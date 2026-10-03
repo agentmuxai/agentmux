@@ -8,8 +8,13 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    buildRefIndex,
+    commentRefs,
     compareCodeEqual,
+    deadRefFindings,
     gateFile,
+    isForeignRef,
+    isScanPath,
     isSourcePath,
     lexSource,
     narrationRule,
@@ -17,6 +22,9 @@ import {
     parseAddedLines,
     parseDiff,
     protectedCounts,
+    refKind,
+    resolvesRef,
+    staleAfterMove,
     statsOf,
 } from "./check-comment-hygiene.mjs";
 
@@ -339,5 +347,130 @@ describe("statsOf / protectedCounts / isSourcePath", () => {
         expect(isSourcePath("frontend/types/rpc/Foo.ts")).toBe(false);
         expect(isSourcePath("node_modules/x/a.ts")).toBe(false);
         expect(isSourcePath("docs/a.md")).toBe(false);
+    });
+});
+
+describe("file references", () => {
+    const index = buildRefIndex([
+        "crates/srv/src/backend/blockcontroller/persistent/spawn.rs",
+        "crates/srv/src/backend/blockcontroller/persistent/mod.rs",
+        "frontend/app/view/agent/agent-view.tsx",
+        "docs/specs/SPEC_FOO_2026_01_01.md",
+    ]);
+
+    it("finds names in comments only, and joins a name wrapped across lines", () => {
+        const info = rs(
+            [
+                '// See persistent/spawn.rs and SPEC_FOO_',
+                "// 2026_01_01.md for why.",
+                'let s = "not/a/comment.rs";',
+            ].join("\n"),
+        );
+        expect(commentRefs(info).map((r) => [r.line, r.ref])).toEqual([
+            [1, "persistent/spawn.rs"],
+            [2, "SPEC_FOO_2026_01_01.md"],
+        ]);
+    });
+
+    it("does not join an SCSS partial or a `--` separator onto the previous line", () => {
+        const partial = ts("// sibling of\n// _cpu-cores-popover.scss (same chrome)\n");
+        expect(commentRefs(partial).map((r) => r.ref)).toEqual(["_cpu-cores-popover.scss"]);
+        const dashes = ts("/* stylelint-disable color-no-hex --\n   theme.scss is the canonical source */\n");
+        expect(commentRefs(dashes).map((r) => r.ref)).toEqual(["theme.scss"]);
+    });
+
+    it("reads `a.ts/b.ts` as two names, not a path", () => {
+        const refs = commentRefs(ts("// see ToolBlock.tsx/MarkdownBlock.tsx and src/app/x.ts\n")).map((r) => r.ref);
+        expect(refs).toEqual(["ToolBlock.tsx", "MarkdownBlock.tsx", "src/app/x.ts"]);
+    });
+
+    it("resolves by full path, path suffix, relative path or basename", () => {
+        expect(resolvesRef("frontend/app/view/agent/agent-view.tsx", index)).toBe(true);
+        expect(resolvesRef("persistent/spawn.rs", index)).toBe(true);
+        expect(resolvesRef("../agent/agent-view.tsx", index)).toBe(true);
+        expect(resolvesRef("spawn.rs", index)).toBe(true);
+        expect(resolvesRef("persistent.rs", index)).toBe(false);
+        expect(resolvesRef("other/spawn.rs", index)).toBe(false);
+    });
+
+    it("tells doc names, repo-rooted paths and bare names apart", () => {
+        expect(refKind("SPEC_BAR_2026-05-14.md", index)).toBe("doc");
+        expect(refKind("docs/specs/x.md", index)).toBe("doc");
+        expect(refKind("crates/srv/src/app.rs", index)).toBe("path");
+        expect(refKind("identity/resolver.rs", index)).toBe("bare");
+        expect(refKind("persistent.rs", index)).toBe("bare");
+    });
+
+    it("treats runtime files, other repos and elided paths as foreign", () => {
+        expect(isForeignRef("CLAUDE.md")).toBe(true);
+        expect(isForeignRef(".claude/CLAUDE.md")).toBe(true);
+        expect(isForeignRef("muxbus/server/src/wan-keys.ts")).toBe(true);
+        expect(isForeignRef("frontend/.../runtime-apply.ts")).toBe(true);
+        expect(isForeignRef("src-tauri/src/commands/drag.rs")).toBe(true);
+        expect(isForeignRef(".github/copilot-instructions.md")).toBe(true);
+        expect(isForeignRef("agentmux-cloud/docs/PLAN_X.md")).toBe(true);
+        expect(isForeignRef("persistent.rs")).toBe(false);
+        expect(isForeignRef("crates/srv/src/app.rs")).toBe(false);
+    });
+
+    it("errors on an added dead doc or repo path, warns on a bare name, skips the rest", () => {
+        const info = rs(
+            [
+                "// See SPEC_BAR_2026-05-14.md.",
+                "// Lives in crates/srv/src/gone.rs.",
+                "// Was in persistent.rs.",
+                "// Writes CLAUDE.md into the workdir.",
+                "// See persistent/spawn.rs.",
+                "// Old: crates/srv/src/old.rs // comment-hygiene: allow",
+                "// Not added: SPEC_NOPE.md",
+            ].join("\n"),
+        );
+        const res = deadRefFindings(info, new Set([1, 2, 3, 4, 5, 6]), index);
+        expect(res.errors.map((e) => e.line)).toEqual([1, 2]);
+        expect(res.warnings.map((w) => w.line)).toEqual([3]);
+        const moved = new Set(["See SPEC_BAR_2026-05-14.md."]);
+        expect(deadRefFindings(info, new Set([1]), index, moved).errors).toEqual([]);
+    });
+
+    it("flags comments naming a file the branch renamed or deleted", () => {
+        const info = rs(["// see persistent.rs", "// and blockcontroller/persistent.rs", "// but other/persistent.rs is unrelated", "// history: split from persistent.rs // comment-hygiene: allow"].join("\n"));
+        const gone = [{ path: "crates/srv/src/backend/blockcontroller/persistent.rs", to: "crates/srv/src/backend/blockcontroller/persistent/mod.rs" }];
+        const out = staleAfterMove(gone, [{ file: "a.rs", info }]);
+        expect(out.map((o) => o.line)).toEqual([1, 2]);
+        expect(out[0].message).toMatch(/renames `crates\/srv\/src\/backend\/blockcontroller\/persistent.rs` to/);
+        expect(staleAfterMove([{ path: "x/gone.ts", to: null }], [{ file: "b.ts", info: ts("// uses gone.ts") }])[0].message).toMatch(/deletes `x\/gone.ts`/);
+    });
+    it("matches every removed file that shares a basename", () => {
+        const gone = [
+            { path: "crates/a/src/util.rs", to: "crates/a/src/util/mod.rs" },
+            { path: "crates/b/src/util.rs", to: null },
+        ];
+        const info = rs(["// see a/src/util.rs", "// see b/src/util.rs", "// see util.rs"].join("\n"));
+        const out = staleAfterMove(gone, [{ file: "c.rs", info }]);
+        expect(out.map((o) => o.line)).toEqual([1, 2, 3]);
+        expect(out[1].message).toMatch(/deletes `crates\/b\/src\/util.rs`/);
+        expect(out[2].message).toMatch(/removes every file of that name/);
+    });
+
+    it("checks .js paths but treats bare .js names as libraries, except when the file is removed", () => {
+        expect(isForeignRef("xterm.js")).toBe(true);
+        expect(isForeignRef("Node.js")).toBe(true);
+        expect(isForeignRef("crates/cef/src/browser_api/scripts/gone.js")).toBe(false);
+        expect(commentRefs(ts("// see scripts/query.js\n")).map((r) => r.ref)).toEqual(["scripts/query.js"]);
+        const gone = [{ path: "crates/cef/src/browser_api/scripts/query.js", to: null }];
+        expect(staleAfterMove(gone, [{ file: "a.rs", info: rs("// injects query.js") }]).map((o) => o.line)).toEqual([1]);
+    });
+
+    it("scans JavaScript-family files in tree-wide checks", () => {
+        expect(isScanPath("scripts/check-doc-links.mjs")).toBe(true);
+        expect(isScanPath("crates/srv/src/backend/shellintegration/muxlog.mjs")).toBe(true);
+        expect(isScanPath("version.cjs")).toBe(true);
+        expect(isScanPath("node_modules/x/index.js")).toBe(false);
+        expect(isScanPath("docs/a.md")).toBe(false);
+    });
+
+    it("recognises a sibling repo behind ./ or ../", () => {
+        expect(isForeignRef("../agentmux-cloud/docs/SPEC_X.md")).toBe(true);
+        expect(isForeignRef("./agentmux-cloud/docs/SPEC_X.md")).toBe(true);
     });
 });
