@@ -938,6 +938,7 @@ pub fn resync_controller(
                 event_bus,
                 mstore,
                 filestore,
+                auth_key.to_string(),
             ));
             register_controller(block_id, ctrl.clone());
             ctrl.start(block_meta.clone(), rt_opts, force)

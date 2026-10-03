@@ -24,6 +24,10 @@
 //! - Closing the pane ends the session; quitting AgentMux detaches it (it
 //!   keeps running on the host for the next start to reattach); a forced
 //!   restart or a connection change detaches too.
+//! - `ssh` has no terminal here, so its prompts (a password, a passphrase, a
+//!   new host key) go to the user through the askpass bridge
+//!   (`remote::askpass`). A login it still cannot make stops the pane with
+//!   the reason rather than asking again every 30 s.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -162,6 +166,32 @@ pub fn attach_command(session: &str, offset: u64, cols: u16, rows: u16) -> Strin
 
 /// `ssh` exits 127 when the remote shell cannot find the command: no helper.
 const EXIT_COMMAND_NOT_FOUND: i32 = 127;
+/// `ssh`'s own failures (it could not connect or log in) exit 255.
+const EXIT_SSH_FAILED: i32 = 255;
+
+/// ssh could not log in, and trying again would only fail (or ask) again:
+/// refused credentials, or a host key it will not accept.
+pub fn login_refused(stderr: &str) -> bool {
+    [
+        "Permission denied (",
+        "Too many authentication failures",
+        "No more authentication methods",
+        "Host key verification failed",
+        "REMOTE HOST IDENTIFICATION HAS CHANGED",
+    ]
+    .iter()
+    .any(|p| stderr.contains(p))
+}
+
+/// How a pane's run ended, when the pane should show it done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Done {
+    code: i32,
+    /// The session is gone (its shell exited, or the pane ended it): the next
+    /// start makes a new one. Otherwise it may still be on the host, and the
+    /// pane keeps its id to reattach.
+    session_over: bool,
+}
 const PING_EVERY: Duration = Duration::from_secs(15);
 const STALLED_AFTER: Duration = Duration::from_secs(35);
 
@@ -192,6 +222,8 @@ pub struct DurableSshController {
     event_bus: Option<Arc<EventBus>>,
     mstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
+    /// srv's auth key, for the askpass helper to reach srv with.
+    auth_key: String,
     inner: Mutex<Inner>,
 }
 
@@ -202,6 +234,7 @@ impl DurableSshController {
         event_bus: Option<Arc<EventBus>>,
         mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
+        auth_key: String,
     ) -> Self {
         Self {
             block_id,
@@ -209,6 +242,7 @@ impl DurableSshController {
             event_bus,
             mstore,
             filestore,
+            auth_key,
             inner: Mutex::new(Inner {
                 status: STATUS_INIT.to_string(),
                 version: 0,
@@ -326,6 +360,25 @@ impl Controller for DurableSshController {
             inner.done_rx = Some(done_rx);
         }
         self.publish();
+        // ssh's prompts go to the user (this pane's window), revoked when the
+        // run ends.
+        let (askpass_env, askpass_grant) = match crate::backend::remote::askpass::program() {
+            Some(program) => {
+                use crate::backend::remote::askpass;
+                let secret = askpass::grant(askpass::AskpassGrant {
+                    agent_block_id: self.block_id.clone(),
+                    agent: String::new(),
+                    connection: conn.clone(),
+                    user_pane: true,
+                });
+                let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
+                (
+                    askpass::ssh_env(&secret, &program, &local_url, &self.auth_key),
+                    Some(askpass::Revoke(secret)),
+                )
+            }
+            None => (Vec::new(), None),
+        };
         let run = Run {
             block_id: self.block_id.clone(),
             conn,
@@ -338,6 +391,8 @@ impl Controller for DurableSshController {
             size,
             broker: self.broker.clone(),
             filestore: self.filestore.clone(),
+            askpass_env,
+            _askpass_grant: askpass_grant,
         };
         let this = super::get_controller(&self.block_id);
         tokio::spawn(async move {
@@ -346,7 +401,7 @@ impl Controller for DurableSshController {
             // Only the session's own end (or a helper that is not there) makes
             // the pane `done`; a detach or an end asked for leaves that to
             // whoever asked.
-            if let Some(code) = ended {
+            if let Some(done) = ended {
                 if let Some(ctrl) = this
                     .as_ref()
                     .and_then(|c| c.as_any().downcast_ref::<DurableSshController>())
@@ -355,11 +410,13 @@ impl Controller for DurableSshController {
                         let mut inner = ctrl.inner.lock().unwrap();
                         inner.status = STATUS_DONE.to_string();
                         inner.version += 1;
-                        inner.exit_code = code;
+                        inner.exit_code = done.code;
                         inner.input_tx = None;
                     }
                     // The session is over: the next start makes a new one.
-                    ctrl.write_block_meta(META_KEY_SESSION_ID, serde_json::Value::Null);
+                    if done.session_over {
+                        ctrl.write_block_meta(META_KEY_SESSION_ID, serde_json::Value::Null);
+                    }
                     ctrl.publish();
                 }
             }
@@ -540,6 +597,9 @@ struct Run {
     size: (u16, u16),
     broker: Option<Arc<mps::Broker>>,
     filestore: Option<Arc<FileStore>>,
+    /// askpass for ssh's prompts, and the grant behind it (revoked on drop).
+    askpass_env: Vec<(String, String)>,
+    _askpass_grant: Option<crate::backend::remote::askpass::Revoke>,
 }
 
 /// How one `ssh` ended.
@@ -561,13 +621,13 @@ enum Ended {
 
 impl Run {
     /// Connect, and reconnect for as long as the pane wants the session.
-    /// `Some(code)` when the session (or the attempt to reach it) is over and
-    /// the pane should show it done; `None` when the pane left.
+    /// `Some` when the session (or the attempt to reach it) is over and the
+    /// pane should show it done; `None` when the pane left.
     async fn run(
         mut self,
         mut input_rx: mpsc::UnboundedReceiver<Frame>,
         mut leave_rx: watch::Receiver<Leave>,
-    ) -> Option<i32> {
+    ) -> Option<Done> {
         let mut attempt = 0u32;
         let mut noted_drop = false;
         let mut installed_once = false;
@@ -586,12 +646,25 @@ impl Run {
                     self.size = (cols, rows);
                 }
             }
+            let over = |code| {
+                Some(Done {
+                    code,
+                    session_over: true,
+                })
+            };
             match self.attach_once(&mut input_rx, &mut leave_rx).await {
-                Ended::Exited(code) => return Some(code),
+                Ended::Exited(code) => {
+                    // A new session's output starts at 0.
+                    self.write_offset(0);
+                    return over(code);
+                }
                 Ended::Left => return None,
                 // The pane itself ended the session (a signal): it is over,
                 // and the pane offers a restart.
-                Ended::EndedHere => return Some(-1),
+                Ended::EndedHere => {
+                    self.write_offset(0);
+                    return over(-1);
+                }
                 Ended::Dropped {
                     code,
                     attached,
@@ -607,7 +680,7 @@ impl Run {
                                 helper_path()
                             ))
                             .await;
-                            return Some(EXIT_COMMAND_NOT_FOUND);
+                            return over(EXIT_COMMAND_NOT_FOUND);
                         }
                         installed_once = true;
                         match self.install_helper().await {
@@ -618,9 +691,31 @@ impl Run {
                                     self.conn
                                 ))
                                 .await;
-                                return Some(EXIT_COMMAND_NOT_FOUND);
+                                return over(EXIT_COMMAND_NOT_FOUND);
                             }
                         }
+                    }
+                    // A refused login (the user cancelled a password, a key
+                    // was not accepted, a host key changed) stops the pane:
+                    // retrying would ask the user again every 30 s, or fail
+                    // for ever. The session, if any, stays on the host for
+                    // the pane's restart to reattach to.
+                    if !attached && code == Some(EXIT_SSH_FAILED) && login_refused(&stderr) {
+                        let why = stderr
+                            .lines()
+                            .rev()
+                            .find(|l| login_refused(l))
+                            .unwrap_or("")
+                            .trim();
+                        self.note(&format!(
+                            "Could not log in to {} ({why}). Press to try again.",
+                            self.conn
+                        ))
+                        .await;
+                        return Some(Done {
+                            code: EXIT_SSH_FAILED,
+                            session_over: false,
+                        });
                     }
                     if attached {
                         attempt = 0;
@@ -865,6 +960,8 @@ impl Run {
             cmd.no_window();
         }
         crate::backend::pane_env::sanitize_process_command(&mut cmd);
+        // After the sanitizing: askpass needs srv's address and key.
+        cmd.envs(self.askpass_env.iter().map(|(k, v)| (k, v)));
         cmd
     }
 
@@ -1133,13 +1230,22 @@ time.sleep(5)
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
+            askpass_env: Vec::new(),
+            _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
         let ended = tokio::time::timeout(Duration::from_secs(30), run.run(input_rx, leave_rx))
             .await
             .expect("the run ends");
-        assert_eq!(ended, Some(0), "the session's own end ends the run");
+        assert_eq!(
+            ended,
+            Some(Done {
+                code: 0,
+                session_over: true
+            }),
+            "the session's own end ends the run"
+        );
 
         let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
         assert_eq!(
@@ -1163,7 +1269,9 @@ time.sleep(5)
             .meta
             .get(FILE_META_REMOTE_OFFSET)
             .cloned();
-        assert_eq!(offset, Some(serde_json::json!(14)));
+        // Over, so the next session starts from 0 (no "the previous session
+        // is gone" for a plain `exit`).
+        assert_eq!(offset, Some(serde_json::json!(0)));
     }
 
     /// Every attach fails (the host is unreachable); `end` is logged.
@@ -1230,6 +1338,8 @@ sys.exit(0 if remote[1] == 'end' else 255)
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
+            askpass_env: Vec::new(),
+            _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -1351,6 +1461,8 @@ elif ' attach ' in remote:
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
+            askpass_env: Vec::new(),
+            _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -1358,7 +1470,13 @@ elif ' attach ' in remote:
             .await
             .expect("the run ends");
         std::env::remove_var("AGENTMUX_REMOTE_HELPER_DIR");
-        assert_eq!(ended, Some(0));
+        assert_eq!(
+            ended,
+            Some(Done {
+                code: 0,
+                session_over: true
+            })
+        );
         let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
         assert_eq!(log, "attach-missing\nprobe\nupload\ninstall\nattach\n");
         let term = state
@@ -1391,5 +1509,112 @@ elif ' attach ' in remote:
         assert!(!wants(&meta("area54", Some(false))));
         assert!(!wants(&meta("local", Some(true))));
         assert!(!wants(&meta("wsl://Ubuntu", Some(true))));
+    }
+
+    #[test]
+    fn a_refused_login_is_told_from_a_dropped_link() {
+        assert!(login_refused(
+            "user@box: Permission denied (publickey,password)."
+        ));
+        assert!(login_refused("Host key verification failed."));
+        assert!(login_refused(
+            "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @"
+        ));
+        assert!(!login_refused(
+            "ssh: connect to host box port 22: Connection timed out"
+        ));
+        assert!(!login_refused("Connection reset by peer"));
+        assert!(!login_refused(""));
+    }
+
+    /// The host refuses the login (stderr is the point; every attach is one).
+    const FAKE_SSH_REFUSED: &str = r#"
+import os, sys
+with open(os.environ['FAKE_SSH_LOG3'], 'ab') as log:
+    log.write(b'attach\n')
+sys.stderr.write('user@fakehost: Permission denied (publickey).\n')
+sys.exit(255)
+"#;
+
+    /// A refused login stops the pane at once with the reason, rather than
+    /// asking again every 30 s, and keeps the session id: the session may
+    /// still be on the host for the pane's restart to reattach to.
+    #[tokio::test]
+    async fn a_refused_login_stops_the_pane_and_keeps_its_session() {
+        let Some(python) = python() else {
+            eprintln!("skipped: no python to stand in for ssh");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake_ssh_refused.py");
+        std::fs::write(&script, FAKE_SSH_REFUSED).unwrap();
+        let ssh_path = if cfg!(windows) {
+            let cmd = dir.path().join("fake_ssh_refused.cmd");
+            std::fs::write(
+                &cmd,
+                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
+            )
+            .unwrap();
+            cmd
+        } else {
+            let sh = dir.path().join("fake_ssh_refused");
+            std::fs::write(
+                &sh,
+                format!(
+                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
+                    python.display(),
+                    script.display()
+                ),
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            sh
+        };
+        std::env::set_var("FAKE_SSH_LOG3", dir.path().join("log"));
+
+        let state = crate::server::tests::test_state();
+        let block = "durable-refused-block";
+        let run = Run {
+            block_id: block.to_string(),
+            conn: "fakehost".to_string(),
+            dest: SshDest {
+                destination: "fakehost".to_string(),
+                port: None,
+            },
+            ssh_path,
+            control_dir: None,
+            session: "amx-refused".to_string(),
+            size: (80, 24),
+            broker: Some(state.broker.clone()),
+            filestore: Some(state.filestore.clone()),
+            askpass_env: Vec::new(),
+            _askpass_grant: None,
+        };
+        let (_input_tx, input_rx) = mpsc::unbounded_channel();
+        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        // Well inside the first backoff: no retry was waited for.
+        let ended = tokio::time::timeout(Duration::from_secs(15), run.run(input_rx, leave_rx))
+            .await
+            .expect("the run ends");
+        assert_eq!(
+            ended,
+            Some(Done {
+                code: EXIT_SSH_FAILED,
+                session_over: false
+            })
+        );
+        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
+        assert_eq!(log, "attach\n", "asked once, not again");
+        let term = state.filestore.read_file(block, "term").unwrap().unwrap();
+        let text = String::from_utf8_lossy(&term).into_owned();
+        assert!(
+            text.contains("Could not log in to fakehost")
+                && text.contains("Permission denied (publickey)"),
+            "{text:?}"
+        );
     }
 }

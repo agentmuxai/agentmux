@@ -4690,6 +4690,7 @@ async fn askpass_answers_only_a_live_secret_and_only_through_the_user() {
         agent_block_id: "askpass-no-such-block".into(),
         agent: "korp".into(),
         connection: "area54".into(),
+        user_pane: false,
     });
     let (status, json) = post_json(
         &app,

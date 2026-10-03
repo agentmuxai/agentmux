@@ -307,27 +307,6 @@ jobs:
       cef-runtime-tag: ${{ needs.cef-runtime-pins.outputs.macos-tag }}
     secrets: inherit
 
-  # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
-  # GitHub Releases is the single source of truth for distribution. The landing
-  # page (agentmux-landing/scripts/fetch-release.mjs) reads this release, mirrors
-  # the assets into its OWN bucket (agentmux-landing-prod), and serves them from
-  # agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
-  # GitHub Release plus a repository_dispatch to redeploy the landing page.
-  #
-  # `if: !failure() && !cancelled()` rather than plain `success()` is
-  # deliberate: build-macos is legitimately SKIPPED (not failed) whenever
-  # APPLE_CEF_AVAILABLE isn't set, and `success()` would treat that skip as
-  # not-a-success and block publish even though a Windows/Linux-only release
-  # is fine. `failure()`/`cancelled()` only inspect jobs THIS job directly
-  # `needs` — they do not look at the whole transitive graph (GitHub Actions'
-  # documented behaviour: an `if:` that references one of these functions
-  # gets no implicit "all needs succeeded" check at all, unlike a plain
-  # output-only `if:` such as build-macos's own) — so cef-runtime-pins MUST
-  # be listed here explicitly, or its failure (a milestone mismatch) would
-  # cascade to skip every build job (invisible to failure()) while publish's
-  # condition stayed true, ran anyway, downloaded zero artifacts, and failed
-  # confusingly later instead of being cleanly blocked at the real point of
-  # failure.
   # AgentMux's remote helper (crates/remote): uploaded by srv to an SSH host
   # for durable sessions (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md
   # §6.2, §6.4). Static musl builds for any Linux (cargo-zigbuild cross-builds
@@ -377,6 +356,27 @@ jobs:
           name: remote-helper-${{ matrix.target }}
           path: out/*
 
+  # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
+  # GitHub Releases is the single source of truth for distribution. The landing
+  # page (agentmux-landing/scripts/fetch-release.mjs) reads this release, mirrors
+  # the assets into its OWN bucket (agentmux-landing-prod), and serves them from
+  # agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
+  # GitHub Release plus a repository_dispatch to redeploy the landing page.
+  #
+  # `if: !failure() && !cancelled()` rather than plain `success()` is
+  # deliberate: build-macos is legitimately SKIPPED (not failed) whenever
+  # APPLE_CEF_AVAILABLE isn't set, and `success()` would treat that skip as
+  # not-a-success and block publish even though a Windows/Linux-only release
+  # is fine. `failure()`/`cancelled()` only inspect jobs THIS job directly
+  # `needs` — they do not look at the whole transitive graph (GitHub Actions'
+  # documented behaviour: an `if:` that references one of these functions
+  # gets no implicit "all needs succeeded" check at all, unlike a plain
+  # output-only `if:` such as build-macos's own) — so cef-runtime-pins MUST
+  # be listed here explicitly, or its failure (a milestone mismatch) would
+  # cascade to skip every build job (invisible to failure()) while publish's
+  # condition stayed true, ran anyway, downloaded zero artifacts, and failed
+  # confusingly later instead of being cleanly blocked at the real point of
+  # failure.
   publish:
     name: Publish release
     needs: [verify, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-remote-helper]
