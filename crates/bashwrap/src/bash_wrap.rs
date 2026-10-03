@@ -2306,11 +2306,13 @@ const ACCESS_DENIED_MARKERS: &[&str] = &[
 ];
 
 /// Appended after a failed command whose output shows an access denial.
-/// Generic on purpose: how to escalate differs per deployment, and this only
-/// has to make the agent look it up instead of working around the denial.
-pub(crate) const ACCESS_DENIED_HINT: &str = "\n[agentmux] This failed with an access denial. Don't work around it with \
-another credential or by skipping the step. Use this environment's documented escalation path (check your Global \
-Memory and CLAUDE.md), with a stated reason; if there is none, ask the human operator.\n";
+/// Generic on purpose: how to escalate differs per deployment. Conditional
+/// on purpose: in a compound command or a test suite the denial text may
+/// come from a step that isn't the one that failed.
+pub(crate) const ACCESS_DENIED_HINT: &str = "\n[agentmux] The output above includes an access denial. If that denial \
+is why the command failed, don't work around it with another credential or by skipping the step: use this \
+environment's documented escalation path (check your Global Memory and CLAUDE.md) with a stated reason, or ask the \
+human operator if there is none.\n";
 
 /// The hint for the model, if the command failed and its output shows an
 /// access denial. The whole buffer is searched, including any part the
@@ -2758,8 +2760,10 @@ mod tests {
         for specific in ["secrets escalate", "gh-agent", "a5af"] {
             assert!(!ACCESS_DENIED_HINT.contains(specific), "{specific}");
         }
-        assert!(ACCESS_DENIED_HINT.contains("Don't work around it"));
+        assert!(ACCESS_DENIED_HINT.contains("don't work around it"));
         assert!(ACCESS_DENIED_HINT.contains("ask the human operator"));
+        // The denial may come from an earlier step than the one that failed.
+        assert!(ACCESS_DENIED_HINT.contains("If that denial is why the command failed"));
     }
 
     #[test]
