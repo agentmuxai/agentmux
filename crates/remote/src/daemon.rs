@@ -308,8 +308,8 @@ fn attach(
                 Frame::Ping => {
                     let mut inner = session.inner.lock().unwrap();
                     if let Some((g, c)) = inner.client.as_mut() {
-                        if *g == generation {
-                            let _ = c.write_all(&Frame::Pong.encode());
+                        if *g == generation && c.write_all(&Frame::Pong.encode()).is_err() {
+                            drop_client(&mut inner);
                         }
                     }
                 }
@@ -330,6 +330,15 @@ fn attach(
 }
 
 /// Drop this connection as the session's client, if it still is.
+/// A client that could not take a frame (or took part of one): shut its
+/// socket, so its `attach` exits and srv sees the drop at once and reattaches,
+/// rather than waiting on a link that may now hold half a frame.
+fn drop_client(inner: &mut Inner) {
+    if let Some((_, c)) = inner.client.take() {
+        let _ = c.shutdown(std::net::Shutdown::Both);
+    }
+}
+
 fn release(session: &Session, generation: u64) {
     let mut inner = session.inner.lock().unwrap();
     if inner.client.as_ref().is_some_and(|(g, _)| *g == generation) {
@@ -360,7 +369,7 @@ fn start_reader(session: Arc<Session>, mut child: std::process::Child, sessions:
                     .encode();
                     if let Some((_, c)) = inner.client.as_mut() {
                         if c.write_all(&frame).is_err() {
-                            inner.client = None;
+                            drop_client(&mut inner);
                         }
                     }
                 }
@@ -378,6 +387,15 @@ fn start_reader(session: Arc<Session>, mut child: std::process::Child, sessions:
             sessions.lock().unwrap().remove(&session.id);
         } else {
             drop(inner);
+            // Ended (taken out of the map) already: nothing to keep.
+            let still_listed = sessions
+                .lock()
+                .unwrap()
+                .get(&session.id)
+                .is_some_and(|s| Arc::ptr_eq(s, &session));
+            if !still_listed {
+                return;
+            }
             std::thread::sleep(EXITED_TTL);
             let mut map = sessions.lock().unwrap();
             if map
