@@ -80,6 +80,7 @@ mod browser_start_page;
 mod voice;
 pub(crate) mod fleet;
 mod attachments;
+pub(crate) mod connections;
 
 /// Register all App API handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -100,6 +101,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     voice::register(engine, state);
     fleet::register(engine, state);
     attachments::register(engine, state);
+    connections::register(engine, state);
 }
 
 #[cfg(test)]
