@@ -151,7 +151,7 @@ export interface SwarmLineInput {
  * (`term:awaiting_user`) and a turn is in flight. The row's "Waiting for you"
  * line and the status chip's "question" state both use this. The running-only
  * guard is what stops a flag left by a crash, or by a question answered while
- * the pane was not mounted, from marking an idle agent (ReAgent P1 on #4234).
+ * the pane was not mounted, from marking an idle agent (#4234).
  */
 export function isAwaitingUser(meta: Record<string, unknown> | undefined, status: "running" | "idle"): boolean {
     return status === "running" && meta?.[META_AWAITING_USER] === true;

@@ -166,7 +166,7 @@ describe("question timer: publishing", () => {
         expect(published().at(-1)).toBeNull();
     });
 
-    // Codex P2 on #4250: separate requests can commit out of order, so the
+    // (#4250) separate requests can commit out of order, so the
     // ended question's `null` could land after the next question's countdown.
     it("sends one write at a time per block, then only the latest state", async () => {
         hold = [];
@@ -189,7 +189,7 @@ describe("question timer: publishing", () => {
         expect(published()).toHaveLength(2);
     });
 
-    // Codex P2 on #4250: the pane moving to another window must not race a
+    // (#4250) the pane moving to another window must not race a
     // null from the old window against the new window's countdown.
     it("an unmount stops the local timer and writes nothing", async () => {
         const onExpire = vi.fn();
@@ -203,7 +203,7 @@ describe("question timer: publishing", () => {
         expect(onExpire).not.toHaveBeenCalled();
     });
 
-    // Codex P2 on #4250: a write the previous window had in flight when the
+    // (#4250) a write the previous window had in flight when the
     // pane moved can land after the new owner's; the owner corrects it.
     it("the owner re-publishes when a late write from another window overwrites its state", async () => {
         startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn(), publish: true });
@@ -259,7 +259,7 @@ describe("question timer: readers", () => {
         expect(questionTimer("b2")).toBeNull();
     });
 
-    // Codex P2 on #4250: the pane moved to another window, which now owns the
+    // (#4250) the pane moved to another window, which now owns the
     // timer; this window's Swarm must show what that owner publishes.
     it("after ending, a renderer reads what a later owner publishes", () => {
         startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn() });

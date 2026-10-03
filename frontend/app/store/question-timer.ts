@@ -103,7 +103,7 @@ function sameState(a: QuestionTimerState | undefined, b: QuestionTimerState): bo
 
 // One write in flight per block, then the latest state: separate requests can
 // commit out of order, and a late `null` from the question that just ended
-// would wipe the next question's countdown in other windows (Codex P2, #4250).
+// would wipe the next question's countdown in other windows (#4250).
 const writes = new Map<string, { next?: { state: QuestionTimerState } }>();
 
 function writeMeta(blockId: string, state: QuestionTimerState) {
@@ -147,7 +147,7 @@ function clearTimers(owner: Owner) {
 
 /** Stop owning the block's timer. The local entry goes too, so this renderer
  *  reads whatever a later owner (the pane moved to another window) publishes
- *  (Codex P2, #4250). `clear` also removes the published copy: only when the
+ *  (#4250). `clear` also removes the published copy: only when the
  *  question is over, never on an unmount (see `releaseQuestionTimer`). */
 function release(blockId: string, owner: Owner, clear: boolean) {
     clearTimers(owner);
@@ -240,8 +240,8 @@ export function endQuestionTimer(blockId: string, opts?: { publish?: boolean }):
  * The panel unmounted with its question possibly still pending. Stops the
  * local timer and writes nothing: whichever window mounts the pane next writes
  * its own state on mount, so a pane moving between windows has one writer and
- * no `null` from the old window can land after the new countdown (Codex P2,
- * #4250). A key left with no owner at all is covered by the readers' stale
+ * no `null` from the old window can land after the new countdown
+ * (#4250). A key left with no owner at all is covered by the readers' stale
  * rules (spec §2.2).
  */
 export function releaseQuestionTimer(blockId: string): void {
@@ -254,7 +254,7 @@ export function releaseQuestionTimer(blockId: string): void {
  * this renderer's own writes is in flight. Called from a reactive scope, so it
  * re-runs when the meta changes. Covers a write the previous window already had
  * in flight when the pane moved here: nothing can order that request against
- * ours, so if it lands last, this corrects it (Codex P2, #4250).
+ * ours, so if it lands last, this corrects it (#4250).
  */
 export function reconcileQuestionTimer(blockId: string): void {
     const meta = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta;

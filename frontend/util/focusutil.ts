@@ -108,7 +108,7 @@ export function eventBelongsToPaneOf(e: Event, el: Element | null | undefined): 
  * Whether a key event's target is somewhere the user types: any `<input>`,
  * `<textarea>` or contentEditable. The decision and question panels use it so
  * Enter/Escape aren't stolen from the composer or the Ctrl+F search bar
- * (reagent P1, PR #2060: a narrower check let Enter in the search input submit
+ * (#2060: a narrower check let Enter in the search input submit
  * a pending question). `composer-focus.ts` and `userCaretInBlock` differ on
  * purpose (SELECT; non-text inputs) and keep their own.
  */

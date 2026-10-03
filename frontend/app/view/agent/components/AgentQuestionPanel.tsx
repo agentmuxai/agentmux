@@ -290,7 +290,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     // already gone — the panel would be stuck forever with no further
     // timeout retry, defeating the whole "work never stalls" guarantee for
     // exactly the unattended-run case this feature exists to protect
-    // (reagent P1, PR #2441).
+    // (#2441).
     const applyRecommendedDefaults = (): number => {
         const r = request();
         if (!r) return 0;
@@ -404,7 +404,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         if (e.key === "Enter" && !e.shiftKey) {
             // Outside the panel, don't hijack Enter from a real editable
             // control elsewhere in the pane (composer textarea, Ctrl+F
-            // search input, etc.; reagent P1, PR #2060). Inside the panel,
+            // search input, etc.; #2060). Inside the panel,
             // every control (options, "Other" free-text input) submits on
             // Enter regardless — none of them treat Enter as "insert a newline".
             if (!inPanel && editable) return;
@@ -417,7 +417,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
             // behavior: "deny"). Without this guard, pressing Escape to clear
             // the composer textarea or dismiss an unrelated search/autocomplete
             // input anywhere in the pane would silently and permanently
-            // decline the pending question. reagent P1, PR #2950.
+            // decline the pending question (#2950).
             if (!inPanel && editable) return;
             e.preventDefault();
             cancel();
@@ -425,7 +425,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     };
 
     // Focus moving into the panel (Tab from outside: the keydown's target is
-    // still the element losing focus, codex P2, PR #2787) counts as activity.
+    // still the element losing focus, #2787) counts as activity.
     usePanelKeys(() => rootRef, () => !!request(), handleKey, () => noteQuestionActivity(timerKey));
 
     // A real mouse move over the panel is activity; a parked cursor is not.
