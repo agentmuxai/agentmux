@@ -4,6 +4,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getSettingsKeyAtom } from "@/store/global";
+import { showHostSessions } from "./hostSessions";
 import type { TermViewModel } from "./termViewModel";
 
 /** A connection name that is an SSH destination: not local, not WSL. */
@@ -139,6 +140,12 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
                     : { "term:durable": true };
                 void model.setMeta(patch).then(() => model.forceRestartController());
             },
+        });
+        // The host's durable sessions, including any no pane holds any more.
+        const conn = String(meta.connection).trim();
+        fullMenu.push({
+            label: `Sessions on ${conn}…`,
+            click: () => void showHostSessions(conn, model.blockId),
         });
     }
 

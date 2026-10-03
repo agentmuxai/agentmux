@@ -100,6 +100,25 @@ export const WorkspaceApi = {
         return client.rpcCall("connlist", null, opts);
     },
 
+    // The durable sessions on an SSH host; `blockid` is the asking pane,
+    // whose window shows any ssh prompt.
+    ConnSessionsCommand(
+        client: RpcClient,
+        data: { connname: string; blockid?: string },
+        opts?: RpcOpts
+    ): Promise<HostSession[]> {
+        return client.rpcCall("connsessions", data, opts);
+    },
+
+    // End one; `true` if the host had it.
+    ConnSessionEndCommand(
+        client: RpcClient,
+        data: { connname: string; sessionid: string; blockid?: string },
+        opts?: RpcOpts
+    ): Promise<boolean> {
+        return client.rpcCall("connsessionend", data, opts);
+    },
+
     ConnListAWSCommand(client: RpcClient, opts?: RpcOpts): Promise<string[]> {
         return client.rpcCall("connlistaws", null, opts);
     },
