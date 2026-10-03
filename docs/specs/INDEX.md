@@ -567,6 +567,7 @@ partial list.
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for the Agent App API |
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
 | [`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21`](SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md) | Spec: Cross-tier conversation visibility for `muxspect` (host / cross-channel / LAN / WAN) |
+| [`SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03`](SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md) | SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials |
 | [`SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15`](SPEC_NODEJS_24_LTS_STANDARDIZATION_2026_09_15.md) | Node.js 24 LTS standardization across agentmuxai repos |
 | [`SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01`](SPEC_NO_WINDOW_SPAWN_AND_META_ROW_TYPE_SCALE_DRY_2026_10_01.md) | Spec: DRY the no-window spawn flag, and the meta-row type scale |
 | [`SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24`](SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md) | SPEC: OS notification system (native toasts) + tray re-enablement |
@@ -702,7 +703,6 @@ partial list.
 | [`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15`](SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md) | SPEC: MuxBus cloud-relayed login callback (no loopback listener) |
 | [`SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20`](SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md) | SPEC: MuxBus — GitHub PR review notifications (end-to-end MVP) |
 | [`SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02`](SPEC_MUXSPECT_CROSS_TIER_INSTANCE_INSPECTION_2026_09_02.md) | muxspect Phase 2: cross-tier instance inspection (same-host channels + LAN) |
-| [`SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03`](SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md) | SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials |
 | [`SPEC_NAMED_AGENT_CONTINUATION_2026_05_12`](SPEC_NAMED_AGENT_CONTINUATION_2026_05_12.md) | Spec: Named agent continuation — launch modal dropdown of existing agents |
 | [`SPEC_ORPHAN_THINKING_NODES_2026_05_27`](SPEC_ORPHAN_THINKING_NODES_2026_05_27.md) | SPEC: Orphan in-progress nodes — cancel + collapse on session reopen |
 | [`SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23`](SPEC_PANE_CLOSE_CONFIRM_NAMES_PROCESSES_2026_09_23.md) | SPEC: The pane-close confirmation names the processes it will stop |
