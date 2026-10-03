@@ -42,6 +42,7 @@ import {
     noteQuestionActivity,
     questionCountdown,
     questionTimer,
+    releaseQuestionTimer,
     resetQuestionTimersForTests,
     setQuestionTimerDormant,
     startQuestionTimer,
@@ -185,6 +186,20 @@ describe("question timer: publishing", () => {
         hold.shift()!();
         await flush();
         expect(published()).toHaveLength(2);
+    });
+
+    // Codex P2 on #4250: the pane moving to another window must not race a
+    // null from the old window against the new window's countdown.
+    it("an unmount stops the local timer and writes nothing", async () => {
+        const onExpire = vi.fn();
+        startQuestionTimer("b1", { durationMs: 30_000, onExpire, publish: true });
+        await flush();
+        releaseQuestionTimer("b1");
+        await flush();
+        expect(published()).toHaveLength(1); // just the start
+        expect(questionTimer("b1")).toBeNull();
+        vi.advanceTimersByTime(60_000);
+        expect(onExpire).not.toHaveBeenCalled();
     });
 
     it("writes nothing for a local key", () => {

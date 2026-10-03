@@ -50,6 +50,7 @@ import {
     endQuestionTimer,
     noteQuestionActivity,
     questionCountdown,
+    releaseQuestionTimer,
     setQuestionTimerDormant,
     startQuestionTimer,
 } from "@/app/store/question-timer";
@@ -373,7 +374,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         )
     );
     createEffect(() => setQuestionTimerDormant(timerKey, props.isDormant?.() ?? false));
-    onCleanup(() => endQuestionTimer(timerKey));
+    onCleanup(() => releaseQuestionTimer(timerKey));
 
     // Cancel — a REAL protocol-level decline delivered to the agent (Cancel
     // button / Escape), replacing the old "Answer later" defer/minimize
