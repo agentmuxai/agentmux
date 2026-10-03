@@ -654,9 +654,16 @@ impl Controller for ShellController {
             c.env("AGENTMUX_BLOCKID", &self.block_id);
             c.env("AGENTMUX_TABID", &self.tab_id);
             c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
+            // Configured cmd:env (global, then the block's), as a local
+            // interactive shell gets it, and listed in WSLENV so it crosses.
+            let overrides = cmd_env_overrides(&self.live_settings(), &block_meta);
+            overrides.apply_to(&mut c);
             c.env(
                 "WSLENV",
-                crate::backend::remote::wsl::wslenv(&std::env::var("WSLENV").unwrap_or_default()),
+                crate::backend::remote::wsl::wslenv_with(
+                    &std::env::var("WSLENV").unwrap_or_default(),
+                    overrides.vars.iter().map(|(k, _)| k.as_str()),
+                ),
             );
             c
         } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {

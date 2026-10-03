@@ -106,7 +106,7 @@ pub(super) async fn handle_shell_create(
     let wsl_args = wsl_distro.as_ref().map(|distro| {
         effective_env.insert(
             "WSLENV".to_string(),
-            crate::backend::remote::wsl::agent_wslenv(
+            crate::backend::remote::wsl::wslenv_with(
                 &std::env::var("WSLENV").unwrap_or_default(),
                 caller_keys.iter().map(String::as_str),
             ),
@@ -359,12 +359,20 @@ pub(super) async fn try_attach_to_existing_shell(
 
     // Settled before the resync, which would otherwise start a shell on the
     // block's own connection: a running shell on another connection is refused
-    // and left as it is; one with no controller (from before a srv restart) is
-    // replaced, like an exited one, rather than revived on the old connection.
-    // An exited one is replaced below whatever its connection was.
+    // and left as it is, and so is one this srv run created and is still
+    // starting (a concurrent create won the claim). One with no controller from
+    // an earlier run (before a srv restart) is replaced, like an exited one,
+    // rather than revived on the old connection. An exited one is replaced
+    // below whatever its connection was.
     if let Some(conflict) = connection_conflict(&block, connection) {
+        let created_this_run = crate::backend::obj::meta_get_string(
+            &block.meta,
+            META_KEY_PTYSHELL_BOOT_ID,
+            "",
+        ) == *state.boot_id;
         match blockcontroller::get_block_controller_status(id) {
             Some(s) if s.shellprocstatus == blockcontroller::STATUS_RUNNING => return Some(conflict),
+            None if created_this_run => return Some(conflict),
             None => {
                 clear_shell_pointer_if(state, agent_block_id, id);
                 tracing::info!(
@@ -488,6 +496,9 @@ pub(super) async fn try_attach_to_existing_shell(
     tracing::info!(block_id = %id, parent_id = %agent_block_id, "ptyshell.create: reused");
     Some((StatusCode::OK, Json(PtyShellCreateResponse { shell_id: id.to_string() })).into_response())
 }
+
+/// Block meta on a `PtyShell` block: the srv boot id of the run that created it.
+pub(super) const META_KEY_PTYSHELL_BOOT_ID: &str = "ptyshell:bootid";
 
 /// Clear the agent block's shell pointer, if it still names `id` (see the
 /// exited-shell branch of `try_attach_to_existing_shell` for why it is

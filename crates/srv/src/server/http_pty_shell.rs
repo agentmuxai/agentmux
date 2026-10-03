@@ -73,6 +73,10 @@ pub(super) async fn handle_pty_shell_create(
     let child_id = uuid::Uuid::new_v4().to_string();
 
     let mut meta = crate::backend::obj::MetaMapType::new();
+    // Which srv run created this shell: a block with no controller is one this
+    // run is still starting (a concurrent create), not one left from before a
+    // restart (`try_attach_to_existing_shell`).
+    meta.insert(META_KEY_PTYSHELL_BOOT_ID.to_string(), json!(&*state.boot_id));
     meta.insert("view".to_string(), json!("term"));
     meta.insert(
         blockcontroller::META_KEY_CONTROLLER.to_string(),

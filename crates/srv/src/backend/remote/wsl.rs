@@ -72,13 +72,14 @@ pub fn wslenv(existing: &str) -> String {
     parts.join(":")
 }
 
-/// `WSLENV` for a command an agent runs in a distro (the `Shell` tool): the
-/// terminal variables, the names the caller passed in its own `env`, and
-/// `GH_CONFIG_DIR` translated to a distro path (`/p`), so the agent's plain-`gh`
-/// guard holds inside the distro too and `gh` there cannot act as the user.
-/// Never an `AGENTMUX_*` variable beyond the terminal ones: the auth key, the
-/// local URL and the jekt key stay on Windows.
-pub fn agent_wslenv<'a>(existing: &str, caller_keys: impl IntoIterator<Item = &'a str>) -> String {
+/// `WSLENV` for a process in a distro: the terminal variables, the names its
+/// caller set (an agent `Shell` call's `env`, or a pane's configured
+/// `cmd:env`), and `GH_CONFIG_DIR` translated to a distro path (`/p`), so an
+/// agent's plain-`gh` guard holds inside the distro too and `gh` there cannot
+/// act as the user. Never an `AGENTMUX_*` variable beyond the terminal ones
+/// and the agent id: the auth key, the local URL and the jekt key stay on
+/// Windows.
+pub fn wslenv_with<'a>(existing: &str, caller_keys: impl IntoIterator<Item = &'a str>) -> String {
     let guard = crate::backend::gh_guard::GH_CONFIG_DIR;
     // Whatever flag the user's own WSLENV gives GH_CONFIG_DIR (`/u` would keep
     // it from crossing), the guard's own `/p` entry replaces it.
@@ -102,7 +103,9 @@ pub fn agent_wslenv<'a>(existing: &str, caller_keys: impl IntoIterator<Item = &'
     for key in caller_keys {
         let forwardable = !key.is_empty()
             && !key.contains([':', '/', '='])
-            && (!key.starts_with("AGENTMUX_") || FORWARDED_ENV.contains(&key))
+            && (!key.starts_with("AGENTMUX_")
+                || FORWARDED_ENV.contains(&key)
+                || key == "AGENTMUX_AGENT_ID")
             && key != guard
             && key != "WSLENV";
         if forwardable {
@@ -255,7 +258,7 @@ mod tests {
             "{env}"
         );
         assert!(env.starts_with("PATH/l:AGENTMUX_TABID:"), "{env}");
-        assert!(!agent_wslenv("AGENTMUX_AUTH_KEY/p", []).contains("AGENTMUX_AUTH_KEY"));
+        assert!(!wslenv_with("AGENTMUX_AUTH_KEY/p", []).contains("AGENTMUX_AUTH_KEY"));
         let env = wslenv("USERPROFILE/p:TERM/u");
         assert!(env.starts_with("USERPROFILE/p:TERM/u:"), "{env}");
         let names: Vec<&str> = env
@@ -272,7 +275,7 @@ mod tests {
 
     #[test]
     fn an_agent_command_carries_its_own_env_and_the_gh_guard_but_no_agentmux_secret() {
-        let env = agent_wslenv(
+        let env = wslenv_with(
             "GH_CONFIG_DIR/u:USERPROFILE/p",
             [
                 "RUST_LOG",
@@ -280,6 +283,7 @@ mod tests {
                 "AGENTMUX_LOCAL_URL",
                 "AGENTMUX_JEKT_KEY",
                 "AGENTMUX_BLOCKID",
+                "AGENTMUX_AGENT_ID",
                 "GH_CONFIG_DIR",
                 "WSLENV",
                 "BAD:NAME",
@@ -288,6 +292,10 @@ mod tests {
         );
         let entries: Vec<&str> = env.split(':').collect();
         assert!(entries.contains(&"RUST_LOG"), "{env}");
+        assert!(
+            entries.contains(&"AGENTMUX_AGENT_ID"),
+            "a pane's configured identity crosses: {env}"
+        );
         assert!(
             entries.contains(&"USERPROFILE/p"),
             "the user's own entries stay: {env}"

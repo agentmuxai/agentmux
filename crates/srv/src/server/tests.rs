@@ -4667,6 +4667,58 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     blockcontroller::delete_controller(&first_shell_id);
 }
 
+/// Two first `PtyShell` calls on different connections: the claim's winner has
+/// inserted its block and pointer but not started its controller yet. The
+/// loser must not take that block for one left from before a restart: it gets
+/// 409 and the winner's pointer stays (#4253). No PTY is spawned, so this runs
+/// on CI.
+#[tokio::test]
+async fn a_concurrent_ptyshell_on_another_connection_leaves_the_winner_alone() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    // The winner's block, as the claim left it: stamped with this run, no controller yet.
+    let mut winner = crate::backend::obj::Block {
+        oid: "in-flight-shell".to_string(),
+        parentoref: "block:race-agent-block".to_string(),
+        ..Default::default()
+    };
+    winner.meta.insert(
+        blockcontroller::META_KEY_CONNECTION.to_string(),
+        serde_json::json!("wsl://Fake"),
+    );
+    winner.meta.insert(
+        super::http_shell::META_KEY_PTYSHELL_BOOT_ID.to_string(),
+        serde_json::json!(&*state.boot_id),
+    );
+    state.mstore.insert(&mut winner).expect("insert winner");
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "race-agent-block".to_string(),
+        subblockids: Some(vec!["in-flight-shell".to_string()]),
+        ..Default::default()
+    };
+    agent_block.meta.insert(
+        META_KEY_SHELL_SUBBLOCK_ID.to_string(),
+        serde_json::json!("in-flight-shell"),
+    );
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "race-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json:?}");
+    assert!(blockcontroller::get_block_controller_status("in-flight-shell").is_none());
+    let agent_block: crate::backend::obj::Block =
+        state.mstore.must_get("race-agent-block").expect("agent block exists");
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some("in-flight-shell")
+    );
+}
+
 /// After a srv restart a pane's shell block has no controller. Asked for on
 /// another connection than the block's, it is replaced by a fresh shell, not
 /// revived on its old connection and then refused (#4253).
