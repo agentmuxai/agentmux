@@ -47,6 +47,9 @@
         "term:scrollback": {
           "type": "integer"
         },
+        "term:durable": {
+          "type": "boolean"
+        },
         "term:copyonselect": {
           "type": "boolean"
         },

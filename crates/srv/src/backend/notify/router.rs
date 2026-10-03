@@ -863,6 +863,7 @@ mod tests {
     fn parses_real_serialized_controller_status_including_omitted_false() {
         use crate::backend::blockcontroller::BlockControllerRuntimeStatus;
         let mk = |turn_active: bool| BlockControllerRuntimeStatus {
+            durable: false,
             blockid: "b1".into(),
             version: 1,
             shellprocstatus: "running".into(),

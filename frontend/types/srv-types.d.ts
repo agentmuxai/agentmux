@@ -72,6 +72,8 @@ declare global {
         shellprocstatus?: string;
         shellprocconnname?: string;
         shellprocexitcode: number;
+        // A durable SSH pane: its shell lives on the host.
+        durable?: boolean;
         // PID of the controller's own child. Set by the shell controller —
         // the agent pane's Shell drawer identifies its shell by PID.
         shellprocpid?: number;
@@ -596,6 +598,7 @@ declare global {
         "term:fontfamily"?: string;
         "term:zoom"?: number;
         "term:theme"?: string;
+        "term:durable"?: boolean;
         "cmd:env"?: {[key: string]: string};
         "cmd:initscript"?: string;
         "cmd:initscript.sh"?: string;
@@ -1084,6 +1087,7 @@ declare global {
         "term:localshellpath"?: string;
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;
+        "term:durable"?: boolean;
         "term:copyonselect"?: boolean;
         "term:transparency"?: number;
         "term:scrollsensitivity"?: number;

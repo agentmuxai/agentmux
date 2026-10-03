@@ -274,6 +274,7 @@ impl SubprocessController {
         turn_active: bool,
     ) -> BlockControllerRuntimeStatus {
         BlockControllerRuntimeStatus {
+            durable: false,
             blockid: block_id.to_string(),
             version: inner.status_version,
             shellprocstatus: inner.proc_status.clone(),

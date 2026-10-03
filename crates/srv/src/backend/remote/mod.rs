@@ -12,6 +12,7 @@
 pub mod agent_access;
 pub mod askpass;
 pub mod conn;
+pub mod helper_hosts;
 pub mod helper_install;
 pub mod host;
 pub mod sessions;
