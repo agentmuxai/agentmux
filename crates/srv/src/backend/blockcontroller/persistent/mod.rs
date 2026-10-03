@@ -1683,6 +1683,44 @@ fn classify_exit_line(exit_code: Option<i32>, line: &str) -> Option<crate::agent
     }
 }
 
+/// Record `failure` as the block's `agent:last_failure`, then publish it as
+/// `agent-failure` on `block:<id>` (persisted for replay) when there is a broker.
+fn surface_failure(
+    block_id: &str,
+    failure: &crate::agents::failure::AgentFailure,
+    broker: Option<&mps::Broker>,
+    mstore: &Option<Arc<Store>>,
+    event_bus: &Option<Arc<EventBus>>,
+) {
+    core::persist_last_failure(block_id, Some(failure), mstore, event_bus);
+    if let Some(broker) = broker {
+        broker.publish(mps::MuxEvent {
+            event: mps::EVENT_AGENT_FAILURE.to_string(),
+            scopes: vec![format!("block:{}", block_id)],
+            sender: String::new(),
+            persist: 1,
+            data: serde_json::to_value(failure).ok(),
+        });
+    }
+}
+
+/// Classify a final error line with [`classify_exit_line`] and, if it is a
+/// failure, [`surface_failure`] it. Returns whether it was surfaced.
+fn surface_error_line(
+    block_id: &str,
+    exit_code: Option<i32>,
+    line: &str,
+    broker: Option<&mps::Broker>,
+    mstore: &Option<Arc<Store>>,
+    event_bus: &Option<Arc<EventBus>>,
+) -> bool {
+    let Some(failure) = classify_exit_line(exit_code, line) else {
+        return false;
+    };
+    surface_failure(block_id, &failure, broker, mstore, event_bus);
+    true
+}
+
 mod eager_resume;
 mod input;
 mod lifecycle;

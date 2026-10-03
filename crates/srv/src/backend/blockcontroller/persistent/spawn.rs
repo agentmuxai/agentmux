@@ -973,18 +973,13 @@ impl PersistentSubprocessController {
                         if let (Some(broker), true) = (broker_read.as_ref(), boundary_is_current) {
                             let status = {
                                 let locked = inner_read.lock().unwrap();
-                                BlockControllerRuntimeStatus {
-                                    blockid: block_id_read.clone(),
-                                    version: locked.status_version,
-                                    shellprocstatus: locked.proc_status.clone(),
-                                    shellprocconnname: "local".to_string(),
-                                    shellprocexitcode: locked.proc_exit_code,
-                                    shellprocpid: None,
-                                    shellprocname: String::new(),
-                                    spawn_ts_ms: None,
-                                    is_agent_pane: true,
-                                    turn_active: false,
-                                }
+                                super::super::agent_runtime_status(
+                                    &block_id_read,
+                                    locked.status_version,
+                                    &locked.proc_status,
+                                    locked.proc_exit_code,
+                                    false,
+                                )
                             };
                             super::super::publish_controller_status(broker, &status);
                         }
@@ -1202,18 +1197,15 @@ impl PersistentSubprocessController {
                                         // failure silently loses its recovery
                                         // banner. No exit code exists for this
                                         // now-superseded turn.
-                                        if let Some(failure) = classify_exit_line(None, &line) {
+                                        if surface_error_line(
+                                            &block_id_read,
+                                            None,
+                                            &line,
+                                            broker_read.as_deref(),
+                                            &mstore_read,
+                                            &event_bus_read,
+                                        ) {
                                             flushed_failure_this_tick = true;
-                                            core::persist_last_failure(&block_id_read, Some(&failure), &mstore_read, &event_bus_read);
-                                            if let Some(ref broker) = broker_read {
-                                                broker.publish(mps::MuxEvent {
-                                                    event: mps::EVENT_AGENT_FAILURE.to_string(),
-                                                    scopes: vec![format!("block:{}", block_id_read)],
-                                                    sender: String::new(),
-                                                    persist: 1,
-                                                    data: serde_json::to_value(&failure).ok(),
-                                                });
-                                            }
                                         }
                                     }
                                     other => {
@@ -1296,18 +1288,15 @@ impl PersistentSubprocessController {
                                         // true for the rest of this tick, so
                                         // this can never collide with the
                                         // clear-on-success step below.
-                                        if let Some(failure) = classify_exit_line(None, &old_line) {
+                                        if surface_error_line(
+                                            &block_id_read,
+                                            None,
+                                            &old_line,
+                                            broker_read.as_deref(),
+                                            &mstore_read,
+                                            &event_bus_read,
+                                        ) {
                                             flushed_failure_this_tick = true;
-                                            core::persist_last_failure(&block_id_read, Some(&failure), &mstore_read, &event_bus_read);
-                                            if let Some(ref broker) = broker_read {
-                                                broker.publish(mps::MuxEvent {
-                                                    event: mps::EVENT_AGENT_FAILURE.to_string(),
-                                                    scopes: vec![format!("block:{}", block_id_read)],
-                                                    sender: String::new(),
-                                                    persist: 1,
-                                                    data: serde_json::to_value(&failure).ok(),
-                                                });
-                                            }
                                         }
                                     }
                                     other => {
@@ -1332,16 +1321,7 @@ impl PersistentSubprocessController {
                     // classify() only runs once this error is confirmed final.
                     if is_error_result && !hold_back_for_resume_retry {
                         let failure = crate::agents::failure::classify(None, None, "", Some(&parsed));
-                        core::persist_last_failure(&block_id_read, Some(&failure), &mstore_read, &event_bus_read);
-                        if let Some(ref broker) = broker_read {
-                            broker.publish(mps::MuxEvent {
-                                event: mps::EVENT_AGENT_FAILURE.to_string(),
-                                scopes: vec![format!("block:{}", block_id_read)],
-                                sender: String::new(),
-                                persist: 1,
-                                data: serde_json::to_value(&failure).ok(),
-                            });
-                        }
+                        surface_failure(&block_id_read, &failure, broker_read.as_deref(), &mstore_read, &event_bus_read);
                     } else if is_result_frame && !is_error_result && !flushed_failure_this_tick {
                         // reagentx P1 on PR #2421: unlike host_spawn.rs, this
                         // controller never exits between turns, so nothing
@@ -1497,17 +1477,7 @@ impl PersistentSubprocessController {
                     // `abort()` on a separately-obtained `AbortHandle`
                     // actually cancels it — the task stops at its next
                     // yield point and can never reach either call again.
-                    if let Some(handle) = stderr_reader_handle {
-                        let abort_handle = handle.abort_handle();
-                        if tokio::time::timeout(std::time::Duration::from_millis(500), handle).await.is_err() {
-                            tracing::warn!(
-                                block_id = %block_id_wait,
-                                "stderr reader did not finish within 500ms of process exit — aborting it"
-                            );
-                            abort_handle.abort();
-                        }
-                    }
-
+                    //
                     // codex P1 on PR #2371 (round 1): the stdout reader
                     // performs synchronous FileStore/SQLite writes that
                     // can legitimately contend for multiple seconds
@@ -1539,19 +1509,7 @@ impl PersistentSubprocessController {
                     // every last buffered line, the same risk profile
                     // the original 500ms bound already accepted, just at
                     // a bound wide enough not to fire under normal load.
-                    let abort_handle = stdout_reader_handle.abort_handle();
-                    if tokio::time::timeout(std::time::Duration::from_secs(10), stdout_reader_handle)
-                        .await
-                        .is_err()
-                    {
-                        tracing::warn!(
-                            block_id = %block_id_wait,
-                            "stdout reader did not finish within 10s of process exit \
-                             (SQLite contention, or a descendant process holding stdout open?) \
-                             — aborting it"
-                        );
-                        abort_handle.abort();
-                    }
+                    settle_reader_tasks(&block_id_wait, stderr_reader_handle, stdout_reader_handle, "process exit").await;
 
                     // Wait (briefly, bounded) for the drain to finish
                     // appending whatever message it's currently
@@ -1793,18 +1751,14 @@ impl PersistentSubprocessController {
                                 // exit is NOT being silently retried (contrast
                                 // FireRetry below, which must stay invisible to
                                 // the user).
-                                if let Some(failure) = classify_exit_line(Some(exit_code), &line) {
-                                    core::persist_last_failure(&block_id_wait, Some(&failure), &mstore_wait, &event_bus_wait);
-                                    if let Some(ref broker) = broker_wait {
-                                        broker.publish(mps::MuxEvent {
-                                            event: mps::EVENT_AGENT_FAILURE.to_string(),
-                                            scopes: vec![format!("block:{}", block_id_wait)],
-                                            sender: String::new(),
-                                            persist: 1,
-                                            data: serde_json::to_value(&failure).ok(),
-                                        });
-                                    }
-                                }
+                                surface_error_line(
+                                    &block_id_wait,
+                                    Some(exit_code),
+                                    &line,
+                                    broker_wait.as_deref(),
+                                    &mstore_wait,
+                                    &event_bus_wait,
+                                );
                             }
                             persistent_resume::ResumeEffect::FireRetry { retry, held_error_line, attempted_sid } => {
                                 // Issue #2368: the retry is firing and will
@@ -1862,18 +1816,13 @@ impl PersistentSubprocessController {
                             }
                             persistent_resume::ResumeEffect::PublishDone => {
                                 if let Some(ref broker) = broker_wait {
-                                    let status = BlockControllerRuntimeStatus {
-                                        blockid: block_id_wait.clone(),
-                                        version: 0,
-                                        shellprocstatus: STATUS_DONE.to_string(),
-                                        shellprocconnname: "local".to_string(),
-                                        shellprocexitcode: exit_code,
-                                        shellprocpid: None,
-                                        shellprocname: String::new(),
-                                        spawn_ts_ms: None,
-                                        is_agent_pane: true,
-                                        turn_active: false,
-                                    };
+                                    let status = super::super::agent_runtime_status(
+                                        &block_id_wait,
+                                        0,
+                                        STATUS_DONE,
+                                        exit_code,
+                                        false,
+                                    );
                                     super::super::publish_controller_status(broker, &status);
                                 }
                             }
@@ -1964,16 +1913,6 @@ impl PersistentSubprocessController {
                     // back; the lagging reader would then find `NotTracking`
                     // and persist the line on its own, instead of it being
                     // flushed below as part of this stop.
-                    if let Some(handle) = stderr_reader_handle {
-                        let abort_handle = handle.abort_handle();
-                        if tokio::time::timeout(std::time::Duration::from_millis(500), handle).await.is_err() {
-                            tracing::warn!(
-                                block_id = %block_id_wait,
-                                "stderr reader did not finish within 500ms of kill — aborting it"
-                            );
-                            abort_handle.abort();
-                        }
-                    }
                     // codex P1 on PR #2371 (round 2): a bounded wait, not
                     // an unconditional one — see the child.wait() arm's
                     // identical comment above for the full reasoning. This
@@ -1984,19 +1923,7 @@ impl PersistentSubprocessController {
                     // leave a user-initiated Stop making the controller
                     // appear permanently alive if a descendant process
                     // ever holds the stdout descriptor open.
-                    let abort_handle = stdout_reader_handle.abort_handle();
-                    if tokio::time::timeout(std::time::Duration::from_secs(10), stdout_reader_handle)
-                        .await
-                        .is_err()
-                    {
-                        tracing::warn!(
-                            block_id = %block_id_wait,
-                            "stdout reader did not finish within 10s of kill \
-                             (SQLite contention, or a descendant process holding stdout open?) \
-                             — aborting it"
-                        );
-                        abort_handle.abort();
-                    }
+                    settle_reader_tasks(&block_id_wait, stderr_reader_handle, stdout_reader_handle, "kill").await;
 
                     let mut inner = inner_wait.lock().unwrap();
                     // reagentx P1 (round 6 on PR #2373, extended round 8):
@@ -2213,5 +2140,39 @@ impl PersistentSubprocessController {
         });
 
         Ok(())
+    }
+}
+
+/// Wait for the process's reader tasks once it has ended (stderr up to 500ms,
+/// stdout up to 10s), aborting any that overruns. `after` names how the process
+/// ended ("process exit" or "kill") in the warning.
+async fn settle_reader_tasks(
+    block_id: &str,
+    stderr_reader_handle: Option<tokio::task::JoinHandle<()>>,
+    stdout_reader_handle: tokio::task::JoinHandle<()>,
+    after: &str,
+) {
+    if let Some(handle) = stderr_reader_handle {
+        let abort_handle = handle.abort_handle();
+        if tokio::time::timeout(std::time::Duration::from_millis(500), handle).await.is_err() {
+            tracing::warn!(
+                block_id = %block_id,
+                "stderr reader did not finish within 500ms of {after} — aborting it"
+            );
+            abort_handle.abort();
+        }
+    }
+    let abort_handle = stdout_reader_handle.abort_handle();
+    if tokio::time::timeout(std::time::Duration::from_secs(10), stdout_reader_handle)
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            block_id = %block_id,
+            "stdout reader did not finish within 10s of {after} \
+             (SQLite contention, or a descendant process holding stdout open?) \
+             — aborting it"
+        );
+        abort_handle.abort();
     }
 }

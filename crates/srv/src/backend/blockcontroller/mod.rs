@@ -1056,6 +1056,44 @@ pub fn publish_controller_status(
     broker.publish(event);
 }
 
+/// The status an agent-CLI controller reports: a local agent pane with no PID,
+/// program name or spawn time, so only these five fields vary between sites.
+pub(crate) fn agent_runtime_status(
+    block_id: &str,
+    version: i32,
+    proc_status: &str,
+    exit_code: i32,
+    turn_active: bool,
+) -> BlockControllerRuntimeStatus {
+    BlockControllerRuntimeStatus {
+        blockid: block_id.to_string(),
+        version,
+        shellprocstatus: proc_status.to_string(),
+        shellprocconnname: "local".to_string(),
+        shellprocexitcode: exit_code,
+        shellprocpid: None,
+        shellprocname: String::new(),
+        spawn_ts_ms: None,
+        is_agent_pane: true,
+        turn_active,
+    }
+}
+
+/// Publish `agent-message-accepted` for `message_id` on `block:<id>`, telling
+/// the frontend to promote that pending entry from queued to in-document.
+pub(crate) fn publish_message_accepted(broker: &super::mps::Broker, block_id: &str, message_id: &str) {
+    broker.publish(super::mps::MuxEvent {
+        event: super::mps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
+        scopes: vec![format!("block:{}", block_id)],
+        sender: String::new(),
+        persist: 0,
+        data: Some(serde_json::json!({
+            "block_id": block_id,
+            "message_id": message_id,
+        })),
+    });
+}
+
 #[cfg(test)]
 mod cmd_env_tests {
     use super::{cmd_env_of, MetaMapType, META_KEY_CMD_ENV};
@@ -1479,6 +1517,21 @@ mod tests {
             serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
         assert_eq!(replayed.blockid, "block-persist-test");
         assert!(replayed.turn_active);
+    }
+
+    #[test]
+    fn agent_runtime_status_sets_the_fixed_agent_pane_fields() {
+        let status = agent_runtime_status("block-a", 7, STATUS_DONE, -1, true);
+        assert_eq!(status.blockid, "block-a");
+        assert_eq!(status.version, 7);
+        assert_eq!(status.shellprocstatus, STATUS_DONE);
+        assert_eq!(status.shellprocconnname, "local");
+        assert_eq!(status.shellprocexitcode, -1);
+        assert_eq!(status.shellprocpid, None);
+        assert!(status.shellprocname.is_empty());
+        assert_eq!(status.spawn_ts_ms, None);
+        assert!(status.is_agent_pane);
+        assert!(status.turn_active);
     }
 
     // ── Subprocess agents are unreachable via this primitive alone ──────────

@@ -631,17 +631,7 @@ impl PersistentSubprocessController {
     pub(super) fn emit_message_accepted(&self, message_id: Option<&str>) {
         let Some(id) = message_id else { return };
         let Some(ref broker) = self.broker else { return };
-        let event = crate::backend::mps::MuxEvent {
-            event: crate::backend::mps::EVENT_AGENT_MESSAGE_ACCEPTED.to_string(),
-            scopes: vec![format!("block:{}", self.block_id)],
-            sender: String::new(),
-            persist: 0,
-            data: Some(serde_json::json!({
-                "block_id": self.block_id,
-                "message_id": id,
-            })),
-        };
-        broker.publish(event);
+        super::super::publish_message_accepted(broker, &self.block_id, id);
         tracing::info!(
             block_id = %self.block_id,
             message_id = %id,

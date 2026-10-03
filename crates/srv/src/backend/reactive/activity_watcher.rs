@@ -40,8 +40,9 @@ use tokio::sync::Semaphore;
 use tokio::time::interval;
 
 use crate::ambient::validate::is_usable_title;
+use crate::backend::blockcontroller::core::broadcast_block_update;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
-use crate::backend::eventbus::{EventBus, WSEventType};
+use crate::backend::eventbus::EventBus;
 use crate::backend::obj::{self, Block};
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -104,26 +105,6 @@ pub(crate) fn store_recovered_title(store: &Store, block_id: &str, title: &str) 
             Ok(true)
         })
         .map_err(|e| e.to_string())
-}
-
-/// Tell open frontends the block changed, the way the other backend meta writers
-/// do (`blockcontroller::core::persist_session_id`).
-fn broadcast_block_update(store: &Store, event_bus: &EventBus, block_id: &str) {
-    let Ok(block) = store.must_get::<Block>(block_id) else {
-        return;
-    };
-    let data = serde_json::to_value(&obj::MuxObjUpdate {
-        updatetype: "update".into(),
-        otype: "block".into(),
-        oid: block_id.to_string(),
-        obj: Some(obj::mux_obj_to_value(&block)),
-    })
-    .ok();
-    event_bus.broadcast_event(&WSEventType {
-        eventtype: "waveobj:update".to_string(),
-        oref: format!("block:{block_id}"),
-        data,
-    });
 }
 
 /// Run the recovery sweep. Never returns.
