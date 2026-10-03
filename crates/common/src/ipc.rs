@@ -1823,10 +1823,10 @@ pub enum HwndDriftKind {
     OrphanInstance,
 }
 
-/// Phase B.9.1 — drift severity. Operator-tunable severity floor
-/// in `WrrConfig.severity_floor` controls which events get
-/// broadcast (ones below the floor are still logged at DEBUG so
-/// they show up in `--diag wrr` post-mortem).
+/// Phase B.9.1 — drift severity, assigned per drift kind by the
+/// launcher's `severity_for` (`crates/launcher/src/wrr/mod.rs`). The
+/// operator-tunable severity floor the B.9 design described was never
+/// built: nothing filters events by severity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {

@@ -279,8 +279,7 @@ export function update(
             // a state-mirror notification, NOT a `navigate` intent — so
             // there's no echo-loop risk here regardless of source. The
             // explicit guard lives where intent-bearing commands
-            // (`Navigate`) decide whether to emit `navigate` (the saga
-            // consumer treats that event as "call browser_pane_tab_navigate").
+            // (`Navigate`) decide whether to emit `navigate`.
             const originChanged = sameOriginUrl(tab.url, command.url) === false;
             const faviconAlreadyForNewOrigin = tab.faviconOverridden
                 && sameOriginUrl(tab.faviconUrl, command.url);
@@ -551,8 +550,9 @@ export function update(
                 nextActive,
                 ...state.tabs.slice(idx + 1),
             ];
-            // Echo-loop guard (convention §6). The `navigate` event tells
-            // the saga to call `browser_pane_tab_navigate` on the host.
+            // Echo-loop guard (convention §6). The `navigate` event is the
+            // host-navigation intent (nothing consumes it yet: the nav bar
+            // calls `browser_pane_navigate` on the host directly).
             // If the originating command came FROM the host (it shouldn't
             // for Navigate today — user/programmatic only — but the slot
             // store may relay backend-driven URL applies via this command

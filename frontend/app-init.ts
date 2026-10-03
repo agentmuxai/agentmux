@@ -1082,9 +1082,10 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     // longer removed here. Removing it mid-mount exposed the bare chrome →
     // empty → piecemeal-mount cascade behind it (very visible on tear-off).
     // It is now cross-faded out by the content-reveal gate's "settled" moment
-    // (tab-reveal.ts `liftGate` → startup-splash.ts `fadeOutStartupSplash`),
-    // so the brain covers the whole bootstrap and the transition reads as
-    // brain → content with nothing uncovered in between.
+    // (tab-reveal.ts `liftTabGate` → startup-splash.ts
+    // `fadeOutStartupSplash`), so the brain covers the whole bootstrap and
+    // the transition reads as brain → content with nothing uncovered in
+    // between.
 
     getApi().setWindowInitStatus("wave-ready");
 }

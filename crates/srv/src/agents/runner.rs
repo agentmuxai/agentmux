@@ -277,9 +277,9 @@ pub(crate) async fn run_agent_with_bin(
 /// `Done` event payloads into an `AgentRunResult`, wait for the
 /// child to exit, and return the result.
 ///
-/// Split out from `run_agent` so it can be unit-tested against
-/// in-memory readers without spawning a real subprocess. Used by
-/// the integration test below as `drain_async_reader_for_test`.
+/// Split out from `run_agent`; its parsing core, `drain_async_reader`,
+/// takes any async reader, so the unit tests below exercise it against
+/// in-memory pipes without spawning a real subprocess.
 async fn drain_and_collect(
     stdout: tokio::process::ChildStdout,
     tx: &mpsc::UnboundedSender<AgentEvent>,

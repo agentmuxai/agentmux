@@ -181,14 +181,14 @@ pub fn spawn_background_subsystems(
     // Recipient-identity check (issue #2695): before delivering, compare the
     // resolved target's own live, spawn-time-captured identity (queried from
     // the actual controller, independent of reactive_handler's own
-    // agent_to_block map) against who the jekt was addressed to. See
+    // name/UID-to-block maps) against who the jekt was addressed to. See
     // Controller::agent_id's doc comment for why this can't be derived from
     // reactive_handler's own state.
     reactive_handler.set_agent_identity_confirmer(Arc::new(|block_id: &str| {
         backend::blockcontroller::get_controller(block_id).and_then(|c| c.agent_id())
     }));
     // Stable counterpart to the above (`AGENTMUX_AGENT_ID`, frozen at spawn)
-    // — see `Controller::stable_agent_id`'s and `Handler::alias_to_block`'s
+    // — see `Controller::stable_agent_id`'s and `NameBindings::stable`'s
     // doc comments for why a jekt tagged with the stable ID needs its own,
     // independently-sourced confirmer instead of reusing the live one.
     reactive_handler.set_stable_agent_identity_confirmer(Arc::new(|block_id: &str| {

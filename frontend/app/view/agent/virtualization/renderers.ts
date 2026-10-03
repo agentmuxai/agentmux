@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-kind renderer registry — each DocumentNode kind declares its
- * component, size estimator, and streaming behavior. Phase 2 builds
- * the virtualizer config from this registry; Phase 3's perf probe
- * compares each renderer's `estimatedSize` against actual measured
- * heights to flag misses.
+ * Per-kind size estimators and streaming flags for DocumentNode kinds:
+ * `estimateNode` / `estimateNodeForState` give a row's height estimate,
+ * and `STREAMING_CAPABLE` says which kinds stream. The perf probe
+ * compares these estimates against actual measured heights to flag
+ * misses.
  *
  * See docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md
  * §"Render contract".
@@ -115,9 +115,7 @@ export function toolExpandedPx(): number {
 // ── Per-kind estimator functions ────────────────────────────────────────────
 //
 // Exported individually so they can be unit-tested without needing the
-// real components. The full registry is constructed via
-// buildRendererRegistry() at view-mount time — registry binding to
-// concrete components is Phase 2's job.
+// real components; `estimateNodeForState` below dispatches to them by kind.
 
 /**
  * Room reserved per local image in an agent message

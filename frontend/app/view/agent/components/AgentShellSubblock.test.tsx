@@ -1149,12 +1149,14 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
     });
 
     /**
-     * ReAgent P1 on PR #3257, round 3: `lastObservedExitCode` is a single
-     * component-scoped variable, written by the controllerstatus
-     * subscription and read by attachShell's resync-failure catch block
-     * (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md) — but it
-     * was never reset when a re-attach switches to a new candidate id.
-     * Since this PR is what makes attachShell run more than once per
+     * Regression test (#3257): the last observed exit was once a bare,
+     * component-scoped `lastObservedExitCode`, written by the
+     * controllerstatus subscription and read by attachShell's
+     * resync-failure catch block
+     * (SPEC_AGENT_PANE_SHELL_EXIT_COLLAPSES_DRAWER_2026_09_15.md) — and it
+     * was never reset when a re-attach switches to a new candidate id. It
+     * is now `lastObservedExit`, tagged with the id it was observed for.
+     * Since #3257 makes attachShell run more than once per
      * mount, a resync failure for a FRESHLY re-attached id could consult
      * an exit code actually observed for the PREVIOUS sub-block this
      * component was bound to. In the direction this test exercises, that
@@ -1171,7 +1173,7 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
         const idA = "stale-exit-code-a";
         const idB = "stale-exit-code-b";
         queueSeedMeta(`block:${idA}`, {});
-        // A exits CLEANLY — this sets lastObservedExitCode = 0 as a side
+        // A exits CLEANLY — this sets lastObservedExit to code 0 as a side
         // effect of being replayed at subscribe time, independent of
         // whether the drawer acts on it (sawRunning is irrelevant to this
         // write — see the subscription handler's own comment).

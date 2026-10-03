@@ -288,12 +288,12 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // regress Streaming → Submitting and re-arm this exact timer
     // unnecessarily), and a backend-accepted turn can legitimately take
     // well over 30s to produce its first token (large context, a long
-    // agentic tool chain) — that window is already independently bounded
-    // server-side by `HealthMonitor`'s own Stalled(30s)/Dead(120s)
-    // silence detection once the backend marks the turn active, which
+    // agentic tool chain). A turn that actually fails in that window
     // surfaces as a real `AgentFailure` → `FailureObserved` → this same
-    // `Done.errored` transition through an already-tested, unrelated
-    // path. A blind 30s bound here would misfire on exactly that healthy
+    // `Done.errored` transition through an already-tested, unrelated path
+    // (the server's silence-based Stalled/Dead detection that also used to
+    // bound it was removed in #2825). A blind 30s bound here would misfire
+    // on exactly that healthy
     // case — and since neither `StreamFlushObserved` nor `bumpEvent`
     // re-promote an `errored` `Done` phase, the eventual real response
     // would arrive with the lifecycle stuck errored and the UI free to

@@ -297,8 +297,8 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
     });
 
     // The full stack, reactive — same `localTreeStateAtom()` + live
-    // `findNode` lookup pattern term.tsx's own `termTabs` and agent-view.tsx's
-    // `stackTabs` already use, falling back to a single-entry list when this
+    // `findNode` lookup pattern PaneChrome.tsx's own `stackIds` already
+    // uses, falling back to a single-entry list when this
     // leaf hasn't split into a stack yet. `nodeModel.layoutModel`, NOT
     // `getLayoutModelForStaticTab()` — see that field's own doc comment
     // (layout/lib/types.ts) for why the global "active tab" lookup is wrong

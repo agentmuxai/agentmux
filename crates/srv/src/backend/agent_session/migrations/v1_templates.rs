@@ -63,7 +63,7 @@ pub struct TemplatePromoteStats {
 ///    - Skip if missing (zone refers to a deleted definition).
 ///    - Skip if `is_seeded = 0` (already user-owned — no work).
 ///    - Otherwise: clone the template into a new user definition
-///      (mirrors `agent_def_create_from_template` semantics).
+///      (mirrors the `agentdefcreatefromtemplate` handler's semantics).
 /// 3. Pick the new name: most-recently-active named instance's
 ///    `instance_name` if any exists, else fall back to the template's
 ///    own `name`.
@@ -254,13 +254,14 @@ pub fn migrate_promote_template_sessions_v1(
             existing
         } else {
             // Clone the template into a new user-owned definition
-            // at the deterministic id. Field copies mirror
-            // `agent_def_create_from_template`.
+            // at the deterministic id. Field copies mirror the
+            // `agentdefcreatefromtemplate` handler
+            // (server/agent_handlers/template.rs).
             let now = now_ms() as i64;
             // Resolve through the template's own bound bundle when it has
             // one, not the possibly-drifted `db_agent_definitions.provider`
             // column directly (#2594, same pattern as
-            // `agent_def_create_from_template`/`forkagentdefinition`). Only
+            // `agentdefcreatefromtemplate`/`forkagentdefinition`). Only
             // `mstore` is available in this migration (no id_store/shared
             // store handoff at this point in the boot sequence) — falls
             // back to `template.provider` when the bundle isn't found via

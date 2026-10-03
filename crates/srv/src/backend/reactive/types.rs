@@ -713,9 +713,9 @@ pub enum SenderDelivery {
 /// Function type for querying a block's own live, spawn-time-captured jekt
 /// identity — an independent source of truth for `inject_message_inner`'s
 /// recipient-identity check, deliberately NOT derived from `Handler`'s own
-/// `agent_to_block`/`agent_info` maps (see `Controller::agent_id`'s doc
-/// comment for why checking a registry against itself would be a
-/// tautology). Given `block_id`, returns `Some(agent_id)` if that block's
+/// `uid_to_block`/`name_to_blocks`/`agent_info` maps (see
+/// `Controller::agent_id`'s doc comment for why checking a registry against
+/// itself would be a tautology). Given `block_id`, returns `Some(agent_id)` if that block's
 /// controller has a captured identity, `None` if it doesn't (a non-agent
 /// controller, or a controller type that doesn't implement `agent_id()`) —
 /// `None` is treated as "unverifiable," not "confirmed absent," so delivery

@@ -382,9 +382,9 @@ struct PersistentInner {
     /// of those can tell it apart from a user's Stop; this can. Every stop
     /// request except the restart's own clears it, and nothing but the
     /// boundary sets it, so an explicit Stop or a pane close landing anywhere
-    /// in the window is never undone by a respawn (codex P1s on #3990). It is
-    /// consumed only immediately before the replacement's OS process starts
-    /// (`take_restart_spawn_permission_locked`).
+    /// in the window is never undone by a respawn (#3990). It is consumed
+    /// only in the acquisition that installs the replacement's freshly
+    /// started child as the live process (`commit_restart_spawn_locked`).
     config_restart_generation: Option<u64>,
     /// The spawn claimed for a config restart's replacement, by generation
     /// (`try_claim_eager_resume_spawn_for`). `spawn_process` re-checks the
@@ -483,21 +483,22 @@ struct PersistentInner {
     next_message_seq: u64,
     /// True while the drain (`drain_queue_after_successful_spawn`) is
     /// between successfully sending a message on the live stdin channel
-    /// and finishing its OWN follow-up append of that message into
-    /// `pending_resume_retry`/`confirmed_stale_resume_retry` — see
-    /// `pending_resume_retry`'s own doc comment for why that append
-    /// exists. reagentx P1 on PR #2360 (sixth review pass, round 9): the
+    /// and finishing its OWN follow-up append of that message into the
+    /// stale-`--resume` retry batch held in `resume`
+    /// (`ResumeEvent::MessageAppendedToRetryBatch`) — see the drain's own
+    /// comment at that append for why it exists (#2360): the
     /// `Sender::send().await` and that follow-up append are two separate
     /// lock acquisitions with an unavoidable gap between them (a mutex
     /// can't be held across an `.await`). Without this flag, the
     /// process-waiter's own exit-handling — running concurrently on a
-    /// DIFFERENT task — could `.take()` the confirmed retry batch in that
-    /// exact gap, dispatching a retry that's missing a message the doomed
+    /// DIFFERENT task — could resolve the retry batch
+    /// (`ResumeEvent::ProcessExited`) in that exact gap, dispatching a
+    /// retry that's missing a message the doomed
     /// process's channel had ALREADY accepted: the message stays marked
     /// "accepted" and gets persisted, but is never actually delivered to
     /// any process again. The exit-handling waits (briefly, bounded) for
     /// this to go false before deciding the retry batch is final — see
-    /// its own comment at the `.take()` call site.
+    /// its own comment at that wait loop.
     drain_send_in_flight: bool,
     current_pid: Option<u32>,
     /// Channel to send messages to the stdin writer task.
@@ -518,14 +519,15 @@ struct PersistentInner {
     /// seconds when a descendant holds stdout open).
     stop_exit: Option<(u64, bool)>,
     /// Monotonic counter bumped once per `spawn_process` call (in the same
-    /// lock acquisition as stashing `pending_resume_retry`), uniquely
-    /// identifying that one spawn attempt for the rest of this controller
-    /// instance's lifetime. Note this is NOT the `spawn_epoch`/
-    /// `should_skip_own_delivery` mechanism removed earlier in this same
-    /// PR (see `spawning_in_progress`'s own doc comment) — that existed to
+    /// lock acquisition that reports `SpawnedWithResume`/`SpawnedFresh` to
+    /// `resume`), uniquely identifying that one spawn attempt for the rest
+    /// of this controller instance's lifetime. Note this is NOT the
+    /// `spawn_epoch`/`should_skip_own_delivery` mechanism removed earlier
+    /// (see `spawning_in_progress`'s own doc comment) — that existed to
     /// dedup a spawn-claim race, a job `spawning_in_progress` now fully
     /// owns. This counter exists for a different, narrower purpose: giving
-    /// `stop_requested_generation` something stable to compare against.
+    /// every `ResumeEvent` (and the per-spawn tokens above, such as
+    /// `config_restart_generation`) something stable to compare against.
     ///
     /// ALSO bumped (without a spawn) by
     /// `clear_session_id_for_fresh_spawn` to atomically retire every
@@ -1096,7 +1098,8 @@ fn build_deny_resume_message(message: &str) -> String {
 /// The parking/decide mechanism this gate controls —
 /// `park_tool_permission_request` below and
 /// `PersistentSubprocessController::decide_tool_permission` — is complete
-/// and independently tested (see `tool_permission_tests` below); flipping
+/// and independently tested (see the "Phase 2 gate" tests in
+/// `persistent/tests/send_input.rs`, which call both directly); flipping
 /// this gate on is a policy call about which tools or modes actually
 /// warrant a prompt (a risk-tiering scheme per
 /// `SPEC_DECISION_PROMPT_2026_04_24.md`'s own speculative `risk` field,

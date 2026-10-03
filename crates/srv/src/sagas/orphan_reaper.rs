@@ -43,11 +43,11 @@ pub(crate) const MIN_ORPHAN_AGE: Duration = Duration::from_secs(90);
 
 /// Diagnostic-only counters updated at the end of every `sweep()` — for the
 /// periodic `mem_attribution` log (`sysinfo.rs`) to correlate commit/handle
-/// growth against reaper activity. A `candidates`/`first_seen_len` that
-/// climbs sweep over sweep without a matching rise in `reaped_cumulative`
-/// would mean the reaper keeps finding (but not managing to close) the same
-/// growing set of blocks — worth seeing directly rather than inferred from
-/// commit numbers alone.
+/// growth against reaper activity. A `reaper_candidates`/`reaper_first_seen`
+/// that climbs sweep over sweep without a matching rise in
+/// `reaper_reaped_cumulative` would mean the reaper keeps finding (but not
+/// managing to close) the same growing set of blocks — worth seeing
+/// directly rather than inferred from commit numbers alone.
 static LAST_CANDIDATES: AtomicUsize = AtomicUsize::new(0);
 static LAST_FIRST_SEEN_LEN: AtomicUsize = AtomicUsize::new(0);
 static REAPED_CUMULATIVE: AtomicU64 = AtomicU64::new(0);

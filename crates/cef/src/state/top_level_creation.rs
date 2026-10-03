@@ -113,9 +113,9 @@ pub struct TopLevelCreationState {
 // ── Effects (carrier for side-effect-bearing events) ─────────────────────
 
 /// Side-effect descriptor emitted by reducer arms. Carried inside
-/// `HostEvent::Effect(EffectKind)`. The effects executor in
-/// `AppState::host_dispatch_with_effects` dispatches each kind to the
-/// appropriate imperative handler (e.g., posting a CEF UI task).
+/// `HostEvent::Effect(EffectKind)`. No effects executor exists yet:
+/// `AppState::host_dispatch` only logs them (`log_host_event`) — see
+/// `HostEvent::Effect`.
 ///
 /// Reducer arms emit effects but never execute them; this preserves the
 /// pure-functional discipline of `update()`. Manual Debug impl below

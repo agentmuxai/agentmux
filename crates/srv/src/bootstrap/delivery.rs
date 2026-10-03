@@ -170,9 +170,9 @@ pub fn install_agent_turn_delivery(state: &AppState) {
             // registration tail's `get_global_handler().register_agent(...)`
             // would try to re-lock a mutex this very thread already holds and
             // wedge the reactive handler process-wide (reagent P0 on PR #2930).
-            // It is also simply redundant here: this block was resolved BY an
-            // `agent_to_block` lookup in that handler, so the agent is
-            // registered by construction. Do not "simplify" this to Register.
+            // It is also simply redundant here: this block was resolved BY a
+            // `resolve_target` lookup in that handler's registry, so the agent
+            // is registered by construction. Do not "simplify" this to Register.
             let Ok(handle) = tokio::runtime::Handle::try_current() else {
                 return Err(
                     "no tokio runtime available to start an agent turn".to_string(),

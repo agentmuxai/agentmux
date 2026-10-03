@@ -40,9 +40,9 @@ fn truncate_chars(s: &str, max: usize) -> String {
 
 /// The human-meaningful field of a tool call's `input`, by tool name.
 ///
-/// Mirrors the frontend's `extractToolDetail`
-/// (`frontend/app/view/agent/stream-parser.ts`), which is what the Agent pane,
-/// the Activity Dock and the tool blocks have always used. The Swarm feed
+/// Mirrors the frontend's `toolDetail`
+/// (`frontend/app/view/agent/tool-meta/tool-descriptors.ts`), which is what
+/// the Agent pane, the Activity Dock and the tool blocks use. The Swarm feed
 /// instead showed `serde_json::Value::to_string()` — the whole input object as
 /// compact JSON, cut mid-token — because summarising happens here, at parse
 /// time, and the structured input is dropped before it ever reaches a view
@@ -566,7 +566,7 @@ pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
 /// `SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`.
 ///
 /// Falls back to `cmd:env.CLAUDE_CONFIG_DIR` (written by the launch flow
-/// before spawn — see `agentmux-cef`'s `ensure_auth_dir`) when `bound_dir`
+/// before spawn — see srv's `provider.ensureauthdir`) when `bound_dir`
 /// is `None` (an ambient/unbound agent, where `cmd:env` IS correct and
 /// stays correct — nothing to re-resolve). Falls back further to
 /// `derive_claude_config_dir`'s legacy `~/.config/claude-<agent_id>` guess

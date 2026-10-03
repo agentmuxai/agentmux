@@ -302,8 +302,9 @@ impl SubprocessController {
     }
 
     /// Emit `agent-message-accepted` for the given config, if it carries
-    /// a `message_id`. Called from both `spawn_turn` (direct path) and
-    /// the `process_waiter` drain site (queue path). No-op if the config
+    /// a `message_id`. Called from `spawn_turn` / `spawn_container_turn`;
+    /// a queued message gets here too, when the process-waiter task's drain
+    /// calls that same spawn function for it. No-op if the config
     /// has no id, or the broker isn't configured.
     fn emit_message_accepted(&self, config: &SubprocessSpawnConfig) {
         let Some(id) = config.message_id.as_deref() else { return };

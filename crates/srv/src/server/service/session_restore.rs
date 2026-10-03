@@ -70,8 +70,8 @@ pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Va
     // see `tab_lifecycle.rs`); a workspace the reducer hasn't touched yet
     // (e.g. straight out of `ensure_initial_data`) can still have its one
     // tab sitting there instead of in `tabids` until the next
-    // `TabsReordered` event drains it. Read both so a snapshot taken before
-    // that drain doesn't silently see zero tabs.
+    // `TabsReorderedBulk` event drains it. Read both so a snapshot taken
+    // before that drain doesn't silently see zero tabs.
     for tab_id in workspace.pinnedtabids.iter().chain(workspace.tabids.iter()) {
         let Some(tab) = store.get::<Tab>(tab_id).ok().flatten() else {
             continue;
@@ -1084,8 +1084,8 @@ mod tests {
         let ws = state.mstore.get::<Workspace>(&ws_id).unwrap().unwrap();
         // Count BOTH lists: a workspace the reducer has not touched yet
         // (straight out of `ensure_initial_data`) still has its tab in the
-        // legacy `pinnedtabids` until a `TabsReordered` drains it — which is
-        // exactly why `snapshot_workspace` reads both (see its loop).
+        // legacy `pinnedtabids` until a `TabsReorderedBulk` drains it — which
+        // is exactly why `snapshot_workspace` reads both (see its loop).
         let open_tabs = ws.pinnedtabids.len() + ws.tabids.len();
         assert!(open_tabs > 0, "precondition: the session has a tab open");
         assert!(

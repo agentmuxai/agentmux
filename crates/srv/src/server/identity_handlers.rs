@@ -3,21 +3,21 @@
 
 //! Pre-launch OAuth flow RPC handlers.
 //!
-//! Five commands per `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §7:
+//! Five commands per `docs/specs/SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` §7
+//! (request types named after that section's RPCs), plus
+//! `identity.ensureaccountdir`:
 //!
-//!   * `auth.start`           — `StartProviderAuth`
-//!   * `auth.poll`            — `PollProviderAuth`
-//!   * `auth.submitcallback`  — `SubmitAuthCallback`
-//!   * `auth.cancel`          — `CancelProviderAuth`
-//!   * `auth.submitapikey`    — `SubmitProviderApiKey`
+//!   * `auth.start`           — `StartProviderAuthReq`
+//!   * `auth.poll`            — `PollProviderAuthReq`
+//!   * `auth.submitcallback`  — `SubmitAuthCallbackReq`
+//!   * `auth.cancel`          — `CancelProviderAuthReq`
+//!   * `auth.submitapikey`    — `SubmitProviderApiKeyReq`
 //!
 //! This module owns the RPC surface and dispatches into
-//! `crate::identity::auth_session::AuthSessionManager`. The actual
-//! provider-CLI spawn (which feeds stdout lines into the session
-//! via `record_line`) lands in a follow-up commit on this branch —
-//! these handlers ship the lifecycle plumbing and return clear
-//! "spawn not yet wired" errors for the callback/api-key paths so
-//! frontend (PR B) can integrate against the real shape.
+//! `crate::identity::auth_session::AuthSessionManager`. `auth.start` also
+//! spawns the provider CLI (`spawn_auth_cli`), which feeds stdout lines
+//! into the session via `record_line`. `auth.submitapikey` is not built:
+//! it always returns an error.
 //!
 //! Split across four files (module-organization pass, see
 //! `docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md`):

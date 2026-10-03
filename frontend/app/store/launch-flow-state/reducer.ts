@@ -6,8 +6,8 @@
  * `update(state, command) → { state, events }` shape used by
  * `frontend/app/store/browser-pane-state/reducer.ts`.
  *
- * Stage 2a — additive. The view migration (AgentLaunchModal swap to
- * `useLaunchFlowStore()`) is Stage 2b. See spec
+ * Landed additively in Stage 2a; Stage 2b migrated the view —
+ * AgentLaunchModal now drives it via `createLaunchFlowStore()`. See spec
  * `docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md`.
  */
 

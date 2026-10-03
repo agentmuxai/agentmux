@@ -30,7 +30,7 @@
 /// (truthy) on ARM64, making CEF think the app is already inside a
 /// `sendEvent:` call and skip normal event routing — which breaks window
 /// drag silently. A maintained allowlist of `BOOL`-returning selectors
-/// gets a `BOOL_no_stub` returning `0` (NO); everything else gets a void
+/// gets a `bool_no_stub` returning `0` (NO); everything else gets a void
 /// stub, which is safe for the unbounded set of removed Apple-private APIs.
 ///
 /// Safety: Called once, before `cef::initialize`. `NSApplication` is a

@@ -10,9 +10,9 @@
  *
  * ## What this replaces
  *
- * Today, "a subtree is about to change height, ease it instead of jump-
- * cutting" is reimplemented per call site — `ToolOverlayLog.tsx`'s
- * `flipHeight()` tracks a `lastMeasuredHeight`/`lastBranch` pair across
+ * Before this module, "a subtree is about to change height, ease it instead
+ * of jump-cutting" was reimplemented per call site — `ToolOverlayLog.tsx`'s
+ * old `flipHeight()` tracked a `lastMeasuredHeight`/`lastBranch` pair across
  * effect runs by hand, with its own reduced-motion check, its own
  * content-visibility guard (`heightStale`), and its own `prevNodeId` reset
  * for the streaming-buffer slot-reuse hazard. `ToolBlock.tsx` needed the
@@ -29,7 +29,7 @@
  * pass — freeze the shrinking element at its old height, then ease it down,
  * so the browser's clamp lands in many imperceptible per-frame steps
  * instead of one visible jump. That is what `flip()` below does; it is not
- * a novel technique, just `ToolOverlayLog.tsx`'s existing `flipHeight()`
+ * a novel technique, just `ToolOverlayLog.tsx`'s former `flipHeight()`
  * moved here and given a shared policy layer.
  *
  * ## Two entry points, two call shapes

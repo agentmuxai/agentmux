@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! `bundle.import`, `bundle.import_preview`, `bundle.import_commit`: the ABF
+//! `bundle.import`, `bundle.import.preview`, `bundle.import.commit`: the ABF
 //! file/bytes intake path, its size and warning budgets, and the two-phase
 //! preview/commit flow.
 

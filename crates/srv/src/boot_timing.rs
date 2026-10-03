@@ -216,8 +216,8 @@ mod tests {
 
     #[test]
     fn nested_global_timing_does_not_deadlock() {
-        // The lock must not be held across the closure — `open_stores` wraps
-        // passes that are themselves wrapped.
+        // The lock must not be held across the closure —
+        // `open_stores_and_migrate` wraps passes that are themselves wrapped.
         let out = time("outer", || time("inner", || 7));
         assert_eq!(out, 7);
     }

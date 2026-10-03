@@ -162,9 +162,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // RAF-coalesced scroll handling (task #39): native `scroll` events can
     // fire dozens of times per drag/wheel gesture; without coalescing, each
     // one dispatches a layout `Scrolled` command and re-derives the window.
-    // Mirrors the `scheduleFlush`/`flushRafId` idiom useAgentStream.ts uses to
-    // batch stream chunks into one dispatch per animation frame — same
-    // "guard with a nullable rAF handle" pattern, applied to scroll here.
+    // Same one-dispatch-per-animation-frame idea the stream path applies to
+    // chunks (stream-flush-queue.ts's `scheduleFlush`), done here with a
+    // nullable rAF handle as the guard.
     // `handleScrollNow` reads scrollRef's LIVE values (not anything captured
     // from the event), so it's safe to defer to the next frame: whichever
     // scroll position is current when the frame runs is the one applied.

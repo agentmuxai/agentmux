@@ -148,7 +148,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .filter(|s| !s.is_empty());
 
             // `/agentmux/reactive/inject`'s `target_agent` resolves by
-            // registered AGENT NAME only (`agent_to_block`,
+            // agent UID or registered AGENT NAME only (`resolve_target`,
             // crates/srv/src/backend/reactive/handler.rs) — never by
             // block_id, even though this tool's own advertised contract
             // (FLEET_BROADCAST_TOOL) is block_id values from FleetList, to

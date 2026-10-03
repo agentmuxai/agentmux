@@ -405,8 +405,10 @@ export class BrowserViewModel {
             else this._faviconUnsub = unsub;
         });
 
-        // Subscribe to nav-state updates fired by the backend on every
-        // `on_load_end_pane`. This is the source of truth for address bar +
+        // Subscribe to nav-state updates fired by the backend from
+        // `on_load_end_browser_pane`, `on_loading_state_change_browser_pane`
+        // and `set_pane_main_frame_loading` (browser_pane/callbacks.rs).
+        // This is the source of truth for address bar +
         // back/forward state: CEF knows the real history (including
         // in-pane link clicks and popup-intercept redirects), and the
         // local fake history array we used before diverged the moment
@@ -430,12 +432,12 @@ export class BrowserViewModel {
                 `nav-state recv url=${JSON.stringify(payload.url)} url_only=${!!payload.url_only} is_loading=${payload.is_loading} can_back=${payload.can_go_back} can_forward=${payload.can_go_forward}`,
             );
             this._dispatch({ type: "UrlConfirmed", url: payload.url }, "nav-state");
-            // `url_only` events come from `on_load_end_pane` — they arrive
-            // before the navigation controller has fully committed, so the
-            // `can_go_back` / `can_go_forward` values from that hook would
-            // be stale (kimi's investigation identified this race). The
-            // authoritative values come from `on_loading_state_change_pane`
-            // which CEF invokes with direct params. Skip touching the
+            // `url_only` events come from `on_load_end_browser_pane` — they
+            // arrive before the navigation controller has fully committed, so
+            // the `can_go_back` / `can_go_forward` values from that hook would
+            // be stale. The authoritative values come from
+            // `on_loading_state_change_browser_pane`, which CEF invokes with
+            // direct params. Skip touching the
             // back/forward atoms on `url_only` events.
             if (
                 !payload.url_only &&
@@ -452,15 +454,17 @@ export class BrowserViewModel {
                 );
             }
             // SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.2:
-            // `is_loading` (present only on `on_loading_state_change_pane`
-            // events, never on the `url_only` `on_load_end_pane` ones) is
-            // CEF's real navigation-controller loading state — dispatch the
+            // `is_loading` (present on `on_loading_state_change_browser_pane`
+            // and `set_pane_main_frame_loading` events, never on the
+            // `url_only` `on_load_end_browser_pane` ones) is the backend's
+            // main-frame loading state — dispatch the
             // reducer's TabLoadingChanged, which was built for exactly this
             // and was never wired up before. This used to unconditionally
             // dispatch LoadFinished on EVERY nav-state event, including ones
             // fired at navigation START — clearing `loading` within the same
-            // tick Navigate() had just set it. `on_loading_state_change_pane`
-            // fires on start/commit/back-forward too, so only trust its
+            // tick Navigate() had just set it.
+            // `on_loading_state_change_browser_pane` fires on
+            // start/commit/back-forward too, so only trust its
             // `is_loading` value, not "we received an event at all," as the
             // loading signal.
             if (payload.is_loading !== undefined) {

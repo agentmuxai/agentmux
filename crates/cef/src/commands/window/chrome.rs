@@ -92,10 +92,10 @@ pub(crate) unsafe fn toggle_maximize_hwnd(hwnd: *mut std::ffi::c_void) {
 /// The gesture means "maximize", unconditionally: a toggle would be a
 /// latent trap, silently restoring-down instead on any path where the
 /// window is still maximized at release. That path is not currently
-/// reachable — `ui_tasks::drag::unmaximize_for_drag` restores a maximized
-/// window at drag START, so by release it is never maximized — but the
-/// gesture's meaning does not depend on that invariant holding, and this
-/// function is what keeps the two independent.
+/// reachable — `ui_tasks::drag::begin_unmaximize_for_drag` restores a
+/// maximized window at drag START, so by release it is never maximized —
+/// but the gesture's meaning does not depend on that invariant holding, and
+/// this function is what keeps the two independent.
 #[cfg(target_os = "windows")]
 pub(crate) unsafe fn maximize_hwnd(hwnd: *mut std::ffi::c_void) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MAXIMIZE};

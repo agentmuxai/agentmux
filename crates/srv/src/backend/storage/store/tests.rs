@@ -1350,7 +1350,7 @@
         // agent instead folds into that agent's own row (consolidation
         // Phase 3b), and `instance_create` returns whichever row the launch
         // landed on; the folded case is covered by
-        // `instance_create_on_a_user_agent_folds_into_its_row`.
+        // `launching_a_user_agent_folds_into_its_row`.
         let mut agent = sample_agent("def-mirror", "mirror");
         agent.is_seeded = 1;
         store.agent_def_insert(&mut agent).unwrap();
@@ -4700,12 +4700,11 @@
         assert_eq!(launch_state("inst-ls"), ("sess-2".into(), "stopped".into(), 3000, 3500, "blk-2".into()));
     }
 
-    /// Reagent P1 + P2 on #1013 round 2 — pins the user-cloned-def
-    /// branch of `agents_dual_write_instance_create` so it matches
-    /// the backfill rule (`agents_consolidate.rs::backfill_instances`
-    /// folds the instance's bindings into the EXISTING `db_agents`
-    /// row keyed by `def.id`, NOT a fresh row keyed by `inst.id`).
-    /// Round-1 test only covered the seeded-template branch.
+    /// Pins the user-cloned-def branch of `Store::instance_create` (#1013)
+    /// so it matches the backfill rule (`agents_consolidate.rs`'s
+    /// `run_consolidate_migration`, step 4, folds the instance's bindings
+    /// into the EXISTING `db_agents` row keyed by `def.id`, NOT a fresh
+    /// row keyed by `inst.id`).
     #[test]
     fn launching_a_user_agent_folds_into_its_row() {
         let store = make_store();

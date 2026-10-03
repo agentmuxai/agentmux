@@ -10,9 +10,9 @@
  * platform-specific `CrossWindowDragMonitor` variant
  * (win32 / darwin / linux).
  *
- * `tabbar.tsx::performTabTearOff` does NOT use this helper — its
- * tear-off pipeline tracks `coldPathFailed` for F1.B orphan-workspace
- * cleanup safety (codex P1 round-3 #624) and pairs the open with an
+ * `tab-tearoff-rpc.ts::requestTearOff` (the tab-bar tear-off) does NOT
+ * use this helper — its tear-off pipeline tracks `coldPathFailed` for
+ * F1.B orphan-workspace cleanup safety (#624) and pairs the open with an
  * SC_MOVE handshake. Both flows still try-pool-first, just with
  * different surrounding logic.
  *

@@ -441,7 +441,8 @@ async fn test_handler_inject_rejects_when_neither_confirmer_matches() {
     // Force resolution through the alias entry so the check runs, but
     // address a THIRD identity neither confirmer will vouch for. Re-registering
     // the same primary key with a different alias just swaps the alias
-    // (see `register_alias`'s eviction behavior).
+    // (`register_agent_full` replaces the block's stable binding when a new
+    // one is supplied).
     handler
         .register_agent_with_nonce("claude", "block1", None, 0, Some("intruder"))
         .unwrap();

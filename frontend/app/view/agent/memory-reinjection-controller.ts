@@ -39,7 +39,7 @@
  *    `if (!wasAlreadyWorking)`, a guard this module bypassed entirely by
  *    never calling `handleSendMessage` in the first place. First fix:
  *    check `opts.isPaneWorking()` once, before fetching, and DEFER (via
- *    `deferredFrameTimestamp`) when busy.
+ *    `deferred`) when busy.
  *
  *    **Round 2 (reagentx P1, same PR, next re-review): that single
  *    check wasn't enough — it left a real, narrower race.**

@@ -718,7 +718,7 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
     // write path changed this column after the bundle was already
     // provisioned/immutable), but its bound bundle's REAL provider is
     // "claude". The promoted clone must carry "claude", not "codex"
-    // (#2594, same pattern as `agent_def_create_from_template`/
+    // (#2594, same pattern as `agentdefcreatefromtemplate`/
     // `forkagentdefinition`).
     let dir = tempdir().unwrap();
     let mstore = open_temp_mstore(dir.path());

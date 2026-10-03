@@ -53,3 +53,35 @@ Effort: **S** = one small PR, mechanical; **M** = a few files or a design choice
 1. §1 first: both are small, and each removes a real behavioural difference between two code paths. Decide the intended precedence (#1) and whether the string form of `cmd:env` is valid (#2) before writing the shared helper.
 2. Then the S items in §2, one PR each or grouped by file: they shrink the controllers that the accuracy audit found most often out of date.
 3. #17 and #19 are worth a short design note first (module boundary, crate placement).
+
+## 5. Added by the dead-symbol pass (2026-10-03)
+
+A second accuracy pass checked 527 comments that named a function, type or field that exists nowhere in the code (184 were stale and are fixed in the same PR as this section). Its auditors logged 14 more cases the same way. #21 already disagrees in behaviour.
+
+| # | What | Where | Effort |
+|---|---|---|---|
+| 21 | **Rust re-implements the frontend's per-tool header detail, and they have drifted** (WebFetch: Rust shows the full URL, the frontend host+path; the frontend also matches `read`/`read_file`). | `subagent_watcher/parse.rs:59` (`tool_input_detail`), `tool-meta/tool-descriptors.ts:243` (`toolDetail`) | M: send structured tool input to the Swarm feed and format it once, in the frontend |
+| 22 | The "surface a final error line" sequence (classify, persist last failure, publish `EVENT_AGENT_FAILURE`) is repeated at five sites. | `persistent/resume_retry.rs:35`, `persistent/spawn.rs:1205,1299`, … | S: one `publish_failure(...)` free fn |
+| 23 | The process waiter's wait arm and kill arm inline the same bounded await-then-abort of both reader tasks. | `persistent/spawn.rs:1497,1964` | S |
+| 24 | `spawn.rs` (~2,200 lines) is essentially one function that inlines the stderr reader, the stdout reader and the process waiter. | `persistent/spawn.rs` | L: one file per task under `persistent/`, a small context struct |
+| 25 | Two near-identical `emit_message_accepted` helpers. | `persistent/queue.rs:631`, `subprocess/mod.rs:309` | S |
+| 26 | `random_token()` hand-rolls the CSPRNG fill `random_seed_bytes()` already provides (#4094 consolidated the other copies). | `storage/agent_tokens.rs:57`, `storage/agent_lan_keys.rs:31` | S |
+| 27 | Two byte-identical `StubTracker` modules under opposite `cfg`s. | `process_tracker/mod.rs:206,234` | S |
+| 28 | `carry_skills` / `carry_mcp_servers` are ~200-line near-copies in one migration. | `m0031_…:264,465` | M, only if the migration is touched again |
+| 29 | "Create a block as a tab of this pane" (open, re-resolve the pane, clean up if gone, push onto the stack) exists three times. | `layout/lib/layoutStack.ts:76`, `agent/quick-fork.ts:205`, `agent/open-history-tab.ts:113` | M |
+| 30 | The tab-bar tear-off re-implements the pool-first/cold-path fallback `openTearOffWindow` already provides. | `tab/tab-tearoff-rpc.ts:104`, `drag/tear-off-pool-helper.ts:137` | S |
+| 31 | A pane's reactive stack id list is derived twice with the same logic. | `tab/pane-leaf-chrome.tsx:307`, `element/PaneChrome.tsx:101` | S |
+| 32 | `tear_off_hook.rs` (~1,560 lines) holds both the Windows mouse hook and a ~670-line inline macOS module. | `commands/tear_off_hook.rs:894` | S: split into `tear_off_hook/{mod,windows,macos}.rs` |
+| 33 | The main-frame URL expression is copied three times; the pane block id is resolved three times in one callback. | `browser_pane/callbacks.rs:476,525,606` | S |
+| 34 | The auth reducer and controller carry a full two-phase save path (`authenticated`/`saving` kinds, `SaveBundleClicked`, cancel/dispose guards) for an `auth.savebundle` RPC that was never built. | `auth/auth-state.ts:82`, `auth/auth-flow-controller.ts:233` | M: build the RPC, or delete the dormant states (see §6) |
+
+## 6. Code findings: dormant or unbuilt features the comments described as live
+
+These surfaced as stale comments; the comments are now accurate, but each is a decision about code, not wording. I checked each against the code.
+
+| What | Evidence | Decision needed |
+|---|---|---|
+| **Top-level window creation pipeline (H.6) is dormant.** The reducer arms emit `HostEvent::Effect { PostCreateWindow }`, but `HostCommand::EnqueueTopLevelWindow` and `TopLevelCallbackFired` are never dispatched outside the reducer and its tests, and `host_dispatch` only logs events. Nothing is lost today because nothing enqueues. | `reducer/top_level.rs:15,97,123`; `reducer/mod.rs:1241,1244`; no production dispatch site | Finish the migration (add the effect executor and switch the creators over) or delete the dormant arms |
+| **`auth.savebundle` was never built**, but the frontend carries its two-phase flow (#34). | No non-comment reference outside the auth reducer and its tests | Build it or delete the scaffolding |
+| **Process tracking is Windows-only.** The table in `process_tracker/mod.rs` listed Linux and macOS trackers as shipped; those platforms get the no-op `StubTracker`. | `process_tracker/mod.rs` | Accept, or schedule the Linux/macOS trackers |
+| **Planned `Resync` recovery for the event buffer was never built.** `event-buffer.ts` documented a working force-push/`Resync` protocol. | No `Resync` command or force-push request exists | Accept (comment now says so), or build it |

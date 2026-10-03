@@ -38,8 +38,8 @@ use crate::state::AppState;
 
 /// HWND liveness state of a candidate browser. Inputs to the
 /// planner; computed in production from real CEF/Win32 calls in
-/// `hwnd_is_dead_or_missing` + the `host()` check, supplied
-/// directly in tests.
+/// `classify_hwnd` (the `host()` check + `IsWindow`, or
+/// `Browser::is_valid()` off Windows), supplied directly in tests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HwndStatus {
     /// HWND is non-null AND `IsWindow` returns true. Live user window.
@@ -64,7 +64,7 @@ pub(crate) struct ReconcilePlan {
     /// still drive the drain when their close resolves (the level-trigger
     /// completes asynchronously). Empty when a user creation is in flight:
     /// the close chain itself could race the pending creation (see the
-    /// `plan_pending_creation_blocks_zombie_close` test).
+    /// `plan_pending_creation_defers_zombie_close` test).
     pub zombie_closes: Vec<String>,
     /// Hostless entries whose reducer kind is a live user window
     /// (`TopLevel { is_pool: false }`) — the stale-projection entries that

@@ -7,9 +7,10 @@
 //
 // Motivation (issue #2179): pane-minimize corruption kept shipping because
 // nothing ever *observed* an illegal tree — each bug was reconstructed after
-// the fact from db_layout archaeology. These checks run at the same choke
-// points as `balanceNode`/`enforceMinimizedLocks` and turn a silent
-// corruption into a loud, attributable log line at the moment it appears.
+// the fact from db_layout archaeology. These checks run on every geometry
+// pass (`updateTree` in `layoutGeometry.ts`) and after each minimize toggle
+// (`layoutMinimize.ts`), and turn a silent corruption into a loud,
+// attributable log line at the moment it appears.
 
 import type { LayoutNode } from "./types";
 import { FlexDirection } from "./types";

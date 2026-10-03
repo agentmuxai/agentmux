@@ -106,14 +106,14 @@ pub(crate) async fn generate_recovered_title(
 /// from the instance's raw terminal capture (the `"output"` filestore file,
 /// written unconditionally by the CLI pipeline, independent of the newer
 /// structured snapshot), reusing `read_recent_activity_digest` — the same
-/// extraction `generate_pushed_activity_summary` above uses.
+/// extraction `generate_recovered_title` above uses.
 ///
 /// One-shot per definition, not per-turn: `generation` is always the
 /// constant `1`, mirroring `generate_subagent_name`'s cache-once posture —
 /// the caller only invokes this when `agent_activity_summary_get` found
 /// nothing persisted yet, so there is no "newer turn" to supersede an
-/// in-flight call here (unlike the pull/pushed activity-summary RPCs,
-/// which regenerate every turn for a LIVE conversation).
+/// in-flight call here (unlike the `session:activity_summary` RPC, which
+/// regenerates every turn for a LIVE conversation).
 ///
 /// CLI path resolution (reagent P1, PR #2786): the row shape this feature
 /// actually targets is a CLOSED pane — `DeleteBlock`

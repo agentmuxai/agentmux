@@ -91,9 +91,10 @@ export interface TileLayoutPlatform {
     /**
      * ms after mount before CSS transitions enable and `layoutModel.ready`
      * flips. win32: 150 — Issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE: block
-     * measurements (block.tsx `getBoundingClientRect`, virtual-list
-     * `measureElement`) haven't completed at the 50 ms mark, so transitions
-     * enabled mid-settle and panes snapped-then-animated. linux/darwin: 50.
+     * measurements (block.tsx `getBoundingClientRect`, and at the time the
+     * since-retired TanStack virtualizer's `measureElement`) hadn't
+     * completed at the 50 ms mark, so transitions enabled mid-settle and
+     * panes snapped-then-animated. linux/darwin: 50.
      */
     animateDelayMs: number;
     /**

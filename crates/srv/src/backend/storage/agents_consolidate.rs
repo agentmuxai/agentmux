@@ -451,10 +451,10 @@ pub fn run_consolidate_migration(
             // def's edit time was — which makes `db_agents.updated_at`
             // useless as a "most-recently-used" sort key for migrated
             // stores, breaking the ordering invariant that the live
-            // dual-write (`agents_dual_write_instance_insert`) maintains
-            // for new launches. Codex P2 on PR #1110 — surfaced via the
-            // first read-flip (`instance_get_by_name`) ordering by
-            // `updated_at DESC`.
+            // launch write (`Store::instance_create`) maintains
+            // for new launches. Surfaced in #1110 via the
+            // first read-flip (the since-deleted `instance_get_by_name`)
+            // ordering by `updated_at DESC`.
             //
             // The loop iterates `ORDER BY i.created_at DESC`, so the
             // FIRST instance per def_id is the most recent, and that's
@@ -806,8 +806,8 @@ mod tests {
         // didn't write `updated_at`. After the fix, the folded
         // user-clone row's `updated_at` equals the most-recent
         // instance's `created_at` (the launch moment), not the def's
-        // edit time — matching what the live dual-write
-        // (`agents_dual_write_instance_insert`) stamps for new
+        // edit time — matching what the live launch write
+        // (`Store::instance_create`) stamps for new
         // launches.
         let mut conn = fresh_conn();
         // Def created at t=1000 (insert_def uses ?4 for both

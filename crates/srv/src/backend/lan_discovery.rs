@@ -320,8 +320,9 @@ pub struct LanDiscovery {
     version: String,
     port: u16,
     /// Cancellation half for the UDP responder task spawned in `start()`.
-    /// `None` once `shutdown()` has fired (or if the UDP socket never bound
-    /// — see `spawn_udp_responder`). Guarded by a sync mutex since
+    /// `None` once `shutdown()` has fired. Set even if the UDP socket never
+    /// binds (`udp_responder_loop` then just exits, and `shutdown()`'s send
+    /// is a harmless no-op). Guarded by a sync mutex since
     /// `shutdown()` is `&self` and called from both an explicit live-toggle
     /// path and `Drop`.
     udp_cancel: Mutex<Option<oneshot::Sender<()>>>,
@@ -2327,7 +2328,7 @@ mod handle_event_tests {
 
     /// A `LanDiscovery` whose `service_fullname` is derived the same way
     /// production's `start()` derives it (from a real `ServiceInfo` for
-    /// `self_instance_id`), so the self-skip comparison in `handle_event`
+    /// `self_host_seed`), so the self-skip comparison in `handle_event`
     /// is exercised exactly as it runs in production — not asserted
     /// against a hand-typed guess at mdns-sd's fullname format.
     /// `self_port` is now load-bearing: it is BOTH the port baked into our

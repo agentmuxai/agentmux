@@ -707,7 +707,7 @@ wrap_task! {
                 );
                 // Cleanup-on-failure (codex P1 on #811). The outer
                 // HWND was already created + shown via
-                // `SW_SHOWNOACTIVATE` inside `create_owned_popup`; if
+                // `SW_SHOWNOACTIVATE` inside `create_popup`; if
                 // we return here without `DestroyWindow` it sits on
                 // screen as a phantom empty tool window. Also dequeue
                 // the pending-creation entry that

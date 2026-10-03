@@ -50,7 +50,7 @@ use super::store::Store;
 use agentmux_common::time::now_secs;
 
 /// 32 bytes of CSPRNG randomness, hex-encoded (64 chars). Same source as
-/// `agent_jekt_keys::random_key_bytes` — `uuid`'s v4 generation is already
+/// `agent_lan_keys::random_seed_bytes` — `uuid`'s v4 generation is already
 /// CSPRNG-backed and already a dependency; hex rather than base64 so the
 /// value is safe in any environment-variable or shell context without
 /// quoting.
