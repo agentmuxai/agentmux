@@ -370,16 +370,15 @@ fn cmd_env_overrides(
     }
 
     // Block metadata (per-block overrides).
-    if let Some(obj) = block_meta.get(META_KEY_CMD_ENV).and_then(|m| m.as_object()) {
-        for (k, v) in obj {
-            if let Some(val) = v.as_str() {
-                if k == "AGENTMUX_AGENT_ID" {
-                    block_sets_agent_id = true;
-                }
-                let expanded = crate::backend::base::expand_home_dir_safe(val);
-                vars.push((k.clone(), expanded.to_string_lossy().into_owned()));
-            }
+    // Sorted, matching the key order serde_json's map gave before.
+    let mut block_env: Vec<(String, String)> = super::super::cmd_env_of(block_meta).into_iter().collect();
+    block_env.sort();
+    for (k, val) in block_env {
+        if k == "AGENTMUX_AGENT_ID" {
+            block_sets_agent_id = true;
         }
+        let expanded = crate::backend::base::expand_home_dir_safe(&val);
+        vars.push((k, expanded.to_string_lossy().into_owned()));
     }
 
     CmdEnvOverrides { vars, block_sets_agent_id }
@@ -787,10 +786,8 @@ impl Controller for ShellController {
             //     user installed via /tools. APPENDED so the user's own system
             //     PATH still wins for those.
             {
-                let sep = if cfg!(windows) { ";" } else { ":" };
                 let current_path = std::env::var("PATH").unwrap_or_default();
-                let mut prepend: Vec<String> = Vec::new();
-                let mut append: Vec<String> = Vec::new();
+                let mut bundled: Option<std::path::PathBuf> = None;
 
                 // Bundled store — prepended (app-owned, version-locked).
                 if let Some(bundled_bin) = crate::backend::tool_store::bundled_tools_dir() {
@@ -821,7 +818,7 @@ impl Controller for ShellController {
                                 "agent bashwrap: bundled store present but agentmux-bashwrap MISSING — agent will resolve via system PATH (risk of a stale copy; see RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md)"
                             );
                         }
-                        prepend.push(bundled_bin.to_string_lossy().into_owned());
+                        bundled = Some(bundled_bin.clone());
                     } else {
                         tracing::warn!(
                             target: "agent-tools",
@@ -830,20 +827,15 @@ impl Controller for ShellController {
                     }
                 }
 
-                // User-managed store — appended (system PATH still wins).
-                if let Some(user_bin) = crate::backend::tool_store::user_tools_dir() {
-                    if user_bin.exists() {
-                        append.push(user_bin.to_string_lossy().into_owned());
-                    }
-                }
-
-                if !prepend.is_empty() || !append.is_empty() {
-                    let mut parts = prepend;
-                    if !current_path.is_empty() {
-                        parts.push(current_path);
-                    }
-                    parts.extend(append);
-                    c.env("PATH", parts.join(sep));
+                // User-managed store — after the system PATH, which still wins.
+                let user = crate::backend::tool_store::user_tools_dir().filter(|d| d.exists());
+                if let Some(path) = crate::backend::tool_store::compose_tools_path(
+                    &current_path,
+                    bundled.as_deref(),
+                    user.as_deref(),
+                    crate::backend::tool_store::UserToolsPrecedence::AfterExisting,
+                ) {
+                    c.env("PATH", path);
                 }
             }
 

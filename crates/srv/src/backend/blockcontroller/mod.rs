@@ -76,6 +76,25 @@ pub const META_KEY_CMD_CWD: &str = "cmd:cwd";
 pub const META_KEY_CMD_SHELL: &str = "cmd:shell";
 pub const META_KEY_CMD_ARGS: &str = "cmd:args";
 pub const META_KEY_CMD_ENV: &str = "cmd:env";
+
+/// A meta value that is an object of strings, or a JSON string encoding one,
+/// as a string map. Non-string values are skipped; any other shape is empty.
+pub fn meta_string_map(meta: &MetaMapType, key: &str) -> HashMap<String, String> {
+    match meta.get(key) {
+        Some(serde_json::Value::Object(values)) => values
+            .iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+            .collect(),
+        Some(serde_json::Value::String(s)) => serde_json::from_str(s).unwrap_or_default(),
+        _ => HashMap::new(),
+    }
+}
+
+/// A block's `cmd:env` as a string map. The frontend writes an object; the
+/// JSON-string form is accepted too, so every spawn path reads the same env.
+pub fn cmd_env_of(meta: &MetaMapType) -> HashMap<String, String> {
+    meta_string_map(meta, META_KEY_CMD_ENV)
+}
 #[allow(dead_code)]
 pub const META_KEY_CMD_JWT: &str = "cmd:jwt";
 pub const META_KEY_CMD_RUN_ON_START: &str = "cmd:runonstart";
@@ -1035,6 +1054,27 @@ pub fn publish_controller_status(
         data: serde_json::to_value(status).ok(),
     };
     broker.publish(event);
+}
+
+#[cfg(test)]
+mod cmd_env_tests {
+    use super::{cmd_env_of, MetaMapType, META_KEY_CMD_ENV};
+
+    #[test]
+    fn cmd_env_reads_the_object_form_and_the_json_string_form() {
+        let mut meta = MetaMapType::new();
+        meta.insert(META_KEY_CMD_ENV.to_string(), serde_json::json!({"K": "v", "N": 1}));
+        let env = cmd_env_of(&meta);
+        assert_eq!(env.get("K").map(String::as_str), Some("v"));
+        assert!(!env.contains_key("N"), "non-string values are skipped");
+
+        meta.insert(META_KEY_CMD_ENV.to_string(), serde_json::json!("{\"K\":\"w\"}"));
+        assert_eq!(cmd_env_of(&meta).get("K").map(String::as_str), Some("w"));
+
+        meta.insert(META_KEY_CMD_ENV.to_string(), serde_json::json!(["not", "a", "map"]));
+        assert!(cmd_env_of(&meta).is_empty());
+        assert!(cmd_env_of(&MetaMapType::new()).is_empty());
+    }
 }
 
 #[cfg(test)]

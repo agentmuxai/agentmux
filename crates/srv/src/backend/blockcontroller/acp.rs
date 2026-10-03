@@ -36,6 +36,7 @@ use super::{
     STATUS_RUNNING,
 };
 use super::core;
+use super::meta_string_map;
 use super::health::TurnActivityTracker;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -663,17 +664,6 @@ fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<Str
     }
 }
 
-/// A meta value that is an object of strings, or a JSON string encoding one.
-fn meta_string_map(meta: &super::super::obj::MetaMapType, key: &str) -> HashMap<String, String> {
-    match meta.get(key) {
-        Some(serde_json::Value::Object(values)) => values
-            .iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-            .collect(),
-        Some(serde_json::Value::String(s)) => serde_json::from_str(s).unwrap_or_default(),
-        _ => HashMap::new(),
-    }
-}
 
 impl AcpController {
     /// The env this block's ACP process is spawned with: `cmd:env` (either

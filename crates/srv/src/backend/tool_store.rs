@@ -108,6 +108,57 @@ pub fn user_tools_dir() -> Option<PathBuf> {
     Some(home.join(".agentmux").join("tools").join("bin"))
 }
 
+/// Where the user tools dir goes relative to the existing PATH. The bundled
+/// dir always goes first: it is app-owned and version-locked, and a stale
+/// system copy shadowing it is the exit-130 trap
+/// (RETRO_BASHWRAP_STALE_BUNDLE_2026_06_13.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UserToolsPrecedence {
+    /// Before the existing PATH. Agent CLIs: in `task dev` there is no
+    /// bundled dir and the wrapper lives in the user dir, so a system copy
+    /// must not win.
+    BeforeExisting,
+    /// After the existing PATH. Interactive shells: the user's own system
+    /// PATH wins for tools they installed via /tools.
+    AfterExisting,
+}
+
+/// `existing` with the given tool dirs added (bundled first, user per
+/// `user_precedence`). `None` when neither dir is given, so the caller can
+/// leave PATH untouched.
+pub fn compose_tools_path(
+    existing: &str,
+    bundled: Option<&std::path::Path>,
+    user: Option<&std::path::Path>,
+    user_precedence: UserToolsPrecedence,
+) -> Option<String> {
+    if bundled.is_none() && user.is_none() {
+        return None;
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(d) = bundled {
+        parts.push(d.to_string_lossy().into_owned());
+    }
+    if let (Some(d), UserToolsPrecedence::BeforeExisting) = (user, user_precedence) {
+        parts.push(d.to_string_lossy().into_owned());
+    }
+    if !existing.is_empty() {
+        parts.push(existing.to_string());
+    }
+    if let (Some(d), UserToolsPrecedence::AfterExisting) = (user, user_precedence) {
+        parts.push(d.to_string_lossy().into_owned());
+    }
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    Some(parts.join(sep))
+}
+
+/// [`compose_tools_path`] over the tool dirs that exist on this machine.
+pub fn tools_path(existing: &str, user_precedence: UserToolsPrecedence) -> Option<String> {
+    let bundled = bundled_tools_dir().filter(|d| d.exists());
+    let user = user_tools_dir().filter(|d| d.exists());
+    compose_tools_path(existing, bundled.as_deref(), user.as_deref(), user_precedence)
+}
+
 /// Returns `~/.agentmux/tools/downloads/`.
 fn downloads_dir() -> Option<PathBuf> {
     let home = dirs::home_dir()?;
@@ -524,5 +575,48 @@ mod tool_status_wire_tests {
         ] {
             assert_eq!(serde_json::to_value(variant).unwrap(), json!(tag));
         }
+    }
+}
+
+#[cfg(test)]
+mod tools_path_tests {
+    use super::{compose_tools_path, UserToolsPrecedence};
+    use std::path::Path;
+
+    const SEP: &str = if cfg!(windows) { ";" } else { ":" };
+
+    fn join(parts: &[&str]) -> String {
+        parts.join(SEP)
+    }
+
+    #[test]
+    fn bundled_always_leads_and_user_follows_the_requested_precedence() {
+        let (b, u) = (Path::new("B"), Path::new("U"));
+        assert_eq!(
+            compose_tools_path("SYS", Some(b), Some(u), UserToolsPrecedence::BeforeExisting),
+            Some(join(&["B", "U", "SYS"]))
+        );
+        assert_eq!(
+            compose_tools_path("SYS", Some(b), Some(u), UserToolsPrecedence::AfterExisting),
+            Some(join(&["B", "SYS", "U"]))
+        );
+    }
+
+    #[test]
+    fn no_tool_dirs_leaves_path_untouched() {
+        assert_eq!(compose_tools_path("SYS", None, None, UserToolsPrecedence::BeforeExisting), None);
+    }
+
+    #[test]
+    fn an_empty_inherited_path_adds_no_empty_entry() {
+        // An empty PATH entry means "the current directory" on Unix.
+        assert_eq!(
+            compose_tools_path("", None, Some(Path::new("U")), UserToolsPrecedence::BeforeExisting),
+            Some("U".to_string())
+        );
+        assert_eq!(
+            compose_tools_path("", Some(Path::new("B")), None, UserToolsPrecedence::AfterExisting),
+            Some("B".to_string())
+        );
     }
 }

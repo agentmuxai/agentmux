@@ -85,14 +85,7 @@ pub(super) async fn handle_shell_create(
     // created here run from agentmux-srv's env plus cmd:env + req.env.
     let mut effective_env: std::collections::HashMap<String, String> = agent_block
         .as_ref()
-        .and_then(|block| match block.meta.get("cmd:env") {
-            Some(serde_json::Value::Object(obj)) => Some(
-                obj.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect(),
-            ),
-            _ => None,
-        })
+        .map(|block| crate::backend::blockcontroller::cmd_env_of(&block.meta))
         .unwrap_or_default();
     let caller_keys: Vec<String> = req.env.iter().flat_map(|e| e.keys().cloned()).collect();
     if let Some(req_env) = req.env {

@@ -11,7 +11,7 @@
 
 #[cfg(windows)]
 use agentmux_common::win32::NoWindow;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -132,15 +132,7 @@ impl AppServerController {
             return Err("App Server command must include app-server arguments".to_string());
         }
         let working_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
-        let mut env_vars = match block_meta.get("cmd:env") {
-            Some(serde_json::Value::Object(values)) => values
-                .iter()
-                .filter_map(|(key, value)| {
-                    value.as_str().map(|value| (key.clone(), value.to_string()))
-                })
-                .collect::<HashMap<_, _>>(),
-            _ => HashMap::new(),
-        };
+        let mut env_vars = super::cmd_env_of(block_meta);
         // Identity M4b-2 (spec §6.5.8): carry the block's row UID + token.
         // Buys no attribution today — no provider maps to App Server, and
         // codex is not given agentmux-mcp — but keeps the counters true.
