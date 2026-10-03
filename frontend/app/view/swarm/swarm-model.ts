@@ -14,6 +14,7 @@ import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
 import type { SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
+import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -146,10 +147,25 @@ export interface SubagentEvent {
 
 type SubagentEventType =
     | { type: "text"; content: string }
-    | { type: "tool_use"; name: string; input_summary: string }
+    /** `input`: the call's input, each field cut by the backend
+     *  (`subagent_watcher/parse.rs`'s `bounded_tool_input`). */
+    | { type: "tool_use"; name: string; input: unknown }
     | { type: "tool_result"; is_error: boolean; preview: string }
     | { type: "progress"; output: string }
     | { type: "result"; content: string };
+
+/**
+ * A subagent tool call's detail line: the agent pane's own header detail
+ * (`toolDetail`), so both show the same thing for the same call. A tool with
+ * no detail shows its input as compact JSON instead, since this feed has
+ * nothing else to show for it.
+ */
+export function subagentToolDetail(name: string, input: unknown): string {
+    if (input == null) return "";
+    const params = typeof input === "object" && !Array.isArray(input) ? (input as Record<string, any>) : undefined;
+    const detail = toolDetail(name, params);
+    return typeof detail === "string" && detail ? detail : JSON.stringify(input);
+}
 
 /**
  * One row for a Workflow-kind `AgentDispatch` — SPEC §7: never one row per
