@@ -145,6 +145,14 @@ interface PeekOverlayProps {
 const HOVER_BRIDGE_MS = 150;
 /** The longest an approaching pointer can keep the grace period going, in total. */
 const HOVER_BRIDGE_MAX_MS = 1000;
+/**
+ * The narrowest a peek panel ("end" mode) may be, in the panel's own pixels (it
+ * scales with pane zoom). A very narrow, very tall panel (a long command made of
+ * short lines) looked broken. Placement treats the panel as at least this wide
+ * (so a panel wider than its row goes left-pinned, over the pane border), and
+ * caps it to the room actually available.
+ */
+const PEEK_MIN_WIDTH_PX = 600;
 
 /**
  * This overlay's owning pane's zoom factor, read off the anchor row.
@@ -168,7 +176,7 @@ function readPaneZoom(row: HTMLElement | undefined): number {
 }
 
 /** Style lengths that are in real viewport px and must be de-scaled. */
-const ZOOM_SCALED_LENGTHS = ["left", "top", "width", "max-width", "max-height"] as const;
+const ZOOM_SCALED_LENGTHS = ["left", "top", "width", "max-width", "min-width", "max-height"] as const;
 
 /**
  * Re-express a style computed in REAL viewport pixels so it renders
@@ -383,8 +391,20 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         // pointer is never inside the panel — is swept by its tests.
         const viewport = { width: window.innerWidth, height: window.innerHeight };
         const rowRect = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-        const hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth: measureWidth() });
-        const placeAt = { row: rowRect, container, viewport, naturalHeight: measureHeightAt(hz.maxWidth, paneZoom) };
+        // PEEK_MIN_WIDTH_PX is in the panel's own pixels, so it scales with the
+        // pane's zoom like the text inside it; placement works in viewport px.
+        const hz = computePeekHorizontal({
+            row: rowRect,
+            viewport,
+            naturalWidth: measureWidth(),
+            minWidth: PEEK_MIN_WIDTH_PX * paneZoom,
+        });
+        const placeAt = {
+            row: rowRect,
+            container,
+            viewport,
+            naturalHeight: measureHeightAt(hz.maxWidth, hz.minWidth, paneZoom),
+        };
         let vt: ReturnType<typeof computePeekVertical>;
         if (pinnedOffsetY != null) {
             vt = computePeekVertical({ ...placeAt, mouseY: rect.top + pinnedOffsetY, flushToRow: true });
@@ -411,6 +431,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                     top: `${vt.top}px`,
                     ...(hz.alignRight ? { transform: "translateX(-100%)" } : {}),
                     "max-width": `${hz.maxWidth}px`,
+                    "min-width": `${hz.minWidth}px`,
                     "max-height": `${vt.maxHeight}px`,
                 },
                 paneZoom,
@@ -427,22 +448,27 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // does not depend on the layout it is currently in. Then the height at the
     // width the horizontal placement chose. Measuring at fixed inputs means the
     // placement never depends on the placement chosen last time.
-    const withCapsLifted = <T,>(maxWidth: string, read: (el: HTMLElement) => T, fallback: T): T => {
+    const withCapsLifted = <T,>(maxWidth: string, minWidth: string, read: (el: HTMLElement) => T, fallback: T): T => {
         const el = floatingEl;
         if (!el) return fallback;
         const prevW = el.style.maxWidth;
+        const prevMin = el.style.minWidth;
         const prevH = el.style.maxHeight;
         el.style.maxWidth = maxWidth;
+        el.style.minWidth = minWidth;
         el.style.maxHeight = "none";
         const out = read(el);
         el.style.maxWidth = prevW;
+        el.style.minWidth = prevMin;
         el.style.maxHeight = prevH;
         return out;
     };
+    // The content's own width: no cap and no minimum.
     const measureWidth = (): number =>
-        withCapsLifted("none", (el) => el.getBoundingClientRect().width, 0);
-    const measureHeightAt = (maxWidthPx: number, paneZoom: number): number =>
-        withCapsLifted(`${maxWidthPx / paneZoom}px`, (el) => el.getBoundingClientRect().height, 0);
+        withCapsLifted("none", "0px", (el) => el.getBoundingClientRect().width, 0);
+    // The height at the width the panel will actually have (between min and max).
+    const measureHeightAt = (maxWidthPx: number, minWidthPx: number, paneZoom: number): number =>
+        withCapsLifted(`${maxWidthPx / paneZoom}px`, `${minWidthPx / paneZoom}px`, (el) => el.getBoundingClientRect().height, 0);
 
     // Track the mouse continuously while the row exists, independent of
     // `show` (the 50ms enter-delay in useNodePeek means `show` flips true

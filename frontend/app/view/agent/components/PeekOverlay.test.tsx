@@ -152,7 +152,8 @@ describe("PeekOverlay", () => {
             const row = document.createElement("div");
             container.appendChild(row);
             rectOf(container, { top: 100, bottom: 400 });
-            rectOf(row, { top: 200, bottom: 230, left: 100, right: 500, width: 400 });
+            // Wider than the 600px minimum, so a panel can still fit inside the pane.
+            rectOf(row, { top: 200, bottom: 230, left: 100, right: 800, width: 700 });
             Object.defineProperty(window, "innerWidth", { value: 1400, configurable: true });
             Object.defineProperty(window, "innerHeight", { value: 1000, configurable: true });
             const [show, setShow] = createSignal(true);
@@ -250,6 +251,17 @@ describe("PeekOverlay", () => {
                 expect(panel()!.style.left).toBe("100px");
                 expect(panel()!.style.transform).toBe("");
                 expect(parseFloat(panel()!.style.maxWidth)).toBe(1400 - 8 - 100);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a thin, tall panel is at least 600px wide", () => {
+            vi.useFakeTimers();
+            try {
+                setup({ panelHeight: 5000, panelWidth: 120 }); // a long command of short lines
+                expect(parseFloat(panel()!.style.minWidth)).toBe(600);
+                expect(panel()!.style.left).toBe("800px"); // still right-aligned to the 700px row
             } finally {
                 vi.useRealTimers();
             }
@@ -700,8 +712,10 @@ describe("PeekOverlay", () => {
             paneRoot.appendChild(container);
             const row = document.createElement("div");
             container.appendChild(row);
-            setRect(container, { top: 0, bottom: 1000, right: 400 });
-            setRect(row, { top: 100, bottom: 300, left: 100, right: 400, width: 300 });
+            // Wide enough (1300px) that the panel stays right-aligned even with its
+            // 600px minimum at zoom 2 (1200 viewport px), so these test the zoom math.
+            setRect(container, { top: 0, bottom: 1000, right: 1400 });
+            setRect(row, { top: 100, bottom: 300, left: 100, right: 1400, width: 1300 });
             return row;
         }
 
@@ -734,10 +748,12 @@ describe("PeekOverlay", () => {
             vi.useFakeTimers();
             try {
                 const overlay = renderPeek(makeZoomedRow("2"));
-                // row.right is 400 real px; at zoom 2 that must be written as 200.
-                expect(parseFloat(overlay.style.left)).toBeCloseTo(200, 5);
-                // max-width tracks the row's 300px width → 150 at zoom 2.
-                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(150, 5);
+                // row.right is 1400 real px; at zoom 2 that must be written as 700.
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(700, 5);
+                // max-width tracks the row's 1300px width → 650 at zoom 2.
+                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(650, 5);
+                // The 600px minimum is in the panel's own pixels: 600 at any zoom.
+                expect(parseFloat(overlay.style.minWidth)).toBeCloseTo(600, 5);
             } finally {
                 vi.useRealTimers();
             }
@@ -750,7 +766,7 @@ describe("PeekOverlay", () => {
                 expect(overlay.style.zoom).toBe("2");
                 expect(parseFloat(overlay.style.left)).toBeCloseTo(50, 5);   // 100 / 2
                 expect(parseFloat(overlay.style.top)).toBeCloseTo(50, 5);    // 100 / 2
-                expect(parseFloat(overlay.style.width)).toBeCloseTo(150, 5); // 300 / 2
+                expect(parseFloat(overlay.style.width)).toBeCloseTo(650, 5); // 1300 / 2
             } finally {
                 vi.useRealTimers();
             }
@@ -763,8 +779,9 @@ describe("PeekOverlay", () => {
             try {
                 const overlay = renderPeek(makeZoomedRow("1"));
                 expect(overlay.style.zoom).toBe("");
-                expect(parseFloat(overlay.style.left)).toBeCloseTo(400, 5);
-                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(300, 5);
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(1400, 5);
+                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(1300, 5);
+                expect(parseFloat(overlay.style.minWidth)).toBeCloseTo(600, 5);
             } finally {
                 vi.useRealTimers();
             }
@@ -777,7 +794,7 @@ describe("PeekOverlay", () => {
             try {
                 const overlay = renderPeek(makeZoomedRow(null));
                 expect(overlay.style.zoom).toBe("");
-                expect(parseFloat(overlay.style.left)).toBeCloseTo(400, 5);
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(1400, 5);
             } finally {
                 vi.useRealTimers();
             }
