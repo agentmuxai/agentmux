@@ -118,9 +118,14 @@ fn handle(home: &Path, req: Request) -> Reply {
         }
         Request::Rename { from, to } => {
             let (from, to) = (resolve(home, &from), resolve(home, &to));
+            if let Err(e) = fs::symlink_metadata(&from) {
+                return err(e);
+            }
             // Never over something already there: a rename that would
-            // replace a file says so instead.
-            if fs::symlink_metadata(&to).is_ok() {
+            // replace a file says so instead. The same file under another
+            // spelling (a case-only rename on a case-insensitive disk) is
+            // not something else.
+            if fs::symlink_metadata(&to).is_ok() && !same_file(&from, &to) {
                 return Reply::Err {
                     kind: ErrKind::AlreadyExists,
                     message: format!("{} already exists", to.display()),
@@ -130,8 +135,25 @@ fn handle(home: &Path, req: Request) -> Reply {
         }
         Request::Delete { path, recursive } => {
             let p = resolve(home, &path);
-            if p.parent().is_none() || p == home {
-                return invalid("refusing to delete the root or the home directory");
+            // `..` is never needed to name a thing to delete, and it is how a
+            // path that looks like it is under home reaches home or above.
+            if p.components().any(|c| c == std::path::Component::ParentDir) {
+                return invalid("refusing to delete a path with '..' in it");
+            }
+            // What it really is, its parents' links resolved (the thing
+            // itself is not followed: a link is removed, never its target).
+            let real = match (p.parent(), p.file_name()) {
+                (Some(parent), Some(name)) => match fs::canonicalize(parent) {
+                    Ok(dir) => dir.join(name),
+                    Err(e) => return err(e),
+                },
+                _ => return invalid("refusing to delete the root"),
+            };
+            let real_home = fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+            if real.parent().is_none() || real == real_home || real_home.starts_with(&real) {
+                return invalid(
+                    "refusing to delete the root, the home directory or a folder holding it",
+                );
             }
             match fs::symlink_metadata(&p) {
                 // A link is removed, never followed.
@@ -176,7 +198,8 @@ fn entry_of(p: &Path) -> io::Result<Entry> {
     #[cfg(unix)]
     let mode = {
         use std::os::unix::fs::PermissionsExt;
-        meta.permissions().mode()
+        // The permission bits only, not the file type in st_mode.
+        meta.permissions().mode() & 0o7777
     };
     #[cfg(not(unix))]
     let mode = 0;
@@ -191,6 +214,26 @@ fn entry_of(p: &Path) -> io::Result<Entry> {
         mode,
         symlink,
     })
+}
+
+/// Whether `a` and `b` are one file (both exist): the same inode on Unix,
+/// the same final path on Windows, which gives each file one spelling.
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (fs::symlink_metadata(a), fs::symlink_metadata(b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        match (fs::canonicalize(a), fs::canonicalize(b)) {
+            (Ok(x), Ok(y)) => x == y,
+            _ => false,
+        }
+    }
 }
 
 fn list(dir: &Path, offset: u32, limit: u32) -> io::Result<Reply> {
@@ -477,11 +520,47 @@ mod tests {
     }
 
     #[test]
+    fn a_case_only_rename_is_not_refused_as_a_clash() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        fs::write(h.join("a.txt"), b"a").unwrap();
+        let case_insensitive = h.join("A.TXT").exists();
+        let r = exchange(
+            h,
+            &[Request::Rename {
+                from: "a.txt".into(),
+                to: "A.txt".into(),
+            }],
+        );
+        assert_eq!(
+            r[0],
+            Reply::Done,
+            "case-insensitive disk: {case_insensitive}"
+        );
+        let names: Vec<String> = fs::read_dir(h)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["A.txt"]);
+    }
+
+    #[test]
+    fn modes_are_permission_bits_only() {
+        let home = tempfile::tempdir().unwrap();
+        fs::write(home.path().join("f"), b"").unwrap();
+        let e = entry_of(&home.path().join("f")).unwrap();
+        assert_eq!(e.mode & !0o7777, 0, "{:o}", e.mode);
+    }
+
+    #[test]
     fn it_refuses_what_would_destroy_more_than_asked() {
         let home = tempfile::tempdir().unwrap();
         let h = home.path();
         fs::write(h.join("a"), b"a").unwrap();
         fs::write(h.join("b"), b"b").unwrap();
+        fs::create_dir(h.join("x")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(h, h.join("to-home")).unwrap();
         let replies = exchange(
             h,
             &[
@@ -502,6 +581,23 @@ mod tests {
                     offset: 0,
                     len: 10,
                 },
+                // Home, or above it, spelled another way.
+                Request::Delete {
+                    path: "~/x/..".into(),
+                    recursive: true,
+                },
+                Request::Delete {
+                    path: "~/..".into(),
+                    recursive: true,
+                },
+                Request::Delete {
+                    path: h.join("x/..").to_string_lossy().into_owned(),
+                    recursive: true,
+                },
+                Request::Rename {
+                    from: "missing".into(),
+                    to: "b".into(),
+                },
             ],
         );
         assert!(matches!(
@@ -511,22 +607,47 @@ mod tests {
                 ..
             }
         ));
-        assert!(matches!(
-            replies[1],
-            Reply::Err {
-                kind: ErrKind::Invalid,
-                ..
-            }
-        ));
-        assert!(matches!(
-            replies[2],
-            Reply::Err {
-                kind: ErrKind::Invalid,
-                ..
-            }
-        ));
+        for r in [
+            &replies[1],
+            &replies[2],
+            &replies[4],
+            &replies[5],
+            &replies[6],
+        ] {
+            assert!(
+                matches!(
+                    r,
+                    Reply::Err {
+                        kind: ErrKind::Invalid,
+                        ..
+                    }
+                ),
+                "{r:?}"
+            );
+        }
         assert!(matches!(replies[3], Reply::Err { .. }));
+        assert!(matches!(
+            replies[7],
+            Reply::Err {
+                kind: ErrKind::NotFound,
+                ..
+            }
+        ));
         assert_eq!(fs::read(h.join("b")).unwrap(), b"b");
-        assert!(h.exists());
+        assert!(h.join("x").exists());
+
+        // Through a link to home: the link goes, home stays.
+        #[cfg(unix)]
+        {
+            let r = exchange(
+                h,
+                &[Request::Delete {
+                    path: "~/to-home".into(),
+                    recursive: true,
+                }],
+            );
+            assert_eq!(r[0], Reply::Done);
+            assert!(h.join("a").exists() && !h.join("to-home").exists());
+        }
     }
 }

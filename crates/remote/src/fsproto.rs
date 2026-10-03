@@ -82,7 +82,7 @@ pub struct Entry {
     pub size: u64,
     /// Last modified, in milliseconds since the Unix epoch (0 if unknown).
     pub mtime_ms: i64,
-    /// Unix permission bits (0 where there are none).
+    /// Unix permission bits, `st_mode & 0o7777` (0 where there are none).
     pub mode: u32,
     pub symlink: bool,
 }
@@ -109,13 +109,12 @@ impl ErrKind {
             K::PermissionDenied => ErrKind::PermissionDenied,
             K::AlreadyExists => ErrKind::AlreadyExists,
             K::InvalidInput | K::InvalidData => ErrKind::Invalid,
-            _ => match e.raw_os_error() {
-                // ENOTDIR, EISDIR, ENOTEMPTY on Linux and macOS.
-                Some(20) => ErrKind::NotADirectory,
-                Some(21) => ErrKind::IsADirectory,
-                Some(39) | Some(66) => ErrKind::DirectoryNotEmpty,
-                _ => ErrKind::Other,
-            },
+            // std's own mapping of each platform's codes, never raw numbers:
+            // the same number means different things on different hosts.
+            K::NotADirectory => ErrKind::NotADirectory,
+            K::IsADirectory => ErrKind::IsADirectory,
+            K::DirectoryNotEmpty => ErrKind::DirectoryNotEmpty,
+            _ => ErrKind::Other,
         }
     }
 
