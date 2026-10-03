@@ -309,6 +309,19 @@ impl End {
         }
     }
 
+    /// The last part of `path` as this side spells paths: on a host `/` only
+    /// (a `\` there is part of a name); here, either separator.
+    fn name(&self, path: &str) -> String {
+        match self {
+            End::Local => file_name(path),
+            End::Host { .. } => path
+                .rsplit('/')
+                .find(|s| !s.is_empty())
+                .unwrap_or(path)
+                .to_string(),
+        }
+    }
+
     /// The display form of `path` on this side, naming the host.
     fn show(&self, path: &str) -> String {
         match self {
@@ -392,31 +405,40 @@ struct Transfer<'r> {
     kind: FsOpKind,
     src: End,
     dest: End,
+    /// Each measured subtree's (items, bytes), by source path.
+    measured: std::cell::RefCell<std::collections::HashMap<String, (u64, u64)>>,
 }
 
 impl Transfer<'_> {
     /// Items and file bytes under `path` on the source.
-    fn measure(&self, path: &str) -> (u64, u64) {
-        let mut stack = vec![path.to_string()];
-        let (mut items, mut bytes) = (0u64, 0u64);
-        while let Some(p) = stack.pop() {
-            let Ok(Some(info)) = self.src.stat(self.rt, &p) else {
-                continue;
-            };
-            items += 1;
-            if info.is_dir {
-                for name in self.src.list(self.rt, &p).unwrap_or_default() {
-                    stack.push(self.src.join(&p, &name));
-                }
-            } else if !info.is_link {
-                bytes += info.size;
-            }
+    /// Items and file bytes under `path` on the source, each subtree's
+    /// totals kept for [`Self::pass_over`]. Stops early when the op is
+    /// canceled: every entry is a round trip to a host.
+    fn measure(&self, job: &HostJob<'_, '_>, path: &str) -> (u64, u64) {
+        if job.is_canceled() {
+            return (0, 0);
         }
-        (items, bytes)
+        let Ok(Some(info)) = self.src.stat(self.rt, path) else {
+            return (0, 0);
+        };
+        let mut total = (1u64, 0u64);
+        if info.is_dir {
+            for name in self.src.list(self.rt, path).unwrap_or_default() {
+                let (i, b) = self.measure(job, &self.src.join(path, &name));
+                total.0 += i;
+                total.1 += b;
+            }
+        } else if !info.is_link {
+            total.1 = info.size;
+        }
+        self.measured.borrow_mut().insert(path.to_string(), total);
+        total
     }
 
+    /// Count `path`'s subtree as handled without copying it (skipped,
+    /// failed, or moved by a rename), from what [`Self::measure`] found.
     fn pass_over(&self, job: &mut HostJob<'_, '_>, path: &str) {
-        let (items, bytes) = self.measure(path);
+        let (items, bytes) = self.measured.borrow().get(path).copied().unwrap_or((1, 0));
         job.advance(items, bytes);
     }
 
@@ -429,7 +451,10 @@ impl Transfer<'_> {
         let info = match self.src.stat(self.rt, src) {
             Ok(Some(i)) => i,
             Ok(None) => {
-                job.fail(&shown, format!("“{}” isn't there anymore.", file_name(src)));
+                job.fail(
+                    &shown,
+                    format!("“{}” isn't there anymore.", self.src.name(src)),
+                );
                 return Outcome::NotDone;
             }
             Err(e) => {
@@ -445,12 +470,12 @@ impl Transfer<'_> {
             let why = if one_host {
                 format!(
                     "“{}” is a link: copying links on a host isn't available yet (moving one is).",
-                    file_name(src)
+                    self.src.name(src)
                 )
             } else {
                 format!(
                     "“{}” is a link: links aren't copied between two machines.",
-                    file_name(src)
+                    self.src.name(src)
                 )
             };
             job.fail(&shown, why);
@@ -462,7 +487,7 @@ impl Transfer<'_> {
                 &shown,
                 format!(
                     "“{}” isn't a regular file (a device, socket or pipe): not copied.",
-                    file_name(src)
+                    self.src.name(src)
                 ),
             );
             job.advance(1, 0);
@@ -502,7 +527,7 @@ impl Transfer<'_> {
                 }
                 Some(FsOpChoice::KeepBoth) => {
                     let dir = self.dest.parent(&dest);
-                    match keep_both_name(&self.dest, self.rt, &dir, &file_name(&dest)) {
+                    match keep_both_name(&self.dest, self.rt, &dir, &self.dest.name(&dest)) {
                         Ok(d) => dest = d,
                         Err(e) => {
                             job.fail(&shown, e);
@@ -517,7 +542,7 @@ impl Transfer<'_> {
                             &shown,
                             format!(
                                 "“{}” and what's there aren't both files: not replaced.",
-                                file_name(src)
+                                self.src.name(src)
                             ),
                         );
                         self.pass_over(job, src);
@@ -533,7 +558,7 @@ impl Transfer<'_> {
             // Only a move within one host gets here: in one step there.
             return match self.src.replace(self.rt, src, &dest) {
                 Ok(()) => {
-                    self.pass_over_after_rename(job, &dest);
+                    self.pass_over(job, src);
                     Outcome::Done
                 }
                 Err(e) => {
@@ -546,13 +571,16 @@ impl Transfer<'_> {
         if self.kind == FsOpKind::Move && !replace && one_host {
             match self.src.rename_no_replace(self.rt, src, &dest) {
                 Ok(()) => {
-                    self.pass_over_after_rename(job, &dest);
+                    self.pass_over(job, src);
                     return Outcome::Done;
                 }
                 Err(RenameError::Taken) => {
                     job.fail(
                         &shown,
-                        format!("Something named “{}” appeared there.", file_name(&dest)),
+                        format!(
+                            "Something named “{}” appeared there.",
+                            self.dest.name(&dest)
+                        ),
                     );
                     self.pass_over(job, src);
                     return Outcome::NotDone;
@@ -583,17 +611,6 @@ impl Transfer<'_> {
             return out;
         }
         self.file(job, src, &dest, &shown, info, replace)
-    }
-
-    /// After a rename within one host, count what moved as done.
-    fn pass_over_after_rename(&self, job: &mut HostJob<'_, '_>, moved_to: &str) {
-        let probe = Transfer {
-            rt: self.rt,
-            kind: self.kind,
-            src: self.dest.clone(),
-            dest: self.dest.clone(),
-        };
-        probe.pass_over(job, moved_to);
     }
 
     fn merge(&self, job: &mut HostJob<'_, '_>, src: &str, dest: &str) -> Outcome {
@@ -709,7 +726,7 @@ impl Transfer<'_> {
                     shown,
                     format!(
                         "Something named “{}” appeared there meanwhile; nothing was replaced.",
-                        file_name(dest)
+                        self.dest.name(dest)
                     ),
                 );
                 job.advance(1, 0);
@@ -799,7 +816,7 @@ fn plan_on_one_host(
     let landing: std::collections::HashSet<String> = items
         .iter()
         .filter(|i| !i.duplicate)
-        .map(|i| file_name(&i.src))
+        .map(|i| src.name(&i.src))
         .collect();
     for (item, key) in items.iter().zip(&keys) {
         let rest = if dest_dir == "/" {
@@ -813,7 +830,7 @@ fn plan_on_one_host(
             if landing.contains(first) {
                 return Err(format!(
                     "Can't {verb} there: “{first}” would land on the folder that holds “{}”.",
-                    file_name(&item.src)
+                    src.name(&item.src)
                 ));
             }
         }
@@ -897,9 +914,9 @@ pub async fn start(
     for s in &sources {
         match stat_now(&src, s).await? {
             Some(_) => {}
-            None => return Err(format!("“{}” isn't there anymore.", file_name(s))),
+            None => return Err(format!("“{}” isn't there anymore.", src.name(s))),
         }
-        if let Some(why) = dest.refusal(&dest.join(&dest_dir, &file_name(s))) {
+        if let Some(why) = dest.refusal(&dest.join(&dest_dir, &src.name(s))) {
             return Err(why);
         }
         if kind == FsOpKind::Move {
@@ -913,7 +930,7 @@ pub async fn start(
         let mut keyed = Vec::with_capacity(sources.len());
         for s in &sources {
             let parent = realpath_now(&src, &src.parent(s)).await;
-            keyed.push((s.clone(), src.join(&parent, &file_name(s))));
+            keyed.push((s.clone(), src.join(&parent, &src.name(s))));
         }
         (keyed, realpath_now(&dest, &dest_dir).await)
     } else {
@@ -936,16 +953,20 @@ pub async fn start(
                 kind,
                 src,
                 dest,
+                measured: Default::default(),
             };
             let (mut total_items, mut total_bytes) = (0, 0);
             for item in &items {
-                let (i, b) = t.measure(&item.src);
+                let (i, b) = t.measure(job, &item.src);
                 total_items += i;
                 total_bytes += b;
             }
+            if job.is_canceled() {
+                return Err(HostStop::Canceled);
+            }
             job.add_total(total_items, total_bytes);
             for item in &items {
-                let name = file_name(&item.src);
+                let name = t.src.name(&item.src);
                 let target = if item.duplicate {
                     // Copied into the folder it is in: always beside itself,
                     // as `name (n)`, never a question about itself.
@@ -1466,6 +1487,32 @@ mod tests {
         assert!(
             under("/a/b", "/a") && under("/a", "/") && !under("/ab", "/a") && !under("/a", "/a")
         );
+    }
+
+    /// On a host a backslash is part of a name: `a\b.txt` stays itself.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_backslash_is_part_of_a_hosts_file_name() {
+        let local = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        std::fs::write(remote.path().join("a\\b.txt"), b"x").unwrap();
+        let h = host(remote.path()).await;
+        let (emit, seen) = events();
+        let src = format!("{}/a\\b.txt", display_path(remote.path()));
+        start(
+            FsOpKind::Copy,
+            h,
+            vec![src],
+            End::Local,
+            display_path(local.path()),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        assert_eq!(end.state, FsOpEventState::Done, "{end:?}");
+        assert_eq!(std::fs::read(local.path().join("a\\b.txt")).unwrap(), b"x");
+        assert!(!local.path().join("b.txt").exists());
     }
 
     #[test]
