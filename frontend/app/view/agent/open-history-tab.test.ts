@@ -18,26 +18,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openOrFocusHistoryTab } from "./open-history-tab";
 
 const getNodeByBlockId = vi.fn();
-const pushBlockOntoStack = vi.fn();
+const openBlockInStack = vi.fn();
 const setActiveBlockInStack = vi.fn();
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ getNodeByBlockId }),
-    pushBlockOntoStack: (...args: unknown[]) => pushBlockOntoStack(...args),
+    openBlockInStack: (...args: unknown[]) => openBlockInStack(...args),
     setActiveBlockInStack: (...args: unknown[]) => setActiveBlockInStack(...args),
 }));
 
-const rpcCall = vi.fn();
-vi.mock("@/app/store/rpc-util", () => ({
-    TabRpcClient: { rpcCall: (...args: unknown[]) => rpcCall(...args) },
-}));
-
-vi.mock("@/app/store/services", () => ({
-    ObjectService: { DeleteBlock: vi.fn().mockResolvedValue(undefined) },
-}));
-
 const getObjectValue = vi.fn();
+const pushNotification = vi.fn();
 vi.mock("@/app/store/global", () => ({
-    pushNotification: vi.fn(),
+    pushNotification: (...args: unknown[]) => pushNotification(...args),
     MOS: {
         getObjectValue: (...args: unknown[]) => getObjectValue(...args),
         makeORef: (kind: string, id: string) => `${kind}:${id}`,
@@ -62,9 +54,13 @@ describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)"
         vi.restoreAllMocks();
     });
 
-    it("two concurrent calls for the same pane/agent issue only ONE pane.open RPC and push only ONE block", async () => {
+    it("two concurrent calls for the same pane/agent open only ONE tab", async () => {
         let resolveRpc: (v: unknown) => void;
-        rpcCall.mockReturnValue(new Promise((resolve) => { resolveRpc = resolve; }));
+        openBlockInStack.mockReturnValue(
+            new Promise((resolve) => {
+                resolveRpc = resolve;
+            })
+        );
 
         const first = openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
         const second = openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
@@ -72,20 +68,42 @@ describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)"
         // Both calls are in flight, neither has resolved yet — the RPC must
         // have been issued exactly once (the actual bug: it used to fire
         // twice here).
-        expect(rpcCall).toHaveBeenCalledTimes(1);
+        expect(openBlockInStack).toHaveBeenCalledTimes(1);
 
-        resolveRpc!({ block_id: "history-block-1" });
+        resolveRpc!("history-block-1");
         await Promise.all([first, second]);
 
-        expect(rpcCall).toHaveBeenCalledTimes(1);
-        expect(pushBlockOntoStack).toHaveBeenCalledTimes(1);
-        expect(pushBlockOntoStack).toHaveBeenCalledWith(expect.anything(), "node-1", "history-block-1");
+        expect(openBlockInStack).toHaveBeenCalledTimes(1);
+    });
+
+    it("opens the history block as a tab of the live block's own pane, with the history meta", async () => {
+        getObjectValue.mockReturnValue({ meta: { agentOutputFormat: "claude-stream-json", agentName: "Ann" } });
+        openBlockInStack.mockResolvedValue("history-block-1");
+        await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
+        expect(openBlockInStack).toHaveBeenCalledWith(expect.anything(), { blockId: "live-block" }, "agent", {
+            view: "agent",
+            agentId: "agent-1",
+            "agent:historyTabFor": "agent-1",
+            "agent:historySourceBlockId": "live-block",
+            agentOutputFormat: "claude-stream-json",
+            agentName: "Ann",
+        });
+    });
+
+    it("notifies instead of throwing when the tab cannot be opened", async () => {
+        openBlockInStack.mockRejectedValue(new Error("boom"));
+        await expect(
+            openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" })
+        ).resolves.toBeUndefined();
+        expect(pushNotification).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "error", title: "Agent History failed to open", message: "boom" })
+        );
     });
 
     it("a call AFTER the first fully resolves is independent — re-opening (already-open case) still works", async () => {
-        rpcCall.mockResolvedValue({ block_id: "history-block-1" });
+        openBlockInStack.mockResolvedValue("history-block-1");
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
-        expect(rpcCall).toHaveBeenCalledTimes(1);
+        expect(openBlockInStack).toHaveBeenCalledTimes(1);
 
         // Now the tab exists — a later, non-overlapping call must focus it,
         // not open a second one.
@@ -95,19 +113,19 @@ describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)"
         getNodeByBlockId.mockReturnValue({ id: "node-1", data: { blockStack: ["live-block", "history-block-1"] } });
 
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
-        expect(rpcCall).toHaveBeenCalledTimes(1); // still just the one from before
+        expect(openBlockInStack).toHaveBeenCalledTimes(1); // still just the one from before
         expect(setActiveBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "history-block-1");
     });
 
     it("concurrent calls for DIFFERENT agents/panes are independent — each gets its own RPC", async () => {
-        rpcCall.mockResolvedValue({ block_id: "history-block-x" });
+        openBlockInStack.mockResolvedValue("history-block-x");
 
         await Promise.all([
             openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" }),
             openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-2" }),
         ]);
 
-        expect(rpcCall).toHaveBeenCalledTimes(2);
+        expect(openBlockInStack).toHaveBeenCalledTimes(2);
     });
 });
 
@@ -128,7 +146,7 @@ describe("openOrFocusHistoryTab reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER
 
     it("holds the gate on the pane's own node id for the create-new-tab path, and schedules the lift with the SAME generation token", async () => {
         holdLeafRevealGate.mockReturnValue(7);
-        rpcCall.mockResolvedValue({ block_id: "history-block-1" });
+        openBlockInStack.mockResolvedValue("history-block-1");
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
         expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
         // Codex's review of PR #2761: the returned generation token must be
@@ -144,11 +162,11 @@ describe("openOrFocusHistoryTab reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
         expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
         expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
-        expect(rpcCall).not.toHaveBeenCalled();
+        expect(openBlockInStack).not.toHaveBeenCalled();
     });
 
     it("schedules the lift even when the pane.open RPC rejects", async () => {
-        rpcCall.mockRejectedValue(new Error("boom"));
+        openBlockInStack.mockRejectedValue(new Error("boom"));
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
         expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
     });

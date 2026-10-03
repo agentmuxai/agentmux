@@ -214,6 +214,22 @@ export function disposeNodeModel(model: LayoutModel, nodeid: string): void {
 }
 
 /**
+ * The block ids of a pane's tabs, in order: the leaf's `blockStack`, or just
+ * its active block when it has no stack yet. Reactive: reads
+ * `localTreeStateAtom()`, so a memo calling this recomputes on every tree
+ * update. Looks the leaf up in `nodeModel.layoutModel`, the tree of the tab
+ * this pane lives in, not the globally active one (see `NodeModel.layoutModel`
+ * in types.ts; SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md).
+ */
+export function paneStackIds(nodeModel: NodeModel): string[] {
+    const layoutModel = nodeModel.layoutModel;
+    layoutModel.localTreeStateAtom();
+    const node = findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
+    const stack = node?.data?.blockStack;
+    return stack?.length ? stack : [nodeModel.activeBlockId?.() ?? nodeModel.blockId];
+}
+
+/**
  * Get the layout node matching the specified blockId.
  * @param model The LayoutModel instance.
  * @param blockId The blockId that the returned node should contain.

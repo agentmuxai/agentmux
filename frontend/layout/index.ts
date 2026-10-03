@@ -17,6 +17,7 @@ import {
     addWidgetAsPaneTab,
     closeBlockInStack,
     moveBlockInStack,
+    openBlockInStack,
     pushBlockOntoStack,
     setActiveBlockInStack,
 } from "./lib/layoutStack";
@@ -47,6 +48,7 @@ export {
     moveBlockInStack,
     NavigateDirection,
     newLayoutNode,
+    openBlockInStack,
     pushBlockOntoStack,
     redockDraggedPane,
     setActiveBlockInStack,
