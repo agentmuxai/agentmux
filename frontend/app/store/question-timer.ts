@@ -8,7 +8,8 @@
  * its own, so the two can't disagree.
  *
  * Owner side (the agent pane holding the question): `startQuestionTimer`,
- * `noteQuestionActivity`, `setQuestionTimerDormant`, `endQuestionTimer`. Only
+ * `noteQuestionActivity`, `setQuestionTimerDormant`, `endQuestionTimer`, and
+ * `releaseQuestionTimer` on unmount. Only
  * the owner schedules the expiry, so a question can't be auto-answered twice.
  *
  * Reader side: `questionTimer` and `questionCountdown`. In the owner's renderer
@@ -146,8 +147,9 @@ function clearTimers(owner: Owner) {
 
 /** Stop owning the block's timer. The local entry goes too, so this renderer
  *  reads whatever a later owner (the pane moved to another window) publishes
- *  (Codex P2, #4250). */
-function release(blockId: string, owner: Owner) {
+ *  (Codex P2, #4250). `clear` also removes the published copy: only when the
+ *  question is over, never on an unmount (see `releaseQuestionTimer`). */
+function release(blockId: string, owner: Owner, clear: boolean) {
     clearTimers(owner);
     owners.delete(blockId);
     setLocal((prev) => {
@@ -155,11 +157,11 @@ function release(blockId: string, owner: Owner) {
         delete rest[blockId];
         return rest;
     });
-    if (owner.published) writeMeta(blockId, null);
+    if (clear && owner.published) writeMeta(blockId, null);
 }
 
 function expire(blockId: string, owner: Owner) {
-    release(blockId, owner);
+    release(blockId, owner, true);
     owner.onExpire();
 }
 
@@ -221,17 +223,30 @@ export function setQuestionTimerDormant(blockId: string, dormant: boolean): void
 }
 
 /**
- * The question was answered or cancelled, or the panel unmounted. Also called
- * by a panel that mounts with nothing pending: with `publish`, it then clears a
- * key a crashed owner left in block meta.
+ * The question was answered or cancelled. Also called by a panel that mounts
+ * with nothing pending: with `publish`, it then clears a key a crashed owner
+ * left in block meta.
  */
 export function endQuestionTimer(blockId: string, opts?: { publish?: boolean }): void {
     const owner = owners.get(blockId);
     if (owner) {
-        release(blockId, owner);
+        release(blockId, owner, true);
         return;
     }
     if (opts?.publish && publishedState(blockId) !== undefined) writeMeta(blockId, null);
+}
+
+/**
+ * The panel unmounted with its question possibly still pending. Stops the
+ * local timer and writes nothing: whichever window mounts the pane next writes
+ * its own state on mount, so a pane moving between windows has one writer and
+ * no `null` from the old window can land after the new countdown (Codex P2,
+ * #4250). A key left with no owner at all is covered by the readers' stale
+ * rules (spec §2.2).
+ */
+export function releaseQuestionTimer(blockId: string): void {
+    const owner = owners.get(blockId);
+    if (owner) release(blockId, owner, false);
 }
 
 // ── Reader side ──────────────────────────────────────────────────────────

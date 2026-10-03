@@ -52,13 +52,13 @@ The panel's "Auto-selects recommended in 23s" and the Swarm chip's "question 23s
 ### 2.2 Publishing across windows
 Swarm can run in another window, which is another renderer, so the owner also writes the state to its block's meta under `term:question_timer` (same shape, `null` removes the key). Readers outside the owner's renderer read it from there.
 - Written on edges only: start, pause, resume, end. Never per tick. Activity while already paused changes nothing and writes nothing.
-- `null` on end and on unmount. Unlike `term:awaiting_user`, the question is still pending after an unmount, but nothing is counting any more.
+- `null` when the question ends: answered, cancelled or expired. **Nothing on unmount**: whichever window mounts the pane next writes its state on mount (rule 3 below), so a pane moving between windows has one writer. A `null` from the old window, sent over its own connection, could otherwise land after the new window's countdown and blank it everywhere (Codex P2 on #4250). Per renderer, writes for a block go out one at a time, latest state last.
 - Same machine, same clock: every window and the owner share `Date.now()`, so `endsAt` reads the same everywhere.
 - Remote rows (another channel or host) never have this key in this window's store; they show plain `question` (§3.3).
 - **Stale values.** A renderer crash or a closed window skips the unmount, so the key can outlive its owner. Three rules keep that from showing:
   1. `questionCountdown` returns no state for a published `counting` whose `endsAt` has passed, so the chip shows plain `question`, never `0s` or a negative.
   2. Readers use the key only while §3.2's question condition holds (turn in flight and `term:awaiting_user`). Once the turn ends, a leftover `paused` or `counting` is ignored, the same guard §5.3 keeps for `term:awaiting_user`.
-  3. The owner always writes the key when its panel mounts: the live state if a question is pending, `null` otherwise. A reload or a restored window therefore overwrites whatever the crash left behind. A closed window takes its blocks with it, so no Swarm row is left reading the key.
+  3. The owner always writes the key when its panel mounts: the live state if a question is pending, `null` otherwise. A reload, a restored window, or the window a pane moved to therefore overwrites whatever was left behind. A closed window takes its blocks with it, so no Swarm row is left reading the key.
 
 ## 3. Swarm: the "question" chip and its countdown
 
@@ -138,7 +138,7 @@ Besides the countdown itself (§2), the panel's `countdownSeverity()` thresholds
   - activity → paused, then counting at the full duration 15s after the last activity;
   - activity while paused restarts the quiet timer and writes nothing;
   - dormant pauses and waking re-arms;
-  - end and unmount clear the state and the published key;
+  - end clears the state and the published key; unmount clears the local state and writes nothing;
   - edges-only meta writes;
   - a non-owner renderer reads the published copy and never schedules an expiry;
   - `questionCountdown` seconds and bands;
