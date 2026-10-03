@@ -39,7 +39,8 @@ mod translation;
 // watchdog, agent_handlers/input, blockfile, app_api).
 pub use controller::ShellController;
 pub use file_ops::{
-    handle_append_block_file, persist_user_line, publish_transcript_changed, with_transcript_order,
+    append_output_line, handle_append_block_file, persist_user_line, publish_transcript_changed,
+    with_transcript_order,
 };
 // These are `pub(crate)` at their definition (crate-internal API), so they must
 // be re-exported at the same visibility — `pub use` of a `pub(crate)` item is
