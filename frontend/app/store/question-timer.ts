@@ -249,6 +249,23 @@ export function releaseQuestionTimer(blockId: string): void {
     if (owner) release(blockId, owner, false);
 }
 
+/**
+ * Re-publish the owner's state when block meta says something else and none of
+ * this renderer's own writes is in flight. Called from a reactive scope, so it
+ * re-runs when the meta changes. Covers a write the previous window already had
+ * in flight when the pane moved here: nothing can order that request against
+ * ours, so if it lands last, this corrects it (Codex P2, #4250).
+ */
+export function reconcileQuestionTimer(blockId: string): void {
+    const meta = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta;
+    const owner = owners.get(blockId);
+    if (!owner?.published || writes.has(blockId)) return;
+    const mine = local()[blockId];
+    if (mine === undefined) return;
+    const theirs = meta?.[META_QUESTION_TIMER];
+    if (!sameState(isState(theirs) ? theirs : null, mine)) writeMeta(blockId, mine);
+}
+
 // ── Reader side ──────────────────────────────────────────────────────────
 
 function isState(v: unknown): v is NonNullable<QuestionTimerState> {

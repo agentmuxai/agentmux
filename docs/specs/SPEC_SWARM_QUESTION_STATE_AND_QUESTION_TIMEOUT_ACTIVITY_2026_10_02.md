@@ -52,7 +52,7 @@ The panel's "Auto-selects recommended in 23s" and the Swarm chip's "question 23s
 ### 2.2 Publishing across windows
 Swarm can run in another window, which is another renderer, so the owner also writes the state to its block's meta under `term:question_timer` (same shape, `null` removes the key). Readers outside the owner's renderer read it from there.
 - Written on edges only: start, pause, resume, end. Never per tick. Activity while already paused changes nothing and writes nothing.
-- `null` when the question ends: answered, cancelled or expired. **Nothing on unmount**: whichever window mounts the pane next writes its state on mount (rule 3 below), so a pane moving between windows has one writer. A `null` from the old window, sent over its own connection, could otherwise land after the new window's countdown and blank it everywhere (Codex P2 on #4250). Per renderer, writes for a block go out one at a time, latest state last.
+- `null` when the question ends: answered, cancelled or expired. **Nothing on unmount**: whichever window mounts the pane next writes its state on mount (rule 3 below), so a pane moving between windows has one writer. A `null` from the old window, sent over its own connection, could otherwise land after the new window's countdown and blank it everywhere (Codex P2 on #4250). Per renderer, writes for a block go out one at a time, latest state last. A write the old window already had in flight can still land after the new owner's, so the owner re-publishes its state whenever block meta differs from it and none of its own writes is in flight (`reconcileQuestionTimer`).
 - Same machine, same clock: every window and the owner share `Date.now()`, so `endsAt` reads the same everywhere.
 - Remote rows (another channel or host) never have this key in this window's store; they show plain `question` (§3.3).
 - **Stale values.** A renderer crash or a closed window skips the unmount, so the key can outlive its owner. Three rules keep that from showing:
@@ -139,6 +139,7 @@ Besides the countdown itself (§2), the panel's `countdownSeverity()` thresholds
   - activity while paused restarts the quiet timer and writes nothing;
   - dormant pauses and waking re-arms;
   - end clears the state and the published key; unmount clears the local state and writes nothing;
+  - the owner re-publishes when a late write from another window leaves block meta different from its state;
   - edges-only meta writes;
   - a non-owner renderer reads the published copy and never schedules an expiry;
   - `questionCountdown` seconds and bands;

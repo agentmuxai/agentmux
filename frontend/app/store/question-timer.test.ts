@@ -8,7 +8,7 @@
  * docs/specs/SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md §2, §6.
  */
 
-import { createSignal } from "solid-js";
+import { createEffect, createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const writes: Array<{ oref: string; meta: Record<string, unknown> }> = [];
@@ -42,6 +42,7 @@ import {
     noteQuestionActivity,
     questionCountdown,
     questionTimer,
+    reconcileQuestionTimer,
     releaseQuestionTimer,
     resetQuestionTimersForTests,
     setQuestionTimerDormant,
@@ -200,6 +201,23 @@ describe("question timer: publishing", () => {
         expect(questionTimer("b1")).toBeNull();
         vi.advanceTimersByTime(60_000);
         expect(onExpire).not.toHaveBeenCalled();
+    });
+
+    // Codex P2 on #4250: a write the previous window had in flight when the
+    // pane moved can land after the new owner's; the owner corrects it.
+    it("the owner re-publishes when a late write from another window overwrites its state", async () => {
+        startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn(), publish: true });
+        await flush();
+        const mine = published()[0];
+        setMetaByBlock({ b1: { [META_QUESTION_TIMER]: mine as Record<string, unknown> } }); // our own echo
+        createRoot(() => createEffect(() => reconcileQuestionTimer("b1")));
+        await flush();
+        expect(published()).toHaveLength(1); // matches: nothing to do
+
+        setMetaByBlock({ b1: { [META_QUESTION_TIMER]: { kind: "paused", reason: "activity" } } }); // the old window's
+        await flush();
+        expect(published()).toHaveLength(2);
+        expect(published()[1]).toEqual(mine);
     });
 
     it("writes nothing for a local key", () => {

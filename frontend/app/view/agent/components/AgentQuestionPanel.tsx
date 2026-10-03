@@ -50,6 +50,7 @@ import {
     endQuestionTimer,
     noteQuestionActivity,
     questionCountdown,
+    reconcileQuestionTimer,
     releaseQuestionTimer,
     setQuestionTimerDormant,
     startQuestionTimer,
@@ -374,6 +375,8 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         )
     );
     createEffect(() => setQuestionTimerDormant(timerKey, props.isDormant?.() ?? false));
+    // Keep the published copy in step with this panel's timer (Swarm question spec §2.2).
+    if (publish) createEffect(() => reconcileQuestionTimer(timerKey));
     onCleanup(() => releaseQuestionTimer(timerKey));
 
     // Cancel — a REAL protocol-level decline delivered to the agent (Cancel
