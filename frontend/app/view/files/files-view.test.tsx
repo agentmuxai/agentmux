@@ -383,6 +383,12 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
         await waitFor(() => expect(v.names()).toHaveLength(4));
         expect(v.meta().connection).toBeUndefined();
         expect(h.rpc.FsListCommand).toHaveBeenLastCalledWith(expect.anything(), { path: HOME, cursor: undefined, limit: 1000 }, undefined);
+        // On one connection, a Places click is history like any navigation.
+        const docs = [...v.container.querySelectorAll(".files-place")].find((b) => b.textContent?.includes("Documents"))!;
+        h.state.dirs.set(`${HOME}\\Documents`, [f("x.txt")]);
+        fireEvent.click(docs);
+        await waitFor(() => expect(v.names()).toEqual(["x.txt"]));
+        expect(v.model.canBack()).toBe(true);
     });
 
     it("deletes on the host, but has no Trash and no undo of a new item", async () => {

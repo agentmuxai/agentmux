@@ -379,7 +379,8 @@ export class FilesModel {
      *  belong to the folders they were made in. */
     async openOn(connection: string, path: string): Promise<void> {
         const next = isSshConnection(connection) ? connection.trim() : "";
-        if (next !== this.connection()) {
+        const changed = next !== this.connection();
+        if (changed) {
             this.stopWatching();
             this.back = [];
             this.forward = [];
@@ -388,7 +389,9 @@ export class FilesModel {
             this.setConnection(next);
             void this.ctx.setMeta({ [META_CONN]: next || null });
         }
-        await this.navigate(path, { push: false });
+        // On the same connection, a Places click is a navigation like any
+        // other: Back returns to the folder it left.
+        await this.navigate(path, { push: !changed });
     }
 
     /** What a remote pane can't do yet, said once. */
