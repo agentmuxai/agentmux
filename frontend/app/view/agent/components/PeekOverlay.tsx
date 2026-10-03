@@ -44,7 +44,7 @@
  * Positioning ("end" mode) is peek-placement.ts's job, and the panel always sits
  * near the pointer. Horizontally: right-aligned to the row when it fits the row's
  * width; pinned to the row's left edge and extending right over the pane border,
- * up to the window edge, when wider. Vertically: below or above the pointer
+ * by at most half the row's width, when wider. Vertically: below or above the pointer
  * inside the transcript when it fits; otherwise it leaves the transcript, on the
  * side of the pointer with more room, with its HEIGHT cut to that room so it can
  * never reach the pointer, and the rest scrolls. The old code clamped the

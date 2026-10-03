@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
     CURSOR_GAP_PX,
+    MAX_OVERSHOOT_FRACTION,
     VIEWPORT_MARGIN_PX,
     computePeekHorizontal,
     computePeekVertical,
@@ -26,12 +27,19 @@ describe("computePeekHorizontal", () => {
         expect(h.alignRight).toBe(false);
         expect(h.left).toBe(400);
         expect(h.extendsPastRow).toBe(true);
-        // Uses the room to the window's right edge: 1400 - 8 - 400.
-        expect(h.maxWidth).toBe(VIEWPORT.width - VIEWPORT_MARGIN_PX - 400);
+        // The row is 500 wide: it may reach 250 (half the row) past its right edge.
+        expect(MAX_OVERSHOOT_FRACTION).toBe(0.5);
+        expect(h.maxWidth).toBe(750);
     });
 
-    it("uses as much width as exists, however long the line", () => {
+    it("overshoots the row by at most half its width, however long the line", () => {
         const h = computePeekHorizontal({ row: ROW, viewport: VIEWPORT, naturalWidth: 50_000 });
+        expect(placedSpan(h, 50_000)).toEqual({ left: 400, right: 900 + 250 });
+    });
+
+    it("near the window's right edge, stops at the edge before the half-width cap", () => {
+        const row = { left: 800, right: 1300, top: 300, bottom: 330 }; // cap would reach 1550
+        const h = computePeekHorizontal({ row, viewport: VIEWPORT, naturalWidth: 50_000 });
         expect(placedSpan(h, 50_000).right).toBe(VIEWPORT.width - VIEWPORT_MARGIN_PX);
     });
 
@@ -63,6 +71,13 @@ describe("computePeekHorizontal: minimum width", () => {
         expect(h.left).toBe(400);
         expect(h.minWidth).toBe(600);
         expect(h.extendsPastRow).toBe(true);
+    });
+
+    it("in a very narrow row the minimum gives way to the half-width cap", () => {
+        const row = { left: 400, right: 700, top: 300, bottom: 330 }; // 300 wide → at most 450
+        const h = computePeekHorizontal({ row, viewport: VIEWPORT, naturalWidth: 120, minWidth: 600 });
+        expect(h.maxWidth).toBe(450);
+        expect(h.minWidth).toBe(450);
     });
 
     it("never runs off the window: the minimum is capped to the room there is", () => {

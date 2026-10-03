@@ -250,7 +250,7 @@ describe("PeekOverlay", () => {
                 setup({ panelHeight: 40, panelWidth: 900 });
                 expect(panel()!.style.left).toBe("100px");
                 expect(panel()!.style.transform).toBe("");
-                expect(parseFloat(panel()!.style.maxWidth)).toBe(1400 - 8 - 100);
+                expect(parseFloat(panel()!.style.maxWidth)).toBe(700 * 1.5); // overshoots the 700px row by half
             } finally {
                 vi.useRealTimers();
             }
