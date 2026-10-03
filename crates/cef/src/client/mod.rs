@@ -67,7 +67,7 @@ mod context_menu;
 // instead of only windows-latest. See the module's own doc comment.
 pub(crate) mod window_snap;
 #[cfg(target_os = "windows")]
-mod wndproc;
+pub(crate) mod wndproc;
 #[cfg(target_os = "windows")]
 pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 // Round 6 (pool demote) — the imperative srv-cleanup path in

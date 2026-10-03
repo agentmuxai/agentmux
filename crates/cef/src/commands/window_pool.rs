@@ -1787,6 +1787,9 @@ pub fn promote_pool_window(
         let acked = crate::commands::pane_pool::wait_snapshot_shown(&label, shown);
         tracing::info!(target: "dnd:tearoff:pool", label = %label, acked, "[pool] moving window on-screen after its snapshot");
     });
+    // Step 1 below activates the window while it is still hidden; keep the
+    // invisible-activation hand-back off it until it is shown.
+    let _promoting = crate::client::wndproc::PromoteActivationGuard::new(raw_hwnd);
     unsafe {
         use windows_sys::Win32::Foundation::RECT;
         use windows_sys::Win32::UI::WindowsAndMessaging::{
