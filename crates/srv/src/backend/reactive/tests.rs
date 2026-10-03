@@ -3327,7 +3327,7 @@ fn the_handler_lock_is_held_across_the_message_sender() {
 // re-lock `run_agent_turn`'s own tail would otherwise attempt. But that is
 // only ONE of the two re-locks on this path: `run_agent_turn` calls
 // `PersistentSubprocessController::send_message`, whose spawn path
-// (`persistent/spawn.rs`, `spawn_process`) does its OWN auto-registration via
+// (`persistent/spawn.rs`, `spawn_process`) did its OWN auto-registration via
 // `get_global_handler().register_agent_with_nonce(...)` — two modules away
 // from anything `TurnRegistration::Skip` touches. On 2026-09-07 this second
 // re-lock deadlocked a production srv permanently: every reactive endpoint
@@ -3335,9 +3335,10 @@ fn the_handler_lock_is_held_across_the_message_sender() {
 // behind it, and only a process restart cleared it. See
 // `docs/incident/INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md`.
 //
-// The fix is `ReactiveHandler::try_register_agent_with_nonce`: a `try_lock`
-// variant `persistent/spawn.rs` now calls instead, which returns an error
-// instead of blocking when the calling thread already holds the lock. These
+// The fix is `ReactiveHandler::try_register_agent_with_nonce`: a bounded
+// `try_lock` variant (its full-identity form, `try_register_agent_full`, is
+// what `persistent/spawn.rs` now calls), which returns an error instead of
+// blocking when the calling thread already holds the lock. These
 // two tests pin both directions: the reentrant call must fail fast (not hang),
 // and an ordinary non-reentrant call must still succeed normally.
 

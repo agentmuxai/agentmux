@@ -332,10 +332,10 @@ pub(crate) async fn identity_self_accounts_impl<'o>(
         // just reachable through this separate per-agent lookup too. Skip and
         // log rather than `?`-propagate.
         // resolve_account (WITH the global-mirror fallback), not
-        // resolve_account_for_spawn. Originally reagentx P1 on PR #2632: without
-        // the fallback a migrated/continuing account showed as "missing" here.
+        // resolve_account_for_spawn: without the fallback a migrated/continuing
+        // account showed as "missing" here (#2632).
         //
-        // CAVEAT since 2026-08-31 (reagent P2 on PR #2878): this is NO LONGER
+        // CAVEAT (#2878): this is NO LONGER
         // consistent with the spawn path. `inject.rs` now uses
         // `resolve_account_for_spawn`, which deliberately has no fallback, so an
         // oauth-class account resolvable ONLY via the mirror is listed here yet

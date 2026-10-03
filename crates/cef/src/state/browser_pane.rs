@@ -60,7 +60,7 @@ pub struct BrowserPaneEntry {
 // Live/Closing lifecycle: lifecycle stays in `HostState.browser_panes`;
 // placement lives in `HostState.pane_window_states`. Docked panes have NO
 // entry here — their "maximize" is backend magnify
-// (`LayoutState.magnifiednodeid`), routed by the frontend `<MaximizeButton>`
+// (`LayoutState.magnifiednodeid`), routed by the frontend `OptMagnifyButton`
 // (spec §3.3a, b2), never through this reducer.
 
 /// Screen-space window rectangle in physical pixels. Distinct from

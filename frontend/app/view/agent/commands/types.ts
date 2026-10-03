@@ -193,8 +193,8 @@ export interface SlashCommandContext {
      * the restart while `isTurnActive()` is true, and declares the pane
      * healthy anyway, leaves the controller on the stale credential
      * indefinitely (every fast-fail guard cleared, nothing left to catch
-     * the next message) until the pane is manually reopened. Codex P1 on
-     * PR #2338 (thirteenth re-review). Consumed by
+     * the next message) until the pane is manually reopened (#2338).
+     * Consumed by
      * `useAgentCommands.flushPendingControllerRefresh`, which
      * `agent-view.tsx` calls the moment its turn-just-ended edge detector
      * fires — so `notifyControllerHealthy`/`clearAuthFailure` are deferred

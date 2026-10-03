@@ -113,9 +113,10 @@ pub fn migrate_from_sqlite_once(
     // on disk: instance `working_directory` values are `~/.agentmux/agents/<name>`
     // (e.g. `…/agents/mazs-0527n`), NOT under any per-channel `channels/<ch>/agents`
     // dir, and NOT under the P0.3-re-rooted registry's parent (`<home>/shared/
-    // agents`). `home` is `~/.agentmux` (main.rs derives it as the registry root's
-    // 3rd ancestor: registry → agents → shared → home). Anchor migrated records on
-    // this real workspace root so the reader (`agent_handlers/session.rs` reconstructs
+    // agents`). `home` is `~/.agentmux` (`MigrationContext.home`: the global
+    // shared root's parent, `migrations/runner.rs::resolve_home`). Anchor migrated
+    // records on this real workspace root so the reader
+    // (`agent_registry_lookup::working_dir_from_record` reconstructs
     // `source_agents_base.join(working_dir)`) resolves the actual workspace in
     // EVERY channel. NB this deliberately differs from the live mirror, which
     // strips against the per-channel `AGENTMUX_AGENTS_DIR` — that anchor never

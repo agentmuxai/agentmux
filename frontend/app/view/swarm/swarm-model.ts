@@ -1086,8 +1086,9 @@ export class SwarmViewModel {
     private lastSubscribedBlockIds: Set<string> = new Set();
 
     // Backend broadcasts one subagent:spawned/subagent:completed event per
-    // subagent file (see subagent_watcher/jsonl.rs's process_jsonl_change) — a
-    // backfill scan on pane reopen can fire dozens of these in a burst.
+    // subagent file (see subagent_watcher/jsonl.rs's process_jsonl_change, and
+    // flush_pending_dispatch_activity for workflow members) — a backfill scan
+    // on pane reopen can fire dozens of these in a burst.
     // Debounce the resulting loadSubagents() RPC here instead of batching the
     // broadcasts themselves, since activity/subagent-source.ts (a different
     // consumer of the same events, driving the ActivityDock) needs one event

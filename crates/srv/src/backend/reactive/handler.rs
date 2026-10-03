@@ -2067,16 +2067,19 @@ impl ReactiveHandler {
             .register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce, alias)
     }
 
-    /// Like [`register_agent_with_nonce`], but never blocks: if the lock is
-    /// already held, this returns an error immediately instead of waiting
-    /// for it.
+    /// Like [`register_agent_with_nonce`], but never blocks indefinitely: if
+    /// the lock is still held after a short bounded retry
+    /// (`try_lock_bounded`), this returns an error instead of
+    /// waiting for it. Test-only; the spawn path uses the full-identity
+    /// form, [`Self::try_register_agent_full`], which shares this
+    /// reasoning.
     ///
     /// The case that matters is this exact call running on the same OS
     /// thread as an in-flight `inject_message` — the reactive-delivery spawn
     /// fallback (`bootstrap/delivery.rs`'s `install_agent_turn_delivery`) runs a
     /// respawn synchronously on the injecting thread via `block_in_place`,
-    /// and that respawn's own auto-registration (this method's caller,
-    /// `PersistentSubprocessController::spawn_process`) used to re-lock this
+    /// and that respawn's own auto-registration
+    /// (`PersistentSubprocessController::spawn_process`) used to re-lock this
     /// same non-reentrant `Mutex<Handler>` two modules away from the
     /// call site `TurnRegistration::Skip` actually guards — permanently
     /// deadlocking the reactive handler process-wide (every persistent
@@ -2096,20 +2099,20 @@ impl ReactiveHandler {
     /// directly, with no `run_agent_turn` `Register`-tail behind them to
     /// repair a skip — a losing race there can leave a live respawned
     /// agent unregistered and unreachable until a human intervenes via
-    /// the UI (reagent P1 on PR #3084's review). The retry loop below
+    /// the UI (#3084). The retry loop in `try_lock_bounded`
     /// exists for exactly that case: a same-thread reentrant call can
     /// never succeed no matter how many times it retries (nothing on
     /// that call stack can release the lock), but ordinary cross-thread
     /// contention — a few HashMap reads under the same lock elsewhere,
     /// typically microseconds — very likely clears within the retry
-    /// budget. See the loop's own comment for the full reasoning.
+    /// budget. See the comment in this method's body for the full reasoning.
     ///
     /// A skip's caller (`spawn_process`) is also responsible for not
     /// trusting `registration_nonce` as this spawn's exit-time cleanup
     /// key when the call returns `Err` here — the registration this
     /// skip left in place (if any) still belongs to whichever nonce is
     /// actually on record, not to this spawn's own unwritten one. See
-    /// `spawn_process`'s handling of this method's `Err` arm.
+    /// `spawn_process`'s handling of `try_register_agent_full`'s `Err` arm.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn try_register_agent_with_nonce(
         &self,
@@ -2119,11 +2122,10 @@ impl ReactiveHandler {
         registration_nonce: u64,
         alias: Option<&str>,
     ) -> Result<(), String> {
-        // Bounded retry, not a single attempt (reagent P1 on PR #3084 —
-        // review of INCIDENT_2026_09_07_BACKEND_UPTIME_TIMER_FROZEN.md's
-        // fix): this method has exactly one call site
-        // (`PersistentSubprocessController::spawn_process`'s
-        // auto-registration), shared by every caller that spawns a
+        // Bounded retry, not a single attempt (#3084): the spawn-path
+        // registration (`PersistentSubprocessController::spawn_process`'s
+        // auto-registration, via `try_register_agent_full`, which shares
+        // `try_lock_bounded`) is shared by every caller that spawns a
         // process — including `respawn_once_for_leftover_queue`, which
         // calls `spawn_process` directly with no `run_agent_turn`
         // `Register`-tail to repair a skip. A single `try_lock` cannot

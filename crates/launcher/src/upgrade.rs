@@ -13,10 +13,11 @@
 //! logic below is a self-contained, thoroughly-testable async function; the
 //! "suspend the live supervisor loop's respawn/teardown handling" half
 //! means editing `supervisor/windows.rs`'s and `supervisor/unix.rs`'s
-//! `tokio::select!` state machines — 1000+-line functions this repo has no
-//! way to exercise end-to-end outside a real multi-process launcher run
-//! (see CLAUDE.md's I1-I6 isolation invariants; this is exactly the surface
-//! they exist to protect). §4.2 also hasn't landed yet, which is what
+//! `tokio::select!` state machines — ~700- and ~1200-line functions this
+//! repo has no way to exercise end-to-end outside a real multi-process
+//! launcher run (see the I1-I6 isolation invariants in
+//! `docs/specs/SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md`;
+//! this is exactly the surface they exist to protect). §4.2 also hasn't landed yet, which is what
 //! decides WHEN this runs at all — an upgrade-only srv mode most likely
 //! means srv is never handed to the normal supervised loop as a
 //! respawn-on-exit child in the first place, so the "suspend the loop"

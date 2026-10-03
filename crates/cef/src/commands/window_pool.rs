@@ -444,9 +444,10 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     }
 
     // PR #6 H.7 — refuse pool refill while any pane is mid-close. Pool
-    // windows are CEF top-levels just like user-visible ones; the v146
-    // deadlock fires regardless of whether the new window is on-screen.
-    // See `commands/window/creation.rs::open_window_with_kind` for rationale.
+    // windows are CEF top-levels just like user-visible ones, so the same
+    // gate applies whether or not the new window is on-screen. See
+    // `commands/window/creation.rs::open_window_with_kind` for its rationale
+    // (and why the v146-deadlock diagnosis behind it was later found wrong).
     if state.any_browser_pane_closing() {
         tracing::warn!(
             target: "wfr:gate",

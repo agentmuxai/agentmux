@@ -33,8 +33,9 @@ pub struct WindowMeta {
 
 /// Phase B.5 (window_meta step d) — pre-create handoff. Caller
 /// (`drag.rs::open_window_at_position`,
-/// `commands/window/creation.rs::open_new_window`,
-/// `window_pool.rs::spawn_pool_window`, `browser_pane/creation.rs`) pushes
+/// `commands/window/creation.rs::open_window_with_kind`,
+/// `window_pool.rs::spawn_pool_window`, `browser_pane/creation.rs`,
+/// the floating-pane and pane-pool creators) pushes
 /// one entry per window CEF is about to create;
 /// `client/lifecycle.rs::on_after_created` pops the head entry and uses
 /// `kind` for the Subwindow

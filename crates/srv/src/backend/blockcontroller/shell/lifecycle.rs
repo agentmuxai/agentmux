@@ -263,11 +263,7 @@ async fn run_pty_output_flusher(
 /// Deliberately does NOT fall back to `std::env::var` for either key: that
 /// reads THIS SRV PROCESS's own environment, shared by every block/pane
 /// this instance spawns — reintroducing exactly the same collision as the
-/// global-settings fallback below (reagentx P1, round 2: an earlier version
-/// of this fn read `std::env::var("WAVEMUX_AGENT_ID")` here, which is process-
-/// global env, not per-pane, despite this file's own line ~404 comment
-/// already correctly describing WAVEMUX_AGENT_ID as "process-global env
-/// state" in a different context — the two were inconsistent). Nor does it
+/// global-settings fallback below (#2694). Nor does it
 /// fall back to the global settings' cmd_env.AGENTMUX_AGENT_ID: that value
 /// is shared across every pane in the instance/channel, so a pane spawned
 /// without its own explicit per-block ID would silently inherit whatever
@@ -278,8 +274,8 @@ async fn run_pty_output_flusher(
 /// (its `settings.cmd_env` loop) for the matching fix that keeps
 /// this global value out of the pane's OWN environment too — otherwise a
 /// pane could still pick it up via OSC 16162 and re-register through the
-/// frontend's `/agentmux/reactive/register` path instead (reagentx P1,
-/// round 2), even with THIS function never reading it directly. A pane with
+/// frontend's `/agentmux/reactive/register` path instead, even with THIS
+/// function never reading it directly. A pane with
 /// no block-scoped identity is simply not jekt-registered, matching
 /// persistent/mod.rs's muxbus_agent_id_from_env, which never had either fallback.
 fn resolve_agent_id_for_jekt(block_meta: &MetaMapType) -> Option<String> {

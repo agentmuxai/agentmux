@@ -94,7 +94,7 @@ use types::{DispatchState, PendingDispatchActivity, SessionWatch, WatchedAgent};
 const DISPATCH_ACTIVITY_FLUSH_INTERVAL: Duration = Duration::from_millis(500);
 
 // Host-wide instance, set once at startup (`set_global`, called from
-// main.rs right after `SubagentWatcher::spawn`). Exposed as a global —
+// bootstrap/background.rs right after `SubagentWatcher::spawn`). Exposed as a global —
 // mirroring `process_tracker::registry`'s own doc comment for the exact
 // same problem — so callers that only occasionally need it (like
 // `blockcontroller/persistent/spawn.rs`'s turn-end reconciliation hook,

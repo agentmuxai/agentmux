@@ -65,12 +65,11 @@ pub enum HostLifecyclePhase {
 pub struct HostState {
     /// FIFO queue of pre-create handoffs. Pushed by callers
     /// (`browser_pane/creation.rs`,
-    /// `commands/window/creation.rs::open_new_window`,
-    /// `commands/drag.rs::tear_off`, `commands/window_pool.rs::spawn_pool_window`)
-    /// before `post_create_window`. Popped by `client.rs::on_after_created`
-    /// when CEF reports a new browser. Peeked at the back by
-    /// `wrr/win_event.rs::handle_event` to label OS-level WM_CREATE
-    /// events with the upcoming label.
+    /// `commands/window/creation.rs::open_window_with_kind`,
+    /// `commands/drag.rs::open_window_at_position`,
+    /// `commands/window_pool.rs::spawn_pool_window`, the floating-pane and
+    /// pane-pool creators) before the browser is created. Popped by
+    /// `client/lifecycle.rs::on_after_created` when CEF reports a new browser.
     ///
     /// Invariants:
     /// - At most one entry per (in-flight) browser create.

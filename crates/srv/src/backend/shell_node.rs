@@ -352,8 +352,9 @@ impl ShellNodeRunner {
         // Only set the working directory if it actually exists. The cwd is
         // normalized upstream (handle_shell_create → base::normalize_working_dir),
         // but a stale or mistyped path would otherwise make the spawn fail hard
-        // with os error 267 (ERROR_DIRECTORY) on Windows. Mirror the agent-CLI
-        // spawn's graceful fallback (blockcontroller/core.rs::apply_working_dir):
+        // with os error 267 (ERROR_DIRECTORY) on Windows. Like the agent-CLI
+        // spawn (blockcontroller/core.rs::apply_working_dir, which skips
+        // `current_dir` when the directory is missing and can't be created),
         // warn via a system chunk and run in the server's cwd rather than
         // killing the shell before it starts.
         if let Some(ref cwd) = self.cwd {

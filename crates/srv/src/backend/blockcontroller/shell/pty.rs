@@ -67,8 +67,8 @@ pub(super) const PTY_CHANNEL_CAPACITY: usize = 128;
 /// would never see its channel close and its `JoinHandle` would never
 /// resolve on its own. An unbounded await here would then hang child
 /// reaping's own downstream cleanup (STATUS_DONE, run_lock release)
-/// forever, for a case that must never block them. 10s mirrors
-/// `persistent/spawn.rs`'s identical stdout-reader bound for the same
+/// forever, for a case that must never block them. The original 10s mirrored
+/// `persistent/spawn.rs`'s stdout-reader bound for the same
 /// descendant-held-descriptor scenario: generous enough that normal
 /// flushing (one already-queued drain plus a write, milliseconds) never trips
 /// it, but a hard ceiling so a genuinely stuck descendant can't hang pane

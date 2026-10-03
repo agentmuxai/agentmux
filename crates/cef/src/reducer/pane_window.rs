@@ -30,13 +30,15 @@
 //!   (NOT `ShowWindow(SW_MAXIMIZE)`, which mis-handles borderless popups).
 //! - `EvictFloatingPaneWindowState` — dispatched from `on_before_close` so a
 //!   floater's placement entry never outlives its window.
+//! - `SetFloatingAlwaysOnTop` — the header tack's `always_on_top` flag.
 //!
 //! ## Out of scope (later phases)
 //!
 //! - `ReportOSPlacementChange` (Win+Down / system menu → reducer).
-//! - `ReportNormalRect` (WM_WINDOWPOSCHANGED debounced) + the backend
-//!   rect-mirror (`block.meta["pane:floating_normal_rect"]`) — currently the
-//!   normal rect is captured at click time, not continuously tracked.
+//! - `ReportNormalRect` (WM_WINDOWPOSCHANGED debounced) — the normal rect is
+//!   captured only at click time (`toggle_floating_maximize` also writes it
+//!   to `block.meta["pane:floating_normal_rect"]` then), not continuously
+//!   tracked.
 
 use crate::state::{PaneRect, PaneWindowState, WindowPlacement};
 

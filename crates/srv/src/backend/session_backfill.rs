@@ -13,8 +13,9 @@
 //! the original.
 //! See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md.
 //!
-//! Once populated, `--resume` keeps the same session id across turns, so a single
-//! idempotent startup pass keeps continuity solid without per-turn wiring.
+//! Production code now also writes it on every capture (`core::persist_session_id`,
+//! mirrored to the registry by the instance store); this idempotent startup pass
+//! backfills records that predate that write.
 
 use crate::backend::claude_layout::project_dir_name;
 use crate::registry::Registry;

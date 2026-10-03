@@ -10,7 +10,8 @@
  * across the whole app.
  *
  * Features:
- *  - WeakMap-based per-node cache: re-hovering the same tool block is instant.
+ *  - Module-level Map cache keyed on (lang, code): re-hovering the same tool
+ *    block is instant.
  *  - Size cap: files > CAP_BYTES or > CAP_LINES skip highlighting (avoids
  *    stalling the main thread on huge files).
  *  - Sequence guard: stale async results are discarded if props changed.

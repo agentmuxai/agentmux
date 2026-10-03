@@ -323,7 +323,7 @@ pub struct AppState {
     ///
     /// **Phase B status**: synchronous host-side cache mirroring the
     /// launcher's `state.windows` mirror. Single canonical mutation site:
-    /// inserted in `client.rs::on_after_created` from the popped
+    /// inserted in `client/lifecycle.rs::on_after_created` from the popped
     /// `PendingWindowCreation` entry, removed in `on_before_close`.
     /// Required for synchronous lookups that can't tolerate the launcher
     /// round-trip lag (`open_subwindow` parent-liveness check; cascade-close
@@ -345,11 +345,11 @@ pub struct AppState {
     /// Phase F.1 — host reducer state.
     ///
     /// Owns `pending_window_creations` (formerly a top-level
-    /// `Mutex<VecDeque<PendingWindowCreation>>` field on AppState).
-    /// All mutations go through `host_dispatch`; reads use the
-    /// `peek_back_pending_window_creation` snapshot helper.
-    /// Future PRs will migrate `active_drag` and tear-off-hook state
-    /// here too. See `crates/cef/src/reducer/mod.rs` and
+    /// `Mutex<VecDeque<PendingWindowCreation>>` field on AppState) and the
+    /// state migrated in since (browsers, browser panes, `active_drag`,
+    /// pools, quit lifecycle, …). Mutations go through `host_dispatch`;
+    /// readers lock this briefly and copy out what they need. Tear-off-hook
+    /// state has not moved here yet. See `crates/cef/src/reducer/mod.rs` and
     /// `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
     pub host_state: Mutex<crate::reducer::HostState>,
 
@@ -610,11 +610,13 @@ pub struct AppState {
     // Phase B.1 removed `job_handle` (was Windows-only). Launcher
     // owns J0 wrapping srv now; host no longer needs its own job.
 
-    /// Per-window opacity HWND registry. Populated by `set_window_init_status`
-    /// once the window is fully shown (CEF Views returns NULL at on_after_created
-    /// time). Stored as `isize` (the raw HWND value) so the map is `Send`.
-    /// Read by `set_window_opacity` to target exactly one HWND instead of
-    /// enumerating all process windows.
+    /// Per-window HWND registry (label → HWND). Bound at Views window
+    /// creation (`app/mod.rs` `on_window_created`) and by the floating-pane
+    /// creator right after `CreateWindowExW`; `set_window_init_status` →
+    /// `capture_hwnd_for_label` fills in any label still missing once the
+    /// window is shown. Stored as `isize` (the raw HWND value) so the map is
+    /// `Send`. Read wherever the host must target exactly one window's HWND
+    /// (opacity, close, drag, …) instead of enumerating all process windows.
     #[cfg(target_os = "windows")]
     pub window_hwnds: Mutex<HashMap<String, isize>>,
 
@@ -1336,9 +1338,10 @@ impl AppState {
     /// PR #6 H.7 — cross-state invariant for the 2026-05-02 freeze.
     ///
     /// Returns true iff ANY pane is in `Closing`. Top-level window
-    /// creation paths (open_new_window, open_window_at_position,
-    /// spawn_pool_window) MUST refuse while this is true. The gate was
-    /// added on the hypothesis that creating a CEF top-level
+    /// creation paths (open_new_window, open_window_with_kind,
+    /// open_window_at_position, spawn_pool_window, spawn_pane_pool_window,
+    /// open_floating_pane_window, open_panel) refuse while this is true.
+    /// The gate was added on the hypothesis that creating a CEF top-level
     /// mid-pane-close hits a Chromium v146 deadlock (HiddenSinceOpen +
     /// IPC backpressure, `pending=N` rising); the follow-up retro
     /// (`docs/retro/h7-freeze-fix-retro-2026-05-02.md`) found the gate

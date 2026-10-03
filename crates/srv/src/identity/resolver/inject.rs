@@ -32,13 +32,15 @@ use super::secret::resolve_secret;
 
 /// Inject identity-derived env vars into the spawn map for a block.
 ///
-/// This is the public entry point called from the CLI-spawn paths
-/// (`AgentInputCommand` in websocket.rs and `AgentSendCommand` in
-/// app_api/agent_io.rs). Resolution flow:
+/// Synchronous, broker-less entry point — in production only the durable-jekt
+/// sign-in recheck (server/jekt_held.rs) calls it. The CLI-spawn paths use
+/// [`inject_identity_env_async`] instead (via `build_persistent_spawn_env` in
+/// server/agent_handlers/input.rs). Resolution flow:
 ///
 /// 1. Look up the active `AgentInstance` for this block. If none
 ///    exists, the caller didn't go through the launch modal — return
-///    immediately, no injection.
+///    immediately, no injection (unless the block names a deleted agent:
+///    that is refused with `SpawnGateError::AgentDeleted`, #3577).
 /// 2. Read its `identity_id`. Empty / "blank" no longer short-circuits to
 ///    ambient creds (see #2463 — this used to bypass the layer-3 gate
 ///    entirely, so whether a spawn required a bound account depended on
@@ -54,12 +56,11 @@ use super::secret::resolve_secret;
 ///    - **Api-key-class** per-binding failures are logged and skipped —
 ///      other bindings still inject (historical behavior).
 ///    - **Oauth-class** failures (account row missing, lookup error,
-///      non-OAuthConfigDir secret_ref) are BLOCKING unless the agent
-///      definition carries `use_ambient_login = 1`: the function returns
-///      [`SpawnGateError`] before the CLI process is created. With the
-///      opt-in set, the binding is skipped WITHOUT injecting a config dir
-///      (the CLI uses its global login) and `identity.spawn.ambient:` is
-///      logged at info — the only sanctioned ambient path (spec §2.2).
+///      non-OAuthConfigDir secret_ref) are always BLOCKING: the function
+///      returns [`SpawnGateError`] before the CLI process is created.
+///      `use_ambient_login` no longer exempts an agent; it is read only for
+///      the `identity.spawn.blocked:` log line (the opt-out was retired, see
+///      m0017_ambient_login_grandfather.rs).
 /// 5. If the agent definition's own provider is oauth-class and no binding
 ///    for it exists at all (fresh/never-bound or post-delete-cascade), the
 ///    same gate applies — implicit ambient fallback is how the
@@ -80,14 +81,13 @@ pub fn inject_identity_env(
     inject_identity_env_with_broker(mstore, id_store, identity_store, None, block_id, env_vars)
 }
 
-/// `inject_identity_env` + optional broker handle so the OAuth-class
-/// branch can publish `identityaccounts:changed` on a status change
-/// discovered by the expiry probe. The broker is `Option<Arc<Broker>>`
-/// — `None` (the legacy entry point, kept for test ergonomics) skips the
-/// publish; in production both call sites (`app_api/agent_io.rs`
-/// AgentSendCommand + `websocket.rs` AgentInputCommand) pass
-/// `Some(broker.clone())` so any live account list flips its status badge
-/// without a reload. Per spec §4.4.
+/// The optional broker lets the OAuth-class branch publish
+/// `identityaccounts:changed` on a status change discovered by the expiry
+/// probe. `None` skips the publish; the `agentinput` turn
+/// (server/agent_handlers/input.rs) and `agent.send` (app_api/agent_io.rs)
+/// pass `Some(broker.clone())` through `build_persistent_spawn_env` so any
+/// live account list flips its status badge without a reload. Per spec §4.4.
+///
 /// Async wrapper around [`inject_identity_env_with_broker`] for use from
 /// async spawn handlers. The underlying path does blocking I/O — synchronous
 /// SQLite reads and, for `SecretRef::Keychain` accounts, a blocking

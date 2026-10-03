@@ -2605,7 +2605,8 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
                 // other instance, and the "registered elsewhere too" badge
                 // would fire on every healthy agent (reagentx P1). Same
                 // self-filter this file already uses for Tier 2a/2b forwarding
-                // (`entry.local_url == state.local_web_url`, ~line 454/580).
+                // (`entry.local_url == state.local_web_url` in
+                // `handle_reactive_inject`).
                 let remote = crate::registry::resolve_shared_reactive_dir()
                     .map(|shared_dir| {
                         agent_registry::lookup_all_shared(&shared_dir, &params.agent_id)

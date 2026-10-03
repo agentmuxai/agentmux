@@ -1067,16 +1067,16 @@ impl AgentMuxHandler {
                 remaining
             );
 
-            // Evict this label's HWND from `window_hwnds`. The cache
-            // has no other cleanup path, and the resolver's hot-path
-            // hits it before walking the registry — without this,
-            // a subsequent open of the same label (e.g. main
-            // restart) leaves a stale entry that breaks WM_CLOSE
+            // Evict this label's HWND from `window_hwnds`. Apart from
+            // the resolvers dropping an entry they find dead (IsWindow
+            // false), this is the cache's only cleanup path, and the
+            // resolver's hot-path hits it before walking the registry —
+            // without this, a subsequent open of the same label (e.g.
+            // main restart) leaves a stale entry that breaks WM_CLOSE
             // routing. See
             // docs/specs/SPEC_WINDOW_HWND_CACHE_STALE_FIX_2026_05_28.md.
             // Windows-only because `AppState::window_hwnds` is itself
-            // `#[cfg(target_os = "windows")]` in `state.rs`. Codex P1
-            // on PR #1133.
+            // `#[cfg(target_os = "windows")]` in `state/mod.rs` (#1133).
             #[cfg(target_os = "windows")]
             {
                 let removed = self.state.window_hwnds.lock().remove(lbl);
@@ -1185,9 +1185,8 @@ impl AgentMuxHandler {
         // bounded chance to resolve before we give up. See
         // docs/specs/SPEC_WINDOW_LIFECYCLE_CLOSE_RELIABILITY_2026_07_04.md.
         //
-        // IMPORTANT (reagent P1 on PR #1965): `report_backend_window_id_unregistered`
-        // is deliberately NOT called here, unconditionally, the way it used
-        // to be. That report tells the launcher to drop its own canonical
+        // IMPORTANT (#1965): `report_backend_window_id_unregistered` is
+        // deliberately NOT called here, unconditionally. That report tells the launcher to drop its own canonical
         // `backend_window_ids[label]` entry and broadcasts
         // `BackendWindowIdUnregistered`, which purges this host's shadow
         // map too (launcher_ipc/mod.rs). Firing it before we know whether the

@@ -287,10 +287,9 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     // real daemon-boot marker (ESTART, MIGRATING, MIGRATION-FAILED) already
     // uses — via `agentmux_common::srv_stderr`, which both real consumers
     // (the launcher and, in `task dev:standalone`, the CEF host sidecar)
-    // already parse the rest of this protocol from. A supervisor that
-    // doesn't recognize these two new lines yet (neither did until this
-    // change) just logs them like any other stderr line — same fallback
-    // that already existed for a hypothetical unknown line before this.
+    // already parse the rest of this protocol from. The launcher parses
+    // these two lines (`srv_spawner.rs`); a supervisor that doesn't (the
+    // CEF host sidecar today) just logs them like any other stderr line.
     let progress = ApplyProgress {
         on_start: &|id, description| {
             eprintln!("{}", agentmux_common::srv_stderr::migration_begin_line(id, description));

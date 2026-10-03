@@ -262,11 +262,12 @@ pub(crate) async fn generate_subagent_name(
 }
 
 /// Generate the one Haiku display name for a Workflow-kind dispatch,
-/// eagerly, the first time its first member is observed live (never called
-/// for a Solo dispatch — a Solo dispatch's name IS its one member's
-/// `display_name`, already covered by `generate_subagent_name`; never called
-/// during cold-backfill replay — see the `live` gate on
-/// `process_jsonl_change`'s `trigger_eager_naming` call in
+/// eagerly, the first time its first member is observed live, or for an
+/// unnamed historical dispatch via `SubagentWatcher::resolve_unnamed_backlog`
+/// when the Swarm pane opens (never called for a Solo dispatch — a Solo
+/// dispatch's name IS its one member's `display_name`, already covered by
+/// `generate_subagent_name`; never called during cold-backfill replay — see
+/// the `live` gate on `process_jsonl_change`'s `trigger_eager_naming` call in
 /// `crates/srv/src/backend/subagent_watcher/jsonl.rs`).
 ///
 /// A workflow has no single task prompt the way a solo call does (members

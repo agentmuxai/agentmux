@@ -139,9 +139,9 @@
  * elapsed.
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
- * the details drawer (the AgentShellSubblock terminal — activity-log lines
- * write directly into it rather than a separate panel, see agent-view.tsx's
- * `log`/`handleShellTermReady`).
+ * the details drawer (the AgentShellSubblock terminal — "system"-tagged
+ * activity-log lines write directly into it rather than a separate panel,
+ * see useShellLogBridge.ts's `log`/`handleShellTermReady`).
  * Mode/Model/Effort used to be
  * three separate FlyoutMenu drop-up pills here (SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02
  * Fix 7); they're now consolidated into one AgentRuntimeDropup trigger + panel

@@ -46,8 +46,8 @@ impl BrowserPaneManager {
     /// HWND. Empty `overlay_rects` restores full pane visibility (same as
     /// calling `clear_pane_overlay_clip`).
     ///
-    /// No-op on non-Windows: other platforms don't use native child HWNDs
-    /// for panes, so there's no airspace to work around.
+    /// Windows only. Linux and macOS use the Views-based equivalent below,
+    /// which hides an overlapped pane instead of clipping it.
     ///
     /// `window_label` scopes the clip to panes whose top-level ancestor
     /// matches the requesting window. Without it, a modal opened in

@@ -55,9 +55,8 @@ export interface UseAgentQuestionsOptions {
 // so falling back to the follow-up-message path can never duplicate-deliver
 // for either command — both share the identical pending_questions lookup and
 // error wording, verified against the current source, not assumed.
-// Deliberately an allowlist, not a blocklist: reagent P2 on the PR that
-// widened this fallback flagged that an RPC-engine-level failure (e.g. the
-// "EC-TIME: timeout" the engine's own `tokio::time::timeout` wrapper can
+// Deliberately an allowlist, not a blocklist: an RPC-engine-level failure
+// (e.g. the "EC-TIME: timeout" the engine's own `tokio::time::timeout` wrapper can
 // emit under executor saturation — crates/srv/src/backend/rpc/engine.rs)
 // does NOT carry the same guarantee: the handler could have completed
 // tx.try_send successfully server-side even though the client sees an
@@ -93,8 +92,8 @@ export interface UseAgentQuestionsResult {
  *  string, update ASK_USER_QUESTION_DENY_MESSAGE too — persistent/tests/send_input.rs's
  *  `ask_user_question_deny_message_matches_frontend_cancel_fallback_text`
  *  pins the literal on that side; the "handleCancel fallback" describe block
- *  below (asserting `sendMessage` was called with this exact text) pins it
- *  here. Neither test can see the other language's constant. */
+ *  in useAgentQuestions.test.ts (asserting `sendMessage` was called with this
+ *  exact text) pins it here. Neither test can see the other language's constant. */
 const CANCEL_FALLBACK_MESSAGE = "The user declined to answer this question.";
 
 export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuestionsResult {
