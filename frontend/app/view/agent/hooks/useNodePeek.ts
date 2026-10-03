@@ -33,8 +33,9 @@
  * left.
  */
 
-import { createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, type Accessor } from "solid-js";
 import { PEEK_ENTER_DELAY_MS } from "../components/hover-anchor";
+import { peekBridgeRow } from "../components/peek-bridge";
 import { isPrimaryButtonDown, onPrimaryButtonRelease } from "@/app/util/pointer-drag-state";
 
 export interface NodePeek {
@@ -49,6 +50,10 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
     const [isPeeking, setIsPeeking] = createSignal(false);
     const [rowEl, setRowEl] = createSignal<HTMLElement>();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // The enter delay elapsed while ANOTHER row's peek panel was bridging (the
+    // pointer crossing to it, peek-bridge.ts), so this peek is waiting for that
+    // to end. Cleared when the pointer leaves this row.
+    let waitingForBridge = false;
 
     const handlePeekEnter = () => {
         if (isPrimaryButtonDown()) return;
@@ -59,13 +64,41 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
         // still mount the overlay mid-drag.
         timer = setTimeout(() => {
             if (isPrimaryButtonDown()) return;
+            const bridging = peekBridgeRow();
+            // A bridge whose row has left the DOM is stale: ignore it.
+            if (bridging && bridging !== rowEl() && bridging.isConnected) {
+                waitingForBridge = true;
+                return;
+            }
             setIsPeeking(true);
         }, delayMs);
     };
     const handlePeekLeave = () => {
         clearTimeout(timer);
+        waitingForBridge = false;
         setIsPeeking(false);
     };
+
+    // The other panel's bridge ended without the pointer reaching it, and the
+    // pointer is still on this row (no leave since): open now. If the pointer
+    // did reach that panel, it left this row on the way, so nothing opens.
+    createEffect(
+        on(
+            peekBridgeRow,
+            (bridging) => {
+                if (bridging === null && waitingForBridge) {
+                    waitingForBridge = false;
+                    // A selection drag may have started while it waited: never
+                    // mount mid-drag (the reason for the checks in
+                    // handlePeekEnter). The release resync below reopens it if
+                    // the row is still hovered when the button comes up.
+                    if (isPrimaryButtonDown()) return;
+                    setIsPeeking(true);
+                }
+            },
+            { defer: true },
+        ),
+    );
 
     // `handlePeekEnter` drops the enter that arrives mid-drag. If the drag
     // then ends with the cursor still on this row, no further enter ever

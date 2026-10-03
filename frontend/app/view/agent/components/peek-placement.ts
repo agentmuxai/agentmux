@@ -31,7 +31,10 @@
  *
  * A panel that had to be cut (`scrolls`) is meant to be entered — its scroll
  * bar and text must be reachable — so `PeekOverlay` bridges the pointer from the
- * row to it.
+ * row to it. It also PINS such a panel (stops recomputing from the live pointer
+ * Y) and places it with `flushToRow`. Following the pointer made a tall panel
+ * unreachable: every move toward it moved it away and cut its height again, and
+ * the only way out crossed the next row, whose own peek then opened on top.
  *
  * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md
  */
@@ -107,6 +110,16 @@ export interface PeekVerticalInput {
     viewport: { width: number; height: number };
     /** The panel's height with no height cap, laid out at its final width. */
     naturalHeight: number;
+    /**
+     * Keep the panel's near edge on the row: below the pointer it starts no lower
+     * than the row's bottom, above it ends no higher than the row's top. For a
+     * panel the pointer is meant to ENTER (`PeekOverlay` pins those): with the
+     * plain `CURSOR_GAP_PX` offset there can be a strip of the NEXT row between
+     * this row and the panel, and crossing it opens that row's peek on top of
+     * this one. The pointer stays outside the panel either way, since it is on
+     * the row.
+     */
+    flushToRow?: boolean;
 }
 
 export interface PeekVertical {
@@ -119,7 +132,7 @@ export interface PeekVertical {
 }
 
 export function computePeekVertical(input: PeekVerticalInput): PeekVertical {
-    const { row, mouseY, container, viewport, naturalHeight } = input;
+    const { row, mouseY, container, viewport, naturalHeight, flushToRow } = input;
     const h = Math.max(0, naturalHeight);
     const windowBottom = viewport.height - VIEWPORT_MARGIN_PX;
 
@@ -135,13 +148,16 @@ export function computePeekVertical(input: PeekVerticalInput): PeekVertical {
         };
     }
 
+    // The panel's near edge on each side of the pointer (see `flushToRow`).
+    const belowTop = flushToRow ? Math.min(mouseY + CURSOR_GAP_PX, row.bottom) : mouseY + CURSOR_GAP_PX;
+    const aboveBottom = flushToRow ? Math.max(mouseY - CURSOR_GAP_PX, row.top) : mouseY - CURSOR_GAP_PX;
+
     // Fits on one side of the pointer, inside the container.
-    const belowTop = mouseY + CURSOR_GAP_PX;
     const containerLimit = container.bottom - BOTTOM_MARGIN_PX;
     if (belowTop + h <= containerLimit) {
         return { top: Math.max(belowTop, container.top), maxHeight: h, leavesContainer: false, scrolls: false };
     }
-    const aboveTop = mouseY - CURSOR_GAP_PX - h;
+    const aboveTop = aboveBottom - h;
     if (aboveTop >= container.top) {
         return { top: aboveTop, maxHeight: h, leavesContainer: false, scrolls: false };
     }
@@ -149,10 +165,10 @@ export function computePeekVertical(input: PeekVerticalInput): PeekVertical {
     // Leaves the container: the side of the pointer with more room, height cut
     // to that room so it cannot reach the pointer.
     const roomBelow = Math.max(0, windowBottom - belowTop);
-    const roomAbove = Math.max(0, mouseY - CURSOR_GAP_PX - VIEWPORT_MARGIN_PX);
+    const roomAbove = Math.max(0, aboveBottom - VIEWPORT_MARGIN_PX);
     const useBelow = h <= roomBelow || (h > roomAbove && roomBelow >= roomAbove);
     const maxHeight = Math.min(h, useBelow ? roomBelow : roomAbove);
-    const top = useBelow ? belowTop : mouseY - CURSOR_GAP_PX - maxHeight;
+    const top = useBelow ? belowTop : aboveBottom - maxHeight;
     return {
         top,
         maxHeight,

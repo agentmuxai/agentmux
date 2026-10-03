@@ -110,6 +110,34 @@ describe("computePeekVertical", () => {
         const v = computePeekVertical({ ...base, mouseY: null, naturalHeight: 100 });
         expect(v.top).toBe(300);
     });
+
+    // flushToRow: a panel the pointer must be able to ENTER keeps its near edge on
+    // the row, so there is no strip of the next row between the two.
+    describe("flushToRow", () => {
+        it("below the pointer: starts at the row's bottom when pointer + gap would pass it", () => {
+            const v = computePeekVertical({ ...base, mouseY: 325, naturalHeight: 5000, flushToRow: true });
+            expect(v.top).toBe(330); // ROW.bottom, not 325 + 12 = 337
+            expect(v.scrolls).toBe(true);
+        });
+
+        it("below the pointer: keeps pointer + gap when that is still on the row", () => {
+            const v = computePeekVertical({ ...base, mouseY: 305, naturalHeight: 5000, flushToRow: true });
+            expect(v.top).toBe(305 + CURSOR_GAP_PX);
+        });
+
+        it("above the pointer: ends at the row's top when pointer - gap would pass it", () => {
+            const row = { left: 400, right: 900, top: 840, bottom: 870 };
+            const v = computePeekVertical({
+                ...base, row, container: { top: 600, bottom: 900 }, mouseY: 845, naturalHeight: 5000, flushToRow: true,
+            });
+            expect(v.top + v.maxHeight).toBe(840); // ROW.top, not 845 - 12 = 833
+        });
+
+        it("off by default: pointer + gap, as before", () => {
+            const v = computePeekVertical({ ...base, mouseY: 325, naturalHeight: 5000 });
+            expect(v.top).toBe(325 + CURSOR_GAP_PX);
+        });
+    });
 });
 
 // The invariant this file exists for. The panel is portalled, so the row sees
@@ -136,12 +164,13 @@ describe("the pointer is never inside the placed panel", () => {
         for (const pane of panes) {
             for (const naturalHeight of heights) {
                 for (const naturalWidth of widths) {
-                    it(`${viewport.width}x${viewport.height} pane ${pane.left}-${pane.right}, panel ${naturalWidth}x${naturalHeight}`, () => {
+                  for (const flushToRow of [false, true]) {
+                    it(`${viewport.width}x${viewport.height} pane ${pane.left}-${pane.right}, panel ${naturalWidth}x${naturalHeight}${flushToRow ? ", flush" : ""}`, () => {
                         const container = { top: 60, bottom: viewport.height - 80 };
                         for (let y = container.top + 1; y < container.bottom; y += 7) {
                             const row = { ...pane, top: y - 10, bottom: y + 10 };
                             const hz = computePeekHorizontal({ row, viewport, naturalWidth });
-                            const v = computePeekVertical({ row, mouseY: y, container, viewport, naturalHeight });
+                            const v = computePeekVertical({ row, mouseY: y, container, viewport, naturalHeight, flushToRow });
                             const e = placedExtent(v);
                             const s = placedSpan(hz, naturalWidth);
                             for (const x of [pane.left + 1, (pane.left + pane.right) / 2, pane.right - 1]) {
@@ -157,6 +186,7 @@ describe("the pointer is never inside the placed panel", () => {
                             expect(s.right).toBeLessThanOrEqual(viewport.width);
                         }
                     });
+                  }
                 }
             }
         }
