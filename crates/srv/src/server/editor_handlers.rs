@@ -140,6 +140,8 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>, agent_mode: &st
     }
 }
 
+use crate::backend::fs_ops::remote as remote_fs;
+
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let mstore = state.mstore.clone();
@@ -433,10 +435,33 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // readeditorfile → read file from disk for the editor pane
+    let auth_key = state.auth_key.clone();
     engine.register_typed(
         "readeditorfile",
-        |cmd: CommandReadEditorFileData, _ctx| {
+        move |cmd: CommandReadEditorFileData, _ctx| {
+            let auth_key = auth_key.clone();
             async move {
+                // A file on an SSH host: read there by its helper, decoded
+                // here the same way (remote terminals spec §6.3).
+                if let Some(conn) = remote_fs::ssh_connection(cmd.connection.as_deref()) {
+                    let r = remote_fs::Remote {
+                        connection: conn,
+                        block_id: cmd.block_id.as_deref(),
+                        auth_key: &auth_key,
+                    };
+                    let (bytes, read_only) = remote_fs::read_file(r, &cmd.path)
+                        .await
+                        .map_err(|e| format!("readeditorfile: {e}"))?;
+                    let decoded = crate::backend::text_encoding::decode_file(&bytes);
+                    return Ok(CommandReadEditorFileResult {
+                        content: decoded.content,
+                        encoding: decoded.encoding,
+                        bom: decoded.bom.to_string(),
+                        line_ending: decoded.line_ending.to_string(),
+                        had_decode_errors: decoded.had_decode_errors,
+                        read_only,
+                    });
+                }
                 let expanded = expand_home_dir_safe(&cmd.path);
                 let path = expanded.as_path();
 
@@ -471,13 +496,35 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // writeeditorfile → write file to disk from the editor pane
+    let auth_key = state.auth_key.clone();
     engine.register_typed(
         "writeeditorfile",
-        |cmd: CommandWriteEditorFileData, _ctx| {
+        move |cmd: CommandWriteEditorFileData, _ctx| {
+            let auth_key = auth_key.clone();
             async move {
                 // Size guard: match readeditorfile's 10MB limit
                 if cmd.content.len() > 10_000_000 {
                     return Err("Content too large (>10MB)".to_string());
+                }
+
+                // A file on an SSH host: encoded here as for a local file,
+                // then written there atomically by its helper.
+                if let Some(conn) = remote_fs::ssh_connection(cmd.connection.as_deref()) {
+                    let (out_bytes, had_unmappable) = crate::backend::text_encoding::encode_file(
+                        &cmd.content,
+                        cmd.encoding.as_deref().unwrap_or(""),
+                        cmd.bom.as_deref().unwrap_or("none"),
+                        cmd.line_ending.as_deref().unwrap_or("lf"),
+                    );
+                    if had_unmappable {
+                        return Err("writeeditorfile: file contains characters that can't be represented in its encoding — save it as UTF-8 instead".to_string());
+                    }
+                    let r = remote_fs::Remote {
+                        connection: conn,
+                        block_id: cmd.block_id.as_deref(),
+                        auth_key: &auth_key,
+                    };
+                    return remote_fs::write_file(r, &cmd.path, out_bytes).await;
                 }
 
                 let expanded = expand_home_dir_safe(&cmd.path);

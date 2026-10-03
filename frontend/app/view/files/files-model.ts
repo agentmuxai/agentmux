@@ -25,6 +25,7 @@ import type { FsGitState } from "@/types/rpc/FsGitState";
 import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
+import { isSshConnection } from "@/app/view/term/termSettingsMenu";
 import { isValidAgentColor, pickAgentColor } from "@/app/view/agent/agent-color";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
@@ -40,6 +41,9 @@ export const META_HIDDEN = "files:hidden";
 export const META_SIDEBAR = "files:sidebar";
 export const META_PREVIEW = "files:preview";
 export const META_VIEW = "files:view";
+/** The SSH connection the pane is browsing (the key terminals use too);
+ *  absent for this computer. Remote terminals spec §6.3. */
+export const META_CONN = "connection";
 
 /** Entries per `fs.list` page (srv caps at 5000). */
 const PAGE = 1000;
@@ -174,6 +178,12 @@ export class FilesModel {
     private readonly setStatusSignal: (s: StatusMessage | null) => void;
     readonly places: () => FsPlace[];
     private readonly setPlaces: (p: FsPlace[]) => void;
+    /** The SSH connection shown, or "" for this computer. */
+    readonly connection: () => string;
+    private readonly setConnection: (c: string) => void;
+    /** SSH hosts for the Remote section of Places. */
+    readonly remotes: () => string[];
+    private readonly setRemotes: (r: string[]) => void;
     readonly agents: () => AgentPlace[];
     /** What git says about the folder shown: markers per entry, the branch. */
     readonly git: () => FsGitStatus | null;
@@ -233,6 +243,9 @@ export class FilesModel {
         [this.status, this.setStatusSignal] = createSignal<StatusMessage | null>(null);
         [this.revealRequest, this.setRevealRequest] = createSignal<{ name: string } | null>(null, { equals: false });
         [this.places, this.setPlaces] = createSignal<FsPlace[]>([]);
+        const conn = ctx.meta()?.[META_CONN];
+        [this.connection, this.setConnection] = createSignal(isSshConnection(conn) ? String(conn).trim() : "");
+        [this.remotes, this.setRemotes] = createSignal<string[]>([]);
         [this.agents, this.setAgents] = createSignal<AgentPlace[]>([]);
         [this.git, this.setGit] = createSignal<FsGitStatus | null>(null);
         this.gitStateOf = createMemo(() => new Map((this.git()?.entries ?? []).map((e) => [e.name, e.state])));
@@ -322,10 +335,12 @@ export class FilesModel {
     async start(): Promise<void> {
         const saved = this.ctx.meta()?.[META_PATH];
         await this.loadPlaces();
-        const home = this.places().find((p) => p.kind === "home")?.path ?? "~";
+        // On a host, its own home (`~`, which srv resolves there).
+        const home = this.connection() ? "~" : (this.places().find((p) => p.kind === "home")?.path ?? "~");
         const target = typeof saved === "string" && saved !== "" ? saved : home;
         await this.navigate(target, { push: false });
         void this.loadAgents();
+        void this.loadRemotes();
     }
 
     private async loadPlaces(): Promise<void> {
@@ -335,6 +350,48 @@ export class FilesModel {
         } catch {
             // Places stay empty; the breadcrumb still works.
         }
+    }
+
+    /** The user's SSH hosts (ssh config and those used this session), for
+     *  the Remote section of Places. */
+    private async loadRemotes(): Promise<void> {
+        try {
+            const names = await RpcApi.ConnListCommand(TabRpcClient, { timeout: 5000 });
+            if (!this.disposed) this.setRemotes((names ?? []).filter((n) => isSshConnection(n)));
+        } catch {
+            // No Remote section.
+        }
+    }
+
+    // ── Connections (remote terminals spec §6.3) ──────────────────────────────
+
+    /** Where a file request runs: the SSH connection shown, and this pane
+     *  for any ssh prompt; nothing for this computer. */
+    private on(): { connection?: string; block_id?: string } {
+        const c = this.connection();
+        return c ? { connection: c, block_id: this.blockId } : {};
+    }
+
+    /** Shows `path` on `connection` (an SSH host, or "" for this computer).
+     *  A different connection starts afresh: history, undo and the watcher
+     *  belong to the folders they were made in. */
+    async openOn(connection: string, path: string): Promise<void> {
+        const next = isSshConnection(connection) ? connection.trim() : "";
+        if (next !== this.connection()) {
+            this.stopWatching();
+            this.back = [];
+            this.forward = [];
+            this.undoStack = [];
+            this.setHistoryVersion((n) => n + 1);
+            this.setConnection(next);
+            void this.ctx.setMeta({ [META_CONN]: next || null });
+        }
+        await this.navigate(path, { push: false });
+    }
+
+    /** What a remote pane can't do yet, said once. */
+    notOnHost(what: string): void {
+        this.setStatus({ text: `${what} isn't available on ${this.connection()} yet.`, tone: "error" });
     }
 
     /** Each named agent's working folder, for the Agents section of Places
@@ -372,7 +429,7 @@ export class FilesModel {
 
     /** The protected macOS place `path` is in, if any. */
     protectedPlace(raw: string): FsPlace | null {
-        if (!isMacOS()) return null;
+        if (!isMacOS() || this.connection()) return null;
         // Compare the folder srv will list, not how it was spelled: `~/Documents`
         // or `Desktop/../Documents` from the path box, `mux view` or OpenFiles
         // must not slip past the gate (ReAgent on #4201).
@@ -508,7 +565,12 @@ export class FilesModel {
         let first = true;
         try {
             do {
-                const res = await RpcApi.FsListCommand(TabRpcClient, { path: dir, cursor, limit: PAGE });
+                const res = await RpcApi.FsListCommand(
+                    TabRpcClient,
+                    { path: dir, cursor, limit: PAGE, ...this.on() },
+                    // Over ssh, which may first ask the user something.
+                    this.connection() ? { timeout: 180_000 } : undefined
+                );
                 if (gen !== this.generation || this.disposed) return;
                 if (res.error) {
                     this.stopWatching();
@@ -596,6 +658,8 @@ export class FilesModel {
     // ── Watching ─────────────────────────────────────────────────────────────
 
     private async watch(dir: string): Promise<void> {
+        // A host's folders aren't watched: Refresh (F5) shows changes there.
+        if (this.connection()) return;
         if (this.watchedPath && samePath(this.watchedPath, dir)) return;
         this.stopWatching();
         this.watchedPath = dir;
@@ -649,7 +713,7 @@ export class FilesModel {
         if (newName === name) return true;
         const from = this.pathOf(name);
         try {
-            const res = await RpcApi.FsRenameCommand(TabRpcClient, { path: from, new_name: newName });
+            const res = await RpcApi.FsRenameCommand(TabRpcClient, { path: from, new_name: newName, ...this.on() });
             this.undoStack.push({ kind: "rename", from, to: res.new_path });
             this.setSelection({ names: new Set([newName]), focus: newName, anchor: newName });
             this.refresh();
@@ -670,7 +734,7 @@ export class FilesModel {
         let name = `${base}${ext}`;
         for (let i = 2; taken.has(name.toLowerCase()); i++) name = `${base} (${i})${ext}`;
         try {
-            const res = await RpcApi.FsCreateCommand(TabRpcClient, { parent: this.path(), name, kind });
+            const res = await RpcApi.FsCreateCommand(TabRpcClient, { parent: this.path(), name, kind, ...this.on() });
             this.undoStack.push({ kind: "create", path: res.path });
             await this.list(this.path(), { silent: true });
             batch(() => {
@@ -688,6 +752,10 @@ export class FilesModel {
     /** Delete key: to the OS Trash, no confirmation, with Undo (§7.3). */
     async trash(entries: FsEntry[]): Promise<void> {
         if (entries.length === 0) return;
+        if (this.connection()) {
+            this.setStatus({ text: `${this.connection()} has no Trash: Shift+Delete deletes permanently.`, tone: "info" });
+            return;
+        }
         const paths = entries.map((e) => this.pathOf(e.name));
         try {
             const res = await RpcApi.FsTrashCommand(TabRpcClient, { paths });
@@ -711,7 +779,10 @@ export class FilesModel {
     async deletePermanently(entries: FsEntry[]): Promise<void> {
         if (entries.length === 0) return;
         try {
-            const res = await RpcApi.FsDeleteCommand(TabRpcClient, { paths: entries.map((e) => this.pathOf(e.name)) });
+            const res = await RpcApi.FsDeleteCommand(TabRpcClient, {
+                paths: entries.map((e) => this.pathOf(e.name)),
+                ...this.on(),
+            });
             const problem = failures(res.results);
             const done = res.results.filter((r) => r.ok).length;
             this.setStatus(
@@ -735,8 +806,12 @@ export class FilesModel {
         }
         try {
             if (last.kind === "rename") {
-                await RpcApi.FsRenameCommand(TabRpcClient, { path: last.to, new_name: baseName(last.from) });
+                await RpcApi.FsRenameCommand(TabRpcClient, { path: last.to, new_name: baseName(last.from), ...this.on() });
                 this.setStatus({ text: `Renamed back to ${baseName(last.from)}`, tone: "info" });
+            } else if (last.kind === "create" && this.connection()) {
+                // Undoing a new item moves it to the Trash, and a host has
+                // none: deleting it for good is not an undo.
+                this.setStatus({ text: `Can't undo creating ${baseName(last.path)}: ${this.connection()} has no Trash`, tone: "error" });
             } else if (last.kind === "create") {
                 const res = await RpcApi.FsTrashCommand(TabRpcClient, { paths: [last.path] });
                 const problem = failures(res.results);
@@ -763,7 +838,7 @@ export class FilesModel {
     /** Ctrl+C / Ctrl+X: the selection onto the shared Hangar clipboard. */
     copyToClipboard(kind: "copy" | "cut", entries: FsEntry[]): void {
         if (entries.length === 0) return;
-        setClipboard({ kind, paths: entries.map((e) => this.pathOf(e.name)) });
+        setClipboard({ kind, paths: entries.map((e) => this.pathOf(e.name)), connection: this.connection() || undefined });
         const what = entries.length === 1 ? entries[0].name : `${entries.length} items`;
         this.setStatus({ text: kind === "cut" ? `Cut ${what}: paste to move it` : `Copied ${what}: paste to copy it`, tone: "info" }, 3000);
     }
@@ -776,6 +851,10 @@ export class FilesModel {
             return;
         }
         if (this.phase() !== "ready") return;
+        if ((c.connection ?? "") !== this.connection() || this.connection()) {
+            this.notOnHost("Copying and moving files to or from a host");
+            return;
+        }
         // A cut is used up only once srv has taken the move: a refused one
         // (protected place, folder into itself) keeps it (ReAgent on #4221).
         const started = await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths);
@@ -784,6 +863,10 @@ export class FilesModel {
 
     /** Copy or move `sources` into the folder shown. */
     async transfer(kind: "copy" | "move", sources: string[], destDir: string = this.path()): Promise<boolean> {
+        if (this.connection()) {
+            this.notOnHost("Copying and moving files");
+            return false;
+        }
         try {
             await this.ops.start(kind, sources, destDir);
             return true;
@@ -807,6 +890,11 @@ export class FilesModel {
      *  is dropped. */
     private refreshGit(): void {
         if (this.gitTimer) clearTimeout(this.gitTimer);
+        // git runs on this computer, not on the host.
+        if (this.connection()) {
+            this.setGit(null);
+            return;
+        }
         const dir = this.path();
         const gen = ++this.gitGeneration;
         this.gitTimer = setTimeout(() => {

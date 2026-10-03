@@ -60,6 +60,7 @@ const h = vi.hoisted(() => {
             { instance_name: "korp", definition_name: "korp", definition_id: "def-korp", working_directory: "C:\\Users\\a\\.agentmux\\agents\\korp" },
             { instance_name: "loap", definition_name: "loap", definition_id: "def-loap", working_directory: "C:\\Users\\a\\.agentmux\\agents\\loap" },
         ]),
+        ConnListCommand: vi.fn(async () => ["user@box", "wsl://Ubuntu"]),
         GetAgentContentCommand: vi.fn(async (_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "def-korp" ? { agent_id: req.agent_id, content_type: "ui:color", content: "#22c55e", updated_at: 0 } : null
         ),
@@ -340,6 +341,90 @@ describe("the Files pane: keyboard and selection", () => {
         expect([...v.model.selection().names]).toEqual(["a2.md", "a10.md", "b.txt"]);
         fireEvent.click(v.row("a10.md"), { ctrlKey: true });
         expect([...v.model.selection().names]).toEqual(["a2.md", "b.txt"]);
+    });
+});
+
+describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
+    const HOST_HOME = "/home/u";
+    const on = { connection: "user@box", block_id: "b1" };
+    beforeEach(() => {
+        h.state.dirs.set(HOST_HOME, [f("notes.md"), d("proj")]);
+    });
+
+    it("lists the host's folder through srv, unwatched, with no git, and says where it is", async () => {
+        const v = mount({ connection: "user@box", "files:path": HOST_HOME });
+        await waitFor(() => expect(v.names()).toEqual(["proj", "notes.md"]));
+        expect(h.rpc.FsListCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ path: HOST_HOME, ...on }), expect.anything());
+        expect(h.rpc.FsWatchCommand).not.toHaveBeenCalled();
+        expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalled();
+        expect(v.container.querySelector(".files-crumb-host")?.textContent).toContain("user@box");
+        // The host is listed under Remote, and marked as the one shown.
+        await waitFor(() => expect(v.container.querySelector(".files-place-active")?.textContent).toContain("user@box"));
+        expect(v.container.textContent).not.toContain("wsl://Ubuntu");
+    });
+
+    it("a Remote place opens the host's home; a local place comes back to this computer", async () => {
+        const v = mount();
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        h.state.dirs.set("~", [f("notes.md"), d("proj")]);
+        const host = await waitFor(() => {
+            const b = [...v.container.querySelectorAll(".files-place")].find((x) => x.textContent?.includes("user@box"));
+            if (!b) throw new Error("no Remote place yet");
+            return b;
+        });
+        fireEvent.click(host);
+        await waitFor(() => expect(v.names()).toEqual(["proj", "notes.md"]));
+        expect(v.meta().connection).toBe("user@box");
+        expect(h.rpc.FsListCommand).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ path: "~", ...on }), expect.anything());
+        // Back: nothing from the host's history.
+        expect(v.model.canBack()).toBe(false);
+        const home = [...v.container.querySelectorAll(".files-place")].find((b) => b.textContent?.includes("Home"))!;
+        fireEvent.click(home);
+        await waitFor(() => expect(v.names()).toHaveLength(4));
+        expect(v.meta().connection).toBeUndefined();
+        expect(h.rpc.FsListCommand).toHaveBeenLastCalledWith(expect.anything(), { path: HOME, cursor: undefined, limit: 1000 }, undefined);
+    });
+
+    it("deletes on the host, but has no Trash and no undo of a new item", async () => {
+        const v = mount({ connection: "user@box", "files:path": HOST_HOME });
+        await waitFor(() => expect(v.names()).toHaveLength(2));
+        fireEvent.click(v.row("notes.md"));
+        fireEvent.keyDown(v.list(), { key: "Delete" });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("user@box has no Trash"));
+        expect(h.rpc.FsTrashCommand).not.toHaveBeenCalled();
+        fireEvent.keyDown(v.list(), { key: "Delete", shiftKey: true });
+        fireEvent.click(screen.getByText("Delete permanently"));
+        await waitFor(() => expect(h.rpc.FsDeleteCommand).toHaveBeenCalledWith(expect.anything(), { paths: [`${HOST_HOME}/notes.md`], ...on }));
+
+        await v.model.createNew("dir");
+        expect(h.rpc.FsCreateCommand).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ parent: HOST_HOME, ...on }));
+        await v.model.undo();
+        expect(h.rpc.FsTrashCommand).not.toHaveBeenCalled();
+        expect(v.container.querySelector(".files-status")?.textContent).toContain("has no Trash");
+    });
+
+    it("refuses what would hand the host's paths to this computer", async () => {
+        const v = mount({ connection: "user@box", "files:path": HOST_HOME });
+        await waitFor(() => expect(v.names()).toHaveLength(2));
+        // A text file opens in an editor on the host.
+        fireEvent.dblClick(v.row("notes.md"));
+        await waitFor(() =>
+            expect(h.rpcCall).toHaveBeenCalledWith(
+                "pane.open",
+                expect.objectContaining({ view: "editor", file: `${HOST_HOME}/notes.md`, meta: { connection: "user@box" } }),
+                {}
+            )
+        );
+        // A local clipboard isn't pasted onto the host, nor a drop copied.
+        setClipboard({ kind: "copy", paths: [`${HOME}\b.txt`] });
+        await v.model.paste();
+        expect(await v.model.transfer("copy", [`${HOME}\b.txt`])).toBe(false);
+        expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+        // Nothing is dragged out.
+        const drag = new Event("dragstart", { bubbles: true, cancelable: true });
+        Object.defineProperty(drag, "dataTransfer", { value: { setData: vi.fn(), effectAllowed: "" } });
+        v.row("notes.md").dispatchEvent(drag);
+        expect(drag.defaultPrevented).toBe(true);
     });
 });
 

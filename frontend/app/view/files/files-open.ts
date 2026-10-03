@@ -45,11 +45,24 @@ export function openTargetOf(name: string): OpenTarget {
 
 /** Opens `path` in a new pane of `view` to the right of the Files pane; a
  *  media file joins the Media pane on screen as a tab, if there is one. */
-export async function openInPane(view: "editor" | "media", path: string, besideBlockId: string): Promise<void> {
+export async function openInPane(
+    view: "editor" | "media",
+    path: string,
+    besideBlockId: string,
+    connection?: string
+): Promise<void> {
+    if (connection && view === "media") throw new Error(`Media files on ${connection} can't be shown yet`);
     if (view === "media" && (await openInMediaPaneOnScreen(path))) return;
     await TabRpcClient.rpcCall(
         "pane.open",
-        { view, file: path, split_direction: "right", split_reference_block_id: besideBlockId },
+        {
+            view,
+            file: path,
+            split_direction: "right",
+            split_reference_block_id: besideBlockId,
+            // An editor on the host the file is on (editor-model's connection()).
+            ...(connection ? { meta: { connection } } : {}),
+        },
         {}
     );
 }
@@ -62,11 +75,18 @@ export async function revealInOs(path: string): Promise<void> {
     await RpcApi.FsRevealCommand(TabRpcClient, { path });
 }
 
-/** Opens a terminal in `dir`, to the right of the Files pane. */
-export async function openTerminalHere(dir: string, besideBlockId: string): Promise<void> {
+/** Opens a terminal in `dir`, to the right of the Files pane; on
+ *  `connection` (an SSH host) when given, as the folder is there. */
+export async function openTerminalHere(dir: string, besideBlockId: string, connection?: string): Promise<void> {
     await TabRpcClient.rpcCall(
         "pane.open",
-        { view: "term", cwd: dir, split_direction: "right", split_reference_block_id: besideBlockId },
+        {
+            view: "term",
+            cwd: dir,
+            split_direction: "right",
+            split_reference_block_id: besideBlockId,
+            ...(connection ? { meta: { connection } } : {}),
+        },
         {}
     );
 }
@@ -85,11 +105,14 @@ function paneOf(blockId: string): { model: LayoutModel; nodeId: string } | null 
     return model && node ? { model, nodeId: node.id } : null;
 }
 
-/** A new Hangar tab on `dir`, beside `fromBlockId` in its pane. */
-export async function openFolderInNewTab(fromBlockId: string, dir: string): Promise<void> {
+/** A new Hangar tab on `dir`, beside `fromBlockId` in its pane; on
+ *  `connection` (an SSH host) when given. */
+export async function openFolderInNewTab(fromBlockId: string, dir: string, connection?: string): Promise<void> {
     const pane = paneOf(fromBlockId);
     if (!pane) throw new Error("This pane isn't in the window tab on screen.");
-    await addWidgetAsPaneTab(pane.model, pane.nodeId, { meta: { view: "files", "files:path": dir } });
+    await addWidgetAsPaneTab(pane.model, pane.nodeId, {
+        meta: { view: "files", "files:path": dir, ...(connection ? { connection } : {}) },
+    });
 }
 
 /** Close `blockId`'s pane tab, but never the pane itself: false when it is

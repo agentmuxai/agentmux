@@ -17,6 +17,15 @@ use serde::{Deserialize, Serialize};
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandReadEditorFileData {
     pub path: String,
+    /// An SSH connection the file is on (`fs_ops::remote`); absent, local or
+    /// WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 /// Response for `readeditorfile`.
@@ -63,6 +72,15 @@ pub struct CommandWriteEditorFileData {
     #[serde(default)]
     #[ts(optional)]
     pub line_ending: Option<String>,
+    /// An SSH connection the file is on (`fs_ops::remote`); absent, local or
+    /// WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 /// Request for `listeditordir`.
