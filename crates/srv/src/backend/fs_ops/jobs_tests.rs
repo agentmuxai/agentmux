@@ -86,6 +86,8 @@ fn req(kind: FsOpKind, sources: &[&Path], dest_dir: &Path) -> FsOpStartReq {
         sources: sources.iter().map(|p| s(p)).collect(),
         dest_dir: s(dest_dir),
         block_id: "block-1".to_string(),
+        source_connection: None,
+        connection: None,
     }
 }
 

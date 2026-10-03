@@ -13,9 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
-use crate::fsproto::{
-    self, Entry, ErrKind, Kind, Reply, Request, Splitter, MAX_READ, MAX_WRITE,
-};
+use crate::fsproto::{self, Entry, ErrKind, Kind, Reply, Request, Splitter, MAX_READ, MAX_WRITE};
 
 /// Serve requests from `input`, answering on `output`, until `input` ends.
 /// `home` is the user's home directory ([`home_dir`]).
@@ -108,6 +106,26 @@ pub fn handle(home: &Path, req: Request) -> Reply {
                 };
             }
             write_atomic(&resolve(home, &path), &data).map(|()| Reply::Done)
+        }
+        Request::Append { path, data } => {
+            if data.len() > MAX_WRITE {
+                return Reply::Err {
+                    kind: ErrKind::TooLarge,
+                    message: format!("over the {} MB a write may be", MAX_WRITE >> 20),
+                };
+            }
+            let p = resolve(home, &path);
+            // Only a file already there: never makes one, never follows a
+            // link somewhere else.
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.is_file() => fs::OpenOptions::new()
+                    .append(true)
+                    .open(&p)
+                    .and_then(|mut f| f.write_all(&data))
+                    .map(|()| Reply::Done),
+                Ok(_) => return invalid("only a regular file can be appended to"),
+                Err(e) => Err(e),
+            }
         }
         Request::Mkdir { path, parents } => {
             let p = resolve(home, &path);
@@ -568,6 +586,58 @@ mod tests {
         assert_eq!(resolve(h, "/srv/data//"), Path::new("/srv/data"));
         assert_eq!(resolve(h, "rel/"), Path::new("/home/u/rel"));
         assert_eq!(resolve(h, "~"), h);
+    }
+
+    #[test]
+    fn append_adds_to_an_existing_file_only() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        let r = exchange(
+            h,
+            &[
+                Request::Write {
+                    path: "~/up".into(),
+                    data: b"ab".to_vec(),
+                },
+                Request::Append {
+                    path: "~/up".into(),
+                    data: b"cd".to_vec(),
+                },
+                Request::Append {
+                    path: "~/missing".into(),
+                    data: b"x".to_vec(),
+                },
+                Request::Append {
+                    path: "~".into(),
+                    data: b"x".to_vec(),
+                },
+            ],
+        );
+        assert_eq!((&r[0], &r[1]), (&Reply::Done, &Reply::Done));
+        assert!(
+            matches!(
+                r[2],
+                Reply::Err {
+                    kind: ErrKind::NotFound,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[2]
+        );
+        assert!(
+            matches!(
+                r[3],
+                Reply::Err {
+                    kind: ErrKind::Invalid,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[3]
+        );
+        assert_eq!(fs::read(h.join("up")).unwrap(), b"abcd");
+        assert!(!h.join("missing").exists());
     }
 
     #[test]

@@ -213,6 +213,31 @@ impl RemoteFiles {
         .await
     }
 
+    /// Add `data` to the end of an existing file (a big upload, in pieces).
+    pub async fn append(&self, path: &str, data: Vec<u8>) -> Result<(), RemoteError> {
+        self.done(Request::Append {
+            path: path.into(),
+            data,
+        })
+        .await
+    }
+
+    /// One range of a file: up to `len` bytes from `offset`, and whether the
+    /// file ends there.
+    pub async fn read_range(&self, path: &str, offset: u64, len: u32) -> Result<(Vec<u8>, bool), RemoteError> {
+        match self
+            .call(Request::Read {
+                path: path.into(),
+                offset,
+                len: len.min(fsproto::MAX_READ),
+            })
+            .await?
+        {
+            Reply::Read { data, eof } => Ok((data, eof)),
+            r => Err(unexpected(&r)),
+        }
+    }
+
     pub async fn mkdir(&self, path: &str, parents: bool) -> Result<(), RemoteError> {
         self.done(Request::Mkdir {
             path: path.into(),
@@ -477,6 +502,23 @@ pub(crate) mod testing {
         home: std::path::PathBuf,
         size: usize,
     ) -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
+        helper_with(home, size, Duration::ZERO)
+    }
+
+    /// [`helper`] that takes `delay` over each request, as a slow link
+    /// would: long enough to cancel something halfway.
+    pub(crate) fn slow_helper(
+        home: std::path::PathBuf,
+        delay: Duration,
+    ) -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
+        helper_with(home, 1 << 20, delay)
+    }
+
+    fn helper_with(
+        home: std::path::PathBuf,
+        size: usize,
+        delay: Duration,
+    ) -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
         let (client_read, mut helper_write) = tokio::io::duplex(size);
         let (mut helper_read, client_write) = tokio::io::duplex(size);
         tokio::spawn(async move {
@@ -488,6 +530,9 @@ pub(crate) mod testing {
                     Ok(n) => n,
                 };
                 for body in s.push(&buf[..n]).unwrap() {
+                    if !delay.is_zero() {
+                        tokio::time::sleep(delay).await;
+                    }
                     let (id, req) = Request::decode(&body).unwrap();
                     let reply = agentmux_remote::serve::handle(&home, req);
                     helper_write.write_all(&reply.encode(id)).await.unwrap();

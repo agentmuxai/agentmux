@@ -226,13 +226,38 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // own thread, publishing `files:op` to the block.
     {
         let broker = state.broker.clone();
+        let auth_key = state.auth_key.clone();
         engine.register_typed("fs.op.start", move |cmd: FsOpStartReq, _ctx| {
             let broker = broker.clone();
+            let auth_key = auth_key.clone();
             async move {
                 if cmd.block_id.is_empty() {
                     return Err("No pane was named to report the operation's progress to.".to_string());
                 }
                 let emit = fs_ops::jobs::broker_emitter(broker, cmd.block_id.clone());
+                // Either side on an SSH host: the host transfer (same events,
+                // cancel and questions), its ssh prompts in this pane's window.
+                let from = fs_remote::ssh_connection(cmd.source_connection.as_deref());
+                let to = fs_remote::ssh_connection(cmd.connection.as_deref());
+                if from.is_some() || to.is_some() {
+                    let ask = crate::backend::remote::sessions::AskIn {
+                        block_id: &cmd.block_id,
+                        auth_key: &auth_key,
+                    };
+                    let mut ends = Vec::with_capacity(2);
+                    for conn in [from, to] {
+                        ends.push(match conn {
+                            None => fs_ops::host_jobs::End::Local,
+                            Some(c) => crate::backend::remote::files::connect(c, Some(ask))
+                                .await
+                                .map(fs_ops::host_jobs::End::host)
+                                .map_err(|e| e.message)?,
+                        });
+                    }
+                    let dest = ends.pop().expect("two ends");
+                    let src = ends.pop().expect("two ends");
+                    return fs_ops::host_jobs::start(cmd.kind, src, cmd.sources, dest, cmd.dest_dir, emit).await;
+                }
                 blocking(move || fs_ops::jobs::JOBS.start(&cmd, emit)).await?
             }
         });

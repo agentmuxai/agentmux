@@ -196,6 +196,55 @@ impl Jobs {
         Ok(FsOpStartResult { op_id })
     }
 
+    /// Run `work` as an op of `kind` in this registry, the way [`Self::start`]
+    /// runs a local one: its own thread, a slot, cancel and conflict answers
+    /// through `fs.op.cancel` and `fs.op.resolve`, progress as `files:op`
+    /// events, and the audit line at the end (`dest` and `requested` are for
+    /// it). For transfers that touch an SSH host (`host_jobs`).
+    pub(super) fn start_host(
+        self: &Arc<Self>,
+        kind: FsOpKind,
+        requested: usize,
+        dest: String,
+        emit: Emit,
+        work: Box<dyn FnOnce(&mut HostJob<'_, '_>) -> Result<(), HostStop> + Send>,
+    ) -> Result<FsOpStartResult, String> {
+        let op_id = uuid::Uuid::new_v4().to_string();
+        let control = Arc::new(OpControl::default());
+        lock(&self.ops).insert(op_id.clone(), control.clone());
+        let jobs = self.clone();
+        let id = op_id.clone();
+        let spawned = std::thread::Builder::new().name("fs-op-host".to_string()).spawn(move || {
+            let _registered = Registered { jobs: &jobs, op_id: &id };
+            let mut job = Job::new(&jobs.config, id.clone(), kind, control.clone(), emit);
+            job.emit_now(FsOpEventState::Running);
+            let ending = match jobs.take_slot(&control) {
+                None => Ending::Canceled,
+                Some(_slot) => {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let mut host = HostJob { job: &mut job };
+                        work(&mut host)
+                    }));
+                    match result {
+                        Ok(Ok(())) => Ending::Done,
+                        Ok(Err(HostStop::Canceled)) => Ending::Canceled,
+                        Ok(Err(HostStop::Failed(e))) => Ending::Failed(e),
+                        Err(_) => {
+                            tracing::error!(op_id = %id, "fs.op: a host transfer panicked");
+                            Ending::Failed("The operation stopped unexpectedly.".to_string())
+                        }
+                    }
+                }
+            };
+            job.finish(ending, requested, &dest);
+        });
+        if let Err(e) = spawned {
+            lock(&self.ops).remove(&op_id);
+            return Err(format!("Couldn't start the operation: {e}"));
+        }
+        Ok(FsOpStartResult { op_id })
+    }
+
     /// `fs.op.resolve`. Only an op blocked on a conflict takes an answer: one
     /// stored ahead of time would silently decide whatever conflict came
     /// next.
@@ -262,7 +311,59 @@ impl Jobs {
                 })
             }
         };
-        job.finish(ending, &plan);
+        job.finish(ending, plan.requested, &display_path(&plan.dest_dir));
+    }
+}
+
+/// How a host transfer stopped early.
+pub(super) enum HostStop {
+    /// Canceled, or nobody answered a conflict (the job says why).
+    Canceled,
+    /// It couldn't go on at all.
+    Failed(String),
+}
+
+/// A host transfer's handle on its op: the same progress, failures, cancel
+/// and conflict questions as a local copy's (`host_jobs`).
+pub(super) struct HostJob<'j, 'c> {
+    job: &'j mut Job<'c>,
+}
+
+impl HostJob<'_, '_> {
+    pub fn is_canceled(&self) -> bool {
+        self.job.control.is_canceled()
+    }
+
+    /// Bytes per read and write.
+    pub fn chunk_size(&self) -> usize {
+        self.job.config.chunk_size
+    }
+
+    /// What is about to be copied, counted as progress is.
+    pub fn add_total(&mut self, items: u64, bytes: u64) {
+        self.job.total_items += items;
+        self.job.total_bytes += bytes;
+        self.job.emit_now(FsOpEventState::Running);
+    }
+
+    pub fn set_current(&mut self, path: &str) {
+        self.job.current = Some(path.to_string());
+    }
+
+    pub fn advance(&mut self, items: u64, bytes: u64) {
+        self.job.advance(Measure { items, bytes });
+        self.job.tick();
+    }
+
+    pub fn fail(&mut self, path: &str, error: String) {
+        tracing::debug!(op_id = %self.job.op_id, path = %path, error = %error, "fs.op: an item failed");
+        self.job.failures.push(FsOpResult { path: path.to_string(), ok: false, error: Some(error) });
+    }
+
+    /// The user's answer about `dest` already being there; `None` when
+    /// canceled or nobody answered in time.
+    pub fn ask(&mut self, src: &str, src_side: EntrySide, dest: &str, dest_side: EntrySide) -> Option<FsOpChoice> {
+        self.job.ask_about(src, src_side, dest, dest_side)
     }
 }
 
@@ -429,6 +530,22 @@ enum Ending {
     Failed(String),
 }
 
+/// One side of a conflict, as the prompt shows it: a local entry's metadata
+/// or a host's (`host_jobs`).
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct EntrySide {
+    pub is_dir: bool,
+    /// A file's size; `None` for a folder.
+    pub size: Option<u64>,
+    pub mtime: Option<u64>,
+}
+
+impl EntrySide {
+    fn of(meta: &std::fs::Metadata) -> Self {
+        Self { is_dir: meta.is_dir(), size: meta.is_file().then_some(meta.len()), mtime: mtime_ms(meta) }
+    }
+}
+
 /// Entries and file bytes under a path, counted the same way as progress.
 #[derive(Debug, Clone, Copy, Default)]
 struct Measure {
@@ -554,7 +671,7 @@ impl<'a> Job<'a> {
         self.advance(m);
     }
 
-    fn finish(&mut self, ending: Ending, plan: &Plan) {
+    fn finish(&mut self, ending: Ending, requested: usize, dest: &str) {
         let (state, error, outcome) = match ending {
             Ending::Done => (FsOpEventState::Done, None, "done"),
             Ending::Canceled => (FsOpEventState::Canceled, self.stop_reason.clone(), "canceled"),
@@ -564,8 +681,8 @@ impl<'a> Job<'a> {
             op = "fs.op",
             op_id = %self.op_id,
             kind = self.verb(),
-            sources = plan.requested,
-            dest = %display_path(&plan.dest_dir),
+            sources = requested,
+            dest = %dest,
             outcome,
             done_items = self.done_items,
             total_items = self.total_items,
@@ -706,6 +823,12 @@ impl<'a> Job<'a> {
     /// Block in `conflict` until answered. `None` if canceled, or if the
     /// wait limit passed (then `stop_reason` says so).
     fn ask(&mut self, src: &Path, meta: &std::fs::Metadata, dest: &Path, dest_meta: &std::fs::Metadata) -> Option<FsOpChoice> {
+        self.ask_about(&display_path(src), EntrySide::of(meta), &display_path(dest), EntrySide::of(dest_meta))
+    }
+
+    /// [`Self::ask`] for any two entries, local or on a host, by their display
+    /// paths and what they are.
+    fn ask_about(&mut self, src: &str, meta: EntrySide, dest: &str, dest_meta: EntrySide) -> Option<FsOpChoice> {
         if let Some(choice) = self.sticky {
             return Some(choice);
         }
@@ -718,14 +841,14 @@ impl<'a> Job<'a> {
         }
         let mut event = self.event(FsOpEventState::Conflict);
         event.conflict = Some(FsOpConflict {
-            source: display_path(src),
-            dest: display_path(dest),
-            source_is_dir: meta.is_dir(),
-            dest_is_dir: dest_meta.is_dir(),
-            source_size: meta.is_file().then_some(meta.len()),
-            dest_size: dest_meta.is_file().then_some(dest_meta.len()),
-            source_mtime: mtime_ms(meta),
-            dest_mtime: mtime_ms(dest_meta),
+            source: src.to_string(),
+            dest: dest.to_string(),
+            source_is_dir: meta.is_dir,
+            dest_is_dir: dest_meta.is_dir,
+            source_size: meta.size,
+            dest_size: dest_meta.size,
+            source_mtime: meta.mtime,
+            dest_mtime: dest_meta.mtime,
         });
         (self.emit)(&event);
 
@@ -741,10 +864,8 @@ impl<'a> Job<'a> {
                 }
                 let now = Instant::now();
                 if now >= deadline {
-                    self.stop_reason = Some(format!(
-                        "No one answered about “{}”, so the operation stopped.",
-                        file_name_lossy(src)
-                    ));
+                    let name = src.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or(src);
+                    self.stop_reason = Some(format!("No one answered about “{name}”, so the operation stopped."));
                     break None;
                 }
                 question = self.control.answered.wait_timeout(question, deadline - now).unwrap_or_else(|e| e.into_inner()).0;

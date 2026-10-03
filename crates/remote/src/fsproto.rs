@@ -51,6 +51,13 @@ pub enum Request {
         path: String,
         data: Vec<u8>,
     },
+    /// Add `data` to the end of an existing file (at most [`MAX_WRITE`]): a
+    /// big upload, a piece at a time, into a temp file that is then renamed
+    /// into place. Never creates the file.
+    Append {
+        path: String,
+        data: Vec<u8>,
+    },
     Mkdir {
         path: String,
         parents: bool,
@@ -172,6 +179,7 @@ mod op {
     pub const MKDIR: u8 = 6;
     pub const RENAME: u8 = 7;
     pub const DELETE: u8 = 8;
+    pub const APPEND: u8 = 9;
 }
 
 mod status {
@@ -311,6 +319,9 @@ impl Request {
             Request::Write { path, data } => {
                 w.u8(op::WRITE).str(path).bytes(data);
             }
+            Request::Append { path, data } => {
+                w.u8(op::APPEND).str(path).bytes(data);
+            }
             Request::Mkdir { path, parents } => {
                 w.u8(op::MKDIR).str(path).u8(u8::from(*parents));
             }
@@ -342,6 +353,10 @@ impl Request {
                 len: r.u32()?,
             },
             op::WRITE => Request::Write {
+                path: r.str()?,
+                data: r.bytes()?,
+            },
+            op::APPEND => Request::Append {
                 path: r.str()?,
                 data: r.bytes()?,
             },
@@ -504,6 +519,10 @@ mod tests {
             Request::Write {
                 path: "/x".into(),
                 data: vec![0, 1, 2, 255],
+            },
+            Request::Append {
+                path: "/x".into(),
+                data: vec![3, 4],
             },
             Request::Mkdir {
                 path: "/d".into(),
