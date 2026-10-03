@@ -417,6 +417,12 @@ pub const COMMAND_CONN_ENSURE: &str = "connensure";
 pub const COMMAND_CONN_CONNECT: &str = "connconnect";
 /// The connection name: disconnect it.
 pub const COMMAND_CONN_DISCONNECT: &str = "conndisconnect";
+/// `{ connname, blockid? }`: the durable sessions on an SSH host, each with
+/// the pane holding it (`remote::sessions`). `blockid` is the asking pane,
+/// whose window shows any ssh prompt.
+pub const COMMAND_CONN_SESSIONS: &str = "connsessions";
+/// `{ connname, sessionid, blockid? }`: end one; `true` if the host had it.
+pub const COMMAND_CONN_SESSION_END: &str = "connsessionend";
 /// Ambient call outcomes since srv started, by purpose then outcome label
 /// (`ambient::outcome::snapshot`). For the Instance panel.
 pub const COMMAND_AMBIENT_OUTCOMES: &str = "ambient.outcomes";

@@ -12,6 +12,7 @@
 
 use super::*;
 use crate::backend::mps::Broker;
+use crate::backend::remote::sessions;
 use crate::backend::remote::status::{self, state};
 use crate::backend::remote::ConnTarget;
 
@@ -102,6 +103,90 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // A host's durable sessions, for the pane menu's "Sessions on <host>"
+    // (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
+    // UI's other connection calls do. Ending one is the user's decision,
+    // made in the host's own window (`ask_user`): anything holding srv's
+    // auth key can send this RPC, an agent included, but none can answer
+    // that window.
+    let (store, auth_key) = (state.mstore.clone(), state.auth_key.clone());
+    engine.register_handler(
+        COMMAND_CONN_SESSIONS,
+        Box::new(move |data, _ctx| {
+            let (store, auth_key) = (store.clone(), auth_key.clone());
+            Box::pin(async move {
+                let (conn, block) = (str_field(&data, "connname"), str_field(&data, "blockid"));
+                let ask = (!block.is_empty()).then_some(sessions::AskIn {
+                    block_id: &block,
+                    auth_key: &auth_key,
+                });
+                let list = sessions::list(&store, &conn, ask).await?;
+                Ok(Some(serde_json::json!(list)))
+            })
+        }),
+    );
+    let app = state.clone();
+    engine.register_handler(
+        COMMAND_CONN_SESSION_END,
+        Box::new(move |data, _ctx| {
+            let app = app.clone();
+            Box::pin(async move {
+                let (conn, id, block) = (
+                    str_field(&data, "connname"),
+                    str_field(&data, "sessionid"),
+                    str_field(&data, "blockid"),
+                );
+                if block.is_empty() {
+                    return Err("ending a session needs the pane asking, to ask the user in".into());
+                }
+                if !crate::backend::blockcontroller::durable_ssh::valid_session_id(&id) {
+                    return Err(format!("{:?} is not a session id", one_line(&id, 80)));
+                }
+                confirm_session_end(&app, &block, &conn, &id).await?;
+                let ask = sessions::AskIn {
+                    block_id: &block,
+                    auth_key: &app.auth_key,
+                };
+                let ended = sessions::end(&conn, &id, Some(ask)).await?;
+                Ok(Some(serde_json::json!(ended)))
+            })
+        }),
+    );
+}
+
+/// The user's yes to ending session `id` on `conn`, asked in the window of
+/// pane `block`. `Err` unless they said yes.
+async fn confirm_session_end(
+    state: &AppState,
+    block: &str,
+    conn: &str,
+    id: &str,
+) -> Result<(), String> {
+    // `consent`: a plain question of AgentMux's own, not a relayed ssh prompt.
+    let question = serde_json::json!({
+        "kind": "consent",
+        "title": format!("End a session on {}", one_line(conn, 80)),
+        "message": format!(
+            "End the durable session {id} on {}?\n\nIts shell, and everything running in it, stops. This cannot be undone.",
+            one_line(conn, 80)
+        ),
+        "ok_label": "End Session",
+        "cancel_label": "Keep It",
+    });
+    let answer = ask_user(state, block, question).await?;
+    if answer.answered && answer.approve {
+        Ok(())
+    } else {
+        Err("kept: the user chose not to end it".to_string())
+    }
+}
+
+fn str_field(data: &serde_json::Value, key: &str) -> String {
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// What `connensure` and `connconnect` do: accept `local`; accept a WSL distro

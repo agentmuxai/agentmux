@@ -44,7 +44,7 @@ use super::{
 use crate::backend::eventbus::EventBus;
 use crate::backend::mps;
 use crate::backend::obj::{self, MetaMapType};
-use crate::backend::remote::conn::SshDest;
+use crate::backend::remote::host::HostSsh;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
 
@@ -350,12 +350,7 @@ impl Controller for DurableSshController {
         _force: bool,
     ) -> Result<(), String> {
         let conn = obj::meta_get_string(&block_meta, super::META_KEY_CONNECTION, "");
-        let dest = match crate::backend::remote::ConnTarget::parse(&conn) {
-            Ok(crate::backend::remote::ConnTarget::Ssh(d)) => d,
-            _ => return Err(format!("{conn:?} is not an SSH connection")),
-        };
-        let ssh_path = crate::backend::remote::ssh::binary()
-            .ok_or_else(crate::backend::remote::ssh::missing_binary_message)?;
+        let mut host = HostSsh::for_connection(&conn)?;
         {
             let inner = self.inner.lock().unwrap();
             if inner.status == STATUS_RUNNING {
@@ -381,36 +376,15 @@ impl Controller for DurableSshController {
         self.publish();
         // ssh's prompts go to the user (this pane's window), revoked when the
         // run ends.
-        let (askpass_env, askpass_grant) = match crate::backend::remote::askpass::program() {
-            Some(program) => {
-                use crate::backend::remote::askpass;
-                let secret = askpass::grant(askpass::AskpassGrant {
-                    agent_block_id: self.block_id.clone(),
-                    agent: String::new(),
-                    connection: conn.clone(),
-                    user_pane: true,
-                });
-                let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
-                (
-                    askpass::ssh_env(&secret, &program, &local_url, &self.auth_key),
-                    Some(askpass::Revoke(secret)),
-                )
-            }
-            None => (Vec::new(), None),
-        };
+        let askpass_grant = host.ask_user_in(&self.block_id, &conn, &self.auth_key);
         let run = Run {
             block_id: self.block_id.clone(),
             conn,
-            dest,
-            ssh_path,
-            control_dir: crate::backend::remote::ssh::control_dir(
-                &crate::backend::base::get_mux_config_dir(),
-            ),
+            host,
             session,
             size,
             broker: self.broker.clone(),
             filestore: self.filestore.clone(),
-            askpass_env,
             _askpass_grant: askpass_grant,
         };
         let this = super::get_controller(&self.block_id);
@@ -599,16 +573,13 @@ fn append_checked(broker: &mps::Broker, fs: &FileStore, block_id: &str, data: &[
 struct Run {
     block_id: String,
     conn: String,
-    dest: SshDest,
-    ssh_path: std::path::PathBuf,
-    /// ssh's connection-sharing directory (macOS and Linux), if any.
-    control_dir: Option<std::path::PathBuf>,
+    /// The host, with askpass for ssh's prompts.
+    host: HostSsh,
     session: String,
     size: (u16, u16),
     broker: Option<Arc<mps::Broker>>,
     filestore: Option<Arc<FileStore>>,
-    /// askpass for ssh's prompts, and the grant behind it (revoked on drop).
-    askpass_env: Vec<(String, String)>,
+    /// The askpass grant behind `host`'s prompts (revoked on drop).
     _askpass_grant: Option<crate::backend::remote::askpass::Revoke>,
 }
 
@@ -785,7 +756,7 @@ impl Run {
         input_rx: &mut mpsc::UnboundedReceiver<Frame>,
         leave_rx: &mut watch::Receiver<Leave>,
     ) -> Ended {
-        use crate::backend::remote::{ssh, status};
+        use crate::backend::remote::status;
         let mut expected = self.read_offset();
         let remote = attach_command(&self.session, expected, self.size.0, self.size.1);
         let mut cmd = self.ssh_command(&remote);
@@ -975,69 +946,17 @@ impl Run {
         }
     }
 
-    /// `ssh -T ... -- <host> <remote>`: no terminal on the remote side
-    /// (frames or a script's output, not a session, go over it). The one place
-    /// this pane runs ssh; the caller sets its stdio.
     fn ssh_command(&self, remote: &str) -> tokio::process::Command {
-        let mut args = crate::backend::remote::ssh::launch(
-            &self.dest,
-            remote,
-            &[],
-            "",
-            self.control_dir.as_deref(),
-        );
-        args[0] = "-T".to_string();
-        let mut cmd = tokio::process::Command::new(&self.ssh_path);
-        cmd.args(&args).kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            use agentmux_common::win32::NoWindow;
-            cmd.no_window();
-        }
-        crate::backend::pane_env::sanitize_process_command(&mut cmd);
-        // After the sanitizing: askpass needs srv's address and key.
-        cmd.envs(self.askpass_env.iter().map(|(k, v)| (k, v)));
-        cmd
+        self.host.command(remote)
     }
 
-    /// Run `remote` over ssh with `input` on its stdin; its exit code and
-    /// output. Bounded: an install step never hangs the pane.
-    async fn ssh_run(
-        &self,
-        remote: &str,
-        input: Option<Vec<u8>>,
-    ) -> Result<(Option<i32>, String), String> {
-        let mut cmd = self.ssh_command(remote);
-        cmd.stdin(if input.is_some() {
-            std::process::Stdio::piped()
-        } else {
-            std::process::Stdio::null()
-        })
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-        let mut child = cmd.spawn().map_err(|e| format!("could not run ssh: {e}"))?;
-        if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
-            stdin
-                .write_all(&bytes)
-                .await
-                .map_err(|e| format!("upload: {e}"))?;
-            drop(stdin);
-        }
-        let out = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output())
-            .await
-            .map_err(|_| "ssh took too long".to_string())?
-            .map_err(|e| format!("ssh: {e}"))?;
-        let text = String::from_utf8_lossy(&out.stdout).into_owned();
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            return Err(err
-                .lines()
-                .last()
-                .unwrap_or("ssh failed")
-                .trim()
-                .to_string());
-        }
-        Ok((out.status.code(), text))
+    /// Run `remote` over ssh with `input` on its stdin; its output. Bounded:
+    /// an install step never hangs the pane.
+    async fn ssh_run(&self, remote: &str, input: Option<Vec<u8>>) -> Result<String, String> {
+        self.host
+            .run(remote, input, Duration::from_secs(120))
+            .await?
+            .ok()
     }
 
     /// Put this version's helper on the host (spec §6.2): probe the
@@ -1046,7 +965,7 @@ impl Run {
     async fn install_helper(&self) -> Result<(), String> {
         use crate::backend::remote::helper_install as hi;
         let version = env!("CARGO_PKG_VERSION");
-        let (_, out) = self.ssh_run(&hi::probe_command(version), None).await?;
+        let out = self.ssh_run(&hi::probe_command(version), None).await?;
         let probe = hi::parse_probe(&out, version);
         if probe.installed {
             return Ok(());
@@ -1068,7 +987,7 @@ impl Run {
         .await;
         self.ssh_run(&hi::upload_command(version, &self.session), Some(bytes))
             .await?;
-        let (_, out) = self
+        let out = self
             .ssh_run(&hi::install_command(version, &self.session, &hash), None)
             .await?;
         if out.trim() != "ok" {
@@ -1120,6 +1039,7 @@ impl Run {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::remote::conn::SshDest;
 
     #[test]
     fn only_a_helper_session_id_reaches_a_command_line() {
@@ -1255,17 +1175,19 @@ time.sleep(5)
         let run = Run {
             block_id: block.to_string(),
             conn: "fakehost".to_string(),
-            dest: SshDest {
-                destination: "fakehost".to_string(),
-                port: None,
+            host: HostSsh {
+                dest: SshDest {
+                    destination: "fakehost".to_string(),
+                    port: None,
+                },
+                ssh_path,
+                control_dir: None,
+                env: Vec::new(),
             },
-            ssh_path,
-            control_dir: None,
             session: "amx-test".to_string(),
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
-            askpass_env: Vec::new(),
             _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
@@ -1366,17 +1288,19 @@ sys.exit(0 if remote[1] == 'end' else 255)
         let run = Run {
             block_id: "durable-down-block".to_string(),
             conn: "downhost".to_string(),
-            dest: SshDest {
-                destination: "downhost".to_string(),
-                port: None,
+            host: HostSsh {
+                dest: SshDest {
+                    destination: "downhost".to_string(),
+                    port: None,
+                },
+                ssh_path,
+                control_dir: None,
+                env: Vec::new(),
             },
-            ssh_path,
-            control_dir: None,
             session: "amx-down".to_string(),
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
-            askpass_env: Vec::new(),
             _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
@@ -1489,17 +1413,19 @@ elif ' attach ' in remote:
         let run = Run {
             block_id: "durable-fresh-block".to_string(),
             conn: "freshhost".to_string(),
-            dest: SshDest {
-                destination: "freshhost".to_string(),
-                port: None,
+            host: HostSsh {
+                dest: SshDest {
+                    destination: "freshhost".to_string(),
+                    port: None,
+                },
+                ssh_path,
+                control_dir: None,
+                env: Vec::new(),
             },
-            ssh_path,
-            control_dir: None,
             session: "amx-fresh".to_string(),
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
-            askpass_env: Vec::new(),
             _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
@@ -1624,17 +1550,19 @@ sys.exit(255)
         let run = Run {
             block_id: block.to_string(),
             conn: "fakehost".to_string(),
-            dest: SshDest {
-                destination: "fakehost".to_string(),
-                port: None,
+            host: HostSsh {
+                dest: SshDest {
+                    destination: "fakehost".to_string(),
+                    port: None,
+                },
+                ssh_path,
+                control_dir: None,
+                env: Vec::new(),
             },
-            ssh_path,
-            control_dir: None,
             session: "amx-refused".to_string(),
             size: (80, 24),
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
-            askpass_env: Vec::new(),
             _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
