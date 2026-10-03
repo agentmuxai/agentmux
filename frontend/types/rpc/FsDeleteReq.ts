@@ -4,4 +4,13 @@
  * Request for `fs.delete`: PERMANENT removal. A symlink is unlinked, never
  * followed.
  */
-export type FsDeleteReq = { paths: Array<string>, };
+export type FsDeleteReq = { paths: Array<string>, 
+/**
+ * An SSH connection to run this on (its helper, `fs_ops::remote`);
+ * absent, local, or WSL: this machine, as before.
+ */
+connection?: string, 
+/**
+ * The pane asking, whose window shows any ssh prompt for `connection`.
+ */
+block_id?: string, };

@@ -194,6 +194,51 @@ pub async fn local_build(
     Ok((bytes, got))
 }
 
+/// Put this version's helper on `host` if it is not there (spec §6.2): probe
+/// the platform, get the matching build (checked against the release's
+/// hashes), upload it over ssh, check its hash there, move it in. `tag` names
+/// this install's own temp file (letters, digits, `-`, `_`), so two installs
+/// on one host never touch each other's upload. `announce` hears the size
+/// just before the upload, for whoever is waiting to say what is happening.
+pub async fn ensure<F, Fut>(
+    host: &super::host::HostSsh,
+    tag: &str,
+    announce: F,
+) -> Result<(), String>
+where
+    F: FnOnce(usize) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let run = |cmd: String, input: Option<Vec<u8>>| async move {
+        host.run(&cmd, input, std::time::Duration::from_secs(120))
+            .await?
+            .ok()
+    };
+    let version = env!("CARGO_PKG_VERSION");
+    let probe = parse_probe(&run(probe_command(version), None).await?, version);
+    if probe.installed {
+        return Ok(());
+    }
+    let target = target_for(&probe.uname).ok_or_else(|| {
+        format!(
+            "AgentMux has no helper build for this host ({})",
+            probe.uname.trim()
+        )
+    })?;
+    let cache = crate::backend::base::get_mux_config_dir().join("remote-helper");
+    let (bytes, hash) = local_build(version, target, &cache, &reqwest::Client::new()).await?;
+    announce(bytes.len()).await;
+    run(upload_command(version, tag), Some(bytes)).await?;
+    let out = run(install_command(version, tag, &hash), None).await?;
+    if out.trim() != "ok" {
+        return Err(format!(
+            "the uploaded helper did not check out on the host ({})",
+            out.trim()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

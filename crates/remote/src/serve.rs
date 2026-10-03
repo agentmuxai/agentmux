@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
-use agentmux_remote::fsproto::{
+use crate::fsproto::{
     self, Entry, ErrKind, Kind, Reply, Request, Splitter, MAX_READ, MAX_WRITE,
 };
 
@@ -82,7 +82,8 @@ fn invalid(message: &str) -> Reply {
     }
 }
 
-fn handle(home: &Path, req: Request) -> Reply {
+/// The reply to one request; `home` is the user's home directory.
+pub fn handle(home: &Path, req: Request) -> Reply {
     let result = match req {
         Request::Hello => Ok(Reply::Hello {
             protocol: fsproto::PROTOCOL,
@@ -211,7 +212,15 @@ fn entry_of(p: &Path) -> io::Result<Entry> {
     };
     #[cfg(not(unix))]
     let mode = 0;
+    let link_target = if symlink {
+        fs::read_link(p)
+            .map(|t| t.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
     Ok(Entry {
+        link_target,
         name: p
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())

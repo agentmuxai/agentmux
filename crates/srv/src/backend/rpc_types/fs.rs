@@ -32,6 +32,15 @@ pub struct FsListReq {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub limit: Option<u32>,
+    /// An SSH connection to run this on (its helper, `fs_ops::remote`);
+    /// absent, local, or WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 /// One row of an `fs.list` page.
@@ -201,6 +210,15 @@ pub struct FsRenameReq {
     /// A plain name: no separators, not `.` or `..`, and on Windows none of
     /// the names or characters Windows refuses or silently alters.
     pub new_name: String,
+    /// An SSH connection to run this on (its helper, `fs_ops::remote`);
+    /// absent, local, or WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -225,6 +243,15 @@ pub struct FsCreateReq {
     pub parent: String,
     pub name: String,
     pub kind: FsCreateKind,
+    /// An SSH connection to run this on (its helper, `fs_ops::remote`);
+    /// absent, local, or WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -238,6 +265,15 @@ pub struct FsCreateResult {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FsTrashReq {
     pub paths: Vec<String>,
+    /// An SSH connection to run this on (its helper, `fs_ops::remote`);
+    /// absent, local, or WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 /// Request for `fs.restore`: put each path, trashed earlier, back where it
@@ -246,6 +282,15 @@ pub struct FsTrashReq {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FsRestoreReq {
     pub paths: Vec<String>,
+    /// An SSH connection to run this on (its helper, `fs_ops::remote`);
+    /// absent, local, or WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 /// Request for `fs.delete`: PERMANENT removal. A symlink is unlinked, never
@@ -254,6 +299,15 @@ pub struct FsRestoreReq {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct FsDeleteReq {
     pub paths: Vec<String>,
+    /// An SSH connection to run this on (its helper, `fs_ops::remote`);
+    /// absent, local, or WSL: this machine, as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// The pane asking, whose window shows any ssh prompt for `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }
 
 /// One path's outcome in a batch operation.
