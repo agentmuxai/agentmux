@@ -5,6 +5,8 @@
 **Related:** `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`,
 `docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`
 
+> **Amended 2026-10-03:** the default is now **shared on every channel**; `AGENTMUX_ISOLATED_AUTH=1` is the only way to isolate (`docs/specs/SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`). The mechanism below is unchanged.
+>
 > **Amended 2026-08-06:** everything below describing the mechanism
 > (channel-scoped store, credential-dir isolation, the two load-bearing
 > migration fixes) is still accurate and authoritative. What changed is
