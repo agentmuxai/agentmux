@@ -158,13 +158,9 @@ fn preflight_input_from_meta(
     // when this pane isn't identity-bound.
     let config_dir = match bound_config_dir {
         Some(dir) => dir.to_string_lossy().to_string(),
-        None => meta
-            .get(crate::backend::blockcontroller::META_KEY_CMD_ENV)
-            .and_then(|v| v.as_object())
-            .and_then(|env| env.get("CLAUDE_CONFIG_DIR"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
+        None => crate::backend::blockcontroller::cmd_env_of(meta)
+            .remove("CLAUDE_CONFIG_DIR")
+            .unwrap_or_default(),
     };
 
     crate::backend::resume_preflight::PreflightInput {

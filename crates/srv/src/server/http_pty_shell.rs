@@ -84,8 +84,7 @@ pub(super) async fn handle_pty_shell_create(
         .get::<crate::backend::obj::Block>(&req.agent_block_id)
         .ok()
         .flatten()
-        .and_then(|b| b.meta.get("cmd:env").and_then(|v| v.as_object()).cloned())
-        .map(|obj| obj.into_iter().filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string()))).collect())
+        .map(|b| crate::backend::blockcontroller::cmd_env_of(&b.meta))
         .unwrap_or_default();
     meta.insert(
         crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR.to_string(),

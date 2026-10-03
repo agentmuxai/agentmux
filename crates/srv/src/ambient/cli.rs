@@ -52,13 +52,7 @@ pub async fn invoke_haiku_with_timeout(
     cancel: tokio_util::sync::CancellationToken,
     timeout: std::time::Duration,
 ) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
-    let auth_env: std::collections::HashMap<String, String> = match meta.get("cmd:env") {
-        Some(serde_json::Value::Object(obj_map)) => obj_map
-            .iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-            .collect(),
-        _ => std::collections::HashMap::new(),
-    };
+    let auth_env = crate::backend::blockcontroller::cmd_env_of(meta);
 
     let mut cmd = crate::server::cli_handlers::make_cli_cmd(cli_path);
     // A bare text-generation call, not an agent session: no tools, one turn, no

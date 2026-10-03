@@ -94,12 +94,7 @@ impl PersistentSubprocessController {
         // and the process never re-reads `cmd:args`: fill from `agent:runtime`.
         let cli_args = crate::backend::agent_runtime::with_runtime_flags(block_meta, cli_args);
         let working_dir = crate::backend::obj::meta_get_string(block_meta, "cmd:cwd", "");
-        let base_env_vars: HashMap<String, String> = match block_meta.get("cmd:env") {
-            Some(serde_json::Value::Object(obj)) => {
-                obj.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect()
-            }
-            _ => HashMap::new(),
-        };
+        let base_env_vars = crate::backend::blockcontroller::cmd_env_of(block_meta);
         let resume_flag = crate::backend::obj::meta_get_string(block_meta, "agent:resume_flag", "--resume");
         let session_id_field = crate::backend::obj::meta_get_string(block_meta, "agent:session_id_field", "session_id");
 

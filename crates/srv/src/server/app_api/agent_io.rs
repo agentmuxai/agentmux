@@ -270,13 +270,7 @@ pub(crate) async fn agent_send_spawn_env(
     block_id: &str,
     auth_key: &str,
 ) -> Result<std::collections::HashMap<String, String>, crate::identity::resolver::SpawnGateError> {
-    let env_vars: std::collections::HashMap<String, String> = match block.meta.get("cmd:env") {
-        Some(serde_json::Value::Object(obj)) => obj
-            .iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-            .collect(),
-        _ => std::collections::HashMap::new(),
-    };
+    let env_vars = crate::backend::blockcontroller::cmd_env_of(&block.meta);
     crate::server::agent_handlers::input::build_persistent_spawn_env(
         mstore,
         id_store,
