@@ -124,10 +124,11 @@ pub fn run(base: &Path) -> io::Result<()> {
             let mut idle_since = Instant::now();
             loop {
                 std::thread::sleep(Duration::from_secs(5));
-                let abandoned: Vec<Arc<Session>> = sessions
-                    .lock()
-                    .unwrap()
-                    .values()
+                // The sessions first, then each one's state: never the map's
+                // lock while waiting on a session's (as LIST does).
+                let all: Vec<Arc<Session>> = sessions.lock().unwrap().values().cloned().collect();
+                let abandoned: Vec<Arc<Session>> = all
+                    .into_iter()
                     .filter(|s| {
                         let inner = s.inner.lock().unwrap();
                         inner.exited.is_none()
@@ -136,7 +137,6 @@ pub fn run(base: &Path) -> io::Result<()> {
                                 .detached_since
                                 .is_some_and(|t| t.elapsed() >= DETACHED_LIMIT)
                     })
-                    .cloned()
                     .collect();
                 for s in abandoned {
                     end_session(&sessions, &s.id, Some(&s));
