@@ -166,6 +166,18 @@ pub fn handle(home: &Path, req: Request) -> Reply {
             }
             fs::rename(&from, &to).map(|()| Reply::Done)
         }
+        Request::Sync { path } => {
+            let p = resolve(home, &path);
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.is_file() => fs::OpenOptions::new()
+                    .write(true)
+                    .open(&p)
+                    .and_then(|f| f.sync_all())
+                    .map(|()| Reply::Done),
+                Ok(_) => return invalid("only a file is synced"),
+                Err(e) => Err(e),
+            }
+        }
         Request::Realpath { path } => fs::canonicalize(resolve(home, &path))
             .map(|p| Reply::Path(p.to_string_lossy().into_owned())),
         Request::SetMeta {
@@ -336,8 +348,26 @@ fn list(dir: &Path, offset: u32, limit: u32) -> io::Result<Reply> {
 
 fn read(p: &Path, offset: u64, len: u32) -> io::Result<Reply> {
     use std::io::{Seek, SeekFrom};
+    // Never through a link swapped in after it was listed, and never stuck
+    // opening a pipe: whatever this opened must be a regular file.
+    #[cfg(unix)]
+    let mut f = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(p)?
+    };
+    #[cfg(not(unix))]
     let mut f = fs::File::open(p)?;
-    if f.metadata()?.is_dir() {
+    let opened = f.metadata()?;
+    if !opened.is_dir() && !opened.is_file() {
+        return Ok(Reply::Err {
+            kind: ErrKind::Invalid,
+            message: format!("{} isn't a regular file", p.display()),
+        });
+    }
+    if opened.is_dir() {
         return Ok(Reply::Err {
             kind: ErrKind::IsADirectory,
             message: format!("{} is a directory", p.display()),
@@ -750,6 +780,53 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// A pipe is refused at once (never a read that waits for a writer),
+    /// and a link is never read through.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_takes_only_a_regular_file() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        assert!(std::process::Command::new("mkfifo")
+            .arg(h.join("pipe"))
+            .status()
+            .unwrap()
+            .success());
+        fs::write(h.join("real"), b"r").unwrap();
+        std::os::unix::fs::symlink(h.join("real"), h.join("link")).unwrap();
+        let r = exchange(
+            h,
+            &[
+                Request::Read {
+                    path: "~/pipe".into(),
+                    offset: 0,
+                    len: 10,
+                },
+                Request::Read {
+                    path: "~/link".into(),
+                    offset: 0,
+                    len: 10,
+                },
+                Request::Sync {
+                    path: "~/real".into(),
+                },
+            ],
+        );
+        assert!(
+            matches!(
+                r[0],
+                Reply::Err {
+                    kind: ErrKind::Invalid,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[0]
+        );
+        assert!(matches!(r[1], Reply::Err { .. }), "{:?}", r[1]);
+        assert_eq!(r[2], Reply::Done);
     }
 
     #[test]

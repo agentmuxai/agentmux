@@ -87,6 +87,10 @@ pub enum Request {
         mode: u32,
         mtime_ms: i64,
     },
+    /// Flush a file's contents to disk (before a moved source goes).
+    Sync {
+        path: String,
+    },
 }
 
 /// What kind of thing an entry is (a symlink is reported as what it points
@@ -202,6 +206,7 @@ mod op {
     pub const REPLACE: u8 = 10;
     pub const REALPATH: u8 = 11;
     pub const SETMETA: u8 = 12;
+    pub const SYNC: u8 = 13;
 }
 
 mod status {
@@ -367,6 +372,9 @@ impl Request {
             } => {
                 w.u8(op::SETMETA).str(path).u32(*mode).i64(*mtime_ms);
             }
+            Request::Sync { path } => {
+                w.u8(op::SYNC).str(path);
+            }
         }
         w.message()
     }
@@ -413,6 +421,7 @@ impl Request {
                 to: r.str()?,
             },
             op::REALPATH => Request::Realpath { path: r.str()? },
+            op::SYNC => Request::Sync { path: r.str()? },
             op::SETMETA => Request::SetMeta {
                 path: r.str()?,
                 mode: r.u32()?,
@@ -591,6 +600,7 @@ mod tests {
                 to: "/x".into(),
             },
             Request::Realpath { path: "~/l".into() },
+            Request::Sync { path: "/x".into() },
             Request::SetMeta {
                 path: "/x".into(),
                 mode: 0o755,

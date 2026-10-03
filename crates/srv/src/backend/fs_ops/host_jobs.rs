@@ -299,11 +299,29 @@ impl End {
         }
     }
 
-    /// Remove a file, a link, or an empty folder.
+    /// Flush a file's contents to disk.
+    fn sync(&self, rt: &Handle, path: &str) -> Result<(), String> {
+        match self {
+            End::Local => std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| e.to_string()),
+            End::Host { files, .. } => rt.block_on(files.sync(path)).map_err(host_error),
+        }
+    }
+
+    /// Remove a file, a link, or an empty folder. A read-only file goes too
+    /// (Windows refuses to remove one otherwise).
     fn remove(&self, rt: &Handle, path: &str) -> Result<(), String> {
         match self {
             End::Local => {
-                platform::remove_entry_no_follow(Path::new(path)).map_err(|e| e.to_string())
+                let p = Path::new(path);
+                match std::fs::symlink_metadata(p) {
+                    Ok(m) if m.is_file() => platform::remove_file_force(p),
+                    _ => platform::remove_entry_no_follow(p),
+                }
+                .map_err(|e| e.to_string())
             }
             End::Host { files, .. } => rt.block_on(files.delete(path, false)).map_err(host_error),
         }
@@ -368,6 +386,41 @@ fn local_mode(m: &std::fs::Metadata) -> u32 {
         let _ = m;
         0
     }
+}
+
+/// A local source file, opened once: never through a link swapped in after
+/// it was checked, never stuck opening a pipe; whatever was opened must be a
+/// regular file.
+fn open_source(path: &str) -> Result<std::fs::File, String> {
+    #[cfg(unix)]
+    let f = {
+        use std::os::unix::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|e| e.to_string())?
+    };
+    #[cfg(not(unix))]
+    let f = platform::open_no_follow(Path::new(path)).map_err(|e| e.to_string())?;
+    match f.metadata() {
+        Ok(m) if m.is_file() => Ok(f),
+        Ok(_) => Err(format!(
+            "“{}” changed while it was being copied: not a regular file now.",
+            file_name(path)
+        )),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Up to `len` bytes from an open file, and whether it ends there.
+fn read_open(f: &mut std::fs::File, len: usize) -> Result<(Vec<u8>, bool), String> {
+    let mut data = Vec::with_capacity(len);
+    f.take(len as u64)
+        .read_to_end(&mut data)
+        .map_err(|e| e.to_string())?;
+    let eof = data.len() < len;
+    Ok((data, eof))
 }
 
 fn file_name(path: &str) -> String {
@@ -670,6 +723,19 @@ impl Transfer<'_> {
         let discard = |t: &Transfer<'_>| {
             let _ = t.dest.remove(t.rt, &temp);
         };
+        // A local source: opened once, checked, then read from that handle.
+        let mut local_src = match &self.src {
+            End::Local => match open_source(src) {
+                Ok(f) => Some(f),
+                Err(e) => {
+                    discard(self);
+                    job.fail(shown, e);
+                    job.advance(1, size);
+                    return Outcome::NotDone;
+                }
+            },
+            End::Host { .. } => None,
+        };
         // Pieces: the job's chunk, within what one message may carry.
         let chunk = job.chunk_size().clamp(64 * 1024, 4 << 20);
         let mut offset = 0u64;
@@ -678,7 +744,11 @@ impl Transfer<'_> {
                 discard(self);
                 return Outcome::Stopped;
             }
-            let (data, eof) = match self.src.read(self.rt, src, offset, chunk) {
+            let read = match local_src.as_mut() {
+                Some(f) => read_open(f, chunk),
+                None => self.src.read(self.rt, src, offset, chunk),
+            };
+            let (data, eof) = match read {
                 Ok(r) => r,
                 Err(e) => {
                     discard(self);
@@ -704,11 +774,19 @@ impl Transfer<'_> {
         }
         // The source's permissions and time, on the temp file before it goes
         // in: never a half-kept file in place, and a moved program still runs.
+        // Best effort, as for a local copy: a disk that refuses (FAT, some
+        // network shares) still gets the file.
         if let Err(e) = self.dest.set_meta(self.rt, &temp, info.mode, info.mtime) {
-            discard(self);
-            job.fail(shown, format!("Couldn't keep its permissions or time: {e}"));
-            job.advance(1, 0);
-            return Outcome::NotDone;
+            tracing::debug!(path = %shown, error = %e, "fs.op: a host copy's permissions or time weren't kept");
+        }
+        // A move deletes the only other copy next: on disk first.
+        if self.kind == FsOpKind::Move {
+            if let Err(e) = self.dest.sync(self.rt, &temp) {
+                discard(self);
+                job.fail(shown, format!("Couldn't make sure it was written: {e}"));
+                job.advance(1, 0);
+                return Outcome::NotDone;
+            }
         }
         // Replacing: in one step, so what is there goes only once the copy is.
         let placed = if replace {

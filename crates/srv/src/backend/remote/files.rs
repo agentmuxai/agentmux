@@ -271,6 +271,11 @@ impl RemoteFiles {
         .await
     }
 
+    /// Flush a file's contents to disk.
+    pub async fn sync(&self, path: &str) -> Result<(), RemoteError> {
+        self.done(Request::Sync { path: path.into() }).await
+    }
+
     pub async fn mkdir(&self, path: &str, parents: bool) -> Result<(), RemoteError> {
         self.done(Request::Mkdir {
             path: path.into(),
