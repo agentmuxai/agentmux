@@ -9,6 +9,8 @@
 //! - `attach --session ID [--offset N] [--cols C] [--rows R]`: attach to a
 //!   durable session, starting the daemon and the session as needed.
 //! - `end --session ID`, `list`: end a session; list them.
+//! - `serve --stdio`: file operations for srv over stdio (`serve.rs`), on
+//!   any platform.
 //!
 //! It holds no credentials and opens no network port: it talks only to its
 //! own SSH channel and a per-user Unix socket. Its files live in
@@ -22,6 +24,7 @@ mod attach;
 mod daemon;
 #[cfg(unix)]
 mod pty;
+mod serve;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -54,6 +57,16 @@ fn run(args: &[String]) -> i32 {
                 frame::PROTOCOL
             );
             0
+        }
+        Some("serve") if args.get(1).map(String::as_str) == Some("--stdio") => {
+            let (mut stdin, mut stdout) = (std::io::stdin().lock(), std::io::stdout().lock());
+            match serve::run(&serve::home_dir(), &mut stdin, &mut stdout) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("agentmux-remote serve: {e}");
+                    1
+                }
+            }
         }
         #[cfg(unix)]
         Some("daemon") => match daemon::run(&base_dir()) {
@@ -102,7 +115,7 @@ fn run(args: &[String]) -> i32 {
             1
         }
         _ => {
-            eprintln!("usage: agentmux-remote version | daemon | attach --session ID [--offset N] [--cols C] [--rows R] | end --session ID | list");
+            eprintln!("usage: agentmux-remote version | serve --stdio | daemon | attach --session ID [--offset N] [--cols C] [--rows R] | end --session ID | list");
             2
         }
     }
