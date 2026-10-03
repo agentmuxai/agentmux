@@ -529,11 +529,13 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                 >
                                     <For each={namedAgents() ?? []}>
                                         {(row) => {
+                                            // identity_name is "No auth" or the account; empty when the
+                                            // backend could not tell, which is left out, not guessed.
                                             const parts = [
                                                 row.instance_name,
-                                                row.identity_name?.trim() || "(ambient creds)",
+                                                row.identity_name?.trim(),
                                                 row.memory_name?.trim() || "(vanilla CLI)",
-                                            ];
+                                            ].filter(Boolean);
                                             if (row.started_at) parts.push(formatRelative(row.started_at));
                                             return (
                                                 <option value={row.instance_id}>

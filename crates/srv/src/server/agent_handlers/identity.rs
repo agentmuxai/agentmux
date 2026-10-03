@@ -756,8 +756,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let accounts = id_store
                     .identity_list(None)
                     .map_err(|e| format!("listnamedagents: accounts: {e}"))?;
-                let accounts_by_id: std::collections::HashMap<&str, &IdentityAccount> =
-                    accounts.iter().map(|a| (a.id.as_str(), a)).collect();
+                let own_ids: std::collections::HashSet<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
+                let mut mirror_failed = false;
+                let mirror_accounts: Vec<IdentityAccount> =
+                    if agent_identity_links.iter().any(|l| !own_ids.contains(l.account_id.as_str())) {
+                        identity_store.identity_list(None).unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, "listnamedagents: the global account mirror could not be read");
+                            mirror_failed = true;
+                            Vec::new()
+                        })
+                    } else {
+                        Vec::new()
+                    };
+                let account_names = super::account_label::names_by_id(&accounts, &mirror_accounts);
                 let mut links_by_agent: std::collections::HashMap<&str, Vec<&AgentIdentityLink>> =
                     std::collections::HashMap::new();
                 for link in &agent_identity_links {
@@ -767,23 +778,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .push(link);
                 }
                 let resolve_identity_name = |definition_id: &str| -> String {
-                    match links_by_agent.get(definition_id) {
-                        Some(links) if !links.is_empty() => {
-                            let mut names: Vec<String> = links
-                                .iter()
-                                .map(|link| {
-                                    accounts_by_id
-                                        .get(link.account_id.as_str())
-                                        .map(|a| a.name.clone())
-                                        .unwrap_or_else(|| "(missing account)".to_string())
-                                })
-                                .collect();
-                            names.sort();
-                            names.dedup();
-                            names.join(", ")
-                        }
-                        _ => "(ambient creds)".to_string(),
-                    }
+                    super::account_label::account_line(
+                        links_by_agent.get(definition_id).map(|v| v.as_slice()),
+                        &account_names,
+                        super::account_label::Degraded { links: false, accounts: mirror_failed },
+                    )
+                    .text
                 };
 
                 // PR B — read from the cross-version registry when
