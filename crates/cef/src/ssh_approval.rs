@@ -177,33 +177,44 @@ async fn ask(
     (StatusCode::OK, Json(ApiResponse::ok(answer)))
 }
 
-/// The full window showing `block_id`, or any full window: an approval
-/// subwindow needs a full window as its parent.
+/// A pre-created window waiting in a pool: hidden, so never a parent the user
+/// would see.
+fn is_pool_window(label: &str) -> bool {
+    label.starts_with("window-pool-") || label.starts_with("floating-pool-")
+}
+
+/// The full window showing `block_id`; else the main window; else any other
+/// full window the user can see. An approval subwindow needs a full window as
+/// its parent, and one over a hidden pool window is never seen.
 async fn parent_window(state: &Arc<AppState>, block_id: &str) -> Option<String> {
-    let is_full = |label: &str| {
-        state
-            .window_meta
-            .lock()
-            .get(label)
-            .map(|m| m.kind == crate::state::WindowKind::FullInstance)
-            .unwrap_or(false)
-    };
+    let full_windows: Vec<String> = state
+        .window_meta
+        .lock()
+        .iter()
+        .filter(|(label, m)| {
+            m.kind == crate::state::WindowKind::FullInstance && !is_pool_window(label)
+        })
+        .map(|(label, _)| label.clone())
+        .collect();
     if let Ok(target) = state
         .browser_api
         .target_cache
         .resolve(state, block_id)
         .await
     {
-        if is_full(&target.label) {
+        if full_windows.contains(&target.label) {
             return Some(target.label);
         }
     }
-    state
-        .window_meta
-        .lock()
+    pick_fallback(&full_windows)
+}
+
+fn pick_fallback(full_windows: &[String]) -> Option<String> {
+    full_windows
         .iter()
-        .find(|(_, m)| m.kind == crate::state::WindowKind::FullInstance)
-        .map(|(label, _)| label.clone())
+        .find(|l| l.as_str() == "main")
+        .or_else(|| full_windows.iter().min())
+        .cloned()
 }
 
 /// The user decided in the subwindow (`ssh_approval_decide`). Only that
@@ -273,6 +284,23 @@ mod tests {
             "answered once"
         );
         assert!(!decide("ssh-never", true, String::new(), false));
+    }
+
+    #[test]
+    fn a_hidden_pool_window_is_never_the_parent() {
+        assert!(is_pool_window("floating-pool-f7b0"));
+        assert!(is_pool_window("window-pool-1"));
+        assert!(!is_pool_window("main") && !is_pool_window("window-731e"));
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            pick_fallback(&s(&["window-b", "main", "window-a"])).as_deref(),
+            Some("main")
+        );
+        assert_eq!(
+            pick_fallback(&s(&["window-b", "window-a"])).as_deref(),
+            Some("window-a")
+        );
+        assert_eq!(pick_fallback(&[]), None);
     }
 
     #[test]
