@@ -328,9 +328,10 @@ fn attach(
             at += chunk.len() as u64;
         }
         if let Some(code) = inner.exited {
+            // Replayed, but kept: `attach` taking the frame does not mean srv
+            // got it, so a reattach in the exited TTL replays it again (the
+            // reader thread removes the session when the TTL is up).
             out.write_all(&Frame::Exited { code }.encode())?;
-            drop(inner);
-            remove_if_same(sessions, &session);
             return Ok(());
         }
         if let Some((_, old)) = inner.client.replace((generation, out)) {
