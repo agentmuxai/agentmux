@@ -371,6 +371,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // SQLite query, the per-call cost is dominated by
                 // the eventual snapshot read for the top-20.
                 let mut rows: Vec<RecentSessionRow> = Vec::with_capacity(instances.len());
+                // What each agent was last asked comes from its global transcript
+                // (keyed by agent id), not from this channel's per-block
+                // snapshot, so a closed pane, an agent never launched here and a
+                // registry-only row all get a real preview.
+                let histories = crate::backend::agent_session::history_summary::read_histories(
+                    instances.iter().map(|i| i.definition_id.clone()).collect(),
+                )
+                .await;
+                if histories
+                    .values()
+                    .any(|h| matches!(h, crate::backend::agent_session::history_summary::HistoryRead::Failed))
+                {
+                    degraded.push("transcript");
+                }
                 for inst in instances {
                     // Consolidation Phase 3b: `definition_id` is the agent's
                     // own id, so its own row answers every display question
@@ -431,8 +445,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // row that DOES have history rendered identically to
                     // "never had one," silently. Split so the row can carry
                     // that distinction downstream instead of losing it here.
+                    use crate::backend::agent_session::history_summary::HistoryRead;
+                    // `node_count` is 0 here: counting messages would mean reading
+                    // the whole transcript, so the tile shows none rather than a
+                    // guess.
+                    let from_transcript = match histories.get(&inst.definition_id) {
+                        Some(HistoryRead::Transcript(h)) => Some((
+                            true,
+                            if h.last_activity_ms > 0 { h.last_activity_ms } else { inst.started_at },
+                            h.last_user_message.clone(),
+                            0usize,
+                            false,
+                        )),
+                        Some(HistoryRead::Failed) => Some((false, inst.started_at, String::new(), 0usize, true)),
+                        // No transcript: fall back to this channel's per-block
+                        // snapshot, which old builds wrote.
+                        Some(HistoryRead::NoTranscript) | None => None,
+                    };
                     let (has_snapshot, last_active_at, mut preview, node_count, snapshot_check_failed) =
-                        if inst.block_id.is_empty() {
+                        if let Some(t) = from_transcript {
+                            t
+                        } else if inst.block_id.is_empty() {
                             (false, inst.started_at, String::new(), 0usize, false)
                         } else {
                             match filestore.stat(&inst.block_id, "output.state.json") {
@@ -1128,8 +1161,8 @@ mod tests {
     }
 
     /// Counterpart to the above: when NOTHING is persisted yet for the
-    /// definition, the row's `preview` stays empty — the frontend's own
-    /// existing "(no conversation snapshot)" fallback text is unaffected.
+    /// definition, the row's `preview` stays empty and the frontend shows its
+    /// own empty-state text ("No conversations yet").
     /// Generation itself (a real Haiku CLI round-trip) is fire-and-forget
     /// and not asserted here — this only locks in that a missing summary
     /// never surfaces as a fabricated non-empty preview.
@@ -1154,6 +1187,70 @@ mod tests {
         let row = &result.rows[0];
         assert!(!row.has_snapshot);
         assert_eq!(row.preview, "", "no summary persisted yet — preview must stay empty, not fabricated");
+    }
+
+    /// Put an `output` file in the (test) global transcript store for `def_id`.
+    fn install_transcript(store: &std::sync::Arc<crate::backend::storage::filestore::FileStore>, def_id: &str, ndjson: &str) {
+        let zone = format!("agent:{def_id}:current");
+        store
+            .make_file(&zone, "output", Default::default(), crate::backend::storage::filestore::FileOpts::default())
+            .unwrap();
+        store.write_file(&zone, "output", ndjson.as_bytes()).unwrap();
+    }
+
+    fn user_line(text: &str) -> String {
+        serde_json::json!({"type":"user","message":{"role":"user","content":text}}).to_string()
+    }
+
+    /// Clears the thread's test transcript store when a test ends, pass or fail.
+    struct TranscriptStoreGuard;
+    impl Drop for TranscriptStoreGuard {
+        fn drop(&mut self) {
+            crate::backend::agent_session::history_summary::set_test_store(None);
+        }
+    }
+
+    /// The preview, last-active time and "has history" flag come from the agent's
+    /// global transcript, so a registry-only row (no local instance, no block id)
+    /// with a transcript shows what it was last asked.
+    #[tokio::test]
+    async fn a_row_with_no_block_takes_its_preview_from_the_global_transcript() {
+        let (_state, engine, mut output_rx, _reg_dir, _def_dir) = setup_with_n_cross_channel_agents(2);
+        let store = std::sync::Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap());
+        install_transcript(&store, "def-0", &format!("{}\n{}", user_line("# Session Context\nboot"), user_line("ship the tiles")));
+        crate::backend::agent_session::history_summary::set_test_store(Some(store));
+        let _guard = TranscriptStoreGuard;
+
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        let with = result.rows.iter().find(|r| r.definition_id == "def-0").unwrap();
+        assert!(with.block_id_hint.is_empty(), "the row has no local block");
+        assert!(with.has_snapshot);
+        assert!(!with.snapshot_check_failed);
+        assert_eq!(with.preview, "ship the tiles");
+        assert!(with.last_active_at > 1, "last-active comes from the transcript, got {}", with.last_active_at);
+        let without = result.rows.iter().find(|r| r.definition_id == "def-1").unwrap();
+        assert!(!without.has_snapshot, "an agent with no transcript has no history");
+        assert!(!without.snapshot_check_failed, "no transcript is a state, not a failed read");
+        assert_eq!(without.preview, "");
+    }
+
+    /// A transcript that holds no user prompt is still history: the row says so
+    /// (has_snapshot) rather than claiming the agent never ran.
+    #[tokio::test]
+    async fn a_transcript_without_a_prompt_still_counts_as_history() {
+        let (_state, engine, mut output_rx, _reg_dir, _def_dir) = setup_with_n_cross_channel_agents(1);
+        let store = std::sync::Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap());
+        install_transcript(&store, "def-0", r#"{"type":"stream_event","event":{}}"#);
+        crate::backend::agent_session::history_summary::set_test_store(Some(store));
+        let _guard = TranscriptStoreGuard;
+
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+        let result: ListRecentSessionsResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        assert!(result.rows[0].has_snapshot);
+        assert_eq!(result.rows[0].preview, "");
     }
 
     /// Consolidation Phase 3b (reagent P1 on PR #3080): the row's display

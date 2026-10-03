@@ -24,6 +24,7 @@
 
 pub mod archive;
 pub mod global_store;
+pub mod history_summary;
 pub(crate) mod helpers;
 pub mod migrations;
 pub mod session_io;

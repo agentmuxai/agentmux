@@ -124,60 +124,51 @@ describe("MyAgentsList — populated", () => {
         expect(screen.getByText(/^1 message$/)).toBeInTheDocument();
     });
 
-    it("renders an italic empty-preview hint when has_snapshot but no user message", async () => {
+    it("says a transcript with no recent prompt has none, not that it has no history", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
             makeRow({ preview: "", has_snapshot: true, node_count: 0 }),
         ]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
-        expect(
-            screen.getByText("(no user message yet)"),
-        ).toBeInTheDocument();
+        expect(screen.getByText("No prompt in recent history")).toBeInTheDocument();
     });
 
-    it("renders a 'no snapshot' hint when the block has no snapshot file", async () => {
+    it("says No conversations yet for an agent with no transcript, whatever channel the row came from", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ preview: "", has_snapshot: false, node_count: 0 }),
+            makeRow({ instance_id: "local", preview: "", has_snapshot: false, node_count: 0 }),
+            makeRow({ instance_id: "other", preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
         ]));
         render(() => <MyAgentsList onReattach={() => {}} />);
-        await screen.findByTestId("agent-my-agents-entry");
-        expect(
-            screen.getByText("(no conversation snapshot)"),
-        ).toBeInTheDocument();
+        await screen.findAllByTestId("agent-my-agents-entry");
+        expect(screen.getAllByText("No conversations yet")).toHaveLength(2);
     });
 
-    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
-    // §5, bullet 2: a cross-channel row (no local block_id at all) reads
-    // "no conversation snapshot" identically to a row that genuinely never
-    // had one — but its history may well exist in a different channel's
-    // filestore. Distinguished here by `block_id_hint === ""`, the same
-    // signal `session.rs` already uses server-side to skip the stat() call
-    // entirely for a synthetic cross-channel row.
-    it("renders a distinct hint for a cross-channel row instead of claiming no history exists", async () => {
-        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
-            makeRow({ preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
-        ]));
-        render(() => <MyAgentsList onReattach={() => {}} />);
-        await screen.findByTestId("agent-my-agents-entry");
-        expect(
-            screen.getByText("(history may exist in another version)"),
-        ).toBeInTheDocument();
-        expect(screen.queryByText("(no conversation snapshot)")).toBeNull();
-    });
-
-    // §5, bullet 1: a real filestore.stat() error must not look identical
-    // to a genuine "never had a snapshot" — see session.rs's
-    // `snapshot_check_failed` field.
-    it("renders a distinct hint when the snapshot check itself failed", async () => {
+    it("says Couldn't read history when the transcript read itself failed", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
             makeRow({ preview: "", has_snapshot: false, node_count: 0, snapshot_check_failed: true }),
         ]));
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
-        expect(
-            screen.getByText("(couldn't check for history)"),
-        ).toBeInTheDocument();
-        expect(screen.queryByText("(no conversation snapshot)")).toBeNull();
+        expect(screen.getByText("Couldn't read history")).toBeInTheDocument();
+        expect(screen.queryByText("No conversations yet")).toBeNull();
+    });
+
+    it("no longer uses the retired history placeholders", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
+            makeRow({ instance_id: "b", preview: "", has_snapshot: true, node_count: 0 }),
+            makeRow({ instance_id: "c", preview: "", has_snapshot: false, node_count: 0, snapshot_check_failed: true }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findAllByTestId("agent-my-agents-entry");
+        for (const gone of [
+            "(history may exist in another version)",
+            "(no conversation snapshot)",
+            "(no user message yet)",
+            "(couldn't check for history)",
+        ]) {
+            expect(screen.queryByText(gone)).toBeNull();
+        }
     });
 
     // SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.2: the account line
