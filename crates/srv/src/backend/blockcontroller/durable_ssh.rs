@@ -1043,11 +1043,12 @@ impl Run {
             .unwrap_or(false)
     }
 
-    /// A line from AgentMux in the pane, dimmed, on its own line.
+    /// [`Self::note`] with an owned line (for a closure's future).
     async fn note_owned(&self, text: String) {
         self.note(&text).await
     }
 
+    /// A line from AgentMux in the pane, dimmed, on its own line.
     async fn note(&self, text: &str) {
         let _ = self
             .append(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").into_bytes())

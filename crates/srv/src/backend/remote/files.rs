@@ -276,13 +276,20 @@ async fn call(
 async fn pump<R, W>(
     conn: String,
     mut reader: R,
-    mut writer: W,
+    writer: W,
     mut calls: mpsc::UnboundedReceiver<Call>,
     keep: Box<dyn std::any::Any + Send>,
 ) where
     R: AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
+    W: AsyncWrite + Unpin + Send + 'static,
 {
+    // Writes on their own task: replies are read while a big request (up to
+    // 32 MB) is still going out. The helper answers one request at a time and
+    // stops reading while it writes a reply, so a writer that waited here,
+    // not reading, would leave both pipes full and both ends stuck.
+    let (out_tx, out_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (failed_tx, mut failed_rx) = oneshot::channel::<String>();
+    tokio::spawn(write_out(conn.clone(), writer, out_rx, failed_tx));
     let mut waiting: HashMap<u32, oneshot::Sender<Result<Reply, String>>> = HashMap::new();
     let mut next_id = 0u32;
     let mut splitter = Splitter::new();
@@ -293,12 +300,14 @@ async fn pump<R, W>(
                 let Some(c) = c else { break "closed".to_string() };
                 next_id = next_id.wrapping_add(1);
                 let id = next_id;
-                if let Err(e) = writer.write_all(&c.req.encode(id)).await {
-                    let _ = c.reply.send(Err(format!("could not send to {conn}: {e}")));
-                    break format!("the connection to {conn} dropped ({e})");
+                if out_tx.send(c.req.encode(id)).is_err() {
+                    let _ = c.reply.send(Err(format!("the connection to {conn} closed")));
+                    break format!("the connection to {conn} closed");
                 }
-                let _ = writer.flush().await;
                 waiting.insert(id, c.reply);
+            }
+            failed = &mut failed_rx => {
+                break failed.unwrap_or_else(|_| format!("the connection to {conn} closed"));
             }
             n = reader.read(&mut buf) => {
                 let n = match n {
@@ -333,7 +342,29 @@ async fn pump<R, W>(
     while let Ok(c) = calls.try_recv() {
         let _ = c.reply.send(Err(why.clone()));
     }
+    // Ends the writer (its queue closes), then the ssh.
+    drop(out_tx);
     drop(keep);
+}
+
+/// The connection's writer: each request's bytes, in order. A failed write
+/// is reported once, and ends the connection.
+async fn write_out<W: AsyncWrite + Unpin>(
+    conn: String,
+    mut writer: W,
+    mut out: mpsc::UnboundedReceiver<Vec<u8>>,
+    failed: oneshot::Sender<String>,
+) {
+    while let Some(bytes) = out.recv().await {
+        let result = match writer.write_all(&bytes).await {
+            Ok(()) => writer.flush().await,
+            Err(e) => Err(e),
+        };
+        if let Err(e) = result {
+            let _ = failed.send(format!("the connection to {conn} dropped ({e})"));
+            return;
+        }
+    }
 }
 
 /// One host's slot in the pool: a lock so two first calls make one
@@ -381,11 +412,14 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
     if let Some(f) = s.as_ref().filter(|f| f.is_open()) {
         return Ok(f.clone());
     }
-    let host = HostSsh::for_connection(conn).map_err(RemoteError::link)?;
+    let mut host = HostSsh::for_connection(conn).map_err(RemoteError::link)?;
     let files = match start(&name, host.clone(), ask).await {
         Ok(f) => f,
-        // The helper is not there (or not this version): install it, once.
+        // The helper is not there (or not this version): install it, once,
+        // with ssh's prompts going to the user as for the connection itself
+        // (the grant lives until the install is done).
         Err((e, true)) => {
+            let _install_grant = ask.and_then(|a| host.ask_user_in(a.block_id, &name, a.auth_key));
             super::helper_install::ensure(&host, "files", |_| async {})
                 .await
                 .map_err(|i| {
@@ -435,8 +469,16 @@ pub(crate) mod testing {
     pub(crate) fn helper(
         home: std::path::PathBuf,
     ) -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
-        let (client_read, mut helper_write) = tokio::io::duplex(1 << 20);
-        let (mut helper_read, client_write) = tokio::io::duplex(1 << 20);
+        helper_with_pipes(home, 1 << 20)
+    }
+
+    /// [`helper`] with pipes of `size` bytes each way (an ssh's are small).
+    pub(crate) fn helper_with_pipes(
+        home: std::path::PathBuf,
+        size: usize,
+    ) -> (tokio::io::DuplexStream, tokio::io::DuplexStream) {
+        let (client_read, mut helper_write) = tokio::io::duplex(size);
+        let (mut helper_read, client_write) = tokio::io::duplex(size);
         tokio::spawn(async move {
             let mut s = Splitter::new();
             let mut buf = vec![0u8; 65536];
@@ -551,6 +593,36 @@ mod tests {
         assert_eq!(f.stat("~/d/renamed").await.unwrap().size, 0);
         f.delete("~/d", true).await.unwrap();
         assert!(f.stat("~/d").await.unwrap_err().is_not_found());
+    }
+
+    /// A big read's reply and a big write's request at once, over pipes far
+    /// smaller than either, against a helper that stops reading while it
+    /// writes: both finish (a writer that blocked the reader would not).
+    #[tokio::test]
+    async fn a_big_write_and_a_big_read_at_once_do_not_jam_small_pipes() {
+        let home = tempfile::tempdir().unwrap();
+        let big: Vec<u8> = (0..(3 << 20)).map(|i| (i % 251) as u8).collect();
+        std::fs::write(home.path().join("in.bin"), &big).unwrap();
+        let (r, w) = super::testing::helper_with_pipes(home.path().to_path_buf(), 64 * 1024);
+        let f = RemoteFiles::over("testhost", r, w, Box::new(()))
+            .await
+            .unwrap();
+        let (read, wrote) = tokio::time::timeout(Duration::from_secs(30), async {
+            tokio::join!(
+                f.read("~/in.bin", 64 << 20),
+                f.write("~/out.bin", vec![7u8; 8 << 20])
+            )
+        })
+        .await
+        .expect("no deadlock");
+        assert_eq!(read.unwrap(), big);
+        wrote.unwrap();
+        assert_eq!(
+            std::fs::metadata(home.path().join("out.bin"))
+                .unwrap()
+                .len(),
+            8 << 20
+        );
     }
 
     #[tokio::test]

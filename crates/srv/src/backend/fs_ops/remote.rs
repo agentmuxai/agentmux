@@ -120,8 +120,13 @@ fn join(dir: &str, name: &str) -> String {
 }
 
 /// Whether changing `path` (absolute, [`resolve`]d) is refused: the root, a
-/// system folder or anything in one, or the home folder itself.
+/// system folder or anything in one, or the home folder itself. Anything
+/// inside home is the user's, even where home is under a system folder
+/// (`/var/home/<user>` on Fedora Silverblue, a home under `/opt`).
 pub fn protected(home: &str, path: &str) -> bool {
+    if path != home && path.starts_with(&format!("{}/", home.trim_end_matches('/'))) {
+        return false;
+    }
     path == "/"
         || path == home
         || SYSTEM_DIRS
@@ -336,6 +341,13 @@ mod tests {
         ] {
             assert!(!protected(h, p), "{p}");
         }
+        // A home under a system folder: inside it is the user's, the home
+        // itself and the rest of /var still are not.
+        let h = "/var/home/u";
+        assert!(!protected(h, "/var/home/u/proj"));
+        assert!(protected(h, "/var/home/u"));
+        assert!(protected(h, "/var/log"));
+        assert!(protected(h, "/var/home/uv"));
     }
 
     #[test]
