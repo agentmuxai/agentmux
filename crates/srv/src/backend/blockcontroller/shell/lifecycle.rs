@@ -421,15 +421,17 @@ impl Controller for ShellController {
             return Ok(());
         }
 
-        // A pane on a WSL or SSH connection must not quietly get a local shell
-        // under a remote name: until WSL (P1) and SSH (P2) terminals exist, it
-        // gets no shell, and its connection overlay says why
-        // (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md, P0). The
-        // test-only mock factory keeps its own path.
+        // A pane on a connection AgentMux cannot run must not quietly get a
+        // local shell under a remote name: it gets no shell, and its connection
+        // overlay says why (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md).
+        // WSL runs on Windows (P1); SSH arrives in P2. The test-only mock
+        // factory keeps its own path.
         if self.conn_factory.lock().unwrap().is_none() {
             let conn = Self::get_conn_name(&block_meta);
             match crate::backend::remote::ConnTarget::parse(&conn) {
                 Ok(target) if target.is_local() => {}
+                #[cfg(windows)]
+                Ok(crate::backend::remote::ConnTarget::Wsl(_)) => {}
                 Ok(target) => {
                     return Err(format!(
                         "connection {} is not available yet: this version of AgentMux runs local terminals only",
@@ -633,7 +635,31 @@ impl Controller for ShellController {
             }
         }
 
-        let mut cmd = if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
+        // A WSL pane runs `wsl.exe -d <distro>` (Windows only; the guard above
+        // refuses it elsewhere). Its cwd is a path inside the distro, passed as
+        // `--cd`, never set as the Windows working directory below.
+        let wsl_distro = match crate::backend::remote::ConnTarget::parse(&conn_name) {
+            Ok(crate::backend::remote::ConnTarget::Wsl(d)) if cfg!(windows) => Some(d),
+            _ => None,
+        };
+        let mut cmd = if let Some(distro) = &wsl_distro {
+            let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
+            let plan = crate::backend::remote::wsl::launch(distro, &cmd_str, &cmd_args, &cwd);
+            tracing::info!(block_id = %self.block_id, distro = %distro, args = ?plan.args, "wsl spawn path");
+            let mut c = CommandBuilder::new("wsl.exe");
+            c.args(plan.args.iter().map(String::as_str));
+            c.env("TERM", "xterm-256color");
+            c.env("COLORTERM", "truecolor");
+            c.env("TERM_PROGRAM", "agentmux");
+            c.env("AGENTMUX_BLOCKID", &self.block_id);
+            c.env("AGENTMUX_TABID", &self.tab_id);
+            c.env("AGENTMUX_VERSION", env!("CARGO_PKG_VERSION"));
+            c.env(
+                "WSLENV",
+                crate::backend::remote::wsl::wslenv(&std::env::var("WSLENV").unwrap_or_default()),
+            );
+            c
+        } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
             tracing::info!(block_id = %self.block_id, cmd = %cmd_str, args = ?cmd_args, "direct spawn path");
@@ -841,7 +867,7 @@ impl Controller for ShellController {
 
         // Set working directory if specified
         let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
-        if !cwd.is_empty() {
+        if !cwd.is_empty() && wsl_distro.is_none() {
             cmd.cwd(&cwd);
         }
 
