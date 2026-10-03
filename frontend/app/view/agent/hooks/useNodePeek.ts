@@ -88,6 +88,11 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
             (bridging) => {
                 if (bridging === null && waitingForBridge) {
                     waitingForBridge = false;
+                    // A selection drag may have started while it waited: never
+                    // mount mid-drag (the reason for the checks in
+                    // handlePeekEnter). The release resync below reopens it if
+                    // the row is still hovered when the button comes up.
+                    if (isPrimaryButtonDown()) return;
                     setIsPeeking(true);
                 }
             },
