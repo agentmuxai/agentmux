@@ -255,6 +255,28 @@ pointer, like every other peek:
 
 §7's "beside or over" question is therefore answered as "near the pointer".
 
+**Revision 2 (2026-10-03): a tall panel could not be entered.** Found in use: some tall
+panels with a scroll bar could never be reached. Two causes compounded:
+
+1. *The panel followed the pointer.* Every move over the row re-placed it at pointer + 12px,
+   with its height cut to the room left, so a pointer heading for it pushed it away and its
+   scroll bar shrank as it went.
+2. *The way out crossed the next row.* Leaving the row meant crossing up to 12px of the next
+   tool row before reaching the panel, and that row's own peek opened (after its 50 ms enter
+   delay) on top of this one, before the 150 ms linger could help.
+
+Fix, for panels that scroll (enterable) only; a panel that fits behaves as before:
+
+- **Pinned** once it turns out to scroll: it stops following the pointer (it still moves with
+  its row if the transcript scrolls).
+- **Flush with the row**: its near edge is `min(pointer + 12, row bottom)` (or the mirror
+  above), so no other row lies between them (`computePeekVertical({ flushToRow })`).
+- **Approach-aware linger**: the 150 ms grace is re-armed while the pointer keeps getting
+  closer to the panel, up to 1 s, so a slow or diagonal approach still arrives.
+- **Other peeks wait**: while a panel is being crossed to (or the pointer is on it), other
+  rows' peeks hold off (`peek-bridge.ts`); if the pointer never arrives, a still-hovered row
+  opens its peek when the grace ends.
+
 ## 7. Open questions for you
 
 1. **Beside the pane or over it?** Beside (left/right) is the flicker-proof choice; if
