@@ -1368,13 +1368,11 @@ impl PersistentSubprocessController {
                     line_len = line.len(),
                     "persistent stdout → blockfile"
                 );
-                let line_with_newline = format!("{}\n", line);
                 if let Some(ref broker) = broker_read {
-                    super::super::shell::handle_append_block_file(
+                    super::super::shell::append_output_line(
                         broker,
                         &block_id_read,
-                        PERSISTENT_OUTPUT_SUBJECT,
-                        line_with_newline.as_bytes(),
+                        &line,
                         filestore_read.as_ref(),
                         crate::backend::agent_admission::fenced_zone(global_output_zone.as_deref(), &record_fence),
                     );

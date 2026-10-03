@@ -244,6 +244,26 @@ pub fn handle_append_block_file(
     }
 }
 
+/// Appends one NDJSON stdout line, plus the newline the frontend's line
+/// splitter needs, to the block's `output` file and `global_output_zone`.
+pub fn append_output_line(
+    broker: &mps::Broker,
+    block_id: &str,
+    line: &str,
+    filestore: Option<&Arc<FileStore>>,
+    global_output_zone: Option<&str>,
+) {
+    let line_with_newline = format!("{line}\n");
+    handle_append_block_file(
+        broker,
+        block_id,
+        crate::backend::agent_session::OUTPUT_FILE,
+        line_with_newline.as_bytes(),
+        filestore,
+        global_output_zone,
+    );
+}
+
 /// Append `data` to the global transcript zone's `output` file, creating it
 /// lazily on first write, and return where it landed. Mirrors the
 /// per-channel write-through in [`handle_append_block_file`]; all errors are
