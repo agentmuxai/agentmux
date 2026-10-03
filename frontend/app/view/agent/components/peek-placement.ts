@@ -18,8 +18,9 @@
  *  - Fits within the row's width: right edge on the row's right edge, growing
  *    leftward (what it always did).
  *  - Wider than the row: **pinned to the row's left edge** and extending right,
- *    over the pane border, up to the window edge. It uses as much width as
- *    exists, and never less than the row.
+ *    over the pane border, by at most half the row's width
+ *    (`MAX_OVERSHOOT_FRACTION`: a 500px pane gives a panel up to 750px) and never
+ *    past the window edge. Never less wide than the row.
  *
  * Vertical (`computePeekVertical`)
  *  - Fits on one side of the pointer inside the transcript container: placed
@@ -57,6 +58,8 @@ export const CURSOR_GAP_PX = 12;
 export const BOTTOM_MARGIN_PX = 4;
 /** Clearance kept from the window edge when the panel leaves the pane. */
 export const VIEWPORT_MARGIN_PX = 8;
+/** How far past its row's right edge a wide panel may reach, as a fraction of the row's width. */
+export const MAX_OVERSHOOT_FRACTION = 0.5;
 
 // ── Horizontal ───────────────────────────────────────────────────────────────
 
@@ -100,9 +103,10 @@ export function computePeekHorizontal(input: PeekHorizontalInput): PeekHorizonta
         extendsPastRow: false,
     };
     if (width <= rowWidth) return rightAligned;
-    // Wider than the row: pin the left edge and use the room to the window's
-    // right edge. If that is no more than the row has, nothing is gained.
-    const room = viewport.width - VIEWPORT_MARGIN_PX - row.left;
+    // Wider than the row: pin the left edge and extend right, by at most half the
+    // row's width and never past the window's right edge. If that is no more
+    // than the row has, nothing is gained.
+    const room = Math.min(viewport.width - VIEWPORT_MARGIN_PX - row.left, rowWidth * (1 + MAX_OVERSHOOT_FRACTION));
     if (room <= rowWidth) return rightAligned;
     return {
         left: row.left,
