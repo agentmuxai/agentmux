@@ -11,6 +11,7 @@
 
 pub mod conn;
 pub mod ssh;
+pub mod ssh_config;
 pub mod status;
 pub mod wsl;
 pub mod wsl_fs;
