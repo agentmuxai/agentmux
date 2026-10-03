@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::daemon::socket_path;
-use crate::frame::PROTOCOL;
+use agentmux_remote::frame::PROTOCOL;
 
 /// Connect to the daemon, starting it (detached, in its own session, so it
 /// outlives this SSH channel) if none is running.

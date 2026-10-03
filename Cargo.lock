@@ -168,6 +168,7 @@ name = "agentmux-srv"
 version = "0.59.7"
 dependencies = [
  "agentmux-common",
+ "agentmux-remote",
  "async-stream",
  "axum 0.7.9",
  "base64",

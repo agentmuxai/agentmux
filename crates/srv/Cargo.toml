@@ -72,6 +72,8 @@ mdns-sd = "0.12"
 # new supply-chain surface — it just makes the dependency honest.
 if-addrs = "0.13"
 which = "7"
+# The durable-session protocol, shared with the helper (crates/remote).
+agentmux-remote = { path = "../remote" }
 # Text encoding detection + transcoding for the editor (SPEC_EDITOR_FILE_ENCODINGS).
 encoding_rs = "0.8"
 chardetng = "0.1"
