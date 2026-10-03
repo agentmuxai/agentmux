@@ -36,8 +36,7 @@
 // LIMITS of the lexer (shared by all modes). It is not a parser. JSX text that
 // contains `//` or an apostrophe, and a regex literal after an unusual token,
 // can be misread; the effect is a comment missed or a code line counted as
-// comment, never a crash. Comments inside a template literal's `${...}` are
-// treated as code.
+// comment, never a crash.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -130,6 +129,40 @@ export function lexSource(src, lang) {
         line++;
     };
 
+    // Template literals: the text parts are strings, but a `${ ... }` substitution
+    // is code (it can hold comments). `tmplStack` holds, for each open
+    // substitution, the number of `{` opened inside it and not yet closed.
+    const tmplStack = [];
+    // Scans template text from `j` until the closing backtick or the next `${`;
+    // returns the index to continue from.
+    const templateBody = (j) => {
+        while (j < n) {
+            const ch = src[j];
+            if (ch === "\\") {
+                str(ch);
+                j++;
+                if (j < n) {
+                    if (src[j] === "\n") newline(true);
+                    else str(src[j]);
+                    j++;
+                }
+            } else if (ch === BT) {
+                str(ch);
+                return j + 1;
+            } else if (ch === "$" && src[j + 1] === "{") {
+                str("$");
+                str("{");
+                tmplStack.push(0);
+                return j + 2;
+            } else {
+                if (ch === "\n") newline(true);
+                else str(ch);
+                j++;
+            }
+        }
+        return j;
+    };
+
     let i = 0;
     while (i < n) {
         const c = src[i];
@@ -213,41 +246,23 @@ export function lexSource(src, lang) {
         }
         if (!rust && c === BT) {
             str(c);
-            i++;
-            while (i < n) {
-                if (src[i] === "\\") {
-                    str(src[i++]);
-                    if (i < n) {
-                        if (src[i] === "\n") newline(true);
-                        else str(src[i]);
-                        i++;
-                    }
-                    continue;
-                }
-                if (src[i] === BT) {
-                    str(src[i++]);
-                    break;
-                }
-                if (src[i] === "$" && src[i + 1] === "{") {
-                    str("$");
-                    str("{");
-                    i += 2;
-                    let depth = 1;
-                    while (i < n && depth > 0) {
-                        const ch = src[i];
-                        if (ch === "{") depth++;
-                        else if (ch === "}") depth--;
-                        if (ch === "\n") newline(true);
-                        else str(ch);
-                        i++;
-                    }
-                    continue;
-                }
-                if (src[i] === "\n") newline(true);
-                else str(src[i]);
-                i++;
-            }
+            i = templateBody(i + 1);
             continue;
+        }
+        if (!rust && tmplStack.length > 0 && (c === "{" || c === "}")) {
+            // Inside a `${ ... }` substitution: count braces to find its end,
+            // then resume the template's string text.
+            const top = tmplStack.length - 1;
+            if (c === "{") {
+                tmplStack[top]++;
+            } else if (tmplStack[top] === 0) {
+                tmplStack.pop();
+                str(c);
+                i = templateBody(i + 1);
+                continue;
+            } else {
+                tmplStack[top]--;
+            }
         }
         if (rust && c === SQ) {
             if (d === "\\") {
@@ -390,15 +405,27 @@ export function gateFile(info, added) {
 }
 
 // Items a condensing PR must not remove (spec C8). Counted in comment text only;
-// code is covered by the code-equal comparison.
+// code is covered by the code-equal comparison. Besides the markers the spec
+// names, this covers every comment the toolchain acts on: bundler hints
+// (`@vite-ignore`, `webpackIgnore`), test-runner docblocks (`@vitest-environment`),
+// formatter and coverage switches, JSX pragmas, tree-shaking and legal-comment
+// markers. The tracked source uses `@vite-ignore`, `@vitest-environment` and
+// `prettier-ignore` today; the rest guard against the next one.
 const PROTECTED = [
     ["SAFETY:", /\bSAFETY:/g],
     ["TODO", /\bTODO\b/g],
     ["FIXME", /\bFIXME\b/g],
-    ["eslint directive", /\beslint-(?:disable|enable)/g],
-    ["@ts directive", /@ts-(?:expect-error|ignore|nocheck)/g],
+    ["eslint directive", /\beslint-[a-z-]+/g],
+    ["@ts directive", /@ts-[a-z-]+/g],
     ["/// <reference", /<reference\b/g],
     ["doctest fence", /```/g],
+    ["bundler hint", /@vite-ignore|webpackIgnore|webpackChunkName|webpackMode|webpackPrefetch|webpackPreload/g],
+    ["test-runner directive", /@vitest[\w-]*|@jest-[\w-]+/g],
+    ["formatter or linter switch", /prettier-ignore|stylelint-(?:disable|enable)/g],
+    ["coverage ignore", /\b(?:istanbul|c8|v8) ignore\b/g],
+    ["JSX or refresh pragma", /@jsx\w*|@refresh\b/g],
+    ["tree-shaking marker", /[@#]__(?:PURE|NO_SIDE_EFFECTS)__/g],
+    ["legal comment", /@preserve|@license|\/\*!/g],
 ];
 
 export function protectedCounts(info) {

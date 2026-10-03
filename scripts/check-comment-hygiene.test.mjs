@@ -71,6 +71,20 @@ describe("lexSource: TypeScript", () => {
         expect(info.lines[1].code).toBe(false);
     });
 
+    it("finds a comment inside a template substitution, and resumes the string after it", () => {
+        const info = ts("const s = `a ${foo( // inside\n  x)} // text`;\n// after\n");
+        expect(info.lines[0].text).toBe("// inside");
+        expect(info.lines[1].text).toBe("");
+        expect(info.lines[2].text).toBe("// after");
+        expect(info.lines[2].code).toBe(false);
+    });
+
+    it("counts braces and nested templates inside a substitution", () => {
+        const info = ts("const s = `${ {a: 1}.a } ${ `n ${y} // str` /* c */ } // str2`;\n");
+        expect(info.lines[0].text).toBe("/* c */");
+        expect(ts("const s = `${ {a: 1}.a }`; // t\n").lines[0].text).toBe("// t");
+    });
+
     it("does not treat a multi-line template literal's lines as comments", () => {
         const info = ts("const q = `\n// not a comment\n`;\n");
         expect(textOf(info).join("")).toBe("");
@@ -252,6 +266,16 @@ describe("statsOf / protectedCounts / isSourcePath", () => {
         expect(c.TODO).toBe(0);
         expect(c["eslint directive"]).toBe(1);
         expect(c["@ts directive"]).toBe(1);
+    });
+
+    it("protects bundler, test-runner and formatter directives", () => {
+        const before = "const m = import(/* @vite-ignore */ url);\n/** @vitest-environment jsdom */\n// prettier-ignore\nconst t = 1;\n";
+        const lost = "const m = import(/* dynamic */ url);\n/** jsdom */\n// keep\nconst t = 1;\n";
+        const problems = compareCodeEqual(before, lost, "ts").problems.join("|");
+        expect(problems).toMatch(/bundler hint/);
+        expect(problems).toMatch(/test-runner directive/);
+        expect(problems).toMatch(/formatter or linter switch/);
+        expect(compareCodeEqual(before, before, "ts").problems).toEqual([]);
     });
 
     it("skips generated and vendored paths", () => {
