@@ -19,9 +19,11 @@
  * A "connected" result means the MCP handshake succeeded — it does NOT mean
  * every prerequisite the server itself depends on is satisfied (e.g.
  * ableton-mcp's process starts and answers `initialize` whether or not
- * Ableton Live is actually running; that gap is why the spec pairs this
- * dynamic check with static per-entry remediation text, `prereq_note`
- * (§4.4/§6), which is not built yet).
+ * Ableton Live is actually running; that gap is why each preload catalog
+ * entry's static `prereqNote` (mcp-preload-catalog.ts, shown by
+ * McpCatalogPicker and mcp-manager) matters alongside this dynamic check,
+ * not instead of it. Only the spec's `db_mcp_servers` column for it
+ * (§4.4/§6) is not built).
  */
 
 import { createStore, reconcile } from "solid-js/store";
