@@ -934,10 +934,10 @@ impl Run {
             bytes.len() / 1024
         ))
         .await;
-        self.ssh_run(&hi::upload_command(version), Some(bytes))
+        self.ssh_run(&hi::upload_command(version, &self.session), Some(bytes))
             .await?;
         let (_, out) = self
-            .ssh_run(&hi::install_command(version, &hash), None)
+            .ssh_run(&hi::install_command(version, &self.session, &hash), None)
             .await?;
         if out.trim() != "ok" {
             return Err(format!(
@@ -1302,11 +1302,23 @@ elif ' attach ' in remote:
         std::fs::write(&script, FAKE_SSH_FRESH_HOST).unwrap();
         let ssh_path = if cfg!(windows) {
             let cmd = dir.path().join("fake_ssh_fresh.cmd");
-            std::fs::write(&cmd, format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display())).unwrap();
+            std::fs::write(
+                &cmd,
+                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
+            )
+            .unwrap();
             cmd
         } else {
             let sh = dir.path().join("fake_ssh_fresh");
-            std::fs::write(&sh, format!("#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n", python.display(), script.display())).unwrap();
+            std::fs::write(
+                &sh,
+                format!(
+                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
+                    python.display(),
+                    script.display()
+                ),
+            )
+            .unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -1318,7 +1330,10 @@ elif ' attach ' in remote:
         // The "release" build, from a local folder.
         let builds = dir.path().join("builds");
         std::fs::create_dir_all(&builds).unwrap();
-        let name = crate::backend::remote::helper_install::asset_name(env!("CARGO_PKG_VERSION"), "x86_64-unknown-linux-musl");
+        let name = crate::backend::remote::helper_install::asset_name(
+            env!("CARGO_PKG_VERSION"),
+            "x86_64-unknown-linux-musl",
+        );
         std::fs::write(builds.join(name), b"the helper").unwrap();
         std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
 
@@ -1326,7 +1341,10 @@ elif ' attach ' in remote:
         let run = Run {
             block_id: "durable-fresh-block".to_string(),
             conn: "freshhost".to_string(),
-            dest: SshDest { destination: "freshhost".to_string(), port: None },
+            dest: SshDest {
+                destination: "freshhost".to_string(),
+                port: None,
+            },
             ssh_path,
             control_dir: None,
             session: "amx-fresh".to_string(),
@@ -1343,9 +1361,16 @@ elif ' attach ' in remote:
         assert_eq!(ended, Some(0));
         let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
         assert_eq!(log, "attach-missing\nprobe\nupload\ninstall\nattach\n");
-        let term = state.filestore.read_file("durable-fresh-block", "term").unwrap().unwrap();
+        let term = state
+            .filestore
+            .read_file("durable-fresh-block", "term")
+            .unwrap()
+            .unwrap();
         let text = String::from_utf8_lossy(&term).into_owned();
-        assert!(text.contains("Installing AgentMux's helper on freshhost") && text.contains("ready"), "{text:?}");
+        assert!(
+            text.contains("Installing AgentMux's helper on freshhost") && text.contains("ready"),
+            "{text:?}"
+        );
     }
 
     #[test]

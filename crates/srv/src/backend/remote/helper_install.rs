@@ -83,19 +83,32 @@ pub fn probe_command(version: &str) -> String {
 }
 
 /// Reads the binary from stdin into a temp file in an owner-only folder.
-pub fn upload_command(version: &str) -> String {
+/// A temp file of this install's own (`tag`: the pane's session id, letters,
+/// digits, `-` and `_`), so two panes installing on one host at once never
+/// write, check or remove each other's upload.
+fn temp_name(tag: &str) -> String {
+    let tag: String = tag
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    format!("agentmux-remote.{tag}.tmp")
+}
+
+pub fn upload_command(version: &str, tag: &str) -> String {
     let dir = remote_dir(version);
+    let tmp = temp_name(tag);
     sh(&format!(
-        "umask 077; mkdir -p \"{dir}\" && cat > \"{dir}/agentmux-remote.tmp\""
+        "umask 077; mkdir -p \"{dir}\" && cat > \"{dir}/{tmp}\""
     ))
 }
 
 /// Checks the uploaded file's hash; on a match makes it the helper, else
 /// removes it. Prints `ok` or `mismatch <hash>`.
-pub fn install_command(version: &str, sha256: &str) -> String {
+pub fn install_command(version: &str, tag: &str, sha256: &str) -> String {
     let dir = remote_dir(version);
+    let tmp = temp_name(tag);
     sh(&format!(
-        "f=\"{dir}/agentmux-remote.tmp\"; \
+        "f=\"{dir}/{tmp}\"; \
          h=$( (sha256sum \"$f\" 2>/dev/null || shasum -a 256 \"$f\") | cut -d' ' -f1); \
          if [ \"$h\" = \"{sha256}\" ]; then chmod 700 \"$f\" && mv -f \"$f\" \"{dir}/agentmux-remote\" && echo ok; \
          else rm -f \"$f\"; echo \"mismatch $h\"; fi"
@@ -246,14 +259,17 @@ mod tests {
     fn the_remote_scripts_run_under_sh_whatever_the_login_shell() {
         for cmd in [
             probe_command("0.59.8"),
-            upload_command("0.59.8"),
-            install_command("0.59.8", &"a".repeat(64)),
+            upload_command("0.59.8", "amx-1"),
+            install_command("0.59.8", "amx-1", &"a".repeat(64)),
         ] {
             assert!(cmd.starts_with("sh -c '"), "{cmd}");
             assert!(cmd.ends_with('\''), "{cmd}");
             assert!(cmd.contains("$HOME/.agentmux-remote/bin/0.59.8"), "{cmd}");
         }
-        assert!(install_command("0.59.8", "abc").contains("= \"abc\" ]"));
+        assert!(install_command("0.59.8", "amx-1", "abc").contains("= \"abc\" ]"));
+        // Each install its own temp file; nothing but the id's own characters.
+        assert!(upload_command("0.59.8", "amx-1").contains("agentmux-remote.amx-1.tmp"));
+        assert!(upload_command("0.59.8", "a;b $x").contains("agentmux-remote.abx.tmp"));
     }
 
     /// The scripts do what they say in a real `sh` (where there is one).
@@ -275,13 +291,19 @@ mod tests {
             String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
         };
         let body = b"#!/bin/sh\necho agentmux-remote 0.59.8 protocol 1\n";
-        run(&upload_command("0.59.8"), body);
-        assert!(run(&install_command("0.59.8", &"0".repeat(64)), b"").starts_with("mismatch"));
-        run(&upload_command("0.59.8"), body);
+        run(&upload_command("0.59.8", "s1"), body);
+        assert!(run(&install_command("0.59.8", "s1", &"0".repeat(64)), b"").starts_with("mismatch"));
+        // Another pane's upload in flight is untouched by this one's install.
+        run(&upload_command("0.59.8", "s2"), b"other");
+        run(&upload_command("0.59.8", "s1"), body);
         assert_eq!(
-            run(&install_command("0.59.8", &sha256_hex(body)), b"").trim(),
+            run(&install_command("0.59.8", "s1", &sha256_hex(body)), b"").trim(),
             "ok"
         );
+        assert!(home
+            .path()
+            .join(".agentmux-remote/bin/0.59.8/agentmux-remote.s2.tmp")
+            .exists());
         let probe = parse_probe(&run(&probe_command("0.59.8"), b""), "0.59.8");
         assert!(probe.installed, "{probe:?}");
     }
