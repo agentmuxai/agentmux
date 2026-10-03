@@ -62,8 +62,8 @@
  *  3. it lingers after the row's `mouseleave`, and the linger is re-armed while
  *     the pointer keeps closing in on it (HOVER_BRIDGE_MS, up to
  *     HOVER_BRIDGE_MAX_MS), then stays while the pointer is on it;
- *  4. meanwhile other rows' peeks wait (peek-bridge.ts), so one the pointer
- *     passes over on the way cannot open on top of it.
+ *  4. while the pointer is crossing to it, other rows' peeks wait
+ *     (peek-bridge.ts), so one it passes over on the way cannot open on top.
  * A panel that fits behaves as before: it follows the pointer and closes the
  * instant the pointer leaves the row.
  * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md
@@ -231,6 +231,14 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     let bridgeTimer: ReturnType<typeof setTimeout> | undefined;
     let bridgeStartedAt = 0;
     let closestApproach = Infinity;
+    // The row this panel bridged, remembered rather than re-read at release time,
+    // so a row element that changes meanwhile cannot leave the bridge set (which
+    // would hold off every other peek).
+    let bridgedRow: HTMLElement | undefined;
+    const releaseBridge = () => {
+        endPeekBridge(bridgedRow);
+        bridgedRow = undefined;
+    };
 
     // How far the pointer is from the panel (0 inside it).
     const distanceToPanel = (x: number, y: number): number => {
@@ -262,7 +270,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     const endLinger = () => {
         clearBridgeTimer();
         if (!held && !props.show) {
-            endPeekBridge(props.rowEl());
+            releaseBridge();
             setOpen(false);
         }
     };
@@ -271,7 +279,8 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         bridgeStartedAt = Date.now();
         closestApproach = Infinity;
         // Other rows' peeks wait while the pointer crosses to this panel.
-        beginPeekBridge(props.rowEl());
+        bridgedRow = props.rowEl();
+        beginPeekBridge(bridgedRow);
         document.addEventListener("mousemove", onApproach, { passive: true });
         armBridgeTimer();
     };
@@ -282,7 +291,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                 clearBridgeTimer();
                 if (show) {
                     // The pointer is back on the row: nothing is being crossed.
-                    endPeekBridge(props.rowEl());
+                    releaseBridge();
                     setOpen(true);
                 } else if (bridges() && untrack(open) && lastEnterable) {
                     // Only a panel that had to be cut (it scrolls) is meant to be
@@ -361,7 +370,10 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                 vt = computePeekVertical({ ...placeAt, mouseY: lastMouseY, flushToRow: true });
             }
         }
-        lastEnterable = pinnedOffsetY != null;
+        // Enterable if pinned, or if it scrolls with no pointer Y to pin to yet
+        // (a peek opened by the drag-release hover resync before any mousemove:
+        // it still needs its linger, and pins on the first move).
+        lastEnterable = pinnedOffsetY != null || vt.scrolls;
         setOutside(hz.extendsPastRow || vt.leavesContainer);
         setFloatingStyle(
             withPaneZoom(
@@ -467,7 +479,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             pinnedOffsetY = null;
             lastEnterable = false;
             clearBridgeTimer();
-            endPeekBridge(props.rowEl());
+            releaseBridge();
         });
     };
 
@@ -488,9 +500,11 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                         if (!bridges()) return;
                         clearBridgeTimer();
                         held = true;
-                        // Arrived. Keep other rows' peeks shut while the pointer
-                        // is here (it is over them, under the panel).
-                        beginPeekBridge(props.rowEl());
+                        // Arrived: the crossing is over. (Rows under the panel
+                        // cannot be hovered while the pointer is on it anyway, so
+                        // no bridge is needed here, and none can go stale if a
+                        // mouseleave is ever missed.)
+                        releaseBridge();
                     }}
                     onMouseLeave={() => {
                         if (!bridges()) return;
@@ -498,7 +512,6 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                         // Pointer left the panel: linger briefly (it may be heading
                         // back to the row, whose mouseenter will re-show it).
                         if (!props.show) startLinger();
-                        else endPeekBridge(props.rowEl());
                     }}
                     style={floatingStyle()}
                 >

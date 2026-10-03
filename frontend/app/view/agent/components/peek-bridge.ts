@@ -8,9 +8,9 @@
  * its row and reaching it, the pointer may pass over OTHER rows, and each of
  * those opens its own peek after the enter delay, on top of the one the user is
  * heading for. So while a panel is bridging (its grace period after the row's
- * `mouseleave`, or the pointer on it), `useNodePeek` holds off opening any other
- * row's peek. When the bridge ends without the pointer arriving, a row that is
- * still hovered opens its peek then.
+ * `mouseleave`, which always ends within HOVER_BRIDGE_MAX_MS), `useNodePeek`
+ * holds off opening any other row's peek. When the bridge ends without the
+ * pointer arriving, a row that is still hovered opens its peek then.
  *
  * One pointer, so one bridge at a time: a module-level signal.
  */

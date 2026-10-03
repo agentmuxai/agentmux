@@ -395,6 +395,66 @@ describe("PeekOverlay", () => {
             }
         });
 
+        it("a tall panel opened before any pointer move (no Y to pin to) still lingers on the row's mouseleave", () => {
+            vi.useFakeTimers();
+            try {
+                // No mousemove: e.g. the drag-release hover resync opened it.
+                const container = document.createElement("div");
+                container.style.overflowY = "auto";
+                document.body.appendChild(container);
+                const row = document.createElement("div");
+                container.appendChild(row);
+                rectOf(container, { top: 100, bottom: 400 });
+                rectOf(row, { top: 200, bottom: 230, left: 100, right: 500, width: 400 });
+                const [show, setShow] = createSignal(true);
+                render(() => (
+                    <PeekOverlay show={show()} rowEl={() => row}>
+                        <span>peek content</span>
+                    </PeekOverlay>
+                ));
+                vi.advanceTimersByTime(50);
+                rectOf(panel()!, { height: 5000, width: 300 });
+                (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void)(); // re-place, now measured
+                setShow(false);
+                expect(panel()).not.toBeNull(); // lingers so its scroll bar can be reached
+                vi.advanceTimersByTime(200);
+                expect(panel()).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a bridge whose row has left the page does not hold off other peeks", () => {
+            vi.useFakeTimers();
+            try {
+                const { row, setShow } = setup({ panelHeight: 5000 });
+                const elsewhere = otherRow();
+                setShow(false); // bridging this row
+                row.remove(); // ...which is then virtualized away
+                elsewhere.handlePeekEnter();
+                vi.advanceTimersByTime(60);
+                expect(elsewhere.isPeeking()).toBe(true);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("arriving on the panel ends the bridge: a peek held off meanwhile then opens if still hovered", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const waiting = otherRow();
+                setShow(false);
+                waiting.handlePeekEnter();
+                vi.advanceTimersByTime(60);
+                expect(waiting.isPeeking()).toBe(false);
+                panel()!.dispatchEvent(new MouseEvent("mouseenter")); // pointer arrives, bridge ends
+                expect(waiting.isPeeking()).toBe(true); // nothing is being crossed any more
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         it("the panel's own row is never held off by its bridge", () => {
             vi.useFakeTimers();
             try {
