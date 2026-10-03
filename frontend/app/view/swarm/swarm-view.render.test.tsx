@@ -103,6 +103,20 @@ describe("DispatchActivityFeedEntry — ANSI-aware rendering", () => {
         expect(container.querySelector(".text-ansi-green")).not.toBeNull();
     });
 
+    it("shows an expanded tool_use with the agent pane's detail for its input", async () => {
+        const entry: DispatchActivityEntry = {
+            agentId: "a1",
+            event: {
+                agent_id: "a1",
+                timestamp: 0,
+                event_type: { type: "tool_use", name: "WebFetch", input: { url: "https://example.com/docs?q=1" } },
+            },
+        };
+        const { container, findByText } = render(() => <DispatchActivityFeedEntry entry={entry} showAgentTag={false} />);
+        (await findByText("WebFetch")).click();
+        expect(container.querySelector(".swarm-subagent-detail-text")!.textContent).toBe("example.com/docs");
+    });
+
     it("splits a multi-line body into one row per line", () => {
         const { container } = render(() => (
             <DispatchActivityFeedEntry entry={textEntry("a1", "line1\nline2\nline3")} showAgentTag={false} />

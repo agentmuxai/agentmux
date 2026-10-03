@@ -112,7 +112,9 @@ pub struct SubagentEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SubagentEventType {
     Text { content: String },
-    ToolUse { name: String, input_summary: String },
+    /// `input` is the call's input, bounded by `parse::bounded_tool_input`;
+    /// the Swarm feed formats it with the agent pane's `toolDetail`.
+    ToolUse { name: String, input: serde_json::Value },
     ToolResult { is_error: bool, preview: String },
     Progress { output: String },
     /// A JSONL `"result"`-typed line — the subagent's final output.
