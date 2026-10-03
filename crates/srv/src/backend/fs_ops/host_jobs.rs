@@ -370,14 +370,23 @@ impl Transfer<'_> {
                 return Outcome::NotDone;
             }
         };
-        if info.is_link {
-            job.fail(
-                &shown,
+        // A link moves within one host as itself (a rename there); copied, or
+        // between two machines, it isn't: where it points means something
+        // only on its own side, and the helper makes no links.
+        let one_host = self.src.same_host(&self.dest);
+        if info.is_link && !(one_host && self.kind == FsOpKind::Move) {
+            let why = if one_host {
+                format!(
+                    "“{}” is a link: copying links on a host isn't available yet (moving one is).",
+                    file_name(src)
+                )
+            } else {
                 format!(
                     "“{}” is a link: links aren't copied between two machines.",
                     file_name(src)
-                ),
-            );
+                )
+            };
+            job.fail(&shown, why);
             job.advance(1, 0);
             return Outcome::NotDone;
         }
@@ -440,8 +449,17 @@ impl Transfer<'_> {
                 }
             }
         }
-        // Within one host, a move is a rename there.
-        if self.kind == FsOpKind::Move && !replace && self.src.same_host(&self.dest) {
+        // Within one host, a move is a rename there. A link only ever moves
+        // this way (never read through): to replace, what is there goes first.
+        if info.is_link && replace {
+            if let Err(e) = self.dest.remove(self.rt, &dest) {
+                job.fail(&shown, e);
+                job.advance(1, 0);
+                return Outcome::NotDone;
+            }
+            replace = false;
+        }
+        if self.kind == FsOpKind::Move && !replace && one_host {
             match self.src.rename_no_replace(self.rt, src, &dest) {
                 Ok(()) => {
                     self.pass_over_after_rename(job, &dest);
@@ -453,6 +471,12 @@ impl Transfer<'_> {
                         format!("Something named “{}” appeared there.", file_name(&dest)),
                     );
                     self.pass_over(job, src);
+                    return Outcome::NotDone;
+                }
+                // A link can't be copied instead.
+                Err(RenameError::Other(e)) if info.is_link => {
+                    job.fail(&shown, e);
+                    job.advance(1, 0);
                     return Outcome::NotDone;
                 }
                 Err(RenameError::Other(_)) => {}
@@ -1116,6 +1140,64 @@ mod tests {
             b"a"
         );
         assert_eq!(std::fs::read(remote.path().join("d/a.txt")).unwrap(), b"a");
+    }
+
+    /// Within one host a link moves as itself; copied, it is reported.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_link_moves_within_one_host_and_is_not_copied() {
+        let remote = tempfile::tempdir().unwrap();
+        let r = display_path(remote.path());
+        std::fs::create_dir_all(remote.path().join("to")).unwrap();
+        std::fs::write(remote.path().join("target.txt"), b"t").unwrap();
+        std::os::unix::fs::symlink("target.txt", remote.path().join("l1")).unwrap();
+        std::os::unix::fs::symlink("target.txt", remote.path().join("l2")).unwrap();
+        let h = host(remote.path()).await;
+        let (emit, seen) = events();
+        start(
+            FsOpKind::Move,
+            h.clone(),
+            vec![format!("{r}/l1")],
+            h.clone(),
+            format!("{r}/to"),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        assert!(end.failures.is_none(), "{end:?}");
+        let moved = remote.path().join("to/l1");
+        assert!(std::fs::symlink_metadata(&moved)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            std::fs::read_link(&moved).unwrap(),
+            std::path::Path::new("target.txt")
+        );
+
+        let (emit, seen) = events();
+        start(
+            FsOpKind::Copy,
+            h.clone(),
+            vec![format!("{r}/l2")],
+            h,
+            format!("{r}/to"),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        let failures = end.failures.unwrap_or_default();
+        assert!(
+            failures[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("copying links on a host"),
+            "{failures:?}"
+        );
+        assert!(!remote.path().join("to/l2").exists());
     }
 
     #[test]
