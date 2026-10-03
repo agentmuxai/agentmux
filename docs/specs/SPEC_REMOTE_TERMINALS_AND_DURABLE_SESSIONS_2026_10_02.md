@@ -1,7 +1,7 @@
 # SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan
 
 **Date:** 2026-10-02
-**Status:** proposed — plan only; nothing implemented. Section 10 asks for decisions.
+**Status:** proposed — plan only; nothing implemented. The section 10 decisions were answered on 2026-10-02 (the recommendations, see 10.1).
 **Author:** AgentX (narko), at the owner's request ("lets get both remote terminals and durable sessions in, lets work first on that ... this would also need support across the 3 platforms")
 **Affects:** `crates/srv` (blockcontroller/shell, a new `remote/` module, fs_ops, wconfig, server/service), a new crate `crates/remote` (the remote helper), `crates/cef` (none expected), `frontend/app` (term view, block frame, conntypeahead, Hangar, settings), `Taskfile.yml` and `.github/workflows` (new build targets)
 **Builds on:** `docs/reports/REPORT_WAVETERM_FEATURE_GAP_2026_10_02.md` §2.10 (what Wave has), `docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md` (the `term` blockfile and offset replay a durable session plugs into), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why the last remote helper was removed, and what not to repeat)
@@ -35,12 +35,13 @@ On all three platforms AgentMux ships on. Specifically:
 
 ### 3.1 Use the system's OpenSSH, not an SSH library
 
-Every client platform has an OpenSSH client: Windows 10 1809+ ships `C:\Windows\System32\OpenSSH\ssh.exe`, macOS and Linux have `ssh`. Spawning it (in a PTY, as the terminal's process) gives, for free and exactly as the user's own `ssh` behaves: `~/.ssh/config` including `Match` (which Wave's own parser cannot handle), `ProxyJump`/`ProxyCommand`, `Include`, the user's agent (OpenSSH agent pipe on Windows, `SSH_AUTH_SOCK` elsewhere), FIDO/hardware keys, certificates, Kerberos/GSSAPI, `known_hosts`, and every fix OpenSSH ships. An embedded library (`russh`) would mean reimplementing all of that in security-sensitive code AgentMux would then own.
+Every client platform has an OpenSSH client: Windows 10 version 1803 and later ships `C:\Windows\System32\OpenSSH\ssh.exe`, macOS and Linux have `ssh`. Spawning it (in a PTY, as the terminal's process) gives, for free and exactly as the user's own `ssh` behaves: `~/.ssh/config` including `Match` (which Wave's own parser cannot handle), `ProxyJump`/`ProxyCommand`, `Include`, the user's agent (OpenSSH agent pipe on Windows, `SSH_AUTH_SOCK` elsewhere), FIDO/hardware keys, certificates, Kerberos/GSSAPI, `known_hosts`, and every fix OpenSSH ships. An embedded library (`russh`) would mean reimplementing all of that in security-sensitive code AgentMux would then own.
 
 Costs, and how they are handled:
 - **No multiplexing on Windows.** Win32-OpenSSH does not support `ControlMaster`. Each terminal and the file channel are separate `ssh` processes. That is acceptable (one TCP connection each); on macOS and Linux a per-connection `ControlMaster` socket under the data dir cuts repeat logins to one.
 - **Prompts.** Passwords, passphrases and host-key confirmations are delivered through `SSH_ASKPASS` with `SSH_ASKPASS_REQUIRE=force` pointing at a small AgentMux askpass shim (§5.3), so they appear as AgentMux dialogs (or come from the secret store) instead of text in the pane. Supported by OpenSSH 8.4+ on all three platforms; Windows' bundled OpenSSH is 8.x or 9.x on supported Windows versions. Verify the minimum at P2 and fall back to in-pane prompts below it.
 - **Which `ssh`.** On Windows, prefer System32 OpenSSH over a Git-for-Windows `ssh` on PATH (their agents differ). Setting `ssh:binarypath` overrides it everywhere.
+- **When there is no `ssh`.** The client is part of every supported OS by default: Windows since 10 version 1803 (`C:\Windows\System32\OpenSSH\ssh.exe`; narko has `OpenSSH_for_Windows_9.5p2`), always on macOS, and on every common desktop Linux. It can still be missing: Windows lists it as an optional feature that a managed image can remove, and minimal Linux installs and containers omit it. Then the pane says so plainly and how to add it on that platform (Windows: Settings → System → Optional features → OpenSSH Client, or `Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0`; Linux: the distro's `openssh-client` package), instead of failing with a spawn error. WSL terminals do not need it.
 
 ### 3.2 A remote helper, installed per host, is required for files and durability; not for a plain remote shell
 
@@ -193,6 +194,10 @@ Each phase is one or more PRs, each with its own tests and docs. Client-side wor
 3. **Remote platforms.** Recommended: Linux x86_64/arm64 and macOS from P3; Windows hosts in P6.
 4. **Durable by default.** Recommended: on for SSH connections that have the helper, off otherwise; Wave makes it opt-in. On by default is the point of the feature for long agent and build jobs, and the housekeeping in §7.6 bounds its cost on servers.
 5. **Where connection settings live.** Recommended: `settings.json` under `connections` (the type exists), not a separate `connections.json`.
+
+### 10.1 Answers (2026-10-02)
+
+The owner accepted the recommendations: system OpenSSH (1); ask once per host before installing the helper, remembered (2); Linux x86_64/arm64 and macOS remote hosts from P3, Windows hosts in P6 (3); durable on by default for SSH connections that have the helper (4); connection settings in `settings.json` under `connections` (5).
 
 ## 11. Risks
 
