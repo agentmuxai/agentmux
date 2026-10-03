@@ -16,6 +16,10 @@
  * decision (spec §3).
  */
 
+import { getRuntimeConfig } from "./buildRuntimeArgs";
+import { PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { effectiveModel } from "./runtime-capabilities";
+
 /** One finished compaction. */
 export interface CompactionSample {
     /** The boundary frame's uuid — a frame seen twice counts once. */
@@ -23,10 +27,12 @@ export interface CompactionSample {
     /** Tokens in context when compaction started. */
     preTokens: number;
     durationMs: number;
+    /** The model the compaction ran on (see `compactionModelKey`), when known. */
+    model?: string;
 }
 
 const STORAGE_KEY = "agentmux:compaction-samples:v1";
-const MAX_SAMPLES = 10;
+const MAX_SAMPLES = 30;
 const MIN_ESTIMATE_MS = 5_000;
 const MAX_ESTIMATE_MS = 600_000;
 const SCALE_MIN = 0.5;
@@ -45,7 +51,7 @@ function pos(n: unknown): n is number {
  * snake_case (`compact_metadata.pre_tokens`) to stdout and camelCase
  * (`compactMetadata.preTokens`) to its transcript; both are accepted.
  */
-export function parseCompactionSample(rawEvent: unknown): CompactionSample | null {
+export function parseCompactionSample(rawEvent: unknown, model?: string | null): CompactionSample | null {
     if (!rawEvent || typeof rawEvent !== "object") return null;
     const e = rawEvent as Record<string, unknown>;
     if (e.type !== "system" || e.subtype !== "compact_boundary") return null;
@@ -55,7 +61,7 @@ export function parseCompactionSample(rawEvent: unknown): CompactionSample | nul
     const durationMs = meta.duration_ms ?? meta.durationMs;
     if (!pos(preTokens) || !pos(durationMs)) return null;
     const uuid = typeof e.uuid === "string" && e.uuid ? e.uuid : `${preTokens}:${durationMs}`;
-    return { uuid, preTokens, durationMs };
+    return model ? { uuid, preTokens, durationMs, model } : { uuid, preTokens, durationMs };
 }
 
 function defaultStorage(): SampleStorage | null {
@@ -79,7 +85,9 @@ export function readCompactionSamples(storage: SampleStorage | null = defaultSto
             if (!item || typeof item !== "object") continue;
             const s = item as Record<string, unknown>;
             if (typeof s.uuid === "string" && s.uuid && pos(s.preTokens) && pos(s.durationMs)) {
-                out.push({ uuid: s.uuid, preTokens: s.preTokens, durationMs: s.durationMs });
+                const sample: CompactionSample = { uuid: s.uuid, preTokens: s.preTokens, durationMs: s.durationMs };
+                if (typeof s.model === "string" && s.model) sample.model = s.model;
+                out.push(sample);
             }
         }
         return out.slice(-MAX_SAMPLES);
@@ -102,6 +110,33 @@ export function recordCompactionSample(
     } catch {
         /* storage full or denied: the estimate just has fewer samples */
     }
+}
+
+/**
+ * The model a pane's compaction samples are kept under: the model the process is
+ * configured to run (runtime selection, or a `--model` in the agent's own flags),
+ * so a `/model` switch counts before the next reply arrives; else the resolved
+ * model id from the replies.
+ */
+export function compactionModelKey(
+    blockMeta: Record<string, any> | undefined,
+    resolvedModel: string | null | undefined
+): string | undefined {
+    const configured = effectiveModel(getRuntimeConfig(blockMeta).model ?? "", blockMeta?.[PROVIDER_FLAGS_META_KEY]);
+    return configured || resolvedModel || undefined;
+}
+
+/**
+ * The samples to estimate from: the ones recorded for `model` when there are
+ * any, otherwise all of them. Duration depends mostly on which model
+ * summarizes; samples from before models were recorded only serve the fallback.
+ */
+export function samplesForModel(samples: readonly CompactionSample[], model: string | null | undefined): CompactionSample[] {
+    if (model) {
+        const own = samples.filter((s) => s.model === model);
+        if (own.length > 0) return own;
+    }
+    return [...samples];
 }
 
 function median(nums: number[]): number {

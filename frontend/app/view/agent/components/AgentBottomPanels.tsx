@@ -19,6 +19,7 @@ import { AgentAuthPanel } from "./AgentDocumentView";
 import { AgentWorkingRow } from "./AgentFooter";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
 import { AgentSessionNotices } from "./AgentSessionNotices";
+import { compactionModelKey } from "../compaction-estimate";
 import { ForkProviderFallbackBanner } from "./ForkProviderFallbackBanner";
 import { PaneRow } from "./PaneRow";
 import { PendingMessagesPanel } from "./PendingMessagesPanel";
@@ -246,6 +247,7 @@ export const AgentBottomPanels = (props: {
                     })()}
                     compacting={props.paneModel.state.compacting}
                     compactionContextTokens={props.paneModel.state.lastContextTokens}
+                    compactionModel={compactionModelKey(props.block()?.meta, props.paneModel.state.lastContextModel)}
                     reconnecting={props.paneModel.state.reconnecting}
                 />
             </Show>
