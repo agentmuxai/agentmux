@@ -225,6 +225,9 @@ pub fn replace_now(ctrl: &dyn blockcontroller::Controller) -> Result<(), String>
 /// any `Shell()` session left over (one whose agent is already gone, or whose
 /// teardown hit the cap). Returns how many controllers it closed.
 pub async fn app_exit(state: &AppState) -> usize {
+    // Durable SSH panes detach rather than end their sessions: they live on
+    // on their hosts for the next start to reattach (durable_ssh.rs).
+    crate::backend::blockcontroller::durable_ssh::note_app_exiting();
     let all: Vec<String> = blockcontroller::get_all_controllers().into_keys().collect();
     // A drawer is closed by its parent's teardown (`close_sub_blocks`); listing
     // it here too would run two teardowns of one block at once.

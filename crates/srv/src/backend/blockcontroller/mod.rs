@@ -17,6 +17,7 @@ pub mod app_server;
 pub mod app_server_controller;
 pub mod app_server_protocol;
 pub mod core;
+pub mod durable_ssh;
 pub mod health;
 pub mod persistent;
 mod persistent_resume;
@@ -908,6 +909,20 @@ pub fn resync_controller(
 
     // Create new controller
     match controller_type.as_str() {
+        // A durable SSH pane: the shell lives in the helper's session on the
+        // host, reached over ssh (durable_ssh.rs). Same `shell` type and
+        // connection name as the meta says, so a resync keeps it.
+        BLOCK_CONTROLLER_SHELL if durable_ssh::wants(block_meta) => {
+            let ctrl = Arc::new(durable_ssh::DurableSshController::new(
+                block_id.to_string(),
+                broker,
+                event_bus,
+                mstore,
+                filestore,
+            ));
+            register_controller(block_id, ctrl.clone());
+            ctrl.start(block_meta.clone(), rt_opts, force)
+        }
         BLOCK_CONTROLLER_SHELL | BLOCK_CONTROLLER_CMD => {
             let ctrl = shell::ShellController::new(
                 controller_type.clone(),

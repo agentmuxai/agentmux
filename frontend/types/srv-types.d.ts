@@ -891,6 +891,9 @@ declare global {
         "term:localshellopts"?: string[];
         "term:scrollback"?: number;
         "term:transparency"?: number;
+        // A durable SSH pane: its shell lives on the host (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §7).
+        "term:durable"?: boolean;
+        "remote:session_id"?: string;
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
         "term:agentmaxruntimehours"?: number;

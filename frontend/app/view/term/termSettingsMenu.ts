@@ -6,6 +6,11 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { atoms, getSettingsKeyAtom } from "@/store/global";
 import type { TermViewModel } from "./termViewModel";
 
+/** A connection name that is an SSH destination: not local, not WSL. */
+export function isSshConnection(conn: unknown): boolean {
+    return typeof conn === "string" && conn.trim() !== "" && conn.trim() !== "local" && !conn.startsWith("wsl://");
+}
+
 export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] {
     const fullConfig = atoms.fullConfigAtom();
     const termThemes = fullConfig?.termthemes ?? {};
@@ -117,6 +122,20 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
         label: "Force Restart Controller",
         click: model.forceRestartController.bind(model),
     });
+    // An SSH pane can keep its shell running on the host (AgentMux's helper
+    // there holds it): a dropped link, sleep or a restart reattaches instead
+    // of ending it. Switching restarts the pane's connection.
+    if (isSshConnection(meta?.connection)) {
+        const durable = meta?.["term:durable"] === true;
+        fullMenu.push({
+            label: "Keep Session Alive (durable)",
+            type: "checkbox",
+            checked: durable,
+            click: () => {
+                void model.setMeta({ "term:durable": durable ? null : true }).then(() => model.forceRestartController());
+            },
+        });
+    }
 
     const isClearOnStart = meta?.["cmd:clearonstart"];
     fullMenu.push({
