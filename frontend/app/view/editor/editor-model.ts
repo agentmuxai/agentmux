@@ -617,21 +617,6 @@ export class EditorViewModel {
         }
     }
 
-    /** Fetch `filePath`'s current disk content via RPC and apply it to
-     *  `tabId`'s view-local buffer + slice state. Shared by the initial-open
-     *  path (`_openFileWithMode`) and the live-reload path
-     *  (`_handleExternalFileChanged`) — same fetch/sniff/hash/dispatch
-     *  sequence either way, just triggered differently.
-     *
-     *  When `skipIfHashMatches` is given and the freshly-read content hashes
-     *  the same, the buffer/dispatch are skipped entirely (no-op reload) —
-     *  this is what suppresses a self-triggered echo from our own
-     *  `writeeditorfile` save also tripping the fs watcher, and avoids
-     *  redundant re-renders on a metadata-only touch.
-     *
-     *  Returns the new contentHash on success, or null if the load failed,
-     *  was refused (binary/oversized), or the tab's path moved out from
-     *  under us mid-fetch. */
     /** The SSH connection this editor's files are on (block meta
      *  `connection`, set when Hangar opens a file on a host); "" for this
      *  computer. Remote terminals spec §6.3. */
@@ -648,6 +633,21 @@ export class EditorViewModel {
         return c && !scratch ? { connection: c, block_id: this.blockId } : {};
     }
 
+    /** Fetch `filePath`'s current disk content via RPC and apply it to
+     *  `tabId`'s view-local buffer + slice state. Shared by the initial-open
+     *  path (`_openFileWithMode`) and the live-reload path
+     *  (`_handleExternalFileChanged`) — same fetch/sniff/hash/dispatch
+     *  sequence either way, just triggered differently.
+     *
+     *  When `skipIfHashMatches` is given and the freshly-read content hashes
+     *  the same, the buffer/dispatch are skipped entirely (no-op reload) —
+     *  this is what suppresses a self-triggered echo from our own
+     *  `writeeditorfile` save also tripping the fs watcher, and avoids
+     *  redundant re-renders on a metadata-only touch.
+     *
+     *  Returns the new contentHash on success, or null if the load failed,
+     *  was refused (binary/oversized), or the tab's path moved out from
+     *  under us mid-fetch. */
     private async _loadFileIntoTab(
         tabId: string,
         filePath: string,
