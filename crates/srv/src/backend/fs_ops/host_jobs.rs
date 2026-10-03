@@ -38,7 +38,10 @@ pub enum End {
     /// This computer.
     Local,
     /// An SSH host, through its helper; `home` in tidy form.
-    Host { files: Arc<RemoteFiles>, home: String },
+    Host {
+        files: Arc<RemoteFiles>,
+        home: String,
+    },
 }
 
 /// What a path is, on either side.
@@ -103,7 +106,10 @@ impl End {
 
     fn parent(&self, path: &str) -> String {
         match self {
-            End::Local => Path::new(path).parent().map(display_path).unwrap_or_default(),
+            End::Local => Path::new(path)
+                .parent()
+                .map(display_path)
+                .unwrap_or_default(),
             End::Host { .. } => match path.rfind('/') {
                 Some(0) | None => "/".to_string(),
                 Some(i) => path[..i].to_string(),
@@ -177,13 +183,21 @@ impl End {
     }
 
     /// Up to `len` bytes of a file from `offset`, and whether it ends there.
-    fn read(&self, rt: &Handle, path: &str, offset: u64, len: usize) -> Result<(Vec<u8>, bool), String> {
+    fn read(
+        &self,
+        rt: &Handle,
+        path: &str,
+        offset: u64,
+        len: usize,
+    ) -> Result<(Vec<u8>, bool), String> {
         match self {
             End::Local => {
                 let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
                 f.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
                 let mut data = Vec::with_capacity(len);
-                f.take(len as u64).read_to_end(&mut data).map_err(|e| e.to_string())?;
+                f.take(len as u64)
+                    .read_to_end(&mut data)
+                    .map_err(|e| e.to_string())?;
                 let eof = data.len() < len;
                 Ok((data, eof))
             }
@@ -205,7 +219,9 @@ impl End {
                     .open(&path)
                     .map_err(|e| e.to_string())?;
             }
-            End::Host { files, .. } => rt.block_on(files.write(&path, Vec::new())).map_err(host_error)?,
+            End::Host { files, .. } => rt
+                .block_on(files.write(&path, Vec::new()))
+                .map_err(host_error)?,
         }
         Ok(path)
     }
@@ -224,13 +240,15 @@ impl End {
     /// Rename, never over anything.
     fn rename_no_replace(&self, rt: &Handle, from: &str, to: &str) -> Result<(), RenameError> {
         match self {
-            End::Local => platform::rename_no_replace(Path::new(from), Path::new(to)).map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    RenameError::Taken
-                } else {
-                    RenameError::Other(e.to_string())
-                }
-            }),
+            End::Local => {
+                platform::rename_no_replace(Path::new(from), Path::new(to)).map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        RenameError::Taken
+                    } else {
+                        RenameError::Other(e.to_string())
+                    }
+                })
+            }
             End::Host { files, .. } => rt.block_on(files.rename(from, to)).map_err(|e| {
                 if e.kind == Some(agentmux_remote::fsproto::ErrKind::AlreadyExists) {
                     RenameError::Taken
@@ -244,7 +262,9 @@ impl End {
     /// Remove a file, a link, or an empty folder.
     fn remove(&self, rt: &Handle, path: &str) -> Result<(), String> {
         match self {
-            End::Local => platform::remove_entry_no_follow(Path::new(path)).map_err(|e| e.to_string()),
+            End::Local => {
+                platform::remove_entry_no_follow(Path::new(path)).map_err(|e| e.to_string())
+            }
             End::Host { files, .. } => rt.block_on(files.delete(path, false)).map_err(host_error),
         }
     }
@@ -267,7 +287,10 @@ impl End {
 }
 
 fn file_name(path: &str) -> String {
-    path.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or(path).to_string()
+    path.rsplit(['/', '\\'])
+        .find(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
 }
 
 /// `name (n).ext` for the first free n.
@@ -306,7 +329,9 @@ impl Transfer<'_> {
         let mut stack = vec![path.to_string()];
         let (mut items, mut bytes) = (0u64, 0u64);
         while let Some(p) = stack.pop() {
-            let Ok(Some(info)) = self.src.stat(self.rt, &p) else { continue };
+            let Ok(Some(info)) = self.src.stat(self.rt, &p) else {
+                continue;
+            };
             items += 1;
             if info.is_dir {
                 for name in self.src.list(self.rt, &p).unwrap_or_default() {
@@ -342,7 +367,13 @@ impl Transfer<'_> {
             }
         };
         if info.is_link {
-            job.fail(&shown, format!("“{}” is a link: links aren't copied between two machines.", file_name(src)));
+            job.fail(
+                &shown,
+                format!(
+                    "“{}” is a link: links aren't copied between two machines.",
+                    file_name(src)
+                ),
+            );
             job.advance(1, 0);
             return Outcome::NotDone;
         }
@@ -391,7 +422,13 @@ impl Transfer<'_> {
                 }
                 Some(FsOpChoice::Replace) => {
                     if info.is_dir || there.is_dir {
-                        job.fail(&shown, format!("“{}” and what's there aren't both files: not replaced.", file_name(src)));
+                        job.fail(
+                            &shown,
+                            format!(
+                                "“{}” and what's there aren't both files: not replaced.",
+                                file_name(src)
+                            ),
+                        );
                         self.pass_over(job, src);
                         return Outcome::NotDone;
                     }
@@ -407,7 +444,10 @@ impl Transfer<'_> {
                     return Outcome::Done;
                 }
                 Err(RenameError::Taken) => {
-                    job.fail(&shown, format!("Something named “{}” appeared there.", file_name(&dest)));
+                    job.fail(
+                        &shown,
+                        format!("Something named “{}” appeared there.", file_name(&dest)),
+                    );
                     self.pass_over(job, src);
                     return Outcome::NotDone;
                 }
@@ -466,7 +506,11 @@ impl Transfer<'_> {
         };
         let mut all = Outcome::Done;
         for name in names {
-            match self.entry(job, &self.src.join(src, &name), &self.dest.join(dest, &name)) {
+            match self.entry(
+                job,
+                &self.src.join(src, &name),
+                &self.dest.join(dest, &name),
+            ) {
                 Outcome::Stopped => return Outcome::Stopped,
                 Outcome::NotDone => all = Outcome::NotDone,
                 Outcome::Done => {}
@@ -475,7 +519,15 @@ impl Transfer<'_> {
         all
     }
 
-    fn file(&self, job: &mut HostJob<'_, '_>, src: &str, dest: &str, shown: &str, size: u64, replace: bool) -> Outcome {
+    fn file(
+        &self,
+        job: &mut HostJob<'_, '_>,
+        src: &str,
+        dest: &str,
+        shown: &str,
+        size: u64,
+        replace: bool,
+    ) -> Outcome {
         let dir = self.dest.parent(dest);
         let temp = match self.dest.create_temp(self.rt, &dir) {
             Ok(t) => t,
@@ -532,7 +584,13 @@ impl Transfer<'_> {
             Ok(()) => {}
             Err(RenameError::Taken) => {
                 discard(self);
-                job.fail(shown, format!("Something named “{}” appeared there meanwhile; nothing was replaced.", file_name(dest)));
+                job.fail(
+                    shown,
+                    format!(
+                        "Something named “{}” appeared there meanwhile; nothing was replaced.",
+                        file_name(dest)
+                    ),
+                );
                 job.advance(1, 0);
                 return Outcome::NotDone;
             }
@@ -546,12 +604,95 @@ impl Transfer<'_> {
         job.advance(1, 0);
         if self.kind == FsOpKind::Move {
             if let Err(e) = self.src.remove(self.rt, src) {
-                job.fail(shown, format!("Copied, but the original couldn't be removed: {e}"));
+                job.fail(
+                    shown,
+                    format!("Copied, but the original couldn't be removed: {e}"),
+                );
                 return Outcome::NotDone;
             }
         }
         Outcome::Done
     }
+}
+
+/// One source to transfer, as planned.
+struct Item {
+    src: String,
+    /// Copied into the folder it is already in: kept as `name (n)`.
+    duplicate: bool,
+}
+
+fn under(path: &str, dir: &str) -> bool {
+    path.strip_prefix(dir)
+        .is_some_and(|rest| rest.starts_with('/'))
+        || (dir == "/" && path.starts_with('/') && path != "/")
+}
+
+/// The local plan's rules (`jobs::plan`) where source and destination are
+/// one host's folders: a folder never into itself or a folder of its own; a
+/// move into the folder it is in is nothing to do, a copy there is a
+/// duplicate; and no destination lands on a folder holding another source.
+/// Between two machines none of this can happen.
+fn plan_on_one_host(
+    kind: FsOpKind,
+    src: &End,
+    sources: &[String],
+    dest: &End,
+    dest_dir: &str,
+) -> Result<Vec<Item>, String> {
+    if !src.same_host(dest) {
+        return Ok(sources
+            .iter()
+            .map(|s| Item {
+                src: s.clone(),
+                duplicate: false,
+            })
+            .collect());
+    }
+    let verb = if kind == FsOpKind::Move {
+        "move"
+    } else {
+        "copy"
+    };
+    let mut items = Vec::new();
+    for s in sources {
+        if dest_dir == s || under(dest_dir, s) {
+            return Err(format!("Can't {verb} a folder into itself."));
+        }
+        let in_dest_already = src.parent(s) == dest_dir;
+        if in_dest_already && kind == FsOpKind::Move {
+            continue;
+        }
+        items.push(Item {
+            src: s.clone(),
+            duplicate: in_dest_already,
+        });
+    }
+    // E.g. copying `/a/d/d` into `/a` would merge into `/a/d`, which holds
+    // the source itself.
+    let landing: std::collections::HashSet<String> = items
+        .iter()
+        .filter(|i| !i.duplicate)
+        .map(|i| file_name(&i.src))
+        .collect();
+    for item in &items {
+        let rest = if dest_dir == "/" {
+            item.src.strip_prefix('/')
+        } else {
+            item.src.strip_prefix(&format!("{dest_dir}/"))
+        };
+        let Some(rest) = rest else { continue };
+        let mut parts = rest.split('/').filter(|p| !p.is_empty());
+        if let (Some(first), Some(_)) = (parts.next(), parts.next()) {
+            if landing.contains(first) {
+                return Err(format!(
+                    "Can't {verb} there: “{first}” would land on the folder that holds “{}”.",
+                    file_name(&item.src)
+                ));
+            }
+        }
+    }
+    Ok(items)
 }
 
 /// Start a copy or move of `sources` (on `src`) into `dest_dir` (on `dest`)
@@ -570,22 +711,33 @@ pub async fn start(
     // Checked before answering, as a local copy's plan is (awaited here: only
     // the op's own thread blocks on the runtime).
     let is_dir = match &dest {
-        End::Local => std::fs::metadata(&dest_dir).map(|m| m.is_dir()).map_err(|e| e.kind()),
+        End::Local => std::fs::metadata(&dest_dir)
+            .map(|m| m.is_dir())
+            .map_err(|e| e.kind()),
         End::Host { files, .. } => files
             .stat(&dest_dir)
             .await
             .map(|e| e.kind == agentmux_remote::fsproto::Kind::Dir)
-            .map_err(|e| if e.is_not_found() { std::io::ErrorKind::NotFound } else { std::io::ErrorKind::Other }),
+            .map_err(|e| {
+                if e.is_not_found() {
+                    std::io::ErrorKind::NotFound
+                } else {
+                    std::io::ErrorKind::Other
+                }
+            }),
     };
     match is_dir {
         Ok(true) => {}
         Ok(false) => return Err("The destination isn't a folder.".to_string()),
-        Err(std::io::ErrorKind::NotFound) => return Err("The destination folder isn't there anymore.".to_string()),
+        Err(std::io::ErrorKind::NotFound) => {
+            return Err("The destination folder isn't there anymore.".to_string())
+        }
         Err(_) => return Err("Couldn't reach the destination folder.".to_string()),
     }
     if sources.is_empty() {
         return Err("Nothing to copy.".to_string());
     }
+    let items = plan_on_one_host(kind, &src, &sources, &dest, &dest_dir)?;
     let shown_dest = dest.show(&dest_dir);
     let requested = sources.len();
     JOBS.start_host(
@@ -600,27 +752,30 @@ pub async fn start(
                 src,
                 dest,
             };
-            let (mut items, mut bytes) = (0, 0);
-            for s in &sources {
-                let (i, b) = t.measure(s);
-                items += i;
-                bytes += b;
+            let (mut total_items, mut total_bytes) = (0, 0);
+            for item in &items {
+                let (i, b) = t.measure(&item.src);
+                total_items += i;
+                total_bytes += b;
             }
-            job.add_total(items, bytes);
-            for s in &sources {
-                let target = t.dest.join(&dest_dir, &file_name(s));
-                // Into the folder it is already in, on the same side: nothing
-                // to do for a move; a copy is kept as `name (n)`.
-                if t.src.is_host() == t.dest.is_host()
-                    && (!t.src.is_host() || t.src.same_host(&t.dest))
-                    && t.src.parent(s) == dest_dir
-                {
-                    if kind == FsOpKind::Move {
-                        t.pass_over(job, s);
-                        continue;
+            job.add_total(total_items, total_bytes);
+            for item in &items {
+                let name = file_name(&item.src);
+                let target = if item.duplicate {
+                    // Copied into the folder it is in: always beside itself,
+                    // as `name (n)`, never a question about itself.
+                    match keep_both_name(&t.dest, &rt, &dest_dir, &name) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            job.fail(&t.src.show(&item.src), e);
+                            t.pass_over(job, &item.src);
+                            continue;
+                        }
                     }
-                }
-                if t.entry(job, s, &target) == Outcome::Stopped {
+                } else {
+                    t.dest.join(&dest_dir, &name)
+                };
+                if t.entry(job, &item.src, &target) == Outcome::Stopped {
                     return Err(HostStop::Canceled);
                 }
             }
@@ -638,7 +793,10 @@ mod tests {
     fn events() -> (super::super::jobs::Emit, Arc<Mutex<Vec<FsOpEvent>>>) {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let s = seen.clone();
-        (Arc::new(move |e: &FsOpEvent| s.lock().unwrap().push(e.clone())), seen)
+        (
+            Arc::new(move |e: &FsOpEvent| s.lock().unwrap().push(e.clone())),
+            seen,
+        )
     }
 
     async fn finished(seen: &Arc<Mutex<Vec<FsOpEvent>>>) -> FsOpEvent {
@@ -647,7 +805,12 @@ mod tests {
                 .lock()
                 .unwrap()
                 .iter()
-                .find(|e| matches!(e.state, FsOpEventState::Done | FsOpEventState::Failed | FsOpEventState::Canceled))
+                .find(|e| {
+                    matches!(
+                        e.state,
+                        FsOpEventState::Done | FsOpEventState::Failed | FsOpEventState::Canceled
+                    )
+                })
                 .cloned()
             {
                 return e;
@@ -659,7 +822,11 @@ mod tests {
 
     async fn host(home: &Path) -> End {
         let (r, w) = crate::backend::remote::files::testing::helper(home.to_path_buf());
-        End::host(RemoteFiles::over("testhost", r, w, Box::new(())).await.unwrap())
+        End::host(
+            RemoteFiles::over("testhost", r, w, Box::new(()))
+                .await
+                .unwrap(),
+        )
     }
 
     /// Up to a host and back down, folders and all, in pieces bigger than
@@ -679,25 +846,56 @@ mod tests {
         let (emit, seen) = events();
         let src = display_path(&local.path().join("proj"));
         let dest_dir = display_path(remote.path());
-        start(FsOpKind::Copy, End::Local, vec![src], h.clone(), dest_dir, emit).await.unwrap();
+        start(
+            FsOpKind::Copy,
+            End::Local,
+            vec![src],
+            h.clone(),
+            dest_dir,
+            emit,
+        )
+        .await
+        .unwrap();
         let end = finished(&seen).await;
         assert_eq!(end.state, FsOpEventState::Done, "{end:?}");
         assert_eq!(end.done_bytes, end.total_bytes);
-        assert_eq!(std::fs::read(remote.path().join("proj/src/big.bin")).unwrap(), big);
-        assert_eq!(std::fs::read(remote.path().join("proj/readme.md")).unwrap(), b"hi");
+        assert_eq!(
+            std::fs::read(remote.path().join("proj/src/big.bin")).unwrap(),
+            big
+        );
+        assert_eq!(
+            std::fs::read(remote.path().join("proj/readme.md")).unwrap(),
+            b"hi"
+        );
         // No temp file left on the host.
         assert!(std::fs::read_dir(remote.path().join("proj/src"))
             .unwrap()
-            .all(|e| !e.unwrap().file_name().to_string_lossy().starts_with(".agentmux-part")));
+            .all(|e| !e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".agentmux-part")));
 
         // Back down, as a move: the host's copy goes once it landed.
         let down = tempfile::tempdir().unwrap();
         let (emit, seen) = events();
         let src = display_path(&remote.path().join("proj"));
-        start(FsOpKind::Move, h, vec![src], End::Local, display_path(down.path()), emit).await.unwrap();
+        start(
+            FsOpKind::Move,
+            h,
+            vec![src],
+            End::Local,
+            display_path(down.path()),
+            emit,
+        )
+        .await
+        .unwrap();
         let end = finished(&seen).await;
         assert_eq!(end.state, FsOpEventState::Done, "{end:?}");
-        assert_eq!(std::fs::read(down.path().join("proj/src/big.bin")).unwrap(), big);
+        assert_eq!(
+            std::fs::read(down.path().join("proj/src/big.bin")).unwrap(),
+            big
+        );
         assert!(!remote.path().join("proj").exists());
     }
 
@@ -720,23 +918,40 @@ mod tests {
             h,
             display_path(remote.path()),
             emit,
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
         // Wait for the question, then keep both.
         for _ in 0..500 {
-            if seen.lock().unwrap().iter().any(|e| e.state == FsOpEventState::Conflict) {
+            if seen
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| e.state == FsOpEventState::Conflict)
+            {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
-        let asked = seen.lock().unwrap().iter().find(|e| e.state == FsOpEventState::Conflict).cloned().unwrap();
+        let asked = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| e.state == FsOpEventState::Conflict)
+            .cloned()
+            .unwrap();
         let c = asked.conflict.unwrap();
         assert_eq!((c.source_size, c.dest_size), (Some(3), Some(3)));
         assert!(c.dest.starts_with("testhost:"), "{}", c.dest);
-        JOBS.resolve(&op.op_id, FsOpChoice::KeepBoth, false).unwrap();
+        JOBS.resolve(&op.op_id, FsOpChoice::KeepBoth, false)
+            .unwrap();
         let end = finished(&seen).await;
         assert_eq!(end.state, FsOpEventState::Done, "{end:?}");
         assert_eq!(std::fs::read(remote.path().join("a.txt")).unwrap(), b"old");
-        assert_eq!(std::fs::read(remote.path().join("a (2).txt")).unwrap(), b"new");
+        assert_eq!(
+            std::fs::read(remote.path().join("a (2).txt")).unwrap(),
+            b"new"
+        );
     }
 
     /// Within one host a move is a rename there; nothing comes through here.
@@ -777,7 +992,11 @@ mod tests {
             remote.path().to_path_buf(),
             std::time::Duration::from_millis(20),
         );
-        let h = End::host(RemoteFiles::over("testhost", r, w, Box::new(())).await.unwrap());
+        let h = End::host(
+            RemoteFiles::over("testhost", r, w, Box::new(()))
+                .await
+                .unwrap(),
+        );
         let (emit, seen) = events();
         let op = start(
             FsOpKind::Copy,
@@ -814,14 +1033,92 @@ mod tests {
         std::fs::write(local.path().join("a.txt"), b"a").unwrap();
         let h = host(remote.path()).await;
         let (emit, seen) = events();
-        start(FsOpKind::Copy, End::Local, vec![display_path(&local.path().join("a.txt"))], h, "/etc".into(), emit)
-            .await
-            .unwrap();
+        start(
+            FsOpKind::Copy,
+            End::Local,
+            vec![display_path(&local.path().join("a.txt"))],
+            h,
+            "/etc".into(),
+            emit,
+        )
+        .await
+        .unwrap();
         let end = finished(&seen).await;
         let failures = end.failures.unwrap_or_default();
         assert_eq!(failures.len(), 1, "{failures:?}");
-        assert!(failures[0].error.as_deref().unwrap_or("").contains("doesn't change"), "{failures:?}");
+        assert!(
+            failures[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("doesn't change"),
+            "{failures:?}"
+        );
         assert!(!std::path::Path::new("/etc/a.txt").exists());
+    }
+
+    /// Within one host: never a folder into itself, a copy into its own
+    /// folder is a duplicate, and nothing lands on a folder holding a source.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn within_one_host_the_local_plans_rules_hold() {
+        let remote = tempfile::tempdir().unwrap();
+        let r = display_path(remote.path());
+        std::fs::create_dir_all(remote.path().join("d/d/inner")).unwrap();
+        std::fs::write(remote.path().join("d/a.txt"), b"a").unwrap();
+        let h = host(remote.path()).await;
+        let into_itself = start(
+            FsOpKind::Copy,
+            h.clone(),
+            vec![format!("{r}/d")],
+            h.clone(),
+            format!("{r}/d/d"),
+            events().0,
+        )
+        .await;
+        assert!(into_itself.unwrap_err().contains("into itself"));
+        let landing = start(
+            FsOpKind::Copy,
+            h.clone(),
+            vec![format!("{r}/d/d")],
+            h.clone(),
+            r.clone(),
+            events().0,
+        )
+        .await;
+        assert!(landing.unwrap_err().contains("would land on the folder"));
+
+        // A copy beside itself: `a (2).txt`, nothing asked.
+        let (emit, seen) = events();
+        start(
+            FsOpKind::Copy,
+            h.clone(),
+            vec![format!("{r}/d/a.txt")],
+            h,
+            format!("{r}/d"),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        assert_eq!(end.state, FsOpEventState::Done, "{end:?}");
+        assert!(!seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e.state == FsOpEventState::Conflict));
+        assert_eq!(
+            std::fs::read(remote.path().join("d/a (2).txt")).unwrap(),
+            b"a"
+        );
+        assert_eq!(std::fs::read(remote.path().join("d/a.txt")).unwrap(), b"a");
+    }
+
+    #[test]
+    fn one_hosts_plan_matches_the_local_rules() {
+        assert!(
+            under("/a/b", "/a") && under("/a", "/") && !under("/ab", "/a") && !under("/a", "/a")
+        );
     }
 
     #[test]
