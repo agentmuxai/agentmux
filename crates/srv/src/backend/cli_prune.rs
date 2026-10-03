@@ -55,7 +55,12 @@ pub fn record_use(dir: &Path, now: SystemTime) {
             return;
         }
     }
-    let _ = std::fs::write(&marker, b"");
+    // Set the mtime explicitly: rewriting the empty marker does not move it on
+    // Windows (truncating an empty file changes nothing), so the marker would
+    // keep its first-use time and a used install would look idle.
+    if let Ok(file) = std::fs::File::options().create(true).write(true).open(&marker) {
+        let _ = file.set_modified(now);
+    }
 }
 
 /// What is running right now, as text to search for install paths in.

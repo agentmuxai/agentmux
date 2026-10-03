@@ -454,8 +454,10 @@ mod priority_tests {
     /// must not drop it, or an AgentMux crash would leak the agent's tree.
     #[test]
     fn a_process_in_the_job_runs_below_normal_and_kill_on_close_survives() {
-        // Explicitly NORMAL: a child inherits its parent's priority class, and
-        // the test runner itself may be running below normal.
+        // Ask for NORMAL: a child inherits its parent's priority class, and the
+        // test runner itself may be running below normal. An outer job with a
+        // priority limit (an agent running these tests inside AgentMux's own
+        // job) still caps it, so compare with what the child starts at.
         use std::os::windows::process::CommandExt;
         let mut child = std::process::Command::new("cmd")
             .args(["/c", "ping -n 30 127.0.0.1 >nul"])
@@ -463,9 +465,10 @@ mod priority_tests {
             .spawn()
             .expect("spawn cmd");
         let pid = child.id();
+        let baseline = priority_of(pid);
         let t = JobObjectTracker::new("priority-test").unwrap();
         t.assign_process(pid).unwrap();
-        assert_eq!(priority_of(pid), NORMAL_PRIORITY_CLASS);
+        assert_eq!(priority_of(pid), baseline, "joining the job alone must not change priority");
 
         t.set_below_normal_priority(true).unwrap();
         assert_eq!(priority_of(pid), BELOW_NORMAL_PRIORITY_CLASS);
