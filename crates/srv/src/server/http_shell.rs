@@ -30,6 +30,12 @@ pub(super) async fn handle_shell_create(
     // through the askpass bridge, never to the agent.
     let mut ssh_agent = String::new();
     if let AgentTarget::Ssh(dest) = &target {
+        // Before anything is asked: with no askpass helper this cannot run, and
+        // consent (or an "always") given for it would be given for nothing.
+        if crate::backend::remote::askpass::program().is_none() {
+            let e = "this AgentMux has no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
         ssh_agent = match connections::verified_agent(&state, &req.agent_block_id, req.auth.as_ref()) {
             Ok(a) => a,
             Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
