@@ -644,3 +644,15 @@ The churn column is bent by the recent split: `useAgentCommands.ts` shows 15 com
 
 - Should test files get a lighter pass later? They are 12–15% comments, and many of those comments name the bug each test pins, which is the guardrail case.
 - Should the §1.1 lexer stay in `scripts/` as the only comment counter, so the gate and `--report` can never disagree? Recommended: yes.
+
+## 9. Phase 0 as built
+
+Phase 0 (§7.2) is `scripts/check-comment-hygiene.mjs`, its tests (`scripts/check-comment-hygiene.test.mjs`), a CI step in the `docs` job of `ci-pr.yml`, and the "Comments" section of `CONTRIBUTING.md`. The measurement and the cost/benefit analysis are in [`REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02`](../reports/REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02.md). Differences from the design above:
+
+- **Gate (option B).** It lexes each changed file and checks the comment text of added lines only (diff against the merge-base, working tree included), so a marker word inside a string or in code never fires. It fails on six narration patterns: a severity tag next to a PR number; "re-review"; "round N"; a review bot named next to a PR number, a severity tag, or a verdict (asked, flagged, caught, …). The severity pattern is case-sensitive (`P1`, not `p1`), because `p1` is a point variable and `#333` a colour. Before shipping I sampled 12 random hits per pattern on `main` (60 in total) and every one was review history.
+- **Opt-out.** A comment containing `comment-hygiene: allow` is skipped, for the rare comment whose subject is the review bot itself. Without it the gate would have no way out of a false positive.
+- **Warnings (A′ and C3).** A new `//` or `/* */` block over 8 lines, and a file above 40% comment lines whose ratio the branch raised, print as warnings and never fail. Doc comments (`///`, `//!`, `/** */`) are exempt from the block-length warning, because §4.3 C3 allows a long interface doc.
+- **`--code-equal <base>`.** Compares each changed `.ts`/`.tsx`/`.rs` file against the merge-base with `<base>`. It fails on any code change (whitespace outside string literals is ignored), on an added or deleted source file, and on a change in the per-file count of `SAFETY:`, `TODO`, `FIXME`, `eslint-disable`, `@ts-…` directives, `<reference` and doctest fences. It prints every `#NNNN` and `SPEC_…` citation the comments dropped as a notice.
+- **`--report`.** Prints the §1.2 totals and the top 20 files. On `9e3e01438` it gives 164,388 non-test comment lines (27.8%) and 3,623 marker lines.
+- **Lexer limits.** It is a lexer, not a parser: JSX text containing `//` or an apostrophe, and a regex literal after an unusual token, can be misread (a comment missed, never a crash). Comments inside a template literal's `${…}` are treated as code. §1.1's counter had the same limits.
+- **Still open from §6:** option D (ReAgent's instruction) lives outside this repo, and C7 (a gate on stale source-file names) is not built. Density (A′) stays report-only until the Phase 1 files are condensed.

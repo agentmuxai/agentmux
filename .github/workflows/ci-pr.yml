@@ -395,6 +395,12 @@ jobs:
         run: bash scripts/check-name-resolver-callers.sh
       - name: No new hand-rolled epoch time (use agentmux_common::time)
         run: node scripts/check-time-helpers.mjs
+      # Review history belongs in the PR thread, not in code comments. Scoped to
+      # lines this PR ADDS, so the existing backlog never fails a PR (the
+      # density report is warning-only). Spec:
+      # docs/specs/SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md §6.
+      - name: No review-history narration in new comments
+        run: node scripts/check-comment-hygiene.mjs
       - name: Agent workdir writes go through workdir_fs
         run: node scripts/check-workdir-writes.mjs
       - name: No CEF/Chromium version in the README or overview diagrams
