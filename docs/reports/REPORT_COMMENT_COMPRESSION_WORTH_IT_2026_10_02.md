@@ -263,6 +263,34 @@ The scan was later widened to comments in JavaScript-family files and stylesheet
 
 The 241 broken references stay until fixed. 196 have a verified replacement path; 45 need rewording (the target is gone, or the cited doc never existed). They are fixed in a separate comment-only PR, proven with `--code-equal`, so the guard PR stays reviewable on its own.
 
+## 7. Trial: one file condensed (2026-10-03)
+
+§4.3 and §5 recommended condensing one file first and measuring it against criteria set in advance. The file was `frontend/app/view/agent/hooks/useAgentCommands.ts`, the densest file in the repo (68% comment lines) and the one with the most review narration (111 lines).
+
+### 7.1 Method
+
+1. One agent condensed the comments under spec §4.3/§5 (keep every constraint, delete narration and restating, explain a rule once and point to it elsewhere).
+2. A second, independent agent compared every changed block before and after (49 hunks, ~75 blocks), opened every pointer the new text uses, and listed anything lost. It found no lost constraint, changed claim, bad pointer or dropped citation, and 5 minor omissions. All 5 were restored; one of them also corrected a claim that was already stale before the edit (`initiatesTurn`).
+3. Mechanical proof: `--code-equal` (code identical), the file's 65 tests, `tsc --noEmit`, and the narration and reference gates.
+
+### 7.2 Result against the §5 criteria
+
+| Criterion | Bar | Result |
+|---|---|---|
+| Comment-token cut on the file | ≥30% | **59%** (~18.4k → ~7.6k tokens) |
+| Code-equal on the PR | green | green (code identical) |
+| Tests | unchanged | 65 / 65 pass; `tsc` clean |
+| Lost constraints found by review | 0 (2+ = stop) | 0 (independent check), 5 minor omissions restored |
+| Review rounds, merge conflicts | repo median | measured on the PR |
+
+- **Per read:** the whole file goes from ~27.6k to ~14.8k tokens (−46%) and from 1,926 to 1,164 lines.
+- **Accuracy:** the pass fixed several stale pointers on the way (e.g. `trackTurnJustEnded` and `wasTurnActive` now point to `turn-confirmation.ts`, where they live).
+- **Versus the estimate:** the spec estimated 35–50% from one person's rewrite of a random sample. This file came out above that range, as expected for the file with the most narration and duplication; the random-sample figure remains the better guess for an average file.
+
+### 7.3 What it means
+
+The trial passes every criterion fixed in advance. The cost was one condensing pass plus one independent review pass, about 15 minutes of agent time, and the two-pass method (rewrite, then independent before/after check) is what made a 59% cut safe to take. Continuing down the §7.1 ranking is justified; the next candidates are the rest of the agent-pane cluster (`AgentComposerStrip.tsx`, `store/agent-pane-state/types.ts`, `useAgentControllerStatus.ts`, `reducer.ts`), one file per PR, same method.
+
 ## Appendix A: top 15 non-test files by comment characters (`9e3e01438`)
 
 Comment tokens are chars / 4. "Marker lines" are lines matching a review-history regex (severity tag near a PR number, re-review, round N, or a review-bot name).
