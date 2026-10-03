@@ -17,7 +17,7 @@
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
+import { createSignal, Show } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { PeekOverlay } from "./PeekOverlay";
 import { useNodePeek, type NodePeek } from "../hooks/useNodePeek";
@@ -152,7 +152,8 @@ describe("PeekOverlay", () => {
             const row = document.createElement("div");
             container.appendChild(row);
             rectOf(container, { top: 100, bottom: 400 });
-            rectOf(row, { top: 200, bottom: 230, left: 100, right: 500, width: 400 });
+            // Wider than the 600px minimum, so a panel can still fit inside the pane.
+            rectOf(row, { top: 200, bottom: 230, left: 100, right: 800, width: 700 });
             Object.defineProperty(window, "innerWidth", { value: 1400, configurable: true });
             Object.defineProperty(window, "innerHeight", { value: 1000, configurable: true });
             const [show, setShow] = createSignal(true);
@@ -249,7 +250,39 @@ describe("PeekOverlay", () => {
                 setup({ panelHeight: 40, panelWidth: 900 });
                 expect(panel()!.style.left).toBe("100px");
                 expect(panel()!.style.transform).toBe("");
-                expect(parseFloat(panel()!.style.maxWidth)).toBe(1400 - 8 - 100);
+                expect(parseFloat(panel()!.style.maxWidth)).toBe(700 * 1.5); // overshoots the 700px row by half
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a thin, tall panel is at least 600px wide", () => {
+            vi.useFakeTimers();
+            try {
+                setup({ panelHeight: 5000, panelWidth: 120 }); // a long command of short lines
+                expect(parseFloat(panel()!.style.minWidth)).toBe(600);
+                expect(panel()!.style.left).toBe("800px"); // still right-aligned to the 700px row
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a panel two lines tall is not widened: the minimum is for taller panels", () => {
+            vi.useFakeTimers();
+            try {
+                setup({ panelHeight: 45, panelWidth: 120 }); // a time line and a one-line command
+                expect(parseFloat(panel()!.style.minWidth)).toBe(0);
+                expect(panel()!.style.left).toBe("800px"); // right-aligned, compact
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a panel three lines tall gets the 600px minimum", () => {
+            vi.useFakeTimers();
+            try {
+                setup({ panelHeight: 64, panelWidth: 120 });
+                expect(parseFloat(panel()!.style.minWidth)).toBe(600);
             } finally {
                 vi.useRealTimers();
             }
@@ -472,6 +505,71 @@ describe("PeekOverlay", () => {
             }
         });
 
+        it("the panel's content (time, estimate) stays while the pointer is on a panel its row has left", () => {
+            vi.useFakeTimers();
+            try {
+                // Real hook + overlay, content gated the way ToolBlock gates its
+                // time line. The row's hover ends when the pointer moves onto the
+                // panel; the content must not vanish with it.
+                const container = document.createElement("div");
+                container.style.overflowY = "auto";
+                document.body.appendChild(container);
+                const row = document.createElement("div");
+                container.appendChild(row);
+                rectOf(container, { top: 100, bottom: 400 });
+                rectOf(row, { top: 200, bottom: 230, left: 100, right: 500, width: 400 });
+                Object.defineProperty(window, "innerWidth", { value: 1400, configurable: true });
+                Object.defineProperty(window, "innerHeight", { value: 1000, configurable: true });
+                let peek!: NodePeek;
+                function Harness() {
+                    peek = useNodePeek();
+                    peek.setRowEl(row);
+                    return (
+                        <PeekOverlay show={peek.isPeeking()} rowEl={peek.rowEl}>
+                            <Show when={peek.panelVisible()}>
+                                <span>time-line</span>
+                            </Show>
+                        </PeekOverlay>
+                    );
+                }
+                render(() => <Harness />);
+                peek.handlePeekEnter();
+                vi.advanceTimersByTime(60); // enter delay, then the mount's RAF
+                rectOf(panel()!, { height: 5000, width: 300, top: 230, bottom: 830, left: 200, right: 500 });
+                row.dispatchEvent(new MouseEvent("mousemove", { clientY: 215, bubbles: true }));
+                vi.advanceTimersByTime(50); // placed: tall, so enterable and pinned
+                expect(screen.getByText("time-line")).toBeInTheDocument();
+
+                peek.handlePeekLeave(); // the row's mouseleave as the pointer heads for the panel
+                expect(peek.isPeeking()).toBe(false);
+                expect(peek.panelVisible()).toBe(true);
+                expect(screen.getByText("time-line")).toBeInTheDocument(); // still there while crossing
+
+                panel()!.dispatchEvent(new MouseEvent("mouseenter"));
+                vi.advanceTimersByTime(2000);
+                expect(screen.getByText("time-line")).toBeInTheDocument(); // still there while on the panel
+
+                panel()!.dispatchEvent(new MouseEvent("mouseleave"));
+                vi.advanceTimersByTime(200);
+                expect(panel()).toBeNull();
+                expect(peek.panelVisible()).toBe(false); // closed: the row's ticker can idle again
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("another row's panelVisible stays false while one panel is open after its row was left", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const elsewhere = otherRow();
+                setShow(false); // this panel lingers after its row was left
+                expect(elsewhere.panelVisible()).toBe(false);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         it("the panel's own row is never held off by its bridge", () => {
             vi.useFakeTimers();
             try {
@@ -635,8 +733,10 @@ describe("PeekOverlay", () => {
             paneRoot.appendChild(container);
             const row = document.createElement("div");
             container.appendChild(row);
-            setRect(container, { top: 0, bottom: 1000, right: 400 });
-            setRect(row, { top: 100, bottom: 300, left: 100, right: 400, width: 300 });
+            // Wide enough (1300px) that the panel stays right-aligned even with its
+            // 600px minimum at zoom 2 (1200 viewport px), so these test the zoom math.
+            setRect(container, { top: 0, bottom: 1000, right: 1400 });
+            setRect(row, { top: 100, bottom: 300, left: 100, right: 1400, width: 1300 });
             return row;
         }
 
@@ -669,10 +769,23 @@ describe("PeekOverlay", () => {
             vi.useFakeTimers();
             try {
                 const overlay = renderPeek(makeZoomedRow("2"));
-                // row.right is 400 real px; at zoom 2 that must be written as 200.
-                expect(parseFloat(overlay.style.left)).toBeCloseTo(200, 5);
-                // max-width tracks the row's 300px width → 150 at zoom 2.
-                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(150, 5);
+                // row.right is 1400 real px; at zoom 2 that must be written as 700.
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(700, 5);
+                // max-width tracks the row's 1300px width → 650 at zoom 2.
+                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(650, 5);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a tall panel's 600px minimum is in the panel's own pixels: 600 at zoom 2 too", () => {
+            vi.useFakeTimers();
+            try {
+                const row = makeZoomedRow("2");
+                const overlay = renderPeek(row);
+                setRect(overlay, { height: 400, width: 100 }); // tall and thin (viewport px)
+                (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void)();
+                expect(parseFloat(overlay.style.minWidth)).toBeCloseTo(600, 5); // 1200 viewport px / zoom 2
             } finally {
                 vi.useRealTimers();
             }
@@ -685,7 +798,7 @@ describe("PeekOverlay", () => {
                 expect(overlay.style.zoom).toBe("2");
                 expect(parseFloat(overlay.style.left)).toBeCloseTo(50, 5);   // 100 / 2
                 expect(parseFloat(overlay.style.top)).toBeCloseTo(50, 5);    // 100 / 2
-                expect(parseFloat(overlay.style.width)).toBeCloseTo(150, 5); // 300 / 2
+                expect(parseFloat(overlay.style.width)).toBeCloseTo(650, 5); // 1300 / 2
             } finally {
                 vi.useRealTimers();
             }
@@ -698,8 +811,8 @@ describe("PeekOverlay", () => {
             try {
                 const overlay = renderPeek(makeZoomedRow("1"));
                 expect(overlay.style.zoom).toBe("");
-                expect(parseFloat(overlay.style.left)).toBeCloseTo(400, 5);
-                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(300, 5);
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(1400, 5);
+                expect(parseFloat(overlay.style.maxWidth)).toBeCloseTo(1300, 5);
             } finally {
                 vi.useRealTimers();
             }
@@ -712,7 +825,7 @@ describe("PeekOverlay", () => {
             try {
                 const overlay = renderPeek(makeZoomedRow(null));
                 expect(overlay.style.zoom).toBe("");
-                expect(parseFloat(overlay.style.left)).toBeCloseTo(400, 5);
+                expect(parseFloat(overlay.style.left)).toBeCloseTo(1400, 5);
             } finally {
                 vi.useRealTimers();
             }
