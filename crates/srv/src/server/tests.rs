@@ -4667,6 +4667,69 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     blockcontroller::delete_controller(&first_shell_id);
 }
 
+/// After a srv restart a pane's shell block has no controller. Asked for on
+/// another connection than the block's, it is replaced by a fresh shell, not
+/// revived on its old connection and then refused (#4253).
+///
+/// `#[ignore]`d like the other real-PTY tests here (the fresh shell is real).
+/// Run manually: `cargo test -p agentmux-srv --bin agentmux-srv
+/// a_pre_restart_ptyshell_on_another_connection_is_replaced -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn a_pre_restart_ptyshell_on_another_connection_is_replaced() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    // A shell block as a previous srv run left it: on wsl://Fake, no controller.
+    let mut old_shell = crate::backend::obj::Block {
+        oid: "pre-restart-shell".to_string(),
+        parentoref: "block:restart-agent-block".to_string(),
+        ..Default::default()
+    };
+    old_shell.meta.insert("view".to_string(), serde_json::json!("term"));
+    old_shell.meta.insert(
+        blockcontroller::META_KEY_CONTROLLER.to_string(),
+        serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+    );
+    old_shell.meta.insert(
+        blockcontroller::META_KEY_CONNECTION.to_string(),
+        serde_json::json!("wsl://Fake"),
+    );
+    state.mstore.insert(&mut old_shell).expect("insert old shell");
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "restart-agent-block".to_string(),
+        subblockids: Some(vec!["pre-restart-shell".to_string()]),
+        ..Default::default()
+    };
+    agent_block.meta.insert(
+        META_KEY_SHELL_SUBBLOCK_ID.to_string(),
+        serde_json::json!("pre-restart-shell"),
+    );
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "restart-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json:?}");
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+    assert_ne!(shell_id, "pre-restart-shell");
+    assert!(
+        blockcontroller::get_block_controller_status("pre-restart-shell").is_none(),
+        "the old shell must not be revived on its old connection"
+    );
+    let agent_block: crate::backend::obj::Block =
+        state.mstore.must_get("restart-agent-block").expect("agent block exists");
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some(shell_id.as_str())
+    );
+
+    blockcontroller::delete_controller(&shell_id);
+}
+
 /// A shell that has EXITED must not still hold an agent lease over the
 /// human's keyboard (`blockcontroller::agent_lock`, wired from the
 /// wait/cleanup task in `shell/lifecycle.rs`).

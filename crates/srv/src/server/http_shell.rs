@@ -357,14 +357,24 @@ pub(super) async fn try_attach_to_existing_shell(
 ) -> Option<axum::response::Response> {
     let block = state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
 
-    // A running shell on another connection is refused before the resync, so
-    // the refusal leaves it exactly as it is. An exited one is not checked: it
-    // is replaced below whatever its connection was.
-    let running = blockcontroller::get_block_controller_status(id)
-        .is_some_and(|s| s.shellprocstatus == blockcontroller::STATUS_RUNNING);
-    if running {
-        if let Some(conflict) = connection_conflict(&block, connection) {
-            return Some(conflict);
+    // Settled before the resync, which would otherwise start a shell on the
+    // block's own connection: a running shell on another connection is refused
+    // and left as it is; one with no controller (from before a srv restart) is
+    // replaced, like an exited one, rather than revived on the old connection.
+    // An exited one is replaced below whatever its connection was.
+    if let Some(conflict) = connection_conflict(&block, connection) {
+        match blockcontroller::get_block_controller_status(id) {
+            Some(s) if s.shellprocstatus == blockcontroller::STATUS_RUNNING => return Some(conflict),
+            None => {
+                clear_shell_pointer_if(state, agent_block_id, id);
+                tracing::info!(
+                    block_id = %id,
+                    parent_id = %agent_block_id,
+                    "ptyshell.create: pane's shell is not running and was on another connection — falling through to a fresh shell"
+                );
+                return None;
+            }
+            Some(_) => {}
         }
     }
 
@@ -453,23 +463,7 @@ pub(super) async fn try_attach_to_existing_shell(
             // path). Not fully transactional (same as that existing
             // pattern) — a failed/skipped clear just costs one more round
             // trip through the fallback chain, not correctness.
-            if let Ok(mut parent) = state.mstore.must_get::<crate::backend::obj::Block>(agent_block_id) {
-                if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(id) {
-                    parent.meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::Value::Null);
-                    if state.mstore.update(&mut parent).is_ok() {
-                        state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                            eventtype: "waveobj:update".to_string(),
-                            oref: format!("block:{agent_block_id}"),
-                            data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                                updatetype: "update".into(),
-                                otype: "block".into(),
-                                oid: agent_block_id.to_string(),
-                                obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                            }).unwrap_or_default()),
-                        });
-                    }
-                }
-            }
+            clear_shell_pointer_if(state, agent_block_id, id);
             tracing::info!(
                 block_id = %id,
                 parent_id = %agent_block_id,
@@ -485,15 +479,37 @@ pub(super) async fn try_attach_to_existing_shell(
                 .into_response(),
         );
     }
-    // Running now: the one that already was (refused above if on another
-    // connection), or one the resync started because no controller existed
-    // (after a srv restart), which runs on the block's own connection.
+    // A shell that started or changed connection between the check above and
+    // the resync (a concurrent caller) is still not handed out on the wrong one.
     if let Some(conflict) = connection_conflict(&block, connection) {
         return Some(conflict);
     }
     answer_conpty_handshake_if_seen(state, id, baseline_len).await;
     tracing::info!(block_id = %id, parent_id = %agent_block_id, "ptyshell.create: reused");
     Some((StatusCode::OK, Json(PtyShellCreateResponse { shell_id: id.to_string() })).into_response())
+}
+
+/// Clear the agent block's shell pointer, if it still names `id` (see the
+/// exited-shell branch of `try_attach_to_existing_shell` for why it is
+/// compare-before-clear), so the next create claims a fresh shell.
+fn clear_shell_pointer_if(state: &AppState, agent_block_id: &str, id: &str) {
+    if let Ok(mut parent) = state.mstore.must_get::<crate::backend::obj::Block>(agent_block_id) {
+        if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(id) {
+            parent.meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::Value::Null);
+            if state.mstore.update(&mut parent).is_ok() {
+                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                    eventtype: "waveobj:update".to_string(),
+                    oref: format!("block:{agent_block_id}"),
+                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
+                        updatetype: "update".into(),
+                        otype: "block".into(),
+                        oid: agent_block_id.to_string(),
+                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                    }).unwrap_or_default()),
+                });
+            }
+        }
+    }
 }
 
 /// 409 when the pane's running shell is on another connection than `wanted`.
@@ -508,7 +524,7 @@ fn connection_conflict(
         blockcontroller::META_KEY_CONNECTION,
         "local",
     );
-    if same_connection(&running_on, wanted) {
+    if crate::backend::remote::conn::same_connection(&running_on, wanted) {
         return None;
     }
     let error = format!(
@@ -517,29 +533,4 @@ fn connection_conflict(
          or call PtyShell with connection '{running_on}' to use it"
     );
     Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response())
-}
-
-/// Whether two connection names mean the same place:`""` and `local` do, and
-/// WSL distro names compare without case, as `connections::ensure` accepts them.
-fn same_connection(a: &str, b: &str) -> bool {
-    use crate::backend::remote::ConnTarget;
-    match (ConnTarget::parse(a), ConnTarget::parse(b)) {
-        (Ok(ConnTarget::Wsl(a)), Ok(ConnTarget::Wsl(b))) => a.eq_ignore_ascii_case(&b),
-        (Ok(a), Ok(b)) => a == b,
-        _ => a == b,
-    }
-}
-
-#[cfg(test)]
-mod connection_tests {
-    use super::same_connection;
-
-    #[test]
-    fn a_pane_shell_is_reused_only_on_its_own_connection() {
-        assert!(same_connection("local", ""));
-        assert!(same_connection("wsl://Ubuntu", " wsl://Ubuntu "));
-        assert!(!same_connection("local", "wsl://Ubuntu"));
-        assert!(!same_connection("wsl://Ubuntu", "wsl://Debian"));
-        assert!(same_connection("wsl://Ubuntu", "wsl://ubuntu"));
-    }
 }

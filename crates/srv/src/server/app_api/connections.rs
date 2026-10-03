@@ -164,7 +164,8 @@ pub(crate) struct ConnEntry {
 /// What an agent may connect to: this machine, each installed WSL distro, and
 /// any other connection a pane has used this session, with its status.
 pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEntry> {
-    let status_of = |name: &str| known.iter().find(|s| s.connection == name);
+    use crate::backend::remote::conn::same_connection;
+    let status_of = |name: &str| known.iter().find(|s| same_connection(&s.connection, name));
     let mut out = vec![ConnEntry {
         connection: "local".to_string(),
         kind: "local",
@@ -185,7 +186,10 @@ pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEn
         });
     }
     for s in known {
-        if out.iter().any(|e| e.connection == s.connection) {
+        if out
+            .iter()
+            .any(|e| same_connection(&e.connection, &s.connection))
+        {
             continue;
         }
         let kind = match ConnTarget::parse(&s.connection) {
@@ -298,7 +302,8 @@ mod tests {
     fn the_list_is_local_then_the_distros_then_what_panes_have_used() {
         let installed = vec!["Ubuntu".to_string(), "Debian".to_string()];
         let known = vec![
-            st("wsl://Ubuntu", state::CONNECTED, ""),
+            // Accepted as typed; still the installed Ubuntu, listed once.
+            st("wsl://ubuntu", state::CONNECTED, ""),
             st("area54", state::ERROR, "SSH terminals are not available"),
             st("wsl://Arch", state::ERROR, "not installed"),
             // Not a connection: never listed.

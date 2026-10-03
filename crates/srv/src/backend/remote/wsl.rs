@@ -52,9 +52,16 @@ pub fn launch(distro: &str, cmd: &str, cmd_args: &[String], cwd: &str) -> WslLau
 /// `WSLENV` with [`FORWARDED_ENV`] added to whatever the user already set,
 /// without duplicates.
 pub fn wslenv(existing: &str) -> String {
+    // An `AGENTMUX_*` entry the user's own WSLENV already lists is dropped
+    // unless it is one of ours: the pane sets AGENTMUX_AUTH_KEY and
+    // AGENTMUX_LOCAL_URL on wsl.exe, and a listed name would carry them in.
     let mut parts: Vec<String> = existing
         .split(':')
         .filter(|p| !p.is_empty())
+        .filter(|p| {
+            let name = p.split('/').next().unwrap_or_default();
+            !name.starts_with("AGENTMUX_") || FORWARDED_ENV.contains(&name)
+        })
         .map(str::to_string)
         .collect();
     for name in FORWARDED_ENV {
@@ -241,6 +248,14 @@ mod tests {
     fn wslenv_adds_the_terminal_variables_once_and_keeps_the_users() {
         let env = wslenv("");
         assert_eq!(env, FORWARDED_ENV.join(":"));
+        // The user's own WSLENV cannot carry the instance's credentials in.
+        let env = wslenv("AGENTMUX_AUTH_KEY:AGENTMUX_LOCAL_URL/u:PATH/l:AGENTMUX_TABID");
+        assert!(
+            !env.contains("AGENTMUX_AUTH_KEY") && !env.contains("AGENTMUX_LOCAL_URL"),
+            "{env}"
+        );
+        assert!(env.starts_with("PATH/l:AGENTMUX_TABID:"), "{env}");
+        assert!(!agent_wslenv("AGENTMUX_AUTH_KEY/p", []).contains("AGENTMUX_AUTH_KEY"));
         let env = wslenv("USERPROFILE/p:TERM/u");
         assert!(env.starts_with("USERPROFILE/p:TERM/u:"), "{env}");
         let names: Vec<&str> = env
