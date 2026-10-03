@@ -280,6 +280,9 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
             );
         }
 
+        // Every rect is final now, including chips docked inside nested Rows.
+        extendResizeHandlesThroughChips(newAdditionalProps, newLeafs, resizeHandleSizePx);
+
         model.treeState.leafOrder = getLeafOrder(newLeafs, newAdditionalProps);
         model.validateFocusedNode(model.treeState.leafOrder);
         model.validateMagnifiedNode(model.treeState.leafOrder, newAdditionalProps);
@@ -498,17 +501,23 @@ function updateTreeHelper(
     // that boundary with no handle at all — `A | B(minimized) | C` produced
     // ZERO handles while A and C sat edge-to-edge with nothing to drag.
     //
-    // An ordinary minimized child — one with its own chip slot, i.e. a
-    // Column parent, or a Row where every child is minimized — is NOT
-    // skipped. It occupies real extent, so its neighbours are genuinely not
-    // adjacent and a handle spanning it would float on top of the chip.
-    // That case resets the chain instead.
+    // An ordinary minimized child — one with its own chip slot — occupies
+    // real extent, so its neighbours are not adjacent and one handle
+    // spanning it would float on top of the chip.
+    //
+    // In a Column the chain is NOT reset: the expanded panes above and below
+    // a run of chip slots still get a handle, placed at the upper pane's
+    // bottom edge, and `extendResizeHandlesThroughChips` (run once the whole
+    // tree is laid out) adds one at every chip edge below it, each resizing
+    // the same two panes (SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md).
+    // In a Row (where a chip slot means every child is minimized) the chain
+    // still resets.
     let beforeIdx = -1;
     for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
         if (slipChildIds.has(child.id)) continue; // zero extent — span it
         if (isEffectivelyMinimized(child)) {
-            beforeIdx = -1; // real chip slot — neighbours aren't adjacent
+            if (nodeIsRow) beforeIdx = -1; // real chip slot — neighbours aren't adjacent
             continue;
         }
         if (beforeIdx < 0) {
@@ -580,6 +589,77 @@ function updateTreeHelper(
         pixelToSizeRatio,
         resizeHandles,
     };
+}
+
+/** How close two edges must be, in CSS px, to count as the same edge. */
+const EDGE_EPSILON_PX = 0.5;
+
+/**
+ * Make every edge of a run of collapsed panes a resize handle for the expanded
+ * panes either side (SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md).
+ *
+ * Runs once per layout pass, after every node's rect is final. For each
+ * handle between vertically stacked panes it walks down from the handle's
+ * edge through the collapsed chips that start exactly there — a Column's own
+ * chip slots, the chips of a fully-minimized branch, or chips docked onto the
+ * top of the lower pane inside a nested Row (Phase B, which lays out only
+ * after the Column's own handles exist, hence a separate pass) — and adds a
+ * handle at each chip's bottom edge. Every added handle copies the original's
+ * pair (`parentIndex`/`afterIndex`), so dragging it resizes the same two
+ * expanded panes and never a chip; `onResizeMove` measures from the grabbed
+ * handle's own `centerPx`, so nothing jumps.
+ *
+ * A grab zone reaches at most a third of the way into a chip, so the chip's
+ * middle stays a click target whatever the tile gap (spec R6).
+ */
+export function extendResizeHandlesThroughChips(
+    additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
+    leafs: LayoutNode[],
+    resizeHandleSizePx: number
+): void {
+    const chips: Dimensions[] = [];
+    for (const leaf of leafs) {
+        const rect = isEffectivelyMinimized(leaf) ? additionalPropsMap[leaf.id]?.rect : undefined;
+        if (rect && rect.height > 0) chips.push(rect);
+    }
+    if (chips.length === 0) return;
+    for (const props of Object.values(additionalPropsMap)) {
+        const handles = props.resizeHandles;
+        if (!handles?.length) continue;
+        const added: ResizeHandleProps[] = [];
+        for (const handle of handles) {
+            if (handle.flexDirection !== FlexDirection.Column) continue;
+            let edge = handle.centerPx;
+            let perpMin = handle.perpMinPx;
+            let perpMax = handle.perpMaxPx;
+            const used = new Set<Dimensions>();
+            for (let n = 1; ; n++) {
+                const chip = chips.find(
+                    (r) =>
+                        !used.has(r) &&
+                        Math.abs(r.top - edge) < EDGE_EPSILON_PX &&
+                        r.left < perpMax &&
+                        r.left + r.width > perpMin
+                );
+                if (!chip) break;
+                used.add(chip);
+                perpMin = Math.max(perpMin, chip.left);
+                perpMax = Math.min(perpMax, chip.left + chip.width);
+                edge = chip.top + chip.height;
+                const half = Math.min(resizeHandleSizePx / 2, chip.height / 3);
+                const dims: Dimensions = { top: edge - half, left: perpMin, width: perpMax - perpMin, height: 2 * half };
+                added.push({
+                    ...handle,
+                    id: `${handle.id}-${n}`,
+                    transform: setTransform(dims, true, false),
+                    centerPx: edge,
+                    perpMinPx: perpMin,
+                    perpMaxPx: perpMax,
+                });
+            }
+        }
+        if (added.length) props.resizeHandles = [...handles, ...added];
+    }
 }
 
 /**
