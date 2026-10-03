@@ -403,16 +403,10 @@ pub(crate) async fn handle_askpass(
         },
         "cancel_label": if kind == PromptKind::YesNo { "No" } else { "Cancel" },
     });
-    // A notice ("touch your security key"): ssh does not wait for an answer
-    // and ends askpass itself once done, so it is shown and not waited on.
-    if kind == PromptKind::Info {
-        let state = state.clone();
-        let block = grant.agent_block_id.clone();
-        tokio::spawn(async move {
-            let _ = ask_user(&state, &block, question).await;
-        });
-        return axum::Json(serde_json::json!({ "answer": "" })).into_response();
-    }
+    // A notice ("touch your security key") is waited on like a question, but
+    // ssh does not wait for it: it kills askpass once done. That drops this
+    // request, which drops the request to the host, whose cleanup closes the
+    // window, so the notice goes exactly when ssh is done with it.
     match ask_user(&state, &grant.agent_block_id, question).await {
         Ok(answer) if answer.answered => {
             // Never logged: the answer may be a password.
