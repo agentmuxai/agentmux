@@ -291,10 +291,9 @@ mod tests {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
-        // Isolation flag unset, channel is the real release channel —
-        // this is the one default SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_
-        // 2026_08_06.md deliberately leaves unchanged, even with an
-        // instance dir present.
+        // Isolation flag unset on the real release channel, with an instance
+        // dir present: shared, as on every channel since
+        // SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md.
         std::env::set_var("AGENTMUX_CHANNEL", "stable");
         std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
         let r = resolve_shared_store_path().unwrap();

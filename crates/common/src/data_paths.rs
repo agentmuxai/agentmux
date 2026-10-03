@@ -1644,13 +1644,12 @@ mod tests {
 
     #[test]
     fn identities_dir_is_shared_on_stable_channel() {
-        // stable is the real release channel — the one default this
-        // spec (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md)
-        // deliberately does not change. AGENTMUX_CHANNEL is set to
-        // "stable" explicitly (mirroring what a real host/srv process
-        // always has via from_env(), per to_env_vars()) rather than left
-        // unset, so this test exercises the "stable" branch of the
-        // resolution order specifically, not the "channel unknown"
+        // Auth is shared on every channel by default
+        // (SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md); this pins the real
+        // release channel. AGENTMUX_CHANNEL is set to "stable" explicitly
+        // (mirroring what a real host/srv process always has via from_env(),
+        // per to_env_vars()) rather than left unset, so the test names the
+        // "stable" channel, not the "channel unknown"
         // fallback covered by identities_dir_is_shared_when_channel_unset.
         with_home_override(|_root| {
             clear_channel_env();
