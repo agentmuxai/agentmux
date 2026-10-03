@@ -52,6 +52,12 @@ pub struct ShellCreateRequest {
     /// (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
+    /// The calling agent's signed identity (`UiAutomationAuth`, its own jekt
+    /// key). Required for an SSH `connection`: srv derives the agent's pane
+    /// from it and refuses a request naming another pane, so no agent can
+    /// borrow another's SSH consent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<UiAutomationAuth>,
 }
 
 /// Response from `POST /api/v1/shell/create`
@@ -160,6 +166,12 @@ pub struct PtyShellCreateRequest {
     /// (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §8).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
+    /// The calling agent's signed identity (`UiAutomationAuth`, its own jekt
+    /// key). Required for an SSH `connection`: srv derives the agent's pane
+    /// from it and refuses a request naming another pane, so no agent can
+    /// borrow another's SSH consent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<UiAutomationAuth>,
 }
 
 /// Response from `POST /api/v1/ptyshell/create`. `shell_id` is the new
@@ -759,6 +771,7 @@ mod app_api_manifest_contract_tests {
             env: Some(Default::default()),
             capture_stdin: Some(true),
             connection: Some("wsl://Ubuntu".to_string()),
+            auth: Some(UiAutomationAuth { agent_id: "a".into(), ts_secs: 1, sig: "s".into() }),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

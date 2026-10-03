@@ -581,7 +581,7 @@ async function initAppInner() {
                     // entirely for credential-approval).
                     let coldMeta: Record<string, unknown> | undefined;
                     // The memory-adoption approval window is the same kind.
-                    const approvalViews = ["credential-approval", "memory-adoption-approval"];
+                    const approvalViews = ["credential-approval", "memory-adoption-approval", "ssh-approval"];
                     const seedView =
                         coldInitialView && !approvalViews.includes(coldInitialView) ? coldInitialView : undefined;
                     if (seedView) {

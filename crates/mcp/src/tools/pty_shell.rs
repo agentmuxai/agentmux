@@ -35,10 +35,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 rows,
                 cols,
                 connection,
+                auth: sign_ui_automation_auth().ok(),
             };
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
+                .timeout(crate::srv_http::SHELL_CREATE_TIMEOUT)
                 .json(&req)
                 .send()
                 .await

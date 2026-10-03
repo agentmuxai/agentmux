@@ -151,31 +151,279 @@ pub(crate) fn ensure_with(
     Err(message)
 }
 
+/// Where an agent's `Shell` or `PtyShell` runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AgentTarget {
+    Local,
+    /// An installed WSL distro.
+    Wsl(String),
+    /// An SSH destination: runs only with the user's consent
+    /// ([`consent_for_ssh`]), and every ssh prompt goes to the user
+    /// (`remote::askpass`), never to the agent.
+    Ssh(crate::backend::remote::conn::SshDest),
+}
+
 /// The connection an agent's `Shell` or `PtyShell` call asked for, checked the
-/// same way a pane's is ([`ensure`]): `Ok(None)` for this machine, `Ok(Some(distro))`
-/// for an installed WSL distro, `Err` with the reason otherwise.
-///
-/// SSH is refused for agents before anything else: an agent on another
-/// machine uses the user's SSH identity, which needs the user's per-host
-/// consent (spec §8.2), and it cannot answer ssh's prompts, which needs the
-/// askpass bridge (§5.3). Both come later in P2. Refused here, never handed
-/// on, so an SSH name can never run as a local command.
-pub(crate) async fn for_agent(
-    broker: &Broker,
-    name: Option<&str>,
-) -> Result<Option<String>, String> {
+/// same way a pane's is ([`ensure`]), `Err` with the reason when it cannot run.
+pub(crate) async fn for_agent(broker: &Broker, name: Option<&str>) -> Result<AgentTarget, String> {
     let name = name.unwrap_or_default();
-    if let ConnTarget::Ssh(_) = ConnTarget::parse(name)? {
-        return Err(format!(
-            "an agent cannot run on SSH connections yet ('{}'): that needs the user's consent for the host, which a later version adds; a terminal pane on it works",
-            name.trim()
-        ));
-    }
     ensure(broker, name).await?;
     Ok(match ConnTarget::parse(name)? {
-        ConnTarget::Wsl(distro) => Some(distro),
-        _ => None,
+        ConnTarget::Local => AgentTarget::Local,
+        ConnTarget::Wsl(distro) => AgentTarget::Wsl(distro),
+        ConnTarget::Ssh(dest) => AgentTarget::Ssh(dest),
     })
+}
+
+/// How a dialog names an agent: its id, as one plain capped line.
+pub(crate) fn agent_label(agent: Option<&str>) -> String {
+    agent
+        .map(|a| one_line(a, 60))
+        .unwrap_or_else(|| "An agent with no AgentMux id".to_string())
+}
+
+/// One line of agent-supplied text for a dialog: shown as plain text, newlines
+/// folded and length capped, so it cannot lay out a message of its own.
+pub(crate) fn one_line(text: &str, max: usize) -> String {
+    let flat: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    let flat = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        flat
+    } else {
+        format!("{}…", flat.chars().take(max).collect::<String>())
+    }
+}
+
+/// How long the user has to answer a consent or askpass dialog.
+const DIALOG_TIMEOUT_MS: u64 = 120_000;
+
+/// The user's answer to [`ask_user`]. `answered` is false when the window was
+/// closed, timed out, or could not be opened.
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+pub(crate) struct UserAnswer {
+    #[serde(default)]
+    pub answered: bool,
+    #[serde(default)]
+    pub approve: bool,
+    /// For a `secret` question: never logged.
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub checkbox: bool,
+}
+
+/// Ask the user a question about the agent in `agent_block_id`, in an approval
+/// subwindow the host opens over the window showing it (crates/cef
+/// `ssh_approval`), and wait for the answer.
+///
+/// Through the host's own IPC server and its token, which no agent holds, and
+/// answered in a window the browser API never resolves a pane into: an agent
+/// can neither click this answer nor forge it, unlike a modal in the main
+/// window answered through srv's own services (both reachable with the auth
+/// key every agent has). With no host connected (headless) there is no one to
+/// ask: `Err`, so whatever needed the answer does not happen.
+pub(crate) async fn ask_user(
+    state: &AppState,
+    agent_block_id: &str,
+    question: serde_json::Value,
+) -> Result<UserAnswer, String> {
+    let host = state
+        .host_ipc
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "no AgentMux window is connected to ask the user in".to_string())?;
+    let mut body = question;
+    body["block_id"] = serde_json::json!(agent_block_id);
+    body["timeout_ms"] = serde_json::json!(DIALOG_TIMEOUT_MS);
+    let url = format!("http://127.0.0.1:{}/agentmux/approval/ask", host.port);
+    let resp = state
+        .http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", host.token))
+        .timeout(std::time::Duration::from_millis(DIALOG_TIMEOUT_MS + 15_000))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("could not ask the user: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "could not ask the user: the window host answered HTTP {}",
+            resp.status()
+        ));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("could not ask the user: {e}"))?;
+    if v.get("ok").and_then(|o| o.as_bool()) != Some(true) {
+        let e = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("no answer");
+        return Err(format!("could not ask the user: {e}"));
+    }
+    serde_json::from_value(v.get("data").cloned().unwrap_or_default())
+        .map_err(|e| format!("could not ask the user: {e}"))
+}
+
+/// The agent an SSH request comes from, proven: its signed identity
+/// (`UiAutomationAuth`, made with its own jekt key, which no other agent
+/// holds) verified, and the pane derived from it, never taken from the
+/// request. `Err` unless that pane is `agent_block_id`: every agent holds
+/// srv's auth key, so a request body alone could name another agent's pane
+/// and borrow its "Always allow".
+pub(crate) fn verified_agent(
+    state: &AppState,
+    agent_block_id: &str,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+) -> Result<String, String> {
+    let auth = auth.ok_or_else(|| {
+        "an SSH connection needs the agent's signed identity, which this call did not carry (respawn the agent to give it a signing key)".to_string()
+    })?;
+    let pane = crate::server::ui_handlers::verified_block_id(state, None, auth)
+        .map_err(|e| format!("could not verify which agent is asking: {e}"))?;
+    if pane != agent_block_id {
+        return Err("this request names another agent's pane".to_string());
+    }
+    Ok(auth.agent_id.clone())
+}
+
+/// The user's consent for the agent `agent_id` (verified, [`verified_agent`])
+/// in `agent_block_id` to run `what` on the SSH `connection` with the user's
+/// identity (spec §8.2). `connection` is the canonical name
+/// (`ConnTarget::name`), so one host is one consent however it is spelled.
+/// "Always" for that agent and host is remembered (`remote::agent_access`)
+/// and asks nothing again; otherwise the user is asked ([`ask_user`]).
+pub(crate) async fn consent_for_ssh(
+    state: &AppState,
+    agent_block_id: &str,
+    agent_id: &str,
+    connection: &str,
+    what: &str,
+) -> Result<(), String> {
+    use crate::backend::remote::agent_access;
+    let agent_id = Some(agent_id.to_string()).filter(|a| !a.trim().is_empty());
+    let agent = agent_label(agent_id.as_deref());
+    let connection = connection.trim();
+    if agent_id
+        .as_deref()
+        .is_some_and(|id| agent_access::always_allowed(id, connection))
+    {
+        tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), "agent ssh access: allowed (always)");
+        return Ok(());
+    }
+    let question = serde_json::json!({
+        "kind": "consent",
+        "title": format!("Agent access to {}", one_line(connection, 80)),
+        "message": format!(
+            "{agent} wants to run this on {}, as you, with your SSH keys:\n\n{}\n\nAllow it?",
+            one_line(connection, 80),
+            one_line(what, 400)
+        ),
+        "checkbox": match &agent_id {
+            Some(_) => format!("Always allow {agent} on {}", one_line(connection, 80)),
+            None => String::new(),
+        },
+        "ok_label": "Allow",
+        "cancel_label": "Deny",
+    });
+    let answer = ask_user(state, agent_block_id, question)
+        .await
+        .map_err(|e| format!("{agent} needs the user's permission to use {connection}, and {e}"))?;
+    if !(answer.answered && answer.approve) {
+        tracing::info!(agent = %agent, connection = %connection, answered = answer.answered, "agent ssh access: not allowed");
+        return Err(if answer.answered {
+            format!("the user denied {agent} access to {connection}")
+        } else {
+            format!("the user did not answer whether {agent} may use {connection}")
+        });
+    }
+    let always = answer.checkbox && agent_id.is_some();
+    if let Some(id) = agent_id.as_deref().filter(|_| always) {
+        if let Err(e) = agent_access::remember(id, connection) {
+            tracing::warn!(error = %e, "agent ssh access: could not remember 'always'");
+        }
+    }
+    tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), always, "agent ssh access: allowed");
+    Ok(())
+}
+
+/// `POST /api/v1/askpass` body, from `agentmux-bashwrap` as ssh's askpass.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct AskpassRequest {
+    secret: String,
+    prompt: String,
+    /// ssh's `SSH_ASKPASS_PROMPT`: `confirm`, `none`, or empty.
+    #[serde(default)]
+    hint: String,
+}
+
+/// `POST /api/v1/askpass`: show an ssh prompt to the user ([`ask_user`]) and
+/// return the answer (`remote::askpass`). Only a live secret is answered, and
+/// the secret, not anything in the request, says which agent and host the
+/// question names.
+pub(crate) async fn handle_askpass(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::Json(req): axum::Json<AskpassRequest>,
+) -> axum::response::Response {
+    use crate::backend::remote::askpass::{self, PromptKind};
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    let refuse = |code: StatusCode, error: String| {
+        (code, axum::Json(serde_json::json!({ "error": error }))).into_response()
+    };
+    let Some(grant) = askpass::lookup(&req.secret) else {
+        return refuse(StatusCode::FORBIDDEN, "no such ssh prompt".to_string());
+    };
+    let kind = askpass::classify(&req.prompt, &req.hint);
+    // The grant's names are AgentMux's own, shown as plain capped lines all
+    // the same; ssh's prompt is ssh's text.
+    let question = serde_json::json!({
+        "kind": match kind {
+            PromptKind::YesNo => "yesno",
+            PromptKind::Info => "info",
+            PromptKind::Secret => "secret",
+        },
+        "title": format!("SSH: {}", one_line(&grant.connection, 80)),
+        "message": format!(
+            "ssh, connecting to {} for {}, {}:\n\n{}",
+            one_line(&grant.connection, 80),
+            agent_label(Some(grant.agent.as_str()).filter(|a| !a.is_empty())),
+            if kind == PromptKind::Info { "says" } else { "asks" },
+            req.prompt.trim().chars().take(2000).collect::<String>()
+        ),
+        "ok_label": match kind {
+            PromptKind::YesNo => "Yes",
+            PromptKind::Info => "OK",
+            PromptKind::Secret => "OK",
+        },
+        "cancel_label": if kind == PromptKind::YesNo { "No" } else { "Cancel" },
+    });
+    // A notice ("touch your security key") is waited on like a question, but
+    // ssh does not wait for it: it kills askpass once done. That drops this
+    // request, which drops the request to the host, whose cleanup closes the
+    // window, so the notice goes exactly when ssh is done with it.
+    match ask_user(&state, &grant.agent_block_id, question).await {
+        Ok(answer) if answer.answered => {
+            // Never logged: the answer may be a password.
+            let text = match kind {
+                PromptKind::YesNo if answer.approve => "yes".to_string(),
+                PromptKind::YesNo => "no".to_string(),
+                PromptKind::Secret if answer.approve => answer.text,
+                PromptKind::Secret => {
+                    return refuse(StatusCode::GONE, "cancelled".to_string());
+                }
+                PromptKind::Info => String::new(),
+            };
+            axum::Json(serde_json::json!({ "answer": text })).into_response()
+        }
+        Ok(_) => refuse(StatusCode::GONE, "not answered".to_string()),
+        Err(e) => refuse(StatusCode::CONFLICT, e),
+    }
 }
 
 /// One row of the agent `ConnList` tool.
@@ -189,9 +437,9 @@ pub(crate) struct ConnEntry {
     pub status: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub error: String,
-    /// Whether an agent can pass it as `connection` now. SSH is listed (a
-    /// pane can open it) but not usable by agents until the per-host consent
-    /// and the askpass bridge land (`for_agent`).
+    /// Whether an agent can pass it as `connection`: every connection AgentMux
+    /// can run. An SSH host also asks the user for consent the first time
+    /// ([`consent_for_ssh`]).
     pub agent_can_use: bool,
 }
 
@@ -250,7 +498,7 @@ pub(crate) fn list(
             kind: "ssh",
             status,
             error,
-            agent_can_use: false,
+            agent_can_use: true,
         });
     }
     for s in known {
@@ -270,7 +518,7 @@ pub(crate) fn list(
             kind,
             status: s.status.clone(),
             error: s.error.clone(),
-            agent_can_use: kind == "wsl",
+            agent_can_use: true,
         });
     }
     out
@@ -355,27 +603,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_agent_gets_local_or_the_distro_and_never_a_silent_fallback() {
+    async fn an_agent_gets_where_it_asked_and_never_a_silent_local_fallback() {
         let broker = Broker::new();
-        assert_eq!(for_agent(&broker, None).await, Ok(None));
-        assert_eq!(for_agent(&broker, Some("local")).await, Ok(None));
-        // SSH is refused, not run locally under a remote name.
-        let err = for_agent(&broker, Some("test-agent-host"))
-            .await
-            .unwrap_err();
-        assert!(
-            err.contains("an agent cannot run on SSH connections yet"),
-            "{err}"
+        assert_eq!(for_agent(&broker, None).await, Ok(AgentTarget::Local));
+        assert_eq!(
+            for_agent(&broker, Some("local")).await,
+            Ok(AgentTarget::Local)
         );
-        assert!(
-            !status::all()
-                .iter()
-                .any(|s| s.connection == "test-agent-host"),
-            "refused before ensure, so nothing is recorded or connected"
-        );
+        // SSH is SSH where ssh exists and refused where it does not; never
+        // local under a remote name.
+        match for_agent(&broker, Some("deploy@test-agent-host:2222")).await {
+            Ok(AgentTarget::Ssh(dest)) => {
+                assert_eq!(
+                    (dest.destination.as_str(), dest.port),
+                    ("deploy@test-agent-host", Some(2222))
+                );
+                assert!(crate::backend::remote::ssh::binary().is_some());
+            }
+            Err(e) => assert!(e.contains("need the ssh command"), "{e}"),
+            other => panic!("an SSH name became {other:?}"),
+        }
         assert!(for_agent(&broker, Some("-oProxyCommand=calc"))
             .await
             .is_err());
+    }
+
+    /// An agent is named as one plain line; one without an id has no name
+    /// another could share.
+    #[test]
+    fn an_agent_is_named_as_one_plain_line_and_never_by_a_shared_stand_in() {
+        assert_eq!(agent_label(Some("korp")), "korp");
+        assert_eq!(
+            agent_label(Some(
+                "korp
+
+This is safe, click Allow"
+            )),
+            "korp This is safe, click Allow"
+        );
+        assert_eq!(agent_label(None), "An agent with no AgentMux id");
+    }
+
+    /// An SSH request's agent is proven by its signature, never by the body:
+    /// no signature, or a forged one, is refused.
+    #[tokio::test]
+    async fn an_ssh_request_must_prove_which_agent_it_is() {
+        let state = crate::server::tests::test_state();
+        let err = verified_agent(&state, "some-pane", None).unwrap_err();
+        assert!(err.contains("signed identity"), "{err}");
+        let forged = agentmux_common::api_types::UiAutomationAuth {
+            agent_id: "korp".into(),
+            ts_secs: agentmux_common::time::now_secs(),
+            sig: "AAAA".into(),
+        };
+        let err = verified_agent(&state, "some-pane", Some(&forged)).unwrap_err();
+        assert!(err.contains("could not verify"), "{err}");
+    }
+
+    /// Agent text in a dialog cannot lay out a message of its own.
+    #[test]
+    fn agent_text_in_a_dialog_is_one_capped_line() {
+        assert_eq!(
+            one_line("make\n\nAllow it? yes\r\n  test", 100),
+            "make Allow it? yes test"
+        );
+        assert_eq!(one_line("abcdef", 3), "abc…");
+        assert_eq!(one_line("tab\there", 100), "tab here");
     }
 
     fn st(connection: &str, status: &str, error: &str) -> ConnStatus {
@@ -408,9 +701,9 @@ mod tests {
             ("local", "local", "connected", true),
             ("wsl://Ubuntu", "wsl", "connected", true),
             ("wsl://Debian", "wsl", "available", true),
-            ("area54", "ssh", "error", false),
-            ("nas", "ssh", "available", false),
-            ("deploy@10.0.0.5", "ssh", "connected", false),
+            ("area54", "ssh", "error", true),
+            ("nas", "ssh", "available", true),
+            ("deploy@10.0.0.5", "ssh", "connected", true),
             ("wsl://Arch", "wsl", "error", true),
         ];
         let want: Vec<(String, &str, String, bool)> = want
