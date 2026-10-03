@@ -701,7 +701,7 @@ describe("resize through collapsed panes", () => {
 
         // The drag-rejection zone (TileLayout.win32 rejectDragAt) uses the
         // same clamped extent, so a pane drag from the chip's lower half is
-        // not refused (ReAgent P2 on #4260).
+        // not refused (#4260).
         const handles = model.resizeHandles();
         const x = b.left + b.width / 2;
         const half = model.resizeHandleSizePx() / 2; // 20

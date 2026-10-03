@@ -667,7 +667,7 @@ export function extendResizeHandlesThroughChips(
  * Whether a container-local point lies in a resize handle's zone, by each
  * handle's own extent: `halfSizePx` when set (a clamped chip-edge handle),
  * else `defaultHalfSizePx`. Used to refuse a pane drag that starts on a
- * handle, so it must match what is rendered (ReAgent P2 on #4260).
+ * handle, so it must match what is rendered (#4260).
  */
 export function isInResizeHandleZone(
     handles: readonly ResizeHandleProps[],
