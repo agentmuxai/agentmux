@@ -72,7 +72,7 @@ pub(crate) async fn setup_torn_off_block_layout(
 /// but the LayoutModel never picks it up, and the next frontend-
 /// initiated `object.UpdateObject` overwrites the backend version
 /// with the LayoutModel's stale tree. The pending-actions queue
-/// (`onBackendUpdate` in `layoutPersistence.ts:50`) is the canonical
+/// (`onBackendUpdate` in `layoutPersistence.ts`) is the canonical
 /// channel for "backend wants the frontend to mutate its layout
 /// tree". Source-delete on tear-off uses the same channel via
 /// `queue_source_layout_delete`.
@@ -86,7 +86,7 @@ pub(crate) async fn queue_target_layout_insert(
 ) -> Result<(), String> {
     let action = LayoutActionData {
         // Matches `LayoutTreeActionType.InsertNode = "insert"` in
-        // `frontend/layout/lib/types.ts:73`.
+        // `frontend/layout/lib/types.ts`.
         actiontype: "insert".to_string(),
         actionid: uuid::Uuid::new_v4().to_string(),
         blockid: block_id.to_string(),

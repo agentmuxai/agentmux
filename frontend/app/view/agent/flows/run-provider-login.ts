@@ -311,7 +311,8 @@ const INAPP_COMPLETION_TIMEOUT_MS = 5 * 60 * 1_000;
  *  (`cli_login_cred_baseline`'s mtime check), but on macOS the Claude CLI
  *  can update credentials in the Keychain ("Claude Safe Storage") without
  *  ever touching `.credentials.json` — the exact case
- *  `cli_handlers.rs:393-416`'s own auth-check already has to special-case.
+ *  `cli_handlers.rs`'s own auth-check (its `COMMAND_CHECK_CLI_AUTH`
+ *  handler) already has to special-case.
  *  Requiring `credential_changed` unconditionally made EVERY macOS Claude
  *  login report `inapp-timeout` even on success, since the file the
  *  baseline watches simply never appears. `initialAuthed` recovers the

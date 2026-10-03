@@ -1,7 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// MPS event-name constants — mirrors crates/srv/src/backend/mps.rs:22-54.
+// MPS event-name constants — mostly mirrors the `EVENT_*` constants in
+// crates/srv/src/backend/mps.rs; a few (e.g. `waveobj:batchedupdates`,
+// `files:changed`) are defined elsewhere in the backend.
 // Use these instead of bare string literals so typos are caught at build time
 // and grepping for an event name finds all its usages in one search.
 

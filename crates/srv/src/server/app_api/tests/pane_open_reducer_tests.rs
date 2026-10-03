@@ -875,7 +875,7 @@ async fn open_editor_reuse_queues_multiple_pending_files() {
 }
 
 /// Regression for reagent P1 on PR #2404: `EditorViewModel.openToTheSide`/
-/// `openInTerminal` (`frontend/app/view/editor/editor-model.ts:958-984`)
+/// `openInTerminal` (in `frontend/app/view/editor/editor-model.ts`)
 /// call the same generic `pane.open` RPC with `split_reference_block_id`
 /// set to their OWN block id, for split placement only — never setting
 /// `reuse_editor_pane`. Reuse must not trigger for them, or "Open to the

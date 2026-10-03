@@ -574,8 +574,8 @@ pub(crate) async fn build_persistent_spawn_env(
     // Streaming-bash wrapper auth + discovery
     // (SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7).
     //
-    // 1. AGENTMUX_AUTH_KEY — config.rs:42 removed it from the process env
-    //    at startup (security PR #801). Re-inject for this spawn so the
+    // 1. AGENTMUX_AUTH_KEY — config.rs's `Config::from_env_and_args` removed
+    //    it from the process env at startup (security PR #801). Re-inject for this spawn so the
     //    wrapper (running inside Claude's bash subprocess tree) can
     //    authenticate against the auth_middleware-gated
     //    /agentmux/wps/publish endpoint via X-AuthKey.
@@ -583,7 +583,7 @@ pub(crate) async fn build_persistent_spawn_env(
     //    resolves when the PreToolUse hook (auto-injected by
     //    agent_config.rs) rewrites the command to invoke it.
     //    AGENTMUX_LOCAL_URL is already in the inherited process env
-    //    (main.rs:498).
+    //    (set by `bind_listeners_and_network` in bootstrap/network.rs).
     //
     // Unconditional `insert`, NOT `entry().or_insert()` — these two are
     // RESERVED, server-controlled values (the current key, the real block

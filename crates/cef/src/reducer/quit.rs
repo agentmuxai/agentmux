@@ -97,7 +97,7 @@ pub(super) fn handle_confirm_drained(state: &mut HostState) -> DispatchOutput {
 /// BROAD prefix). A pending creation with one of these prefixes is not a user
 /// "New Window" and must not block drain. Mirrors EXACTLY the exclusion
 /// `commands::orphan_reconcile` applies to `pending_window_creations`
-/// (orphan_reconcile.rs:302-304) — including the broad `floating-`: a #810/#811
+/// (in its `ui_thread_reconcile`) — including the broad `floating-`: a #810/#811
 /// failure path can leak a pending `floating-` entry, and gating drain on it
 /// would block reconciliation forever (reagent P2 #1676).
 ///

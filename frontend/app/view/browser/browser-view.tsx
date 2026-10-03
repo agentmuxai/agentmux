@@ -136,7 +136,8 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
     // browser_pane_create. Required so main_window_focus reclaims OS focus
     // to the WINDOW that sent the IPC (otherwise the host's handler
     // defaults to "main" and misroutes in multi-window setups, creating a
-    // 200 Hz focus bounce — ipc.rs:424-428 documents this).
+    // 200 Hz focus bounce — the `main_window_focus` arm in ipc.rs documents
+    // the misrouting).
     const windowLabel =
         new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
     diag(`view-mount window_label=${windowLabel} initial-urlAtom=${JSON.stringify(model.urlAtom())}`);

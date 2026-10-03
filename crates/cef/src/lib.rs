@@ -777,8 +777,8 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // if absent: `AGENTMUX_SRV_PIPE_PATH` is only set on the srv
     // child by the launcher (`crates/launcher/src/srv_spawner.rs`),
     // not on the host spawn — so today the host never has the env
-    // var and `connect_to_srv` short-circuits to None at
-    // `srv_ipc.rs:62-68`. Path-based dev guard is the right gate
+    // var and `connect_to_srv` (`srv_ipc.rs`) short-circuits to None at
+    // its env-var check. Path-based dev guard is the right gate
     // for this branch; restoring full srv-IPC parity in dev needs
     // the launcher to propagate the env var to the host first.
     // See spec §11 of SPEC_DEV_MODE_LAUNCHER_IPC_2026_05_16.md.

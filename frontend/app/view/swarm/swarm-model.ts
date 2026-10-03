@@ -391,9 +391,10 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
  * real, transient loading state on a real block, and from "the fetch for
  * this oref just hasn't resolved yet" (`isLoading`) — `MOS.
  * getMuxObjectAtom` seeds a freshly-tracked oref with `{ value: null,
- * loading: true }` (`mos.ts:152-153`) until its async `GetObject` fetch
- * resolves, so a genuinely real, just-spawned block's row would otherwise
- * read identically to a phantom one on the very first `buildTree()` pass —
+ * loading: true }` (`mos.ts`'s `createMuxValueObject`) until its async
+ * `GetObject` fetch resolves, so a genuinely real, just-spawned block's row
+ * would otherwise read identically to a phantom one on the very first
+ * `buildTree()` pass —
  * reagentx P1 on #2438, and very plausibly the explanation for the
  * separate "a live-spawned subagent wasn't observed in Swarm" symptom this
  * retro originally left as an open, unconfirmed question. While loading,
@@ -2046,7 +2047,9 @@ export class SwarmViewModel {
             // "this oref resolved to nothing" — both read as block == null,
             // but only the latter means the id is genuinely phantom.
             // getMuxObjectLoadingAtom returns `null` while loading, `false`
-            // once GetObject has resolved either way (mos.ts:232-238).
+            // once GetObject has resolved either way — found, or a definitive
+            // "not found" (mos.ts's `startFetch`; any other fetch error leaves
+            // it `null`).
             const isLoading = MOS.getMuxObjectLoadingAtom(`block:${blockId}`)() !== false;
             if (!hasRenderableBlock(block, isLoading)) return [];
             const agentName =

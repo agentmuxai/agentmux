@@ -100,7 +100,8 @@ pub(super) async fn handle_credential_service(state: &AppState, call: &WebCallTy
 /// that, `secret_matches("", "")` compares equal and a caller supplying
 /// nothing — precisely what an agent without the secret sends — would be
 /// admitted, turning the misconfiguration into a skeleton key. `Config`
-/// already `.filter(|s| !s.is_empty())`s this value (`config.rs:130`), so
+/// already `.filter(|s| !s.is_empty())`s this value (`host_reg_secret` in
+/// `config.rs`'s `Config::from_env_and_args`), so
 /// today the case is unreachable; the check is here so the gate stays
 /// correct on its own terms rather than depending on a filter two modules
 /// away that a future refactor could drop.

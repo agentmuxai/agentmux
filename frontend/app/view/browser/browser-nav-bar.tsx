@@ -317,8 +317,8 @@ export function BrowserNavBar(props: {
             // so a `fa-spinner` icon would render static/non-animating and
             // look broken next to every other spinner in this codebase
             // (which is always fa-spinner + fa-spin together, e.g.
-            // swarm-view.tsx:757, toolchain-view.tsx:322). A label-only row
-            // for this brief, local-file-read loading state is honest
+            // swarm-view.tsx's `DispatchActivityFeedEntry`, toolchain-view.tsx's
+            // "Check latest versions" button). A label-only row for this brief, local-file-read loading state is honest
             // rather than a fake, non-spinning spinner (ReAgent re-review,
             // PR #2730).
             return [{ label: "Loading…" }];
@@ -469,9 +469,9 @@ export function BrowserNavBar(props: {
                         e.currentTarget.select();
                         // Always fire main_window_focus with window_label —
                         // the IPC misrouting was the root cause of the bounce
-                        // (see ipc.rs:424-428). With the correct window_label
-                        // the IPC is a no-op when the target window is
-                        // already foreground, so it's safe to send on every
+                        // (see the `main_window_focus` arm in ipc.rs). With
+                        // the correct window_label the IPC is a no-op when
+                        // the target window is already foreground, so it's safe to send on every
                         // legitimate focus event without triggering loops.
                         getApi().reclaimWindowFocus(windowLabel).catch(() => {});
                     }}

@@ -2526,7 +2526,8 @@ mod tests {
     fn test_build_config_files_expands_agent_slug_and_working_dir() {
         // REPORT_REPO_HEALTH_AUDIT_2026_07_20.md §1.3: AGENT_SLUG/WORKING_DIR
         // were missing from build_config_files's template vars (present in
-        // the TS mirror, agent-model.ts:747-748), so any soul/agentmd content
+        // the TS mirror, `buildConfigFiles` in agent-config-builder.ts), so
+        // any soul/agentmd content
         // using {{AGENT_SLUG}} or {{WORKING_DIR}} was left unexpanded.
         let mut content_map = HashMap::new();
         content_map.insert(

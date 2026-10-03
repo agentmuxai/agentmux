@@ -97,7 +97,8 @@ pub fn fe_log_structured(args: &serde_json::Value) -> serde_json::Value {
 /// (no handle to kill) and spawn a SECOND srv touching the same
 /// data dir, corrupting state. Refuse with a clear message until
 /// Phase B.2 wires a Quit command from host to launcher to do the
-/// restart cleanly. (codex P2 @ sidecar.rs:58, PR #571 round-3.)
+/// restart cleanly (#571). The launcher-managed adoption path is
+/// sidecar.rs's `use_launcher_endpoints`.
 pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, String> {
     tracing::info!("[restart_backend] user-initiated restart");
 

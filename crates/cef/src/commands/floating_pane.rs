@@ -39,7 +39,8 @@ pub struct OpenFloatingPaneArgs {
     /// Backend workspace id the floating window should attach to.
     /// Threaded through the URL so the floater's `initApp` →
     /// `initHostNewWindow` path picks it up via `?workspaceId=` and
-    /// reuses the existing tear-off plumbing (frontend/app-init.ts:236).
+    /// reuses the existing tear-off plumbing (`initHostNewWindow`'s
+    /// `tearOffWsId` branch in frontend/app-init.ts).
     /// Optional for back-compat with Phase 1 callers that didn't pass it.
     /// Issue #1077.
     #[serde(default)]
@@ -60,8 +61,8 @@ pub struct OpenFloatingPaneArgs {
     ///   (`#[cfg(target_os = "windows")]` below) — the frontend can't, since
     ///   it only knows its source monitor's DPR. This makes cross-DPI handoff
     ///   correct (drag from a 100% monitor onto a 150% one and the floater
-    ///   keeps the source pane's visual size). Mirrors
-    ///   `commands/window_pool.rs:684-701`.
+    ///   keeps the source pane's visual size). Mirrors the Windows
+    ///   `promote_pool_window`'s `dpi_scale` in `commands/window_pool.rs`.
     /// - **macOS/Linux**: passed through unscaled — CEF Views sizes in DIP.
     pub width: i32,
     pub height: i32,
@@ -132,7 +133,8 @@ pub fn open_floating_pane_window(
     // Scale incoming CSS / DIP size to PHYSICAL pixels using the
     // DESTINATION monitor's DPI. The frontend can't do this — it only
     // knows its own (source) monitor's DPR. The destination monitor is
-    // wherever (x, y) lands. Mirrors `commands/window_pool.rs:684-701`.
+    // wherever (x, y) lands. Mirrors the Windows `promote_pool_window`'s
+    // `dpi_scale` in `commands/window_pool.rs`.
     #[cfg(target_os = "windows")]
     let parsed = {
         use windows_sys::Win32::Foundation::POINT;

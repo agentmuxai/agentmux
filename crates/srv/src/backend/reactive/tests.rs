@@ -640,7 +640,7 @@ fn test_handler_inject_agent_not_found() {
 
 // `#[tokio::test]` because `Handler::inject_message` internally
 // `tokio::spawn`s the delayed-Enter follow-up; without a runtime it
-// panics at the spawn site (handler.rs:308).
+// panics at the spawn site (`deliver_audited` in handler.rs).
 #[tokio::test]
 async fn test_handler_inject_success() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
@@ -675,7 +675,7 @@ async fn test_handler_inject_success() {
     assert_eq!(resp.block_id.as_deref(), Some("block1"));
 
     let calls = sent.lock().unwrap();
-    // Production sequence (handler.rs:268-280): clear `\r`, then
+    // Production sequence (`deliver_audited` in handler.rs): clear `\r`, then
     // message+`\r` as a single payload. The 3 delayed `\r` follow-ups
     // are tokio-spawned with 200ms delays so they don't run before
     // the assertions in this synchronous-only test body.
@@ -2906,7 +2906,7 @@ fn test_keyword_match_whole_word_positive_cases() {
 fn test_keyword_match_whole_word_avoids_substring_false_positives() {
     // These contain a whole-word keyword as a SUBSTRING only (no word boundary
     // on both sides) and must NOT trigger — this is the documented purpose of
-    // contains_whole_word (sanitize.rs:145-148).
+    // contains_whole_word (its doc comment in sanitize.rs).
     for msg in [
         "please dispatch the agent",
         "apply the patch to main",
@@ -2931,7 +2931,7 @@ fn test_keyword_match_whole_word_case_insensitive() {
 fn test_keyword_match_whole_word_at_string_boundaries() {
     // Keyword as the entire message (no surrounding characters at all) must
     // still match — before_ok/after_ok both fall back to "start/end of string
-    // counts as a boundary" (sanitize.rs:174-176).
+    // counts as a boundary" (contains_whole_word in sanitize.rs).
     assert!(is_sensitive_message("token"));
     assert!(is_sensitive_message("secret"));
     // Punctuation-adjacent, not just whitespace-adjacent.
@@ -3037,8 +3037,9 @@ fn test_keyword_match_armory_feature_name_is_a_broad_false_positive_source() {
 // -- Jekt tier classification: marker rendering matrix (wrap_jekt_message) --
 //
 // Direct, isolated tests of wrap_jekt_message's TRUST=/SIG=/ESCALATE= field
-// rendering, covering every branch documented in its own doc comment
-// (sanitize.rs:193-278). Previously only reached transitively through full
+// rendering, covering every branch documented in its own doc comment in
+// sanitize.rs except `wan_instance` (covered by the WAN verification tests
+// above). Previously only reached transitively through full
 // Handler::inject_message integration tests elsewhere in this file.
 
 fn wrap(
@@ -3157,9 +3158,10 @@ fn test_marker_lan_tier_trust_values() {
 
 #[test]
 fn test_marker_wan_tier_trust_is_always_network_claimed() {
-    // sig_verified is a host-only signal; even if somehow set true on a WAN
-    // call, TRUST must not read host-verified — delivery_tier gates this
-    // before sig_verified is even consulted (sanitize.rs:299-309).
+    // sig_verified is a host/channel-tier signal; even if somehow set true on
+    // a WAN call, TRUST must not read host-verified — delivery_tier gates this
+    // before sig_verified is even consulted (wrap_jekt_message's `trust`
+    // selection in sanitize.rs).
     for reagent in [Some(true), Some(false), None] {
         let m = wrap("coord", "wan", Some(true), reagent, None, false);
         assert!(m.contains("TRUST=network-claimed"), "got: {m}");

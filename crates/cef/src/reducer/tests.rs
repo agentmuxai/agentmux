@@ -1033,7 +1033,8 @@ fn should_begin_drain_background_service_suppresses_last_window_closed_only() {
 fn user_creation_in_flight_ignores_background_labels() {
     let mut state = HostState::default();
     // Pool refill, browser-pane, warm floating-pool, AND broad floating- tear-off
-    // are all background — none blocks drain (mirrors orphan_reconcile.rs:302-304).
+    // are all background — none blocks drain (mirrors the prefix exclusion in
+    // orphan_reconcile.rs's `ui_thread_reconcile`).
     for bg in ["window-pool-abc", "browser-pane-1", "floating-pool-xyz", "floating-tearoff-7"] {
         update(
             &mut state,

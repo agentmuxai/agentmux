@@ -277,8 +277,9 @@ pub(super) async fn handle_shell_status(
 }
 
 // Meta key persisting which sub-block is "this pane's one shell" — the same
-// key `agent-view.tsx` reads/writes for the human-facing composer drawer
-// (`agent-view.tsx:2883,2890-2894`). `PtyShell` reuses this instead of
+// key the human-facing shell drawer uses: `agent-view.tsx` reads it into
+// `AgentShellDrawer`'s `shellSubBlockId` prop, and `AgentShellDrawer.tsx`'s
+// `onSubBlockCreated` handler writes it. `PtyShell` reuses this instead of
 // minting an independent, invisible shell: reusing it means the agent
 // drives the SAME shell a human sees in the drawer, and a drawer opened
 // later attaches to whatever the agent already started, live output and

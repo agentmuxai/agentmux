@@ -10,13 +10,13 @@
 // recovery walker never replayed or compensated anything — it only marked
 // interrupted rows `failed_compensation` for operator review via
 // `--diag sagas` ("we DO NOT auto-replay or auto-compensate launcher
-// sagas", the deleted recovery.rs:19). With srv authoritative over session
-// state and crash-reproject rebuilding windows from it (Pillar 1 Steps
-// 1–5), an interrupted launcher saga leaves nothing durable to review:
-// both concrete sagas (window_cleanup_cascade, pool_respawn) narrate
-// cleanup the host performs organically, and their srv-side effects are
-// reconstructed by reproject regardless. The SQLite file bought WAL churn
-// every session in exchange for a diagnostic tombstone.
+// sagas", in the walker's own header, deleted with it). With srv
+// authoritative over session state and crash-reproject rebuilding windows
+// from it (Pillar 1 Steps 1–5), an interrupted launcher saga leaves nothing
+// durable to review: both concrete sagas (window_cleanup_cascade,
+// pool_respawn) narrate cleanup the host performs organically, and their
+// srv-side effects are reconstructed by reproject regardless. The SQLite file
+// bought WAL churn every session in exchange for a diagnostic tombstone.
 //
 // What stays: the LIVE coordinator semantics. The registry keeps the same
 // method surface the coordinator drives (start/terminate saga,

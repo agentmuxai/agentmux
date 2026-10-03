@@ -8,7 +8,8 @@
  *
  * The backend publishes `agentidentities:changed:<agentId>` SYNCHRONOUSLY
  * inside the `LinkAgentIdentityCommand` handler, before it even responds to
- * the RPC (`agent_handlers/identity.rs:590-611`). RPC responses and WS
+ * the RPC (`agent_handlers/identity.rs`'s `COMMAND_LINK_AGENT_IDENTITY`
+ * registration). RPC responses and WS
  * events share one in-order connection, so the frontend's subscription
  * fires before `bindAccountToAgent`'s own `SetMetaCommand` — which only
  * runs AFTER that same Link RPC resolves client-side — has refreshed

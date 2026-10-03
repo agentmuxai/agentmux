@@ -512,7 +512,7 @@ pub async fn spawn_srv(
     // handles cleanup), so dropping the Child wouldn't terminate the
     // suspended srv — it would orphan as a permanent zombie holding
     // resources and the data dir lockfile, blocking subsequent
-    // launches. (codex P1 @ srv_spawner.rs:161, PR #571 round-3.)
+    // launches (#571).
     #[cfg(target_os = "windows")]
     {
         if !job_handle.is_null() {
@@ -628,7 +628,7 @@ pub async fn spawn_srv(
     // class as the assign/resume failures above. Without this, the
     // 30s timeout in degraded mode (J0 absent) would leak a fully-
     // running srv that keeps the data dir lockfile, blocking the
-    // next launch. (codex P2 @ srv_spawner.rs:240, PR #571 round-4.)
+    // next launch (#571).
     //
     // If srv emits AGENTMUXSRV-MIGRATING before ESTART, the deadline is
     // extended to 30 minutes to accommodate large-dataset migrations. A shorter
@@ -717,8 +717,9 @@ pub async fn spawn_srv(
 /// Resolve the agentmux-srv binary path from the LAUNCHER's vantage
 /// point.
 ///
-/// Search order, mirroring the host's `resolve_backend_binary`
-/// (sidecar.rs:318-402) but anchored at the launcher's exe dir:
+/// Search order, mirroring the host's `resolve_backend_binary` in
+/// sidecar.rs (minus its workspace `dist/bin` fallback) but anchored at
+/// the launcher's exe dir:
 ///   1. `<launcher_dir>/runtime/agentmux-srv-{ver}-{os}.{arch}.exe`
 ///      (versioned portable layout)
 ///   2. `<launcher_dir>/runtime/agentmux-srv.exe` (dev fallback)
@@ -772,7 +773,7 @@ fn resolve_srv_binary(launcher_exe_dir: &Path) -> Result<PathBuf, SrvSpawnError>
 }
 
 /// Parsed fields out of a `AGENTMUXSRV-ESTART` line. Same shape as the
-/// host's `parse_estart` (sidecar.rs:404-420).
+/// host's `parse_estart` in sidecar.rs, minus `version`.
 struct EstartFields {
     ws_endpoint: String,
     web_endpoint: String,

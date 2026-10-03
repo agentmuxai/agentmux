@@ -1147,7 +1147,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     "CreateSubBlock"
                 );
                 // TS `CreateSubBlockCommand` resolves `Promise<ORef>`, and
-                // `ORef` (srv-types.d.ts:1258) is a plain string — return the
+                // `ORef` (srv-types.d.ts) is a plain string — return the
                 // bare "block:<id>" string, not a wrapper object.
                 Ok(Some(serde_json::Value::String(format!("block:{child_id}"))))
             })

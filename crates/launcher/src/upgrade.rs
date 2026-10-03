@@ -80,8 +80,8 @@ pub enum QuiesceOutcome {
 }
 
 /// Stop `child` and return only once it has genuinely exited — never a
-/// fixed sleep. This is the fix for the exact gap
-/// `crates/cef/src/commands/backend.rs:223`'s `sleep(300ms)` heuristic
+/// fixed sleep. This is the fix for the exact gap the `sleep(300ms)`
+/// heuristic in `crates/cef/src/commands/backend.rs`'s `run_migrations`
 /// left open: that comment already says "so the OS releases file locks
 /// before we open the DB," which a sleep can only approximate and a real
 /// `.wait()` guarantees outright.
@@ -89,7 +89,8 @@ pub enum QuiesceOutcome {
 /// # Windows
 /// There is no graceful shutdown signal available here today — every
 /// existing srv-teardown call site in this launcher already uses
-/// `start_kill()` (`supervisor/windows.rs:574,741,1141`), relying on srv's
+/// `start_kill()` (the `srv_child.start_kill()` calls in
+/// `supervisor/windows.rs`'s `run_windows`), relying on srv's
 /// SQLite WAL durability rather than a clean in-process shutdown. Building
 /// a graceful path for Windows is out of scope for this change; this
 /// function stays consistent with that existing convention rather than

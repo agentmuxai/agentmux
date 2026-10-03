@@ -323,7 +323,7 @@ mod req_shape_tests {
     use super::*;
     use serde_json::json;
 
-    // useAgentActivitySummary.ts:90
+    // useAgentActivitySummary.ts (`useAgentActivitySummary`)
     #[test]
     fn activity_summary_accepts_the_full_payload() {
         let r: CommandActivitySummaryData = serde_json::from_value(json!({
@@ -349,7 +349,7 @@ mod req_shape_tests {
         assert!(r.word_target.is_none() && r.user_message.is_none());
     }
 
-    // useNextPromptSuggestion.ts:150
+    // useNextPromptSuggestion.ts (`useNextPromptSuggestion`)
     #[test]
     fn next_prompt_suggestion_accepts_the_payload_the_stub_sends() {
         serde_json::from_value::<CommandNextPromptSuggestionData>(
@@ -358,8 +358,9 @@ mod req_shape_tests {
         .expect("session:next_prompt_suggestion must accept block_id and generation");
     }
 
-    // useResumePreflight.ts:63 and session-actions.ts:46/:50/:55 — all four
-    // send exactly one field.
+    // useResumePreflight.ts (`useResumePreflight`) and session-actions.ts
+    // (`archiveSession`, `restoreSession`, `exportSession`) — all four send
+    // exactly one field.
     #[test]
     fn the_four_block_id_only_commands_accept_a_bare_block_id() {
         let payload = json!({"block_id": "b1"});
@@ -372,14 +373,14 @@ mod req_shape_tests {
         serde_json::from_value::<CommandSessionExportData>(payload).expect("session:export");
     }
 
-    // useHistoryPagination.ts:257
+    // useHistoryPagination.ts (`useHistoryPagination`'s snapshot fast path)
     #[test]
     fn agent_session_read_accepts_the_payload_the_stub_sends() {
         serde_json::from_value::<CommandAgentSessionReadData>(json!({"definition_id": "d1"}))
             .expect("agent:session:read must accept definition_id");
     }
 
-    // useSnapshotPersistence.ts:115
+    // useSnapshotPersistence.ts (`writeSnapshotNow`)
     #[test]
     fn agent_session_write_state_accepts_the_payload_the_stub_sends() {
         serde_json::from_value::<CommandAgentSessionWriteStateData>(
