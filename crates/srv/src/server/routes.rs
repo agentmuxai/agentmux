@@ -264,6 +264,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // The connections an agent's Shell/PtyShell may name (`ConnList` tool,
         // SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §8.1).
         .route("/api/v1/conn/list", get(app_api::connections::handle_conn_list))
+        // ssh's askpass, through agentmux-bashwrap: answered only for a live
+        // per-ssh secret (backend::remote::askpass).
+        .route("/api/v1/askpass", post(app_api::connections::handle_askpass))
         .route("/api/v1/window/name", post(handle_window_name))
         // Naming verbs (SPEC §4.3): rename the caller's own tab / pane / workspace
         // (or an explicit target). agentmux-mcp's SetTabName / SetPaneTitle /

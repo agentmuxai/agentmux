@@ -132,6 +132,8 @@ declare global {
     type ApprovalHostApi = {
         decideCredential(approvalId: string, approve: boolean): Promise<void>;
         decideMemoryAdoption(approvalId: string, approve: boolean): Promise<void>;
+        /** Answer an SSH approval: consent, or ssh's own prompt (`text` for a secret one). */
+        decideSsh(approvalId: string, approve: boolean, text: string, checkbox: boolean): Promise<void>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */

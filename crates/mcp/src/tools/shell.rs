@@ -52,11 +52,15 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 env,
                 capture_stdin,
                 connection,
+                // Proves which agent is asking; srv requires it for SSH. An
+                // agent without a key still runs locally and in WSL.
+                auth: sign_ui_automation_auth().ok(),
             };
 
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
+                .timeout(crate::srv_http::SHELL_CREATE_TIMEOUT)
                 .json(&req)
                 .send()
                 .await

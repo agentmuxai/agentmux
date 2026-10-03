@@ -87,6 +87,9 @@ pub async fn start_ipc_server(state: Arc<AppState>) -> u16 {
     // Browser DOM API routes (`/agentmux/browser/*`). Token auth is
     // enforced inside each handler — same bearer scheme as /ipc.
     app = crate::browser_api::register_routes(app);
+    // srv asks the user about an agent's SSH access, or an agent's ssh asks
+    // its own prompt (`ssh_approval`). Token auth inside the handler, as above.
+    app = crate::ssh_approval::register_routes(app);
     let mut app = app
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -151,7 +154,12 @@ async fn handle_ipc(
         );
     }
 
-    tracing::debug!("IPC request: cmd={} args={}", req.cmd, req.args);
+    // An SSH approval's answer can be a password: never logged.
+    if req.cmd == "ssh_approval_decide" {
+        tracing::debug!("IPC request: cmd={} args=<redacted>", req.cmd);
+    } else {
+        tracing::debug!("IPC request: cmd={} args={}", req.cmd, req.args);
+    }
 
     let result = route_command(&state, &req.cmd, &req.args).await;
 
@@ -741,6 +749,15 @@ async fn route_command(
             }
             crate::memory_adoption::request_release(state, window_label, agent_id, list_id, index, summary)
                 .map(|approval_id| serde_json::json!({ "approval_id": approval_id }))
+        }
+        "ssh_approval_decide" => {
+            // Only the SSH approval subwindow knows the approval_id; its
+            // answer goes to srv's waiting request (`ssh_approval`).
+            let approval_id = args.get("approval_id").and_then(|v| v.as_str()).unwrap_or("");
+            let approve = args.get("approve").and_then(|v| v.as_bool()).unwrap_or(false);
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let checkbox = args.get("checkbox").and_then(|v| v.as_bool()).unwrap_or(false);
+            Ok(serde_json::json!(crate::ssh_approval::decide(approval_id, approve, text, checkbox)))
         }
         "memory_adoption_decide" => {
             // Only the approval subwindow knows the approval_id.

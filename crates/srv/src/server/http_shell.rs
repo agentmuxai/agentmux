@@ -16,19 +16,40 @@ pub(super) async fn handle_shell_create(
     Json(req): Json<ShellCreateRequest>,
 ) -> impl IntoResponse {
     // Where it runs. Checked before anything is published, so a refused
-    // connection (SSH before P2, a distro that isn't installed, a bad name)
-    // fails the call with its reason instead of running the command here.
-    let wsl_distro = match super::app_api::connections::for_agent(
-        &state.broker,
-        req.connection.as_deref(),
-    )
-    .await
-    {
-        Ok(d) => d,
+    // connection (no ssh, a distro that isn't installed, a bad name) fails the
+    // call with its reason instead of running the command here.
+    use super::app_api::connections::{self, AgentTarget};
+    let target = match connections::for_agent(&state.broker, req.connection.as_deref()).await {
+        Ok(t) => t,
         Err(e) => {
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
     };
+    // An SSH host runs with the user's identity: their consent first (asked
+    // once, or remembered as "always"), then every ssh prompt goes to them
+    // through the askpass bridge, never to the agent.
+    let mut ssh_agent = String::new();
+    if let AgentTarget::Ssh(dest) = &target {
+        // Before anything is asked: with no askpass helper this cannot run, and
+        // consent (or an "always") given for it would be given for nothing.
+        if crate::backend::remote::askpass::program().is_none() {
+            let e = "this AgentMux has no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
+        ssh_agent = match connections::verified_agent(&state, &req.agent_block_id, req.auth.as_ref()) {
+            Ok(a) => a,
+            Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
+        };
+        let connection = crate::backend::remote::ConnTarget::Ssh(dest.clone()).name();
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, &req.cmd).await {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
+        }
+    }
+    let wsl_distro = match &target {
+        AgentTarget::Wsl(d) => Some(d.clone()),
+        _ => None,
+    };
+    let remote = !matches!(target, AgentTarget::Local);
 
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
@@ -45,9 +66,9 @@ pub(super) async fn handle_shell_create(
     // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
     // (typically the portable runtime/ dir) instead of the project dir.
     //
-    // In WSL the cwd is a path inside the distro, given as is, and the agent's
-    // own (Windows) directory is no fallback for it: the distro's home is.
-    let effective_cwd = if wsl_distro.is_some() {
+    // In WSL or over SSH the cwd is a path on the other side, given as is, and
+    // the agent's own directory is no fallback for it: the remote home is.
+    let effective_cwd = if remote {
         req.cwd.clone()
     } else {
         req.cwd.clone().or_else(|| {
@@ -62,7 +83,7 @@ pub(super) async fn handle_shell_create(
     // inside a bash shell and emit MSYS paths like `/c/Users/asafe/project`;
     // passing those straight to `Command::current_dir` fails with os error 267
     // (ERROR_DIRECTORY). This converts them to native form and expands `~`.
-    let effective_cwd = if wsl_distro.is_some() {
+    let effective_cwd = if remote {
         effective_cwd
     } else {
         effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c))
@@ -98,22 +119,42 @@ pub(super) async fn handle_shell_create(
     crate::backend::account_login_guard::strip_account_login(&mut effective_env);
     // WSL passes on only what WSLENV names: the caller's own variables and the
     // gh guard, never the rest of the agent's env.
-    let wsl_args = wsl_distro.as_ref().map(|distro| {
-        effective_env.insert(
-            "WSLENV".to_string(),
-            crate::backend::remote::wsl::wslenv_with(
-                &std::env::var("WSLENV").unwrap_or_default(),
-                caller_keys.iter().map(String::as_str),
-            ),
-        );
-        crate::backend::remote::wsl::launch(
-            distro,
-            &req.cmd,
-            &[],
-            effective_cwd.as_deref().unwrap_or_default(),
-        )
-        .args
-    });
+    let cwd_there = effective_cwd.as_deref().unwrap_or_default();
+    let mut askpass_secret = None;
+    let launch = match &target {
+        AgentTarget::Local => None,
+        AgentTarget::Wsl(distro) => {
+            effective_env.insert(
+                "WSLENV".to_string(),
+                crate::backend::remote::wsl::wslenv_with(
+                    &std::env::var("WSLENV").unwrap_or_default(),
+                    caller_keys.iter().map(String::as_str),
+                ),
+            );
+            let args = crate::backend::remote::wsl::launch(distro, &req.cmd, &[], cwd_there).args;
+            Some(("wsl.exe".to_string(), args))
+        }
+        AgentTarget::Ssh(dest) => {
+            use crate::backend::remote::{askpass, ssh};
+            let (Some(ssh_path), Some(askpass_program)) = (ssh::binary(), askpass::program()) else {
+                let e = "this AgentMux has no ssh or no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+            };
+            // Named from AgentMux's own record of the agent and host, never
+            // from the request, whose env the agent controls.
+            let secret = askpass::grant(askpass::AskpassGrant {
+                agent_block_id: req.agent_block_id.clone(),
+                agent: ssh_agent.clone(),
+                connection: crate::backend::remote::ConnTarget::Ssh(dest.clone()).name(),
+            });
+            let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
+            effective_env.extend(askpass::ssh_env(&secret, &askpass_program, &local_url, &state.auth_key));
+            askpass_secret = Some(secret);
+            let control = ssh::control_dir(&crate::backend::base::get_mux_config_dir());
+            let args = ssh::launch_exec(dest, &req.cmd, cwd_there, control.as_deref());
+            Some((ssh_path.to_string_lossy().into_owned(), args))
+        }
+    };
 
     tracing::info!(
         block_id = %req.agent_block_id,
@@ -121,6 +162,7 @@ pub(super) async fn handle_shell_create(
         cmd = %req.cmd,
         cwd = ?effective_cwd,
         wsl = ?wsl_distro,
+        ssh = matches!(target, AgentTarget::Ssh(_)),
         "shell.create"
     );
 
@@ -152,8 +194,9 @@ pub(super) async fn handle_shell_create(
         block_id: req.agent_block_id,
         cmd: req.cmd,
         title,
-        cwd: if wsl_args.is_some() { None } else { effective_cwd },
-        wsl_args,
+        cwd: if launch.is_some() { None } else { effective_cwd },
+        launch,
+        askpass_secret,
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),
@@ -521,7 +564,7 @@ fn clear_shell_pointer_if(state: &AppState, agent_block_id: &str, id: &str) {
 /// 409 when the pane's running shell is on another connection than `wanted`.
 /// PtyShellStop releases the keyboard lock and leaves the shell running, so
 /// ending the shell is the way to switch.
-fn connection_conflict(
+pub(super) fn connection_conflict(
     shell_block: &crate::backend::obj::Block,
     wanted: &str,
 ) -> Option<axum::response::Response> {
@@ -531,6 +574,26 @@ fn connection_conflict(
         "local",
     );
     if crate::backend::remote::conn::same_connection(&running_on, wanted) {
+        // An SSH shell the user opened (not started for an agent) has an ssh
+        // that asks for passwords and host keys in its own terminal, which an
+        // agent reads and types into: it is never shared with an agent.
+        let ssh = matches!(
+            crate::backend::remote::ConnTarget::parse(&running_on),
+            Ok(crate::backend::remote::ConnTarget::Ssh(_))
+        );
+        let for_an_agent = !crate::backend::obj::meta_get_string(
+            &shell_block.meta,
+            crate::backend::remote::askpass::META_KEY_AGENT_BLOCK,
+            "",
+        )
+        .is_empty();
+        if ssh && !for_an_agent {
+            let error = format!(
+                "this pane's shell on '{running_on}' was opened by the user, and its ssh may ask for a \
+                 password in it, so an agent cannot share it. Use Shell instead, or ask the user to close it."
+            );
+            return Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response());
+        }
         return None;
     }
     let error = format!(
@@ -539,4 +602,32 @@ fn connection_conflict(
          or call PtyShell with connection '{running_on}' to use it"
     );
     Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response())
+}
+
+#[cfg(test)]
+mod shared_shell_tests {
+    use super::connection_conflict;
+
+    fn shell(conn: &str, for_agent: bool) -> crate::backend::obj::Block {
+        let mut b = crate::backend::obj::Block::default();
+        b.meta.insert("connection".into(), serde_json::json!(conn));
+        if for_agent {
+            b.meta.insert(
+                crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.into(),
+                serde_json::json!("agent-pane"),
+            );
+        }
+        b
+    }
+
+    /// The user's own SSH shell (its ssh prompts in its terminal) is never
+    /// handed to an agent; one started for an agent, or a local one, is.
+    #[test]
+    fn an_agent_never_shares_the_users_own_ssh_shell() {
+        assert!(connection_conflict(&shell("area54", false), "area54").is_some());
+        assert!(connection_conflict(&shell("area54", true), "area54").is_none());
+        assert!(connection_conflict(&shell("local", false), "local").is_none());
+        assert!(connection_conflict(&shell("wsl://Ubuntu", false), "wsl://Ubuntu").is_none());
+        assert!(connection_conflict(&shell("area54", true), "local").is_some(), "another connection");
+    }
 }

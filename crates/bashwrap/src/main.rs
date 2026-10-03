@@ -28,6 +28,10 @@
 //!   live status instead of a silent gap. See `precompact.rs` and
 //!   `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`.
 //!
+//! - askpass mode (no subcommand) — `ssh`'s `SSH_ASKPASS` when AgentMux
+//!   runs ssh for an agent: shows ssh's prompt to the user through srv and
+//!   prints the answer. See `askpass.rs`.
+//!
 //! - `sessionstart --part N` — registered as Claude Code's `SessionStart`
 //!   hook, once per part. Delivers part N of the agent's memory as the
 //!   hook's `additionalContext`. See `sessionstart.rs` and
@@ -41,6 +45,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod askpass;
 mod bash_wrap;
 mod hook;
 mod precompact;
@@ -78,6 +83,12 @@ enum Command {
 
 fn main() -> Result<()> {
     init_tracing();
+
+    // ssh's askpass for an agent's SSH command: the prompt is the only
+    // argument, so this is decided before clap sees it (askpass.rs).
+    if let Some(code) = askpass::run_if_asked() {
+        std::process::exit(code);
+    }
 
     let cli = Cli::parse();
     let rt = tokio::runtime::Runtime::new()?;

@@ -4669,6 +4669,73 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     blockcontroller::delete_controller(&first_shell_id);
 }
 
+/// The askpass route answers only a live per-ssh secret: a forged one is
+/// refused, and a real one with no window to ask the user in is refused too,
+/// never answered on the user's behalf (remote::askpass).
+#[tokio::test]
+async fn askpass_answers_only_a_live_secret_and_only_through_the_user() {
+    use crate::backend::remote::askpass;
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let (status, _) = post_json(
+        &app,
+        "/api/v1/askpass",
+        serde_json::json!({ "secret": "amxa_forged", "prompt": "password: " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "an agent holding only the auth key cannot ask");
+
+    let secret = askpass::grant(askpass::AskpassGrant {
+        agent_block_id: "askpass-no-such-block".into(),
+        agent: "korp".into(),
+        connection: "area54".into(),
+    });
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/askpass",
+        serde_json::json!({ "secret": secret, "prompt": "password: " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json:?}");
+    assert!(json.get("answer").is_none());
+    askpass::revoke(&secret);
+}
+
+/// An agent's Shell on an SSH host runs only with the user's consent: with no
+/// window to ask in (as here), it is refused and nothing starts.
+#[tokio::test]
+async fn an_agents_ssh_shell_without_consent_never_starts() {
+    let state = test_state();
+    let app = build_router(state.clone());
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "ssh-consent-agent".to_string(),
+        ..Default::default()
+    };
+    agent_block.meta.insert(
+        "cmd:env".to_string(),
+        serde_json::json!({ "AGENTMUX_AGENT_ID": "korp" }),
+    );
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/shell/create",
+        serde_json::json!({
+            "agent_block_id": "ssh-consent-agent",
+            "cmd": "touch /tmp/should-not-run",
+            "connection": "test-consent-host",
+        }),
+    )
+    .await;
+    // 403 without consent; 400 on a machine with no ssh. Never started.
+    assert!(
+        status == StatusCode::FORBIDDEN || status == StatusCode::BAD_REQUEST,
+        "{status}: {json:?}"
+    );
+    assert!(json.get("shell_id").is_none(), "{json:?}");
+}
+
 /// An agent's PtyShell has the agent's plain-`gh` guard: `GH_CONFIG_DIR` in the
 /// shell is the agent's guard directory, as in its `Shell` and its own CLI, so
 /// `gh` typed into the shell cannot act as the user.

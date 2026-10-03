@@ -9,6 +9,8 @@
 //! typeahead, `conn-status.ts`). WSL terminals (P1) and SSH terminals (P2) build
 //! on it; nothing here spawns a remote shell yet.
 
+pub mod agent_access;
+pub mod askpass;
 pub mod conn;
 pub mod ssh;
 pub mod ssh_config;

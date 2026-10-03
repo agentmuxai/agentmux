@@ -25,7 +25,7 @@ pub(crate) const SHELL_TOOL: &str = r#"{
       "title":          { "type": "string",  "description": "Display label shown in the conversation row (defaults to cmd)" },
       "env":            { "type": "object",  "description": "Extra environment variables", "additionalProperties": { "type": "string" } },
       "capture_stdin":  { "type": "boolean", "description": "Pipe stdin so ShellInput() can write to it. Default false — avoids blocking programs that read stdin to EOF (e.g. `cat` with no args). Set true only when you intend to use ShellInput()." },
-      "connection":     { "type": "string",  "description": "Where it runs: \"local\" (default, this machine) or \"wsl://<distro>\" for a WSL distribution on this Windows machine. ConnList shows what is available. SSH hosts are not supported yet. In WSL, cmd runs under the distro's sh -c, cwd is a path inside the distro (default: its home), and only the env you pass (plus terminal variables) crosses into it." }
+      "connection":     { "type": "string",  "description": "Where it runs: \"local\" (default, this machine), \"wsl://<distro>\" for a WSL distribution on this Windows machine, or an SSH host (an ssh config alias, host, user@host or user@host:port). ConnList shows what is available. An SSH host runs as the user with their SSH keys, so the first use asks the user to allow it (an error says if they did not), and any ssh password or host-key prompt goes to the user, never to you. In WSL, cmd runs under the distro's sh -c, cwd is a path inside the distro (default: its home), and only the env you pass (plus terminal variables) crosses into it. Over SSH, cmd is run by the remote login shell, cwd is a remote path (~ is the remote home), and env does not cross." }
     },
     "required": ["cmd"]
   }
@@ -77,7 +77,7 @@ pub(crate) const PTY_SHELL_TOOL: &str = r#"{
       "cwd":  { "type": "string", "description": "Working directory (defaults to agent workdir)" },
       "rows": { "type": "integer", "description": "Initial terminal rows (default 25)" },
       "cols": { "type": "integer", "description": "Initial terminal columns (default 200)" },
-      "connection": { "type": "string", "description": "Where it runs: \"local\" (default, this machine) or \"wsl://<distro>\" for a WSL distribution on this Windows machine. ConnList shows what is available. SSH hosts are not supported yet. A WSL shell is the distro's login shell, and cwd is a path inside the distro. The pane has one shell: to switch connection while it runs, end it first with PtyShellInput(text: \"exit\\r\") (PtyShellStop only releases your keyboard lock and leaves it running)." }
+      "connection": { "type": "string", "description": "Where it runs: \"local\" (default, this machine), \"wsl://<distro>\" for a WSL distribution on this Windows machine, or an SSH host (an ssh config alias, host, user@host or user@host:port). ConnList shows what is available. An SSH host runs as the user with their SSH keys, so the first use asks the user to allow it (an error says if they did not), and any ssh password or host-key prompt goes to the user, never to you. A WSL or SSH shell is the login shell there, and cwd is a path on that side. The pane has one shell: to switch connection while it runs, end it first with PtyShellInput(text: \"exit\\r\") (PtyShellStop only releases your keyboard lock and leaves it running)." }
     }
   }
 }"#;
@@ -577,7 +577,7 @@ pub(crate) const LAYOUT_TOOL: &str = r#"{
 
 pub(crate) const CONN_LIST_TOOL: &str = r#"{
   "name": "ConnList",
-  "description": "List the connections there are: local (this machine), each installed WSL distribution (wsl://<name>), the user's ssh config hosts, and any other connection used this session, each with its status (connected, available, error with the reason) and agent_can_use: whether you can pass it as `connection` to Shell and PtyShell now. SSH hosts are listed for reference with agent_can_use false: a terminal pane can open them, an agent cannot yet. Takes no arguments.",
+  "description": "List the connections there are: local (this machine), each installed WSL distribution (wsl://<name>), the user's ssh config hosts, and any other connection used this session, each with its status (connected, available, error with the reason) and agent_can_use: whether you can pass it as `connection` to Shell and PtyShell. An SSH host asks the user to allow you the first time. Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}

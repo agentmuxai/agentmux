@@ -650,6 +650,19 @@ impl Controller for ShellController {
             }
             _ => None,
         };
+        // An agent's SSH PtyShell (`http_pty_shell.rs` marks it): a secret for
+        // its ssh's prompts, revoked when this shell's wait task ends.
+        let askpass_secret = ssh_plan.as_ref().and_then(|_| {
+            let agent_block = obj::meta_get_string(&block_meta, crate::backend::remote::askpass::META_KEY_AGENT_BLOCK, "");
+            (!agent_block.is_empty()).then(|| {
+                crate::backend::remote::askpass::grant(crate::backend::remote::askpass::AskpassGrant {
+                    agent_block_id: agent_block,
+                    agent: obj::meta_get_string(&block_meta, crate::backend::remote::askpass::META_KEY_AGENT, ""),
+                    connection: conn_name.clone(),
+                })
+            })
+        });
+        let askpass_guard = askpass_secret.clone().map(crate::backend::remote::askpass::Revoke);
         let mut cmd = if let Some(distro) = &wsl_distro {
             let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
             let plan = crate::backend::remote::wsl::launch(distro, &cmd_str, &cmd_args, &cwd);
@@ -683,6 +696,16 @@ impl Controller for ShellController {
             c.args(args.iter().map(String::as_str));
             c.env("TERM", "xterm-256color");
             c.env("COLORTERM", "truecolor");
+            // An agent's SSH shell: every ssh prompt goes to the user through
+            // the askpass bridge, never into this terminal, which the agent reads.
+            if let Some(secret) = &askpass_secret {
+                if let Some(program) = crate::backend::remote::askpass::program() {
+                    let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
+                    for (k, v) in crate::backend::remote::askpass::ssh_env(secret, &program, &local_url, &self.auth_key) {
+                        c.env(k, v);
+                    }
+                }
+            }
             c
         } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
@@ -1280,6 +1303,8 @@ impl Controller for ShellController {
         let ssh_wait = ssh_plan
             .as_ref()
             .map(|(_, dest)| (conn_name.clone(), dest.destination.clone()));
+        // Moved into the wait task: the secret lives exactly as long as the shell.
+        let askpass_guard_wait = askpass_guard;
         // For the agent-lease release below: clearing the `term:agentlockuntil`
         // meta copy (not just the in-memory registry) needs both, since that
         // is what the frontend's own gate reads.
@@ -1339,6 +1364,7 @@ impl Controller for ShellController {
             })
             .await
             .expect("PTY child wait task panicked");
+            drop(askpass_guard_wait);
             if let Some((conn, dest)) = &ssh_wait {
                 let error = raw_exit_code.and_then(|code| crate::backend::remote::ssh::exit_message(dest, code));
                 crate::backend::remote::status::pane_ended(broker_wait.as_deref(), conn, error.as_deref());
