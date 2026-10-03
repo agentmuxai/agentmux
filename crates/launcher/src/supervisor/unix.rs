@@ -64,7 +64,7 @@ async fn next_signal(s: &mut Option<tokio::signal::unix::Signal>) {
 ///     host-side client uses `tokio::net::UnixStream`. See
 ///     `ipc::server::run_ipc_server` (Unix arm) and
 ///     `crates/cef/src/launcher_ipc/mod.rs::connect_to_launcher` (Unix arm).
-///   * srv-side IPC is still skipped on Linux (srv is launched with an
+///   * srv-side IPC is still skipped on Unix (srv is launched with an
 ///     empty `srv_pipe_path`); follow-up PR will bring srv's Unix
 ///     socket online too.
 ///   * Cleanup is SIGTERM-then-SIGKILL (we own the reap) rather than

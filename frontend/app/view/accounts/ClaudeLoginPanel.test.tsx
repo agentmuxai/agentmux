@@ -3,7 +3,7 @@
 
 /**
  * Tests for ClaudeLoginPanel — specifically the staleAliasProvider
- * cleanup (reagent P0 on PR #2414): a successful login here always links
+ * cleanup (#2414): a successful login here always links
  * the CANONICAL "claude" provider (finalizeAccount's
  * ON CONFLICT(agent_id, provider) key), so opening this panel from a
  * legacy-aliased row ("claude-code") and succeeding must ALSO unlink the

@@ -83,8 +83,8 @@ pub(crate) enum SpawnPath {
 }
 
 /// This channel's object store, for deciding whether a spawned block has a
-/// row. Attached once at boot (`bootstrap/stores.rs`), beside the token index; the
-/// subprocess controller has no store handle of its own.
+/// row. Attached once at boot (`bootstrap/stores.rs`), beside the token index, so
+/// `record_process_spawn`'s callers need not pass a store.
 static ROW_STORE: OnceLock<Arc<Store>> = OnceLock::new();
 
 pub(crate) fn attach_row_store(store: Arc<Store>) {

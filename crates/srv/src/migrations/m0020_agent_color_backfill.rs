@@ -57,9 +57,9 @@ impl Migration for M0020AgentColorBackfill {
         // sees cross-channel agents, not just this channel's local rows.
         // Best-effort, matching bootstrap/stores.rs's own handling: if the
         // shared dir can't be resolved or opened, proceed local-only rather
-        // than failing the whole migration — a later channel boot (which DOES
-        // wire the registry before any agent.open) still backfills any
-        // agent this run couldn't see.
+        // than failing the whole migration — `agent.open`'s assign-if-missing
+        // write-through (app_api/agent_open.rs) still colors any agent this
+        // run couldn't see when it is first opened.
         if let Some(def_dir) = resolve_shared_definitions_dir() {
             match DefinitionStore::open(def_dir) {
                 Ok(def_store) => mstore.set_def_registry(Arc::new(def_store)),

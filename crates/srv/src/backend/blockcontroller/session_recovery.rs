@@ -13,14 +13,14 @@
 //!      `--resume <session_id>` on the next input, so the recovery UX is
 //!      simply "click resume, type your next message, get picked up mid-flight".
 //!
-//! The mechanism is a single boolean meta flag: `session:active_pid`. It's
+//! The mechanism is a single meta key: `session:active_pid` (the PID). It's
 //! set on subprocess spawn, cleared on clean exit (graceful or killed). If
 //! this flag is still set when the server boots, the process is definitely
 //! gone (old PID from a dead process), so we transfer it to
 //! `session:was_interrupted = true`.
 //!
 //! `session:was_interrupted` is a frontend-only signal — the backend doesn't
-//! consume it. The frontend `AgentControlBar` renders a banner when it's set,
+//! consume it. The frontend `AgentSessionNotices` renders a banner when it's set,
 //! and `service:update_object_meta` clears it when the user dismisses.
 //!
 //! A second, unrelated flag lives here for the same reason: `session:resume_failed`
@@ -72,7 +72,7 @@ pub fn mark_active_pid(mstore: &Arc<Store>, block_id: &str, pid: u32) {
 /// conversation found with session ID" line, right alongside the existing
 /// `core::persist_session_id(block_id, "", ...)` clear.
 ///
-/// Broadcasts `waveobj:update` on success (reagent P1 on the initial PR):
+/// Broadcasts `waveobj:update` on success:
 /// this fires while the user may be actively watching the pane that just
 /// lost its resume, so — unlike `mark_active_pid`/`scan_orphans`, both of
 /// which run before any frontend subscriber could be watching (spawn time /
@@ -108,7 +108,9 @@ pub fn mark_resume_failed(mstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>
 }
 
 /// Clear `session:resume_failed` — the counterpart to [`mark_resume_failed`],
-/// called when a resume attempt ultimately resolves as `Resumed`.
+/// called when a resume attempt ultimately resolves as `Resumed`, or when a
+/// fresh spawn carries AgentMux's record of the conversation forward
+/// (`persistent/resume_retry.rs`'s `carry_continuation`).
 ///
 /// [`mark_resume_failed`] fires from the stderr reader the instant the CLI
 /// says "No conversation found", which is *before*

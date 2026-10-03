@@ -272,14 +272,14 @@
 // Fills the chrome's .pane-progress-bar-slot (PaneChrome.scss) — no
 // zoom-compensation math needed here (unlike its previous home nested
 // inside .agent-view), since that slot lives in the chrome's tree,
-// outside .agent-view's per-pane `zoom` CSS property entirely, alongside
-// the tab strip and other unzoomed pane chrome. Colors via color-mix() so
-// every theme inherits without hardcoded hex; the stripe color itself is
-// --progress-bar-color (.pane-stack, PaneChrome.scss) rather than --accent-color directly, so the
-// bar matches the pane's own selection-ring color exactly — including
-// switching to the focused-ring color when the pane is focused — instead
-// of always reading as the same fixed accent blue regardless of pane
-// state (#3371).
+// outside the per-pane `zoom` CSS property (.agent-view-zoomed) entirely,
+// alongside the tab strip and other unzoomed pane chrome. Colors via
+// color-mix() so every theme inherits without hardcoded hex; the stripe
+// color itself is --progress-bar-color (.pane-stack, PaneChrome.scss)
+// rather than --accent-color directly, so the bar matches the pane's own
+// selection-ring color exactly — including switching to the focused-ring
+// color when the pane is focused — instead of always reading as the same
+// fixed accent blue regardless of pane state (#3371).
 //
 // Traces the full pane perimeter, not just the top edge. This element
 // itself is the static "picture frame": `padding` sets the ring's

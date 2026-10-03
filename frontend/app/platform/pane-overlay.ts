@@ -12,6 +12,8 @@
 // pane renders normally outside the overlay region; inside it, the HWND
 // is transparent so the DOM overlay painted at the same screen position
 // shows through. Empty overlay set → clip cleared → full pane visibility.
+// That is the Windows path; on macOS/Linux there is no region clip, so the
+// host hides a whole pane while any overlay intersects it (see flushClip).
 
 import { getApi } from "@/app/store/app-api";
 import { anyPaneIntersects, paneCount } from "@/app/platform/pane-rect-registry";
@@ -148,7 +150,7 @@ async function flushClip(): Promise<void> {
     // covering the overlay where the hole is too small (the "offset menus /
     // black spots / hidden" airspace bug — see
     // docs/analysis/ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md).
-    // Mirror browser-view.tsx::paneRect's `Math.round(v * dpr)` convention
+    // Mirror use-pane-rect-sync.ts::paneRect's `Math.round(v * dpr)` convention
     // EXACTLY so the hole and the pane HWND share rounding and never leave a
     // 1px seam. The intersection gate above stays in CSS px because the
     // pane-rect registry it tests against is CSS px.
@@ -171,7 +173,7 @@ async function flushClip(): Promise<void> {
     // getBoundingClientRect space) so pane views can react locally. On
     // macOS/Linux the host responds to an intersecting clip by hiding the
     // WHOLE pane NSWindow (no SetWindowRgn equivalent), which exposes the
-    // bare placeholder; browser-view.tsx listens for this event to show a
+    // bare placeholder; use-freeze-frame.ts listens for this event to show a
     // freeze-frame of the pane instead of a blank surface. Shares the
     // dedup gates above, so it fires exactly when the host's clip state
     // actually changes.

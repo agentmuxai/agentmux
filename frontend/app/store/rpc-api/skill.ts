@@ -3,12 +3,12 @@
 
 // v1 composable model — standalone Skill primitive
 // (crates/srv/src/server/app_api/skill.rs). Agent-scoped: every command is
-// `check_s1`-gated (ctx.agent_id must equal the request's agent_id), so
-// these only work from an authenticated agent connection. Distinct from the
-// legacy agent-scoped AgentSkill (`agent_skill_*` / `db_agent_skills`)
-// — this is the v1 standalone primitive
+// `check_s1`-gated (ctx.agent_id must name the same agent as the request's
+// agent_id), so these only work from an authenticated agent connection.
+// Distinct from the legacy agent-scoped AgentSkill (`agent_skill_*` /
+// `db_agent_skills`) — this is the v1 standalone primitive
 // (`db_skills`). The skill.catalog.* commands are the window-scoped
-// counterpart (no agent_id, global rows only) — that's what the Armory's
+// counterpart (no `check_s1`, global rows only) — that's what the Armory's
 // Skills tab uses.
 
 import { RpcClient } from "../rpc-client";

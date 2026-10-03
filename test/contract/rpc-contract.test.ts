@@ -8,7 +8,8 @@
  * declares command bindings in `frontend/app/store/rpc-api/` (each
  * method wraps exactly one `client.rpcCall("name", …)`), and the
  * backend registers handlers in `agentmux-srv` via
- * `engine.register_handler(NAME, …)` where NAME is either a string
+ * `engine.register_handler(NAME, …)` or `engine.register_typed(NAME, …)`
+ * where NAME is either a string
  * literal or a `pub const … : &str = "name"`. The Go-era generator that
  * used to keep the two sides in sync (`cmd/generate/main-generatets.go`)
  * was removed with the Go backend and never replaced — so nothing but
@@ -20,18 +21,19 @@
  *
  *   • liveUnregistered — commands the FE actually CALLS (`RpcApi.X(…)`
  *     or a direct `rpcCall("name")`) that the backend never registers.
- *     These are latent "not-found" calls (the engine logs-once and the
- *     FE ignores them — see `rpc-client.ts` `notFoundLogMap`). Mostly
- *     Wave-inherited telemetry / conn / wsl surface never reimplemented
- *     in Rust. Fix by implementing the handler or deleting the dead FE
- *     call — never add a new entry here.
+ *     These are latent failing calls (the engine answers each with an
+ *     `unknown command: …` error — see `rpc/engine.rs`). Mostly
+ *     Wave-inherited telemetry / file / workspace surface never
+ *     reimplemented in Rust. Fix by implementing the handler or
+ *     deleting the dead FE call — never add a new entry here.
  *   • declaredUnregistered — `rpc-api/` methods with no backend
  *     handler (dead Wave-inherited binding surface; see A12). Shrinks as
  *     dead methods are deleted.
  *   • registeredUndeclared — backend handlers with no FE binding:
- *     server-driven `agent.*` verbs, `pane.open` (called via a direct
- *     `rpcCall`, not an `RpcApi` method), and the RPC engine's test
- *     stubs (`echo`/`failme`/`slow`/`checkctx`).
+ *     App API verbs (`agent.*`, `bundle.*`, `identity.*`, `memory.*`),
+ *     `pane.open`/`pane.moveTab` (called via a direct `rpcCall`, not an
+ *     `RpcApi` method), and the RPC engine's `#[cfg(test)]` stubs
+ *     (`echo`/`failme`/`slow`/`checkctx` and the typed-registry ones).
  *
  * A NEW drift — a fresh `rpc-api/` method without a handler, a new
  * live call to an unhandled command, or a removed handler still bound
@@ -167,7 +169,7 @@ function deriveContract(root: string): Contract {
     }
     // Every `(client: RpcClient …)` binding must resolve to a command —
     // a non-empty list means the extractor went blind to part of the
-    // surface (exactly the regression Codex flagged on the first draft).
+    // surface.
     expect(skippedMethods, `unresolved rpc-api bindings: ${skippedMethods.join(", ")}`).toEqual([]);
     const declared = new Set<string>(methodToCmd.values());
 

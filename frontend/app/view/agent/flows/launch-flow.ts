@@ -280,7 +280,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
         },
     });
 
-    // Phase 2: Auth Check → auto-login if not authenticated
+    // Phase 2: Auth Check → if not authenticated, notify and stop (the user starts login)
     setPhase({ kind: "checking-auth" });
     log("auth", `checking ${provider.cliCommand} authentication...`);
     let needsLogin = false;

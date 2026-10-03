@@ -43,14 +43,13 @@
 // the snapshot to be fed through the same pipe, which is not the
 // design.
 //
-// **Force-push protocol.** When a renderer asks the source to
-// force-push (e.g. on detected gap), the source replies with a
-// snapshot followed by live events. Today `droppedCount > 0` is
-// observed but no automatic force-push is issued — the renderer
-// continues operating with potentially-stale state until manual
-// resync. Closing this is a future PR; for now, the spec contract
-// is: *gap detection is logged; recovery is operator-driven via
-// `--diag srv` followed by an explicit `Resync` command.*
+// **Force-push protocol (not built yet).** The intended design: a
+// renderer that detects a gap asks the source to force-push a
+// snapshot followed by live events. No such request exists today —
+// `droppedCount > 0` is observed but nothing is issued, and the
+// renderer continues operating with potentially-stale state until a
+// page reload. *Gap detection is logged; `agentmux --diag srv` shows
+// the srv reducer's canonical state for diagnosis.*
 
 import { batch } from "solid-js";
 
@@ -223,8 +222,9 @@ export class PerSourceTracker<E extends VersionedEvent = VersionedEvent> {
             this.lastVersion = 0;
             this.droppedCount = 0;
             // Discard any in-flight saga buffer — the saga it was
-            // tracking is part of the dead source's history; the
-            // restart will re-emit fresh state via Snapshot+Resync.
+            // tracking is part of the dead source's history. Nothing
+            // replays it: there is no snapshot/resync request yet (see
+            // the resync note at the top of this file).
             if (this.sagaBuffer) {
                 console.warn(
                     `[${this.source}-events] dropping stale saga buffer for saga ${this.sagaBuffer.saga_id} during restart`,

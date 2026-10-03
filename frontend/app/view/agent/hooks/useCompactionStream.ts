@@ -25,7 +25,7 @@
  * handled directly in `useAgentStream.ts`, which also clears the
  * `compacting` pane flag this hook sets.
  *
- * Codex P1 on PR #2378 (two rounds): this event is published with
+ * #2378: this event is published with
  * `persist: 0` (`mps_client.rs`) — never retained/replayed — because
  * there is no completion tombstone (`compact_boundary` arrives over
  * the separate NDJSON stream, not MPS), so a replayed "started" ping
@@ -89,7 +89,8 @@ export interface UseCompactionStreamOptions {
      * Reactive `state.compacting` for this pane — pushes the transcript
      * node whenever it transitions from `null` to set. See the module doc
      * comment for why this replaces inspecting individual dispatch return
-     * values. Threaded down from `useAgentStream.ts`'s own `compactingAtom`.
+     * values. Threaded down through `useAgentStream.ts`'s `compacting`
+     * option (agent-view.tsx passes `paneModel.state.compacting`).
      */
     compacting: Accessor<CompactionState | null>;
 }

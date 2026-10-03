@@ -4,11 +4,14 @@
 //! Grandfather the layer-3 `use_ambient_login` opt-in for pre-existing
 //! agents (spec §2.4 of SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md).
 //!
-//! The spawn gate (identity/resolver/inject.rs) now FAILS a spawn when an
+//! The spawn gate (identity/resolver/inject.rs) FAILS a spawn when an
 //! oauth-class provider the agent is supposed to have credentials for has
-//! no resolvable account — unless the agent carries an explicit
-//! `use_ambient_login = 1`. Existing agents that relied on the (previously
-//! silent) ambient fallback must not all break on upgrade:
+//! no resolvable account. When this migration was written, an explicit
+//! `use_ambient_login = 1` exempted the agent; that opt-out has since been
+//! retired (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7), so the
+//! flag set here is now only logged, never gates. At the time, existing
+//! agents that relied on the (previously silent) ambient fallback must not
+//! all break on upgrade:
 //!
 //! - agents with NO **oauth-class** `db_agent_identity_links` rows at
 //!   migration time were de-facto ambient users for their CLI login →

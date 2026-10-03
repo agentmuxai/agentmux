@@ -30,8 +30,9 @@ pub mod session_io;
 pub mod zone_naming;
 
 // Flat re-exports preserving the pre-split `agent_session::<item>` call sites
-// used elsewhere in the crate (shell.rs, persistent/, transcript_backfill.rs,
-// server RPC session.rs, instance.rs, app_api, main.rs, identity migrations).
+// used elsewhere in the crate (blockcontroller shell/ and persistent/,
+// transcript_backfill.rs, server agent_handlers/ and app_api/,
+// bootstrap/stores.rs, the migrations/ m000x steps).
 pub use archive::{archive_session, list_archives};
 pub use global_store::{
     agent_zone_for_block_meta, global_transcript_store, set_global_transcript_store,

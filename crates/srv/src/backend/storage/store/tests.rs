@@ -3400,7 +3400,7 @@
 
     #[test]
     fn continuation_explicit_session_id_clear_propagates_to_root() {
-        // Reagent P1 round 2 on PR #2755: `poison_resume`'s stale-resume
+        // #2755: `poison_resume`'s stale-resume
         // handling deliberately clears an EXISTING continuation's
         // session_id to "" (persist_session_id(block_id, "", ...) when a
         // --resume is confirmed dead — persistent/spawn.rs). That's a
