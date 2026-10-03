@@ -84,7 +84,12 @@ import { createSignal, createComputed, createEffect, on, onCleanup, Show, untrac
 import { Portal } from "solid-js/web";
 import { findScrollContainerRect } from "./hover-anchor";
 import { BOTTOM_MARGIN_PX, computePeekHorizontal, computePeekVertical } from "./peek-placement";
-import { beginPeekBridge, endPeekBridge } from "./peek-bridge";
+import {
+    beginPeekBridge,
+    clearPeekPanelOpenAfterLeave,
+    endPeekBridge,
+    markPeekPanelOpenAfterLeave,
+} from "./peek-bridge";
 
 interface PeekOverlayProps {
     /** Whether the overlay should be mounted right now. */
@@ -307,6 +312,29 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         ),
     );
     onCleanup(clearBridgeTimer);
+
+    // The panel is on screen although its row is no longer hovered (lingering, or
+    // the pointer on it). The caller's `isPeeking()` is false then, so tell it,
+    // through peek-bridge.ts, that the content must stay: callers gate content on
+    // `useNodePeek().panelVisible()`. The row is remembered so the same one is
+    // cleared even if the caller's row element changes meanwhile.
+    let markedRow: HTMLElement | undefined;
+    createComputed(() => {
+        const openAfterLeave = open() && !props.show;
+        untrack(() => {
+            if (openAfterLeave) {
+                markedRow = props.rowEl();
+                markPeekPanelOpenAfterLeave(markedRow);
+            } else if (markedRow) {
+                clearPeekPanelOpenAfterLeave(markedRow);
+                markedRow = undefined;
+            }
+        });
+    });
+    onCleanup(() => {
+        clearPeekPanelOpenAfterLeave(markedRow);
+        markedRow = undefined;
+    });
 
     let floatingEl: HTMLElement | undefined;
     let cleanupAutoUpdate: (() => void) | null = null;

@@ -132,14 +132,15 @@ export const MarkdownBlock = (props: MarkdownBlockProps): JSX.Element => {
     //
     // reagent P2 on PR #2392 (3rd round): every MOUNTED block used to call
     // peekTick() regardless of hover state — a memo only subscribes to what
-    // it actually reads during a given run, so gating on isPeeking() BEFORE
-    // reading peekTick() (not after) means only a genuinely-hovered block
-    // subscribes to the shared 1s ticker. Still applies now that every
+    // it actually reads during a given run, so gating on peekPanelVisible()
+    // BEFORE reading peekTick() (not after) means only the block whose panel
+    // is showing subscribes to the shared 1s ticker (panelVisible, not
+    // isPeeking: the panel can stay open after the row is left). Still applies now that every
     // markdown block (not just thinking ones) participates.
     const peekTick = useTick(1000);
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
     const peekTimeText = createMemo(() => {
-        if (!isPeeking()) return null;
+        if (!peekPanelVisible()) return null;
         peekTick();
         const ts = props.node.timestamp;
         if (ts == null) return null;
