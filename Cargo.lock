@@ -161,6 +161,7 @@ name = "agentmux-remote"
 version = "0.59.7"
 dependencies = [
  "libc",
+ "tempfile",
 ]
 
 [[package]]
