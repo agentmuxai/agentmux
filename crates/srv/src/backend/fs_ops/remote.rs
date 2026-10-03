@@ -306,6 +306,56 @@ pub async fn delete(r: Remote<'_>, paths: &[String]) -> Vec<FsOpResult> {
     out
 }
 
+/// The editor's largest file, as for a local one.
+pub const EDITOR_MAX: u64 = 10_000_000;
+
+/// The editor reading a file on a host: its bytes (at most [`EDITOR_MAX`]),
+/// and whether nobody may write it.
+pub async fn read_file(r: Remote<'_>, path: &str) -> Result<(Vec<u8>, bool), String> {
+    let f = open(r).await?;
+    let home = home_of(&f);
+    let target = resolve(&home, path);
+    let entry = f.stat(&target).await.map_err(|e| e.message)?;
+    if entry.kind == Kind::Dir {
+        return Err(format!("{target} is a folder"));
+    }
+    if entry.size > EDITOR_MAX {
+        return Err("File too large (>10MB)".to_string());
+    }
+    let bytes = f.read(&target, EDITOR_MAX).await.map_err(|e| e.message)?;
+    let read_only = entry.mode != 0 && entry.mode & 0o222 == 0;
+    Ok((bytes, read_only))
+}
+
+/// Whether the editor may write `path` on a host: as on this computer, only
+/// inside the user's home there, and never in a system folder.
+pub fn editor_may_write(home: &str, path: &str) -> bool {
+    home != "/"
+        && path.starts_with(&format!("{}/", home.trim_end_matches('/')))
+        && !protected(home, path)
+}
+
+/// The editor saving a file on a host, atomically there.
+pub async fn write_file(r: Remote<'_>, path: &str, bytes: Vec<u8>) -> Result<(), String> {
+    let f = open(r).await?;
+    let home = home_of(&f);
+    let target = resolve(&home, path);
+    if !editor_may_write(&home, &target) {
+        return Err(format!(
+            "writeeditorfile: {target} on {} is outside your home folder there",
+            r.connection
+        ));
+    }
+    let size = bytes.len();
+    let result = f
+        .write(&target, bytes)
+        .await
+        .map_err(|e| format!("writeeditorfile: {}", e.message));
+    tracing::info!(connection = %r.connection, path = %target, bytes = size,
+        outcome = if result.is_ok() { "ok" } else { "error" }, "remote editor file saved");
+    result
+}
+
 /// What `fs.trash` (and `fs.restore`) say for a remote path: there is no
 /// Trash there.
 pub fn no_trash(connection: &str) -> String {
@@ -366,6 +416,16 @@ mod tests {
         assert!(protected("/", "/etc"));
         assert!(protected("/", "/"));
         assert!(!protected("/", "/srv/data"));
+    }
+
+    #[test]
+    fn the_editor_writes_only_inside_home_on_a_host() {
+        assert!(editor_may_write("/home/u", "/home/u/src/main.rs"));
+        assert!(editor_may_write("/var/home/u", "/var/home/u/a"));
+        assert!(!editor_may_write("/home/u", "/home/u"));
+        assert!(!editor_may_write("/home/u", "/etc/hosts"));
+        assert!(!editor_may_write("/home/u", "/home/other/a"));
+        assert!(!editor_may_write("/", "/srv/a"));
     }
 
     #[test]
@@ -448,6 +508,16 @@ mod tests {
         );
         assert!(!home.path().join("proj").exists());
         assert!(home.path().exists());
+
+        // The editor: saves inside home and reads it back, never outside it.
+        write_file(r, "~/doc.txt", b"hello".to_vec()).await.unwrap();
+        let (bytes, read_only) = read_file(r, "~/doc.txt").await.unwrap();
+        assert_eq!((bytes, read_only), (b"hello".to_vec(), false));
+        assert!(write_file(r, "/etc/x", b"x".to_vec())
+            .await
+            .unwrap_err()
+            .contains("outside your home"));
+        assert!(read_file(r, "~").await.unwrap_err().contains("folder"));
     }
 
     #[test]

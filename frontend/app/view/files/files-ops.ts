@@ -22,6 +22,8 @@ import { baseName, crumbsOf } from "./files-path";
 export interface FilesClipboard {
     kind: "copy" | "cut";
     paths: string[];
+    /** The SSH connection the paths are on; absent for this computer. */
+    connection?: string;
 }
 
 /** One clipboard for every Hangar pane in this window, like a file manager's. */

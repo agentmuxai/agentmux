@@ -4686,6 +4686,30 @@ async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() 
     blockcontroller::delete_controller(&first_shell_id);
 }
 
+/// pane.open over HTTP (the agents' path) on an SSH host: refused without
+/// the agent's signed identity, whether the host is the `connection` field or
+/// sits in a caller's `meta`; this computer and WSL open as before.
+#[tokio::test]
+async fn http_pane_open_on_an_ssh_host_needs_the_agents_identity() {
+    let state = test_state();
+    let app = build_router(state.clone());
+    for body in [
+        serde_json::json!({ "view": "editor", "file": "/home/u/a.txt", "connection": "user@pane-open-test" }),
+        serde_json::json!({ "view": "files", "meta": { "view": "files", "files:path": "~", "connection": "user@pane-open-test" } }),
+    ] {
+        let (status, json) = post_json(&app, "/api/v1/pane/open", body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{json:?}");
+        assert!(json["error"].as_str().unwrap_or("").contains("signed identity"), "{json:?}");
+    }
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/pane/open",
+        serde_json::json!({ "view": "media", "file": "/x.png", "connection": "local" }),
+    )
+    .await;
+    assert_ne!(status, StatusCode::FORBIDDEN, "{json:?}");
+}
+
 /// The askpass route answers only a live per-ssh secret: a forged one is
 /// refused, and a real one with no window to ask the user in is refused too,
 /// never answered on the user's behalf (remote::askpass).

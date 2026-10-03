@@ -216,7 +216,7 @@ pub(super) async fn open_pane_floating(
 }
 
 /// Build the metadata map for a pane.open request, validating required args.
-pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
+pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
     let mut meta = MetaMapType::new();
 
     match cmd.view.as_str() {
@@ -291,6 +291,19 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         meta.insert("frame:title".to_string(), json!(title));
     }
 
+    // The connection the pane works on, for the views that have one; media
+    // reads this computer's files only.
+    if let Some(conn) = cmd.connection.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != "local") {
+        match cmd.view.as_str() {
+            "editor" | "term" | "files" => {
+                meta.insert("connection".to_string(), json!(conn));
+            }
+            "media" if crate::backend::fs_ops::remote::ssh_connection(Some(conn)).is_some() => {
+                return Err(format!("INVALID_ARG: media files on {conn} can't be shown yet"));
+            }
+            _ => {}
+        }
+    }
     Ok(meta)
 }
 
@@ -371,6 +384,7 @@ pub(super) async fn maybe_reuse_editor_pane(
     state: &AppState,
     caller_block_id: &str,
     file: &str,
+    connection: &str,
 ) -> Result<Option<PaneOpenResult>, String> {
     let mstore = &state.mstore;
     let tab_id = match super::resolve_tab_id_for_block(mstore, caller_block_id) {
@@ -378,7 +392,9 @@ pub(super) async fn maybe_reuse_editor_pane(
         Err(_) => return Ok(None), // caller's own block isn't in any known tab — fall through
     };
 
-    let existing = match super::find_editor_block(mstore, &tab_id)? {
+    // Only an editor on the file's own connection: one on a host reads and
+    // saves there, so a local file pushed into it would be read there.
+    let existing = match super::find_editor_block(mstore, &tab_id, connection)? {
         Some(block) => block,
         None => return Ok(None),
     };
@@ -1035,7 +1051,8 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
         if let (Some(caller_block_id), Some(file)) =
             (cmd.split_reference_block_id.as_deref(), cmd.file.as_deref())
         {
-            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file).await? {
+            let connection = cmd.connection.as_deref().unwrap_or("");
+            if let Some(result) = pane::maybe_reuse_editor_pane(state, caller_block_id, file, connection).await? {
                 return Ok(result);
             }
         }

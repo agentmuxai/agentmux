@@ -3,4 +3,13 @@
 /**
  * Request for `readeditorfile`.
  */
-export type CommandReadEditorFileData = { path: string, };
+export type CommandReadEditorFileData = { path: string, 
+/**
+ * An SSH connection the file is on (`fs_ops::remote`); absent, local or
+ * WSL: this machine, as before.
+ */
+connection?: string, 
+/**
+ * The pane asking, whose window shows any ssh prompt for `connection`.
+ */
+block_id?: string, };

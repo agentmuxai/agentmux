@@ -733,6 +733,15 @@ pub struct CommandPaneOpenData {
     /// SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stack_onto_block_id: Option<String>,
+    /// `editor`, `term` or `files`: the connection the pane works on (block
+    /// meta `connection`): an SSH host, `wsl://<distro>`, or absent for this
+    /// computer (remote terminals spec §6.3). Over HTTP (the agent path) an
+    /// SSH connection needs the agent's signed `auth` and the user's consent
+    /// for that host, as `Shell` does.
+    pub connection: Option<String>,
+    /// The calling agent's signed identity (`UiAutomationAuth`), for an SSH
+    /// `connection` over HTTP.
+    pub auth: Option<agentmux_common::api_types::UiAutomationAuth>,
     /// `Some(true)`, `view: "editor"` only: if the caller (identified by
     /// `split_reference_block_id`) already has an Editor pane open in its
     /// own tab, push `file` into that pane as a new tab instead of creating
@@ -988,6 +997,8 @@ mod app_api_manifest_contract_tests {
             stack_onto_block_id: None,
             reuse_editor_pane: None,
             select: None,
+            connection: None,
+            auth: None,
         };
         let value = serde_json::to_value(&instance).expect("CommandPaneOpenData must serialize");
         let struct_fields: HashSet<String> = value
