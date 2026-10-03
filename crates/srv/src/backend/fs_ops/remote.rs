@@ -63,6 +63,13 @@ pub fn ssh_connection(connection: Option<&str>) -> Option<&str> {
     .then_some(c)
 }
 
+/// The host's home as a tidy absolute path: the helper sends it as `$HOME`
+/// says (a trailing `/`, or `/` when unset), and every comparison with it must
+/// see one spelling.
+fn home_of(f: &RemoteFiles) -> String {
+    resolve("/", &f.home)
+}
+
 async fn open(r: Remote<'_>) -> Result<std::sync::Arc<RemoteFiles>, String> {
     let ask = r.block_id.filter(|b| !b.is_empty()).map(|block_id| AskIn {
         block_id,
@@ -124,7 +131,10 @@ fn join(dir: &str, name: &str) -> String {
 /// inside home is the user's, even where home is under a system folder
 /// (`/var/home/<user>` on Fedora Silverblue, a home under `/opt`).
 pub fn protected(home: &str, path: &str) -> bool {
-    if path != home && path.starts_with(&format!("{}/", home.trim_end_matches('/'))) {
+    // (Not when home is `/`, a host with no $HOME: everything would be
+    // "inside" it, system folders included.)
+    if home != "/" && path != home && path.starts_with(&format!("{}/", home.trim_end_matches('/')))
+    {
         return false;
     }
     path == "/"
@@ -169,7 +179,8 @@ fn list_error(e: &RemoteError) -> FsError {
 /// underneath), in its canonical form.
 pub async fn list(r: Remote<'_>, path: &str) -> Result<FsListResult, String> {
     let f = open(r).await?;
-    let dir = resolve(&f.home, path);
+    let home = home_of(&f);
+    let dir = resolve(&home, path);
     Ok(match f.list(&dir).await {
         Ok(entries) => FsListResult {
             path: dir,
@@ -206,11 +217,12 @@ fn friendly(e: RemoteError, what: &str, name: &str) -> String {
 pub async fn rename(r: Remote<'_>, path: &str, new_name: &str) -> Result<String, String> {
     valid_name(new_name)?;
     let f = open(r).await?;
-    let src = resolve(&f.home, path);
+    let home = home_of(&f);
+    let src = resolve(&home, path);
     let dir = parent(&src).ok_or_else(|| refusal(r.connection, &src))?;
     let dest = join(dir, new_name);
     for p in [&src, &dest] {
-        if protected(&f.home, p) {
+        if protected(&home, p) {
             return Err(refusal(r.connection, p));
         }
     }
@@ -235,9 +247,10 @@ pub async fn create(
 ) -> Result<String, String> {
     valid_name(name)?;
     let f = open(r).await?;
-    let dir = resolve(&f.home, parent_dir);
+    let home = home_of(&f);
+    let dir = resolve(&home, parent_dir);
     let target = join(&dir, name);
-    if protected(&f.home, &target) {
+    if protected(&home, &target) {
         return Err(refusal(r.connection, &target));
     }
     match f.stat(&target).await {
@@ -271,10 +284,11 @@ pub async fn delete(r: Remote<'_>, paths: &[String]) -> Vec<FsOpResult> {
                 .collect()
         }
     };
+    let home = home_of(&f);
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
-        let target = resolve(&f.home, p);
-        let result = if protected(&f.home, &target) {
+        let target = resolve(&home, p);
+        let result = if protected(&home, &target) {
             Err(refusal(r.connection, &target))
         } else {
             f.delete(&target, true)
@@ -348,6 +362,10 @@ mod tests {
         assert!(protected(h, "/var/home/u"));
         assert!(protected(h, "/var/log"));
         assert!(protected(h, "/var/home/uv"));
+        // Home `/` (no $HOME on the host): system folders stay protected.
+        assert!(protected("/", "/etc"));
+        assert!(protected("/", "/"));
+        assert!(!protected("/", "/srv/data"));
     }
 
     #[test]
