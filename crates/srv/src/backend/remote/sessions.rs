@@ -3,7 +3,7 @@
 
 //! The durable sessions on an SSH host (spec §7.6): what the helper's daemon
 //! holds there, which pane (if any) each belongs to, and ending one. Behind
-//! the pane menu's "Sessions on <host>" and `muxsh conn sessions <host>`.
+//! the pane menu's "Sessions on <host>".
 
 use std::time::Duration;
 
@@ -19,8 +19,11 @@ use crate::backend::storage::store::Store;
 /// `ssh` exits 127 when the remote shell cannot find the command: no helper.
 const EXIT_COMMAND_NOT_FOUND: i32 = 127;
 
-/// How long listing or ending may take: a menu is waiting on it.
-const LIMIT: Duration = Duration::from_secs(20);
+/// How long listing or ending may take. ssh may first ask the user something
+/// (askpass: a password, a passphrase, a new host key), and its dialog waits
+/// up to two minutes (`connections::ask_user`), so this covers that plus the
+/// command itself.
+const LIMIT: Duration = Duration::from_secs(150);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HostSession {

@@ -70,8 +70,9 @@ export async function showHostSessions(conn: string, blockId: string, notice?: s
         sessions = await RpcApi.ConnSessionsCommand(
             TabRpcClient,
             { connname: conn, blockid: blockId },
-            // Over ssh, and ssh may ask the user something first.
-            { timeout: 120_000 }
+            // Over ssh, and ssh may ask the user something first (srv allows
+            // 150 s for both).
+            { timeout: 180_000 }
         );
     } catch (e) {
         sessions = String((e as Error)?.message ?? e);
