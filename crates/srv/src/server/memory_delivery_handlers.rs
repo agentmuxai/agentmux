@@ -551,15 +551,15 @@ fn fallback_frame(
     })
 }
 
-/// The card of the fallback delivery `delivery_id`, taken once, when its
-/// hidden message reaches srv. `None` for an unknown or expired id, or one
-/// composed for another block.
 /// Records that `block_id`'s CLI wrote the compaction boundary `uuid`. Called
 /// from its stdout reader, before the line reaches any pane.
 pub(crate) fn record_compaction_boundary(block_id: &str, uuid: &str) {
     state_lock().record_boundary(uuid, block_id);
 }
 
+/// The card of the fallback delivery `delivery_id`, taken once, when its
+/// hidden message reaches srv. `None` for an unknown or expired id, or one
+/// composed for another block.
 pub(crate) fn take_fallback_frame(block_id: &str, delivery_id: &str) -> Option<serde_json::Value> {
     let mut st = state_lock();
     st.prune(agentmux_common::time::now_ms());
