@@ -8,8 +8,8 @@
 //! before the CLI subprocess starts, this module:
 //!
 //! 1. Looks up the active instance for the spawning block.
-//! 2. Reads its `identity_id`. Empty / "blank" / not-found → noop
-//!    (the agent inherits ambient credentials).
+//! 2. Reads its `identity_id` (a legacy filter value; credentials come
+//!    from the links in step 3, not from this).
 //! 3. Reads the direct `db_agent_identity_links` rows for the instance's
 //!    definition.
 //! 4. For each link: looks up the Account row, resolves its
@@ -17,12 +17,11 @@
 //!    env-var matrix, and merges those env vars into the spawn
 //!    `env_vars` HashMap.
 //!
-//! Failure mode is **warn-don't-block**: missing accounts, env-var
-//! resolution errors, unknown providers — all logged and skipped.
-//! The agent CLI launches with whatever ambient credentials remain.
-//! This is intentional: identity injection is a convenience, not a
-//! security gate. The caller flags hard-required-creds workflows
-//! separately.
+//! Failure modes differ by provider class. An api-key-class failure
+//! (missing account, unresolvable secret, unknown provider) is logged and
+//! skipped. An oauth-class provider with no resolvable bound account
+//! blocks the spawn (`resolver::inject`'s `gate_oauth_failure`); there is
+//! no fallback to the user's global CLI login.
 //!
 //! Closes Phase 2 of issue #678 (the per-instance injection layer).
 //! Phase 1 (Account registry + UI) and the v7 schema reshape (Bundle

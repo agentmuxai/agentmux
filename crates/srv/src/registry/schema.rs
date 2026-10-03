@@ -38,7 +38,7 @@ pub struct NamedAgentRecordV1 {
     /// Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md, so this
     /// field is now vestigial (opaque pass-through only; credential
     /// resolution is `db_agent_identity_links`-only). None = unbound
-    /// (= ambient creds).
+    /// (no account).
     pub identity_id: Option<String>,
     /// FK to `db_bundles.id`. None = unbound (= vanilla CLI).
     pub memory_id: Option<String>,

@@ -15,7 +15,8 @@ template_id: string,
  */
 name: string, 
 /**
- * Identity bundle id to bind (empty string = ambient creds).
+ * Account id to bind (empty string = no account; an oauth-class agent
+ * then cannot launch until one is bound).
  * Stored on the launch-time `db_agent_instances` row by the
  * launch flow; the definition itself doesn't hold bindings
  * pre-Phase 3, so this is reserved for the frontend to thread

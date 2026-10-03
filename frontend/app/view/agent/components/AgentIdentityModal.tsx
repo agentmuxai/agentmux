@@ -25,8 +25,8 @@
  * rendering as fully interactive with help text promising a working
  * fallback that the backend had already stopped honoring, misleading users
  * into believing they'd configured something that did nothing. The
- * `use_ambient_login` DB column/field itself is untouched (still read and
- * logged, just never gates) — only this now-dead UI is removed.
+ * `use_ambient_login` DB column stays (the shared registry carries it for
+ * older builds) but nothing reads it any more.
  *
  * The "Model Vendor / Custom Endpoint" editor that used to live here was
  * also removed (issue #2594, 2026-08-16): `model_vendor_base_url` is a

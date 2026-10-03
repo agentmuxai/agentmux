@@ -50,7 +50,7 @@ const BLOCK_REGISTRY: Record<BlockKind, BlockKindMeta> = {
         color: "#3b82f6",
         defaultData: {
             // Phase 1.5: forge_agent_id was replaced by AgentRef (#835).
-            // Empty strings = blank singletons (ambient creds, vanilla CLI).
+            // Empty strings = no account, no memory (vanilla CLI).
             agent_ref: {
                 identityId: "",
                 memoryId: "",

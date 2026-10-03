@@ -225,9 +225,10 @@ export const AgentCreateFromTemplateModalPanel = (
     // time would silently freeze on whichever value (fallback or
     // resolved) happened to be current at that instant, the same race
     // #2596 fixed for AgentLaunchModal's account auto-pick. Bindings are
-    // stored on the db_agent_instances row at launch time; the empty
-    // string sentinel means "ambient creds / vanilla CLI" so an empty
-    // selection is OK.
+    // stored on the db_agent_instances row at launch time. An empty
+    // selection ("No auth") is allowed: the agent can be created before
+    // any account exists, and the launch gate asks for one before an
+    // oauth-class agent runs.
     onMount(() => {
         void (async () => {
             try {
@@ -426,7 +427,7 @@ export const AgentCreateFromTemplateModalPanel = (
                         disabled={submitting()}
                         data-testid="create-from-template-identity-select"
                     >
-                        <option value="">(ambient credentials)</option>
+                        <option value="">No auth</option>
                         <For each={accounts()}>
                             {(a) => (
                                 <option value={a.id}>{a.display_name?.trim() || a.name}</option>

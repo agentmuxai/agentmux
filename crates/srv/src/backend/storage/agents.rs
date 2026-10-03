@@ -127,16 +127,13 @@ pub struct AgentDefinition {
     /// empty for host agents. Schema v6.
     #[serde(default)]
     pub container_name: String,
-    /// Explicit per-agent opt-in to the CLI's global (ambient) login when no
-    /// oauth-class account resolves at spawn time. `0` (default) = spawn
-    /// FAILS when an oauth-class provider the agent is supposed to have
-    /// credentials for is missing/unresolvable ("fail by default"); `1` =
-    /// the spawn proceeds WITHOUT injecting a config dir so the CLI reads
-    /// the user's global login (e.g. `~/.claude`) — surfaced via the
-    /// `identity.spawn.ambient:` log line, never silent. Toggled from the
-    /// Agent setup modal's Accounts tab. Schema v12; the m0017 migration
-    /// grandfathers pre-existing linkless agents to `1`. Layer 3 of
-    /// SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md (§2.2-§2.4).
+    /// Inert. It was a per-agent opt-in to the CLI's global login when no
+    /// account resolved at spawn; the spawn gate no longer reads it (an
+    /// oauth-class agent with no bound account is always refused), no RPC
+    /// sets it and no UI shows it. The column and this field stay only so
+    /// the shared definition registry keeps the value older builds read
+    /// (m0017/m0018 grandfathered linkless agents to `1` there).
+    /// SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md R10.
     #[serde(default)]
     #[ts(type = "number")]
     pub use_ambient_login: i64,
@@ -154,8 +151,7 @@ pub struct AgentDefinition {
     /// Per-agent opt-in: when non-zero, a running Warden Supervisor watcher
     /// agent is permitted to auto-continue this agent's session on
     /// turn-end (subject to a server-side consecutive-nudge ceiling).
-    /// Default 0 = opt-in required, same fail-by-default posture as
-    /// `use_ambient_login`. Schema v17. Toggled from the Warden Supervisor
+    /// Default 0 = opt-in required. Schema v17. Toggled from the Warden Supervisor
     /// panel. See
     /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
     #[serde(default)]
@@ -312,8 +308,8 @@ pub struct AgentInstance {
     /// dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md.
     /// The launch modal now writes an account_id here instead; credential
     /// resolution and display names both go through
-    /// `db_agent_identity_links`/`db_accounts`. Empty string means
-    /// "ambient creds, no env-var injection."
+    /// `db_agent_identity_links`/`db_accounts`. Empty string means no
+    /// account was picked at launch.
     #[serde(default)]
     pub identity_id: String,
     /// FK to `db_bundles.id`. Empty string means "use the blank

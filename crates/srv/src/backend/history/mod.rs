@@ -503,7 +503,7 @@ impl HistoryService {
             }
         }
 
-        // An agent on ambient credentials has no link row at all — its
+        // An agent with no bound account has no link row at all — its
         // registry record's `identity_id` reads "default" while its
         // transcripts are written under a channel identity bundle nothing
         // points at — so the identity lookup above finds nothing for the
@@ -1267,7 +1267,7 @@ mod tests {
         store.agent_def_insert(&mut def).unwrap();
     }
 
-    /// The dominant real-world failure: an agent on ambient credentials has
+    /// The dominant real-world failure: an agent with no bound account has
     /// NO `db_agent_identity_links` row (its registry record's `identity_id`
     /// reads "default"), so identity-bundle resolution finds nothing — while
     /// its transcripts sit on disk, recording the directory it ran in. Before
