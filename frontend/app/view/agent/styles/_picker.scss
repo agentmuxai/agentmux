@@ -22,6 +22,10 @@
         // the pane ("maximize screen room"). Tunable in one place.
         // Spec: docs/specs/SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md
         --agent-tile-min: 240px;
+        // My Agents tiles are twice the width, with room for a 3-line summary
+        // (SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.1). The
+        // Templates grid keeps `--agent-tile-min`.
+        --agent-session-tile-min: 480px;
     }
 
     // Filter bar (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) — sits
