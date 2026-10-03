@@ -12,28 +12,22 @@ The sound correlation is real but indirect. Commit pressure drops when another a
 
 ## Evidence
 
-From `agentmux-host-v0.59.4.log.2026-10-03` (and the 10-02 file, plus a v0.59.7 instance):
+From the host's own focus and memory-pressure logging over 24 hours, on two running instances:
 
-| Instance | Pool refills, last 24 h | Followed by the user clicking back into AgentMux within 60 s (`WM_ACTIVATE state=2`) |
+| Instance | Pool refills, last 24 h | Followed by the user clicking back into AgentMux within 60 s |
 |---|---|---|
-| v0.59.4 | 76 | 9 (five within 6 s) |
-| v0.59.7 | 49 | 1 |
+| A | 76 | 9 (five within 6 s) |
+| B | 49 | 1 |
 
-Commit pressure changed level 151 times in the day on v0.59.4: 75 to warn, 12 to critical, 64 back to normal. Every return to normal was followed by the `[pane-pool] spawning` and `[pool] spawning` lines and by two `[focus-restore] WM_ACTIVATE root=<new pool window> no recorded child` lines. That log line is only written when a window is being activated (`activation_state != WA_INACTIVE`).
+On instance A, commit pressure changed level 151 times in the day: 75 to warn, 12 to critical, 64 back to normal. Every return to normal was followed by both pool spawns and by two activations of a newly created pool window. The focus-restore observer only records an activation when a window is actually becoming active (`activation_state != WA_INACTIVE`).
 
-One refill, 2026-10-03 19:31 UTC:
+The order of events in one refill:
 
-```
-19:31:23.334 mem_pressure  page file (commit) pressure changed      (to normal)
-19:31:23.335 pool:pane     [pane-pool] spawning pane pool window
-19:31:23.355 wndproc       [focus-restore] WM_ACTIVATE root=0x49115e (floating-pool-…) no recorded child
-19:31:23.755 wndproc       [focus-restore] installed WM_ACTIVATE observer on 0x2930b12 (window-pool-…)
-19:31:23.761 wndproc       [focus-restore] WM_ACTIVATE root=0x2930b12 no recorded child
-19:31:23.761 pane-wndproc  WM_KILLFOCUS hwnd=0x16c0ea2            (focus leaving the previous pool window)
-19:31:23.764 create-window window_create_top_level returned        (activation happened inside creation)
-19:31:23.768 wrr           callback event=0x3 hwnd=0x2930b12        (EVENT_SYSTEM_FOREGROUND: pool window is foreground)
-19:31:27.398 wndproc       [focus-restore] WM_ACTIVATE root=0x30c6c (main) state=2   (user clicks back, 4 s later)
-```
+1. Commit pressure returns to `Normal`; the pane pool and the window pool each spawn a window.
+2. The new pane-pool window is activated about 20 ms later.
+3. The new top-level pool window is activated **inside** `window_create_top_level`, before that call returns. Keyboard focus leaves the window that had it.
+4. Windows reports the pool window as the new foreground window (`EVENT_SYSTEM_FOREGROUND`).
+5. Four seconds later the main window is activated by a click (`WA_CLICKACTIVE`): the user clicking back in.
 
 `on_load_end` already declines to show pool windows (`client/navigation.rs`, "pool windows skip the show/focus block entirely"), but that does not help: the activation happens earlier, inside `window_create_top_level`, and for the pane pool inside its Win32 popup's browser creation.
 
