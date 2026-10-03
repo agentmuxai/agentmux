@@ -322,6 +322,36 @@ fn protection_ignores_case_and_verbatim_prefixes_on_windows() {
     assert!(protect.check(Path::new(r"\\?\C:\Users\Me\.AgentMux\Agents\korp\x.txt")).is_ok());
 }
 
+/// A WSL distro's files through `\\wsl.localhost` (`remote::wsl_fs`): its own
+/// system and home folders are protected, and the rest of it can be changed.
+/// Windows only: elsewhere such a path is an ordinary one (`wsl_fs::share_of`).
+#[cfg(windows)]
+#[test]
+fn a_wsl_distro_has_its_own_protected_folders() {
+    let protect = ProtectedPaths::for_test(&abs("/users/me"), &abs("/users/me/.agentmux"), &[], &[&abs("/windows")], &[]);
+    let ok = |p: &str| protect.check(Path::new(p)).is_ok();
+    assert!(!ok(r"\\wsl.localhost\Ubuntu\usr\bin\ls"), "a distro's system folder");
+    assert!(!ok(r"\\?\UNC\wsl.localhost\Ubuntu\etc"), "in the form canonicalize returns");
+    assert!(!ok(r"\\wsl.localhost\Ubuntu\mnt"), "where the drives are mounted");
+    assert!(!ok(r"\\wsl.localhost\Ubuntu\home\u"), "a distro user's home folder");
+    assert!(!ok(r"\\wsl.localhost\Ubuntu\home"));
+    assert!(ok(r"\\wsl.localhost\Ubuntu\home\u\proj\main.rs"));
+    assert!(ok(r"\\wsl$\Ubuntu\srv\app"));
+}
+
+/// A distro's `/mnt/c` is the C: drive: changing a file there changes the
+/// Windows file, so the Windows rules decide, not the distro's.
+#[cfg(windows)]
+#[test]
+fn a_wsl_drive_mount_gets_the_windows_rules() {
+    let protect = ProtectedPaths::for_test(&abs("/users/me"), &abs("/users/me/.agentmux"), &[], &[&abs("/windows")], &[]);
+    let ok = |p: &str| protect.check(Path::new(p)).is_ok();
+    assert!(!ok(r"\\wsl.localhost\Ubuntu\mnt\c\Windows\System32"));
+    assert!(!ok(r"\\wsl.localhost\Ubuntu\mnt\c\Users\me"), "the Windows home folder");
+    assert!(!ok(r"\\wsl.localhost\Ubuntu\mnt\c"), "a drive root");
+    assert!(ok(r"\\wsl.localhost\Ubuntu\mnt\c\Users\me\notes.txt"));
+}
+
 #[test]
 fn a_root_is_refused_before_anything_else() {
     let err = resolve_entry_path(&s(&abs("/"))).unwrap_err();

@@ -59,19 +59,26 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         blocking(move || fs_ops::list_page(&cmd)).await
     });
 
-    // fs.places → home, known folders and drives. Known folders are named,
-    // never read (spec §9.1.5).
+    // fs.places → home, known folders, drives and WSL distros. Known folders
+    // are named, never read (spec §9.1.5).
     engine.register_typed(
         "fs.places",
         // `Option<_>` -- see `FsPlacesReq`: both encodings of "no argument".
         |_req: Option<FsPlacesReq>, _ctx| async move {
-            blocking(|| {
+            let distros = crate::backend::remote::wsl::list_cached().await;
+            blocking(move || {
                 let (home, mut places) = fs_ops::home_and_known_places();
                 places.extend(super::editor_handlers::list_drives().into_iter().map(|d| FsPlace {
                     id: format!("drive:{}", d.path),
                     label: d.name,
                     path: d.path,
                     kind: FsPlaceKind::Drive,
+                }));
+                places.extend(distros.into_iter().map(|d| FsPlace {
+                    id: format!("wsl:{d}"),
+                    path: crate::backend::remote::wsl_fs::share_path(&d, "/"),
+                    label: d,
+                    kind: FsPlaceKind::Wsl,
                 }));
                 FsPlacesResult { home, sep: std::path::MAIN_SEPARATOR.to_string(), places }
             })

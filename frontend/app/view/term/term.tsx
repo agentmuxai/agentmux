@@ -447,11 +447,18 @@ export function buildTermPaneChromeModel(anchorBlockId: string, nodeModel: NodeM
         // type gets undefined and is unaffected).
         newTabMeta: (view: string | undefined) => {
             if (view !== "term") return undefined;
-            const cwd = activeBlockData()?.meta?.["cmd:cwd"] as string | undefined;
+            const meta = activeBlockData()?.meta;
+            const cwd = meta?.["cmd:cwd"] as string | undefined;
+            // And its connection: a WSL tab's cwd is a path inside the distro,
+            // which means nothing to a local shell.
+            const connection = meta?.connection as string | undefined;
             // The same key `build_pane_meta`'s own "term" branch writes from
             // a top-level `cwd` arg (pane.rs) — set directly here because
             // this path always supplies `meta`, so that branch never runs.
-            return cwd ? { "cmd:cwd": cwd } : undefined;
+            const out: Record<string, string> = {};
+            if (cwd) out["cmd:cwd"] = cwd;
+            if (connection && connection !== "local") out.connection = connection;
+            return Object.keys(out).length > 0 ? out : undefined;
         },
         rootClass: "term-pane-stack",
         contentClass: "term-pane-stack-content",

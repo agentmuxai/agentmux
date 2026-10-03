@@ -71,6 +71,35 @@ struct WatchEntry {
 struct Inner {
     watcher: Option<Box<dyn Watcher + Send>>,
     targets: HashMap<PathBuf, WatchEntry>,
+    /// Polls WSL share paths (see [`Inner::watcher_for`]); built on first use.
+    share_poller: Option<Box<dyn Watcher + Send>>,
+    /// Where the share poller's events go: the same stream as `watcher`'s.
+    raw_tx: mpsc::UnboundedSender<notify::Result<notify::Event>>,
+}
+
+/// How often a WSL share folder is polled for changes.
+const SHARE_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+impl Inner {
+    /// The watcher for `target`. A WSL distro's folder through
+    /// `\\wsl.localhost` (`remote::wsl_fs`) gets a polling watcher: Windows
+    /// delivers no change notifications for that share (checked on Windows 11:
+    /// none for a change made in the distro, and none for one made through the
+    /// share), so a native watch there would succeed and stay silent.
+    fn watcher_for(&mut self, target: &Path) -> Option<&mut Box<dyn Watcher + Send>> {
+        if crate::backend::remote::wsl_fs::share_of(target).is_none() {
+            return self.watcher.as_mut();
+        }
+        if self.share_poller.is_none() {
+            let tx = self.raw_tx.clone();
+            let config = notify::Config::default().with_poll_interval(SHARE_POLL_INTERVAL);
+            match notify::PollWatcher::new(move |res: notify::Result<notify::Event>| { let _ = tx.send(res); }, config) {
+                Ok(w) => self.share_poller = Some(Box::new(w)),
+                Err(e) => tracing::warn!(error = %e, "fs_watch: no polling watcher for WSL folders"),
+            }
+        }
+        self.share_poller.as_mut()
+    }
 }
 
 pub struct FsWatchPool {
@@ -91,12 +120,12 @@ impl FsWatchPool {
     /// at the top level. Live-update is additive everywhere it's used.
     pub fn new() -> Arc<Self> {
         let (raw_tx, mut raw_rx) = mpsc::unbounded_channel::<notify::Result<notify::Event>>();
-        let (watcher, backend) = construct_watcher(raw_tx);
+        let (watcher, backend) = construct_watcher(raw_tx.clone());
 
         let (broadcast_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
 
         let this = Arc::new(Self {
-            inner: Mutex::new(Inner { watcher, targets: HashMap::new() }),
+            inner: Mutex::new(Inner { watcher, targets: HashMap::new(), share_poller: None, raw_tx }),
             health: HealthState::default(),
             backend,
             next_id: AtomicU64::new(1),
@@ -202,7 +231,7 @@ impl FsWatchPool {
 
         if should_unwatch {
             let mut inner = self.inner.lock().unwrap();
-            if let Some(w) = inner.watcher.as_mut() {
+            if let Some(w) = inner.watcher_for(&sub.watch_target) {
                 let _ = w.unwatch(&sub.watch_target);
             }
             drop(inner);
@@ -270,7 +299,7 @@ impl FsWatchPool {
 
     fn try_watch(&self, target: &Path, mode: RecursiveMode) -> Result<(), String> {
         let mut inner = self.inner.lock().unwrap();
-        let Some(watcher) = inner.watcher.as_mut() else {
+        let Some(watcher) = inner.watcher_for(target) else {
             return Err("no fs watcher backend available".to_string());
         };
         watcher.watch(target, mode).map_err(|e| e.to_string())
@@ -384,7 +413,7 @@ impl FsWatchPool {
         let Some(mode) = inner.targets.get(&target).map(|e| e.mode) else {
             return;
         };
-        let Some(w) = inner.watcher.as_mut() else {
+        let Some(w) = inner.watcher_for(&target) else {
             return;
         };
         // Best-effort: a never-established watch has nothing to unwatch —
@@ -437,6 +466,64 @@ fn construct_watcher(
 mod tests {
     use super::*;
     use std::time::Duration as StdDuration;
+
+    /// A WSL share folder is polled, whatever the native backend is, and every
+    /// other path keeps the native watcher.
+    #[cfg(windows)]
+    #[test]
+    fn a_wsl_share_folder_gets_the_polling_watcher() {
+        let (raw_tx, _raw_rx) = mpsc::unbounded_channel();
+        let mut inner = Inner { watcher: None, targets: HashMap::new(), share_poller: None, raw_tx };
+        assert!(inner.watcher_for(Path::new(r"C:\Users\me\proj")).is_none(), "no native backend here");
+        assert!(inner.watcher_for(Path::new(r"\\?\UNC\wsl.localhost\Ubuntu\home\u")).is_some());
+        assert!(inner.share_poller.is_some(), "built on first use");
+        assert!(inner.watcher_for(Path::new(r"\\wsl$\Debian\srv")).is_some(), "and shared");
+    }
+
+    /// End to end on a Windows machine with WSL: a file written inside a
+    /// distro shows up as an event for its folder watched through the share.
+    /// Needs a distro, so it is not run on CI. Run manually with the distro to
+    /// use: `WSL_TEST_DISTRO=Ubuntu cargo test -p agentmux-srv --bin
+    /// agentmux-srv a_change_inside_a_distro_reaches_a_share_watch -- --ignored`
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore]
+    async fn a_change_inside_a_distro_reaches_a_share_watch() {
+        let distro = std::env::var("WSL_TEST_DISTRO").unwrap_or_else(|_| "Ubuntu".to_string());
+        let dir = crate::backend::remote::wsl_fs::share_path(&distro, "/tmp");
+        // What `canonicalize` really returns for a share path is still one: the
+        // editor's write rule and the protected folders read that form.
+        let canonical = Path::new(&dir).canonicalize().expect("the share path resolves");
+        assert_eq!(
+            crate::backend::remote::wsl_fs::split_share(&canonical.to_string_lossy()).map(|s| s.linux),
+            Some("/tmp".to_string()),
+            "{}",
+            canonical.display()
+        );
+        let pool = FsWatchPool::new();
+        let mut events = pool.events();
+        let _sub = pool.subscribe_dir(Path::new(&dir));
+        let name = format!("am-share-watch-{}", std::process::id());
+        let status = std::process::Command::new("wsl.exe")
+            .args(["-d", &distro, "--exec", "sh", "-c", &format!("echo x > /tmp/{name}")])
+            .status()
+            .expect("wsl.exe runs");
+        assert!(status.success());
+        let seen = tokio::time::timeout(StdDuration::from_secs(10), async {
+            loop {
+                if let Ok(ev) = events.recv().await {
+                    if ev.path.to_string_lossy().ends_with(&name) {
+                        return ev;
+                    }
+                }
+            }
+        })
+        .await;
+        let _ = std::process::Command::new("wsl.exe")
+            .args(["-d", &distro, "--exec", "rm", "-f", &format!("/tmp/{name}")])
+            .status();
+        assert!(seen.is_ok(), "no event for {name} in {dir} within 10s");
+    }
 
     #[tokio::test]
     async fn subscribe_unsubscribe_refcounting_does_not_panic() {
