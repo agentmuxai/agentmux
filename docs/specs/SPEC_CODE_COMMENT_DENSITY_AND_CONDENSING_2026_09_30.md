@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-30
 **Author:** Maricon (charlie)
-**Status:** active — Phase 0 (the gate, `--code-equal`, the `CONTRIBUTING.md` rules) is built in #4246, described in §9. Phase 1+ (condensing files) is not started.
+**Status:** active — Phase 0 (the gate, `--code-equal`, the `CONTRIBUTING.md` rules) is built in #4246, described in §9; rule C7 (dead file references) in #4251, §9.1. Phase 1+ (condensing files) is not started.
 **Baseline:** `main` @ `cee674b6f`. Every `path:line` below was read on that commit.
 **Related:** [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) §7 ("Keep the prose", revisited in §3 here), [`SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18`](SPEC_CLAUDE_MD_CONTENT_PORT_2026_09_18.md) (why this repo has no agent-instructions file).
 
@@ -656,4 +656,14 @@ Phase 0 (§7.2) is `scripts/check-comment-hygiene.mjs`, its tests (`scripts/chec
 x` differ from `return x`; a block comment spanning lines counts as a line break), on an added or deleted source file, and on a change in the per-file count of `SAFETY:`, `TODO`, `FIXME`, doctest fences and every comment the toolchain acts on: `eslint-…`, `@ts-…`, `<reference`, `@vite-ignore` and other bundler hints, `@vitest-…` docblocks, `prettier-ignore`, coverage-ignore, JSX pragmas, `#__PURE__` and legal comments. It prints every `#NNNN` and `SPEC_…` citation the comments dropped as a notice, and lists any other changed file (config, docs, scripts) as a warning: only `.ts`/`.tsx`/`.rs` are compared.
 - **`--report`.** Prints the §1.2 totals and the top 20 files. On `9e3e01438` it gives 164,388 non-test comment lines (27.8%) and 3,623 marker lines.
 - **Lexer limits.** It is a lexer, not a parser: JSX text containing `//` or an apostrophe, and a regex literal after an unusual token, can be misread (a comment missed, never a crash). §1.1's counter had the same limits.
-- **Still open from §6:** option D (ReAgent's instruction) lives outside this repo, and C7 (a gate on stale source-file names) is not built. Density (A′) stays report-only until the Phase 1 files are condensed.
+- **Still open from §6:** option D (ReAgent's instruction) lives outside this repo. Density (A′) stays report-only until the Phase 1 files are condensed.
+
+### 9.1 Rule C7 as built (dead file references)
+
+The same script enforces C7, with tiers set by a full triage of every dead reference on `main` (report §6):
+
+- **Added comments.** A name that resolves to no tracked file (by full path, path suffix, or basename) fails when it is a doc (`SPEC_…`, `REPORT_…`, `docs/…`; 72% of these were genuinely stale) or a repo-rooted path (`crates/…`, `frontend/…`; 95%). A bare name or a partial path (`identity/resolver.rs`) only warns: under 60% were stale, the rest property accesses (`item.ts`), other repos and history.
+- **Deletes and renames.** When a branch deletes or renames a file and no file of that name is left, every comment anywhere that still names it fails, with the new path in the message. This targets the main cause: 176 of the 241 stale references point at a file a split or rename removed (`persistent.rs` 43, `bootstrap.rs` 24).
+- **Not repo files:** names AgentMux writes at runtime (`CLAUDE.md`, `copilot-instructions.md`, …), sibling repos (`agentmux-cloud/`, `muxbus/`, …), the pre-CEF `src-tauri/` tree, and elided paths (`frontend/.../x.ts`). A list written as `a.ts/b.ts` is read as two names.
+- **Coverage.** Comments are read in `.ts`/`.tsx`/`.rs`, the JavaScript family (`.js`, `.jsx`, `.mjs`, `.cjs`) and stylesheets (`.scss`, `.css`), for both added lines and the rename trigger. Narration (C1) and density stay on `.ts`/`.tsx`/`.rs`. Shell and PowerShell (`#` comments) and Markdown are not read; docs have their own link gates. A bare `x.js` name is treated as a library (`xterm.js`, `Node.js`) except by the rename trigger.
+- **`--dead-refs [--json]`** lists every dead reference in those files. Strings in code (a test's `SKIP_FILES` path) are not checked; the code that uses them fails on its own.

@@ -8,6 +8,8 @@
 //
 //   node scripts/check-comment-hygiene.mjs                  gate (what CI runs)
 //   node scripts/check-comment-hygiene.mjs --report         comment density, repo-wide
+//   node scripts/check-comment-hygiene.mjs --dead-refs [--json]
+//                                                           every comment naming a missing file
 //   node scripts/check-comment-hygiene.mjs --code-equal <base>
 //                                                           code must be identical to <base>
 //
@@ -26,6 +28,25 @@
 //   - a file already above 40% comment lines whose ratio this branch raised.
 // A line can opt out with `comment-hygiene: allow` in the comment, for the rare
 // case where the marker words are the subject (e.g. documenting the review bot).
+//
+// DEAD FILE REFERENCES (rule C7), also part of the gate:
+//   - An added comment that names a file not in the repo fails when the name
+//     is a doc (`SPEC_…`, `docs/…`) or a repo-rooted path (`crates/…`,
+//     `frontend/…`); a bare name (`persistent.rs`) or partial path only warns.
+//     The split follows a triage of every dead reference on main: repo paths
+//     were 95% genuinely stale and doc names 72%, bare names and partial paths
+//     under 60% (property accesses, other repos, history).
+//   - A file this branch deletes or renames away fails every comment anywhere
+//     that still names it, so a split updates its pointers in the same PR.
+//     Only names that no longer exist anywhere count (`mod.rs` leaving one
+//     directory proves nothing). This is what left 67 comments pointing at
+//     `persistent.rs` and `bootstrap.rs` after their splits.
+//   Comments are read in .ts/.tsx/.rs, the JavaScript family and stylesheets;
+//   the narration and density rules above stay on .ts/.tsx/.rs. Shell,
+//   PowerShell (`#` comments) and Markdown are not read.
+//   Runtime files AgentMux writes (CLAUDE.md, ...), sibling repos and the old
+//   `src-tauri/` tree are not repo files and are skipped. The same opt-out
+//   applies, for a deliberately historical or illustrative name.
 //
 // CODE-EQUAL. For every .ts/.tsx/.rs file that differs from the merge-base with
 // <base>, strips the comments and compares the rest, with whitespace outside
@@ -62,6 +83,13 @@ const SKIP_RE = /(^|\/)(node_modules|target|dist|build)\/|^frontend\/types\/rpc\
 const TEST_RE = /\.(?:test|spec)\.tsx?$|(^|\/)(?:tests?|__tests__)\/|_tests?\.rs$|\/tests\.rs$/;
 
 export const isSourcePath = (p) => SOURCE_RE.test(p) && !SKIP_RE.test(p);
+// Files whose comments the reference checks read: source plus the JavaScript
+// family (scripts, tools) and stylesheets, which use the same `//` and `/* */`
+// syntax. Shell and PowerShell (`#` comments) and Markdown are not read; docs
+// have their own link gates (check-doc-links.mjs, check-spec-citations.sh).
+const SCAN_GLOBS = ["*.ts", "*.tsx", "*.rs", "*.js", "*.jsx", "*.mjs", "*.cjs", "*.scss", "*.css"];
+const SCAN_RE = /\.(?:tsx?|rs|jsx?|mjs|cjs|s?css)$/;
+export const isScanPath = (p) => SCAN_RE.test(p) && !SKIP_RE.test(p);
 export const isTestPath = (p) => TEST_RE.test(p);
 export const langOf = (p) => (p.endsWith(".rs") ? "rs" : "ts");
 
@@ -353,6 +381,150 @@ export function narrationRule(text) {
     return null;
 }
 
+// ------------------------------------------------------- file references
+
+// File names a comment can point at. JSON/TOML/YAML are left out: in comments
+// they are almost always files AgentMux or a CLI reads at runtime, not files in
+// this repo.
+const REF_EXT = "rs|tsx?|jsx?|mjs|cjs|sh|ps1|scss|css|md";
+const REF_FILE = new RegExp(`\\.(?:${REF_EXT})$`);
+const REF_RE = new RegExp(`(?<![\\w./@-])((?:\\.{1,2}/)*(?:[\\w@.-]+/)*[\\w@-][\\w@.-]*\\.(?:${REF_EXT}))(?![\\w/-])`, "g");
+// Names that are real but not files in this repo: what AgentMux writes into an
+// agent's workdir or reads from a provider CLI's config, sibling repos, and the
+// pre-CEF `src-tauri/` tree that "ported from" comments cite. Measured against a
+// full triage of the tree's dead references (REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02.md §6).
+const FOREIGN_REF = /^(?:CLAUDE|CLAUDE\.local|AGENTS|GEMINI|QWEN|MEMORY|AGENTMUX_MEMORY|SKILL|SYSTEM|APPEND_SYSTEM|copilot-instructions)\.md$/;
+const FOREIGN_PREFIX =
+    /^(?:\.claude|\.codex|\.gemini|\.qwen|\.pi|\.copilot|\.agentmux|\.github\/instructions|~|HOME|agentmux-cloud|agentmux-ai|muxbus|reagent|src-tauri|node_modules)\//;
+const DOC_NAME = /^(?:SPEC|REPORT|PLAN|RUNBOOK|RETRO|ADR|PRD|AUDIT)_[A-Za-z0-9_.-]+\.md$/;
+
+const baseName = (p) => p.slice(p.lastIndexOf("/") + 1);
+
+/** A path with `./`, `../` prefixes and `/./` segments removed. */
+export function cleanRef(ref) {
+    return ref.replace(/^(?:\.{1,2}\/)+/, "").replace(/\/\.\//g, "/");
+}
+
+/**
+ * File references in a lexed file's comments: `[{ line, ref }]`, 1-based lines.
+ * A name hard-wrapped across two comment lines (`SPEC_FOO_` / `2026_01_01.md`)
+ * is joined back together.
+ */
+export function commentRefs(info) {
+    const refs = [];
+    info.lines.forEach((l, idx) => {
+        if (!l.text) return;
+        const body = normalizeComment(l.text);
+        for (const m of body.matchAll(REF_RE)) {
+            let ref = m[1];
+            const prev = idx > 0 ? normalizeComment(info.lines[idx - 1].text) : "";
+            if (m.index === 0 && prev) {
+                const tail = /[\w@./-]+$/.exec(prev);
+                // Only a real mid-name break: the previous line ends in a word
+                // character plus `_`/`-` (`SPEC_FOO_`), or this piece starts with
+                // a digit (`2026_01_01.md`). An SCSS partial (`_x.scss`) or a
+                // `--` separator is not a continuation.
+                if (tail && (/^_?\d/.test(ref) || /[A-Za-z0-9][_-]$/.test(tail[0]))) ref = tail[0] + ref;
+            }
+            // `a.ts/b.ts` is a list of two names, not a path: a directory
+            // segment never carries a source extension.
+            const segs = ref.split("/");
+            const parts = segs.slice(0, -1).some((s) => REF_FILE.test(s)) ? segs.filter((s) => REF_FILE.test(s)) : [ref];
+            for (const part of parts) refs.push({ line: idx + 1, ref: part, text: l.text });
+        }
+    });
+    return refs;
+}
+
+/** What a resolver needs to know about the tracked tree. */
+export function buildRefIndex(paths) {
+    const tops = new Set();
+    for (const p of paths) if (p.includes("/")) tops.add(p.slice(0, p.indexOf("/")));
+    return { paths: new Set(paths), list: paths, bases: new Set(paths.map(baseName)), tops };
+}
+
+/** `doc` (a docs/ file or a SPEC_/REPORT_/... name), `path` (repo-rooted), or `bare`. */
+export function refKind(ref, index) {
+    const r = cleanRef(ref);
+    if (DOC_NAME.test(baseName(r)) || r.startsWith("docs/")) return "doc";
+    if (r.includes("/") && index.tops.has(r.slice(0, r.indexOf("/")))) return "path";
+    return "bare";
+}
+
+/** True when `ref` names something outside this repo on purpose. */
+export function isForeignRef(ref) {
+    const r = cleanRef(ref);
+    // The prefix is tested after `./` and `../` are stripped, so
+    // `../agentmux-cloud/docs/X.md` is recognised as a sibling repo.
+    // A bare `x.js` is almost always a library (`xterm.js`, `Node.js`) in this
+    // TypeScript/Rust tree; a `.js` path is still checked, and so is a bare
+    // name when its file is removed (staleAfterMove does not use this).
+    const bareJs = !r.includes("/") && /\.jsx?$/.test(r);
+    return bareJs || FOREIGN_REF.test(baseName(r)) || FOREIGN_PREFIX.test(r) || r.includes("...") || r.includes("*");
+}
+
+/** True when some tracked file is what `ref` names (by full path, path suffix, or basename). */
+export function resolvesRef(ref, index) {
+    const r = cleanRef(ref);
+    if (!r.includes("/")) return index.bases.has(r);
+    if (index.paths.has(r)) return true;
+    const suffix = `/${r}`;
+    return index.list.some((p) => p.endsWith(suffix));
+}
+
+/**
+ * Dead file references on added lines of one file. An unresolved `doc` or
+ * `path` reference is an error; a `bare` name only warns, because bare names
+ * collide with property accesses (`item.ts`) and other repos' files. Comments
+ * that only moved (see gateFile) are skipped.
+ */
+export function deadRefFindings(info, added, index, moved = new Set()) {
+    const errors = [];
+    const warnings = [];
+    for (const { line, ref, text } of commentRefs(info)) {
+        if (!added.has(line) || text.includes(ALLOW_TOKEN)) continue;
+        if (moved.has(normalizeComment(text))) continue;
+        if (isForeignRef(ref) || resolvesRef(ref, index)) continue;
+        const kind = refKind(ref, index);
+        const message =
+            `comment names \`${ref}\`, which is not in this repo. Point it at the current file or drop it (rule C7). ` +
+            `A file in another repo: prefix it with the repo (\`agentmux-cloud/…\`). An illustrative name: add \`${ALLOW_TOKEN}\`.`;
+        (kind === "bare" ? warnings : errors).push({ line, message });
+    }
+    return { errors, warnings };
+}
+
+/**
+ * Comments anywhere that name a file this branch deleted or renamed away.
+ * `gone` is `[{ path, to }]` (`to` is null for a deletion); only paths whose
+ * basename no longer exists anywhere are passed. Several removed files can
+ * share a basename: a path-qualified reference is matched against each, and a
+ * bare name lists all of them. `files` is `[{ file, info }]`. Returns
+ * `[{ file, line, message }]`.
+ */
+export function staleAfterMove(gone, files) {
+    const out = [];
+    const byBase = new Map();
+    for (const g of gone) {
+        const b = baseName(g.path);
+        if (!byBase.has(b)) byBase.set(b, []);
+        byBase.get(b).push(g);
+    }
+    const describe = (g) => (g.to ? `renames \`${g.path}\` to \`${g.to}\`` : `deletes \`${g.path}\``);
+    for (const { file, info } of files) {
+        for (const { line, ref, text } of commentRefs(info)) {
+            if (text.includes(ALLOW_TOKEN)) continue;
+            const r = cleanRef(ref);
+            const candidates = byBase.get(baseName(r)) || [];
+            const hits = r.includes("/") ? candidates.filter((g) => g.path === r || g.path.endsWith(`/${r}`)) : candidates;
+            if (!hits.length) continue;
+            const what = hits.length === 1 ? `this branch ${describe(hits[0])}` : `this branch removes every file of that name: ${hits.map(describe).join("; ")}`;
+            out.push({ file, line, message: `comment names \`${ref}\`, and ${what}. Update the comment in this PR (rule C7).` });
+        }
+    }
+    return out;
+}
+
 /**
  * Added and removed line numbers per file from `git diff -U0` output:
  * `added` is keyed by new path (new-side numbers), `removed` by old path
@@ -563,20 +735,38 @@ function readWorking(path) {
 
 // ------------------------------------------------------------------- modes
 
+/** Every file in the working tree that git knows or would add, minus deletions. */
+function trackedTree() {
+    const deleted = new Set(git("ls-files", "--deleted").split("\n").filter(Boolean));
+    const all = git("ls-files", "--cached", "--others", "--exclude-standard").split("\n").filter(Boolean);
+    return [...new Set(all)].filter((p) => !deleted.has(p));
+}
+
+/** Lexes every source file in the tree: `[{ file, info }]`. */
+function lexTree(tree) {
+    const out = [];
+    for (const file of tree) {
+        if (!isScanPath(file)) continue;
+        const text = readWorking(file);
+        if (text !== null) out.push({ file, info: lexSource(text, langOf(file)) });
+    }
+    return out;
+}
+
 function runGate() {
-    const baseName = process.env.GITHUB_BASE_REF || "main";
-    const mb = mergeBaseWith(baseName);
+    const baseBranch = process.env.GITHUB_BASE_REF || "main";
+    const mb = mergeBaseWith(baseBranch);
     if (!mb) {
         console.error("check-comment-hygiene: no merge base; nothing to check.");
         return 0;
     }
-    const { added, removed } = parseDiff(git("diff", "-U0", "--no-color", "-M", mb, "--", "*.ts", "*.tsx", "*.rs"));
+    const { added, removed } = parseDiff(git("diff", "-U0", "--no-color", "-M", mb, "--", ...SCAN_GLOBS));
     // Comments this diff removes (from the base version of each file) are not
     // new when they reappear: `-M` follows only whole-file renames, so a split or
     // a move into another file would otherwise count every moved line as added.
     const moved = new Set();
     for (const [oldFile, lines] of removed) {
-        if (!isSourcePath(oldFile)) continue;
+        if (!isScanPath(oldFile)) continue;
         const before = gitShow(mb, oldFile);
         if (before === null) continue;
         const info = lexSource(before, langOf(oldFile));
@@ -585,24 +775,32 @@ function runGate() {
             if (t) moved.add(t);
         }
     }
-    for (const f of git("ls-files", "--others", "--exclude-standard", "--", "*.ts", "*.tsx", "*.rs").split("\n").filter(Boolean)) {
+    for (const f of git("ls-files", "--others", "--exclude-standard", "--", ...SCAN_GLOBS).split("\n").filter(Boolean)) {
         const text = readWorking(f);
         if (text !== null) added.set(f, new Set(Array.from({ length: text.split("\n").length }, (_, k) => k + 1)));
     }
+    const tree = trackedTree();
+    const index = buildRefIndex(tree);
     let errors = 0;
+    let deadRefs = 0;
     let checked = 0;
     for (const [file, lines] of added) {
-        if (!isSourcePath(file) || lines.size === 0) continue;
+        if (!isScanPath(file) || lines.size === 0) continue;
         const text = readWorking(file);
         if (text === null) continue;
         checked++;
         const info = lexSource(text, langOf(file));
-        const res = gateFile(info, lines, moved);
-        for (const e of res.errors) annotate("error", file, e.line, e.message);
-        for (const w of res.warnings) annotate("warning", file, w.line, w.message);
+        // Narration and density apply to .ts/.tsx/.rs; file references to every
+        // scanned file.
+        const source = isSourcePath(file);
+        const res = source ? gateFile(info, lines, moved) : { errors: [], warnings: [] };
+        const refs = deadRefFindings(info, lines, index, moved);
+        for (const e of [...res.errors, ...refs.errors]) annotate("error", file, e.line, e.message);
+        for (const w of [...res.warnings, ...refs.warnings]) annotate("warning", file, w.line, w.message);
         errors += res.errors.length;
+        deadRefs += refs.errors.length;
         const now = statsOf(info);
-        if (now.ratio > DENSITY_WARN_RATIO && now.lines >= 200) {
+        if (source && now.ratio > DENSITY_WARN_RATIO && now.lines >= 200) {
             const old = gitShow(mb, file);
             const before = old === null ? null : statsOf(lexSource(old, langOf(file)));
             if (before && now.ratio > before.ratio + 0.005) {
@@ -610,11 +808,52 @@ function runGate() {
             }
         }
     }
-    if (errors) {
-        console.error(`\ncheck-comment-hygiene: ${errors} review-history comment line(s) added. Review history lives in the PR thread; keep the constraint and cite (#NNNN) once.`);
+    // A file this branch deletes or renames away leaves every comment that names
+    // it stale. Only basenames that no longer exist anywhere are checked, so the
+    // match is unambiguous (`mod.rs` going away from one directory proves nothing).
+    const gone = [];
+    for (const row of git("diff", "--name-status", "-M", mb).split("\n").filter(Boolean)) {
+        const [status, from, to] = row.split("\t");
+        if ((status[0] === "D" || status[0] === "R") && REF_FILE.test(from) && !index.bases.has(baseName(from))) {
+            gone.push({ path: from, to: status[0] === "R" ? to : null });
+        }
+    }
+    let stale = 0;
+    if (gone.length) {
+        for (const s of staleAfterMove(gone, lexTree(tree))) {
+            annotate("error", s.file, s.line, s.message);
+            stale++;
+        }
+    }
+    if (errors || deadRefs || stale) {
+        if (errors) console.error(`\ncheck-comment-hygiene: ${errors} review-history comment line(s) added. Review history lives in the PR thread; keep the constraint and cite (#NNNN) once.`);
+        if (deadRefs) console.error(`check-comment-hygiene: ${deadRefs} added comment(s) name a file that is not in the repo.`);
+        if (stale) console.error(`check-comment-hygiene: ${stale} comment(s) name a file this branch deleted or renamed away.`);
         return 1;
     }
-    console.log(`check-comment-hygiene: ok (${checked} changed source file(s) checked)`);
+    console.log(`check-comment-hygiene: ok (${checked} changed source file(s) checked${gone.length ? `; ${gone.length} removed name(s) checked for stale references` : ""})`);
+    return 0;
+}
+
+/** Lists every unresolved file reference in the tree's comments. */
+function runDeadRefs(json) {
+    const tree = trackedTree();
+    const index = buildRefIndex(tree);
+    const rows = [];
+    for (const { file, info } of lexTree(tree)) {
+        for (const { line, ref, text } of commentRefs(info)) {
+            if (isForeignRef(ref) || resolvesRef(ref, index)) continue;
+            rows.push({ file, line, ref, kind: refKind(ref, index), allowed: text.includes(ALLOW_TOKEN), text: text.trim() });
+        }
+    }
+    if (json) {
+        console.log(JSON.stringify(rows, null, 1));
+        return 0;
+    }
+    const by = {};
+    for (const r of rows) by[r.kind] = (by[r.kind] || 0) + 1;
+    for (const r of rows) console.log(`${r.file}:${r.line}: [${r.kind}] ${r.ref}`);
+    console.log(`\n${rows.length} unresolved reference(s): ${Object.entries(by).map(([k, v]) => `${k} ${v}`).join(", ")}`);
     return 0;
 }
 
@@ -706,10 +945,11 @@ function runReport() {
 
 function main(argv) {
     if (argv.includes("--help") || argv.includes("-h")) {
-        console.log("usage: check-comment-hygiene.mjs [--report | --code-equal <base>]");
+        console.log("usage: check-comment-hygiene.mjs [--report | --dead-refs [--json] | --code-equal <base>]");
         return 0;
     }
     if (argv.includes("--report")) return runReport();
+    if (argv.includes("--dead-refs")) return runDeadRefs(argv.includes("--json"));
     const k = argv.indexOf("--code-equal");
     if (k !== -1) {
         if (!argv[k + 1]) {

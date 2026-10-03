@@ -34,7 +34,7 @@ A comment says why the code is the way it is. The code says what it does. Commen
 4. **Say a rule once**, where it is enforced. Other sites get one line pointing there.
 5. **Over about 8 lines, it's a design note.** Put it in `docs/` and leave a one-line pointer.
 6. **Don't restate the code or the types.** `// Create the channel` and `@param node The node` add nothing.
-7. **Keep paths and symbols current.** A comment that names a file or function must still resolve; update it in the PR that moves the code.
+7. **Keep paths and symbols current.** A comment that names a file or function must still resolve; update it in the PR that moves the code. CI fails a new comment naming a doc or repo path that doesn't exist, and fails any comment still naming a file your PR deletes or renames away (a bare name like `foo.rs` only warns). `node scripts/check-comment-hygiene.mjs --dead-refs` lists every dead reference in the tree.
 8. **Never remove** `// SAFETY:` comments, `TODO`/`FIXME`, lint or compiler directives (`eslint-disable`, `@ts-expect-error`, `/// <reference`), or doctest fences when trimming comments.
 
 To condense comments in a file, make it a comment-only PR (don't mix it with a move or a code change) and run `node scripts/check-comment-hygiene.mjs --code-equal origin/main`. It fails on any change to `.ts`, `.tsx` or `.rs` code, and if a protected item in rule 8 goes missing. Other changed files (config, docs, scripts) are listed as a warning, not compared. It also lists every `#NNNN` or `SPEC_…` citation your edit dropped, so you can confirm each was narration or a duplicate. `node scripts/check-comment-hygiene.mjs --report` prints the repo's comment density.
