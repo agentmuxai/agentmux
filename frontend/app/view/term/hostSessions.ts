@@ -104,7 +104,8 @@ export async function showHostSessions(conn: string, blockId: string, notice?: s
     }, notice);
     // The list arrives after the menu that asked for it has closed: show it
     // over the pane itself.
-    const rect = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`)?.getBoundingClientRect();
+    const pane = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
+    const rect = pane?.getBoundingClientRect(); // perf:allow-layout-read — once, after an RPC reply, never on the input path
     ContextMenuModel.showContextMenu(menu, {
         clientX: (rect?.left ?? 0) + 24,
         clientY: (rect?.top ?? 0) + 32,
