@@ -81,6 +81,11 @@ pub(crate) fn test_state() -> AppState {
             String::new(),
         )),
         lan_listeners: Arc::new(crate::backend::lan_listeners::LanListenerSupervisor::new(0, 0)),
+        fleet_feed: Arc::new(crate::backend::fleet_feed::FleetFeed::new(
+            "test-host".to_string(),
+            "test-channel".to_string(),
+            "0.28.20".to_string(),
+        )),
         lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
         process_tracker,
         process_broker,
@@ -7000,6 +7005,183 @@ async fn lan_router_does_not_serve_full_key_routes() {
         let resp = lan_router().oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{method} {uri} must not be served on LAN");
     }
+}
+
+// The fleet feed (SPEC_LAN_FLEET_FEED_2026_10_03.md): `/agentmux/fleet` and
+// `/agentmux/fleet/events`, readable with the broadcast `lan_key`.
+
+fn fleet_request(uri: &str, key: Option<&str>, extra: &[(&str, &str)]) -> Request<Body> {
+    let mut builder = Request::builder().method(Method::GET).uri(uri);
+    if let Some(key) = key {
+        builder = builder.header("X-AuthKey", key);
+    }
+    for (name, value) in extra {
+        builder = builder.header(*name, *value);
+    }
+    builder.body(Body::empty()).unwrap()
+}
+
+/// The next chunk of a streaming response body, as text.
+async fn next_body_chunk(stream: &mut (impl futures_util::Stream<Item = Result<axum::body::Bytes, axum::Error>> + Unpin)) -> Option<String> {
+    use futures_util::StreamExt;
+    let chunk = tokio::time::timeout(std::time::Duration::from_secs(5), stream.next()).await.ok()??;
+    Some(String::from_utf8(chunk.unwrap().to_vec()).unwrap())
+}
+
+#[tokio::test]
+async fn fleet_snapshot_is_names_only_sorted_and_deduplicated() {
+    let state = test_state();
+    state.fleet_feed.observe(["Clamk", "AgentY", "agenty"].map(String::from));
+    let epoch = state.fleet_feed.epoch().to_string();
+    let resp = build_router(state)
+        .oneshot(fleet_request("/agentmux/fleet", Some("test-lan-key"), &[]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()[header::ETAG], format!("\"{epoch}:2\"").as_str());
+    assert_eq!(resp.headers()[header::CACHE_CONTROL], "no-cache");
+    assert_eq!(resp.headers()[header::CONTENT_TYPE], "application/json");
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "epoch": epoch,
+            "rev": 2,
+            "hostname": "test-host",
+            "channel": "test-channel",
+            "version": "0.28.20",
+            "agents": ["AgentY", "Clamk"],
+        })
+    );
+}
+
+#[tokio::test]
+async fn fleet_snapshot_answers_304_to_a_matching_if_none_match() {
+    let state = test_state();
+    let etag = format!("\"{}\"", state.fleet_feed.event_id(&state.fleet_feed.snapshot()));
+    let app = build_router(state.clone());
+    let resp = app
+        .clone()
+        .oneshot(fleet_request("/agentmux/fleet", Some("test-lan-key"), &[("If-None-Match", &etag)]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+    assert_eq!(resp.headers()[header::ETAG], etag.as_str());
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    assert!(body.is_empty());
+
+    // After a change the old tag no longer matches.
+    state.fleet_feed.observe(["AgentY".to_string()]);
+    let resp = app
+        .oneshot(fleet_request("/agentmux/fleet", Some("test-lan-key"), &[("If-None-Match", &etag)]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn fleet_routes_take_the_lan_key_and_refuse_anything_else() {
+    for uri in ["/agentmux/fleet", "/agentmux/fleet/events"] {
+        for key in ["test-lan-key", "test-secret-key"] {
+            let resp = test_router().oneshot(fleet_request(uri, Some(key), &[])).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::OK, "{uri} with {key}");
+        }
+        let resp = lan_router().oneshot(fleet_request(uri, Some("test-lan-key"), &[])).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{uri} on the LAN router");
+        for key in [Some("not-a-real-key"), None] {
+            let resp = test_router().oneshot(fleet_request(uri, key, &[])).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{uri} with {key:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn fleet_events_start_with_retry_and_the_snapshot() {
+    let state = test_state();
+    state.fleet_feed.observe(["AgentY".to_string()]);
+    let feed = state.fleet_feed.clone();
+    let resp = build_router(state)
+        .oneshot(fleet_request("/agentmux/fleet/events", Some("test-lan-key"), &[]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()[header::CONTENT_TYPE], "text/event-stream");
+    assert_eq!(resp.headers()[header::CACHE_CONTROL], "no-cache");
+    let mut body = resp.into_body().into_data_stream();
+    assert_eq!(next_body_chunk(&mut body).await.unwrap(), "retry: 3000\n\n");
+    let snapshot = feed.snapshot();
+    assert_eq!(
+        next_body_chunk(&mut body).await.unwrap(),
+        format!("event: fleet\nid: {}\ndata: {}\n\n", feed.event_id(&snapshot), feed.body_json(&snapshot))
+    );
+    assert_eq!(feed.open_streams(), 1);
+    drop(body);
+    assert_eq!(feed.open_streams(), 0, "a dropped response body frees the slot");
+}
+
+#[tokio::test]
+async fn fleet_events_resume_quietly_and_then_follow_changes() {
+    let state = test_state();
+    let feed = state.fleet_feed.clone();
+    let current = feed.event_id(&feed.snapshot());
+    let resp = build_router(state)
+        .oneshot(fleet_request("/agentmux/fleet/events", Some("test-lan-key"), &[("Last-Event-ID", &current)]))
+        .await
+        .unwrap();
+    let mut body = resp.into_body().into_data_stream();
+    assert_eq!(next_body_chunk(&mut body).await.unwrap(), "retry: 3000\n\n");
+    {
+        use futures_util::StreamExt;
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), body.next()).await.is_err(),
+            "an up-to-date client gets no initial event"
+        );
+    }
+    feed.observe(["Clamk".to_string()]);
+    let event = next_body_chunk(&mut body).await.unwrap();
+    assert!(event.starts_with(&format!("event: fleet\nid: {}:2\n", feed.epoch())), "{event}");
+    assert!(event.contains(r#""agents":["Clamk"]"#), "{event}");
+}
+
+#[tokio::test]
+async fn fleet_events_refuse_a_stream_past_the_cap() {
+    let state = test_state();
+    let held: Vec<_> = (0..crate::backend::fleet_feed::MAX_STREAMS)
+        .map(|_| state.fleet_feed.open_stream(None).unwrap())
+        .collect();
+    let app = build_router(state.clone());
+    let resp = app
+        .clone()
+        .oneshot(fleet_request("/agentmux/fleet/events", Some("test-lan-key"), &[]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    // The snapshot route is not capped.
+    let resp = app
+        .clone()
+        .oneshot(fleet_request("/agentmux/fleet", Some("test-lan-key"), &[]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    drop(held);
+    let resp = app
+        .oneshot(fleet_request("/agentmux/fleet/events", Some("test-lan-key"), &[]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn discovery_names_this_instances_channel() {
+    let resp = test_router()
+        .oneshot(fleet_request("/agentmux/discovery", Some("test-secret-key"), &[]))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["host"]["channel"].as_str().is_some_and(|c| !c.is_empty()), "{}", json["host"]);
 }
 
 #[tokio::test]

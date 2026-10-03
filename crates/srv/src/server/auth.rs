@@ -150,7 +150,7 @@ pub(super) async fn admit_container_agent(
 /// their own `lan_forward_routes` router in `router()`, not in
 /// `reactive_routes`.
 ///
-/// `state.lan_key` grants access to ONLY these three routes — never the rest
+/// `state.lan_key` grants access to ONLY the `lan_forward_routes` — never the rest
 /// of `/agentmux/service`, `/agentmux/file`, shell creation, credential/
 /// identity endpoints, etc. See `Config::lan_key`'s doc comment for why
 /// this exists (<removed-spec>.md LAN P0-1).

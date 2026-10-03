@@ -91,6 +91,15 @@ pub fn resolve_shared_reactive_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("agents").join("reactive"))
 }
 
+/// Resolve the GLOBAL `<home>/shared/lan/instances/` directory: one file per
+/// LAN-enabled AgentMux instance on this host, so whichever instance holds
+/// the UDP probe port can list the others as `siblings`
+/// (SPEC_LAN_FLEET_FEED_2026_10_03.md §3). Beside `agents/`, not inside the
+/// reactive registry: these are instances, not agents.
+pub fn resolve_shared_lan_instances_dir() -> Option<PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("lan").join("instances"))
+}
+
 /// Resolve the GLOBAL `<home>/shared/agents/transcripts/` directory.
 ///
 /// Sibling of [`resolve_shared_registry_dir`] / [`resolve_shared_definitions_dir`]:
