@@ -938,10 +938,6 @@ impl Controller for ShellController {
             format!("failed to spawn command: {e}")
         })?;
         tracing::info!(block_id = %self.block_id, "process spawned successfully");
-        // Shared by every pane on the connection (remote::status::pane_started).
-        if ssh_plan.is_some() {
-            crate::backend::remote::status::pane_started(self.broker.as_deref(), &conn_name);
-        }
 
         // Register PID and record spawn metadata.
         let spawn_ts_ms = agentmux_common::time::now_ms();
@@ -1029,7 +1025,10 @@ impl Controller for ShellController {
 
         // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
         // before the shell emits its first OSC 7 (or for shells without integration).
-        if let Some(ref store) = self.mstore {
+        // Not for an SSH or WSL pane: its cwd is a path on the other side, and
+        // this machine's directory would be sent there on the next launch.
+        let remote_pane = ssh_plan.is_some() || wsl_distro.is_some();
+        if let Some(store) = self.mstore.as_ref().filter(|_| !remote_pane) {
             let effective_cwd = if !cwd.is_empty() {
                 cwd.clone()
             } else {
@@ -1284,6 +1283,12 @@ impl Controller for ShellController {
         let tab_id_wait = self.tab_id.clone();
         let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
+        // An SSH pane holds its connection open from here to the wait task's
+        // pane_ended (remote::status). Counted only now, after every step that
+        // can still fail and return, so each start has exactly one end.
+        if ssh_plan.is_some() {
+            crate::backend::remote::status::pane_started(self.broker.as_deref(), &conn_name);
+        }
         let ssh_wait = ssh_plan
             .as_ref()
             .map(|(_, dest)| (conn_name.clone(), dest.destination.clone()));

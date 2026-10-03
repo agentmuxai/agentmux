@@ -90,7 +90,7 @@ pub fn launch(
 /// starts the login shell itself.
 ///
 /// The remote shell parses this, whatever it is (bash, zsh, fish), so only
-/// single-quoted words, `;`, `2>/dev/null`, `exec` and `"$SHELL"` appear, which
+/// single-quoted words, a leading `~/`, `;`, `exec` and `"$SHELL"` appear, which
 /// all of them read the same way.
 pub fn remote_command(cmd: &str, cmd_args: &[String], cwd: &str) -> Option<String> {
     let run = if cmd.is_empty() {
@@ -107,12 +107,27 @@ pub fn remote_command(cmd: &str, cmd_args: &[String], cwd: &str) -> Option<Strin
                 .join(" "),
         )
     };
-    let cd = (!cwd.trim().is_empty()).then(|| format!("cd {} 2>/dev/null; ", quote(cwd)));
+    // A failed `cd` prints its own error and the shell goes on, in the
+    // remote home: shown, not hidden.
+    let cd = (!cwd.trim().is_empty()).then(|| format!("cd {}; ", quote_path(cwd)));
     match (cd, run) {
         (None, None) => None,
         (None, Some(run)) => Some(run),
         (Some(cd), Some(run)) => Some(format!("{cd}{run}")),
         (Some(cd), None) => Some(format!("{cd}exec \"$SHELL\" -l")),
+    }
+}
+
+/// [`quote`] for a remote path, leaving a leading `~` or `~/` unquoted so the
+/// remote shell expands it to the remote home (OSC 7 and users write it).
+pub fn quote_path(path: &str) -> String {
+    if path == "~" {
+        return "~".to_string();
+    }
+    match path.strip_prefix("~/") {
+        Some("") => "~/".to_string(),
+        Some(rest) => format!("~/{}", quote(rest)),
+        None => quote(path),
     }
 }
 
@@ -212,21 +227,18 @@ mod tests {
         );
         assert_eq!(
             remote_command("", &[], "/srv/my app"),
-            Some(r#"cd '/srv/my app' 2>/dev/null; exec "$SHELL" -l"#.into())
+            Some(r#"cd '/srv/my app'; exec "$SHELL" -l"#.into())
         );
         assert_eq!(
             remote_command("htop", &["-d".into(), "10".into()], "/tmp"),
-            Some("cd /tmp 2>/dev/null; htop -d 10".into())
+            Some("cd /tmp; htop -d 10".into())
         );
         assert_eq!(
             remote_command("echo", &["it's $HOME".into()], ""),
             Some(r"echo 'it'\''s $HOME'".into())
         );
         let args = launch(&dest("h", None), "uptime", &[], "/tmp", None);
-        assert_eq!(
-            &args[args.len() - 3..],
-            ["--", "h", "cd /tmp 2>/dev/null; uptime"]
-        );
+        assert_eq!(&args[args.len() - 3..], ["--", "h", "cd /tmp; uptime"]);
     }
 
     #[test]
@@ -237,6 +249,21 @@ mod tests {
         assert_eq!(exit_message("area54", 0), None);
         assert_eq!(exit_message("area54", 1), None);
         assert_eq!(exit_message("area54", 130), None);
+    }
+
+    /// `~` is the remote home: left for the remote shell to expand.
+    #[test]
+    fn a_tilde_cwd_is_the_remote_home() {
+        assert_eq!(quote_path("~"), "~");
+        assert_eq!(quote_path("~/"), "~/");
+        assert_eq!(quote_path("~/my proj"), "~/'my proj'");
+        assert_eq!(quote_path("~/src"), "~/src");
+        assert_eq!(quote_path("/a/~b"), "'/a/~b'", "a tilde inside a path stays literal");
+        assert_eq!(quote_path("~bob/x"), "'~bob/x'", "only the user's own home");
+        assert_eq!(
+            remote_command("", &[], "~/proj"),
+            Some(r#"cd ~/proj; exec "$SHELL" -l"#.into())
+        );
     }
 
     #[test]
