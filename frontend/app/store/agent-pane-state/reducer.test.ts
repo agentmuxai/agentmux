@@ -604,6 +604,105 @@ describe("agent-pane-state reducer", () => {
             });
         });
 
+        describe("CompactionStatusFrame (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01 §6)", () => {
+            const frame = (status: "compacting" | "ended", at: number) =>
+                ({ type: "CompactionStatusFrame", status, at }) as const;
+            const boundary = (at: number) =>
+                ({ type: "CompactionBoundary", trigger: "auto", preTokens: 50_000, postTokens: 3_000, durationMs: 9_000, at }) as const;
+
+            it("a live start frame starts the compaction when none is running, without the hook", () => {
+                const r = update(streaming(100), frame("compacting", 200), 200);
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 200, lastHeartbeatAt: 200, heartbeats: 0 });
+                expect(r.state.lastEventMs).toBe(200);
+                expect(r.events).toEqual([{ type: "compaction-started", trigger: "auto" }]);
+            });
+
+            it("calls it manual in the pane's own /compact turn", () => {
+                const s0 = update(ready(100), { type: "TurnStart", at: 110, content: "/compact" }).state;
+                const r = update(s0, frame("compacting", 200), 200);
+                expect(r.state.compacting?.trigger).toBe("manual");
+            });
+
+            it("only records a heartbeat when already compacting (the hook started it)", () => {
+                const s0 = update(streaming(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                const s1 = update(s0, frame("compacting", 160), 160);
+                expect(s1.state.compacting).toEqual({ trigger: "manual", startedAt: 150, lastHeartbeatAt: 160, heartbeats: 0 });
+                expect(s1.events).toEqual([]);
+                const s2 = update(s1.state, frame("compacting", 190), 190);
+                expect(s2.state.compacting).toEqual({ trigger: "manual", startedAt: 150, lastHeartbeatAt: 190, heartbeats: 1 });
+            });
+
+            it("counts each repeat of the frame as a heartbeat and keeps the start", () => {
+                const s0 = update(streaming(100), frame("compacting", 200), 200).state;
+                const s1 = update(s0, frame("compacting", 30_200), 30_200).state;
+                const s2 = update(s1, frame("compacting", 60_200), 60_200).state;
+                expect(s2.compacting).toEqual({ trigger: "auto", startedAt: 200, lastHeartbeatAt: 60_200, heartbeats: 2 });
+            });
+
+            it("a later hook ping for the same compaction keeps the frame's start and takes the hook's trigger", () => {
+                const s0 = update(streaming(100), frame("compacting", 200), 200).state;
+                const r = update(s0, { type: "CompactionStarted", trigger: "manual", at: 190 }, 210);
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 200, lastHeartbeatAt: 200, heartbeats: 0 });
+                expect(r.events).toEqual([]);
+            });
+
+            it("goes through the hook's guards: not subscribed, a terminal turn, or at/before the last boundary", () => {
+                expect(update(mk(), frame("compacting", 200), 200).state.compacting).toBeNull();
+                const errored = update(streaming(100), {
+                    type: "FailureObserved",
+                    failure: { code: "rate_limited", title: "t", detail: "d", retryable: true },
+                    at: 150,
+                }).state;
+                const r = update(errored, frame("compacting", 200), 200);
+                expect(r.state).toBe(errored);
+                const afterBoundary = update(streaming(100), boundary(300), 300).state;
+                expect(update(afterBoundary, frame("compacting", 300), 300).state.compacting).toBeNull();
+            });
+
+            it("an old frame landing on an idle pane is only buffered, and is dropped when the backend says no turn runs", () => {
+                const ended = update(streaming(100), { type: "TurnEnd", stats: null }, 150).state;
+                const s1 = update(ended, frame("compacting", 200), 200).state;
+                expect(s1.compacting).toBeNull();
+                expect(s1.pendingCompactionPing).toEqual({ trigger: "auto", startedAt: 200 });
+                const s2 = update(s1, { type: "ReconcileTurnActive", at: 210, active: false }).state;
+                expect(s2.compacting).toBeNull();
+                expect(s2.pendingCompactionPing).toBeNull();
+            });
+
+            it("does not replace a hook ping already waiting for promotion", () => {
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                const r = update(s0, frame("compacting", 200), 200);
+                expect(r.state).toBe(s0);
+            });
+
+            it("the end frame clears compacting with no boundary after it (a failed compaction)", () => {
+                const s0 = update(streaming(100), frame("compacting", 200), 200).state;
+                const r = update(s0, frame("ended", 45_000), 45_000);
+                expect(r.state.compacting).toBeNull();
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                // Nothing re-sets it, and the watchdog is armed again.
+                expect(update(r.state, { type: "StreamWatchdogTick", nowMs: 45_000 + STUCK_THRESHOLD_MS + 1 }).events).not.toEqual([]);
+            });
+
+            it("the end frame clears a hook-started compaction and a buffered ping too; a no-op otherwise", () => {
+                const hook = update(streaming(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                expect(update(hook, frame("ended", 200), 200).state.compacting).toBeNull();
+                const buffered = update(ready(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                expect(update(buffered, frame("ended", 200), 200).state.pendingCompactionPing).toBeNull();
+                const idle = streaming(100);
+                expect(update(idle, frame("ended", 200), 200).state).toBe(idle);
+            });
+
+            it("a success's end frame then its boundary: cleared once, the boundary still recorded", () => {
+                const s0 = update(streaming(100), frame("compacting", 200), 200).state;
+                const s1 = update(s0, frame("ended", 45_000), 45_000).state;
+                const r = update(s1, boundary(45_012), 45_012);
+                expect(r.state.compacting).toBeNull();
+                expect(r.state.lastCompactionBoundaryAt).toBe(45_012);
+                expect(r.events[0]).toMatchObject({ type: "context-compacted", source: "real" });
+            });
+        });
+
         describe("pendingCompactionPing promotion/discard (SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02)", () => {
             // Regression coverage for the "Working… disappears mid-compaction
             // after a load/resume" bug and the two follow-up races reviewers

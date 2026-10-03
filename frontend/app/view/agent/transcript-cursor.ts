@@ -62,14 +62,24 @@ export interface CursorReadResult {
     genMismatch?: boolean;
 }
 
+/** Where delivered records sit in the transcript, and how they came. */
+export interface DeliveredFrom {
+    stream: string;
+    gen: string;
+    line: number;
+    gap?: true;
+}
+
 export interface TranscriptCursorDeps {
     /**
      * Parse complete records (newline-terminated) as live input. `from`:
      * where the first record sits in the transcript, when the cursor knows
      * (a positioned event or a gap read), so tool nodes can record their
      * result's line (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_2026_10_01.md §3.2).
+     * `gap`: read to fill a gap, not brought by a live event — possibly old,
+     * or another writer's.
      */
-    deliver(text: string, from?: { stream: string; gen: string; line: number }): void;
+    deliver(text: string, from?: DeliveredFrom): void;
     /**
      * An echo's records (the user's own message, already on screen). Not
      * parsed; handed over so the pane can pair it with the node it echoes.
@@ -374,13 +384,13 @@ export class TranscriptCursor {
             at += lines;
             filled += lines;
             pin.next = Math.max(pin.next, at);
-            for (const k of keep) this.deliver(k.line + "\n", { stream, gen, line: k.at });
+            for (const k of keep) this.deliver(k.line + "\n", { stream, gen, line: k.at, gap: true });
         }
         this.stats.gapsFilled++;
         this.stats.gapLinesFilled += filled;
     }
 
-    private deliver(text: string, from?: { stream: string; gen: string; line: number }): void {
+    private deliver(text: string, from?: DeliveredFrom): void {
         this.stats.delivered++;
         this.deps.deliver(text, from);
     }

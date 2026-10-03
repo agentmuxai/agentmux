@@ -17,7 +17,7 @@ import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import type { AgentViewModel } from "../agent-model";
-import { compactionProgress, estimateCompactionMs, readCompactionSamples } from "../compaction-estimate";
+import { compactionProgress, compactionQuietMs, estimateCompactionMs, readCompactionSamples } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
 import { turnAddedInput } from "@/app/store/agent-pane-state/turn-contribution";
@@ -311,10 +311,14 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         if (props.compacting) {
             const elapsed = formatElapsedCompact(compactingElapsedMs());
             const bar = compactionBar();
-            if (!bar) return elapsed;
-            return bar.over
-                ? `${elapsed} · longer than usual`
-                : `${elapsed} / ~${formatElapsedCompact(bar.estimateMs)}`;
+            const time = !bar
+                ? elapsed
+                : bar.over
+                  ? `${elapsed} · longer than usual`
+                  : `${elapsed} / ~${formatElapsedCompact(bar.estimateMs)}`;
+            // The CLI's heartbeat stopped (spec §6): say so, don't guess why.
+            const quiet = compactionQuietMs(props.compacting, (tick(), Date.now()));
+            return quiet == null ? time : `${time} · no update from Claude for ${formatElapsedCompact(quiet)}`;
         }
         const right: string[] = [];
         if (props.turnTokens) right.push(fmtTurnTokens(props.turnTokens));

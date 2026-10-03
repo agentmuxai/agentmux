@@ -1333,6 +1333,12 @@ export function update(
             if (state.lastEventMs == null || isStaleVsLastBoundary) {
                 return { state, events: [] };
             }
+            // The CLI's status frame already started this same compaction
+            // (CompactionStatusFrame below). Keep its start, which keys the
+            // transcript node, and take the hook's trigger: the frame has none.
+            if (state.compacting?.lastHeartbeatAt != null) {
+                return { state: { ...state, compacting: { ...state.compacting, trigger: command.trigger } }, events: [] };
+            }
             // SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md: a
             // ping can ALSO arrive too EARLY — before this pane's turnPhase
             // has been reconciled out of the mount-default Idle
@@ -1394,6 +1400,36 @@ export function update(
             return {
                 state: next,
                 events: [{ type: "compaction-started", trigger: command.trigger }],
+            };
+        }
+
+        case "CompactionStatusFrame": {
+            // SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §6.
+            if (command.status === "ended") {
+                // Not waiting for the boundary: a failed compaction has none,
+                // and a success's follows within milliseconds.
+                if (state.compacting == null && state.pendingCompactionPing == null) return { state, events: [] };
+                return { state: { ...state, compacting: null, pendingCompactionPing: null }, events: [] };
+            }
+            if (state.compacting != null) {
+                const c = state.compacting;
+                const heartbeats = c.lastHeartbeatAt != null ? (c.heartbeats ?? 0) + 1 : 0;
+                return { state: { ...state, compacting: { ...c, lastHeartbeatAt: command.at, heartbeats } }, events: [] };
+            }
+            // A hook ping is already waiting for this turn to be confirmed.
+            if (state.pendingCompactionPing != null) return { state, events: [] };
+            // The frame names no trigger. The pane's own `/compact` turn is
+            // manual; otherwise the CLI compacted on its own, i.e. auto. A
+            // later hook ping corrects it (CompactionStarted above).
+            const trigger = state.pendingCompactTurn ? "manual" : "auto";
+            // The hook's path, with its guards: not subscribed, stale against
+            // the last boundary, or a turn that isn't (or can't become) working.
+            const started = update(state, { type: "CompactionStarted", trigger, at: command.at }, nowMs);
+            const begun = started.state.compacting;
+            if (begun == null) return started;
+            return {
+                state: { ...started.state, compacting: { ...begun, lastHeartbeatAt: command.at, heartbeats: 0 } },
+                events: started.events,
             };
         }
 

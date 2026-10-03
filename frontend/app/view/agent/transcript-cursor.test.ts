@@ -22,6 +22,8 @@ function harness(opts: { lines?: string[]; gen?: string; stream?: string } = {})
     const delivered: string[] = [];
     /** Each delivered line's transcript position, null when not given. */
     const positions: Array<number | null> = [];
+    /** Each delivered line: read to fill a gap? */
+    const gaps: boolean[] = [];
     const echoed: string[] = [];
     const resets: string[] = [];
     const reads: Array<[number, number, string]> = [];
@@ -33,6 +35,7 @@ function harness(opts: { lines?: string[]; gen?: string; stream?: string } = {})
             const lines = text.split("\n").filter((l) => l !== "");
             delivered.push(...lines);
             lines.forEach((_, i) => positions.push(from ? from.line + i : null));
+            lines.forEach(() => gaps.push(from?.gap === true));
         },
         echo: (text) => echoed.push(...text.split("\n").filter((l) => l !== "")),
         isOwnEcho: (line) => ownEchoes.delete(line),
@@ -50,6 +53,7 @@ function harness(opts: { lines?: string[]; gen?: string; stream?: string } = {})
         disk,
         delivered,
         positions,
+        gaps,
         echoed,
         resets,
         reads,
@@ -105,6 +109,15 @@ describe("TranscriptCursor", () => {
         await flush();
         expect(h.delivered).toEqual(["l0", "l2", "l3"]);
         expect(h.positions).toEqual([0, 2, 3]);
+    });
+
+    it("marks lines read to fill a gap, not the live event's own (compaction status frames, spec §6)", async () => {
+        const h = harness({ lines: ["l0", "l1", "l2"] });
+        h.cursor.settle({ stream: G, gen: "g1", next: 0 });
+        h.cursor.push(append(["l2"], [[G, 2]]));
+        await flush();
+        expect(h.delivered).toEqual(["l0", "l1", "l2"]);
+        expect(h.gaps).toEqual([true, true, false]);
     });
 
     it("drops duplicates and delivers in-order events synchronously", () => {

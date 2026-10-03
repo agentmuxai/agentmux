@@ -1,7 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
 **Date:** 2026-10-01
-**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) is built (§8 D1); the rest of status-frame handling (§6) is not built and needs D2.
+**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) is built (§8 D1); the rest of status-frame handling (§6) is built (§8 D2); D3 is open.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: *"search online, latest claude CLI system, can agentmux get the progress of the compression?"*, then *"write spec to file on implements. sure, lets try the tier 4"*.
 **Researched against:** `agentmuxai/agentmux` `main` @ `807c749ce`; Claude Code CLI **2.1.287** (the version AgentMux has installed under `~/.agentmux/shared/cli/claude/`).
@@ -81,13 +81,19 @@ The caller computes it once when `compacting` starts (R4), from `state.lastConte
 - once elapsed exceeds the estimate: the fill stops at 95% and turns indeterminate, right side `42s · longer than usual` (R2).
 With no estimate, exactly today's row.
 
-## 6. Status frames (decision D2) — failure notice built (§10); the rest not built
+## 6. Status frames (decision D2) — built
 
-The `status` frames in §2 could give (a) a **hook-independent start** (the `PreCompact` hook arrives over a live-only WPS event that can be missed), (b) a **visible failure** (`compact_result:"failed"`, `compact_error`, which AgentMux could not see) — **built, see §10**, (c) a liveness heartbeat. (a) and (c) are not wired because:
-- they go through `useAgentStream`'s stdout path and the reducer's `CompactionStarted` race guards (`pendingCompactionPing`, `lastCompactionBoundaryAt`), the same machinery §3 says is unproven live;
-- a status frame has no `trigger`, and a re-read of an old frame could set a stale `compacting` state;
-- (showing a failure turned out not to need a new node type: §10 adds a third kind to `CliNoticeNode`.)
-It should be designed together with the §3 fix. Seeding the sample store from transcript history (so a first compaction already has an estimate) is also left out; the store fills as compactions happen.
+The `status` frames in §2 give (a) a **hook-independent start** (the `PreCompact` hook arrives over a live-only WPS event that can be missed), (b) a **visible failure**, built in §10, and (c) a **liveness heartbeat**. (a) and (c) are built on D1, frontend only:
+- **Reading the frame.** `compactionStatusCommand` (`compact-boundary.ts`) maps `status:"compacting"` to a `CompactionStatusFrame` command with `status: "compacting"`, and `status:null` with a `compact_result` (success or failed) to `status: "ended"`. `useAgentStream` calls it on every `system` frame, at receipt time: the frame has no `timestamp`. A failure still gets its row from `cli-notice.ts`.
+- **Live only.** `parseHistoryLines.ts` never calls it. Lines the transcript cursor reads to fill a gap (`gap: true` on `deliver`'s `from`, `transcript-cursor.ts`) may be old or another writer's, so a start or heartbeat from one is ignored; an end frame from one still clears. The cursor already drops lines it has delivered.
+- **Start.** When the pane isn't compacting and no hook ping is buffered, the reducer runs the hook's own `CompactionStarted` with all its guards: a no-op when unsubscribed, rejected at or before `lastCompactionBoundaryAt`, dropped on a terminal `Done`, and buffered in `pendingCompactionPing` on `Idle`/`Disconnected`/`Done.completed`, where the existing paths promote or discard it (`ReconcileTurnActive`, `TurnStart`, `TurnEnd`, unsubscribe). So an old frame can't set `compacting` on a pane that isn't working, and everything that cleared a hook-started compaction clears this one.
+- **Trigger.** `CompactionState.trigger` stays `"manual" | "auto"`: the transcript node's label and the hook path need one. A status-started compaction is `manual` in the pane's own `/compact` turn (`pendingCompactTurn`), otherwise `auto`, the only way the CLI compacts by itself. A hook ping that lands later for the same compaction keeps the start time (the transcript node's key) and takes the hook's trigger. Left mislabeled: a typed `/compact <instructions>` reads as auto in the "Compacting conversation…" row.
+- **Heartbeat.** While compacting, each frame sets `compacting.lastHeartbeatAt` (receipt time) and each repeat after the first counts in `compacting.heartbeats`. The working row (`AgentFooter`) appends "· no update from Claude for 1m 20s" once the last frame is older than 75 s (`HEARTBEAT_QUIET_MS`, 2.5× the ~30 s cadence) and at least one heartbeat arrived (`compactionQuietMs`, `compaction-estimate.ts`). A CLI that sends none, or a hook-only compaction, never shows it.
+- **End.** `status:null` with a `compact_result` clears `compacting` and `pendingCompactionPing` without waiting for the boundary: a failure has none, and a success's boundary follows within milliseconds and still records `lastCompactionBoundaryAt` and its node. Before, a compaction that failed mid-turn stayed "Compacting…" until the turn ended.
+- **Not done:** a hook ping arriving after a failed compaction's end frame isn't rejected (only a boundary sets the stale-start guard); the watchdog stays suspended for the whole compaction, with the hint as the visible signal. Not live-verified in a pane.
+- **Tests:** `reducer.test.ts` (start without the hook, manual in a `/compact` turn, heartbeat only when already compacting, repeats counted, a later hook ping merged, the hook's guards, an old frame on an idle pane only buffered and then discarded, end clears with no boundary, end then boundary); `compact-boundary.test.ts` (the captured frames, gap reads, other frames, replay builds nothing); `compaction-estimate.test.ts` and `AgentFooter.test.tsx` (the hint only past 75 s and only after a heartbeat); `transcript-cursor.test.ts` (gap lines are marked).
+
+Seeding the sample store from transcript history (so a first compaction already has an estimate) is left out; the store fills as compactions happen.
 
 ## 7. Tests
 
@@ -103,12 +109,12 @@ It should be designed together with the §3 fix. Seeding the sample store from t
   - boundary-derived ids are keyed on the frame's `uuid`: `contextCompactedNodeId` (and through it the summary card's fallback id) and `memoryReinjectionNodeId`. `timestamp` is only a time value, with the existing receipt-time fallbacks;
   - a compaction is claimed when its boundary arrives (`memory-reinjection-controller.ts`), with the boundary's `uuid` (`boundary_uuid` on `memorydelivery:claim_fallback`). "Skip" sends nothing later; "deliver" sends at turn end as before, without a second claim;
   - once per boundary, from the block that compacted: the controller ignores a `uuid` it has seen (a gap re-read, a double trigger). srv records which block's stdout carried each boundary `uuid` (last 256) and answers "skip" to a claim from any other block: another block of the same agent reads the boundary from the shared transcript zone, and its CLI did not compact. A boundary no local stdout carried (another srv instance's) is skipped the same way. A repeat claim by the origin block takes the usual path, so a pane that failed to send is not locked out. A claim without a `uuid` behaves as before. A fresh session still claims when it fires.
-- **D2 — the rest of status-frame handling (§6: a hook-independent start, a heartbeat)** after D1, or not at all? The failure notice is built (§10).
+- **D2 — the rest of status-frame handling (§6: a hook-independent start, a heartbeat)** after D1, or not at all? **Done (2026-10-03), after D1; see §6.** A live `status:"compacting"` frame starts the compaction through the hook's `CompactionStarted` guards (trigger `manual` in the pane's `/compact` turn, else `auto`), never from history or a gap read; its repeats are heartbeats, and 75 s without one shows "no update from Claude" in the working row; the `status:null` end frame clears `compacting` when no boundary follows. The failure notice is built (§10).
 - **D3 — sample store scope:** global (as built) or per account/model.
 
 ## 9. Delivery
 
-PR 1 (#4220): this spec + Tier 4. PR 2 (#4232): the failed-compaction notice (§10), plus the §3 correction. D1 and the rest of D2 are follow-ups.
+PR 1 (#4220): this spec + Tier 4. PR 2 (#4232): the failed-compaction notice (§10), plus the §3 correction. D1 and the rest of D2 followed (§8).
 
 ## 10. Failed-compaction notice as built (PR #4232)
 

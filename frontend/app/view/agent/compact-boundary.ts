@@ -21,6 +21,8 @@
  * two consumers can't drift on what counts as a valid frame.
  */
 
+import type { AgentPaneCommand } from "@/app/store/agent-pane-state/types";
+
 export interface CompactBoundaryData {
     trigger: "manual" | "auto";
     preTokens: number;
@@ -114,4 +116,30 @@ export function contextCompactedNodeId(data: {
 export function contextCompactedLiveTimestamp(frameTimestamp: string | null | undefined): number {
     const parsed = typeof frameTimestamp === "string" ? Date.parse(frameTimestamp) : NaN;
     return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+/**
+ * The pane command for Claude Code's `system/status` compaction frame, or
+ * `null` (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md
+ * §2/§6). `status: "compacting"` is the start and its ~30 s heartbeat;
+ * `status: null` with a `compact_result` is the end, success or failure.
+ * Live path only: history replay never calls this. A gap read (`reread`) may
+ * be old or another writer's lines, so it never starts or extends a
+ * compaction; its end frame still clears one.
+ */
+export function compactionStatusCommand(
+    rawEvent: unknown,
+    at: number,
+    reread: boolean
+): Extract<AgentPaneCommand, { type: "CompactionStatusFrame" }> | null {
+    if (!rawEvent || typeof rawEvent !== "object") return null;
+    const e = rawEvent as Record<string, unknown>;
+    if (e.type !== "system" || e.subtype !== "status") return null;
+    if (e.status === "compacting") {
+        return reread ? null : { type: "CompactionStatusFrame", status: "compacting", at };
+    }
+    if (e.status == null && typeof e.compact_result === "string") {
+        return { type: "CompactionStatusFrame", status: "ended", at };
+    }
+    return null;
 }

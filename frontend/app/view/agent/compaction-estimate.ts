@@ -136,3 +136,20 @@ export function compactionProgress(elapsedMs: number, estimateMs: number): { fra
     const elapsed = Math.max(0, elapsedMs);
     return { fraction: Math.min(MAX_FILL, elapsed / estimateMs), over: elapsed > estimateMs };
 }
+
+/** Silence worth mentioning: 2.5x the CLI's ~30 s compaction heartbeat. */
+export const HEARTBEAT_QUIET_MS = 75_000;
+
+/**
+ * How long Claude Code has sent no `status:"compacting"` frame during this
+ * compaction, in ms, or null: only past `HEARTBEAT_QUIET_MS`, and only once a
+ * heartbeat arrived (a CLI that sends none tells us nothing by its silence).
+ */
+export function compactionQuietMs(
+    compacting: { lastHeartbeatAt?: number; heartbeats?: number } | null | undefined,
+    now: number
+): number | null {
+    if (!compacting?.heartbeats || compacting.lastHeartbeatAt == null) return null;
+    const quiet = now - compacting.lastHeartbeatAt;
+    return quiet > HEARTBEAT_QUIET_MS ? quiet : null;
+}

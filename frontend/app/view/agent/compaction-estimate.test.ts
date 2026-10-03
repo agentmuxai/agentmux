@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 import {
     compactionProgress,
+    compactionQuietMs,
+    HEARTBEAT_QUIET_MS,
     estimateCompactionMs,
     parseCompactionSample,
     readCompactionSamples,
@@ -185,5 +187,23 @@ describe("sample store", () => {
     it("behaves as empty when there is no storage at all", () => {
         expect(readCompactionSamples(null)).toEqual([]);
         expect(() => recordCompactionSample(sample("a", 1000, 20000), null)).not.toThrow();
+    });
+});
+
+describe("compactionQuietMs (the CLI's heartbeat gap, spec §6)", () => {
+    it("is 75 s: 2.5x the CLI's ~30 s heartbeat", () => {
+        expect(HEARTBEAT_QUIET_MS).toBe(75_000);
+    });
+
+    it("reports the silence only past the threshold", () => {
+        const c = { lastHeartbeatAt: 10_000, heartbeats: 1 };
+        expect(compactionQuietMs(c, 10_000 + HEARTBEAT_QUIET_MS)).toBeNull();
+        expect(compactionQuietMs(c, 10_000 + 80_000)).toBe(80_000);
+    });
+
+    it("says nothing unless a heartbeat arrived: a start frame alone, or no status frames at all", () => {
+        expect(compactionQuietMs({ lastHeartbeatAt: 10_000, heartbeats: 0 }, 500_000)).toBeNull();
+        expect(compactionQuietMs({}, 500_000)).toBeNull();
+        expect(compactionQuietMs(null, 500_000)).toBeNull();
     });
 });

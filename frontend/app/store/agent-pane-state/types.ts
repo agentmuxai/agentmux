@@ -98,7 +98,8 @@ export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 /**
  * Live "compaction in progress" state — set the instant the `PreCompact`
  * hook's `compaction_started` MPS event lands (Tier 1 of
- * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`),
+ * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`), or
+ * the CLI's own live `status:"compacting"` frame, whichever lands first;
  * cleared when the matching `compact_boundary` frame (a real
  * `CompactionBoundary` command) arrives. `startedAt` drives the live
  * elapsed-time counter (Tier 2) shown near the pane status chip.
@@ -106,6 +107,16 @@ export type DisconnectReason = "stream-unsubscribed" | "transport-error";
 export interface CompactionState {
     trigger: "manual" | "auto";
     startedAt: number;
+    /**
+     * Receipt time of the last `status:"compacting"` stdout frame for this
+     * compaction (`CompactionStatusFrame`); absent if none arrived.
+     */
+    lastHeartbeatAt?: number;
+    /**
+     * Repeats of that frame seen: the CLI's ~30 s heartbeat. The working row
+     * only says "no update from Claude" once at least one arrived.
+     */
+    heartbeats?: number;
 }
 
 /**
@@ -832,6 +843,15 @@ export type AgentPaneCommand =
      * compaction that produces no other stream activity.
      */
     | { type: "CompactionStarted"; trigger: "manual" | "auto"; at: number }
+    /**
+     * A LIVE `system/status` stdout frame (never history or a gap read;
+     * SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §6).
+     * `compacting`: the start or its ~30 s heartbeat. Starts the compaction
+     * through `CompactionStarted` when none is running, else records the
+     * heartbeat. `ended`: `status:null` with a `compact_result`; clears
+     * `compacting` even when no boundary follows (a failure has none).
+     */
+    | { type: "CompactionStatusFrame"; status: "compacting" | "ended"; at: number }
     /**
      * The real `compact_boundary` frame arrived — compaction finished.
      * Sourced from the backend's `AgentEvent::CompactionBoundary`

@@ -809,6 +809,49 @@ describe("AgentWorkingRow estimated compaction progress", () => {
     });
 });
 
+// SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §6: once
+// the CLI's ~30 s heartbeat stops for over 75 s, the row says so.
+describe("AgentWorkingRow compaction heartbeat gap", () => {
+    const right = (c: HTMLElement) => c.querySelector(".agent-working-row-right")?.textContent ?? "";
+    const compacting = (startedAgo: number, heartbeatAgo: number, heartbeats: number) => ({
+        trigger: "auto" as const,
+        startedAt: Date.now() - startedAgo,
+        lastHeartbeatAt: Date.now() - heartbeatAgo,
+        heartbeats,
+    });
+
+    beforeEach(() => localStorage.clear());
+    afterEach(() => localStorage.clear());
+
+    it("says nothing while heartbeats keep coming", () => {
+        const { container } = render(() => <AgentWorkingRow loading={false} compacting={compacting(100_000, 20_000, 3)} />);
+        expect(right(container)).toMatch(/^1m 40s$/);
+    });
+
+    it("shows how long Claude has been silent once the gap passes 75 s", () => {
+        const { container } = render(() => <AgentWorkingRow loading={false} compacting={compacting(140_000, 80_000, 2)} />);
+        expect(right(container)).toBe("2m 20s · no update from Claude for 1m 20s");
+    });
+
+    it("never shows it when no heartbeat arrived (a CLI that sends none, or the hook alone)", () => {
+        const startOnly = render(() => <AgentWorkingRow loading={false} compacting={compacting(140_000, 140_000, 0)} />);
+        expect(right(startOnly.container)).toBe("2m 20s");
+        startOnly.unmount();
+        const hookOnly = render(() => (
+            <AgentWorkingRow loading={false} compacting={{ trigger: "auto", startedAt: Date.now() - 140_000 }} />
+        ));
+        expect(right(hookOnly.container)).toBe("2m 20s");
+    });
+
+    it("sits after the estimate text when there is one", () => {
+        recordCompactionSample({ uuid: "hb-est", preTokens: 50000, durationMs: 30_000 });
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={compacting(140_000, 80_000, 2)} compactionContextTokens={50000} />
+        ));
+        expect(right(container)).toBe("2m 20s · longer than usual · no update from Claude for 1m 20s");
+    });
+});
+
 // SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §3 — right
 // after a launch (one-shot request) the composer takes focus itself, with
 // retries; every other mount defers to focusManager.claimFocusOnMount

@@ -46,7 +46,12 @@ import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { noteTaskFrame } from "./activity/task-outcomes";
-import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import {
+    compactionStatusCommand,
+    contextCompactedLiveTimestamp,
+    contextCompactedNodeId,
+    parseCompactBoundaryFrame,
+} from "./compact-boundary";
 import { parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
@@ -76,7 +81,13 @@ import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { agentPerfStore } from "./virtualization/perf-probe";
 import { toolActivityArg } from "./tool-meta/tool-descriptors";
-import { EchoLedger, TranscriptCursor, type TranscriptFileEvent, type TranscriptSettleLatch } from "./transcript-cursor";
+import {
+    EchoLedger,
+    TranscriptCursor,
+    type DeliveredFrom,
+    type TranscriptFileEvent,
+    type TranscriptSettleLatch,
+} from "./transcript-cursor";
 
 const OutputFileName = "output";
 /** Longest live records wait for the history load before being placed anyway. */
@@ -499,7 +510,7 @@ export function useAgentStream({
 
         // Records the transcript cursor (below) has placed, parsed as live
         // input.
-        const parseRecords = (text: string, from?: { stream: string; gen: string; line: number }) => {
+        const parseRecords = (text: string, from?: DeliveredFrom) => {
             // Where each complete line sits in the transcript, so a tool node
             // records its result's line (SPEC_AGENT_PANE_TOOL_RESULT_UNLOADING_
             // 2026_10_01.md §3.2). Only when this text starts a fresh line: a
@@ -564,6 +575,14 @@ export function useAgentStream({
                 // the dock reads it from here so it never depends on srv's
                 // live registry having watched the task (activity/task-outcomes.ts).
                 if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
+
+                // The CLI's compaction status frames: start, ~30 s heartbeat,
+                // end (compact-boundary.ts). Observe only: a failed end also
+                // becomes its notice row below (cli-notice.ts).
+                if (rawEvent.type === "system") {
+                    const statusCommand = compactionStatusCommand(rawEvent, Date.now(), from?.gap === true);
+                    if (statusCommand) model.dispatchPane(statusCommand);
+                }
 
                 // Real compaction-boundary completion data (Tier 1/2 —
                 // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).

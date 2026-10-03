@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import {
+    compactionStatusCommand,
+    contextCompactedLiveTimestamp,
+    contextCompactedNodeId,
+    parseCompactBoundaryFrame,
+} from "./compact-boundary";
+import { parseHistoryLines } from "./parseHistoryLines";
 
 // Shared by useAgentStream.ts (live) and parseHistoryLines.ts (replay) —
 // Codex P1, PR #2378 round 2: this used to be inlined only in the live
@@ -220,5 +226,63 @@ describe("contextCompactedLiveTimestamp", () => {
         const after = Date.now();
         expect(result).toBeGreaterThanOrEqual(before);
         expect(result).toBeLessThanOrEqual(after);
+    });
+});
+
+// SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §2/§6:
+// the CLI's own status frames, as captured from 2.1.287.
+describe("compactionStatusCommand", () => {
+    const START = {
+        type: "system",
+        subtype: "status",
+        status: "compacting",
+        session_id: "0e7d5c1b-3a2f-4b9e-8d6c-5a4b3c2d1e0f",
+        uuid: "1f2e3d4c-5b6a-4978-8695-a4b3c2d1e0f9",
+    };
+    const ENDED = (result: "success" | "failed") => ({
+        type: "system",
+        subtype: "status",
+        status: null,
+        compact_result: result,
+        ...(result === "failed" ? { compact_error: "Error during compaction: API Error: 400" } : {}),
+        session_id: "0e7d5c1b-3a2f-4b9e-8d6c-5a4b3c2d1e0f",
+        uuid: "2a3b4c5d-6e7f-4089-9a1b-2c3d4e5f6a7b",
+    });
+
+    it("a live start or heartbeat frame becomes a `compacting` command at the receipt time", () => {
+        expect(compactionStatusCommand(START, 1_000, false)).toEqual({
+            type: "CompactionStatusFrame",
+            status: "compacting",
+            at: 1_000,
+        });
+    });
+
+    it("the end frame, success or failure, becomes an `ended` command", () => {
+        for (const result of ["success", "failed"] as const) {
+            expect(compactionStatusCommand(ENDED(result), 2_000, false)).toEqual({
+                type: "CompactionStatusFrame",
+                status: "ended",
+                at: 2_000,
+            });
+        }
+    });
+
+    it("a gap read never starts or extends a compaction, but its end frame still clears one", () => {
+        expect(compactionStatusCommand(START, 1_000, true)).toBeNull();
+        expect(compactionStatusCommand(ENDED("success"), 1_000, true)?.status).toBe("ended");
+    });
+
+    it("ignores other frames and other statuses", () => {
+        expect(compactionStatusCommand({ ...START, status: "requesting" }, 1, false)).toBeNull();
+        expect(compactionStatusCommand({ ...START, status: null }, 1, false)).toBeNull(); // no compact_result
+        expect(compactionStatusCommand({ ...START, subtype: "init" }, 1, false)).toBeNull();
+        expect(compactionStatusCommand({ ...START, type: "assistant" }, 1, false)).toBeNull();
+        expect(compactionStatusCommand(null, 1, false)).toBeNull();
+        expect(compactionStatusCommand("status", 1, false)).toBeNull();
+    });
+
+    it("history replay builds nothing from the start and heartbeat frames", () => {
+        const { nodes } = parseHistoryLines([JSON.stringify(START), JSON.stringify(START)], "claude-stream-json");
+        expect(nodes).toEqual([]);
     });
 });
