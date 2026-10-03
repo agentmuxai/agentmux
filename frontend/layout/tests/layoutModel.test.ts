@@ -4,6 +4,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
+import { isInResizeHandleZone } from "@/layout/lib/layoutGeometry";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
 import {
     FlexDirection,
@@ -697,6 +698,17 @@ describe("resize through collapsed panes", () => {
         expect(zoneTop).toBeGreaterThanOrEqual(b.top + (2 * b.height) / 3 - 1);
         // Without the clamp a 40 px handle would reach 20 px into this chip.
         expect(b.top + b.height - zoneTop).toBeLessThan(20);
+
+        // The drag-rejection zone (TileLayout.win32 rejectDragAt) uses the
+        // same clamped extent, so a pane drag from the chip's lower half is
+        // not refused (ReAgent P2 on #4260).
+        const handles = model.resizeHandles();
+        const x = b.left + b.width / 2;
+        const half = model.resizeHandleSizePx() / 2; // 20
+        const lowerHalf = b.top + b.height - added[0].halfSizePx! - 1;
+        expect(lowerHalf).toBeGreaterThan(b.top + b.height / 2);
+        expect(isInResizeHandleZone(handles, half, x, lowerHalf)).toBe(false);
+        expect(isInResizeHandleZone(handles, half, x, b.top + b.height - 1)).toBe(true);
     });
 
     it("a Row's collapsed pane is unchanged: one handle spanning it", () => {
