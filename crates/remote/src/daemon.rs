@@ -35,6 +35,11 @@ const REPLAY_CHUNK: usize = 256 * 1024;
 /// With no session and no connection for this long, the daemon exits.
 const IDLE_EXIT: Duration = Duration::from_secs(60);
 
+/// A session nobody has attached to for this long is ended (spec §7.6), so an
+/// abandoned shell does not keep its ring, its terminal and the daemon alive
+/// for ever.
+const DETACHED_LIMIT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
 /// A client that cannot take a frame for this long is dropped: a stalled link
 /// must not hold the session's lock (and so every reattach) behind it.
 const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -67,6 +72,8 @@ struct Inner {
     /// under this lock, so output, replay and replies never interleave.
     client: Option<(u64, UnixStream)>,
     exited: Option<i32>,
+    /// Since when no client has been attached (for the detached limit).
+    detached_since: Option<Instant>,
 }
 
 struct Session {
@@ -117,6 +124,23 @@ pub fn run(base: &Path) -> io::Result<()> {
             let mut idle_since = Instant::now();
             loop {
                 std::thread::sleep(Duration::from_secs(5));
+                let abandoned: Vec<Arc<Session>> = sessions
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .filter(|s| {
+                        let inner = s.inner.lock().unwrap();
+                        inner.exited.is_none()
+                            && inner.client.is_none()
+                            && inner
+                                .detached_since
+                                .is_some_and(|t| t.elapsed() >= DETACHED_LIMIT)
+                    })
+                    .cloned()
+                    .collect();
+                for s in abandoned {
+                    end_session(&sessions, &s.id, Some(&s));
+                }
                 let busy =
                     !sessions.lock().unwrap().is_empty() || connections.load(Ordering::SeqCst) > 0;
                 if busy {
@@ -260,6 +284,7 @@ fn attach(
                         ring: Ring::new(DEFAULT_CAPACITY),
                         client: None,
                         exited: None,
+                        detached_since: Some(Instant::now()),
                     }),
                 });
                 start_reader(s.clone(), p.child, sessions.clone());
@@ -311,6 +336,7 @@ fn attach(
         if let Some((_, old)) = inner.client.replace((generation, out)) {
             let _ = old.shutdown(std::net::Shutdown::Both);
         }
+        inner.detached_since = None;
     }
 
     // Frames from srv.
@@ -326,6 +352,18 @@ fn attach(
             break;
         };
         for frame in frames {
+            // A connection another attach took over may still have frames it
+            // read before its socket was shut: none of them act any more.
+            let current = session
+                .inner
+                .lock()
+                .unwrap()
+                .client
+                .as_ref()
+                .is_some_and(|(g, _)| *g == generation);
+            if !current {
+                return Ok(());
+            }
             match frame {
                 Frame::Input(data) => {
                     let _ = master.write_all(&data);
@@ -363,12 +401,14 @@ fn drop_client(inner: &mut Inner) {
     if let Some((_, c)) = inner.client.take() {
         let _ = c.shutdown(std::net::Shutdown::Both);
     }
+    inner.detached_since = Some(Instant::now());
 }
 
 fn release(session: &Session, generation: u64) {
     let mut inner = session.inner.lock().unwrap();
     if inner.client.as_ref().is_some_and(|(g, _)| *g == generation) {
         inner.client = None;
+        inner.detached_since = Some(Instant::now());
     }
 }
 
@@ -404,23 +444,15 @@ fn start_reader(session: Arc<Session>, mut child: std::process::Child, sessions:
         let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
         let mut inner = session.inner.lock().unwrap();
         inner.exited = Some(code);
-        // An attached client that hears the exit lets the session go. Otherwise
-        // (no client, or the exit could not be written to it) the session
-        // waits for the next attach to replay its last output and the exit,
-        // so srv learns it ended rather than finding a new shell.
-        let delivered = match inner.client.take() {
-            Some((_, mut c)) => {
-                let ok = c.write_all(&Frame::Exited { code }.encode()).is_ok();
-                let _ = c.shutdown(std::net::Shutdown::Both);
-                ok
-            }
-            None => false,
-        };
-        drop(inner);
-        if delivered {
-            remove_if_same(&sessions, &session);
-            return;
+        // Tell an attached client, but keep the session (its last output and
+        // its exit) for the TTL either way: `attach` taking the frame does not
+        // mean it reached srv over ssh, and a reattach in that window must
+        // replay the exit, not find a new shell.
+        if let Some((_, mut c)) = inner.client.take() {
+            let _ = c.write_all(&Frame::Exited { code }.encode());
+            let _ = c.shutdown(std::net::Shutdown::Both);
         }
+        drop(inner);
         // Ended (taken out of the map) already: nothing to keep.
         let still_listed = sessions
             .lock()
