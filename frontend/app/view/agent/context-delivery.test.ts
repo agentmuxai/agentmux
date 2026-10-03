@@ -8,7 +8,7 @@ import {
     compactionSummaryNodeId,
     contextDeliveryTitle,
 } from "./context-delivery";
-import { contextCompactedNodeId, type CompactBoundaryData } from "./compact-boundary";
+import { contextCompactedNodeId, parseCompactBoundaryFrame, type CompactBoundaryData } from "./compact-boundary";
 
 const SUMMARY = [
     "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.",
@@ -28,6 +28,7 @@ const boundary: CompactBoundaryData = {
     postTokens: 8_000,
     durationMs: 30_000,
     frameTimestamp: "2026-09-30T08:00:00.000Z",
+    uuid: "b-1",
 };
 
 const summaryFrame = (content: unknown = SUMMARY, extra: Record<string, unknown> = { isSynthetic: true }) => ({
@@ -54,6 +55,21 @@ describe("CompactionSummaryTracker", () => {
         expect(item.sizeBytes).toBe(new TextEncoder().encode(SUMMARY).length);
         expect(item.tokens).toBeGreaterThan(0);
         expect(item.excerpt).toMatch(/^The user asked to make the Cloud Console sign in/);
+    });
+
+    it("pairs with the real stdout boundary (snake_case, no timestamp)", () => {
+        const stdout = parseCompactBoundaryFrame({
+            type: "system",
+            subtype: "compact_boundary",
+            uuid: "8c1f4e2a-2b7d-4a51-9a0e-6f3c2d1b0a99",
+            compact_metadata: { trigger: "auto", pre_tokens: 25040, post_tokens: 733, cumulative_dropped_tokens: 24307, duration_ms: 1513 },
+        });
+        const t = new CompactionSummaryTracker();
+        t.noteBoundary(stdout!);
+        const node = t.take(summaryFrame(), 1_000);
+        expect(node!.trigger).toBe("auto");
+        expect(node!.timestamp).toBe(1_000);
+        expect(node!.id).toBe("context-delivery-compaction-context-compacted-8c1f4e2a-2b7d-4a51-9a0e-6f3c2d1b0a99");
     });
 
     it("accepts the text signal alone (no isSynthetic flag)", () => {

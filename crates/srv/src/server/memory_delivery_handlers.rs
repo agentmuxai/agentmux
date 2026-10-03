@@ -21,7 +21,7 @@
 //! [`Caller::Agent`](super::caller::Caller)): its Personal Memory is that
 //! agent's. Without a token only Global Memory is delivered.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex};
 
 use axum::extract::State;
@@ -121,6 +121,10 @@ const CLAIM_WINDOW_MS: i64 = 60_000;
 const PENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 const PENDING_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// How many compaction boundaries' claims are remembered, so a repeat claim
+/// for one stands down. Boundary uuids are unique across blocks.
+const CLAIMED_BOUNDARIES_MAX: usize = 256;
+
 /// Deliveries and fallback claims, behind one lock so "who claimed this event
 /// first" is decided atomically.
 #[derive(Default)]
@@ -132,6 +136,8 @@ struct DeliveryState {
     /// Re-deliveries srv composed for the frontend's fallback, by
     /// `delivery_id`, until the hidden message that sends one arrives.
     fallbacks: HashMap<String, FallbackDelivery>,
+    /// Compaction boundaries already claimed, by `uuid`, oldest first.
+    claimed_boundaries: VecDeque<String>,
 }
 
 /// What the fallback's claim found.
@@ -184,6 +190,21 @@ impl DeliveryState {
                 FallbackClaim::Deliver
             }
         }
+    }
+
+    /// A claim naming its compaction boundary: [`Self::claim_fallback`] the
+    /// first time, `Skip` for every later claim of the same boundary.
+    fn claim_boundary(&mut self, block_id: &str, reason: Reason, boundary_uuid: Option<&str>, now: i64) -> FallbackClaim {
+        if let Some(uuid) = boundary_uuid {
+            if self.claimed_boundaries.iter().any(|u| u == uuid) {
+                return FallbackClaim::Skip;
+            }
+            if self.claimed_boundaries.len() >= CLAIMED_BOUNDARIES_MAX {
+                self.claimed_boundaries.pop_front();
+            }
+            self.claimed_boundaries.push_back(uuid.to_string());
+        }
+        self.claim_fallback(block_id, reason, now)
     }
 
     /// The fallback gave up waiting for the hook: it delivers, and the hook's
@@ -362,16 +383,19 @@ fn reason_for_fallback(reason: &str) -> Option<Reason> {
 /// event (`true`) or stand down because the `SessionStart` hook delivered it
 /// (`false`). Waits out a hook delivery still in flight for up to
 /// [`PENDING_WAIT`], then lets the fallback deliver, so a hook that died
-/// part-way never leaves the agent without its memory.
-pub(crate) async fn claim_fallback(block_id: &str, reason: &str) -> bool {
+/// part-way never leaves the agent without its memory. With a
+/// `boundary_uuid`, only the first claim of that compaction can deliver.
+pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: Option<&str>) -> bool {
     let Some(reason) = reason_for_fallback(reason) else { return true };
     let deadline = tokio::time::Instant::now() + PENDING_WAIT;
+    // Checked once: the polls below are this same claim.
+    let mut boundary_uuid = boundary_uuid.filter(|u| !u.is_empty());
     loop {
         let now = agentmux_common::time::now_ms();
         let claim = {
             let mut st = state_lock();
             st.prune(now);
-            st.claim_fallback(block_id, reason, now)
+            st.claim_boundary(block_id, reason, boundary_uuid.take(), now)
         };
         match claim {
             FallbackClaim::Deliver => return true,
@@ -403,7 +427,7 @@ pub(crate) fn register_memory_delivery_handlers(
     engine.register_typed(
         COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
         |req: CommandMemoryDeliveryClaimFallbackData, _ctx| async move {
-            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason).await })
+            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason, req.boundary_uuid.as_deref()).await })
         },
     );
     let state = state.clone();
@@ -902,6 +926,53 @@ mod tests {
             FallbackClaim::Deliver,
             "a delivery older than the window is another event"
         );
+    }
+
+    #[test]
+    fn a_repeat_claim_of_one_boundary_stands_down() {
+        let mut st = DeliveryState::default();
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Deliver);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
+        assert_eq!(
+            st.claim_boundary("other", Reason::Compact, Some("u1"), NOW),
+            FallbackClaim::Skip,
+            "another pane of the agent, same boundary"
+        );
+        assert_eq!(
+            st.claim_boundary("b", Reason::Compact, Some("u2"), NOW),
+            FallbackClaim::Deliver,
+            "a new boundary takes the usual path"
+        );
+    }
+
+    #[test]
+    fn a_new_boundary_still_stands_down_for_a_hook_delivery_in_the_window() {
+        let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
+        let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        assert_eq!(
+            st.claim_boundary("b", Reason::Compact, Some("u1"), NOW + CLAIM_WINDOW_MS + 1),
+            FallbackClaim::Deliver,
+            "a hook delivery older than the window is another event"
+        );
+    }
+
+    #[test]
+    fn a_claim_without_a_boundary_keeps_the_old_behaviour() {
+        let mut st = DeliveryState::default();
+        assert_eq!(st.claim_boundary("b", Reason::Compact, None, NOW), FallbackClaim::Deliver);
+        assert_eq!(st.claim_boundary("b", Reason::Compact, None, NOW), FallbackClaim::Deliver);
+        assert!(st.claimed_boundaries.is_empty());
+    }
+
+    #[test]
+    fn claimed_boundaries_are_bounded() {
+        let mut st = DeliveryState::default();
+        for i in 0..=CLAIMED_BOUNDARIES_MAX {
+            st.claim_boundary("b", Reason::Compact, Some(&format!("u{i}")), NOW);
+        }
+        assert_eq!(st.claimed_boundaries.len(), CLAIMED_BOUNDARIES_MAX);
+        assert_eq!(st.claimed_boundaries.front().map(String::as_str), Some("u1"));
     }
 
     #[test]

@@ -35,7 +35,8 @@
 //!   text_deltas.
 //! - `system.subtype=compact_boundary` — emits
 //!   `AgentEvent::CompactionBoundary` with the exact trigger/token/
-//!   duration data from `compactMetadata`. Other `system` subtypes
+//!   duration data from `compact_metadata` (stdout, snake_case) or
+//!   `compactMetadata` (transcript, camelCase). Other `system` subtypes
 //!   are still discarded. See
 //!   `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
 //!   §4.1 — this used to be silently dropped as an unhandled
@@ -327,15 +328,18 @@ fn handle_result(t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEve
 /// `type: "system"` frames cover several subtypes; today we only act
 /// on `compact_boundary` (see
 /// `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md`
-/// §4.1). Any other subtype — or a `compact_boundary` frame missing
-/// `compactMetadata` / carrying malformed fields — produces no event
+/// §4.1). Any other subtype — or a `compact_boundary` frame missing its
+/// metadata / carrying malformed fields — produces no event
 /// rather than a bad one, matching this file's existing philosophy
 /// (see the module doc comment).
+///
+/// The CLI writes the frame to stdout in snake_case (`compact_metadata`,
+/// `pre_tokens`, …) and to its transcript in camelCase; both are read.
 fn handle_system_message(_t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec<AgentEvent>) {
     if frame.get("subtype").and_then(|v| v.as_str()) != Some("compact_boundary") {
         return;
     }
-    let Some(meta) = frame.get("compactMetadata") else {
+    let Some(meta) = field(frame, "compact_metadata", "compactMetadata") else {
         return;
     };
     let Some(trigger) = meta.get("trigger").and_then(|v| v.as_str()).and_then(|s| match s {
@@ -345,18 +349,17 @@ fn handle_system_message(_t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec
     }) else {
         return;
     };
-    let Some(pre_tokens) = meta.get("preTokens").and_then(|v| v.as_u64()) else {
+    let count = |snake: &str, camel: &str| field(meta, snake, camel).and_then(|v| v.as_u64());
+    let Some(pre_tokens) = count("pre_tokens", "preTokens") else {
         return;
     };
-    let Some(post_tokens) = meta.get("postTokens").and_then(|v| v.as_u64()) else {
+    let Some(post_tokens) = count("post_tokens", "postTokens") else {
         return;
     };
-    let Some(cumulative_dropped_tokens) =
-        meta.get("cumulativeDroppedTokens").and_then(|v| v.as_u64())
-    else {
+    let Some(cumulative_dropped_tokens) = count("cumulative_dropped_tokens", "cumulativeDroppedTokens") else {
         return;
     };
-    let Some(duration_ms) = meta.get("durationMs").and_then(|v| v.as_u64()) else {
+    let Some(duration_ms) = count("duration_ms", "durationMs") else {
         return;
     };
     out.push(AgentEvent::CompactionBoundary {
@@ -366,6 +369,11 @@ fn handle_system_message(_t: &mut ClaudeTranslator, frame: &Value, out: &mut Vec
         cumulative_dropped_tokens,
         duration_ms,
     });
+}
+
+/// `obj[snake]`, else `obj[camel]`.
+fn field<'a>(obj: &'a Value, snake: &str, camel: &str) -> Option<&'a Value> {
+    obj.get(snake).or_else(|| obj.get(camel))
 }
 
 pub(crate) fn parse_usage(usage: Option<&Value>) -> TokenCounts {
@@ -689,6 +697,60 @@ mod tests {
             }
             other => panic!("expected CompactionBoundary, got {other:?}"),
         }
+    }
+
+    /// The stdout form, as Claude Code 2.1.287 writes it: snake_case, no
+    /// `timestamp` (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES §2).
+    fn stdout_compact_boundary_frame(trigger: &str) -> Value {
+        json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "uuid": "8c1f4e2a-2b7d-4a51-9a0e-6f3c2d1b0a99",
+            "compact_metadata": {
+                "trigger": trigger,
+                "pre_tokens": 25_040,
+                "post_tokens": 733,
+                "cumulative_dropped_tokens": 24_307,
+                "duration_ms": 1_513
+            },
+            "logical_parent_uuid": "3e9b7c10-5d2f-4c8a-b1e4-7a6d5c4b3a21"
+        })
+    }
+
+    #[test]
+    fn stdout_snake_case_compact_boundary_emits_compaction_boundary() {
+        for (wire, expected) in [("manual", CompactionTrigger::Manual), ("auto", CompactionTrigger::Auto)] {
+            let mut t = ClaudeTranslator::new();
+            let events = t.translate(stdout_compact_boundary_frame(wire));
+            assert_eq!(events.len(), 1, "{wire}");
+            match &events[0] {
+                AgentEvent::CompactionBoundary {
+                    trigger,
+                    pre_tokens,
+                    post_tokens,
+                    cumulative_dropped_tokens,
+                    duration_ms,
+                } => {
+                    assert_eq!(*trigger, expected);
+                    assert_eq!(*pre_tokens, 25_040);
+                    assert_eq!(*post_tokens, 733);
+                    assert_eq!(*cumulative_dropped_tokens, 24_307);
+                    assert_eq!(*duration_ms, 1_513);
+                }
+                other => panic!("expected CompactionBoundary, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn stdout_snake_case_malformed_field_returns_empty() {
+        let mut t = ClaudeTranslator::new();
+        let mut frame = stdout_compact_boundary_frame("manual");
+        frame["compact_metadata"]["pre_tokens"] = json!("not-a-number");
+        assert!(t.translate(frame).is_empty());
+        let mut frame = stdout_compact_boundary_frame("manual");
+        frame["compact_metadata"].as_object_mut().unwrap().remove("duration_ms");
+        assert!(t.translate(frame).is_empty());
     }
 
     #[test]

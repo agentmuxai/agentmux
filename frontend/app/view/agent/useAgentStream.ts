@@ -118,7 +118,7 @@ function pushContextCompactedNodes(
                       preTokens: ev.tokensBefore,
                       postTokens: ev.tokensAfter,
                       durationMs: ev.durationMs,
-                      frameTimestamp: ev.frameTimestamp,
+                      uuid: ev.boundaryUuid,
                   })
                 : `context-compacted-${Date.now()}`;
         const timestamp =
@@ -332,8 +332,12 @@ export function useAgentStream({
         // Claude Code's SessionStart hook now delivers the same memory at a
         // session start and after a compaction; this fallback fires only when
         // the hook didn't (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
-        claimFallback: (reason) =>
-            MemoryDeliveryApi.ClaimFallbackCommand(TabRpcClient, { block_id: blockId, reason }).then((r) => r.deliver),
+        claimFallback: (reason, boundaryUuid) =>
+            MemoryDeliveryApi.ClaimFallbackCommand(TabRpcClient, {
+                block_id: blockId,
+                reason,
+                ...(boundaryUuid ? { boundary_uuid: boundaryUuid } : {}),
+            }).then((r) => r.deliver),
         // Reuses the REAL TurnStart/TurnReset commands unmodified — a hidden
         // reinjection is a completely genuine turn state-machine-wise; only
         // its rendering differs. See memory-reinjection-controller.ts's
@@ -604,6 +608,7 @@ export function useAgentStream({
                             durationMs: compactBoundary.durationMs,
                             at: Date.now(),
                             frameTimestamp: compactBoundary.frameTimestamp,
+                            boundaryUuid: compactBoundary.uuid,
                         });
                         pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
                         // Fire-and-forget: trigger() handles its own
@@ -612,7 +617,11 @@ export function useAgentStream({
                         // to await or catch. See
                         // SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_
                         // 2026_09_22.md §1.2/§3.3.
-                        void memoryReinjectionController.trigger(compactBoundary.frameTimestamp, "compaction");
+                        void memoryReinjectionController.trigger(
+                            compactBoundary.frameTimestamp,
+                            "compaction",
+                            compactBoundary.uuid,
+                        );
                     }
                     continue;
                 }

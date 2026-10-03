@@ -853,16 +853,19 @@ export type AgentPaneCommand =
            * The `compact_boundary` frame's own `timestamp` field, raw
            * (not parsed/reformatted) — absent/`null` if the frame didn't
            * have one (or the caller doesn't have a raw frame at all, e.g.
-           * a test constructing this command directly). Threaded through
-           * ONLY so the emitted `context-compacted` event's node id can
-           * match `parseHistoryLines.ts`'s id for the same persisted line
-           * — never used for `state.at`/watchdog purposes, which stay on
-           * `Date.now()` (Codex P2, PR #2378 round 7). Optional: every
-           * existing call site/test that doesn't have a frame to key on
-           * still type-checks unchanged; `pushContextCompactedNodes`
-           * falls back to a live timestamp when absent.
+           * a test constructing this command directly). A time value
+           * only: the boundary's completion time for the stale-boundary
+           * checks and the node's time, falling back to `at` / receipt
+           * time when absent (the CLI's stdout frame has none). Never an
+           * id — see `boundaryUuid`.
            */
           frameTimestamp?: string | null;
+          /**
+           * The frame's own `uuid`: keys the emitted `context-compacted`
+           * node's id, so it matches `parseHistoryLines.ts`'s id for the
+           * same line. Optional for callers without a frame.
+           */
+          boundaryUuid?: string | null;
       }
 
     // ── Attached task axis (SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) ──
@@ -1031,6 +1034,8 @@ export type AgentPaneEvent =
           durationMs?: number;
           /** `source: "real"` only — see `CompactionBoundary` command's doc comment. */
           frameTimestamp?: string | null;
+          /** `source: "real"` only — see `CompactionBoundary` command's doc comment. */
+          boundaryUuid?: string | null;
       }
     /** `CompactionStarted` landed — compaction is in progress. */
     | { type: "compaction-started"; trigger: "manual" | "auto" }

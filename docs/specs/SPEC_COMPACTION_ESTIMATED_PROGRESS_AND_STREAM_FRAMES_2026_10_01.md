@@ -1,7 +1,7 @@
 # SPEC: compaction progress — what the CLI really emits, an estimated progress bar (Tier 4), and a stream-frame bug found on the way
 
 **Date:** 2026-10-01
-**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) and the rest of status-frame handling (§6) are not built and need the decisions in §8.
+**Status:** active — Tier 4 (§5) shipped in PR #4220; the failed-compaction notice (§10) shipped in PR #4232; the stream-frame fix (§3) is built (§8 D1); the rest of status-frame handling (§6) is not built and needs D2.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-10-01: *"search online, latest claude CLI system, can agentmux get the progress of the compression?"*, then *"write spec to file on implements. sure, lets try the tier 4"*.
 **Researched against:** `agentmuxai/agentmux` `main` @ `807c749ce`; Claude Code CLI **2.1.287** (the version AgentMux has installed under `~/.agentmux/shared/cli/claude/`).
@@ -98,7 +98,11 @@ It should be designed together with the §3 fix. Seeding the sample store from t
 
 ## 8. Decisions
 
-- **D1 — fix the boundary casing (and re-key node ids on `uuid`) so the live compaction path actually runs?** Recommended: yes, as its own PR, with memory reinjection's id fixed first and a check of what hidden reinjection does after every compaction. Alternative: leave the live path as it is and rely on history replay.
+- **D1 — fix the boundary casing (and re-key node ids on `uuid`) so the live compaction path actually runs?** **Done (2026-10-03).** The check first found a duplicate send: the controller deferred a mid-turn compaction and only claimed at turn end, by which time srv's 60 s claim window had dropped the `SessionStart` hook's delivery, so both sent the memory. Built:
+  - both parsers (`claude.rs` `handle_system_message`, `compact-boundary.ts` `parseCompactBoundaryFrame`) read `compact_metadata`/`compactMetadata` and each field in either casing; malformed frames are still dropped;
+  - boundary-derived ids are keyed on the frame's `uuid`: `contextCompactedNodeId` (and through it the summary card's fallback id) and `memoryReinjectionNodeId`. `timestamp` is only a time value, with the existing receipt-time fallbacks;
+  - a compaction is claimed when its boundary arrives (`memory-reinjection-controller.ts`), with the boundary's `uuid` (`boundary_uuid` on `memorydelivery:claim_fallback`). "Skip" sends nothing later; "deliver" sends at turn end as before, without a second claim;
+  - once per boundary: the controller ignores a `uuid` it has seen, and srv answers "skip" to a repeat claim of a `uuid` (last 256 remembered, across blocks), covering a gap re-read, another pane of the agent and a double trigger. A claim without a `uuid` behaves as before. A fresh session still claims when it fires.
 - **D2 — the rest of status-frame handling (§6: a hook-independent start, a heartbeat)** after D1, or not at all? The failure notice is built (§10).
 - **D3 — sample store scope:** global (as built) or per account/model.
 

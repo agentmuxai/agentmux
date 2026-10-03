@@ -8,4 +8,9 @@ export type CommandMemoryDeliveryClaimFallbackData = { block_id: string,
 /**
  * The reinjection's reason: `compaction` or `fresh_session`.
  */
-reason: string, };
+reason: string, 
+/**
+ * The compaction boundary's `uuid`: a second claim for the same boundary
+ * (a re-read, another pane of the agent) stands down.
+ */
+boundary_uuid?: string, };

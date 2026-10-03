@@ -133,8 +133,12 @@ export interface MemoryReinjectionControllerOpts {
      * the pane untouched. The sidecar decides atomically: whichever of the hook
      * and this fallback claims the event first delivers. Absent, or a
      * rejection, means deliver: a duplicate beats no memory.
+     *
+     * A compaction is claimed when its boundary arrives, with the boundary's
+     * `uuid` (srv answers a repeat claim of one boundary with `false`); a
+     * fresh session when it is about to fire.
      */
-    claimFallback?: (reason: ReinjectionReason) => Promise<boolean>;
+    claimFallback?: (reason: ReinjectionReason, boundaryUuid?: string) => Promise<boolean>;
 }
 
 export interface MemoryReinjectionController {
@@ -155,8 +159,11 @@ export interface MemoryReinjectionController {
      * is called. No-ops entirely (does not fetch, does not defer) if a
      * hidden turn is already in flight — re-entrancy guard, never stacks
      * two.
+     *
+     * `boundaryUuid`: the compaction boundary's own `uuid`. A boundary seen
+     * again (a re-read, a reconnect) is ignored, and it keys the node id.
      */
-    trigger: (frameTimestamp: string | null, reason: ReinjectionReason) => Promise<void>;
+    trigger: (frameTimestamp: string | null, reason: ReinjectionReason, boundaryUuid?: string | null) => Promise<void>;
     /**
      * Call at every `session_end`, unconditionally — including for
      * perfectly ordinary, unrelated turns. Returns the completed
@@ -179,12 +186,32 @@ export interface MemoryReinjectionController {
 interface DeferredTrigger {
     frameTimestamp: string | null;
     reason: ReinjectionReason;
+    boundaryUuid: string | null;
+    /** srv already answered "deliver" for this event: don't ask again. */
+    claimed: boolean;
 }
+
+/** Boundary uuids a controller remembers, to ignore one seen twice. */
+const SEEN_BOUNDARIES_MAX = 64;
 
 export function createMemoryReinjectionController(opts: MemoryReinjectionControllerOpts): MemoryReinjectionController {
     let hiding = false;
     let pendingNode: MemoryReinjectionNode | ContextDeliveryNode | null = null;
     let deferred: DeferredTrigger | undefined = undefined; // undefined = nothing deferred
+    const seenBoundaries = new Set<string>();
+
+    function firstSighting(uuid: string): boolean {
+        if (seenBoundaries.has(uuid)) return false;
+        seenBoundaries.add(uuid);
+        if (seenBoundaries.size > SEEN_BOUNDARIES_MAX) {
+            seenBoundaries.delete(seenBoundaries.values().next().value as string);
+        }
+        return true;
+    }
+
+    function claim(reason: ReinjectionReason, boundaryUuid: string | null): Promise<boolean> {
+        return opts.claimFallback!(reason, boundaryUuid ?? undefined).catch(() => true);
+    }
 
     /**
      * What to send and what to show: srv's composition when it can (CD2b),
@@ -193,6 +220,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
     async function prepare(
         frameTimestamp: string | null,
         reason: ReinjectionReason,
+        boundaryUuid: string | null,
     ): Promise<{ message: string; deliveryId?: string; node: MemoryReinjectionNode | ContextDeliveryNode } | null> {
         if (opts.compose) {
             const composed = await opts.compose(reason).then(
@@ -217,14 +245,15 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             message: composeReinjectionMessage(entries, reason),
             node: buildMemoryReinjectionNode(entries, {
                 frameTimestamp,
+                boundaryUuid,
                 now: opts.now(),
                 contextWindow: opts.contextWindow(),
             }),
         };
     }
 
-    async function doTrigger(frameTimestamp: string | null, reason: ReinjectionReason): Promise<void> {
-        const prepared = await prepare(frameTimestamp, reason);
+    async function doTrigger(t: DeferredTrigger): Promise<void> {
+        const prepared = await prepare(t.frameTimestamp, t.reason, t.boundaryUuid);
         if (!prepared) return;
 
         // Re-check busy-ness HERE, after the async fetchEntries() await —
@@ -244,7 +273,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // matters, not scattered across multiple call sites that could
         // drift out of sync.
         if (opts.isPaneWorking()) {
-            deferred = { frameTimestamp, reason };
+            deferred = t;
             return;
         }
 
@@ -253,12 +282,11 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // nothing: no hiding, no pending node, no TurnStart (Codex on #3926:
         // a skip must never strand the pane busy). A claim is only made when
         // the fallback is really about to fire, never while deferred.
-        if (opts.claimFallback) {
-            const proceed = await opts.claimFallback(reason).catch(() => true);
-            if (!proceed) return;
+        if (opts.claimFallback && !t.claimed) {
+            if (!(await claim(t.reason, t.boundaryUuid))) return;
             // The claim was a round trip too: a real turn may have started.
             if (opts.isPaneWorking()) {
-                deferred = { frameTimestamp, reason };
+                deferred = { ...t, claimed: true };
                 return;
             }
         }
@@ -292,9 +320,24 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         }
     }
 
-    async function trigger(frameTimestamp: string | null, reason: ReinjectionReason): Promise<void> {
+    async function trigger(
+        frameTimestamp: string | null,
+        reason: ReinjectionReason,
+        boundaryUuid: string | null = null,
+    ): Promise<void> {
+        if (boundaryUuid && !firstSighting(boundaryUuid)) return; // once per boundary
         if (hiding) return; // re-entrancy guard — see doc comment
         if (deferred !== undefined) return; // already have one queued — first wins, arbitrary but simple
+
+        const t: DeferredTrigger = { frameTimestamp, reason, boundaryUuid, claimed: false };
+        // A compaction is claimed now, not when it fires: the SessionStart
+        // hook delivered moments ago, inside srv's claim window. Claimed at
+        // the end of a long turn, that window has passed and both would send.
+        if (reason === "compaction" && opts.claimFallback) {
+            if (!(await claim(reason, boundaryUuid))) return;
+            t.claimed = true;
+            if (hiding || deferred !== undefined) return;
+        }
 
         // Early-exit OPTIMIZATION only — skips an unnecessary fetchEntries()
         // round trip when the pane is obviously already busy right now.
@@ -302,11 +345,11 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // isPaneWorking() itself, immediately before dispatching, which is
         // what actually closes the race a stale check here could reopen.
         if (opts.isPaneWorking()) {
-            deferred = { frameTimestamp, reason };
+            deferred = t;
             return;
         }
 
-        await doTrigger(frameTimestamp, reason);
+        await doTrigger(t);
     }
 
     function onSessionEnd(): MemoryReinjectionNode | ContextDeliveryNode | null {
@@ -320,9 +363,9 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
     function maybeFireDeferred(): void {
         if (hiding) return; // shouldn't be reachable (trigger() already guards), but never stack regardless
         if (deferred === undefined) return;
-        const { frameTimestamp, reason } = deferred;
+        const t = deferred;
         deferred = undefined;
-        void doTrigger(frameTimestamp, reason);
+        void doTrigger(t);
     }
 
     return {

@@ -391,6 +391,9 @@ own UI re-surfacing that content as an ordinary visible message on reopen.
 
 ### 3.3 Delivery — reusing the real send path, not inventing a raw-stdin bypass
 
+> **Note (2026-10-03):** the compaction trigger never ran live before this date (the parsers missed the CLI's snake_case stdout frame). With it fixed, a compaction claims `memorydelivery:claim_fallback` when its boundary arrives, not when the deferred turn fires, so the `SessionStart` hook's delivery is still inside srv's claim window. The claim carries the boundary's `uuid`; the controller and srv both answer a repeat of one `uuid` with no send.
+> See `SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md` §8 D1.
+
 Send through the exact same path `buildStartupPayload` already uses
 (`handleSendMessage`, confirmed real and working) rather than a new raw
 stdin-write mechanism — deliberately, for two reasons: it is the only send
