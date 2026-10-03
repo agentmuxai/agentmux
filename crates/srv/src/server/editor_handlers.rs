@@ -32,6 +32,26 @@ fn scratch_session_token() -> &'static str {
     SCRATCH_SESSION_TOKEN.get_or_init(|| uuid::Uuid::new_v4().to_string())
 }
 
+/// The editor changes files only under the user's home folder (an allowlist).
+/// A WSL distro's file through `\\wsl.localhost` counts when it is under a
+/// distro user's home folder (`remote::wsl_fs::in_home`): the same rule, in
+/// the distro. Its `/mnt/<letter>` is a Windows drive and never counts here.
+fn editor_may_change(canonical: &std::path::Path, canonical_home: &std::path::Path) -> bool {
+    canonical.starts_with(canonical_home) || in_a_distro_home(canonical)
+}
+
+/// A home folder itself, the user's or a distro user's: never renamed or deleted.
+fn is_a_home(canonical: &std::path::Path, canonical_home: &std::path::Path) -> bool {
+    canonical == canonical_home
+        || crate::backend::remote::wsl_fs::split_share(&canonical.to_string_lossy())
+            .is_some_and(|s| crate::backend::remote::wsl_fs::is_home(&s.linux))
+}
+
+fn in_a_distro_home(path: &std::path::Path) -> bool {
+    crate::backend::remote::wsl_fs::split_share(&path.to_string_lossy())
+        .is_some_and(|s| crate::backend::remote::wsl_fs::in_home(&s.linux))
+}
+
 /// Enumerate drives/mounts to surface as editor file-tree roots alongside
 /// $HOME (via the `geteditorroots` RPC). On **macOS** this returns nothing, so
 /// the file-tree's roots are limited to $HOME — `/`, `/Volumes`, and external
@@ -478,7 +498,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "invalid path"))
                 }).map_err(|e| format!("writeeditorfile: {e}"))?;
 
-                if !canonical.starts_with(&canonical_home) {
+                if !editor_may_change(&canonical, &canonical_home) {
                     return Err(format!(
                         "writeeditorfile: path {} is outside home directory",
                         canonical.display()
@@ -606,9 +626,17 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 let home = dirs::home_dir()
                     .ok_or_else(|| "geteditorroots: cannot determine home directory".to_string())?;
+                // WSL distros after the drives, at their roots through the share.
+                let mut drives = list_drives();
+                drives.extend(crate::backend::remote::wsl::list().await.into_iter().map(|d| {
+                    EditorDrive {
+                        path: crate::backend::remote::wsl_fs::share_path(&d, "/"),
+                        name: format!("{d} (WSL)"),
+                    }
+                }));
                 Ok(GetEditorRootsResult {
                     home: home.to_string_lossy().into_owned(),
-                    drives: list_drives(),
+                    drives,
                 })
             }
         },
@@ -632,7 +660,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("openinshell: home: {e}"))?;
                 let canonical = path.canonicalize()
                     .map_err(|e| format!("openinshell: {e}"))?;
-                if !canonical.starts_with(&canonical_home) {
+                if !editor_may_change(&canonical, &canonical_home) {
                     return Err(format!("openinshell: path outside home directory"));
                 }
                 // The file manager is third-party and long-lived, and a user can
@@ -674,7 +702,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let home = dirs::home_dir().ok_or("renameeditorfile: cannot determine home")?;
                 let canonical_home = home.canonicalize().map_err(|e| format!("renameeditorfile: home: {e}"))?;
                 let canonical_old = old_path.canonicalize().map_err(|e| format!("renameeditorfile: {e}"))?;
-                if !canonical_old.starts_with(&canonical_home) || canonical_old == canonical_home {
+                if !editor_may_change(&canonical_old, &canonical_home) || is_a_home(&canonical_old, &canonical_home) {
                     return Err("renameeditorfile: path outside or is the home directory".to_string());
                 }
                 if cmd.new_name.contains('/') || cmd.new_name.contains('\\') || cmd.new_name.contains('\0') || cmd.new_name == ".." || cmd.new_name == "." || cmd.new_name.is_empty() {
@@ -703,7 +731,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let home = dirs::home_dir().ok_or("createeditorfile: cannot determine home")?;
                 let canonical_home = home.canonicalize().map_err(|e| format!("createeditorfile: home: {e}"))?;
                 let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditorfile: {e}"))?;
-                if !canonical_parent.starts_with(&canonical_home) {
+                if !editor_may_change(&canonical_parent, &canonical_home) {
                     return Err("createeditorfile: path outside home directory".to_string());
                 }
                 if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
@@ -729,7 +757,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let home = dirs::home_dir().ok_or("createeditordir: cannot determine home")?;
                 let canonical_home = home.canonicalize().map_err(|e| format!("createeditordir: home: {e}"))?;
                 let canonical_parent = parent.canonicalize().map_err(|e| format!("createeditordir: {e}"))?;
-                if !canonical_parent.starts_with(&canonical_home) {
+                if !editor_may_change(&canonical_parent, &canonical_home) {
                     return Err("createeditordir: path outside home directory".to_string());
                 }
                 if cmd.name.contains('/') || cmd.name.contains('\\') || cmd.name.contains('\0') || cmd.name == "." || cmd.name == ".." || cmd.name.is_empty() {
@@ -755,7 +783,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let home = dirs::home_dir().ok_or("deleteeditorfile: cannot determine home")?;
                 let canonical_home = home.canonicalize().map_err(|e| format!("deleteeditorfile: home: {e}"))?;
                 let canonical = path.canonicalize().map_err(|e| format!("deleteeditorfile: {e}"))?;
-                if !canonical.starts_with(&canonical_home) || canonical == canonical_home {
+                if !editor_may_change(&canonical, &canonical_home) || is_a_home(&canonical, &canonical_home) {
                     return Err("deleteeditorfile: path outside or is the home directory".to_string());
                 }
                 // Use symlink_metadata (not metadata) to detect symlinks without following them.
@@ -949,7 +977,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Coarse home-boundary check before any filesystem mutation.
                 // We use the unexpanded path here because the dest may not exist yet
                 // (canonicalize fails on non-existent paths).
-                if !dest_path.starts_with(&home) {
+                if !dest_path.starts_with(&home) && !in_a_distro_home(dest_path) {
                     return Err("movescratchfile: destination outside home directory".to_string());
                 }
                 // Reject ".." components before create_dir_all — the coarse starts_with
@@ -974,7 +1002,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map(|p| p.join(dest_path.file_name().unwrap_or_default()))
                     .ok_or_else(|| "movescratchfile: invalid destination path".to_string())?;
                 // Fine-grained home-boundary check with canonical paths.
-                if !canonical_dest.starts_with(&canonical_home) {
+                if !editor_may_change(&canonical_dest, &canonical_home) {
                     return Err("movescratchfile: destination outside home directory".to_string());
                 }
                 // Copy then remove scratch source (cross-device-safe move).
@@ -999,6 +1027,28 @@ mod tests {
     use crate::backend::rpc_types::{
         CommandReadEditorFileResult, CreateScratchFileReq, DeleteEditorFileReq, DirEntry,
     };
+
+    /// The editor's "only under your home folder" rule, in a WSL distro: under
+    /// a distro user's home, never its system folders or the Windows drives
+    /// mounted in it, and never a home folder itself.
+    #[test]
+    fn the_editor_may_change_files_under_a_distro_home_and_nowhere_else_in_it() {
+        use std::path::Path;
+        let home = Path::new(r"C:\Users\me");
+        let may = |p: &str| super::editor_may_change(Path::new(p), home);
+        assert!(may(r"\\?\UNC\wsl.localhost\Ubuntu\home\u\proj\main.rs"));
+        assert!(may(r"\\wsl.localhost\Ubuntu\root\notes.md"));
+        assert!(may(r"\\wsl.localhost\Ubuntu\home\u"), "a parent for a new file");
+        assert!(!may(r"\\wsl.localhost\Ubuntu\etc\passwd"));
+        assert!(!may(r"\\wsl.localhost\Ubuntu\srv\app\x"));
+        assert!(
+            !may(r"\\wsl.localhost\Ubuntu\mnt\c\Windows\x"),
+            "a Windows drive through the distro is not a way around the home rule"
+        );
+        assert!(super::is_a_home(Path::new(r"\\wsl.localhost\Ubuntu\home\u"), home));
+        assert!(super::is_a_home(Path::new(r"\\wsl.localhost\Ubuntu\root"), home));
+        assert!(!super::is_a_home(Path::new(r"\\wsl.localhost\Ubuntu\home\u\x"), home));
+    }
 
     /// The four watchers record their types too, and `writeagentconfig` migrates
     /// in the same slice as its own agent.ts stub -- so this file is finished:
