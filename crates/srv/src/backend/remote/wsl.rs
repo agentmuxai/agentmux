@@ -37,7 +37,12 @@ pub fn launch(distro: &str, cmd: &str, cmd_args: &[String], cwd: &str) -> WslLau
         cwd.to_string()
     });
     if !cmd.is_empty() {
-        args.push("--".to_string());
+        // `--exec`, not `--`: after `--` wsl.exe hands the rest to the user's
+        // login shell, which expands `$VAR`, `$(...)` and backticks once more
+        // before `sh -c` sees them (`echo '$HOME'` printed the home dir), and a
+        // non-POSIX login shell (fish) misreads the quoting. `--exec` runs the
+        // argv as given.
+        args.push("--exec".to_string());
         if cmd_args.is_empty() {
             // A command line, as a local pane runs it through `sh -c`.
             args.extend(["sh".to_string(), "-c".to_string(), cmd.to_string()]);
@@ -227,23 +232,25 @@ mod tests {
     }
 
     #[test]
+    /// Run with `--exec`, so only `sh -c` parses the command line, not the
+    /// user's login shell first (#4253).
     fn a_command_runs_in_the_distro_not_on_windows() {
         assert_eq!(
-            launch("Ubuntu", "make test && echo ok", &[], "").args,
+            launch("Ubuntu", "echo '$HOME' && echo ok", &[], "").args,
             [
                 "-d",
                 "Ubuntu",
                 "--cd",
                 "~",
-                "--",
+                "--exec",
                 "sh",
                 "-c",
-                "make test && echo ok"
+                "echo '$HOME' && echo ok"
             ]
         );
         assert_eq!(
             launch("Ubuntu", "htop", &["-d".to_string(), "10".to_string()], "").args,
-            ["-d", "Ubuntu", "--cd", "~", "--", "htop", "-d", "10"]
+            ["-d", "Ubuntu", "--cd", "~", "--exec", "htop", "-d", "10"]
         );
     }
 

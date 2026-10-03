@@ -70,7 +70,7 @@ WSL is a local VM. A WSL terminal is `wsl.exe -d <distro>` in a ConPTY. Its file
 
 `ShellController` gains a launch-plan step that, for a non-local connection, builds the argv instead of a local shell:
 
-- **WSL:** `wsl.exe -d <distro> --cd ~` (or `--cd <cmd:cwd>`); `cmd`/`cmd:args` become `wsl.exe -d <distro> -- <cmd>`. List distros with `wsl.exe --list --quiet` (UTF-16 output; decode it).
+- **WSL:** `wsl.exe -d <distro> --cd ~` (or `--cd <cmd:cwd>`); `cmd`/`cmd:args` become `wsl.exe -d <distro> --exec sh -c <cmd>` (or `--exec <cmd> <args>`). `--exec`, never `--`: after `--` wsl.exe runs the rest through the user's login shell, which expands `$VAR` and `$(...)` once more before `sh -c` does. List distros with `wsl.exe --list --quiet` (UTF-16 output; decode it).
 - **SSH, plain:** `ssh -tt [opts] <target> -- <remote login command>`, where the remote command starts the user's login shell with AgentMux's shell integration if it was installed (§5.4), or just the login shell. Options always set: `ServerAliveInterval=15`, `ServerAliveCountMax=3` (§7.5), `SetEnv TERM_PROGRAM=agentmux` where allowed, and on macOS/Linux the `ControlMaster`/`ControlPath`/`ControlPersist` trio.
 - **SSH, durable:** `ssh -tt [opts] <target> -- ~/.agentmux-remote/bin/<ver>/agentmux-remote attach --session <id> --cols C --rows R --offset N` (§7).
 
