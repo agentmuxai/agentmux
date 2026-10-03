@@ -280,6 +280,9 @@ export function updateTree(model: LayoutModel, balanceTree = true) {
             );
         }
 
+        // Every rect is final now, including chips docked inside nested Rows.
+        extendResizeHandlesThroughChips(newAdditionalProps, model.treeState.rootNode, resizeHandleSizePx);
+
         model.treeState.leafOrder = getLeafOrder(newLeafs, newAdditionalProps);
         model.validateFocusedNode(model.treeState.leafOrder);
         model.validateMagnifiedNode(model.treeState.leafOrder, newAdditionalProps);
@@ -498,17 +501,23 @@ function updateTreeHelper(
     // that boundary with no handle at all — `A | B(minimized) | C` produced
     // ZERO handles while A and C sat edge-to-edge with nothing to drag.
     //
-    // An ordinary minimized child — one with its own chip slot, i.e. a
-    // Column parent, or a Row where every child is minimized — is NOT
-    // skipped. It occupies real extent, so its neighbours are genuinely not
-    // adjacent and a handle spanning it would float on top of the chip.
-    // That case resets the chain instead.
+    // An ordinary minimized child — one with its own chip slot — occupies
+    // real extent, so its neighbours are not adjacent and one handle
+    // spanning it would float on top of the chip.
+    //
+    // In a Column the chain is NOT reset: the expanded panes above and below
+    // a run of chip slots still get a handle, placed at the upper pane's
+    // bottom edge, and `extendResizeHandlesThroughChips` (run once the whole
+    // tree is laid out) adds one at every chip edge below it, each resizing
+    // the same two panes (SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md).
+    // In a Row (where a chip slot means every child is minimized) the chain
+    // still resets.
     let beforeIdx = -1;
     for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
         if (slipChildIds.has(child.id)) continue; // zero extent — span it
         if (isEffectivelyMinimized(child)) {
-            beforeIdx = -1; // real chip slot — neighbours aren't adjacent
+            if (nodeIsRow) beforeIdx = -1; // real chip slot — neighbours aren't adjacent
             continue;
         }
         if (beforeIdx < 0) {
@@ -580,6 +589,166 @@ function updateTreeHelper(
         pixelToSizeRatio,
         resizeHandles,
     };
+}
+
+/** How close two edges must be, in CSS px, to count as the same edge. */
+const EDGE_EPSILON_PX = 0.5;
+
+/** One stretch of a horizontal edge: where it is and the span it covers. */
+interface EdgeSegment {
+    edge: number;
+    min: number;
+    max: number;
+}
+
+/** Merge segments on the same edge whose spans overlap or touch. */
+function mergeSegments(segments: EdgeSegment[]): EdgeSegment[] {
+    const sorted = [...segments].sort((a, b) => a.edge - b.edge || a.min - b.min);
+    const out: EdgeSegment[] = [];
+    for (const s of sorted) {
+        const last = out[out.length - 1];
+        if (last && Math.abs(last.edge - s.edge) < EDGE_EPSILON_PX && s.min <= last.max + EDGE_EPSILON_PX) {
+            last.max = Math.max(last.max, s.max);
+        } else {
+            out.push({ ...s });
+        }
+    }
+    return out;
+}
+
+/** The parts of `seg` not already covered by `covered` segments on the same edge. */
+function uncoveredParts(seg: EdgeSegment, covered: EdgeSegment[]): EdgeSegment[] {
+    let parts: EdgeSegment[] = [seg];
+    for (const c of covered) {
+        if (Math.abs(c.edge - seg.edge) >= EDGE_EPSILON_PX) continue;
+        parts = parts.flatMap((p) => {
+            if (c.max <= p.min || c.min >= p.max) return [p];
+            const left = c.min > p.min ? [{ ...p, max: c.min }] : [];
+            const right = c.max < p.max ? [{ ...p, min: c.max }] : [];
+            return [...left, ...right];
+        });
+    }
+    return parts.filter((p) => p.max - p.min > EDGE_EPSILON_PX);
+}
+
+/**
+ * Make every edge of a run of collapsed panes a resize handle for the expanded
+ * panes either side (SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md).
+ *
+ * Runs once per layout pass, after every node's rect is final. For each
+ * handle between vertically stacked panes it walks down from the handle's
+ * edge through the collapsed nodes that start there, and adds a handle at
+ * each edge they end on. A collapsed node is a minimized leaf or a fully
+ * minimized branch: a Column's own chip slots, chips side by side in a
+ * collapsed Row, or chips docked onto the top of the lower pane inside a
+ * nested Row (Phase B, which lays out only after the Column's own handles
+ * exist, hence a separate pass). Every chip starting at an edge is followed,
+ * and chips ending on the same edge share one handle spanning all of them.
+ * Every added handle copies the original's pair (`parentIndex`/`afterIndex`),
+ * so dragging it resizes the same two expanded panes and never a chip.
+ *
+ * A grab zone reaches at most a third into a chip on either side, so a
+ * chip's middle stays a click target whatever the tile gap (spec R6); the
+ * handle's `halfSizePx` records the clamped extent.
+ */
+export function extendResizeHandlesThroughChips(
+    additionalPropsMap: Record<string, LayoutNodeAdditionalProps>,
+    rootNode: LayoutNode | undefined,
+    resizeHandleSizePx: number
+): void {
+    const chips: Dimensions[] = [];
+    const collect = (node: LayoutNode) => {
+        if (isEffectivelyMinimized(node)) {
+            const rect = additionalPropsMap[node.id]?.rect;
+            if (rect && rect.height > 0) chips.push(rect);
+        }
+        node.children?.forEach(collect);
+    };
+    if (rootNode) collect(rootNode);
+    if (chips.length === 0) return;
+
+    const overlaps = (r: Dimensions, s: EdgeSegment) => r.left < s.max && r.left + r.width > s.min;
+    const startingAt = (s: EdgeSegment) => chips.filter((r) => Math.abs(r.top - s.edge) < EDGE_EPSILON_PX && overlaps(r, s));
+    const endingAt = (s: EdgeSegment) =>
+        chips.filter((r) => Math.abs(r.top + r.height - s.edge) < EDGE_EPSILON_PX && overlaps(r, s));
+
+    for (const props of Object.values(additionalPropsMap)) {
+        const handles = props.resizeHandles;
+        if (!handles?.length) continue;
+        const added: ResizeHandleProps[] = [];
+        for (const handle of handles) {
+            if (handle.flexDirection !== FlexDirection.Column) continue;
+            let frontier: EdgeSegment[] = [{ edge: handle.centerPx, min: handle.perpMinPx, max: handle.perpMaxPx }];
+            // Edges already given a handle. A collapsed branch and its own
+            // chips can reach the same edge in different steps; only the
+            // part not yet covered gets a handle, and only it is walked on.
+            const emitted: EdgeSegment[] = [...frontier];
+            let n = 0;
+            // Every step moves strictly down (chips have height), so this ends.
+            for (let step = 0; frontier.length > 0 && step < 64; step++) {
+                const next: EdgeSegment[] = [];
+                for (const seg of frontier) {
+                    for (const chip of startingAt(seg)) {
+                        next.push({
+                            edge: chip.top + chip.height,
+                            min: Math.max(seg.min, chip.left),
+                            max: Math.min(seg.max, chip.left + chip.width),
+                        });
+                    }
+                }
+                frontier = mergeSegments(next).flatMap((seg) => uncoveredParts(seg, emitted));
+                emitted.push(...frontier);
+                for (const seg of frontier) {
+                    const neighbours = [...endingAt(seg), ...startingAt(seg)];
+                    const thinnest = Math.min(...neighbours.map((r) => r.height));
+                    const half = Math.min(resizeHandleSizePx / 2, thinnest / 3);
+                    const dims: Dimensions = { top: seg.edge - half, left: seg.min, width: seg.max - seg.min, height: 2 * half };
+                    added.push({
+                        ...handle,
+                        id: `${handle.id}-${++n}`,
+                        transform: setTransform(dims, true, false),
+                        centerPx: seg.edge,
+                        perpMinPx: seg.min,
+                        perpMaxPx: seg.max,
+                        halfSizePx: half,
+                    });
+                }
+            }
+        }
+        if (added.length) props.resizeHandles = [...handles, ...added];
+    }
+}
+
+/**
+ * Whether a container-local point lies in a resize handle's zone, by each
+ * handle's own extent: `halfSizePx` when set (a clamped chip-edge handle),
+ * else `defaultHalfSizePx`. Used to refuse a pane drag that starts on a
+ * handle, so it must match what is rendered (#4260).
+ */
+export function isInResizeHandleZone(
+    handles: readonly ResizeHandleProps[],
+    defaultHalfSizePx: number,
+    localX: number,
+    localY: number
+): boolean {
+    for (const rh of handles) {
+        const half = rh.halfSizePx ?? defaultHalfSizePx;
+        if (
+            rh.flexDirection === FlexDirection.Row &&
+            Math.abs(localX - rh.centerPx) <= half &&
+            localY >= rh.perpMinPx &&
+            localY <= rh.perpMaxPx
+        )
+            return true;
+        if (
+            rh.flexDirection === FlexDirection.Column &&
+            Math.abs(localY - rh.centerPx) <= half &&
+            localX >= rh.perpMinPx &&
+            localX <= rh.perpMaxPx
+        )
+            return true;
+    }
+    return false;
 }
 
 /**

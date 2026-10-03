@@ -14,7 +14,7 @@ import clsx from "clsx";
 import { createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 import { debounce, throttle } from "throttle-debounce";
-import { FlexDirection } from "./types";
+import { isInResizeHandleZone } from "./layoutGeometry";
 import { createTileLayout, type ResizeHandleComponentProps, type TileLayoutPlatform } from "./TileLayout.core";
 
 export type { TileLayoutProps } from "./TileLayout.core";
@@ -95,16 +95,7 @@ const win32: TileLayoutPlatform = {
         const containerRect = containerEl.getBoundingClientRect();
         const localX = input.clientX - containerRect.left;
         const localY = input.clientY - containerRect.top;
-        const halfSize = layoutModel.resizeHandleSizePx() / 2;
-        for (const rh of layoutModel.resizeHandles()) {
-            if (rh.flexDirection === FlexDirection.Row &&
-                Math.abs(localX - rh.centerPx) <= halfSize &&
-                localY >= rh.perpMinPx && localY <= rh.perpMaxPx) return true;
-            if (rh.flexDirection === FlexDirection.Column &&
-                Math.abs(localY - rh.centerPx) <= halfSize &&
-                localX >= rh.perpMinPx && localX <= rh.perpMaxPx) return true;
-        }
-        return false;
+        return isInResizeHandleZone(layoutModel.resizeHandles(), layoutModel.resizeHandleSizePx() / 2, localX, localY);
     },
 
     ResizeHandle,
