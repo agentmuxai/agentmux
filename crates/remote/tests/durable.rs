@@ -98,10 +98,25 @@ fn contains(hay: &[u8], needle: &str) -> bool {
     String::from_utf8_lossy(hay).contains(needle)
 }
 
+/// Ends the test's session and removes its home however the test ends, so a
+/// failed assertion never leaves a shell and a daemon behind.
+struct Cleanup(std::path::PathBuf);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = Command::new(BIN)
+            .args(["end", "--session", "t1"])
+            .env("AGENTMUX_REMOTE_HOME", &self.0)
+            .output();
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn a_session_survives_a_dropped_link_and_replays_exactly_what_was_missed() {
     let home = std::env::temp_dir().join(format!("amr-test-{}", std::process::id()));
     std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
 
     // 1. Attach: a new session, then a command and its output.
     let mut a = attach(&home, "t1", 0);
@@ -173,8 +188,29 @@ fn a_session_survives_a_dropped_link_and_replays_exactly_what_was_missed() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&list.stdout), "", "ended");
+}
 
-    let _ = std::fs::remove_dir_all(&home);
+/// Several attaches at once, with no daemon running: one daemon, one session.
+#[test]
+fn concurrent_attaches_share_one_daemon_and_one_session() {
+    let home = std::env::temp_dir().join(format!("amr-race-{}", std::process::id()));
+    std::fs::create_dir_all(&home).unwrap();
+    let _cleanup = Cleanup(home.clone());
+    let attaches: Vec<Attached> = (0..4).map(|_| attach(&home, "t1", 0)).collect();
+    for a in &attaches {
+        a.until(|f, _| matches!(f, Frame::Hello { .. }));
+    }
+    let list = Command::new(BIN)
+        .arg("list")
+        .env("AGENTMUX_REMOTE_HOME", &home)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&list.stdout).into_owned();
+    assert_eq!(text.lines().count(), 1, "one session: {text:?}");
+    for mut a in attaches {
+        let _ = a.child.kill();
+        let _ = a.child.wait();
+    }
 }
 
 #[test]

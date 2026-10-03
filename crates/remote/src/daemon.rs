@@ -35,6 +35,14 @@ const REPLAY_CHUNK: usize = 256 * 1024;
 /// With no session and no connection for this long, the daemon exits.
 const IDLE_EXIT: Duration = Duration::from_secs(60);
 
+/// A client that cannot take a frame for this long is dropped: a stalled link
+/// must not hold the session's lock (and so every reattach) behind it.
+const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// A session whose shell exited with no client attached keeps its last output
+/// this long for a reattach to replay, then goes.
+const EXITED_TTL: Duration = Duration::from_secs(10 * 60);
+
 /// `<base>/run`, the daemon's private directory, and its socket.
 pub fn run_dir(base: &Path) -> PathBuf {
     base.join("run")
@@ -78,9 +86,25 @@ pub fn run(base: &Path) -> io::Result<()> {
     std::fs::create_dir_all(&dir)?;
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
     let sock = socket_path(base);
-    if UnixStream::connect(&sock).is_ok() {
-        return Ok(()); // one is already running
+    // One daemon per user: whoever holds this lock owns the socket. Several
+    // attaches starting daemons at once all race here; the losers exit and
+    // their attaches connect to the winner. Held (open) for the daemon's life.
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("daemon.lock"))?;
+    // SAFETY: flock on a descriptor this process owns.
+    if unsafe {
+        libc::flock(
+            std::os::fd::AsRawFd::as_raw_fd(&lock),
+            libc::LOCK_EX | libc::LOCK_NB,
+        )
+    } != 0
+    {
+        return Ok(()); // another daemon is running or starting
     }
+    let _lock = lock;
     let _ = std::fs::remove_file(&sock);
     let listener = UnixListener::bind(&sock)?;
     std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600))?;
@@ -125,8 +149,13 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
     match words.as_slice() {
         ["AMR", proto, rest @ ..] if proto.parse::<u32>().ok() == Some(PROTOCOL) => match rest {
             ["ATTACH", id, offset, cols, rows] if valid_session_id(id) => {
-                let offset = offset.parse().unwrap_or(0);
-                let (cols, rows) = (cols.parse().unwrap_or(80), rows.parse().unwrap_or(24));
+                let Ok(offset) = offset.parse::<u64>() else {
+                    return out.write_all(&Frame::Error(format!("bad offset {offset:?}")).encode());
+                };
+                let (cols, rows) = (
+                    cols.parse::<u16>().unwrap_or(80),
+                    rows.parse::<u16>().unwrap_or(24),
+                );
                 attach(stream, reader, sessions, id, offset, cols, rows)
             }
             ["END", id] => {
@@ -134,10 +163,11 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
                 out.write_all(if found { b"ok\n" } else { b"none\n" })
             }
             ["LIST"] => {
-                let list: Vec<String> = sessions
-                    .lock()
-                    .unwrap()
-                    .values()
+                // The sessions first, then each one's state: never the map's
+                // lock while waiting on a session's.
+                let all: Vec<Arc<Session>> = sessions.lock().unwrap().values().cloned().collect();
+                let list: Vec<String> = all
+                    .iter()
                     .map(|s| {
                         let inner = s.inner.lock().unwrap();
                         let exited = inner
@@ -161,8 +191,13 @@ fn end_session(sessions: &Sessions, id: &str) -> bool {
     let Some(s) = sessions.lock().unwrap().remove(id) else {
         return false;
     };
-    pty::end_group(s.pid);
-    if let Some((_, c)) = s.inner.lock().unwrap().client.take() {
+    let mut inner = s.inner.lock().unwrap();
+    // A shell already reaped has no process group left to end, and its pid
+    // may by now be another process's.
+    if inner.exited.is_none() {
+        pty::end_group(s.pid);
+    }
+    if let Some((_, c)) = inner.client.take() {
         let _ = c.shutdown(std::net::Shutdown::Both);
     }
     true
@@ -214,6 +249,7 @@ fn attach(
     // Replay and take over, under the lock the reader appends under: nothing
     // between the replay and the live stream is lost or sent twice.
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst);
+    stream.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT))?;
     {
         let mut inner = session.inner.lock().unwrap();
         let mut out = stream.try_clone()?;
@@ -340,6 +376,16 @@ fn start_reader(session: Arc<Session>, mut child: std::process::Child, sessions:
             let _ = c.shutdown(std::net::Shutdown::Both);
             drop(inner);
             sessions.lock().unwrap().remove(&session.id);
+        } else {
+            drop(inner);
+            std::thread::sleep(EXITED_TTL);
+            let mut map = sessions.lock().unwrap();
+            if map
+                .get(&session.id)
+                .is_some_and(|s| Arc::ptr_eq(s, &session))
+            {
+                map.remove(&session.id);
+            }
         }
     });
 }

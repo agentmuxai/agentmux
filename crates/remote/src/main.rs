@@ -73,16 +73,21 @@ fn run(args: &[String]) -> i32 {
                 );
                 return 2;
             };
-            let num = |name: &str, default: u64| {
+            // A size that does not fit falls back to the default, never wraps.
+            let size = |name: &str, default: u16| {
                 flag(args, name)
-                    .and_then(|v| v.parse().ok())
+                    .and_then(|v| v.parse::<u16>().ok())
                     .unwrap_or(default)
             };
-            let (offset, cols, rows) = (
-                num("--offset", 0),
-                num("--cols", 80) as u16,
-                num("--rows", 24) as u16,
-            );
+            let offset = match flag(args, "--offset").map(str::parse::<u64>) {
+                None => 0,
+                Some(Ok(o)) => o,
+                Some(Err(_)) => {
+                    eprintln!("agentmux-remote attach: --offset must be a number");
+                    return 2;
+                }
+            };
+            let (cols, rows) = (size("--cols", 80), size("--rows", 24));
             attach::run(&base_dir(), session, offset, cols, rows)
         }
         #[cfg(unix)]
