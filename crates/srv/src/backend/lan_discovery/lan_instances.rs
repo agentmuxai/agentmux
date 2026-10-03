@@ -44,19 +44,23 @@ pub(super) struct InstanceRecord {
     pub updated_at_ms: u64,
 }
 
-/// The file a channel's record lives in. The channel is reduced to
-/// `[a-z0-9_-]` (plus other Unicode letters and digits) and capped, so it can
-/// never name a path outside the directory; the real name stays in the file.
+/// The file a channel's record lives in: a readable stem, reduced to
+/// `[a-z0-9_-]` (plus other Unicode letters and digits) and capped so it can
+/// never name a path outside the directory, then 8 hex chars of a SHA-256 of
+/// the exact channel name. The slug alone is lossy (`Foo` and `foo`, or
+/// `foo bar` and `foo_bar`, share one), and two LAN-enabled channels sharing
+/// a file would overwrite each other's record (Codex P2 on #4297). The real
+/// name stays in the file.
 pub(super) fn record_file_name(channel: &str) -> String {
+    use sha2::{Digest, Sha256};
     let stem: String = agentmux_common::slug::file_stem(channel)
         .chars()
         .take(MAX_CHANNEL_LEN)
         .collect();
-    if stem.is_empty() {
-        "_.json".to_string()
-    } else {
-        format!("{stem}.json")
-    }
+    let digest = Sha256::digest(channel.as_bytes());
+    let tag: String = digest[..4].iter().map(|b| format!("{b:02x}")).collect();
+    let stem = if stem.is_empty() { "_".to_string() } else { stem };
+    format!("{stem}-{tag}.json")
 }
 
 /// Write `record` atomically (temp file, then rename) with mode 0600 on Unix
@@ -304,7 +308,7 @@ mod tests {
             .flatten()
             .map(|e| e.file_name())
             .collect();
-        assert_eq!(names, vec![std::ffi::OsString::from("stable.json")]);
+        assert_eq!(names, vec![std::ffi::OsString::from(record_file_name("stable"))]);
     }
 
     #[cfg(unix)]
@@ -313,36 +317,60 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         write_record(dir.path(), &record("stable", 42, NOW)).unwrap();
-        let mode = std::fs::metadata(dir.path().join("stable.json"))
+        let mode = std::fs::metadata(dir.path().join(record_file_name("stable")))
             .unwrap()
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
     }
 
+    /// `<stem>-<8 hex>.json`: the readable stem, then the hash tag.
+    fn stem_of(name: &str) -> &str {
+        let base = name.strip_suffix(".json").expect("ends in .json");
+        let (stem, tag) = base.rsplit_once('-').expect("has a hash tag");
+        assert_eq!(tag.len(), 8);
+        assert!(tag.chars().all(|c| c.is_ascii_hexdigit()));
+        stem
+    }
+
     #[test]
     fn a_channel_cannot_name_a_path_outside_the_directory() {
-        assert_eq!(
-            record_file_name("../../etc/passwd"),
-            "______etc_passwd.json"
-        );
-        assert_eq!(record_file_name("C:\\Windows\\x"), "c__windows_x.json");
-        assert_eq!(
-            record_file_name("local-main-b28b7a"),
-            "local-main-b28b7a.json"
-        );
-        assert_eq!(record_file_name(""), "_.json");
+        assert_eq!(stem_of(&record_file_name("../../etc/passwd")), "______etc_passwd");
+        assert_eq!(stem_of(&record_file_name("C:\\Windows\\x")), "c__windows_x");
+        assert_eq!(stem_of(&record_file_name("local-main-b28b7a")), "local-main-b28b7a");
+        assert_eq!(stem_of(&record_file_name("")), "_");
         let long = "x".repeat(500);
-        assert_eq!(
-            record_file_name(&long).len(),
-            MAX_CHANNEL_LEN + ".json".len()
-        );
+        assert_eq!(stem_of(&record_file_name(&long)).len(), MAX_CHANNEL_LEN);
+        for name in ["../../etc/passwd", "C:\\Windows\\x", "a/b", ""] {
+            let f = record_file_name(name);
+            assert!(!f.contains('/') && !f.contains('\\') && !f.contains(".."), "{f}");
+        }
 
         let dir = tempfile::tempdir().unwrap();
         let nested = dir.path().join("instances");
         write_record(&nested, &record("../escape", 42, NOW)).unwrap();
-        assert!(nested.join("___escape.json").exists());
-        assert!(!dir.path().join("escape.json").exists());
+        assert!(nested.join(record_file_name("../escape")).exists());
+        let outside: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(outside, vec![std::ffi::OsString::from("instances")]);
+    }
+
+    #[test]
+    fn channels_with_the_same_slug_get_their_own_files() {
+        // Codex P2 on #4297: the slug alone is lossy.
+        for (a, b) in [("Foo", "foo"), ("foo bar", "foo_bar"), ("dev/x", "dev_x")] {
+            assert_eq!(stem_of(&record_file_name(a)), stem_of(&record_file_name(b)));
+            assert_ne!(record_file_name(a), record_file_name(b), "{a} vs {b}");
+        }
+        assert_eq!(record_file_name("stable"), record_file_name("stable"), "stable per name");
+
+        let dir = tempfile::tempdir().unwrap();
+        write_record(dir.path(), &record("foo bar", 50, NOW)).unwrap();
+        write_record(dir.path(), &record("foo_bar", 51, NOW)).unwrap();
+        assert_eq!(siblings(dir.path(), |_| true), vec!["foo bar", "foo_bar"]);
     }
 
     #[test]
@@ -423,11 +451,11 @@ mod tests {
         write_record(dir.path(), &record("stable", 42, NOW)).unwrap();
         remove_own_record(dir.path(), "stable", 43);
         assert!(
-            dir.path().join("stable.json").exists(),
+            dir.path().join(record_file_name("stable")).exists(),
             "another pid's record stays"
         );
         remove_own_record(dir.path(), "stable", 42);
-        assert!(!dir.path().join("stable.json").exists());
+        assert!(!dir.path().join(record_file_name("stable")).exists());
     }
 
     #[test]
