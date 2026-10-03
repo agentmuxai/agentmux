@@ -17,9 +17,9 @@
 //! first. Short version: an unbound oauth-class provider used to
 //! auto-route to an AgentMux-owned isolated dir (no user action, no global
 //! exposure); a 2026-07-08 refactor orphaned that path without meaning to,
-//! and it was never restored — today's gate only chooses between "block"
-//! and "true ambient" (`use_ambient_login=true`, zero isolation), not the
-//! isolated-auto-provision option that used to exist implicitly.
+//! and it was never restored. Today's gate always blocks an unbound
+//! oauth-class provider; the per-agent "true ambient" opt-out
+//! (`use_ambient_login`) is no longer read.
 //!
 //! ## Module layout
 //!

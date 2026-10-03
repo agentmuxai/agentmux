@@ -58,8 +58,8 @@ use super::secret::resolve_secret;
 ///    - **Oauth-class** failures (account row missing, lookup error,
 ///      non-OAuthConfigDir secret_ref) are always BLOCKING: the function
 ///      returns [`SpawnGateError`] before the CLI process is created.
-///      `use_ambient_login` no longer exempts an agent; it is read only for
-///      the `identity.spawn.blocked:` log line (the opt-out was retired, see
+///      `use_ambient_login` no longer exempts an agent and is not read
+///      here (the opt-out was retired, see
 ///      m0017_ambient_login_grandfather.rs).
 /// 5. If the agent definition's own provider is oauth-class and no binding
 ///    for it exists at all (fresh/never-bound or post-delete-cascade), the
@@ -121,7 +121,7 @@ pub async fn inject_identity_env_async(
             // Fail CLOSED. A join failure means the closure panicked (or
             // was cancelled) — the gate never rendered a verdict, and the
             // panic has likely poisoned the Store mutex, so failing open
-            // here would bypass use_ambient_login=false for every later
+            // here would bypass the oauth gate for every later
             // spawn too (reagent P1, PR #2164 round 1). See
             // SpawnGateError::InjectionUnavailable.
             tracing::warn!(
@@ -263,7 +263,7 @@ fn resolve_bindings_for_instance(
         // account) is visible, not silently indistinguishable from
         // routine "no accounts configured." Whether the spawn proceeds
         // is decided by the caller's layer-3 definition-provider gate
-        // (oauth-class CLI provider + no ambient opt-in → blocked).
+        // (oauth-class CLI provider with no bound account → blocked).
         tracing::warn!(
             target: "identity",
             "no direct account links for definition {} (identity {}) — \
@@ -492,9 +492,9 @@ pub(crate) fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
 /// first. Short version: an unbound oauth-class provider used to
 /// auto-route to an AgentMux-owned isolated dir (no user action, no global
 /// exposure); a 2026-07-08 refactor orphaned that path without meaning to,
-/// and it was never restored — today's gate only chooses between "block"
-/// and "true ambient" (`use_ambient_login=true`, zero isolation), not the
-/// isolated-auto-provision option that used to exist implicitly.
+/// and it was never restored. Today's gate always blocks an unbound
+/// oauth-class provider; the per-agent "true ambient" opt-out
+/// (`use_ambient_login`) is no longer read.
 pub fn inject_identity_env_with_broker(
     mstore: Arc<Store>,
     id_store: Arc<Store>,
@@ -554,11 +554,11 @@ pub fn inject_identity_env_with_broker(
         );
     }
 
-    // Layer-3 gate inputs: the agent definition's ambient opt-in flag and
-    // its own CLI provider (the oauth-class provider every launch of this
-    // agent uses, whether or not a binding row exists for it). A missing
-    // definition row reads as flag=false / no expected provider — the
-    // per-binding gate still applies to whatever links exist.
+    // Layer-3 gate input: the agent definition's own CLI provider (the
+    // oauth-class provider every launch of this agent uses, whether or not
+    // a binding row exists for it). A missing definition row reads as no
+    // expected provider — the per-binding gate still applies to whatever
+    // links exist.
     //
     // Provider is resolved via `id_store.resolve_effective_provider_id`
     // (`backend/storage/agents.rs`), NOT `d.provider` directly — the
@@ -581,25 +581,24 @@ pub fn inject_identity_env_with_broker(
     // bundle already carries the canonical id doesn't get re-aliased
     // incorrectly (resolve_provider_alias is idempotent on an
     // already-canonical id, so this is safe either way).
-    let (use_ambient, def_provider, parent_template_id) = match mstore.agent_def_get(&instance.definition_id) {
+    let (def_provider, parent_template_id) = match mstore.agent_def_get(&instance.definition_id) {
         Ok(Some(d)) => {
             let effective_provider = id_store.resolve_effective_provider_id(&d);
             let template_parent_id = template_parent_id_if_seeded(&mstore, &d.parent_id);
             (
-                d.use_ambient_login != 0,
                 Some(resolve_provider_alias(&effective_provider).to_string()),
                 template_parent_id,
             )
         }
-        Ok(None) => (false, None, String::new()),
+        Ok(None) => (None, String::new()),
         Err(e) => {
             tracing::warn!(
                 target: "identity",
-                "definition lookup failed for {} (layer-3 gate reads use_ambient_login=false): {}",
+                "definition lookup failed for {}: {}",
                 instance.definition_id,
                 e,
             );
-            (false, None, String::new())
+            (None, String::new())
         }
     };
 
@@ -613,9 +612,7 @@ pub fn inject_identity_env_with_broker(
     //
     // NOTE: an empty set no longer short-circuits — it falls through to the
     // definition-provider gate below (spec §2.2 edge case: an agent whose
-    // oauth-class CLI provider has no binding at all is blocked unless the
-    // ambient opt-in is set; the m0017 migration grandfathers pre-existing
-    // linkless agents).
+    // oauth-class CLI provider has no binding at all is blocked).
     let bindings = resolve_bindings_for_instance(&identity_store, &instance, &parent_template_id, broker.as_ref());
 
     // Step 4: per-binding resolution + env injection.
@@ -629,8 +626,7 @@ pub fn inject_identity_env_with_broker(
     // Api-key-class per-binding failures (unknown provider, account row
     // missing, mismatched secret_ref, secret resolution failed) are logged
     // and skipped — other bindings still inject. Oauth-class failures go
-    // through the layer-3 gate: blocking by default, skip-with-
-    // `identity.spawn.ambient:` when the agent opted in (spec §2.2).
+    // through the layer-3 gate, which always blocks.
     let mut injected_oauth: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
@@ -644,22 +640,17 @@ pub fn inject_identity_env_with_broker(
     // "single point, not global"): a credential the app can't attribute to
     // a specific Armory account is exactly the state that left Marks
     // silently working with an untracked, unrefreshed shared-dir credential
-    // and no visible account anywhere in Armory. `use_ambient` is kept as a
-    // parameter (read below only for the log line) rather than deleted
-    // outright, so the still-live `use_ambient_login` DB column and its
-    // callers don't need a synchronized migration to compile — it no longer
-    // has any effect on the outcome.
+    // and no visible account anywhere in Armory. The flag is no longer read.
     let gate_oauth_failure = |provider: &str, detail: &str| -> Result<(), SpawnGateError> {
         tracing::warn!(
             target: "identity",
             "identity.spawn.blocked: no credentials for provider {} \
              (definition {}, identity {}) — {}; spawn refused \
-             (single-point enforcement — use_ambient_login={}, ignored)",
+             (single-point enforcement)",
             provider,
             instance.definition_id,
             instance.identity_id,
             detail,
-            use_ambient,
         );
         Err(SpawnGateError::MissingCredentials {
             provider: provider.to_string(),
@@ -1275,8 +1266,7 @@ mod tests {
 
         let mut env: HashMap<String, String> = HashMap::new();
         // Spec §2.5 regression: a resolvable oauth account injects
-        // unchanged — the layer-3 gate never fires (Ok even with
-        // use_ambient_login=0).
+        // unchanged — the layer-3 gate never fires.
         inject_identity_env(store.clone(), store.clone(), store, "block-oauth", &mut env).unwrap();
 
         // OAuth dispatch sets the provider's config-dir env var.
@@ -1750,7 +1740,7 @@ mod tests {
         // An oauth-class provider (claude) bound to an account whose
         // SecretRef is the API-key shape (Env) is a misconfiguration:
         // the account is unresolvable for the provider, so the layer-3
-        // gate blocks the spawn (use_ambient_login=0) instead of
+        // gate blocks the spawn instead of
         // mis-injecting the wrong secret or silently launching on the
         // user's global login.
         let store = make_store();
@@ -1898,7 +1888,7 @@ mod tests {
     //    _2026_07_14.md §2.2/§2.5) ────────────────────────────────────
 
     /// Fixture def for the gating tests — oauth-class CLI provider
-    /// (claude) with a configurable ambient opt-in.
+    /// (claude). `use_ambient_login` is settable only to prove it is inert.
     fn gate_def(use_ambient_login: i64) -> crate::backend::storage::store::AgentDefinition {
         crate::backend::storage::store::AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),

@@ -9,7 +9,7 @@ export type CommandCreateAgentInstanceData = { definition_id: string, block_id: 
  * same-value filtering (`listrecentsessions`/`listnamedagents`'
  * `identity_id` param) — display names and credential resolution
  * both go through `db_agent_identity_links`/`db_accounts` now.
- * Empty = ambient creds (no env-var injection).
+ * Empty = no account picked at launch.
  */
 identity_id: string, 
 /**

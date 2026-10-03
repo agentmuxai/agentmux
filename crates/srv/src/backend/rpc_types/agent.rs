@@ -126,7 +126,7 @@ pub struct CommandAgentDefineData {
     /// branch). `Some(url)` sets it, rejected at define-time unless the
     /// resolved provider declares `ProviderConfig::base_url_env_var`.
     /// Mirrors the existing `Option<T>` = "don't touch" idiom already used
-    /// by `CommandUpdateAgentDefinitionData::use_ambient_login`.
+    /// by `CommandUpdateAgentDefinitionData::auto_continue_enabled`.
     #[serde(default)]
     pub model_vendor_base_url: Option<String>,
 }
@@ -327,7 +327,8 @@ pub struct CommandAgentDefCreateFromTemplateData {
     /// User-chosen display name for the new agent. Non-empty, ≤200
     /// chars, must not collide with another user-owned agent's name.
     pub name: String,
-    /// Identity bundle id to bind (empty string = ambient creds).
+    /// Account id to bind (empty string = no account; an oauth-class agent
+    /// then cannot launch until one is bound).
     /// Stored on the launch-time `db_agent_instances` row by the
     /// launch flow; the definition itself doesn't hold bindings
     /// pre-Phase 3, so this is reserved for the frontend to thread
@@ -502,13 +503,6 @@ pub struct CommandUpdateAgentDefinitionData {
     /// JSON array of volume mount specs. Empty array (`"[]"`) for host agents.
     #[serde(default = "default_container_volumes")]
     pub container_volumes: String,
-    /// Explicit per-agent opt-in to the CLI's global (ambient) login when no
-    /// oauth-class account resolves at spawn (0/1). `None` (omitted) preserves
-    /// the stored value — callers that only edit name/icon/accounts don't
-    /// carry it. SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
-    #[serde(default)]
-    #[ts(type = "number | null")]
-    pub use_ambient_login: Option<i64>,
     /// Per-agent opt-in letting a Warden Supervisor watcher agent
     /// auto-continue this agent's session on turn-end (0/1). `None`
     /// (omitted) preserves the stored value — callers that only edit
@@ -521,7 +515,7 @@ pub struct CommandUpdateAgentDefinitionData {
     /// Custom model vendor base URL override — see
     /// `AgentDefinition.model_vendor_base_url`. `None` (omitted) preserves
     /// the stored value, same "None = don't touch" idiom as
-    /// `use_ambient_login`/`auto_continue_enabled` above. `Some("")`
+    /// `auto_continue_enabled` above. `Some("")`
     /// explicitly clears an existing override back to the harness's
     /// default vendor endpoint. Validated the same way `agent.define`
     /// does — see `agent_define::validate_vendor_base_url`.

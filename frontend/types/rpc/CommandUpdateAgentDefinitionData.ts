@@ -18,13 +18,6 @@ container_image: string,
  */
 container_volumes: string, 
 /**
- * Explicit per-agent opt-in to the CLI's global (ambient) login when no
- * oauth-class account resolves at spawn (0/1). `None` (omitted) preserves
- * the stored value — callers that only edit name/icon/accounts don't
- * carry it. SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md §2.3.
- */
-use_ambient_login: number | null, 
-/**
  * Per-agent opt-in letting a Warden Supervisor watcher agent
  * auto-continue this agent's session on turn-end (0/1). `None`
  * (omitted) preserves the stored value — callers that only edit
@@ -37,7 +30,7 @@ auto_continue_enabled: number | null,
  * Custom model vendor base URL override — see
  * `AgentDefinition.model_vendor_base_url`. `None` (omitted) preserves
  * the stored value, same "None = don't touch" idiom as
- * `use_ambient_login`/`auto_continue_enabled` above. `Some("")`
+ * `auto_continue_enabled` above. `Some("")`
  * explicitly clears an existing override back to the harness's
  * default vendor endpoint. Validated the same way `agent.define`
  * does — see `agent_define::validate_vendor_base_url`.
