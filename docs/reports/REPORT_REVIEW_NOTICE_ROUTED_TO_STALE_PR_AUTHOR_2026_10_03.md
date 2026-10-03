@@ -2,6 +2,7 @@
 
 **Date:** 2026-10-03
 **Status:** analysis — root cause found and fixes proposed; nothing changed.
+**Superseded in part by:** `docs/retro/retro-review-notice-misroute-pulse-448-2026-10-03.md` (production logs; a second defect, the consumer's missing GitHub token; and a correction: AgentMux already sets a per-agent git identity at spawn, so F4 below is done).
 **Author:** AgentY, at the owner's request ("look into the false message, looks like a bug")
 **Code:** `agentmux-cloud/muxbus/consumers/github/` (`agent-mapping.ts`, `events/review.ts`)
 **Related:** `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` (the author-first rule), the "MuxBus Identity" section of the agents' `CLAUDE.md`.
