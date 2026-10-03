@@ -867,6 +867,18 @@ impl Controller for ShellController {
         // branch can launch anything; both inherited the full instance identity
         // while this lived inside the third branch (ReAgent P0 on PR #3326).
         crate::backend::pane_env::sanitize_pty_command(&mut cmd);
+        // An agent's PtyShell carries the agent's plain-`gh` guard (set by
+        // `http_pty_shell.rs`): the agent types into this shell, so `gh` here
+        // must not act as the user. Every branch, after the sanitizer; a WSL
+        // shell's WSLENV already lists GH_CONFIG_DIR as a distro path.
+        let gh_guard = obj::meta_get_string(
+            &block_meta,
+            crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR,
+            "",
+        );
+        if !gh_guard.is_empty() {
+            cmd.env(crate::backend::gh_guard::GH_CONFIG_DIR, &gh_guard);
+        }
         // Identity M4a: a terminal pane never carries a token. No counter —
         // most panes are not agents — but an agent CLI that registers from
         // this block shows in the live gauge.

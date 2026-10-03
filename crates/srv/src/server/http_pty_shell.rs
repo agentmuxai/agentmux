@@ -77,6 +77,20 @@ pub(super) async fn handle_pty_shell_create(
     // run is still starting (a concurrent create), not one left from before a
     // restart (`try_attach_to_existing_shell`).
     meta.insert(META_KEY_PTYSHELL_BOOT_ID.to_string(), json!(&*state.boot_id));
+    // The agent's plain-`gh` guard, as its Shell and its own CLI get it: the
+    // agent types into this shell, so `gh` here must not act as the user.
+    let agent_env: std::collections::HashMap<String, String> = state
+        .mstore
+        .get::<crate::backend::obj::Block>(&req.agent_block_id)
+        .ok()
+        .flatten()
+        .and_then(|b| b.meta.get("cmd:env").and_then(|v| v.as_object()).cloned())
+        .map(|obj| obj.into_iter().filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string()))).collect())
+        .unwrap_or_default();
+    meta.insert(
+        crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR.to_string(),
+        json!(crate::backend::gh_guard::guard_dir_for(&agent_env)),
+    );
     meta.insert("view".to_string(), json!("term"));
     meta.insert(
         blockcontroller::META_KEY_CONTROLLER.to_string(),
