@@ -346,8 +346,9 @@ pub(super) fn broadcast_meta_update(
 /// and reply, or return `None` if `id` doesn't resolve to a real block
 /// (stale pointer), OR if its shell has already exited, so the caller
 /// falls through to creating a fresh one. A pane has one agent shell: asking
-/// for it on another connection than the one it runs on is refused (409), not
-/// answered with the shell on the wrong machine.
+/// for it, while it runs, on another connection than its own is refused (409),
+/// not answered with the shell on the wrong machine. An exited one is replaced
+/// whatever its connection was.
 pub(super) async fn try_attach_to_existing_shell(
     state: &AppState,
     agent_block_id: &str,
@@ -355,16 +356,16 @@ pub(super) async fn try_attach_to_existing_shell(
     connection: &str,
 ) -> Option<axum::response::Response> {
     let block = state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
-    let running_on = crate::backend::obj::meta_get_string(
-        &block.meta,
-        blockcontroller::META_KEY_CONNECTION,
-        "local",
-    );
-    if !same_connection(&running_on, connection) {
-        let error = format!(
-            "this pane's shell runs on '{running_on}', not '{connection}'; stop it with PtyShellStop first"
-        );
-        return Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response());
+
+    // A running shell on another connection is refused before the resync, so
+    // the refusal leaves it exactly as it is. An exited one is not checked: it
+    // is replaced below whatever its connection was.
+    let running = blockcontroller::get_block_controller_status(id)
+        .is_some_and(|s| s.shellprocstatus == blockcontroller::STATUS_RUNNING);
+    if running {
+        if let Some(conflict) = connection_conflict(&block, connection) {
+            return Some(conflict);
+        }
     }
 
     // Baseline BEFORE resync — see `answer_conpty_handshake_if_seen`'s doc
@@ -484,15 +485,46 @@ pub(super) async fn try_attach_to_existing_shell(
                 .into_response(),
         );
     }
+    // Running now: the one that already was (refused above if on another
+    // connection), or one the resync started because no controller existed
+    // (after a srv restart), which runs on the block's own connection.
+    if let Some(conflict) = connection_conflict(&block, connection) {
+        return Some(conflict);
+    }
     answer_conpty_handshake_if_seen(state, id, baseline_len).await;
     tracing::info!(block_id = %id, parent_id = %agent_block_id, "ptyshell.create: reused");
     Some((StatusCode::OK, Json(PtyShellCreateResponse { shell_id: id.to_string() })).into_response())
 }
 
-/// Whether two connection names mean the same place (`""` and `local` do).
+/// 409 when the pane's running shell is on another connection than `wanted`.
+/// PtyShellStop releases the keyboard lock and leaves the shell running, so
+/// ending the shell is the way to switch.
+fn connection_conflict(
+    shell_block: &crate::backend::obj::Block,
+    wanted: &str,
+) -> Option<axum::response::Response> {
+    let running_on = crate::backend::obj::meta_get_string(
+        &shell_block.meta,
+        blockcontroller::META_KEY_CONNECTION,
+        "local",
+    );
+    if same_connection(&running_on, wanted) {
+        return None;
+    }
+    let error = format!(
+        "this pane's shell is running on '{running_on}', not '{wanted}'. \
+         End it with PtyShellInput(text: \"exit\\r\") and call PtyShell again, \
+         or call PtyShell with connection '{running_on}' to use it"
+    );
+    Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response())
+}
+
+/// Whether two connection names mean the same place:`""` and `local` do, and
+/// WSL distro names compare without case, as `connections::ensure` accepts them.
 fn same_connection(a: &str, b: &str) -> bool {
     use crate::backend::remote::ConnTarget;
     match (ConnTarget::parse(a), ConnTarget::parse(b)) {
+        (Ok(ConnTarget::Wsl(a)), Ok(ConnTarget::Wsl(b))) => a.eq_ignore_ascii_case(&b),
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }
@@ -508,5 +540,6 @@ mod connection_tests {
         assert!(same_connection("wsl://Ubuntu", " wsl://Ubuntu "));
         assert!(!same_connection("local", "wsl://Ubuntu"));
         assert!(!same_connection("wsl://Ubuntu", "wsl://Debian"));
+        assert!(same_connection("wsl://Ubuntu", "wsl://ubuntu"));
     }
 }

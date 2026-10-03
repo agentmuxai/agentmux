@@ -77,7 +77,7 @@ pub(crate) const PTY_SHELL_TOOL: &str = r#"{
       "cwd":  { "type": "string", "description": "Working directory (defaults to agent workdir)" },
       "rows": { "type": "integer", "description": "Initial terminal rows (default 25)" },
       "cols": { "type": "integer", "description": "Initial terminal columns (default 200)" },
-      "connection": { "type": "string", "description": "Where it runs: \"local\" (default, this machine) or \"wsl://<distro>\" for a WSL distribution on this Windows machine. ConnList shows what is available. SSH hosts are not supported yet. A WSL shell is the distro's login shell, and cwd is a path inside the distro. The pane has one shell: to switch connection, PtyShellStop it first." }
+      "connection": { "type": "string", "description": "Where it runs: \"local\" (default, this machine) or \"wsl://<distro>\" for a WSL distribution on this Windows machine. ConnList shows what is available. SSH hosts are not supported yet. A WSL shell is the distro's login shell, and cwd is a path inside the distro. The pane has one shell: to switch connection while it runs, end it first with PtyShellInput(text: \"exit\\r\") (PtyShellStop only releases your keyboard lock and leaves it running)." }
     }
   }
 }"#;
