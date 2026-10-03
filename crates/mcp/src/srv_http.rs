@@ -104,3 +104,8 @@ pub(crate) fn describe_http_error(what: &str, status: reqwest::StatusCode, body:
     };
     format!("{what} failed (HTTP {status}): {detail}{hint}")
 }
+
+/// How long a Shell or PtyShell create may take: one on an SSH host the user
+/// has not allowed yet waits for their answer in a consent dialog (srv gives
+/// them two minutes), well past the client's usual 10 s.
+pub(crate) const SHELL_CREATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(150);

@@ -199,6 +199,15 @@ pub async fn ask(
 ) -> Result<UserInputResponse, String> {
     let request_id = req.request_id.clone();
     let rx = global().register(&request_id);
+    // Forgotten however this ends, including the caller giving up mid-wait
+    // (its HTTP request dropped): a late answer then finds nothing waiting.
+    struct Forget(String);
+    impl Drop for Forget {
+        fn drop(&mut self) {
+            global().cancel(&self.0);
+        }
+    }
+    let _forget = Forget(request_id.clone());
     broker.publish(crate::backend::mps::MuxEvent {
         event: crate::backend::mps::EVENT_USER_INPUT.to_string(),
         scopes: vec![window_id.to_string()],
@@ -206,9 +215,7 @@ pub async fn ask(
         persist: 0,
         data: serde_json::to_value(&req).ok(),
     });
-    let result = wait_for_response(rx, timeout).await;
-    global().cancel(&request_id);
-    result
+    wait_for_response(rx, timeout).await
 }
 
 /// Wait for a user input response with timeout.
@@ -276,6 +283,22 @@ mod tests {
         let err = ask(&broker, "win-1", confirm_request("ask-test-2"), Duration::from_millis(50)).await;
         assert!(err.unwrap_err().contains("timed out"));
         assert!(!global().has_pending("ask-test-2"), "a timed-out request is forgotten");
+
+        // A caller that gives up mid-wait (its future dropped) leaves nothing.
+        let waiting = tokio::spawn(async move {
+            let broker = crate::backend::mps::Broker::new();
+            ask(&broker, "win-1", confirm_request("ask-test-3"), Duration::from_secs(30)).await
+        });
+        for _ in 0..50 {
+            if global().has_pending("ask-test-3") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(global().has_pending("ask-test-3"));
+        waiting.abort();
+        let _ = waiting.await;
+        assert!(!global().has_pending("ask-test-3"), "a dropped wait is forgotten");
     }
 
     #[test]
