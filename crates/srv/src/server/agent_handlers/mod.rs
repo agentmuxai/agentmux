@@ -339,6 +339,11 @@ mod recent_sessions_tests {
                 String::new(),
             )),
             lan_listeners: Arc::new(crate::backend::lan_listeners::LanListenerSupervisor::new(0, 0)),
+            fleet_feed: Arc::new(crate::backend::fleet_feed::FleetFeed::new(
+                "test-host".to_string(),
+                "test-channel".to_string(),
+                "0.0.0-test".to_string(),
+            )),
             lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
             process_tracker,
             process_broker,
@@ -694,6 +699,11 @@ mod recent_sessions_tests {
                 String::new(),
             )),
             lan_listeners: Arc::new(crate::backend::lan_listeners::LanListenerSupervisor::new(0, 0)),
+            fleet_feed: Arc::new(crate::backend::fleet_feed::FleetFeed::new(
+                "test-host".to_string(),
+                "test-channel".to_string(),
+                "0.0.0-test".to_string(),
+            )),
             lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
             process_tracker,
             process_broker,

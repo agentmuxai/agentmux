@@ -227,6 +227,8 @@ async fn main() {
     let wal_filestore = Arc::clone(&state.filestore);
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let dev_proxy_registry = state.dev_proxy.clone();
+    let fleet_feed = Arc::clone(&state.fleet_feed);
+    let reactive_handler = state.reactive_handler;
     let routers = build_routers(state);
     let router = routers.full;
 
@@ -259,6 +261,13 @@ async fn main() {
     // long-running sessions.
     bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_mstore, wal_filestore);
 
+    // The fleet feed's change detection (`backend::fleet_feed`): compares the
+    // reachable agent names once a second, stops with the same token.
+    fleet_feed.spawn_change_detection(
+        move || reactive_handler.list_agents().into_iter().map(|a| a.agent_id).collect(),
+        stdin_token.clone(),
+    );
+
     // Run both servers until shutdown
     tokio::select! {
         result = web_server.into_future() => {
@@ -275,6 +284,9 @@ async fn main() {
             tracing::info!("shutdown signal received, exiting");
         }
     }
+
+    // This host's other LAN channels stop listing this one as a sibling.
+    net.lan_discovery.withdraw_instance_record();
 
     // Shutdown cleanup: close every agent through the one teardown
     // (SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md, `Policy::app_exit()`),

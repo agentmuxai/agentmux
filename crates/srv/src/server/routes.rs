@@ -107,6 +107,10 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         )
         // One live instance per agent, LAN tier (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 §4.4).
         .route("/agentmux/agent/holding", get(agent_takeover::handle_agent_holding))
+        // The same names, as a versioned snapshot and an SSE stream, so a phone
+        // follows changes without polling (SPEC_LAN_FLEET_FEED_2026_10_03.md).
+        .route("/agentmux/fleet", get(handle_fleet))
+        .route("/agentmux/fleet/events", get(handle_fleet_events))
         // Identity M4a: inner to the auth layer (route_layer order: the
         // last one added runs first), so it sees which key authenticated.
         .route_layer(middleware::from_fn_with_state(

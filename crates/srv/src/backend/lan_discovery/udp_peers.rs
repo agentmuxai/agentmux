@@ -16,8 +16,8 @@
 //!
 //! * sends the existing probe to the limited broadcast address and to each
 //!   interface's directed broadcast every [`PROBE_INTERVAL`];
-//! * answers a probe from a private-range source with the same identity payload
-//!   the 47891 responder sends (`probe_response_json`);
+//! * answers a probe from a private-range source with the identity payload the
+//!   47891 responder sends (`probe_response_json`), without its `siblings`;
 //! * reads identity payloads that come back and records the sender as a peer.
 //!
 //! Probing and answering share one socket on purpose: a peer's reply goes to the
@@ -363,7 +363,10 @@ impl LanDiscovery {
             if !is_lan_source(&src) {
                 return;
             }
-            if let Ok(payload) = serde_json::to_vec(&self.build_probe_response()) {
+            // Identity only, without the 47891 reply's `siblings`: a desktop
+            // reads replies into a 1024-byte buffer, which siblings could
+            // overflow, and finds a host's other channels over mDNS anyway.
+            if let Ok(payload) = serde_json::to_vec(&self.build_identity_response()) {
                 if let Err(e) = socket.send_to(&payload, src).await {
                     tracing::debug!(%src, error = %e, "UDP peer reply send failed");
                 }
@@ -709,6 +712,9 @@ mod tests {
             udp_cancel: Mutex::new(None),
             udp_peer_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
+            instance_record_cancel: Mutex::new(None),
+            instances_dir: None,
+            instance_record_live: Mutex::new(false),
             announced_v4: Arc::new(Mutex::new(BTreeSet::new())),
             monitored: true,
             started_at: std::time::Instant::now(),
