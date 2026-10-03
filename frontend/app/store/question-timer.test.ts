@@ -13,12 +13,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const writes: Array<{ oref: string; meta: Record<string, unknown> }> = [];
 const [metaByBlock, setMetaByBlock] = createSignal<Record<string, Record<string, unknown>>>({});
+/** While set, writes stay in flight until `release()` is called. */
+let hold: Array<() => void> | null = null;
 
 vi.mock("@/app/store/services", () => ({
     ObjectService: {
         UpdateObjectMeta: (oref: string, meta: Record<string, unknown>) => {
             writes.push({ oref, meta });
-            return Promise.resolve();
+            if (!hold) return Promise.resolve();
+            return new Promise<void>((resolve) => hold!.push(resolve));
         },
     },
 }));
@@ -45,10 +48,15 @@ import {
 } from "./question-timer";
 
 const published = () => writes.map((w) => w.meta[META_QUESTION_TIMER]);
+/** Let queued meta writes go out. */
+const flush = async () => {
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+};
 
 beforeEach(() => {
     vi.useFakeTimers();
     writes.length = 0;
+    hold = null;
     setMetaByBlock({});
 });
 
@@ -125,30 +133,58 @@ describe("question timer: owner", () => {
 });
 
 describe("question timer: publishing", () => {
-    it("writes block meta on edges only: start, pause, resume, end; never per tick or on repeated activity", () => {
+    it("writes block meta on edges only: start, pause, resume, end; never per tick or on repeated activity", async () => {
         startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn(), publish: true });
         vi.advanceTimersByTime(5_000);
+        await flush();
         expect(published()).toEqual([{ kind: "counting", endsAt: 30_000 + Date.now() - 5_000 }]);
 
         noteQuestionActivity("b1");
         noteQuestionActivity("b1");
         noteQuestionActivity("b1");
+        await flush();
         expect(published()).toHaveLength(2);
         expect(published()[1]).toEqual({ kind: "paused", reason: "activity" });
 
         vi.advanceTimersByTime(15_000);
+        await flush();
         expect(published()[2]).toEqual({ kind: "counting", endsAt: Date.now() + 30_000 });
 
         endQuestionTimer("b1");
+        await flush();
         expect(published()).toHaveLength(4);
         expect(published()[3]).toBeNull();
         expect(writes.every((w) => w.oref === "block:b1")).toBe(true);
     });
 
-    it("clears the published key when it expires", () => {
+    it("clears the published key when it expires", async () => {
         startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn(), publish: true });
         vi.advanceTimersByTime(30_000);
+        await flush();
         expect(published().at(-1)).toBeNull();
+    });
+
+    // Codex P2 on #4250: separate requests can commit out of order, so the
+    // ended question's `null` could land after the next question's countdown.
+    it("sends one write at a time per block, then only the latest state", async () => {
+        hold = [];
+        startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn(), publish: true });
+        await flush();
+        expect(published()).toHaveLength(1); // in flight
+
+        endQuestionTimer("b1"); // the question is answered...
+        startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn(), publish: true }); // ...and the next arrives
+        await flush();
+        expect(published()).toHaveLength(1); // nothing sent while one is in flight
+
+        hold.shift()!();
+        await flush();
+        // The null in between is skipped; the newest state goes last.
+        expect(published()).toHaveLength(2);
+        expect(published()[1]).toEqual({ kind: "counting", endsAt: Date.now() + 30_000 });
+        hold.shift()!();
+        await flush();
+        expect(published()).toHaveLength(2);
     });
 
     it("writes nothing for a local key", () => {
@@ -158,9 +194,10 @@ describe("question timer: publishing", () => {
         expect(writes).toHaveLength(0);
     });
 
-    it("a panel mounting with nothing pending clears a key a crashed owner left behind", () => {
+    it("a panel mounting with nothing pending clears a key a crashed owner left behind", async () => {
         setMetaByBlock({ b1: { [META_QUESTION_TIMER]: { kind: "paused", reason: "activity" } } });
         endQuestionTimer("b1", { publish: true });
+        await flush();
         expect(published()).toEqual([null]);
     });
 
@@ -187,6 +224,16 @@ describe("question timer: readers", () => {
     it("ignores a malformed published value", () => {
         setMetaByBlock({ b2: { [META_QUESTION_TIMER]: { kind: "counting" } } });
         expect(questionTimer("b2")).toBeNull();
+    });
+
+    // Codex P2 on #4250: the pane moved to another window, which now owns the
+    // timer; this window's Swarm must show what that owner publishes.
+    it("after ending, a renderer reads what a later owner publishes", () => {
+        startQuestionTimer("b1", { durationMs: 30_000, onExpire: vi.fn() });
+        endQuestionTimer("b1");
+        const endsAt = Date.now() + 20_000;
+        setMetaByBlock({ b1: { [META_QUESTION_TIMER]: { kind: "counting", endsAt } } });
+        expect(questionTimer("b1")).toEqual({ kind: "counting", endsAt });
     });
 
     it("the owner's local state wins over its own published copy", () => {

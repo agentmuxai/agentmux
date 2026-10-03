@@ -27,7 +27,6 @@ import { createSignal } from "solid-js";
 import { MOS } from "@/app/store/global";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
-import { fireAndForget } from "@/util/util";
 
 export type QuestionTimerState =
     | { kind: "counting"; endsAt: number }
@@ -60,8 +59,8 @@ interface Owner {
 }
 
 const owners = new Map<string, Owner>();
-// Present key = this renderer owns (or owned) the block's timer; its value wins
-// over the published copy.
+// Present key = this renderer owns the block's timer; its value wins over the
+// published copy.
 const [local, setLocal] = createSignal<Record<string, QuestionTimerState>>({});
 
 // ── The shared clock ─────────────────────────────────────────────────────
@@ -101,10 +100,33 @@ function sameState(a: QuestionTimerState | undefined, b: QuestionTimerState): bo
     return false;
 }
 
+// One write in flight per block, then the latest state: separate requests can
+// commit out of order, and a late `null` from the question that just ended
+// would wipe the next question's countdown in other windows (Codex P2, #4250).
+const writes = new Map<string, { next?: { state: QuestionTimerState } }>();
+
 function writeMeta(blockId: string, state: QuestionTimerState) {
-    fireAndForget(() =>
-        ObjectService.UpdateObjectMeta(makeORef("block", blockId), { [META_QUESTION_TIMER]: state } as MetaType)
-    );
+    const queued = writes.get(blockId);
+    if (queued) {
+        queued.next = { state };
+        return;
+    }
+    const q: { next?: { state: QuestionTimerState } } = { next: { state } };
+    writes.set(blockId, q);
+    void (async () => {
+        while (q.next) {
+            const { state: latest } = q.next;
+            q.next = undefined;
+            try {
+                await ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
+                    [META_QUESTION_TIMER]: latest,
+                } as MetaType);
+            } catch (e) {
+                console.log("question-timer: meta write failed", e);
+            }
+        }
+        writes.delete(blockId);
+    })();
 }
 
 function setState(blockId: string, owner: Owner | undefined, state: QuestionTimerState) {
@@ -122,10 +144,22 @@ function clearTimers(owner: Owner) {
     owner.expireId = owner.quietId = undefined;
 }
 
-function expire(blockId: string, owner: Owner) {
+/** Stop owning the block's timer. The local entry goes too, so this renderer
+ *  reads whatever a later owner (the pane moved to another window) publishes
+ *  (Codex P2, #4250). */
+function release(blockId: string, owner: Owner) {
     clearTimers(owner);
     owners.delete(blockId);
-    setState(blockId, owner, null);
+    setLocal((prev) => {
+        const rest = { ...prev };
+        delete rest[blockId];
+        return rest;
+    });
+    if (owner.published) writeMeta(blockId, null);
+}
+
+function expire(blockId: string, owner: Owner) {
+    release(blockId, owner);
     owner.onExpire();
 }
 
@@ -194,10 +228,7 @@ export function setQuestionTimerDormant(blockId: string, dormant: boolean): void
 export function endQuestionTimer(blockId: string, opts?: { publish?: boolean }): void {
     const owner = owners.get(blockId);
     if (owner) {
-        clearTimers(owner);
-        owners.delete(blockId);
-        setLocal((prev) => ({ ...prev, [blockId]: null }));
-        if (owner.published) writeMeta(blockId, null);
+        release(blockId, owner);
         return;
     }
     if (opts?.publish && publishedState(blockId) !== undefined) writeMeta(blockId, null);
@@ -252,6 +283,7 @@ export function questionCountdown(blockId: string): QuestionCountdown | null {
 export function resetQuestionTimersForTests(): void {
     for (const owner of owners.values()) clearTimers(owner);
     owners.clear();
+    writes.clear();
     stopClock();
     setLocal({});
 }
