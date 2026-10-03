@@ -878,8 +878,19 @@ pub async fn start(
     emit: super::jobs::Emit,
 ) -> Result<FsOpStartResult, String> {
     let rt = Handle::current();
-    let dest_dir = dest.tidy(&dest_dir);
-    let sources: Vec<String> = sources.iter().map(|s| src.tidy(s)).collect();
+    // Where things really are: the destination folder and each source's
+    // parent with their links resolved (a source keeps its own name, so a
+    // link is moved as a link). Every check below, and the transfer itself,
+    // use these, so a link in a parent (`/tmp/x` to `/home`) can't spell its
+    // way past a protected place.
+    let dest_dir = realpath_now(&dest, &dest.tidy(&dest_dir)).await;
+    let mut resolved = Vec::with_capacity(sources.len());
+    for s in &sources {
+        let s = src.tidy(s);
+        let parent = realpath_now(&src, &src.parent(&s)).await;
+        resolved.push(src.join(&parent, &src.name(&s)));
+    }
+    let sources = resolved;
     // Checked before answering, as a local copy's plan is (awaited here: only
     // the op's own thread blocks on the runtime).
     let is_dir = match &dest {
@@ -925,21 +936,8 @@ pub async fn start(
             }
         }
     }
-    // Within one host, compare where things really are.
-    let (keyed, dest_key) = if src.same_host(&dest) {
-        let mut keyed = Vec::with_capacity(sources.len());
-        for s in &sources {
-            let parent = realpath_now(&src, &src.parent(s)).await;
-            keyed.push((s.clone(), src.join(&parent, &src.name(s))));
-        }
-        (keyed, realpath_now(&dest, &dest_dir).await)
-    } else {
-        (
-            sources.iter().map(|s| (s.clone(), s.clone())).collect(),
-            dest_dir.clone(),
-        )
-    };
-    let items = plan_on_one_host(kind, &src, &keyed, &dest, &dest_key)?;
+    let keyed: Vec<(String, String)> = sources.iter().map(|s| (s.clone(), s.clone())).collect();
+    let items = plan_on_one_host(kind, &src, &keyed, &dest, &dest_dir)?;
     let shown_dest = dest.show(&dest_dir);
     let requested = sources.len();
     JOBS.start_host(
@@ -1450,6 +1448,42 @@ mod tests {
         assert_eq!(landed.permissions().mode() & 0o7777, 0o750);
         assert_eq!(landed.modified().unwrap(), when);
         assert!(!tool.exists());
+    }
+
+    /// A protected folder named through a link in its parent is still that
+    /// folder: refused (#4296).
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_linked_parent_does_not_spell_past_protection() {
+        let remote = tempfile::tempdir().unwrap();
+        let r = display_path(remote.path());
+        // `etc-parent` is `/`: `etc-parent/etc` is `/etc`.
+        std::os::unix::fs::symlink("/", remote.path().join("etc-parent")).unwrap();
+        let h = host(remote.path()).await;
+        let local = tempfile::tempdir().unwrap();
+        std::fs::write(local.path().join("a.txt"), b"a").unwrap();
+        let err = start(
+            FsOpKind::Copy,
+            End::Local,
+            vec![display_path(&local.path().join("a.txt"))],
+            h.clone(),
+            format!("{r}/etc-parent/etc"),
+            events().0,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("doesn't change"), "{err}");
+        let moved = start(
+            FsOpKind::Move,
+            h,
+            vec![format!("{r}/etc-parent/etc")],
+            End::Local,
+            display_path(local.path()),
+            events().0,
+        )
+        .await
+        .unwrap_err();
+        assert!(moved.contains("doesn't change"), "{moved}");
     }
 
     /// A missing source or a protected place is refused before the op starts.

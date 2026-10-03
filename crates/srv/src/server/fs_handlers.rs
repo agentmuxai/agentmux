@@ -244,18 +244,22 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         block_id: &cmd.block_id,
                         auth_key: &auth_key,
                     };
-                    let mut ends = Vec::with_capacity(2);
-                    for conn in [from, to] {
-                        ends.push(match conn {
-                            None => fs_ops::host_jobs::End::Local,
-                            Some(c) => crate::backend::remote::files::connect(c, Some(ask))
-                                .await
-                                .map(fs_ops::host_jobs::End::host)
-                                .map_err(|e| e.message)?,
-                        });
-                    }
-                    let dest = ends.pop().expect("two ends");
-                    let src = ends.pop().expect("two ends");
+                    // Both at once: each may first ask the user something over
+                    // ssh, and two in a row could outlast the request.
+                    let connect = |conn: Option<&str>| {
+                        let conn = conn.map(str::to_string);
+                        async move {
+                            match conn {
+                                None => Ok(fs_ops::host_jobs::End::Local),
+                                Some(c) => crate::backend::remote::files::connect(&c, Some(ask))
+                                    .await
+                                    .map(fs_ops::host_jobs::End::host)
+                                    .map_err(|e| e.message),
+                            }
+                        }
+                    };
+                    let (src, dest) = tokio::join!(connect(from), connect(to));
+                    let (src, dest) = (src?, dest?);
                     return fs_ops::host_jobs::start(cmd.kind, src, cmd.sources, dest, cmd.dest_dir, emit).await;
                 }
                 blocking(move || fs_ops::jobs::JOBS.start(&cmd, emit)).await?
