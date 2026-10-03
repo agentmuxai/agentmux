@@ -1161,8 +1161,8 @@ mod tests {
     }
 
     /// Counterpart to the above: when NOTHING is persisted yet for the
-    /// definition, the row's `preview` stays empty — the frontend's own
-    /// existing "(no conversation snapshot)" fallback text is unaffected.
+    /// definition, the row's `preview` stays empty and the frontend shows its
+    /// own empty-state text ("No conversations yet").
     /// Generation itself (a real Haiku CLI round-trip) is fire-and-forget
     /// and not asserted here — this only locks in that a missing summary
     /// never surfaces as a fabricated non-empty preview.
