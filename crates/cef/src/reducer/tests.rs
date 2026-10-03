@@ -105,16 +105,10 @@ fn version_increments_monotonically() {
         HostEvent::PoolEmpty { version } => *version,
         HostEvent::QuitDraining { version, .. } => *version,
         HostEvent::QuitReady { version } => *version,
-        HostEvent::TopLevelCreationRequested { version, .. } => *version,
-        HostEvent::TopLevelCreationStarted { version, .. } => *version,
-        HostEvent::TopLevelCreationCompleted { version, .. } => *version,
-        HostEvent::TopLevelCreationFailed { version, .. } => *version,
-        HostEvent::TopLevelQueueLengthChanged { version, .. } => *version,
         HostEvent::WindowOpacityApplied { version, .. } => *version,
         HostEvent::WindowOpacityCleared { version, .. } => *version,
         HostEvent::PaneWindowStateChanged { version, .. } => *version,
         HostEvent::FloatingAlwaysOnTopChanged { version, .. } => *version,
-        HostEvent::Effect { version, .. } => *version,
         HostEvent::Error { version, .. } => *version,
     };
     let v1 = extract_version(&out1.events);
@@ -130,19 +124,6 @@ fn browser_pane_request(block_id: &str, label: &str) -> HostCommand {
     HostCommand::EnqueueBrowserPaneCreate {
         block_id: block_id.to_string(),
         label: label.to_string(),
-    }
-}
-
-fn top_level_request(label: &str, source: TopLevelSource) -> TopLevelCreationRequest {
-    TopLevelCreationRequest {
-        label: label.to_string(),
-        kind: WindowKind::FullInstance,
-        parent_instance_id: None,
-        url: format!("https://example.test/{}", label),
-        pos: (0, 0),
-        size: (800, 600),
-        frameless: true,
-        source,
     }
 }
 
@@ -569,165 +550,6 @@ fn quit_state_monotonic() {
     assert_eq!(state.quit_state, QuitState::Quit);
 }
 
-// ── H.6 top-level runner (singleton + fail-fast) ─────────────────────
-
-#[test]
-fn enqueue_top_level_when_idle_starts_immediately() {
-    let mut state = HostState::default();
-    let out = update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("a", TopLevelSource::User),
-        },
-    );
-    assert!(state.top_level_creation.in_flight.is_some());
-    assert_eq!(state.top_level_creation.in_flight.as_ref().unwrap().label, "a");
-    let begin_count = out
-        .events
-        .iter()
-        .filter(|e| matches!(
-            e,
-            HostEvent::Effect { effect: EffectKind::PostCreateWindow { .. }, .. }
-        ))
-        .count();
-    assert_eq!(begin_count, 1);
-}
-
-#[test]
-fn user_initiated_when_busy_fails_fast() {
-    let mut state = HostState::default();
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("a", TopLevelSource::User),
-        },
-    );
-    // Second user-initiated request: in-flight is occupied → error.
-    let out = update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("b", TopLevelSource::User),
-        },
-    );
-    assert!(matches!(out.events[0], HostEvent::Error { .. }));
-    assert_eq!(state.top_level_creation.queue.len(), 0); // not queued
-}
-
-#[test]
-fn background_when_busy_queues_silently() {
-    let mut state = HostState::default();
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("a", TopLevelSource::User),
-        },
-    );
-    // Background request queues even though in-flight occupied.
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("b", TopLevelSource::Background),
-        },
-    );
-    assert_eq!(state.top_level_creation.queue.len(), 1);
-    assert_eq!(state.top_level_creation.in_flight.as_ref().unwrap().label, "a");
-}
-
-#[test]
-fn callback_fired_advances_queue() {
-    let mut state = HostState::default();
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("a", TopLevelSource::User),
-        },
-    );
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("b", TopLevelSource::Background),
-        },
-    );
-    let out = update(
-        &mut state,
-        HostCommand::TopLevelCallbackFired { label: "a".into() },
-    );
-    // a archived to history; b now in-flight.
-    assert_eq!(state.top_level_creation.history.len(), 1);
-    assert_eq!(state.top_level_creation.in_flight.as_ref().unwrap().label, "b");
-    assert!(out.events.iter().any(|e| matches!(e, HostEvent::TopLevelCreationCompleted { .. })));
-}
-
-#[test]
-fn renderer_terminated_fails_in_flight() {
-    let mut state = HostState::default();
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("a", TopLevelSource::User),
-        },
-    );
-    update(
-        &mut state,
-        HostCommand::TopLevelRendererTerminated {
-            label: "a".into(),
-            status: "killed".into(),
-        },
-    );
-    assert!(state.top_level_creation.in_flight.is_none());
-    assert_eq!(state.top_level_creation.history.len(), 1);
-    assert!(matches!(
-        state.top_level_creation.history.back().unwrap().outcome,
-        TopLevelCreationOutcome::RendererTerminated { .. }
-    ));
-}
-
-#[test]
-fn callback_fired_with_unknown_label_is_noop_or_orphan_close() {
-    let mut state = HostState::default();
-    // No in-flight, no browser registered for this label.
-    let out = update(
-        &mut state,
-        HostCommand::TopLevelCallbackFired { label: "ghost".into() },
-    );
-    assert!(out.events.is_empty()); // pure no-op when no orphan to close
-}
-
-#[test]
-fn enqueue_top_level_during_quit_rejected() {
-    let mut state = HostState::default();
-    update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
-    let out = update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("a", TopLevelSource::User),
-        },
-    );
-    assert!(matches!(out.events[0], HostEvent::Error { .. }));
-    assert!(state.top_level_creation.in_flight.is_none());
-}
-
-#[test]
-fn history_caps_at_50() {
-    let mut state = HostState::default();
-    for i in 0..60 {
-        let label = format!("w{}", i);
-        update(
-            &mut state,
-            HostCommand::EnqueueTopLevelWindow {
-                request: top_level_request(&label, TopLevelSource::Background),
-            },
-        );
-        update(
-            &mut state,
-            HostCommand::TopLevelCallbackFired { label },
-        );
-    }
-    assert_eq!(state.top_level_creation.history.len(), TOP_LEVEL_CREATION_HISTORY_CAP);
-    assert_eq!(state.top_level_creation.history.front().unwrap().label, "w10");
-    assert_eq!(state.top_level_creation.history.back().unwrap().label, "w59");
-}
-
 // ── H.4 pool ─────────────────────────────────────────────────────────
 
 #[test]
@@ -1098,60 +920,6 @@ fn pool_destroy_with_unknown_label_is_noop() {
         HostCommand::PoolWindowDestroyedBeforePromote { label: "ghost".into() },
     );
     assert!(out.events.is_empty());
-}
-
-/// Regression test for codex P1 on PR #654 round 1.
-///
-/// Setup: in-flight User creation, Background queued behind it. Begin
-/// drain. Complete the in-flight. The queued Background request must
-/// NOT be started — even though it was enqueued before drain, starting
-/// it would create a new window mid-shutdown and prevent drain completion.
-#[test]
-fn queued_background_does_not_start_after_drain_begins() {
-    let mut state = HostState::default();
-    // Step 1: User-initiated creation goes in-flight.
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("user-window", TopLevelSource::User),
-        },
-    );
-    assert!(state.top_level_creation.in_flight.is_some());
-    // Step 2: Background pool refill queues behind it.
-    update(
-        &mut state,
-        HostCommand::EnqueueTopLevelWindow {
-            request: top_level_request("pool-refill", TopLevelSource::Background),
-        },
-    );
-    assert_eq!(state.top_level_creation.queue.len(), 1);
-    // Step 3: User triggers shutdown (last window closed). Drain begins.
-    update(&mut state, HostCommand::BeginDrain { reason: QuitReason::LastWindowClosed });
-    assert!(matches!(state.quit_state, QuitState::Draining { .. }));
-    // Step 4: The in-flight user-window's CEF callback fires. Normally
-    // this would pop the queued Background request and start it. With
-    // the quit gate it must NOT.
-    let out = update(
-        &mut state,
-        HostCommand::TopLevelCallbackFired { label: "user-window".into() },
-    );
-    assert!(state.top_level_creation.in_flight.is_none(), "in-flight cleared after callback");
-    assert_eq!(state.top_level_creation.queue.len(), 1, "queued background still queued");
-    // CRITICAL: no PostCreateWindow effect emitted.
-    let post_create_count = out
-        .events
-        .iter()
-        .filter(|e| matches!(
-            e,
-            HostEvent::Effect { effect: EffectKind::PostCreateWindow { .. }, .. }
-        ))
-        .count();
-    assert_eq!(post_create_count, 0, "no PostCreateWindow effect during drain");
-    // The completion event for the user-window should still fire.
-    assert!(
-        out.events.iter().any(|e| matches!(e, HostEvent::TopLevelCreationCompleted { .. })),
-        "user-window completion still emitted"
-    );
 }
 
 // ── Level-triggered quit reconciliation (spec §5.1/§10) ───────────────────
