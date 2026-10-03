@@ -621,7 +621,8 @@ pub(crate) const OPEN_EDITOR_TOOL: &str = r#"{
       "title": { "type": "string", "description": "Optional tab/pane title (defaults to the file name)" },
       "split": { "type": "string", "enum": ["right", "left", "down", "up"], "description": "Where to place the new pane relative to this agent pane (default: right). Ignored when floating is true." },
       "collapse_tree": { "type": "boolean", "description": "Open the editor with its file-tree sidebar collapsed (just the file, no explorer). Default: false (tree expanded)." },
-      "floating": { "type": "boolean", "description": "Open the file in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
+      "floating": { "type": "boolean", "description": "Open the file in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." },
+      "connection": { "type": "string", "description": "Where the file is: an SSH host (an ssh config alias, host, user@host or user@host:port; ConnList shows them), whose editor then opens on that host for the user. Absent or \"local\": this machine. An SSH host is reached as the user with their SSH keys, so the first use asks the user to allow it (an error says if they did not), and any ssh prompt goes to the user, never to you. The path is the host's own (~ is its home)." }
     },
     "required": ["file"]
   }
@@ -652,7 +653,8 @@ pub(crate) const OPEN_FILES_TOOL: &str = r#"{
       "select":   { "type": "array", "items": { "type": "string" }, "description": "Names (or absolute paths) of entries inside that folder to select once it is listed" },
       "title":    { "type": "string", "description": "Optional tab/pane title (defaults to the folder name)" },
       "split":    { "type": "string", "enum": ["right", "left", "down", "up"], "description": "Where to place the new pane relative to this agent pane (default: right). Ignored when floating is true." },
-      "floating": { "type": "boolean", "description": "Open the folder in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." }
+      "floating": { "type": "boolean", "description": "Open the folder in a floating window (a chromeless pane over the app) instead of a docked split. Default: false." },
+      "connection": { "type": "string", "description": "Where the folder is: an SSH host (an ssh config alias, host, user@host or user@host:port; ConnList shows them), whose Files pane then opens on that host for the user. Absent or \"local\": this machine. An SSH host is reached as the user with their SSH keys, so the first use asks the user to allow it (an error says if they did not), and any ssh prompt goes to the user, never to you. The path is the host's own (~ is its home)." }
     },
     "required": ["path"]
   }

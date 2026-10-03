@@ -9,6 +9,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     let ToolCtx { local_url, auth_key, block_id, client, .. } = *cx;
     match name {
         "OpenEditor" => {
+            let connection = connection_arg(arguments);
             let file = arguments
                 .get("file")
                 .and_then(|v| v.as_str())
@@ -67,8 +68,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // split_reference_block_id alone).
                 reuse_editor_pane: Some(true),
                 select: None,
-                connection: None,
-                auth: None,
+                // On an SSH host: srv asks the user to allow it, checking this
+                // agent's signed identity (remote terminals spec §8.2).
+                auth: if connection.is_some() { Some(sign_ui_automation_auth()?) } else { None },
+                connection,
             };
 
             let resp = client
@@ -170,6 +173,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
         // Navigation only (SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1, §9:
         // agents don't mutate through this pane).
         "OpenFiles" => {
+            let connection = connection_arg(arguments);
             let path = arguments
                 .get("path")
                 .and_then(|v| v.as_str())
@@ -218,8 +222,10 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 tab_id: None,
                 reuse_editor_pane: None, // view != "editor" — irrelevant here
                 select: if select.is_empty() { None } else { Some(select) },
-                connection: None,
-                auth: None,
+                // On an SSH host: srv asks the user to allow it, checking this
+                // agent's signed identity (remote terminals spec §8.2).
+                auth: if connection.is_some() { Some(sign_ui_automation_auth()?) } else { None },
+                connection,
             };
 
             let resp = client
@@ -643,5 +649,32 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             Ok(format!("Registered. Browse to: {}", body.url))
         }
         _ => Err(not_in_family()),
+    }
+}
+
+
+/// The `connection` an Open tool was given: an SSH host or WSL name, trimmed;
+/// `None` for absent, empty or "local" (this machine).
+fn connection_arg(arguments: &Value) -> Option<String> {
+    arguments
+        .get("connection")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && *c != "local")
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod connection_arg_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_named_connection_is_one() {
+        let c = |v: Value| connection_arg(&serde_json::json!({ "connection": v }));
+        assert_eq!(c(serde_json::json!(" user@box ")).as_deref(), Some("user@box"));
+        assert_eq!(c(serde_json::json!("wsl://Ubuntu")).as_deref(), Some("wsl://Ubuntu"));
+        assert_eq!(c(serde_json::json!("local")), None);
+        assert_eq!(c(serde_json::json!("")), None);
+        assert_eq!(connection_arg(&serde_json::json!({})), None);
     }
 }
