@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Shared styling for the three ABF import modal steps (BundleImportSelect/
-// Preview/ConfirmModal.tsx). Reuses the app's shared .modal-panel-* shell
+// Shared styling for the three ABF import modal steps (BundleImportSelectModal,
+// BundleImportPreviewModal, BundleImportConfirmModal). Reuses the app's shared .modal-panel-* shell
 // classes; everything here is scoped under .bundle-import-*.
 
 .bundle-import-select-body,

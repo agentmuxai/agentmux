@@ -12,7 +12,6 @@
     // the entry here and appends a matching `user_message` node to
     // the conversation — color shifts from amber (pending) to accent
     // blue (accepted), which is the user's visible "accepted" signal.
-    // See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
     .agent-pending-zone {
         // Queue sits directly below the feed (post-reorder PR). Dashed
         // top border visually pins it to the feed above; solid bottom

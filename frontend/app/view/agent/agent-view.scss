@@ -279,7 +279,7 @@
 // bar matches the pane's own selection-ring color exactly — including
 // switching to the focused-ring color when the pane is focused — instead
 // of always reading as the same fixed accent blue regardless of pane
-// state (SPEC_AGENT_PANE_PROGRESS_BAR_FULL_PERIMETER_2026_09_18.md).
+// state (#3371).
 //
 // Traces the full pane perimeter, not just the top edge. This element
 // itself is the static "picture frame": `padding` sets the ring's
@@ -303,7 +303,7 @@
 // stops making sense: the same global slide direction looks like
 // diagonal motion on the top/bottom edges but the WRONG axis of motion on
 // the left/right edges, never reading as one continuous loop (caught in
-// manual testing — see SPEC_AGENT_PANE_PROGRESS_BAR_FULL_PERIMETER_2026_09_18.md).
+// manual testing, #3371).
 // A conic gradient's wedges are defined by ANGLE from the ring's own
 // center, so a single
 // `rotate()` sweeps every point on the ring — all 4 sides and corners —
