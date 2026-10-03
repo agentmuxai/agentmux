@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { outcomeText } from "./MemoryAdoptionPanel";
+import { adoptionHint, outcomeText } from "./MemoryAdoptionPanel";
 import { claimedSince, releaseOutcome } from "./MemoryClaimsPanel";
 import { accountLabel, parseAdoptionMeta } from "@/app/view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
 
@@ -31,6 +31,18 @@ describe("memory adoption", () => {
         expect(meta?.summary.folders[0].files).toEqual(["a.md"]);
         expect(parseAdoptionMeta(JSON.stringify({ summary: {} }))).toBeNull();
         expect(parseAdoptionMeta("not json")).toBeNull();
+    });
+
+    it("explains what earlier memory is and what adopting does", () => {
+        const accounts = adoptionHint(6, 0);
+        expect(accounts).toContain("earlier account");
+        expect(accounts).toContain("copies");
+        expect(accounts).toContain("aren't changed");
+        // The index is the one current file adoption changes; the hint must say so.
+        expect(accounts).toContain("MEMORY.md index");
+        expect(accounts).not.toContain("Held");
+        expect(adoptionHint(0, 1)).toMatch(/^Held files/);
+        expect(adoptionHint(2, 1)).toContain("Held files");
     });
 
     it("names held files and accounts for the human", () => {
