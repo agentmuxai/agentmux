@@ -75,6 +75,9 @@ fn split_line(line: &str) -> Option<(String, Vec<String>)> {
     let mut quoted = false;
     for c in rest.chars() {
         match c {
+            // An unquoted `#` starting a word ends the line, as in ssh's own
+            // parser: `Host box # prod server` names only `box`.
+            '#' if !quoted && current.is_empty() => break,
             '"' => quoted = !quoted,
             c if c.is_whitespace() && !quoted => {
                 if !current.is_empty() {
@@ -167,11 +170,27 @@ mod tests {
              Host *\n\
              Host *.example.com !bastion ?x\n\
              Host -oProxyCommand=calc\n\
+             Host box # prod server\n\
+             Host alpha \"#x\" beta\n\
+             Host gamma x#y delta\n\
              Match host foo\n",
         );
+        // A trailing comment names no hosts; a `#` inside quotes or a word is
+        // not one, so the names after it count (the words holding `#` are
+        // themselves refused by conn.rs, as shell syntax).
         assert_eq!(
             hosts_in(&config, dir.path()),
-            ["area54", "db+replica", "prod/web", "starpower"]
+            [
+                "alpha",
+                "area54",
+                "beta",
+                "box",
+                "db+replica",
+                "delta",
+                "gamma",
+                "prod/web",
+                "starpower"
+            ]
         );
     }
 
