@@ -32,16 +32,7 @@ impl PersistentSubprocessController {
         // deliver) — give it the same classify/persist/publish treatment so
         // it isn't silently dropped from the pane's failure-recovery UI. No
         // exit code exists for this now-superseded turn.
-        if let Some(failure) = classify_exit_line(None, &line) {
-            core::persist_last_failure(&self.block_id, Some(&failure), &self.mstore, &self.event_bus);
-            broker.publish(mps::MuxEvent {
-                event: mps::EVENT_AGENT_FAILURE.to_string(),
-                scopes: vec![format!("block:{}", self.block_id)],
-                sender: String::new(),
-                persist: 1,
-                data: serde_json::to_value(&failure).ok(),
-            });
-        }
+        surface_error_line(&self.block_id, None, &line, Some(broker.as_ref()), &self.mstore, &self.event_bus);
     }
 
     /// Publish a session-outcome line immediately, via the same append
@@ -727,18 +718,13 @@ impl PersistentSubprocessController {
         // `publish_status` would re-lock `inner`; build the same snapshot
         // from the guard we already hold.
         if let Some(ref broker) = self.broker {
-            let status = BlockControllerRuntimeStatus {
-                blockid: self.block_id.clone(),
-                version: inner.status_version,
-                shellprocstatus: inner.proc_status.clone(),
-                shellprocconnname: "local".to_string(),
-                shellprocexitcode: inner.proc_exit_code,
-                shellprocpid: None,
-                shellprocname: String::new(),
-                spawn_ts_ms: None,
-                is_agent_pane: true,
-                turn_active: self.health_monitor.is_active_turn(),
-            };
+            let status = super::super::agent_runtime_status(
+                &self.block_id,
+                inner.status_version,
+                &inner.proc_status,
+                inner.proc_exit_code,
+                self.health_monitor.is_active_turn(),
+            );
             super::super::publish_controller_status(broker, &status);
             // `set_status(STATUS_DONE)` above cleared what the process was
             // spawned with; announce it from the guard already held.

@@ -32,8 +32,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use super::{
-    BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
-    STATUS_RUNNING,
+    agent_runtime_status, BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE,
+    STATUS_INIT, STATUS_RUNNING,
 };
 use super::core;
 use super::meta_string_map;
@@ -157,18 +157,13 @@ impl AcpController {
 
     fn get_status_snapshot(&self) -> BlockControllerRuntimeStatus {
         let inner = self.inner.lock().unwrap();
-        BlockControllerRuntimeStatus {
-            blockid: self.block_id.clone(),
-            version: inner.status_version,
-            shellprocstatus: inner.proc_status.clone(),
-            shellprocconnname: "local".to_string(),
-            shellprocexitcode: inner.proc_exit_code,
-            shellprocpid: None,
-            shellprocname: String::new(),
-            spawn_ts_ms: None,
-            is_agent_pane: true,
-            turn_active: self.health_monitor.is_active_turn(),
-        }
+        agent_runtime_status(
+            &self.block_id,
+            inner.status_version,
+            &inner.proc_status,
+            inner.proc_exit_code,
+            self.health_monitor.is_active_turn(),
+        )
     }
 
     fn publish_status(&self) {
@@ -374,18 +369,13 @@ impl AcpController {
                                     // re-review).
                                     health_clone.mark_turn_active_returning_was_active();
                                     if let Some(ref broker) = broker_clone {
-                                        let status = BlockControllerRuntimeStatus {
-                                            blockid: block_id_stdout.clone(),
-                                            version: inner.status_version,
-                                            shellprocstatus: inner.proc_status.clone(),
-                                            shellprocconnname: "local".to_string(),
-                                            shellprocexitcode: inner.proc_exit_code,
-                                            shellprocpid: None,
-                                            shellprocname: String::new(),
-                                            spawn_ts_ms: None,
-                                            is_agent_pane: true,
-                                            turn_active: true,
-                                        };
+                                        let status = agent_runtime_status(
+                                            &block_id_stdout,
+                                            inner.status_version,
+                                            &inner.proc_status,
+                                            inner.proc_exit_code,
+                                            true,
+                                        );
                                         super::publish_controller_status(broker, &status);
                                     }
                                     let req = serde_json::json!({
@@ -415,18 +405,13 @@ impl AcpController {
                                             if now_empty {
                                                 health_clone.set_active_turn(false);
                                                 if let Some(ref broker) = broker_clone {
-                                                    let status = BlockControllerRuntimeStatus {
-                                                        blockid: block_id_stdout.clone(),
-                                                        version: inner.status_version,
-                                                        shellprocstatus: inner.proc_status.clone(),
-                                                        shellprocconnname: "local".to_string(),
-                                                        shellprocexitcode: inner.proc_exit_code,
-                                                        shellprocpid: None,
-                                                        shellprocname: String::new(),
-                                                        spawn_ts_ms: None,
-                                                        is_agent_pane: true,
-                                                        turn_active: false,
-                                                    };
+                                                    let status = agent_runtime_status(
+                                                        &block_id_stdout,
+                                                        inner.status_version,
+                                                        &inner.proc_status,
+                                                        inner.proc_exit_code,
+                                                        false,
+                                                    );
                                                     super::publish_controller_status(broker, &status);
                                                 }
                                             }
@@ -500,18 +485,13 @@ impl AcpController {
                             if let Some(ref broker) = broker_clone {
                                 let status = {
                                     let locked = inner_clone.lock().unwrap();
-                                    BlockControllerRuntimeStatus {
-                                        blockid: block_id_stdout.clone(),
-                                        version: locked.status_version,
-                                        shellprocstatus: locked.proc_status.clone(),
-                                        shellprocconnname: "local".to_string(),
-                                        shellprocexitcode: locked.proc_exit_code,
-                                        shellprocpid: None,
-                                        shellprocname: String::new(),
-                                        spawn_ts_ms: None,
-                                        is_agent_pane: true,
-                                        turn_active: false,
-                                    }
+                                    agent_runtime_status(
+                                        &block_id_stdout,
+                                        locked.status_version,
+                                        &locked.proc_status,
+                                        locked.proc_exit_code,
+                                        false,
+                                    )
                                 };
                                 super::publish_controller_status(broker, &status);
                             }
@@ -569,18 +549,7 @@ impl AcpController {
                     outstanding_prompt_ids_wait.lock().unwrap().clear();
 
                     if let Some(ref broker) = broker_wait {
-                        let status = BlockControllerRuntimeStatus {
-                            blockid: block_id_wait.clone(),
-                            version: 0,
-                            shellprocstatus: STATUS_DONE.to_string(),
-                            shellprocconnname: "local".to_string(),
-                            shellprocexitcode: -1,
-                            shellprocpid: None,
-                            shellprocname: String::new(),
-                            spawn_ts_ms: None,
-                            is_agent_pane: true,
-                            turn_active: false,
-                        };
+                        let status = agent_runtime_status(&block_id_wait, 0, STATUS_DONE, -1, false);
                         super::publish_controller_status(broker, &status);
                     }
                 }
@@ -603,18 +572,7 @@ impl AcpController {
                     outstanding_prompt_ids_wait.lock().unwrap().clear();
 
                     if let Some(ref broker) = broker_wait {
-                        let status = BlockControllerRuntimeStatus {
-                            blockid: block_id_wait.clone(),
-                            version: 0,
-                            shellprocstatus: STATUS_DONE.to_string(),
-                            shellprocconnname: "local".to_string(),
-                            shellprocexitcode: exit_code,
-                            shellprocpid: None,
-                            shellprocname: String::new(),
-                            spawn_ts_ms: None,
-                            is_agent_pane: true,
-                            turn_active: false,
-                        };
+                        let status = agent_runtime_status(&block_id_wait, 0, STATUS_DONE, exit_code, false);
                         super::publish_controller_status(broker, &status);
                     }
                 }

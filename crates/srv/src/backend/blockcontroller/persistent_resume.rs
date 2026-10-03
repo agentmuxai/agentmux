@@ -298,6 +298,32 @@ fn resolve_superseded_generation(prior: ResumeState) -> Vec<ResumeEffect> {
     }
 }
 
+/// Effects of a `SessionCaptured` that resolves tracking (a different sid, or a
+/// confirmed success): flush any held error line, then emit the session outcome.
+fn capture_resolution_effects(
+    attempted_sid: String,
+    held_error_line: Option<String>,
+    sid: String,
+    is_confirmed_success: bool,
+) -> Vec<ResumeEffect> {
+    // A `held_error_line` already stashed (an EARLIER turn on this same
+    // still-alive generation held one back, before this LATER capture resolves
+    // tracking) must be flushed, not silently discarded along with the state
+    // (#2373).
+    let mut effects: Vec<ResumeEffect> = held_error_line.map(ResumeEffect::FlushErrorLine).into_iter().collect();
+    // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1: this is one of the
+    // two points where a resume attempt's fate becomes unambiguously known —
+    // surface it.
+    let outcome = if sid == attempted_sid && is_confirmed_success {
+        SessionOutcome::Resumed
+    } else {
+        SessionOutcome::Fresh
+    };
+    let actual_sid = if sid != attempted_sid { Some(sid) } else { None };
+    effects.push(ResumeEffect::EmitSessionOutcome { outcome, attempted_sid, actual_sid });
+    effects
+}
+
 /// The pure state transition. See the module doc comment for why this
 /// shape exists and what it replaces.
 pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Vec<ResumeEffect>) {
@@ -341,24 +367,10 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             ResumeEvent::SessionCaptured { generation: g, sid, is_confirmed_success },
         ) if generation == g => {
             if sid != attempted_sid || is_confirmed_success {
-                // reagentx P2 on PR #2373: a `held_error_line` already
-                // stashed (an EARLIER turn on this same still-alive
-                // generation held one back, before this LATER capture
-                // resolves tracking) must be flushed, not silently
-                // discarded along with the state.
-                let mut effects: Vec<ResumeEffect> =
-                    held_error_line.map(ResumeEffect::FlushErrorLine).into_iter().collect();
-                // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1: this
-                // is one of the two points where a resume attempt's fate
-                // becomes unambiguously known — surface it.
-                let outcome = if sid == attempted_sid && is_confirmed_success {
-                    SessionOutcome::Resumed
-                } else {
-                    SessionOutcome::Fresh
-                };
-                let actual_sid = if sid != attempted_sid { Some(sid) } else { None };
-                effects.push(ResumeEffect::EmitSessionOutcome { outcome, attempted_sid, actual_sid });
-                (ResumeState::NotTracking { current_generation: generation }, effects)
+                (
+                    ResumeState::NotTracking { current_generation: generation },
+                    capture_resolution_effects(attempted_sid, held_error_line, sid, is_confirmed_success),
+                )
             } else {
                 (
                     ResumeState::AwaitingOutcome { generation, attempted_sid, retry, held_error_line, stop_requested },
@@ -389,17 +401,10 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
             ResumeEvent::SessionCaptured { generation: g, sid, is_confirmed_success },
         ) if generation == g => {
             if sid != attempted_sid || is_confirmed_success {
-                let mut effects: Vec<ResumeEffect> =
-                    held_error_line.map(ResumeEffect::FlushErrorLine).into_iter().collect();
-                // Same rationale as the `AwaitingOutcome` arm above.
-                let outcome = if sid == attempted_sid && is_confirmed_success {
-                    SessionOutcome::Resumed
-                } else {
-                    SessionOutcome::Fresh
-                };
-                let actual_sid = if sid != attempted_sid { Some(sid) } else { None };
-                effects.push(ResumeEffect::EmitSessionOutcome { outcome, attempted_sid, actual_sid });
-                (ResumeState::NotTracking { current_generation: generation }, effects)
+                (
+                    ResumeState::NotTracking { current_generation: generation },
+                    capture_resolution_effects(attempted_sid, held_error_line, sid, is_confirmed_success),
+                )
             } else {
                 (
                     ResumeState::ConfirmedRetry { generation, attempted_sid, retry, held_error_line, stop_requested },
