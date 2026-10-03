@@ -51,6 +51,11 @@
     user-select: text;
 }
 
+.ssh-approval-note {
+    margin: 0;
+    color: var(--secondary-text-color);
+}
+
 .ssh-approval-input {
     padding: var(--space-2);
     font-family: var(--font-mono);

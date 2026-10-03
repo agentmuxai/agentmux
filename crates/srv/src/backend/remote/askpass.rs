@@ -15,8 +15,17 @@
 //! a route open to that key alone would let an agent pop a fake "password"
 //! dialog and read what the user types. Each such `ssh` therefore gets its own
 //! secret, in its own environment and nowhere else; the askpass route answers
-//! only a live secret, and the secret decides whose pane the dialog names. It
-//! is revoked when that `ssh` exits.
+//! only a live secret, and the secret decides which agent and host the
+//! dialog names. It is revoked when that `ssh` exits.
+//!
+//! What the secret does not do: prove the prompt *text* is ssh's. A process
+//! running as the same OS user can read another process's environment
+//! (`/proc/<pid>/environ` on Linux) and so post a prompt of its own under a
+//! live secret. That is the residual AgentMux accepts elsewhere (a same-user
+//! process reading other processes' memory is machine compromise; such a
+//! process could read `~/.ssh` directly), so the dialog says plainly that the
+//! prompt is relayed and unverified, and asks the user to answer only when
+//! they expect ssh to be asking.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

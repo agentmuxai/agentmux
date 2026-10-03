@@ -75,6 +75,27 @@ struct Pending {
     window_label: Option<String>,
 }
 
+/// Forgets the request and closes its window when the wait ends, however it
+/// ends: answered, timed out, or srv gone (its request dropped mid-wait), so
+/// no window is left asking for an answer nothing will read.
+struct Cleanup {
+    state: Arc<AppState>,
+    approval_id: String,
+    window_label: Option<String>,
+}
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        pending().lock().remove(&self.approval_id);
+        if let Some(label) = self.window_label.take() {
+            let _ = crate::commands::window::close_window_by_label(
+                &self.state,
+                &serde_json::json!({ "label": label }),
+            );
+        }
+    }
+}
+
 fn pending() -> &'static Mutex<HashMap<String, Pending>> {
     static PENDING: OnceLock<Mutex<HashMap<String, Pending>>> = OnceLock::new();
     PENDING.get_or_init(|| Mutex::new(HashMap::new()))
@@ -141,12 +162,16 @@ async fn ask(
             .map(str::to_string)
             .ok_or_else(|| "open_subwindow returned no label".to_string())
     });
-    let window_label = match opened {
+    let _cleanup = match opened {
         Ok(label) => {
             if let Some(p) = pending().lock().get_mut(&approval_id) {
                 p.window_label = Some(label.clone());
             }
-            label
+            Cleanup {
+                state: state.clone(),
+                approval_id: approval_id.clone(),
+                window_label: Some(label),
+            }
         }
         Err(e) => {
             tracing::warn!("[ssh-approval] could not open the approval window: {e}");
@@ -154,19 +179,13 @@ async fn ask(
             return (StatusCode::OK, Json(ApiResponse::ok(Answer::default())));
         }
     };
+    // Closed (cancel_for_window) or timed out: unanswered. Whatever happens,
+    // `_cleanup` forgets the request and closes the window, srv dropping this
+    // request mid-wait included.
     let answer = match tokio::time::timeout(wait, rx).await {
         Ok(Ok(answer)) => answer,
-        // Closed (cancel_for_window) or timed out: unanswered, and the window
-        // goes with the request.
-        _ => {
-            pending().lock().remove(&approval_id);
-            Answer::default()
-        }
+        _ => Answer::default(),
     };
-    let _ = crate::commands::window::close_window_by_label(
-        &state,
-        &serde_json::json!({ "label": window_label }),
-    );
     tracing::info!(
         "[ssh-approval] {} answered={} approve={} checkbox={}",
         req.kind,

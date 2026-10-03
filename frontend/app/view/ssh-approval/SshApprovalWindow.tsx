@@ -77,13 +77,14 @@ export const SshApprovalWindow = (): JSX.Element => {
 
     onMount(() => {
         input?.focus();
+        // Escape declines anything. Enter is never "allow": this window takes
+        // focus when it opens, so an Enter meant for a terminal must not grant
+        // access or trust a host key. It submits only a typed secret (the
+        // input's own handler); consent and yes/no answer by a click.
         const onKeyDown = (e: KeyboardEvent) => {
             if (e.key === "Escape") {
                 e.preventDefault();
                 decide(false);
-            } else if (e.key === "Enter") {
-                e.preventDefault();
-                decide(true);
             }
         };
         window.addEventListener("keydown", onKeyDown);
@@ -105,6 +106,12 @@ export const SshApprovalWindow = (): JSX.Element => {
             </header>
             <div class="ssh-approval-body">
                 <p class="ssh-approval-message">{meta.message}</p>
+                <Show when={meta.kind === "secret" || meta.kind === "yesno"}>
+                    <p class="ssh-approval-note">
+                        AgentMux relays this prompt from the agent's ssh and cannot verify its text. Answer only if you
+                        expect ssh on this host to be asking.
+                    </p>
+                </Show>
                 <Show when={meta.kind === "secret"}>
                     <input
                         ref={input}
@@ -114,6 +121,12 @@ export const SshApprovalWindow = (): JSX.Element => {
                         spellcheck={false}
                         maxLength={1024}
                         aria-label={meta.title}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                                e.preventDefault();
+                                decide(true);
+                            }
+                        }}
                     />
                 </Show>
                 <Show when={meta.checkbox}>
