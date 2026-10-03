@@ -2,6 +2,10 @@
 
 **Date:** 2026-08-20
 **Status:** proposed
+**Superseded in part (2026-10-02):** a keystroke anywhere in the agent's
+pane, the composer included, restarts the quiet window, except auto-repeat;
+the §8 single-window gate is replaced by that (`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md`
+§4, §8). The countdown now lives in `store/question-timer.ts`.
 **Builds on:** `docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md`
 (implemented). This spec adds a *second trigger* for that spec's existing
 `hidden`/hide-timer mechanism — it does not change what "paused" means, how

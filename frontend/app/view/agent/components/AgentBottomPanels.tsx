@@ -119,6 +119,7 @@ export const AgentBottomPanels = (props: {
             Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
             docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md. */}
         <AgentQuestionPanel
+            blockId={props.blockId}
             pending={props.pendingQuestions}
             onAnswer={props.onAnswer}
             onCancel={props.onCancel}

@@ -2,6 +2,10 @@
 
 **Date:** 2026-08-06
 **Status:** implemented — PR #2441; verified in code 2026-08-10.
+**Moved (2026-10-02):** the countdown is now the one question timer in
+`store/question-timer.ts`, which the Swarm chip also shows
+(`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md` §2). The merge rule (§5.1) and the
+colour bands (§2.4) are unchanged.
 **Severity:** Low-Medium — no data-loss risk, but an unanswered question
 blocks the agent's turn indefinitely today, which defeats unattended/overnight
 runs and any workflow where the human isn't watching the pane.

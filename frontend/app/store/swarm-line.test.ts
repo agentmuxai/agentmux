@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
     FALLBACK_TOOLTIP,
     heuristicTitle,
+    isAwaitingUser,
     lastPromptToStore,
     LAST_PROMPT_MAX_CHARS,
     META_AWAITING_USER,
@@ -137,6 +138,15 @@ describe("resolveSwarmLine", () => {
         const stale = { [META_AWAITING_USER]: true, [META_RESTORED]: "Set up CI for the docs site" };
         expect(line({ meta: stale, status: "idle" })).toEqual({ text: "Set up CI for the docs site", source: "restored" });
         expect(line({ meta: { [META_AWAITING_USER]: true }, status: "idle" }).text).toBe(STATUS_NO_ACTIVITY);
+    });
+
+    // The status chip's "question" state uses the same check, so it gets the
+    // same guard against a stale flag.
+    it("isAwaitingUser: the flag, only while a turn is in flight", () => {
+        expect(isAwaitingUser({ [META_AWAITING_USER]: true }, "running")).toBe(true);
+        expect(isAwaitingUser({ [META_AWAITING_USER]: true }, "idle")).toBe(false);
+        expect(isAwaitingUser({ [META_AWAITING_USER]: false }, "running")).toBe(false);
+        expect(isAwaitingUser(undefined, "running")).toBe(false);
     });
 
     it("uses the restored title next, then the heuristic one", () => {
