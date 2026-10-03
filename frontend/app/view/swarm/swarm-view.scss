@@ -818,7 +818,17 @@
     white-space: nowrap;
 
     &--working { color: var(--error-color); }
+    &--question { color: var(--accent-color); }
     &--idle { color: var(--success-color); }
+}
+
+// The question timer's seconds, in the panel's bands (≤10s warning, ≤5s
+// critical); the word keeps the chip's colour.
+.swarm-status-countdown {
+    font-variant-numeric: tabular-nums;
+
+    &--warning { color: var(--warning-color); }
+    &--critical { color: var(--error-color); }
 }
 
 .swarm-status-dot {
@@ -828,7 +838,8 @@
     flex-shrink: 0;
     background: currentColor;
 
-    &--working { animation: swarm-pulse 1.5s ease-in-out infinite; }
+    &--working,
+    &--question { animation: swarm-pulse 1.5s ease-in-out infinite; }
 }
 
 @keyframes swarm-pulse {

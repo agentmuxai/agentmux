@@ -1,6 +1,6 @@
 # SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout
 
-**Status:** proposed
+**Status:** implemented (korp/swarm-question-timer). The two open questions are decided (§8).
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"we simply want the working/idle extended with "question" (use the theme primary color) when an agent is currently asking a question. Also, piggyback a fix on that, question panel in the agent pane should reset their timeout on both mouse movement AND typing (currently it appears to be only for mouse movement)"*, and *"also, in the swarm, put a countdown that mirrors the one on the question panel"*; *"ideally its a single DRY path, one timer surfaced multiple places"*; *"also, take any other opportunities to DRY the code in the area you are working in"* (§5).
@@ -69,7 +69,7 @@ Swarm can run in another window, which is another renderer, so the owner also wr
 - `ChipStatus` becomes `"working" | "question" | "idle"`.
 - **question** when the row's agent has a turn in flight (`node.agentStatus === "running"`, or the mounted pane's phase maps to working/tools) **and** its block meta has `term:awaiting_user === true`. This is the condition `resolveSwarmLine` already uses for "Waiting for you", including its guard: the flag counts only while a turn is in flight, so one left behind by a crash can't outrank idle.
 - Precedence: question over working over idle.
-- Label `question`. Colour `var(--accent-color)` (the theme's primary colour; every theme defines it). The dot is steady, not pulsing: pulsing means "busy", and this state means "waiting on you".
+- Label `question`. Colour `var(--accent-color)` (the theme's primary colour; every theme defines it). The dot pulses like working's (repo owner, 2026-10-02: "just like working and idle, a strobing dot, but the color is the theme primary"); the colour is what tells it apart.
 - Subagent rows are unchanged: a subagent never asks the user; its parent does.
 - `chipStatus(status)` becomes `chipStatus(status, awaitingUser)`; the row computes `awaitingUser` with the same helper the row line uses (§5.3), from the `blockMeta()` it already reads.
 
@@ -143,7 +143,7 @@ Besides the countdown itself (§2), the panel's `countdownSeverity()` thresholds
   - a non-owner renderer reads the published copy and never schedules an expiry;
   - `questionCountdown` seconds and bands;
   - stale values (§2.2): a published `counting` past its `endsAt` reads as no state; a leftover key is ignored once the turn ends; mounting the panel overwrites a leftover key.
-- **Chip**: `chipStatus` for working + flag → question; idle + stale flag → idle; subagent rows unchanged. A render test for the label, `--accent-color` class, steady dot, countdown text, the warning and critical bands, `paused`, and no countdown without timer state.
+- **Chip**: `chipStatus` for working + flag → question; idle + stale flag → idle; subagent rows unchanged. A render test for the label, `--accent-color` class, pulsing dot, countdown text, the warning and critical bands, `paused`, and no countdown without timer state.
 - **Panel**:
   - typing in the composer pauses the countdown;
   - continuous typing (keydowns 2s apart for 60s) never lets it fire, and it fires a full timeout after the last key;
@@ -158,6 +158,7 @@ Besides the countdown itself (§2), the panel's `countdownSeverity()` thresholds
 ## 7. Rollout
 One PR: the timer module, the panel moved onto it with the activity rule, the Swarm chip reading it, and §5's consolidations (they touch the same files). They share one timer, so they land together. On merge, the hover-pause spec's §9, the keyboard-pause spec's §8 and the auto-timeout spec get a pointer here (the countdown moved to the module, and the flat window is replaced for the reasons in §4.3).
 
-## 8. Open questions
-1. **Composer typing.** §4.2 counts keystrokes anywhere in the agent's pane, the composer included. The keyboard-pause spec deliberately excluded the composer ("not engagement with this question"). Proposed: include it, since typing a reply is engagement; the alternative is panel-only typing, which keeps today's composer gap.
-2. **Dot.** Steady (proposed) or pulsing like working.
+## 8. Decisions
+Both decided by the repo owner on 2026-10-02.
+1. **Composer typing counts.** §4.2 counts keystrokes anywhere in the agent's pane, the composer included, since typing a reply is attending to the question. The keyboard-pause spec had excluded the composer ("not engagement with this question"); this replaces that.
+2. **The dot pulses**, like working's, in the theme's primary colour (§3.2).
