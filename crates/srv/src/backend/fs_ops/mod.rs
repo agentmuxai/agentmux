@@ -520,7 +520,7 @@ impl ProtectedPaths {
         if target.parent().is_none() {
             return Err(ROOT_REFUSAL.to_string());
         }
-        if let Some(share) = crate::backend::remote::wsl_fs::split_share(&target.to_string_lossy()) {
+        if let Some(share) = crate::backend::remote::wsl_fs::share_of(target) {
             return self.check_in_distro(&share);
         }
         let key = path_key(target);

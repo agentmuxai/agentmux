@@ -65,7 +65,7 @@ pub fn register_fs_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         "fs.places",
         // `Option<_>` -- see `FsPlacesReq`: both encodings of "no argument".
         |_req: Option<FsPlacesReq>, _ctx| async move {
-            let distros = crate::backend::remote::wsl::list().await;
+            let distros = crate::backend::remote::wsl::list_cached().await;
             blocking(move || {
                 let (home, mut places) = fs_ops::home_and_known_places();
                 places.extend(super::editor_handlers::list_drives().into_iter().map(|d| FsPlace {

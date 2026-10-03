@@ -158,6 +158,28 @@ pub fn parse_list(stdout: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// How long [`list_cached`] keeps an answer.
+const LIST_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// [`list`], kept for [`LIST_CACHE_TTL`]: for the places Hangar and the editor
+/// tree show each time they open, so a slow `wsl.exe` costs at most one wait
+/// per half minute. A connection check uses [`list`], so a distro installed a
+/// moment ago is found there.
+pub async fn list_cached() -> Vec<String> {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Instant;
+    static CACHE: OnceLock<Mutex<Option<(Instant, Vec<String>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(None));
+    if let Some((at, distros)) = cache.lock().unwrap().as_ref() {
+        if at.elapsed() < LIST_CACHE_TTL {
+            return distros.clone();
+        }
+    }
+    let distros = list().await;
+    *cache.lock().unwrap() = Some((Instant::now(), distros.clone()));
+    distros
+}
+
 /// The installed distributions, or none (not Windows, no WSL, or no distro).
 pub async fn list() -> Vec<String> {
     #[cfg(windows)]

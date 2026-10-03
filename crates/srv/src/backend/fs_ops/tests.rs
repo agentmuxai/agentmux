@@ -324,6 +324,8 @@ fn protection_ignores_case_and_verbatim_prefixes_on_windows() {
 
 /// A WSL distro's files through `\\wsl.localhost` (`remote::wsl_fs`): its own
 /// system and home folders are protected, and the rest of it can be changed.
+/// Windows only: elsewhere such a path is an ordinary one (`wsl_fs::share_of`).
+#[cfg(windows)]
 #[test]
 fn a_wsl_distro_has_its_own_protected_folders() {
     let protect = ProtectedPaths::for_test(&abs("/users/me"), &abs("/users/me/.agentmux"), &[], &[&abs("/windows")], &[]);

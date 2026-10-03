@@ -87,7 +87,7 @@ impl Inner {
     /// none for a change made in the distro, and none for one made through the
     /// share), so a native watch there would succeed and stay silent.
     fn watcher_for(&mut self, target: &Path) -> Option<&mut Box<dyn Watcher + Send>> {
-        if crate::backend::remote::wsl_fs::split_share(&target.to_string_lossy()).is_none() {
+        if crate::backend::remote::wsl_fs::share_of(target).is_none() {
             return self.watcher.as_mut();
         }
         if self.share_poller.is_none() {
@@ -469,6 +469,7 @@ mod tests {
 
     /// A WSL share folder is polled, whatever the native backend is, and every
     /// other path keeps the native watcher.
+    #[cfg(windows)]
     #[test]
     fn a_wsl_share_folder_gets_the_polling_watcher() {
         let (raw_tx, _raw_rx) = mpsc::unbounded_channel();

@@ -24,6 +24,18 @@ pub struct SharePath {
     pub linux: String,
 }
 
+/// [`split_share`] where the share exists, on Windows; `None` elsewhere, where
+/// `//wsl.localhost/...` is an ordinary path and the Windows rules for it are
+/// the only ones. Every rule that treats a share path differently goes through
+/// this.
+pub fn share_of(path: &std::path::Path) -> Option<SharePath> {
+    if cfg!(windows) {
+        split_share(&path.to_string_lossy())
+    } else {
+        None
+    }
+}
+
 /// The distro and Linux path of a path on the share: `\\wsl.localhost\D\...`,
 /// `\\wsl$\D\...`, the `\\?\UNC\wsl.localhost\D\...` form `canonicalize`
 /// returns, or any of those with `/` separators (the frontend's form). `None`
@@ -166,6 +178,13 @@ mod tests {
         ] {
             assert_eq!(split_share(path), None, "{path}");
         }
+    }
+
+    /// Off Windows a share-looking path is an ordinary one: no WSL rule applies.
+    #[test]
+    fn a_share_path_is_one_only_on_windows() {
+        let p = std::path::Path::new("//wsl.localhost/Ubuntu/home/u/x");
+        assert_eq!(share_of(p).is_some(), cfg!(windows));
     }
 
     #[test]

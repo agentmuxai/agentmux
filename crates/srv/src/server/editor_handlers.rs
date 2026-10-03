@@ -43,12 +43,12 @@ fn editor_may_change(canonical: &std::path::Path, canonical_home: &std::path::Pa
 /// A home folder itself, the user's or a distro user's: never renamed or deleted.
 fn is_a_home(canonical: &std::path::Path, canonical_home: &std::path::Path) -> bool {
     canonical == canonical_home
-        || crate::backend::remote::wsl_fs::split_share(&canonical.to_string_lossy())
+        || crate::backend::remote::wsl_fs::share_of(canonical)
             .is_some_and(|s| crate::backend::remote::wsl_fs::is_home(&s.linux))
 }
 
 fn in_a_distro_home(path: &std::path::Path) -> bool {
-    crate::backend::remote::wsl_fs::split_share(&path.to_string_lossy())
+    crate::backend::remote::wsl_fs::share_of(path)
         .is_some_and(|s| crate::backend::remote::wsl_fs::in_home(&s.linux))
 }
 
@@ -628,7 +628,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .ok_or_else(|| "geteditorroots: cannot determine home directory".to_string())?;
                 // WSL distros after the drives, at their roots through the share.
                 let mut drives = list_drives();
-                drives.extend(crate::backend::remote::wsl::list().await.into_iter().map(|d| {
+                drives.extend(crate::backend::remote::wsl::list_cached().await.into_iter().map(|d| {
                     EditorDrive {
                         path: crate::backend::remote::wsl_fs::share_path(&d, "/"),
                         name: format!("{d} (WSL)"),
@@ -1030,7 +1030,9 @@ mod tests {
 
     /// The editor's "only under your home folder" rule, in a WSL distro: under
     /// a distro user's home, never its system folders or the Windows drives
-    /// mounted in it, and never a home folder itself.
+    /// mounted in it, and never a home folder itself. Windows only: elsewhere
+    /// such a path is an ordinary one (`wsl_fs::share_of`).
+    #[cfg(windows)]
     #[test]
     fn the_editor_may_change_files_under_a_distro_home_and_nowhere_else_in_it() {
         use std::path::Path;
