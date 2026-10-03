@@ -53,18 +53,19 @@ pub fn home_dir() -> PathBuf {
 /// A request's path on this host: `~` and `~/…` under the home directory,
 /// a relative path too, an absolute one as given.
 pub fn resolve(home: &Path, path: &str) -> PathBuf {
-    if path == "~" {
-        return home.to_path_buf();
-    }
-    if let Some(rest) = path.strip_prefix("~/") {
-        return home.join(rest);
-    }
-    let p = Path::new(path);
-    if p.is_absolute() {
-        p.to_path_buf()
+    let p = if path == "~" {
+        home.to_path_buf()
+    } else if let Some(rest) = path.strip_prefix("~/") {
+        home.join(rest)
+    } else if Path::new(path).is_absolute() {
+        PathBuf::from(path)
     } else {
-        home.join(p)
-    }
+        home.join(path)
+    };
+    // Rebuilt from its parts: no trailing separator, which would make the OS
+    // follow a final symlink (`~/link/` is the link's target, not the link)
+    // and act on something other than what was named.
+    p.components().collect()
 }
 
 fn err(e: io::Error) -> Reply {
@@ -155,16 +156,23 @@ fn handle(home: &Path, req: Request) -> Reply {
                     "refusing to delete the root, the home directory or a folder holding it",
                 );
             }
-            match fs::symlink_metadata(&p) {
-                // A link is removed, never followed.
+            // Everything from here on uses `real`, the path the guard checked:
+            // never `p`, whose trailing slash (`~/link/`) would make the OS
+            // follow a link the guard saw as a link.
+            match fs::symlink_metadata(&real) {
+                // A link is removed, never followed (a directory link is a
+                // directory entry on Windows).
+                Ok(m) if m.file_type().is_symlink() => {
+                    fs::remove_file(&real).or_else(|_| fs::remove_dir(&real))
+                }
                 Ok(m) if m.is_dir() => {
                     if recursive {
-                        fs::remove_dir_all(&p)
+                        fs::remove_dir_all(&real)
                     } else {
-                        fs::remove_dir(&p)
+                        fs::remove_dir(&real)
                     }
                 }
-                Ok(_) => fs::remove_file(&p),
+                Ok(_) => fs::remove_file(&real),
                 Err(e) => Err(e),
             }
             .map(|()| Reply::Done)
@@ -545,6 +553,15 @@ mod tests {
     }
 
     #[test]
+    fn a_path_never_ends_in_a_separator() {
+        let h = Path::new("/home/u");
+        assert_eq!(resolve(h, "~/link/"), Path::new("/home/u/link"));
+        assert_eq!(resolve(h, "/srv/data//"), Path::new("/srv/data"));
+        assert_eq!(resolve(h, "rel/"), Path::new("/home/u/rel"));
+        assert_eq!(resolve(h, "~"), h);
+    }
+
+    #[test]
     fn modes_are_permission_bits_only() {
         let home = tempfile::tempdir().unwrap();
         fs::write(home.path().join("f"), b"").unwrap();
@@ -560,7 +577,10 @@ mod tests {
         fs::write(h.join("b"), b"b").unwrap();
         fs::create_dir(h.join("x")).unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(h, h.join("to-home")).unwrap();
+        {
+            std::os::unix::fs::symlink(h, h.join("to-home")).unwrap();
+            std::os::unix::fs::symlink(h, h.join("to-home2")).unwrap();
+        }
         let replies = exchange(
             h,
             &[
@@ -648,6 +668,17 @@ mod tests {
             );
             assert_eq!(r[0], Reply::Done);
             assert!(h.join("a").exists() && !h.join("to-home").exists());
+            // A trailing slash would make the OS follow the link: still only
+            // the link goes.
+            let r = exchange(
+                h,
+                &[Request::Delete {
+                    path: "~/to-home2/".into(),
+                    recursive: true,
+                }],
+            );
+            assert_eq!(r[0], Reply::Done);
+            assert!(h.join("a").exists() && h.join("x").exists() && !h.join("to-home2").exists());
         }
     }
 }
