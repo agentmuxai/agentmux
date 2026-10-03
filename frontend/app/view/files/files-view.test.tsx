@@ -421,11 +421,19 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
                 {}
             )
         );
-        // A local clipboard isn't pasted onto the host, nor a drop copied.
-        setClipboard({ kind: "copy", paths: [`${HOME}\b.txt`] });
+        // A drop onto a host pane is a copy, even from a local Hangar pane
+        // whose root (`/`) looks like the host's: never a move that deletes
+        // the original here.
+        expect(v.model.dropKind(["/tmp/notes.md"], true)).toBe("copy");
+        // A local clipboard pasted onto the host is an upload: the sources on
+        // this computer, the destination on the host.
+        setClipboard({ kind: "copy", paths: [`${HOME}\\b.txt`] });
         await v.model.paste();
-        expect(await v.model.transfer("copy", [`${HOME}\b.txt`])).toBe(false);
-        expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+        expect(h.rpc.FsOpStartCommand).toHaveBeenCalledWith(
+            expect.anything(),
+            { kind: "copy", sources: [`${HOME}\\b.txt`], dest_dir: HOST_HOME, block_id: "b1", connection: "user@box" },
+            { timeout: 180_000 }
+        );
         // No preview (it reads through this computer's media stream), and no
         // mention in a local agent by keyboard either.
         void v.ctx.setMeta({ "files:preview": true });

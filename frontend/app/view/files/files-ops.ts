@@ -102,12 +102,28 @@ export class FilesOps {
         }
     }
 
-    /** Starts a copy or move of `sources` into `destDir`. */
-    async start(kind: "copy" | "move", sources: string[], destDir: string): Promise<string> {
+    /** Starts a copy or move of `sources` into `destDir`; either side may be
+     *  an SSH host (`sourceConnection`, `connection`; remote terminals spec
+     *  §6.3), this computer when absent. */
+    async start(
+        kind: "copy" | "move",
+        sources: string[],
+        destDir: string,
+        where: { sourceConnection?: string; connection?: string } = {}
+    ): Promise<string> {
         this.pendingStarts++;
         let res: { op_id: string };
         try {
-            res = await RpcApi.FsOpStartCommand(TabRpcClient, { kind, sources, dest_dir: destDir, block_id: this.blockId });
+            const hosts = {
+                ...(where.sourceConnection ? { source_connection: where.sourceConnection } : {}),
+                ...(where.connection ? { connection: where.connection } : {}),
+            };
+            res = await RpcApi.FsOpStartCommand(
+                TabRpcClient,
+                { kind, sources, dest_dir: destDir, block_id: this.blockId, ...hosts },
+                // Reaching a host may first ask the user something over ssh.
+                Object.keys(hosts).length > 0 ? { timeout: 180_000 } : undefined
+            );
         } finally {
             this.pendingStarts--;
         }

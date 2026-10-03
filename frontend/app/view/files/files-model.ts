@@ -856,24 +856,27 @@ export class FilesModel {
             return;
         }
         if (this.phase() !== "ready") return;
-        if ((c.connection ?? "") !== this.connection() || this.connection()) {
-            this.notOnHost("Copying and moving files to or from a host");
-            return;
-        }
         // A cut is used up only once srv has taken the move: a refused one
         // (protected place, folder into itself) keeps it (ReAgent on #4221).
-        const started = await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths);
+        // The clipboard's paths are on the connection they were cut or
+        // copied on, which may be another host than this pane's.
+        const started = await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths, this.path(), c.connection ?? "");
         if (started && c.kind === "cut" && clipboard() === c) setClipboard(null);
     }
 
-    /** Copy or move `sources` into the folder shown. */
-    async transfer(kind: "copy" | "move", sources: string[], destDir: string = this.path()): Promise<boolean> {
-        if (this.connection()) {
-            this.notOnHost("Copying and moving files");
-            return false;
-        }
+    /** Copy or move `sources` (on `sourceConnection`, "" for this computer)
+     *  into the folder shown, on this pane's connection. */
+    async transfer(
+        kind: "copy" | "move",
+        sources: string[],
+        destDir: string = this.path(),
+        sourceConnection: string = ""
+    ): Promise<boolean> {
         try {
-            await this.ops.start(kind, sources, destDir);
+            await this.ops.start(kind, sources, destDir, {
+                sourceConnection: sourceConnection || undefined,
+                connection: this.connection() || undefined,
+            });
             return true;
         } catch (err) {
             this.setStatus({ text: errorText(err), tone: "error" });
@@ -884,6 +887,10 @@ export class FilesModel {
     /** What dropping `sources` here does: move within a drive when the drag
      *  came from another Hangar pane, copy otherwise (as file managers do). */
     dropKind(sources: string[], fromHangar: boolean, destDir: string = this.path()): "copy" | "move" {
+        // Onto a host: always a copy. The sources are on this computer (drags
+        // out of a host pane are off), and their roots looking alike (`/` and
+        // `/`) says nothing about it being one disk.
+        if (this.connection()) return "copy";
         return fromHangar && sameVolume(sources, destDir) ? "move" : "copy";
     }
 
