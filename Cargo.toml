@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/srv", "crates/cef", "crates/launcher", "crates/common", "crates/bashwrap", "crates/mcp"]
+members = ["crates/srv", "crates/cef", "crates/launcher", "crates/common", "crates/bashwrap", "crates/mcp", "crates/remote"]
 
 # Shared workspace metadata — members inherit `version` via
 # `version.workspace = true` so a single bump touches one Cargo.toml.
