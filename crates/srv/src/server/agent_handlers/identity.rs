@@ -757,9 +757,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .identity_list(None)
                     .map_err(|e| format!("listnamedagents: accounts: {e}"))?;
                 let own_ids: std::collections::HashSet<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
+                let mut mirror_failed = false;
                 let mirror_accounts: Vec<IdentityAccount> =
                     if agent_identity_links.iter().any(|l| !own_ids.contains(l.account_id.as_str())) {
-                        identity_store.identity_list(None).unwrap_or_default()
+                        identity_store.identity_list(None).unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, "listnamedagents: the global account mirror could not be read");
+                            mirror_failed = true;
+                            Vec::new()
+                        })
                     } else {
                         Vec::new()
                     };
@@ -776,7 +781,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     super::account_label::account_line(
                         links_by_agent.get(definition_id).map(|v| v.as_slice()),
                         &account_names,
-                        false,
+                        super::account_label::Degraded { links: false, accounts: mirror_failed },
                     )
                     .text
                 };

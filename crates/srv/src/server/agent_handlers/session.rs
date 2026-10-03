@@ -312,7 +312,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     tracing::warn!(
                         error = %e,
                         "listrecentsessions: identity_list failed — degrading to empty \
-                         (rows will show \"No auth\" unless the global mirror has the account)"
+                         (the global mirror fills in what it can; a link it cannot resolve shows no account line)"
                     );
                     degraded.push("accounts");
                     Vec::new()
@@ -320,9 +320,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // The global mirror, read only when a link points at an account
                 // this channel's store does not hold (an isolated channel).
                 let own_ids: std::collections::HashSet<&str> = accounts.iter().map(|a| a.id.as_str()).collect();
+                let mut mirror_failed = false;
                 let mirror_accounts: Vec<IdentityAccount> =
                     if agent_identity_links.iter().any(|l| !own_ids.contains(l.account_id.as_str())) {
-                        identity_store.identity_list(None).unwrap_or_default()
+                        identity_store.identity_list(None).unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, "listrecentsessions: the global account mirror could not be read");
+                            mirror_failed = true;
+                            Vec::new()
+                        })
                     } else {
                         Vec::new()
                     };
@@ -350,13 +355,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // §4: when `agent_identity_list_all()` itself failed above,
                 // `links_by_agent` is empty for EVERY definition_id — not
                 // just the ones that genuinely have no bound identity —
-                // so every row would otherwise show the exact same
-                // "(ambient creds)" text a real unbound agent gets,
-                // making a source failure indistinguishable from a
-                // legitimate state. Computed once, outside the loop: this
-                // source only ever degrades before the loop starts, not
-                // per-row.
-                let identity_links_degraded = degraded.contains(&"identity_links");
+                // so every row would otherwise read "No auth", making a
+                // source failure indistinguishable from a legitimate state.
+                // The same goes for a failed accounts lookup that the global
+                // mirror could not make up for: a link resolving to nothing
+                // then proves nothing. Computed once, outside the loop: these
+                // sources only ever degrade before the loop starts, not per-row.
+                let degraded_lookups = super::account_label::Degraded {
+                    links: degraded.contains(&"identity_links"),
+                    accounts: degraded.contains(&"accounts") && (mirror_failed || mirror_accounts.is_empty()),
+                };
 
                 // Build rows. Hits filestore once per instance; with
                 // raw_limit ≤ 500 and stat() being a single indexed
@@ -397,7 +405,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     let line = super::account_label::account_line(
                         links_by_agent.get(links_key).map(|v| v.as_slice()),
                         &account_names,
-                        identity_links_degraded,
+                        degraded_lookups,
                     );
                     unresolved_links += line.unresolved;
                     let identity_name = line.text;
@@ -978,6 +986,32 @@ mod tests {
                  backend outage must not look identical to that"
             );
         }
+    }
+
+    /// A failed ACCOUNTS lookup (the global mirror unreadable too) must not turn a
+    /// bound agent into "No auth": its account may be perfectly good. The linked
+    /// agent's line is left empty; an agent with no link is still plainly unbound.
+    #[tokio::test]
+    async fn a_failed_accounts_lookup_leaves_a_linked_agents_line_empty_not_no_auth() {
+        let (state, engine, mut output_rx, _reg_dir, _def_dir) = setup_with_n_cross_channel_agents(2);
+        {
+            let conn = state.identity_store.conn().lock().unwrap();
+            conn.execute_batch(
+                "PRAGMA foreign_keys=OFF; INSERT INTO db_agent_identity_links (agent_id, account_id, provider)                  VALUES ('def-0', 'acct-that-is-fine', 'claude');",
+            )
+            .unwrap();
+        }
+        {
+            let conn = state.id_store.conn().lock().unwrap();
+            conn.execute_batch("PRAGMA foreign_keys=OFF; DROP TABLE db_accounts;").unwrap();
+        }
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult = serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert!(result.degraded.contains(&"accounts".to_string()), "got: {:?}", result.degraded);
+        let line = |def: &str| result.rows.iter().find(|r| r.definition_id == def).unwrap().identity_name.clone();
+        assert_eq!(line("def-0"), "", "a link we cannot resolve because the lookup failed is unknown, not unbound");
+        assert_eq!(line("def-1"), "No auth", "an agent with no link is unbound whatever the accounts lookup did");
     }
 
     /// A healthy list: agents with no account link read "No auth", and none of the

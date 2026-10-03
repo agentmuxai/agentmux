@@ -37,24 +37,41 @@ pub(super) struct AccountLine {
     pub unresolved: usize,
 }
 
-/// `links_degraded`: the lookup of every agent's links failed, so "no links" says
-/// nothing about this agent and the line is left empty rather than "No auth".
+/// What could not be read, so a link that resolves to nothing may mean "the account
+/// is gone" or just "the lookup failed".
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct Degraded {
+    /// The lookup of every agent's links failed: "no links" says nothing about this
+    /// agent, so the line is left empty rather than "No auth".
+    pub links: bool,
+    /// The account lookup failed in this channel's store and the global mirror could
+    /// not fill in: a link that resolves to nothing may be a perfectly good account,
+    /// so it is left empty rather than reported as "No auth".
+    pub accounts: bool,
+}
+
 pub(super) fn account_line(
     links: Option<&[&AgentIdentityLink]>,
     names: &HashMap<&str, &str>,
-    links_degraded: bool,
+    degraded: Degraded,
 ) -> AccountLine {
     let links = links.unwrap_or(&[]);
     if links.is_empty() {
-        let text = if links_degraded { String::new() } else { NO_AUTH.to_string() };
+        let text = if degraded.links { String::new() } else { NO_AUTH.to_string() };
         return AccountLine { text, unresolved: 0 };
     }
     let mut resolved: Vec<String> = links.iter().filter_map(|l| names.get(l.account_id.as_str()).map(|n| n.to_string())).collect();
     let unresolved = links.len() - resolved.len();
     resolved.sort();
     resolved.dedup();
-    let text = if resolved.is_empty() { NO_AUTH.to_string() } else { resolved.join(", ") };
-    AccountLine { text, unresolved }
+    let text = match (resolved.is_empty(), degraded.accounts) {
+        (false, _) => resolved.join(", "),
+        // Nothing resolved and the accounts could not be read: unknown, not unbound.
+        (true, true) => String::new(),
+        (true, false) => NO_AUTH.to_string(),
+    };
+    // Only a lookup that worked can say an account is gone.
+    AccountLine { text, unresolved: if degraded.accounts { 0 } else { unresolved } }
 }
 
 #[cfg(test)]
@@ -76,6 +93,8 @@ mod tests {
         }
     }
 
+    const OK: Degraded = Degraded { links: false, accounts: false };
+
     fn link(agent: &str, account: &str) -> AgentIdentityLink {
         AgentIdentityLink { agent_id: agent.into(), account_id: account.into(), provider: "claude".into() }
     }
@@ -86,14 +105,14 @@ mod tests {
         let names = names_by_id(&own, &[]);
         let ls = [link("ag", "a1"), link("ag", "a2"), link("ag", "a1")];
         let refs: Vec<&AgentIdentityLink> = ls.iter().collect();
-        assert_eq!(account_line(Some(&refs), &names, false), AccountLine { text: "home, work".into(), unresolved: 0 });
+        assert_eq!(account_line(Some(&refs), &names, OK), AccountLine { text: "home, work".into(), unresolved: 0 });
     }
 
     #[test]
     fn an_unbound_agent_says_no_auth() {
         let names = names_by_id(&[], &[]);
-        assert_eq!(account_line(None, &names, false).text, NO_AUTH);
-        assert_eq!(account_line(Some(&[]), &names, false).text, NO_AUTH);
+        assert_eq!(account_line(None, &names, OK).text, NO_AUTH);
+        assert_eq!(account_line(Some(&[]), &names, OK).text, NO_AUTH);
     }
 
     #[test]
@@ -101,7 +120,7 @@ mod tests {
         let names = names_by_id(&[], &[]);
         let ls = [link("ag", "deleted")];
         let refs: Vec<&AgentIdentityLink> = ls.iter().collect();
-        assert_eq!(account_line(Some(&refs), &names, false), AccountLine { text: NO_AUTH.into(), unresolved: 1 });
+        assert_eq!(account_line(Some(&refs), &names, OK), AccountLine { text: NO_AUTH.into(), unresolved: 1 });
     }
 
     #[test]
@@ -110,7 +129,7 @@ mod tests {
         let names = names_by_id(&own, &[]);
         let ls = [link("ag", "a1"), link("ag", "deleted")];
         let refs: Vec<&AgentIdentityLink> = ls.iter().collect();
-        assert_eq!(account_line(Some(&refs), &names, false), AccountLine { text: "work".into(), unresolved: 1 });
+        assert_eq!(account_line(Some(&refs), &names, OK), AccountLine { text: "work".into(), unresolved: 1 });
     }
 
     #[test]
@@ -120,19 +139,36 @@ mod tests {
         let names = names_by_id(&own, &mirror);
         let ls = [link("ag", "a1"), link("ag", "a2")];
         let refs: Vec<&AgentIdentityLink> = ls.iter().collect();
-        assert_eq!(account_line(Some(&refs), &names, false).text, "only in mirror, own name");
+        assert_eq!(account_line(Some(&refs), &names, OK).text, "only in mirror, own name");
     }
 
     #[test]
     fn a_failed_links_lookup_claims_nothing() {
         let names = names_by_id(&[], &[]);
-        assert_eq!(account_line(None, &names, true).text, "", "unknown is not 'No auth'");
+        let links_down = Degraded { links: true, accounts: false };
+        assert_eq!(account_line(None, &names, links_down).text, "", "unknown is not 'No auth'");
         // ...but an agent that does have links still shows them
         let own = [acct("a1", "work")];
         let names = names_by_id(&own, &[]);
         let ls = [link("ag", "a1")];
         let refs: Vec<&AgentIdentityLink> = ls.iter().collect();
-        assert_eq!(account_line(Some(&refs), &names, true).text, "work");
+        assert_eq!(account_line(Some(&refs), &names, links_down).text, "work");
+    }
+
+    #[test]
+    fn an_unreadable_accounts_store_makes_a_link_unknown_not_no_auth() {
+        let names = names_by_id(&[], &[]);
+        let ls = [link("ag", "perfectly-good")];
+        let refs: Vec<&AgentIdentityLink> = ls.iter().collect();
+        let accounts_down = Degraded { links: false, accounts: true };
+        // the account may well exist: the lookup failed, so say nothing...
+        assert_eq!(account_line(Some(&refs), &names, accounts_down), AccountLine { text: String::new(), unresolved: 0 });
+        // ...and an agent with no links at all is still plainly unbound
+        assert_eq!(account_line(None, &names, accounts_down).text, NO_AUTH);
+        // ...and an account that DID resolve is still shown
+        let own = [acct("perfectly-good", "work")];
+        let names = names_by_id(&own, &[]);
+        assert_eq!(account_line(Some(&refs), &names, accounts_down).text, "work");
     }
 
     #[test]
