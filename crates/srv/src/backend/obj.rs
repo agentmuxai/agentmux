@@ -109,6 +109,14 @@ pub fn meta_get_string(meta: &MetaMapType, key: &str, default: &str) -> String {
         .to_string()
 }
 
+/// The agent id a block's meta names: `agentId`, else the legacy `agent:id`.
+/// Not trimmed; a string `agentId`, even an empty one, wins over the legacy key.
+pub fn block_meta_agent_id(meta: &MetaMapType) -> Option<&str> {
+    meta.get("agentId")
+        .and_then(|v| v.as_str())
+        .or_else(|| meta.get("agent:id").and_then(|v| v.as_str()))
+}
+
 /// Helper to get a bool value from MetaMapType.
 pub fn meta_get_bool(meta: &MetaMapType, key: &str, default: bool) -> bool {
     meta.get(key).and_then(|v| v.as_bool()).unwrap_or(default)
@@ -543,6 +551,23 @@ pub fn mux_obj_from_json<T: StoreObj>(data: &[u8]) -> Result<T, serde_json::Erro
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn block_meta_agent_id_prefers_agent_id_over_the_legacy_key() {
+        use super::{block_meta_agent_id, MetaMapType};
+        let meta = |pairs: &[(&str, serde_json::Value)]| -> MetaMapType {
+            pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+        };
+        let both = meta(&[("agentId", "new".into()), ("agent:id", "old".into())]);
+        assert_eq!(block_meta_agent_id(&both), Some("new"));
+        let legacy = meta(&[("agent:id", "old".into())]);
+        assert_eq!(block_meta_agent_id(&legacy), Some("old"));
+        let non_string = meta(&[("agentId", 7.into()), ("agent:id", "old".into())]);
+        assert_eq!(block_meta_agent_id(&non_string), Some("old"));
+        let empty = meta(&[("agentId", "".into()), ("agent:id", "old".into())]);
+        assert_eq!(block_meta_agent_id(&empty), Some(""));
+        assert_eq!(block_meta_agent_id(&MetaMapType::new()), None);
+    }
+
     /// This crate defines `BlockDef` and `FileDef` TWICE — here, and again in
     /// `backend/wconfig/types.rs` for widgets. The pairs differ in Rust:
     /// `obj` uses `Option<HashMap<..>>` / `Option<..>` where `wconfig` uses a

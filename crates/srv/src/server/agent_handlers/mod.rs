@@ -15,6 +15,7 @@ mod side_question;
 use std::sync::Arc;
 
 
+use crate::backend::agent_session::archive;
 use crate::backend::rpc::engine::WshRpcEngine;
 
 use super::AppState;
@@ -103,7 +104,7 @@ fn read_session_preview(
     // shouldn't be able to stall this handler. 4MiB is well above the
     // typical conversation snapshot (Maks's was ~750KiB for 169 nodes)
     // but bounded enough to fail fast on garbage.
-    if bytes.len() > 4 * 1024 * 1024 {
+    if bytes.len() > archive::MAX_PREVIEW_SNAPSHOT_BYTES {
         tracing::warn!(
             block_id = %block_id,
             size = bytes.len(),
@@ -111,72 +112,13 @@ fn read_session_preview(
         );
         return (String::new(), 0);
     }
-    let json: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(_) => return (String::new(), 0),
-    };
-    let nodes = match json.get("nodes").and_then(|v| v.as_array()) {
-        Some(a) => a,
-        None => return (String::new(), 0),
-    };
-    let node_count = nodes.len();
-    // First user_message wins. Skip the bootstrap "Session Context"
-    // prompt when present — it's always the first node and is system
-    // boilerplate the user didn't type; if a subsequent user_message
-    // exists, that's the more useful preview. Heuristic: if the first
-    // user message starts with "# Session Context", scan for the next.
-    let mut preview = String::new();
-    for node in nodes {
-        let ty = node.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        if ty != "user_message" {
-            continue;
-        }
-        let msg = node
-            .get("message")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .trim();
-        if msg.is_empty() {
-            continue;
-        }
-        if preview.is_empty() && msg.starts_with("# Session Context") {
-            // Stash as fallback in case there's no later user_message.
-            preview = collapse_preview(msg);
-            continue;
-        }
-        preview = collapse_preview(msg);
-        break;
-    }
-    (preview, node_count)
-}
-
-/// Collapse newlines + extra whitespace, cap at 240 chars. Output is
-/// safe to render inline in a single-line preview row.
-fn collapse_preview(s: &str) -> String {
-    const MAX_CHARS: usize = 240;
-    let mut buf = String::with_capacity(s.len().min(MAX_CHARS + 4));
-    let mut prev_space = false;
-    for ch in s.chars() {
-        if buf.chars().count() >= MAX_CHARS {
-            buf.push('\u{2026}'); // "…"
-            return buf;
-        }
-        if ch.is_whitespace() {
-            if !prev_space && !buf.is_empty() {
-                buf.push(' ');
-                prev_space = true;
-            }
-        } else {
-            buf.push(ch);
-            prev_space = false;
-        }
-    }
-    buf
+    archive::snapshot_preview(&bytes)
 }
 
 #[cfg(test)]
 mod recent_sessions_tests {
     use super::*;
+    use archive::collapse_preview;
     use crate::backend::rpc_types::{ListRecentSessionsResult, COMMAND_LIST_RECENT_SESSIONS};
     use crate::backend::storage::filestore::FileStore;
 

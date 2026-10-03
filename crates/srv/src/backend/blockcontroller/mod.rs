@@ -95,6 +95,17 @@ pub fn meta_string_map(meta: &MetaMapType, key: &str) -> HashMap<String, String>
 pub fn cmd_env_of(meta: &MetaMapType) -> HashMap<String, String> {
     meta_string_map(meta, META_KEY_CMD_ENV)
 }
+
+/// The agent id an env map names: `AGENTMUX_AGENT_ID`, else the legacy
+/// `WAVEMUX_AGENT_ID`, trimmed, skipping blank values.
+pub(crate) fn agent_id_from_env<'a>(lookup: impl Fn(&str) -> Option<&'a str>) -> Option<String> {
+    ["AGENTMUX_AGENT_ID", "WAVEMUX_AGENT_ID"]
+        .into_iter()
+        .filter_map(lookup)
+        .map(str::trim)
+        .find(|v| !v.is_empty())
+        .map(str::to_string)
+}
 #[allow(dead_code)]
 pub const META_KEY_CMD_JWT: &str = "cmd:jwt";
 pub const META_KEY_CMD_RUN_ON_START: &str = "cmd:runonstart";
@@ -1074,6 +1085,19 @@ mod cmd_env_tests {
         meta.insert(META_KEY_CMD_ENV.to_string(), serde_json::json!(["not", "a", "map"]));
         assert!(cmd_env_of(&meta).is_empty());
         assert!(cmd_env_of(&MetaMapType::new()).is_empty());
+    }
+
+    #[test]
+    fn agent_id_from_env_prefers_the_canonical_key_and_skips_blanks() {
+        use super::agent_id_from_env;
+        let id = |pairs: &[(&'static str, &'static str)]| {
+            let pairs = pairs.to_vec();
+            agent_id_from_env(move |k| pairs.iter().find(|(key, _)| *key == k).map(|(_, v)| *v))
+        };
+        assert_eq!(id(&[("AGENTMUX_AGENT_ID", " new "), ("WAVEMUX_AGENT_ID", "old")]).as_deref(), Some("new"));
+        assert_eq!(id(&[("AGENTMUX_AGENT_ID", "  "), ("WAVEMUX_AGENT_ID", "old")]).as_deref(), Some("old"));
+        assert_eq!(id(&[("WAVEMUX_AGENT_ID", "")]), None);
+        assert_eq!(id(&[]), None);
     }
 }
 

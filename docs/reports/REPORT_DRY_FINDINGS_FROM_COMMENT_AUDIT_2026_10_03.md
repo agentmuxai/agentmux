@@ -31,13 +31,13 @@ Effort: **S** = one small PR, mechanical; **M** = a few files or a design choice
 | 7 | Two arms of `ResumeEvent::SessionCaptured` have identical bodies. | `persistent_resume.rs:339,387` | S |
 | 8 | `agent.answer` / `agent.cancel` RPC handlers repeat the same arg check, controller lookup, downcast and error text. | `server/websocket.rs:1588,1629` | S |
 | 9 | `AGENTMUX_AGENT_ID` then `WAVEMUX_AGENT_ID` lookup is implemented twice over two map types. | `persistent/mod.rs:252`, `shell/lifecycle.rs:281` | S |
-| 10 | Block agent id from `agentId` with the legacy `agent:id` fallback is reimplemented at three sites. | `identity/resolver/inject.rs:480`, `agent_session/migrations/v1_blocks.rs:62`, `transcript_backfill.rs:219` | S |
+| 10 | Block agent id from `agentId` with the legacy `agent:id` fallback is reimplemented at three sites. | `identity/resolver/inject.rs:480`, `agent_session/migrations/v1_blocks.rs:62`, `transcript_backfill.rs:219` | S **Done for live code; the two migration-only copies (v1_blocks.rs via m0002, transcript_backfill.rs via m0009) stay, per `migrations/mod.rs`: migrations freeze old logic.** |
 | 11 | `subagent:spawned` / `subagent:completed` event payloads are built twice with identical shapes. | `subagent_watcher/jsonl.rs:328,425,486,543` | S |
 | 12 | `generate_dispatch_name` repeats `generate_subagent_name`'s whole pipeline; its own doc says it "mirrors … exactly". | `ambient/tasks.rs:227,285` | S |
 | 13 | Session-preview parsing (plus its `collapse_preview`) is copied in two places. | `agent_session/archive.rs:338`, `server/agent_handlers/mod.rs:94` | S |
 | 14 | `memory_dir_for_registry_record` inlines `working_dir_from_record`. | `server/native_memory_handlers.rs:350`, `agent_registry_lookup.rs:100` | S |
 | 15 | The HTTP memory-write provenance struct copies `NativeMemoryWriteProvenance`. | `server/http_app_api.rs:86`, `rpc_types/native_memory.rs:86` | S |
-| 16 | "Open the shared definitions store and attach it" is repeated in two migrations and bootstrap. | `m0020…:63`, `m0021…:134`, `bootstrap/stores.rs:277` | S |
+| 16 | "Open the shared definitions store and attach it" is repeated in two migrations and bootstrap. | `m0020…:63`, `m0021…:134`, `bootstrap/stores.rs:277` | S **Not done:** the two copies are migrations (frozen by design), and the bootstrap one also lists active ids and logs differently. |
 
 ## 3. Duplication across crates (cef / common)
 

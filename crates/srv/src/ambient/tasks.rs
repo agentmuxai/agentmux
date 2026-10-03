@@ -239,22 +239,14 @@ pub(crate) async fn generate_subagent_name(
     // (a user rapidly expanding several subagent rows shouldn't spawn
     // unbounded concurrent Haiku CLIs either), `backlog_naming_semaphore()`
     // for the bounded backfill pass — see each call site.
-    let slot = call::admit(
+    let generated = generate_name_from_task_prompt(
+        mstore,
+        &info,
         AmbientCallKey::new(agent_id.to_string(), purpose::SUBAGENT_NAME),
-        1,
-        Some(semaphore),
+        semaphore,
+        prompt::build_subagent_name_prompt,
     )
     .await?;
-
-    let task_prompt = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path)?;
-    let block: Block = mstore.get(&info.parent_block_id).ok().flatten()?;
-    let target = CliTarget::from_meta(&block.meta)?;
-
-    let prompt = prompt::build_subagent_name_prompt(&task_prompt);
-    let generated = finish(
-        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::NAME))
-            .await,
-    )?;
     if let Some(name) = &generated.text {
         subagent_watcher.set_display_name(agent_id, name);
     }
@@ -277,8 +269,8 @@ pub(crate) async fn generate_subagent_name(
 /// reasonable stand-in for the whole batch (SPEC §3 — not a perfect
 /// representation of every member's task, an accepted v1 trade-off).
 ///
-/// Otherwise mirrors `generate_subagent_name`'s admission/semaphore/prompt/
-/// block-resolve/haiku-call shape exactly — no cache-hit short-circuit here
+/// Otherwise runs the same `generate_name_from_task_prompt` pipeline as
+/// `generate_subagent_name` — no cache-hit short-circuit here
 /// (unlike that function): this is only ever called once per dispatch,
 /// already guarded by `naming_triggered` at the call site, so a cache check
 /// would be dead code, not a real fast path.
@@ -293,26 +285,40 @@ pub(crate) async fn generate_dispatch_name(
 
     // Concurrency cap — see `generate_subagent_name`'s matching comment
     // above; same two possible callers, same two possible semaphores.
-    let slot = call::admit(
+    let generated = generate_name_from_task_prompt(
+        mstore,
+        &info,
         AmbientCallKey::new(dispatch_id.to_string(), purpose::DISPATCH_NAME),
-        1,
-        Some(semaphore),
+        semaphore,
+        prompt::build_dispatch_name_prompt,
     )
     .await?;
+    if let Some(name) = &generated.text {
+        subagent_watcher.set_dispatch_name(dispatch_id, name);
+    }
+    Some(generated)
+}
+
+/// Admit under `key`, read `info`'s own task prompt off its JSONL, borrow its
+/// parent block's CLI, and run `build_prompt`'s prompt through the name validator.
+async fn generate_name_from_task_prompt(
+    mstore: &Store,
+    info: &crate::backend::subagent_watcher::SubAgent,
+    key: AmbientCallKey,
+    semaphore: &'static tokio::sync::Semaphore,
+    build_prompt: fn(&str) -> String,
+) -> Option<Generated> {
+    let slot = call::admit(key, 1, Some(semaphore)).await?;
 
     let task_prompt = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path)?;
     let block: Block = mstore.get(&info.parent_block_id).ok().flatten()?;
     let target = CliTarget::from_meta(&block.meta)?;
 
-    let prompt = prompt::build_dispatch_name_prompt(&task_prompt);
-    let generated = finish(
+    let prompt = build_prompt(&task_prompt);
+    finish(
         slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::NAME))
             .await,
-    )?;
-    if let Some(name) = &generated.text {
-        subagent_watcher.set_dispatch_name(dispatch_id, name);
-    }
-    Some(generated)
+    )
 }
 
 /// Generate a short user-facing line narrating an autonomous action.

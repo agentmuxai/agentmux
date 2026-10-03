@@ -280,15 +280,9 @@ async fn run_pty_output_flusher(
 /// persistent/mod.rs's muxbus_agent_id_from_env, which never had either fallback.
 fn resolve_agent_id_for_jekt(block_meta: &MetaMapType) -> Option<String> {
     let cmd_env = block_meta.get(META_KEY_CMD_ENV).and_then(|m| m.as_object());
-    for key in ["AGENTMUX_AGENT_ID", "WAVEMUX_AGENT_ID"] {
-        if let Some(v) = cmd_env.and_then(|obj| obj.get(key)).and_then(|v| v.as_str()) {
-            let trimmed = v.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-    }
-    None
+    crate::backend::blockcontroller::agent_id_from_env(|key| {
+        cmd_env.and_then(|obj| obj.get(key)).and_then(|v| v.as_str())
+    })
 }
 
 /// Whether `key` may be injected into a pane's actual OS environment from
