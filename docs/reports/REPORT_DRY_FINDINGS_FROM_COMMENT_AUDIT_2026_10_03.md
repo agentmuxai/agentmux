@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-03
 **Author:** agent3
-**Status:** analysis. Nothing here is fixed; this is a work list.
+**Status:** implemented — worked through on 2026-10-03; the outcome of every item is in §7.
 **Related:** [`REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02`](REPORT_COMMENT_COMPRESSION_WORTH_IT_2026_10_02.md) §6 (the dead-reference triage that led to the audit).
 
 ## 0. Where these came from
@@ -86,3 +86,56 @@ These surfaced as stale comments; the comments are now accurate, but each is a d
 | **Process tracking is Windows-only.** The table in `process_tracker/mod.rs` listed Linux and macOS trackers as shipped; those platforms get the no-op `StubTracker`. | `process_tracker/mod.rs` | Accept, or schedule the Linux/macOS trackers |
 | **The layout doctor skips unbalanced geometry passes.** `reportLayoutViolations` runs only when `updateTree` balances; resize, stack and magnify call `updateTree(false)`, so a corruption introduced there is not logged until the next balancing pass. | `frontend/layout/lib/layoutGeometry.ts:258-269` | Validate every pass (cost: one walk per resize frame), or accept |
 | **Planned `Resync` recovery for the event buffer was never built.** `event-buffer.ts` documented a working force-push/`Resync` protocol. | No `Resync` command or force-push request exists | Accept (comment now says so), or build it |
+
+## 7. Outcome (2026-10-03)
+
+Every item was verified against the code before changing it. "Not done" items were found not to be duplicates, or to be deliberately frozen.
+
+| # | Outcome | PR |
+|---|---|---|
+| 1 | Done: `tool_store::compose_tools_path` / `tools_path` with an explicit `UserToolsPrecedence`; both documented orders kept and named. An empty inherited PATH no longer adds an empty entry. | #4276 |
+| 2 | Done: `cmd_env_of` / `meta_string_map`, 9 sites; every path now accepts the JSON-string form. | #4276 |
+| 3 | Done: `agent_runtime_status`, 12 sites. | #4278 |
+| 4 | Done: `reply_to_pending_question` + `send_control_response_with_fallback` (also used by `decide_tool_permission`). | #4286 |
+| 5 | Partly: only the output append is shared (`append_output_line`); session-id capture differs on purpose in the persistent reader. | #4286 |
+| 6 | Done: `core::broadcast_block_update`, 5 sites. | #4278 |
+| 7 | Done: `capture_resolution_effects`. | #4278 |
+| 8 | Done: `with_question_controller`. | #4282 |
+| 9 | Done: `agent_id_from_env`. | #4282 |
+| 10 | Done for live code (`obj::block_meta_agent_id`); the two migration-only copies stay frozen. | #4282 |
+| 11 | Done: `broadcast_member_spawned` / `broadcast_member_completed`. | #4282 |
+| 12 | Done: `generate_name_from_task_prompt`. | #4282 |
+| 13 | Done: `snapshot_preview` / `collapse_preview`. | #4282 |
+| 14 | Done. | #4282 |
+| 15 | Done: the HTTP request uses `NativeMemoryWriteProvenance` (round-trip tested). | #4282 |
+| 16 | Not done: two copies are migrations (frozen by design); the bootstrap copy differs. | — |
+| 17 | Deferred: macOS-only FFI that cannot be type-checked on the Windows dev host. Needs a macOS machine. | — |
+| 18 | Done: `check_no_pane_closing` / `check_top_level_creation_allowed`, 5 creators (pool refills keep their own deferring checks). | #4279 |
+| 19 | Not a duplicate: the host and srv read different env vars by design. | — |
+| 20 | Done: `opacity_changes`, one macOS/Linux loop. | #4279 |
+| 21 | Done: the Swarm feed carries the tool input and formats it with the agent pane's `toolDetail`; Rust's `tool_input_detail` is deleted. | #4283 |
+| 22 | Done: `surface_failure` / `surface_error_line`. | #4278 |
+| 23 | Done: `settle_reader_tasks`. | #4278 |
+| 24 | Done: `spawn.rs` split into `stderr_reader.rs`, `stdout_reader.rs`, `process_waiter.rs` (2,176 → 837 lines), as a pure move. | #4288 |
+| 25 | Done: `publish_message_accepted`. | #4278 |
+| 26 | Done: `random_token` uses `random_seed_bytes`. | #4282 |
+| 27 | Done: one `StubTracker` module. | #4278 |
+| 28 | Not done, as the item itself advised: only worth it if the migration is touched again. | — |
+| 29 | Done: `openBlockInStack`. | #4277 |
+| 30 | Done: the tab-bar tear-off uses `openTearOffWindow`. | #4277 |
+| 31 | Done: `paneStackIds`. | #4277 |
+| 32 | Done: `tear_off_hook/{mod,windows,macos}.rs`, pure move. | #4279 |
+| 33 | Done: `main_frame_url`, block id resolved once. | #4279 |
+| 34 | Left: the two-phase save scaffolding belongs to `SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md` (proposed). Comments now say the RPC is unbuilt. | — |
+
+§6 code findings:
+
+| Finding | Outcome |
+|---|---|
+| Dormant H.6 top-level window pipeline | Removed (−831 lines), per `REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` item 9 — #4284 |
+| `auth.savebundle` never built | Left: owned by `SPEC_LAUNCH_AUTH_STATE_MACHINE_2026_05_14.md` (proposed) |
+| Process tracking is Windows-only | Left: tracked as planned work in `REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md` |
+| Event-buffer `Resync` never built | Left: part of `REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md` (active) |
+| Layout doctor skips unbalanced passes | Left as an open decision: validating every resize frame costs a tree walk per frame |
+
+Found along the way, not acted on: `container_spawn.rs`'s stdout reader looked like a copy of `host_spawn.rs`'s but is not (it reassembles lines from Docker's mixed stream).
