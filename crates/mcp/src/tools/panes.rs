@@ -67,6 +67,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 // split_reference_block_id alone).
                 reuse_editor_pane: Some(true),
                 select: None,
+                connection: None,
+                auth: None,
             };
 
             let resp = client
@@ -139,6 +141,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 tab_id: None,
                 reuse_editor_pane: None, // view != "editor" — irrelevant here
                 select: None,
+                connection: None,
+                auth: None,
             };
 
             let resp = client
@@ -214,6 +218,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 tab_id: None,
                 reuse_editor_pane: None, // view != "editor" — irrelevant here
                 select: if select.is_empty() { None } else { Some(select) },
+                connection: None,
+                auth: None,
             };
 
             let resp = client

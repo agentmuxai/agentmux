@@ -85,6 +85,23 @@
     }
 }
 
+/* The SSH host a remote pane is on, before its path. */
+.files-crumb-host {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 5px;
+    margin-right: 4px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--hover-bg-color);
+    color: var(--secondary-text-color);
+
+    i {
+        font-size: 10px;
+    }
+}
+
 .files-crumb-sep {
     flex-shrink: 0;
     font-size: 8px;
@@ -162,6 +179,15 @@
 
     &:hover {
         background: var(--hover-bg-color);
+    }
+
+    /* The host this pane is on. */
+    &.files-place-active {
+        background: var(--hover-bg-color);
+
+        i {
+            color: var(--accent-color);
+        }
     }
 }
 

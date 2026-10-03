@@ -216,6 +216,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     const onRowDragStart = (e: DragEvent, entry: FsEntry): void => {
         if (!e.dataTransfer) return;
+        // A host's paths mean nothing to this computer's panes and apps.
+        if (model.connection()) {
+            e.preventDefault();
+            return;
+        }
         if (!model.selection().names.has(entry.name)) {
             model.setSelection({ names: new Set([entry.name]), focus: entry.name, anchor: entry.name });
         }
@@ -365,6 +370,12 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         }
         const target = openTargetOf(entry.name);
         const fail = (err: unknown) => model.setStatus({ text: `Couldn't open ${entry.name}: ${errorText(err)}`, tone: "error" });
+        // On a host: in an editor on that host; nothing else opens there yet.
+        if (model.connection()) {
+            if (target === "editor") void openInPane("editor", path, model.blockId, model.connection()).catch(fail);
+            else model.notOnHost(`Opening ${target === "media" ? "media files" : "programs and other files"}`);
+            return;
+        }
         if (target === "editor" || target === "media") void openInPane(target, path, model.blockId).catch(fail);
         else if (target === "os") void openWithOs(path).catch(fail);
         else
@@ -379,7 +390,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     /** A folder in a new Hangar tab of this pane (Ctrl+Enter, middle-click,
      *  the menu); Ctrl+T opens the folder shown. */
     const openInNewTab = (dir: string): void => {
-        void openFolderInNewTab(model.blockId, dir).catch((err) =>
+        void openFolderInNewTab(model.blockId, dir, model.connection() || undefined).catch((err) =>
             model.setStatus({ text: `Couldn't open a new tab: ${errorText(err)}`, tone: "error" })
         );
     };
@@ -495,6 +506,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         model.setSelection(clickRow(model.selection(), order(), entry.name, { toggle: isMod(e), range: e.shiftKey }));
     };
 
+    /** On a host, only what works there: nothing that hands its paths to
+     *  this computer (an app, the file manager, an agent) or needs a Trash. */
+    const forHost = (items: ContextMenuItem[]): ContextMenuItem[] => {
+        if (!model.connection()) return items;
+        const local = /^(Open with default app|Reveal in |Mention in agent|Attach to |Move .*to Trash)/;
+        return items.filter((i) => i.type !== "action" || !local.test(i.label));
+    };
+
     const rowMenu = (entry: FsEntry): ContextMenuItem[] => {
         const list = model.selectedEntries();
         const many = list.length > 1;
@@ -506,11 +525,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         }
         if (!entry.is_dir) {
             items.push(
-                { type: "action", label: "Open in Editor", onSelect: () => void openInPane("editor", path, model.blockId).catch(fail) },
+                { type: "action", label: "Open in Editor", onSelect: () => void openInPane("editor", path, model.blockId, model.connection() || undefined).catch(fail) },
                 { type: "action", label: "Open with default app", onSelect: () => void openWithOs(path).catch(fail) }
             );
         } else {
-            items.push({ type: "action", label: "Open terminal here", onSelect: () => void openTerminalHere(path, model.blockId).catch(fail) });
+            items.push({ type: "action", label: "Open terminal here", onSelect: () => void openTerminalHere(path, model.blockId, model.connection() || undefined).catch(fail) });
         }
         items.push(
             { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(path).catch(fail) },
@@ -542,7 +561,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 onSelect: () => askDeletePermanently(many ? list : [entry]),
             }
         );
-        return items;
+        return forHost(items);
     };
 
     /** The agent panes on screen, by name: "Attach to <agent>" targets. */
@@ -560,6 +579,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
      */
     const mentionIn = (list: FsEntry[]): void => {
         if (list.length === 0) return;
+        // A host's paths mean nothing to an agent on this computer.
+        if (model.connection()) {
+            model.notOnHost("Mentioning files in an agent");
+            return;
+        }
         const agents = agentTargets();
         const target = agents.find((t) => t.blockId === lastAgentBlock) ?? (agents.length === 1 ? agents[0] : undefined);
         if (!target) {
@@ -596,6 +620,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     };
 
     const attachTo = (target: { blockId: string; name: string }, list: FsEntry[]): void => {
+        if (model.connection()) {
+            model.notOnHost("Attaching files to an agent");
+            return;
+        }
         const paths = list.map((e) => model.pathOf(e.name));
         void dropPathsOnto(target.blockId, paths).then(
             (ok) =>
@@ -611,7 +639,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     const folderMenu = (): ContextMenuItem[] => {
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
-        return [
+        return forHost([
             { type: "action", label: "New folder", shortcut: isMacOS() ? "⌘⇧N" : "Ctrl+Shift+N", onSelect: () => void model.createNew("dir") },
             { type: "action", label: "New file", onSelect: () => void model.createNew("file") },
             { type: "action", label: "New tab here", shortcut: isMacOS() ? "⌘T" : "Ctrl+T", onSelect: () => openInNewTab(model.path()) },
@@ -623,14 +651,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 onSelect: () => void model.paste(),
             },
             { type: "separator" },
-            { type: "action", label: "Open terminal here", onSelect: () => void openTerminalHere(model.path(), model.blockId).catch(fail) },
+            { type: "action", label: "Open terminal here", onSelect: () => void openTerminalHere(model.path(), model.blockId, model.connection() || undefined).catch(fail) },
             { type: "action", label: isMacOS() ? "Reveal in Finder" : "Reveal in file manager", onSelect: () => void revealInOs(model.path()).catch(fail) },
             { type: "action", label: "Copy folder path", onSelect: () => void navigator.clipboard?.writeText(model.path()) },
             { type: "separator" },
             { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", onSelect: () => model.toggleHidden() },
             { type: "action", label: "Refresh", shortcut: "F5", onSelect: () => model.refresh() },
             { type: "action", label: "Undo", shortcut: isMacOS() ? "⌘Z" : "Ctrl+Z", onSelect: () => void model.undo() },
-        ];
+        ]);
     };
 
     const onRowContextMenu = (e: MouseEvent, entry: FsEntry): void => {
@@ -718,6 +746,12 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     }
                 >
                     <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title="Double-click or Ctrl+L to type a path">
+                        <Show when={model.connection()}>
+                            <span class="files-crumb-host" title={`On ${model.connection()}, over SSH`}>
+                                <i class="fa fa-server" aria-hidden="true" />
+                                {model.connection()}
+                            </span>
+                        </Show>
                         <For each={crumbsOf(model.path())}>
                             {(crumb, i) => (
                                 <>
@@ -813,7 +847,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         <div class="files-places-heading">Places</div>
                         <For each={model.places().filter((p) => p.kind !== "drive" && p.kind !== "wsl")}>
                             {(p) => (
-                                <button type="button" class="files-place" title={p.path} onClick={() => void model.navigate(p.path)}>
+                                <button type="button" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
                                     <i class={`fa fa-${p.kind === "home" ? "house" : "folder"}`} />
                                     <span>{p.label}</span>
                                 </button>
@@ -823,7 +857,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                             <div class="files-places-heading">Drives</div>
                             <For each={model.places().filter((p) => p.kind === "drive")}>
                                 {(p) => (
-                                    <button type="button" class="files-place" title={p.path} onClick={() => void model.navigate(p.path)}>
+                                    <button type="button" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
                                         <i class="fa fa-hard-drive" />
                                         <span>{p.label}</span>
                                     </button>
@@ -834,9 +868,26 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                             <div class="files-places-heading">WSL</div>
                             <For each={model.places().filter((p) => p.kind === "wsl")}>
                                 {(p) => (
-                                    <button type="button" class="files-place" title={p.path} onClick={() => void model.navigate(p.path)}>
+                                    <button type="button" class="files-place" title={p.path} onClick={() => void model.openOn("", p.path)}>
                                         <i class="fa-brands fa-linux" />
                                         <span>{p.label}</span>
+                                    </button>
+                                )}
+                            </For>
+                        </Show>
+                        <Show when={model.remotes().length > 0}>
+                            <div class="files-places-heading">Remote</div>
+                            <For each={model.remotes()}>
+                                {(host) => (
+                                    <button
+                                        type="button"
+                                        class="files-place"
+                                        classList={{ "files-place-active": model.connection() === host }}
+                                        title={`Your home folder on ${host}, over SSH`}
+                                        onClick={() => void model.openOn(host, "~")}
+                                    >
+                                        <i class="fa fa-server" />
+                                        <span>{host}</span>
                                     </button>
                                 )}
                             </For>
@@ -845,7 +896,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                             <div class="files-places-heading">Agents</div>
                             <For each={model.agents()}>
                                 {(a) => (
-                                    <button type="button" class="files-place" title={a.path} onClick={() => void model.navigate(a.path)}>
+                                    <button type="button" class="files-place" title={a.path} onClick={() => void model.openOn("", a.path)}>
                                         <i class="fa fa-robot" />
                                         <span style={a.color ? { color: a.color } : undefined}>{a.name}</span>
                                     </button>
@@ -1249,12 +1300,15 @@ function GridTile(props: {
     onRenameDone: () => void;
 }): JSX.Element {
     const path = () => props.model.pathOf(props.entry.name);
-    const [thumb, setThumb] = createSignal<string | undefined>(cachedThumbnail(path(), props.entry.mtime));
+    // Thumbnails read through this computer's media stream: none for a host's
+    // files, which would show whatever is at that path here.
+    const local = () => !props.model.connection();
+    const [thumb, setThumb] = createSignal<string | undefined>(local() ? cachedThumbnail(path(), props.entry.mtime) : undefined);
     createEffect(
         on(
             () => [path(), props.entry.mtime, props.entry.size] as const,
             ([p, mtime, size]) => {
-                if (!hasThumbnail(props.entry.name, size)) {
+                if (!local() || !hasThumbnail(props.entry.name, size)) {
                     setThumb(undefined);
                     return;
                 }

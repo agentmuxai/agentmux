@@ -16,12 +16,31 @@ pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
     Json(req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
+    // A pane on an SSH host reads and writes there as the user, with their
+    // SSH keys: over HTTP (where agents call from) that takes the agent's
+    // signed identity and the user's consent for that host, as `Shell` does
+    // (remote terminals spec §8.2). Named as the field or inside `meta`.
+    if let Some(conn) = ssh_connection_of(&req) {
+        let block = req.split_reference_block_id.clone().unwrap_or_default();
+        let agent = match app_api::connections::verified_agent(&state, &block, req.auth.as_ref()) {
+            Ok(a) => a,
+            Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
+        };
+        let what = format!(
+            "open {} in {}",
+            req.file.as_deref().or(req.cwd.as_deref()).unwrap_or("a pane"),
+            req.view
+        );
+        if let Err(e) = app_api::connections::consent_for_ssh(&state, &block, &agent, &conn, &what).await {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
+        }
+    }
     match app_api::open_pane(&state, req).await {
         Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
         Err(e) => {
             // Argument/validation errors from build_pane_meta are the caller's
             // fault (400); everything else is a server-side failure (500).
-            let status = if e.starts_with("MISSING_ARG") || e.starts_with("INVALID_VIEW") {
+            let status = if e.starts_with("MISSING_ARG") || e.starts_with("INVALID_VIEW") || e.starts_with("INVALID_ARG") {
                 StatusCode::BAD_REQUEST
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -29,6 +48,24 @@ pub(super) async fn handle_pane_open(
             (status, Json(json!({ "error": e }))).into_response()
         }
     }
+}
+
+/// The SSH connection a pane.open names (the field, or `connection` in a
+/// caller-supplied `meta`), in its canonical form; `None` for this computer
+/// or WSL.
+fn ssh_connection_of(req: &crate::backend::rpc_types::CommandPaneOpenData) -> Option<String> {
+    let from_meta = req
+        .meta
+        .as_ref()
+        .and_then(|m| m.get("connection"))
+        .and_then(|v| v.as_str());
+    [req.connection.as_deref(), from_meta]
+        .into_iter()
+        .flatten()
+        .find_map(|c| match crate::backend::remote::ConnTarget::parse(c.trim()) {
+            Ok(t @ crate::backend::remote::ConnTarget::Ssh(_)) => Some(t.name()),
+            _ => None,
+        })
 }
 
 /// `POST /api/v1/agent/open` — launch an agent into a pane (idempotent: an
@@ -65,6 +102,45 @@ fn open_error_status(e: &str) -> StatusCode {
         StatusCode::BAD_REQUEST
     } else {
         StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+    use crate::backend::rpc_types::CommandPaneOpenData;
+
+    fn cmd(view: &str, connection: Option<&str>, meta: Option<serde_json::Value>) -> CommandPaneOpenData {
+        serde_json::from_value(serde_json::json!({
+            "view": view,
+            "file": "/home/u/a.txt",
+            "connection": connection,
+            "meta": meta,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_ssh_host_a_pane_open_names_is_found_wherever_it_is() {
+        assert_eq!(ssh_connection_of(&cmd("editor", Some("user@box"), None)).as_deref(), Some("user@box"));
+        assert_eq!(
+            ssh_connection_of(&cmd("files", None, Some(serde_json::json!({ "connection": "box:2222" })))).as_deref(),
+            Some("box:2222")
+        );
+        assert_eq!(ssh_connection_of(&cmd("editor", Some("local"), None)), None);
+        assert_eq!(ssh_connection_of(&cmd("editor", Some("wsl://Ubuntu"), None)), None);
+        assert_eq!(ssh_connection_of(&cmd("editor", None, None)), None);
+    }
+
+    #[test]
+    fn a_pane_on_a_connection_gets_it_in_its_meta_and_media_is_refused_there() {
+        let meta = app_api::pane::build_pane_meta(&cmd("editor", Some("user@box"), None)).unwrap();
+        assert_eq!(meta.get("connection"), Some(&serde_json::json!("user@box")));
+        assert_eq!(meta.get("file"), Some(&serde_json::json!("/home/u/a.txt")));
+        let local = app_api::pane::build_pane_meta(&cmd("editor", Some("local"), None)).unwrap();
+        assert!(local.get("connection").is_none());
+        let err = app_api::pane::build_pane_meta(&cmd("media", Some("user@box"), None)).unwrap_err();
+        assert!(err.starts_with("INVALID_ARG"), "{err}");
     }
 }
 

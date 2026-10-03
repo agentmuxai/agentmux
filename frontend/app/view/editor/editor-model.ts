@@ -53,6 +53,7 @@ import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
 import { openPendingFiles } from "./pending-open-files";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { readZoom } from "@/app/store/zoom-factor";
+import { isSshConnection } from "@/app/view/term/termSettingsMenu";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -162,7 +163,9 @@ export class EditorViewModel {
 
     // ── Tree state (per-pane, persisted in block meta) ──────────────────
     private _treeExpanded = createSignal<boolean>(true);
-    treeExpandedAtom: Accessor<boolean> = this._treeExpanded[0];
+    /** The file tree lists this computer's folders: hidden in an editor on
+     *  an SSH host (its files open from Hangar there). */
+    treeExpandedAtom: Accessor<boolean> = () => this._treeExpanded[0]() && !this.connection();
 
     private _showHidden = createSignal<boolean>(false);
     showHiddenAtom: Accessor<boolean> = this._showHidden[0];
@@ -491,8 +494,16 @@ export class EditorViewModel {
         this._disposeFileDrop = registerFileDropTarget(
             blockId,
             createEditorDropHook({
-                openFile: (path) => this.openFile(path),
-                openText: (name, content) => this.openDroppedText(name, content),
+                // A file from this computer isn't on the host an editor there
+                // reads from, and dropped text would become a local scratch.
+                openFile: async (path) => {
+                    if (this.connection()) return notifyDrop.cantOpen(path, "editor");
+                    await this.openFile(path);
+                },
+                openText: async (name, content) => {
+                    if (this.connection()) return notifyDrop.cantOpen(name, "editor");
+                    await this.openDroppedText(name, content);
+                },
                 cantOpen: (name) => notifyDrop.cantOpen(name, "editor"),
             }),
         );
@@ -606,6 +617,22 @@ export class EditorViewModel {
         }
     }
 
+    /** The SSH connection this editor's files are on (block meta
+     *  `connection`, set when Hangar opens a file on a host); "" for this
+     *  computer. Remote terminals spec §6.3. */
+    connection(): string {
+        const c = this.meta?.()?.["connection"];
+        return isSshConnection(c) ? String(c).trim() : "";
+    }
+
+    /** Where a request for `tabId`'s file runs: the host, and this pane for
+     *  ssh's prompts; a scratch tab's file is always on this computer. */
+    private on(tabId?: string): { connection?: string; block_id?: string } {
+        const c = this.connection();
+        const scratch = tabId != null && snapshot(this.blockId)?.tabs.find((t) => t.id === tabId)?.isScratch;
+        return c && !scratch ? { connection: c, block_id: this.blockId } : {};
+    }
+
     /** Fetch `filePath`'s current disk content via RPC and apply it to
      *  `tabId`'s view-local buffer + slice state. Shared by the initial-open
      *  path (`_openFileWithMode`) and the live-reload path
@@ -628,9 +655,12 @@ export class EditorViewModel {
     ): Promise<string | null> {
         const canonical = canonicalizePath(filePath);
         try {
-            const result = await RpcApi.ReadEditorFileCommand(TabRpcClient, {
-                path: filePath,
-            });
+            const result = await RpcApi.ReadEditorFileCommand(
+                TabRpcClient,
+                { path: filePath, ...this.on(tabId) },
+                // Over ssh, which may first ask the user something.
+                this.on(tabId).connection ? { timeout: 180_000 } : undefined
+            );
             const content = result?.content ?? "";
 
             // Re-check the slice: the tab's path may have been swapped out
@@ -712,6 +742,9 @@ export class EditorViewModel {
      *  unchanged tab). Unwatches the previous path first when it differs
      *  (preview-tab file swap: same tabId, new file). */
     private _syncWatch(tabId: string, canonicalPath: string): void {
+        // A host's files aren't watched (this computer's watcher can't see
+        // them); reopening the file shows changes made there.
+        if (this.connection()) return;
         const prev = this._watchedPathByTab.get(tabId);
         if (prev === canonicalPath) return;
         if (prev) {
@@ -888,11 +921,16 @@ export class EditorViewModel {
         const content = this._contentByTab.get(tab.id) ?? "";
 
         try {
-            await RpcApi.WriteEditorFileCommand(TabRpcClient, {
-                path: tab.filePath,
-                content,
-                ...this._encodingFor(tab.id),
-            });
+            await RpcApi.WriteEditorFileCommand(
+                TabRpcClient,
+                {
+                    path: tab.filePath,
+                    content,
+                    ...this._encodingFor(tab.id),
+                    ...this.on(tab.id),
+                },
+                this.on(tab.id).connection ? { timeout: 180_000 } : undefined
+            );
             dispatch(this.blockId, {
                 type: "ClearDirty",
                 tabId: tab.id,
@@ -928,6 +966,9 @@ export class EditorViewModel {
      *  silently re-activating the pane's existing scratch tab there reads
      *  as "+ does nothing" when that tab is already the active one). */
     async openScratch(reuseExisting: boolean = true): Promise<string | undefined> {
+        // A scratch buffer is a file on this computer: not in an editor on a
+        // host, whose reads and saves go there.
+        if (this.connection()) return undefined;
         if (reuseExisting) {
             // Reuse an existing scratch tab if one is already open in this pane.
             const existing = snapshot(this.blockId)?.tabs.find((t) => t.isScratch);

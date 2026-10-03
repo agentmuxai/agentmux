@@ -8,4 +8,13 @@
  * which is what a caller that never read the file back wants. They are
  * `Option<T>` in Rust, so ts-rs marks them optional without help.
  */
-export type CommandWriteEditorFileData = { path: string, content: string, encoding?: string, bom?: string, line_ending?: string, };
+export type CommandWriteEditorFileData = { path: string, content: string, encoding?: string, bom?: string, line_ending?: string, 
+/**
+ * An SSH connection the file is on (`fs_ops::remote`); absent, local or
+ * WSL: this machine, as before.
+ */
+connection?: string, 
+/**
+ * The pane asking, whose window shows any ssh prompt for `connection`.
+ */
+block_id?: string, };

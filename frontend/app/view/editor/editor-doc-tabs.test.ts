@@ -15,6 +15,7 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 const h = vi.hoisted(() => ({
     files: new Map<string, string>(),
     reads: [] as string[],
+    readRequests: [] as Record<string, unknown>[],
     watched: [] as string[],
 }));
 
@@ -28,6 +29,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ReadEditorFileCommand: vi.fn(async (_c: unknown, req: { path: string }) => {
             h.reads.push(req.path);
+            h.readRequests.push(req);
             const content = h.files.get(req.path);
             if (content === undefined) throw new Error(`no such file: ${req.path}`);
             return { content, read_only: false };
@@ -90,12 +92,36 @@ beforeEach(() => {
         ["c:/repo/c.rs", "fn c() {}\n"],
     ]);
     h.reads = [];
+    h.readRequests = [];
     h.watched = [];
 });
 
 afterEach(() => {
     model?.dispose();
     model = null;
+});
+
+describe("an Editor on an SSH host (remote terminals spec §6.3)", () => {
+    it("reads through the host, watches nothing here, and hides this computer's file tree", async () => {
+        h.files.set("/home/u/notes.md", "remote notes\n");
+        const v = mount({ file: "/home/u/notes.md", connection: "user@box" });
+        model = v.model;
+        await until(() => model!.contentAtom() === "remote notes\n");
+        expect(h.readRequests.at(-1)).toMatchObject({ path: "/home/u/notes.md", connection: "user@box", block_id: expect.any(String) });
+        expect(h.watched).not.toContain("/home/u/notes.md");
+        expect(model.treeExpandedAtom()).toBe(false);
+        expect(model.connection()).toBe("user@box");
+        // No local scratch buffer in an editor on a host.
+        expect(await model.openScratch(false)).toBeUndefined();
+    });
+
+    it("a local editor sends no connection", async () => {
+        const v = mount({ file: "c:/repo/c.rs" });
+        model = v.model;
+        await until(() => model!.contentAtom() === "fn c() {}\n");
+        expect(h.readRequests.at(-1)).toEqual({ path: "c:/repo/c.rs" });
+        expect(model.connection()).toBe("");
+    });
 });
 
 describe("the Editor's document tabs", () => {

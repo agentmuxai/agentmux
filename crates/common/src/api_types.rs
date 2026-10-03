@@ -418,6 +418,13 @@ pub struct PaneOpenRequest {
     /// once the Files pane has listed it. Set by the `OpenFiles` MCP tool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub select: Option<Vec<String>>,
+    /// The connection the pane works on (an SSH host, `wsl://<distro>`);
+    /// absent for this computer. An SSH host needs `auth`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
+    /// The calling agent's signed identity, for an SSH `connection`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth: Option<UiAutomationAuth>,
 }
 
 /// Response from `POST /api/v1/pane/open`
