@@ -36,6 +36,12 @@ pub struct SshDest {
 /// Prefix of a WSL connection name.
 pub const WSL_PREFIX: &str = "wsl://";
 
+/// Characters that only mean something to a shell, refused in an SSH
+/// destination (see `parse_ssh`).
+const SHELL_CHARS: &[char] = &[
+    '`', '$', ';', '|', '&', '<', '>', '(', ')', '\'', '"', '\\', '*', '?', '!', '{', '}', '#', '~',
+];
+
 /// Longest connection name accepted: a hostname is at most 253 characters, plus
 /// a user and a port.
 const MAX_CONN_NAME_LEN: usize = 300;
@@ -117,9 +123,13 @@ fn parse_ssh(name: &str) -> Result<SshDest, String> {
             return Err("the user before '@' is empty".to_string());
         }
     }
-    if !destination.chars().all(|c| {
-        c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '@' | ':' | '[' | ']' | '%')
-    }) {
+    // Not a DNS-name whitelist: an ssh config `Host` alias may legitimately
+    // contain '/' or '+' ("prod/web"), and OpenSSH resolves it (Codex P2 on
+    // #4248). What is refused is shell syntax. The destination is passed as one
+    // argv entry after `--`, so it never meets a local shell directly, but a
+    // user's `ProxyCommand` expands it through `%h` into a shell command, and no
+    // real host name or alias needs these characters.
+    if destination.chars().any(|c| SHELL_CHARS.contains(&c)) {
         return Err(format!(
             "'{name}' is not a host name, user@host, or ssh config alias"
         ));
@@ -215,8 +225,18 @@ mod tests {
         );
     }
 
+    /// Codex P2 on #4248: an ssh config alias need not look like a DNS name.
+    #[test]
+    fn ssh_config_aliases_with_slashes_or_plus_are_accepted() {
+        assert_eq!(ConnTarget::parse("prod/web"), Ok(ssh("prod/web", None)));
+        assert_eq!(
+            ConnTarget::parse("deploy@db+replica"),
+            Ok(ssh("deploy@db+replica", None))
+        );
+    }
+
     /// The destination goes into an `ssh` argv: nothing that ssh could read as an
-    /// option, and nothing that is not a host, user or alias.
+    /// option, and no shell syntax (a `ProxyCommand` expands it through `%h`).
     #[test]
     fn unsafe_or_malformed_names_are_refused() {
         for bad in [
