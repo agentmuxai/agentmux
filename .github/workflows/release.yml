@@ -328,9 +328,58 @@ jobs:
   # condition stayed true, ran anyway, downloaded zero artifacts, and failed
   # confusingly later instead of being cleanly blocked at the real point of
   # failure.
+  # AgentMux's remote helper (crates/remote): uploaded by srv to an SSH host
+  # for durable sessions (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md
+  # §6.2, §6.4). Static musl builds for any Linux (cargo-zigbuild cross-builds
+  # aarch64 without a separate toolchain) and both macOS architectures,
+  # published as release assets with a SHA256SUMS that srv checks before
+  # uploading. continue-on-error: a helper build problem must never block an
+  # AgentMux release; srv then reports that no helper is published.
+  build-remote-helper:
+    name: Build — remote helper (${{ matrix.target }})
+    needs: [verify]
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, zig: true }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, zig: true }
+          - { os: macos-latest, target: x86_64-apple-darwin, zig: false }
+          - { os: macos-latest, target: aarch64-apple-darwin, zig: false }
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cargo-zigbuild
+        if: matrix.zig
+        run: |
+          pip install ziglang
+          cargo install cargo-zigbuild --locked
+      - name: Build
+        run: |
+          if [ "${{ matrix.zig }}" = "true" ]; then
+            cargo zigbuild --release -p agentmux-remote --target ${{ matrix.target }}
+          else
+            cargo build --release -p agentmux-remote --target ${{ matrix.target }}
+          fi
+          mkdir -p out
+          cp target/${{ matrix.target }}/release/agentmux-remote "out/agentmux-remote-${VERSION}-${{ matrix.target }}"
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: remote-helper-${{ matrix.target }}
+          path: out/*
+
   publish:
     name: Publish release
-    needs: [verify, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos]
+    needs: [verify, check-macos, cef-runtime-pins, build-windows, build-linux, build-macos, build-remote-helper]
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
@@ -362,7 +411,12 @@ jobs:
         # too once Phase 3 ships).
         run: |
           mkdir -p dist-flat
-          find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" \) -exec cp {} dist-flat/ \;
+          find release-artifacts -type f \( -name "*.zip" -o -name "*.exe" -o -name "*.msix" -o -name "*.AppImage" -o -name "*.dmg" -o -name "*.deb" -o -name "*.rpm" -o -name "*.tar.gz" -o -name "agentmux-remote-*" \) -exec cp {} dist-flat/ \;
+          # The remote helper's hashes, which srv checks before uploading one
+          # to a host (only when at least one helper was built).
+          if ls dist-flat/agentmux-remote-* >/dev/null 2>&1; then
+            (cd dist-flat && sha256sum agentmux-remote-* > "agentmux-remote-${VERSION}-SHA256SUMS")
+          fi
           echo "--- Release artifacts ---"
           ls -lh dist-flat/
 

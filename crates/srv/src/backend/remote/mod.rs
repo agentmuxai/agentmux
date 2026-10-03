@@ -10,6 +10,7 @@
 //! on it; nothing here spawns a remote shell yet.
 
 pub mod conn;
+pub mod helper_install;
 pub mod ssh;
 pub mod ssh_config;
 pub mod status;
