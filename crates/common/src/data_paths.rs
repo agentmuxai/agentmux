@@ -379,11 +379,10 @@ impl DataPaths {
     ///
     /// When [`isolated_auth_enabled`] is set, this resolves to
     /// `instance_dir/identities/` instead — a channel-scoped credential
-    /// tree, now the DEFAULT for every non-`"stable"` channel as of
-    /// `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`
-    /// (this doc comment previously said "opt-in only; default behavior
-    /// above is unchanged" — that was accurate before that spec, stale
-    /// since, corrected 2026-08-16). Originally scoped to destructive
+    /// tree, used only with `AGENTMUX_ISOLATED_AUTH=1`: auth is shared on
+    /// every channel by default
+    /// (`docs/specs/SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`).
+    /// Originally scoped to destructive
     /// Armory testing (delete-account flows) that must never touch the
     /// real global identity store other channels/instances use.
     ///
@@ -1702,7 +1701,7 @@ mod tests {
             )
             .unwrap();
             // AGENTMUX_CHANNEL deliberately left unset here, unlike the
-            // isolated-by-default test above.
+            // non-stable-channel test above.
 
             assert!(dev.identities_dir().ends_with("shared/identities"));
         });
@@ -1790,12 +1789,9 @@ mod tests {
 
     #[test]
     fn isolated_auth_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
-        // reagentx P2 on PR #2431: a typo'd opt-out attempt (anything other
-        // than exactly "1") must land on ExplicitOptOut (global), matching
-        // the pre-existing `.map(|v| v == "1")` rule for every non-"1"
-        // value — it must NOT fall through to the channel default and
-        // silently isolate a non-stable channel just because the intended
-        // "0" was misspelled.
+        // Anything other than exactly "1" is an explicit opt-out (global),
+        // matching the original `.map(|v| v == "1")` rule for every non-"1"
+        // value (#2431): a misspelled value must never isolate a channel.
         let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear_channel_env();
         std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
