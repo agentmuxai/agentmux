@@ -76,8 +76,9 @@ const REGEX_AFTER_WORDS = new Set(["return", "typeof", "case", "do", "else", "in
  * Returns `lines` (one entry per source line: `code` is true when the line has
  * a non-comment, non-blank character; `text` is the comment text on it;
  * `kinds` is a subset of "doc", "line", "block") and `code`, the source with
- * every comment replaced by one space and whitespace outside string literals
- * collapsed, for comparing two versions of a file.
+ * every comment replaced by whitespace and whitespace outside string literals
+ * collapsed (to one space, or a newline if the run held one), for comparing two
+ * versions of a file.
  */
 export function lexSource(src, lang) {
     const rust = lang === "rs";
@@ -86,27 +87,33 @@ export function lexSource(src, lang) {
     let line = 0;
     const cur = () => (lines[line] ||= { code: false, text: "", kinds: new Set() });
     const out = [];
-    let lastSpace = true;
+    // Whitespace between tokens is pending until the next token: " ", or "\n" if
+    // the run held a line terminator (a newline, or a block comment spanning
+    // lines, which JavaScript treats as one). Line terminators stay significant
+    // because automatic semicolon insertion makes `return\nx` differ from
+    // `return x`.
+    let ws = null;
     let prevSig = "";
     let word = "";
 
-    const space = () => {
-        if (!lastSpace) {
-            out.push(" ");
-            lastSpace = true;
-        }
+    const flushWs = () => {
+        if (ws && out.length) out.push(ws);
+        ws = null;
+    };
+    const space = (nl) => {
+        ws = nl || ws === "\n" ? "\n" : " ";
     };
     const code = (ch) => {
-        if (/\s/.test(ch)) return space();
+        if (/\s/.test(ch)) return space(false);
+        flushWs();
         out.push(ch);
-        lastSpace = false;
         cur().code = true;
         prevSig = ch;
         word = IDENT.test(ch) ? word + ch : "";
     };
     const str = (ch) => {
+        flushWs();
         out.push(ch);
-        lastSpace = false;
         cur().code = true;
         prevSig = '"';
         word = "";
@@ -115,11 +122,11 @@ export function lexSource(src, lang) {
         const l = cur();
         l.text += ch;
         l.kinds.add(kind);
-        space();
+        space(false);
     };
     const newline = (asStr) => {
         if (asStr) str("\n");
-        else space();
+        else space(true);
         line++;
     };
 
@@ -154,6 +161,7 @@ export function lexSource(src, lang) {
                     depth--;
                     if (depth <= 0) break;
                 } else if (src[i] === "\n") {
+                    space(true);
                     line++;
                     i++;
                 } else {
@@ -190,9 +198,10 @@ export function lexSource(src, lang) {
                     str(src[i++]);
                 }
                 if (src[i] === "\n") {
-                    // An unterminated TS quote is JSX text or a stray apostrophe:
-                    // stop at the line end instead of swallowing the file.
-                    if (!rust && c === SQ) break;
+                    // A TS quoted literal cannot hold a raw newline, so an open one
+                    // is JSX text (an apostrophe, `6"`): stop at the line end
+                    // instead of swallowing the comments below it.
+                    if (!rust) break;
                     newline(true);
                 } else {
                     str(src[i]);
@@ -307,7 +316,7 @@ export function statsOf(info) {
 // of the review bot as a product does not match.
 const NARRATION = [
     // Uppercase P only: `p1`/`p2` are point variables, and `#333` is a colour.
-    ["severity tag next to a PR number", /\bP[0-3]\b.{0,40}#\d{3,}/],
+    ["severity tag next to a PR number", /\bP[0-3]\b.{0,40}#\d{3,}|#\d{3,}.{0,40}\bP[0-3]\b/],
     ["re-review", /\bre-?review/i],
     ["review round count", /\bround \d+\b/i],
     ["review bot next to a PR number", /\b(?:reagentx?|codex)\b[^.\n]{0,20}#\d{3,}/i],

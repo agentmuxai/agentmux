@@ -65,6 +65,12 @@ describe("lexSource: TypeScript", () => {
         expect(info.lines[1].code).toBe(false);
     });
 
+    it("stops a double-quoted JSX text at the line end too", () => {
+        const info = ts('const a = <p>Choose 6"</p>;\n// next\n');
+        expect(info.lines[1].text).toBe("// next");
+        expect(info.lines[1].code).toBe(false);
+    });
+
     it("does not treat a multi-line template literal's lines as comments", () => {
         const info = ts("const q = `\n// not a comment\n`;\n");
         expect(textOf(info).join("")).toBe("");
@@ -107,6 +113,20 @@ describe("lexSource: code stream", () => {
         expect(a.code).toBe(b.code);
     });
 
+    it("keeps a line terminator significant (automatic semicolon insertion)", () => {
+        const asi = ts("function f() {\n  return\n  // why\n  value;\n}\n");
+        expect(asi.code).not.toBe(ts("function f() {\n  return value;\n}\n").code);
+        // Deleting only the comment line keeps the terminator, so the code is the same.
+        expect(asi.code).toBe(ts("function f() {\n  return\n  value;\n}\n").code);
+        // A block comment that spans lines is itself a line terminator.
+        expect(ts("return /* a\n b */ x;").code).not.toBe(ts("return /* a b */ x;").code);
+    });
+
+    it("ignores blank lines and a removed trailing comment", () => {
+        expect(ts("a;\n\n\nb;\n").code).toBe(ts("a;\nb;\n").code);
+        expect(ts("a; // note\nb;\n").code).toBe(ts("a;\nb;\n").code);
+    });
+
     it("keeps a comment between tokens from gluing them together", () => {
         expect(ts("a/* x */b").code).toBe("a b");
     });
@@ -125,6 +145,8 @@ describe("narrationRule", () => {
         ["the exact attack this fix closes (reagent + Codex, PR #2662, 2026-08-19)"],
         ["reagent caught this on the first draft"],
         ["the actual safety property Codex asked for"],
+        ["PR #1234 review (P1): keep the guard"],
+        ["fixed in #2338, flagged as P2 at the time"],
     ])("flags %s", (text) => {
         expect(narrationRule(text)).not.toBeNull();
     });
