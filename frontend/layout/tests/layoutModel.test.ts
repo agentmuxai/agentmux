@@ -644,6 +644,34 @@ describe("resize through collapsed panes", () => {
         expect(handles[1].centerPx).toBeCloseTo(props[Bottom.id].rect.top, 3);
     });
 
+    it("a fully collapsed Row between two panes: its bottom edge is one handle across its whole width (#4260)", () => {
+        const model = createLayoutModel();
+        const A = leaf("A"), C = leaf("C");
+        const B = leaf("B", true), D = leaf("D", true);
+        const row = newLayoutNode(FlexDirection.Row, 10, [B, D]);
+        const root = newLayoutNode(FlexDirection.Column, 10, [A, row, C]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handles = handlesOf(model, root.id);
+        expect(handles.every((h) => h.parentIndex === 0 && h.afterIndex === 2)).toBe(true);
+        // B and D sit side by side, so the row has two edges: its top (A's
+        // bottom) and its bottom (C's top), and no more.
+        expect(handles).toHaveLength(2);
+        const c = props[C.id].rect;
+        const bottom = handles[1];
+        expect(bottom.centerPx).toBeCloseTo(c.top, 3);
+        // One handle spanning the whole row, under both chips (and any space
+        // beside them), not just under the first chip.
+        const rowRect = props[row.id].rect;
+        expect(bottom.perpMinPx).toBeLessThanOrEqual(Math.min(props[B.id].rect.left, props[D.id].rect.left) + 0.01);
+        expect(bottom.perpMaxPx).toBeGreaterThanOrEqual(
+            Math.max(props[B.id].rect.left + props[B.id].rect.width, props[D.id].rect.left + props[D.id].rect.width) - 0.01
+        );
+        expect(bottom.perpMaxPx - bottom.perpMinPx).toBeCloseTo(rowRect.width, 1);
+    });
+
     it("a collapsed run at the edge of the column adds no handle (nothing to resize against)", () => {
         const model = createLayoutModel();
         const root = newLayoutNode(FlexDirection.Column, 10, [leaf("A"), leaf("B"), leaf("C", true)]);
