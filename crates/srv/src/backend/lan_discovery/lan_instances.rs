@@ -49,7 +49,7 @@ pub(super) struct InstanceRecord {
 /// never name a path outside the directory, then 8 hex chars of a SHA-256 of
 /// the exact channel name. The slug alone is lossy (`Foo` and `foo`, or
 /// `foo bar` and `foo_bar`, share one), and two LAN-enabled channels sharing
-/// a file would overwrite each other's record (Codex P2 on #4297). The real
+/// a file would overwrite each other's record (#4297). The real
 /// name stays in the file.
 pub(super) fn record_file_name(channel: &str) -> String {
     use sha2::{Digest, Sha256};
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn channels_with_the_same_slug_get_their_own_files() {
-        // Codex P2 on #4297: the slug alone is lossy.
+        // The slug alone is lossy (#4297).
         for (a, b) in [("Foo", "foo"), ("foo bar", "foo_bar"), ("dev/x", "dev_x")] {
             assert_eq!(stem_of(&record_file_name(a)), stem_of(&record_file_name(b)));
             assert_ne!(record_file_name(a), record_file_name(b), "{a} vs {b}");
