@@ -1,7 +1,7 @@
 # SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials
 
 **Date:** 2026-10-03
-**Status:** proposed — not built. §8 lists the decisions that block Phase 4.
+**Status:** active — Phase 1 (#4285) and Phase 2a (#4290) built, see §11; Phase 2b and 3 not started; §8 lists the decisions that block Phase 4.
 **Author:** AgentY, at the owner's request
 **Related:** `docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md` (§4 the "(ambient creds)" regression, §5 the snapshot states, §5a the Haiku fallback), `SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md`, `SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md`, `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7 (the retired ambient-login escape hatch), `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`, `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
 
