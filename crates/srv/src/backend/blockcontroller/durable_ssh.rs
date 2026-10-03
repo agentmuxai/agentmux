@@ -76,6 +76,19 @@ pub fn wants(meta: &MetaMapType, config: Option<&crate::backend::wconfig::FullCo
     ) {
         return false;
     }
+    // An agent's SSH shell (`PtyShell`, marked by http_pty_shell.rs) is never
+    // durable, whatever the defaults: its ssh's prompts must reach the user as
+    // the agent's (its own askpass grant), and the agent tools do not reattach
+    // a session yet (the `Shell` tool's `durable`, spec §8.1, still to come).
+    if !obj::meta_get_string(
+        meta,
+        crate::backend::remote::askpass::META_KEY_AGENT_BLOCK,
+        "",
+    )
+    .is_empty()
+    {
+        return false;
+    }
     let conn_setting = config.and_then(|c| {
         c.connections
             .iter()
@@ -1530,6 +1543,14 @@ elif ' attach ' in remote:
             Some(&config)
         ));
         assert!(!wants(&meta("durable-test-other", None), Some(&config)));
+
+        // An agent's SSH shell: never, not even when asked or by default.
+        let mut agent = meta("durable-test-host", Some(true));
+        agent.insert(
+            crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.into(),
+            serde_json::json!("agent-block"),
+        );
+        assert!(!wants(&agent, Some(&config)));
     }
 
     #[test]
