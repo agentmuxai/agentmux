@@ -140,6 +140,9 @@ export const cefApprovals: ApprovalHostApi = {
     decideMemoryAdoption: async (approvalId, approve) => {
         await invokeCommand("memory_adoption_decide", { approval_id: approvalId, approve });
     },
+    decideSsh: async (approvalId, approve, text, checkbox) => {
+        await invokeCommand("ssh_approval_decide", { approval_id: approvalId, approve, text, checkbox });
+    },
     requestMemoryAdoption: async (args) => {
         await invokeCommand("memory_adoption_request", args);
     },

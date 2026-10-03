@@ -202,19 +202,6 @@ pub(crate) fn agent_label(agent: Option<&str>) -> String {
         .unwrap_or_else(|| "An agent with no AgentMux id".to_string())
 }
 
-/// The window showing `block_id`'s workspace: where a question about that
-/// pane is asked.
-pub(crate) async fn window_of(state: &AppState, block_id: &str) -> Option<String> {
-    let workspace = crate::server::service::resolve_agent_context(&state.mstore, block_id)
-        .ok()?
-        .workspace_id?;
-    let s = state.srv_state.lock().await;
-    s.windows
-        .iter()
-        .find(|(_, w)| w.workspace_id == workspace)
-        .map(|(id, _)| id.clone())
-}
-
 /// One line of agent-supplied text for a dialog: shown as plain text, newlines
 /// folded and length capped, so it cannot lay out a message of its own.
 pub(crate) fn one_line(text: &str, max: usize) -> String {
@@ -231,15 +218,79 @@ pub(crate) fn one_line(text: &str, max: usize) -> String {
 }
 
 /// How long the user has to answer a consent or askpass dialog.
-const DIALOG_TIMEOUT_MS: i64 = 120_000;
+const DIALOG_TIMEOUT_MS: u64 = 120_000;
+
+/// The user's answer to [`ask_user`]. `answered` is false when the window was
+/// closed, timed out, or could not be opened.
+#[derive(Debug, Default, Clone, serde::Deserialize)]
+pub(crate) struct UserAnswer {
+    #[serde(default)]
+    pub answered: bool,
+    #[serde(default)]
+    pub approve: bool,
+    /// For a `secret` question: never logged.
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub checkbox: bool,
+}
+
+/// Ask the user a question about the agent in `agent_block_id`, in an approval
+/// subwindow the host opens over the window showing it (crates/cef
+/// `ssh_approval`), and wait for the answer.
+///
+/// Through the host's own IPC server and its token, which no agent holds, and
+/// answered in a window the browser API never resolves a pane into: an agent
+/// can neither click this answer nor forge it, unlike a modal in the main
+/// window answered through srv's own services (both reachable with the auth
+/// key every agent has). With no host connected (headless) there is no one to
+/// ask: `Err`, so whatever needed the answer does not happen.
+pub(crate) async fn ask_user(
+    state: &AppState,
+    agent_block_id: &str,
+    question: serde_json::Value,
+) -> Result<UserAnswer, String> {
+    let host = state
+        .host_ipc
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "no AgentMux window is connected to ask the user in".to_string())?;
+    let mut body = question;
+    body["block_id"] = serde_json::json!(agent_block_id);
+    body["timeout_ms"] = serde_json::json!(DIALOG_TIMEOUT_MS);
+    let url = format!("http://127.0.0.1:{}/agentmux/approval/ask", host.port);
+    let resp = state
+        .http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", host.token))
+        .timeout(std::time::Duration::from_millis(DIALOG_TIMEOUT_MS + 15_000))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("could not ask the user: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("could not ask the user: the window host answered HTTP {}", resp.status()));
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("could not ask the user: {e}"))?;
+    if v.get("ok").and_then(|o| o.as_bool()) != Some(true) {
+        let e = v.get("error").and_then(|e| e.as_str()).unwrap_or("no answer");
+        return Err(format!("could not ask the user: {e}"));
+    }
+    serde_json::from_value(v.get("data").cloned().unwrap_or_default())
+        .map_err(|e| format!("could not ask the user: {e}"))
+}
 
 /// The user's consent for the agent in `agent_block_id` to run `what` on the
 /// SSH `connection` with the user's identity (spec §8.2). `connection` is the
 /// canonical name (`ConnTarget::name`), so one host is one consent however it
 /// is spelled. "Always" for that agent and host is remembered
 /// (`remote::agent_access`) and asks nothing again; otherwise the user is
-/// asked, in the window showing the agent. An agent without an id is asked
-/// every time: "always" is neither offered nor stored for it.
+/// asked ([`ask_user`]). An agent without an id is asked every time: "always"
+/// is neither offered nor stored for it.
 pub(crate) async fn consent_for_ssh(
     state: &AppState,
     agent_block_id: &str,
@@ -257,42 +308,39 @@ pub(crate) async fn consent_for_ssh(
         tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), "agent ssh access: allowed (always)");
         return Ok(());
     }
-    let window = window_of(state, agent_block_id)
-        .await
-        .ok_or_else(|| format!("{agent} needs the user's permission to use {connection}, and no AgentMux window is open to ask in"))?;
-    let req = crate::backend::userinput::UserInputRequest {
-        request_id: uuid::Uuid::new_v4().to_string(),
-        query_text: format!(
+    let question = serde_json::json!({
+        "kind": "consent",
+        "title": format!("Agent access to {}", one_line(connection, 80)),
+        "message": format!(
             "{agent} wants to run this on {}, as you, with your SSH keys:\n\n{}\n\nAllow it?",
             one_line(connection, 80),
             one_line(what, 400)
         ),
-        response_type: crate::backend::userinput::RESPONSE_TYPE_CONFIRM.to_string(),
-        title: format!("Agent access to {connection}"),
-        markdown: false,
-        timeout_ms: DIALOG_TIMEOUT_MS,
-        checkbox_msg: match &agent_id {
+        "checkbox": match &agent_id {
             Some(_) => format!("Always allow {agent} on {}", one_line(connection, 80)),
             None => String::new(),
         },
-        public_text: true,
-        ok_label: "Allow".to_string(),
-        cancel_label: "Deny".to_string(),
-    };
-    let timeout = std::time::Duration::from_millis(DIALOG_TIMEOUT_MS as u64 + 5_000);
-    let answer = crate::backend::userinput::ask(&state.broker, &window, req, timeout)
+        "ok_label": "Allow",
+        "cancel_label": "Deny",
+    });
+    let answer = ask_user(state, agent_block_id, question)
         .await
-        .map_err(|e| format!("the user did not allow {agent} on {connection} ({e})"))?;
-    if !answer.is_confirmed() {
-        tracing::info!(agent = %agent, connection = %connection, "agent ssh access: denied");
-        return Err(format!("the user denied {agent} access to {connection}"));
+        .map_err(|e| format!("{agent} needs the user's permission to use {connection}, and {e}"))?;
+    if !(answer.answered && answer.approve) {
+        tracing::info!(agent = %agent, connection = %connection, answered = answer.answered, "agent ssh access: not allowed");
+        return Err(if answer.answered {
+            format!("the user denied {agent} access to {connection}")
+        } else {
+            format!("the user did not answer whether {agent} may use {connection}")
+        });
     }
-    if let Some(id) = agent_id.as_deref().filter(|_| answer.checkbox_stat) {
+    let always = answer.checkbox && agent_id.is_some();
+    if let Some(id) = agent_id.as_deref().filter(|_| always) {
         if let Err(e) = agent_access::remember(id, connection) {
             tracing::warn!(error = %e, "agent ssh access: could not remember 'always'");
         }
     }
-    tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), always = answer.checkbox_stat && agent_id.is_some(), "agent ssh access: allowed");
+    tracing::info!(agent = %agent, connection = %connection, what = %one_line(what, 200), always, "agent ssh access: allowed");
     Ok(())
 }
 
@@ -306,9 +354,10 @@ pub(crate) struct AskpassRequest {
     hint: String,
 }
 
-/// `POST /api/v1/askpass`: show an ssh prompt to the user and return the
-/// answer (`remote::askpass`). Only a live secret is answered, and the secret,
-/// not anything in the request, says which agent and host the dialog names.
+/// `POST /api/v1/askpass`: show an ssh prompt to the user ([`ask_user`]) and
+/// return the answer (`remote::askpass`). Only a live secret is answered, and
+/// the secret, not anything in the request, says which agent and host the
+/// question names.
 pub(crate) async fn handle_askpass(
     axum::extract::State(state): axum::extract::State<AppState>,
     axum::Json(req): axum::Json<AskpassRequest>,
@@ -322,77 +371,56 @@ pub(crate) async fn handle_askpass(
     let Some(grant) = askpass::lookup(&req.secret) else {
         return refuse(StatusCode::FORBIDDEN, "no such ssh prompt".to_string());
     };
-    let Some(window) = window_of(&state, &grant.agent_block_id).await else {
-        return refuse(
-            StatusCode::CONFLICT,
-            "no AgentMux window is open to ask the user".to_string(),
-        );
-    };
     let kind = askpass::classify(&req.prompt, &req.hint);
-    // The grant's names are AgentMux's own, but shown as plain capped lines
-    // all the same; ssh's prompt is ssh's text.
-    let dialog = crate::backend::userinput::UserInputRequest {
-        request_id: uuid::Uuid::new_v4().to_string(),
-        query_text: format!(
+    // The grant's names are AgentMux's own, shown as plain capped lines all
+    // the same; ssh's prompt is ssh's text.
+    let question = serde_json::json!({
+        "kind": match kind {
+            PromptKind::YesNo => "yesno",
+            PromptKind::Info => "info",
+            PromptKind::Secret => "secret",
+        },
+        "title": format!("SSH: {}", one_line(&grant.connection, 80)),
+        "message": format!(
             "ssh, connecting to {} for {}, {}:\n\n{}",
             one_line(&grant.connection, 80),
-            agent_label(
-                Some(&grant.agent)
-                    .filter(|a| !a.is_empty())
-                    .map(String::as_str)
-            ),
-            if kind == PromptKind::Info {
-                "says"
-            } else {
-                "asks"
-            },
+            agent_label(Some(grant.agent.as_str()).filter(|a| !a.is_empty())),
+            if kind == PromptKind::Info { "says" } else { "asks" },
             req.prompt.trim().chars().take(2000).collect::<String>()
         ),
-        response_type: match kind {
-            PromptKind::YesNo | PromptKind::Info => {
-                crate::backend::userinput::RESPONSE_TYPE_CONFIRM
-            }
-            PromptKind::Secret => crate::backend::userinput::RESPONSE_TYPE_TEXT,
-        }
-        .to_string(),
-        title: format!("SSH: {}", one_line(&grant.connection, 80)),
-        markdown: false,
-        timeout_ms: DIALOG_TIMEOUT_MS,
-        checkbox_msg: String::new(),
-        public_text: false,
-        ok_label: match kind {
-            PromptKind::YesNo => "Yes".into(),
-            PromptKind::Info => "OK".into(),
-            PromptKind::Secret => String::new(),
+        "ok_label": match kind {
+            PromptKind::YesNo => "Yes",
+            PromptKind::Info => "OK",
+            PromptKind::Secret => "OK",
         },
-        cancel_label: if kind == PromptKind::YesNo {
-            "No".into()
-        } else {
-            String::new()
-        },
-    };
-    let timeout = std::time::Duration::from_millis(DIALOG_TIMEOUT_MS as u64 + 5_000);
+        "cancel_label": if kind == PromptKind::YesNo { "No" } else { "Cancel" },
+    });
     // A notice ("touch your security key"): ssh does not wait for an answer
     // and ends askpass itself once done, so it is shown and not waited on.
     if kind == PromptKind::Info {
-        let broker = state.broker.clone();
+        let state = state.clone();
+        let block = grant.agent_block_id.clone();
         tokio::spawn(async move {
-            let _ = crate::backend::userinput::ask(&broker, &window, dialog, timeout).await;
+            let _ = ask_user(&state, &block, question).await;
         });
         return axum::Json(serde_json::json!({ "answer": "" })).into_response();
     }
-    match crate::backend::userinput::ask(&state.broker, &window, dialog, timeout).await {
-        // Never logged: the answer may be a password.
-        Ok(answer) => {
+    match ask_user(&state, &grant.agent_block_id, question).await {
+        Ok(answer) if answer.answered => {
+            // Never logged: the answer may be a password.
             let text = match kind {
-                PromptKind::YesNo if answer.is_confirmed() => "yes".to_string(),
+                PromptKind::YesNo if answer.approve => "yes".to_string(),
                 PromptKind::YesNo => "no".to_string(),
-                PromptKind::Secret => answer.text,
+                PromptKind::Secret if answer.approve => answer.text,
+                PromptKind::Secret => {
+                    return refuse(StatusCode::GONE, "cancelled".to_string());
+                }
                 PromptKind::Info => String::new(),
             };
             axum::Json(serde_json::json!({ "answer": text })).into_response()
         }
-        Err(e) => refuse(StatusCode::GONE, format!("not answered: {e}")),
+        Ok(_) => refuse(StatusCode::GONE, "not answered".to_string()),
+        Err(e) => refuse(StatusCode::CONFLICT, e),
     }
 }
 

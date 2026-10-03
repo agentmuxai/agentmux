@@ -365,6 +365,8 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 pub const CREDENTIAL_APPROVAL_VIEW: &str = "credential-approval";
 /// `initial_view` of the memory-adoption approval page (`memory_adoption`).
 pub const MEMORY_ADOPTION_APPROVAL_VIEW: &str = "memory-adoption-approval";
+/// `initial_view` of the SSH approval page (`ssh_approval`).
+pub const SSH_APPROVAL_VIEW: &str = "ssh-approval";
 
 /// True for the views that are approval pages — the windows the browser API
 /// must never resolve a pane into (`AppState::approval_windows`). Matched
@@ -372,7 +374,7 @@ pub const MEMORY_ADOPTION_APPROVAL_VIEW: &str = "memory-adoption-approval";
 /// IPC accepts any view string, and a future pane-hosting view opened that
 /// way must not silently become unreachable to the browser API (Opaz, #3843).
 pub fn is_approval_view(view: Option<&str>) -> bool {
-    matches!(view, Some(CREDENTIAL_APPROVAL_VIEW | MEMORY_ADOPTION_APPROVAL_VIEW))
+    matches!(view, Some(CREDENTIAL_APPROVAL_VIEW | MEMORY_ADOPTION_APPROVAL_VIEW | SSH_APPROVAL_VIEW))
 }
 
 /// Open a sub-window tied to `parent_instance_id`. **Not exposed to users** —
@@ -1252,12 +1254,13 @@ mod new_window_origin_tests {
 
 #[cfg(test)]
 mod approval_view_tests {
-    use super::{is_approval_view, CREDENTIAL_APPROVAL_VIEW, MEMORY_ADOPTION_APPROVAL_VIEW};
+    use super::{is_approval_view, CREDENTIAL_APPROVAL_VIEW, MEMORY_ADOPTION_APPROVAL_VIEW, SSH_APPROVAL_VIEW};
 
     #[test]
-    fn the_two_approval_pages_are_approval_views() {
+    fn the_approval_pages_are_approval_views() {
         assert!(is_approval_view(Some(CREDENTIAL_APPROVAL_VIEW)));
         assert!(is_approval_view(Some(MEMORY_ADOPTION_APPROVAL_VIEW)));
+        assert!(is_approval_view(Some(SSH_APPROVAL_VIEW)));
     }
 
     #[test]

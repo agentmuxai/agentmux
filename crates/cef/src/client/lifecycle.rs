@@ -1117,6 +1117,8 @@ impl AgentMuxHandler {
         if let Some(ref lbl) = label {
             // Same for a memory-adoption approval window (`memory_adoption`).
             crate::memory_adoption::cancel_for_window(&self.state, lbl);
+            // And an SSH approval window: its request goes back unanswered.
+            crate::ssh_approval::cancel_for_window(lbl);
             let cancelled = crate::credential_broker::approval::cancel_for_window(lbl);
             if !cancelled.is_empty() {
                 use cef::ImplAuthCallback;

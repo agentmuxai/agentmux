@@ -39,6 +39,7 @@ mod memory_pressure;
 mod browser_pane;
 mod credential_broker;
 mod memory_adoption;
+mod ssh_approval;
 #[cfg(target_os = "windows")]
 mod floating_pane;
 mod reducer;

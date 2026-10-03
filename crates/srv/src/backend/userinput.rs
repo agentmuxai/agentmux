@@ -182,42 +182,6 @@ impl Default for UserInputHandler {
     }
 }
 
-/// The one handler srv routes `UserInputService.SendUserInputResponse` to.
-pub fn global() -> &'static UserInputHandler {
-    static HANDLER: std::sync::OnceLock<UserInputHandler> = std::sync::OnceLock::new();
-    HANDLER.get_or_init(UserInputHandler::new)
-}
-
-/// Show `req` in the window `window_id` (the frontend's `UserInputModal`) and
-/// wait for the user's answer, up to `timeout`. A cancel, an error or no
-/// answer in time is `Err`.
-pub async fn ask(
-    broker: &crate::backend::mps::Broker,
-    window_id: &str,
-    req: UserInputRequest,
-    timeout: Duration,
-) -> Result<UserInputResponse, String> {
-    let request_id = req.request_id.clone();
-    let rx = global().register(&request_id);
-    // Forgotten however this ends, including the caller giving up mid-wait
-    // (its HTTP request dropped): a late answer then finds nothing waiting.
-    struct Forget(String);
-    impl Drop for Forget {
-        fn drop(&mut self) {
-            global().cancel(&self.0);
-        }
-    }
-    let _forget = Forget(request_id.clone());
-    broker.publish(crate::backend::mps::MuxEvent {
-        event: crate::backend::mps::EVENT_USER_INPUT.to_string(),
-        scopes: vec![window_id.to_string()],
-        sender: String::new(),
-        persist: 0,
-        data: serde_json::to_value(&req).ok(),
-    });
-    wait_for_response(rx, timeout).await
-}
-
 /// Wait for a user input response with timeout.
 pub async fn wait_for_response(
     rx: oneshot::Receiver<UserInputResponse>,
@@ -239,67 +203,6 @@ pub async fn wait_for_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn confirm_request(id: &str) -> UserInputRequest {
-        UserInputRequest {
-            request_id: id.to_string(),
-            query_text: "Allow it?".to_string(),
-            response_type: RESPONSE_TYPE_CONFIRM.to_string(),
-            title: "t".to_string(),
-            markdown: false,
-            timeout_ms: 1000,
-            checkbox_msg: String::new(),
-            public_text: true,
-            ok_label: String::new(),
-            cancel_label: String::new(),
-        }
-    }
-
-    /// `ask` publishes to the window and returns what the frontend delivers
-    /// (SendUserInputResponse -> global().deliver), then forgets the request.
-    #[tokio::test]
-    async fn ask_returns_the_users_answer_and_forgets_the_request() {
-        let broker = crate::backend::mps::Broker::new();
-        let id = "ask-test-1";
-        let deliver = tokio::spawn(async move {
-            for _ in 0..50 {
-                if global().has_pending(id) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-            global().deliver(UserInputResponse {
-                request_id: id.to_string(),
-                confirm: true,
-                checkbox_stat: true,
-                ..Default::default()
-            })
-        });
-        let answer = ask(&broker, "win-1", confirm_request(id), Duration::from_secs(2)).await.unwrap();
-        assert!(answer.is_confirmed() && answer.checkbox_stat);
-        assert!(deliver.await.unwrap().is_ok());
-        assert!(!global().has_pending(id));
-
-        let err = ask(&broker, "win-1", confirm_request("ask-test-2"), Duration::from_millis(50)).await;
-        assert!(err.unwrap_err().contains("timed out"));
-        assert!(!global().has_pending("ask-test-2"), "a timed-out request is forgotten");
-
-        // A caller that gives up mid-wait (its future dropped) leaves nothing.
-        let waiting = tokio::spawn(async move {
-            let broker = crate::backend::mps::Broker::new();
-            ask(&broker, "win-1", confirm_request("ask-test-3"), Duration::from_secs(30)).await
-        });
-        for _ in 0..50 {
-            if global().has_pending("ask-test-3") {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(global().has_pending("ask-test-3"));
-        waiting.abort();
-        let _ = waiting.await;
-        assert!(!global().has_pending("ask-test-3"), "a dropped wait is forgotten");
-    }
 
     #[test]
     fn test_user_input_request_serde() {

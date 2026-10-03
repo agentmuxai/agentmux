@@ -119,7 +119,7 @@ const UserInputModal = (props: UserInputRequest & ModalCloseProps) => {
     };
 
     const optionalCheckbox = (): JSX.Element => {
-        if (!userInputRequest.checkboxmsg) {
+        if (userInputRequest.checkboxmsg == "") {
             return <></>;
         }
         return (
