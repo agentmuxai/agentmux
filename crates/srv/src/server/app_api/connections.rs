@@ -16,12 +16,25 @@ use crate::backend::remote::status::{self, state};
 use crate::backend::remote::ConnTarget;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    // Lists. SSH hosts arrive with P2; the typeahead adds `local` itself.
-    // One call each, with the constant spelled out: the RPC contract test
-    // resolves every registered command name statically.
+    // Lists. One call each, with the constant spelled out: the RPC contract
+    // test resolves every registered command name statically.
+    //
+    // The picker's "Remote" section: the user's ssh config hosts and any other
+    // SSH connection used this session. The typeahead adds `local` and the
+    // WSL distros itself.
     engine.register_handler(
         COMMAND_CONN_LIST,
-        Box::new(|_data, _ctx| Box::pin(async move { Ok(Some(serde_json::json!([]))) })),
+        Box::new(|_data, _ctx| {
+            Box::pin(async move {
+                let hosts = tokio::task::spawn_blocking(crate::backend::remote::ssh_config::hosts)
+                    .await
+                    .unwrap_or_default();
+                Ok(Some(serde_json::json!(remote_names(
+                    &hosts,
+                    &status::all()
+                ))))
+            })
+        }),
     );
     engine.register_handler(
         COMMAND_CONN_LIST_AWS,
@@ -176,11 +189,34 @@ pub(crate) struct ConnEntry {
     pub status: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub error: String,
+    /// Whether an agent can pass it as `connection` now. SSH is listed (a
+    /// pane can open it) but not usable by agents until the per-host consent
+    /// and the askpass bridge land (`for_agent`).
+    pub agent_can_use: bool,
 }
 
-/// What an agent may connect to: this machine, each installed WSL distro, and
-/// any other connection a pane has used this session, with its status.
-pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEntry> {
+/// The picker's remote names: the ssh config hosts, then any other SSH
+/// connection known this session, each once.
+pub(crate) fn remote_names(ssh_hosts: &[String], known: &[ConnStatus]) -> Vec<String> {
+    use crate::backend::remote::conn::same_connection;
+    let mut out: Vec<String> = ssh_hosts.to_vec();
+    for s in known {
+        let is_ssh = matches!(ConnTarget::parse(&s.connection), Ok(ConnTarget::Ssh(_)));
+        if is_ssh && !out.iter().any(|n| same_connection(n, &s.connection)) {
+            out.push(s.connection.clone());
+        }
+    }
+    out
+}
+
+/// The connections there are: this machine, each installed WSL distro, the
+/// user's ssh config hosts, and any other connection a pane has used this
+/// session, with its status and whether an agent can use it.
+pub(crate) fn list(
+    wsl_installed: &[String],
+    ssh_hosts: &[String],
+    known: &[ConnStatus],
+) -> Vec<ConnEntry> {
     use crate::backend::remote::conn::same_connection;
     let status_of = |name: &str| known.iter().find(|s| same_connection(&s.connection, name));
     let mut out = vec![ConnEntry {
@@ -188,6 +224,7 @@ pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEn
         kind: "local",
         status: state::CONNECTED.to_string(),
         error: String::new(),
+        agent_can_use: true,
     }];
     for distro in wsl_installed {
         let name = ConnTarget::Wsl(distro.clone()).name();
@@ -200,6 +237,20 @@ pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEn
             kind: "wsl",
             status,
             error,
+            agent_can_use: true,
+        });
+    }
+    for host in ssh_hosts {
+        let (status, error) = match status_of(host) {
+            Some(s) => (s.status.clone(), s.error.clone()),
+            None => ("available".to_string(), String::new()),
+        };
+        out.push(ConnEntry {
+            connection: host.clone(),
+            kind: "ssh",
+            status,
+            error,
+            agent_can_use: false,
         });
     }
     for s in known {
@@ -219,6 +270,7 @@ pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEn
             kind,
             status: s.status.clone(),
             error: s.error.clone(),
+            agent_can_use: kind == "wsl",
         });
     }
     out
@@ -227,7 +279,10 @@ pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEn
 /// `GET /api/v1/conn/list`: the agent `ConnList` tool (spec §8.1).
 pub(crate) async fn handle_conn_list() -> axum::Json<Vec<ConnEntry>> {
     let installed = crate::backend::remote::wsl::list().await;
-    axum::Json(list(&installed, &status::all()))
+    let hosts = tokio::task::spawn_blocking(crate::backend::remote::ssh_config::hosts)
+        .await
+        .unwrap_or_default();
+    axum::Json(list(&installed, &hosts, &status::all()))
 }
 
 #[cfg(test)]
@@ -333,31 +388,52 @@ mod tests {
     }
 
     #[test]
-    fn the_list_is_local_then_the_distros_then_what_panes_have_used() {
+    fn the_list_is_local_then_the_distros_then_the_ssh_hosts_then_what_panes_have_used() {
         let installed = vec!["Ubuntu".to_string(), "Debian".to_string()];
+        let hosts = vec!["area54".to_string(), "nas".to_string()];
         let known = vec![
             // Accepted as typed; still the installed Ubuntu, listed once.
             st("wsl://ubuntu", state::CONNECTED, ""),
-            st("area54", state::ERROR, "SSH terminals are not available"),
+            st("area54", state::ERROR, "could not connect"),
+            st("deploy@10.0.0.5", state::CONNECTED, ""),
             st("wsl://Arch", state::ERROR, "not installed"),
             // Not a connection: never listed.
             st("local", state::CONNECTED, ""),
         ];
-        let got: Vec<(String, &str, String)> = list(&installed, &known)
+        let got: Vec<(String, &str, String, bool)> = list(&installed, &hosts, &known)
             .into_iter()
-            .map(|e| (e.connection, e.kind, e.status))
+            .map(|e| (e.connection, e.kind, e.status, e.agent_can_use))
             .collect();
         let want = [
-            ("local", "local", "connected"),
-            ("wsl://Ubuntu", "wsl", "connected"),
-            ("wsl://Debian", "wsl", "available"),
-            ("area54", "ssh", "error"),
-            ("wsl://Arch", "wsl", "error"),
+            ("local", "local", "connected", true),
+            ("wsl://Ubuntu", "wsl", "connected", true),
+            ("wsl://Debian", "wsl", "available", true),
+            ("area54", "ssh", "error", false),
+            ("nas", "ssh", "available", false),
+            ("deploy@10.0.0.5", "ssh", "connected", false),
+            ("wsl://Arch", "wsl", "error", true),
         ];
-        let want: Vec<(String, &str, String)> = want
+        let want: Vec<(String, &str, String, bool)> = want
             .iter()
-            .map(|(c, k, s)| (c.to_string(), *k, s.to_string()))
+            .map(|(c, k, s, a)| (c.to_string(), *k, s.to_string(), *a))
             .collect();
         assert_eq!(got, want);
+    }
+
+    /// The picker's "Remote" section: config hosts first, then other SSH
+    /// connections used this session, never WSL or local.
+    #[test]
+    fn the_picker_gets_the_ssh_hosts_and_the_ssh_connections_used() {
+        let hosts = vec!["area54".to_string(), "nas".to_string()];
+        let known = vec![
+            st("area54", state::CONNECTED, ""),
+            st("deploy@10.0.0.5:2222", state::DISCONNECTED, ""),
+            st("wsl://Ubuntu", state::CONNECTED, ""),
+            st("local", state::CONNECTED, ""),
+        ];
+        assert_eq!(
+            remote_names(&hosts, &known),
+            ["area54", "nas", "deploy@10.0.0.5:2222"]
+        );
     }
 }

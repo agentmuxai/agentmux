@@ -577,7 +577,7 @@ pub(crate) const LAYOUT_TOOL: &str = r#"{
 
 pub(crate) const CONN_LIST_TOOL: &str = r#"{
   "name": "ConnList",
-  "description": "List the connections you can pass as `connection` to Shell and PtyShell: local (this machine), each installed WSL distribution (wsl://<name>), and any other connection used this session, each with its status (connected, available, error with the reason). Takes no arguments.",
+  "description": "List the connections there are: local (this machine), each installed WSL distribution (wsl://<name>), the user's ssh config hosts, and any other connection used this session, each with its status (connected, available, error with the reason) and agent_can_use: whether you can pass it as `connection` to Shell and PtyShell now. SSH hosts are listed for reference with agent_can_use false: a terminal pane can open them, an agent cannot yet. Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}
