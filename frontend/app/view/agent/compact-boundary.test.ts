@@ -192,6 +192,17 @@ describe("contextCompactedNodeId", () => {
         expect(contextCompactedNodeId(data)).toBe("context-compacted-notime-auto-500-100-9000");
     });
 
+    it("keys a uuid-less boundary on its timestamp, so equal numbers still get two ids", () => {
+        const data = { trigger: "auto" as const, preTokens: 500, postTokens: 100, durationMs: 9_000, uuid: null };
+        const a = contextCompactedNodeId({ ...data, frameTimestamp: "2026-10-03T10:00:00.000Z" });
+        const b = contextCompactedNodeId({ ...data, frameTimestamp: "2026-10-03T11:00:00.000Z" });
+        expect(a).toBe("context-compacted-2026-10-03T10:00:00.000Z");
+        expect(a).not.toBe(b);
+        expect(contextCompactedNodeId({ ...data, uuid: "u1", frameTimestamp: "2026-10-03T10:00:00.000Z" })).toBe(
+            "context-compacted-u1",
+        );
+    });
+
     it("treats a missing uuid field the same as an explicit null", () => {
         expect(contextCompactedNodeId({ preTokens: 1, postTokens: 2, durationMs: 3 })).toBe(
             contextCompactedNodeId({ preTokens: 1, postTokens: 2, durationMs: 3, uuid: null }),

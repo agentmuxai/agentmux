@@ -119,6 +119,7 @@ function pushContextCompactedNodes(
                       postTokens: ev.tokensAfter,
                       durationMs: ev.durationMs,
                       uuid: ev.boundaryUuid,
+                      frameTimestamp: ev.frameTimestamp,
                   })
                 : `context-compacted-${Date.now()}`;
         const timestamp =

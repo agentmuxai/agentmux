@@ -81,7 +81,8 @@ export function parseCompactBoundaryFrame(rawEvent: unknown): CompactBoundaryDat
  * by both consumers so they can never independently drift — the exact bug
  * class this module already exists to prevent (see the module doc
  * comment). Keyed on the boundary's `uuid`; a frame without one falls back
- * to a content-derived key, computed identically by both consumers. Never
+ * to its own `timestamp`, then to a content-derived key, computed identically
+ * by both consumers. Never
  * a receipt time or a batch-relative count: the same boundary seen live
  * and on replay would get two ids.
  */
@@ -91,9 +92,11 @@ export function contextCompactedNodeId(data: {
     postTokens: number;
     durationMs?: number;
     uuid?: string | null;
+    frameTimestamp?: string | null;
 }): string {
     const suffix =
         data.uuid ??
+        data.frameTimestamp ??
         `notime-${data.trigger ?? "?"}-${data.preTokens}-${data.postTokens}-${data.durationMs ?? "?"}`;
     return `context-compacted-${suffix}`;
 }
