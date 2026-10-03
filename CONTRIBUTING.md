@@ -24,6 +24,21 @@ Contributions must be accompanied by a Contributor License Agreement (CLA). You 
 - The project uses American English.
 - We use [Prettier](https://prettier.io) and [EditorConfig](https://editorconfig.org) for formatting — please use the recommended VS Code extensions.
 
+#### Comments
+
+A comment says why the code is the way it is. The code says what it does. Comments are read in full every time someone (or an agent) opens the file, so length costs. The reasoning and measurements are in [`SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30`](docs/specs/SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md).
+
+1. **No review history.** Don't name a reviewer or bot, a severity tag (`P1`), a round or re-review count, or an "earlier version did X" story. That belongs in the PR thread. CI fails a PR that adds such a line (`node scripts/check-comment-hygiene.mjs`); a comment that only moves, because the same PR removes it elsewhere, doesn't count as added.
+2. **Cite once.** Put the PR or issue next to the constraint it justifies, as `(#NNNN)`. Cite a spec as `SPEC_NAME.md §N`.
+3. **Constraint and consequence, in about 3 lines.** State the rule and what breaks if it's violated. Interface docs (`///`, `/** */`) may be longer, but start with a one-sentence summary.
+4. **Say a rule once**, where it is enforced. Other sites get one line pointing there.
+5. **Over about 8 lines, it's a design note.** Put it in `docs/` and leave a one-line pointer.
+6. **Don't restate the code or the types.** `// Create the channel` and `@param node The node` add nothing.
+7. **Keep paths and symbols current.** A comment that names a file or function must still resolve; update it in the PR that moves the code.
+8. **Never remove** `// SAFETY:` comments, `TODO`/`FIXME`, lint or compiler directives (`eslint-disable`, `@ts-expect-error`, `/// <reference`), or doctest fences when trimming comments.
+
+To condense comments in a file, make it a comment-only PR (don't mix it with a move or a code change) and run `node scripts/check-comment-hygiene.mjs --code-equal origin/main`. It fails on any change to `.ts`, `.tsx` or `.rs` code, and if a protected item in rule 8 goes missing. Other changed files (config, docs, scripts) are listed as a warning, not compared. It also lists every `#NNNN` or `SPEC_…` citation your edit dropped, so you can confirm each was narration or a duplicate. `node scripts/check-comment-hygiene.mjs --report` prints the repo's comment density.
+
 ## How to Contribute
 
 - For minor changes, open a pull request directly.
