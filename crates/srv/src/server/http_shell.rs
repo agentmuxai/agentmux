@@ -28,9 +28,9 @@ pub(super) async fn handle_shell_create(
     // An SSH host runs with the user's identity: their consent first (asked
     // once, or remembered as "always"), then every ssh prompt goes to them
     // through the askpass bridge, never to the agent.
-    if let AgentTarget::Ssh(_) = &target {
-        let connection = req.connection.as_deref().unwrap_or_default();
-        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, connection, &req.cmd).await {
+    if let AgentTarget::Ssh(dest) = &target {
+        let connection = crate::backend::remote::ConnTarget::Ssh(dest.clone()).name();
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &connection, &req.cmd).await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
     }
@@ -135,10 +135,12 @@ pub(super) async fn handle_shell_create(
                 let e = "this AgentMux has no ssh or no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
                 return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
             };
+            // Named from AgentMux's own record of the agent and host, never
+            // from the request, whose env the agent controls.
             let secret = askpass::grant(askpass::AskpassGrant {
                 agent_block_id: req.agent_block_id.clone(),
-                agent: effective_env.get("AGENTMUX_AGENT_ID").cloned().unwrap_or_else(|| "an agent".into()),
-                connection: req.connection.clone().unwrap_or_default(),
+                agent: connections::agent_of(&state, &req.agent_block_id).unwrap_or_default(),
+                connection: crate::backend::remote::ConnTarget::Ssh(dest.clone()).name(),
             });
             let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
             effective_env.extend(askpass::ssh_env(&secret, &askpass_program, &local_url, &state.auth_key));

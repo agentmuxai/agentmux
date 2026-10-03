@@ -108,10 +108,20 @@ pub enum PromptKind {
     YesNo,
     /// A password, passphrase or one-time code: hidden, never logged.
     Secret,
+    /// A notice ssh does not wait on (`SSH_ASKPASS_PROMPT=none`), such as
+    /// "Confirm user presence for key ...": touch the security key.
+    Info,
 }
 
-/// What kind of answer `prompt` wants.
-pub fn classify(prompt: &str) -> PromptKind {
+/// What kind of answer `prompt` wants. `hint` is ssh's own
+/// `SSH_ASKPASS_PROMPT` (OpenSSH 8.4+): `confirm` is yes or no, `none` a notice;
+/// without it, a `(yes/no` in the text is yes or no and anything else secret.
+pub fn classify(prompt: &str, hint: &str) -> PromptKind {
+    match hint.trim() {
+        "confirm" => return PromptKind::YesNo,
+        "none" => return PromptKind::Info,
+        _ => {}
+    }
     let p = prompt.to_ascii_lowercase();
     if p.contains("(yes/no") || p.contains("[yes/no") {
         PromptKind::YesNo
@@ -202,19 +212,31 @@ mod tests {
     #[test]
     fn a_host_key_question_is_yes_or_no_and_everything_else_is_secret() {
         assert_eq!(
-            classify("Are you sure you want to continue connecting (yes/no/[fingerprint])? "),
+            classify(
+                "Are you sure you want to continue connecting (yes/no/[fingerprint])? ",
+                ""
+            ),
             PromptKind::YesNo
         );
         assert_eq!(
-            classify("Allow use of key id_ed25519? [yes/no]"),
+            classify("Allow use of key id_ed25519? [yes/no]", ""),
             PromptKind::YesNo
         );
-        assert_eq!(classify("asaf@area54's password: "), PromptKind::Secret);
+        assert_eq!(classify("asaf@area54's password: ", ""), PromptKind::Secret);
         assert_eq!(
-            classify("Enter passphrase for key '/home/u/.ssh/id_ed25519': "),
+            classify("Enter passphrase for key '/home/u/.ssh/id_ed25519': ", ""),
             PromptKind::Secret
         );
-        assert_eq!(classify("Verification code: "), PromptKind::Secret);
+        assert_eq!(classify("Verification code: ", ""), PromptKind::Secret);
+        // ssh's own word decides when it gives one.
+        assert_eq!(
+            classify("Allow use of key id_ed25519?", "confirm"),
+            PromptKind::YesNo
+        );
+        assert_eq!(
+            classify("Confirm user presence for key ECDSA-SK", "none"),
+            PromptKind::Info
+        );
     }
 
     #[test]

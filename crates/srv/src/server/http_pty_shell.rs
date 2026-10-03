@@ -141,13 +141,7 @@ pub(super) async fn handle_pty_shell_create(
     //
     // In WSL the cwd is a distro path, kept as given; no Windows fallback.
     if let AgentTarget::Ssh(_) = &target {
-        let agent = state
-            .mstore
-            .get::<crate::backend::obj::Block>(&req.agent_block_id)
-            .ok()
-            .flatten()
-            .and_then(|b| b.meta.get("cmd:env").and_then(|e| e.get("AGENTMUX_AGENT_ID")).and_then(|v| v.as_str()).map(str::to_string))
-            .unwrap_or_else(|| "an agent".to_string());
+        let agent = connections::agent_of(&state, &req.agent_block_id).unwrap_or_default();
         meta.insert(crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.to_string(), json!(req.agent_block_id));
         meta.insert(crate::backend::remote::askpass::META_KEY_AGENT.to_string(), json!(agent));
     }

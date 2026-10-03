@@ -64,7 +64,9 @@ pub fn run_if_asked() -> Option<i32> {
             return Some(1);
         }
     };
-    let body = serde_json::json!({ "secret": secret, "prompt": prompt });
+    // ssh's own word for the prompt (OpenSSH 8.4+): `confirm`, `none`, or unset.
+    let hint = std::env::var("SSH_ASKPASS_PROMPT").unwrap_or_default();
+    let body = serde_json::json!({ "secret": secret, "prompt": prompt, "hint": hint });
     let answer = rt.block_on(client.post_json("/api/v1/askpass", None, &body, ANSWER_TIMEOUT));
     match answer
         .ok()

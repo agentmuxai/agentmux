@@ -662,7 +662,7 @@ impl Controller for ShellController {
             (!agent_block.is_empty()).then(|| {
                 crate::backend::remote::askpass::grant(crate::backend::remote::askpass::AskpassGrant {
                     agent_block_id: agent_block,
-                    agent: obj::meta_get_string(&block_meta, crate::backend::remote::askpass::META_KEY_AGENT, "an agent"),
+                    agent: obj::meta_get_string(&block_meta, crate::backend::remote::askpass::META_KEY_AGENT, ""),
                     connection: conn_name.clone(),
                 })
             })
