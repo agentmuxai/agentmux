@@ -8,13 +8,8 @@
  * Shared tear-off helper: try the warm pool first, fall back to the
  * cold-path `openWindowAtPosition` only on rejection. Used by every
  * platform-specific `CrossWindowDragMonitor` variant
- * (win32 / darwin / linux).
- *
- * `tab-tearoff-rpc.ts::requestTearOff` (the tab-bar tear-off) does NOT
- * use this helper — its tear-off pipeline tracks `coldPathFailed` for
- * F1.B orphan-workspace cleanup safety (#624) and pairs the open with an
- * SC_MOVE handshake. Both flows still try-pool-first, just with
- * different surrounding logic.
+ * (win32 / darwin / linux) and by the tab bar's tear-off
+ * (`tab-tearoff-rpc.ts`).
  *
  * Pool path is ~0ms first paint; cold path is 150–300ms and goes
  * through `create_isolated_request_context` whose stability issues
@@ -129,10 +124,20 @@ export function measureMotherResize(blockId: string): number | undefined {
     return newWidth >= MIN_MOTHER_WIDTH ? newWidth : undefined;
 }
 
+/** The destination window `openTearOffWindow` opened, and whether it came
+ *  from the warm pool. */
+export interface TearOffWindow {
+    label: string;
+    pooled: boolean;
+}
+
 /**
  * Open a tear-off destination window at `(screenX, screenY)`,
  * preferring the pre-warmed pool. Falls back to cold-path only when
  * `tearOffPoolPromote` rejects (e.g. pool exhausted, host refuses).
+ *
+ * Rejects only when the cold path does (a pool failure is caught), so a
+ * rejection means the host never posted a window create.
  */
 export async function openTearOffWindow(
     api: Api,
@@ -144,9 +149,9 @@ export async function openTearOffWindow(
     tabAnchorX?: number,
     tabAnchorY?: number,
     snapshot?: string,
-): Promise<void> {
+): Promise<TearOffWindow> {
     try {
-        await api.tearOffPoolPromote(
+        const label = await api.tearOffPoolPromote(
             newWsId,
             screenX,
             screenY,
@@ -156,18 +161,12 @@ export async function openTearOffWindow(
             tabAnchorY,
             snapshot,
         );
+        return { label, pooled: true };
     } catch (poolErr) {
         Logger.warn("dnd:cross", "pool promote failed, cold-pathing", {
             error: String(poolErr),
         });
-        await api.openWindowAtPosition(
-            screenX,
-            screenY,
-            newWsId,
-            width,
-            height,
-            tabAnchorX,
-            tabAnchorY,
-        );
+        const label = await api.openWindowAtPosition(screenX, screenY, newWsId, width, height, tabAnchorX, tabAnchorY);
+        return { label, pooled: false };
     }
 }

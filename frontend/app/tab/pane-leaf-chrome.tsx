@@ -7,7 +7,7 @@ import { renderPaneChromeShell } from "@/app/element/PaneChrome";
 import { setKeepAliveBlockDormant } from "@/app/store/block-component-registry";
 import { MOS } from "@/app/store/global";
 import type { NodeModel } from "@/layout/index";
-import { findNode } from "@/layout/lib/layoutNode";
+import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { Key } from "@solid-primitives/keyed";
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
@@ -296,18 +296,8 @@ export function PaneLeafChrome(props: { nodeModel: NodeModel }): JSX.Element {
         } as NodeModel;
     });
 
-    // The full stack, reactive — same `localTreeStateAtom()` + live
-    // `findNode` lookup pattern PaneChrome.tsx's own `stackIds` already
-    // uses, falling back to a single-entry list when this
-    // leaf hasn't split into a stack yet. `nodeModel.layoutModel`, NOT
-    // `getLayoutModelForStaticTab()` — see that field's own doc comment
-    // (layout/lib/types.ts) for why the global "active tab" lookup is wrong
-    // here (SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md).
-    const layoutModel = nodeModel.layoutModel;
     const stackBlockIds = createMemo<string[]>(() => {
-        layoutModel.localTreeStateAtom();
-        const node = findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
-        const stack = node?.data?.blockStack?.length ? node.data.blockStack : [activeBlockId()];
+        const stack = paneStackIds(nodeModel);
         // Drop cache/slot entries for blockIds no longer in the stack (tab
         // closed or moved away) so a gone tab's ViewModel/NodeModel wrapper
         // don't linger for the rest of the pane's lifetime.

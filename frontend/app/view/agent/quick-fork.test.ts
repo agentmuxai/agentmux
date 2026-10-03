@@ -8,11 +8,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { quickForkAgent } from "./quick-fork";
 
 const getNodeByBlockId = vi.fn();
-const pushBlockOntoStack = vi.fn();
+const openBlockInStack = vi.fn();
 const closeBlockInStack = vi.fn();
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ getNodeByBlockId }),
-    pushBlockOntoStack: (...args: unknown[]) => pushBlockOntoStack(...args),
+    openBlockInStack: (...args: unknown[]) => openBlockInStack(...args),
     closeBlockInStack: (...args: unknown[]) => closeBlockInStack(...args),
 }));
 
@@ -84,7 +84,7 @@ describe("quickForkAgent", () => {
         getObjectValue.mockReturnValue({ meta: { view: "agent", agentId: "source-def", "agent:sessionid": "sid-parent" } });
         activeTabId.mockReturnValue("tab-1");
         forkAgentDefinitionCommand.mockResolvedValue({ id: "forked-def", name: "X #2", agent_type: "host" });
-        rpcCall.mockResolvedValue({ block_id: "new-block-1" });
+        openBlockInStack.mockResolvedValue("new-block-1");
         launchAgentDefinition.mockResolvedValue(true);
         resolveEffectiveLaunchProvider.mockResolvedValue("claude");
         resolveProviderAlias.mockImplementation((id: string) => id);
@@ -119,15 +119,11 @@ describe("quickForkAgent", () => {
             expect.anything(),
             { source_id: "source-def", branch_label: "" },
         );
-        // pane.open with stack_onto_block_id (create-and-place in one step) —
-        // same primitive Agent History / the
-        // "+" new-tab button use — NOT a WorkspaceService.CreateTab call.
-        expect(rpcCall).toHaveBeenCalledWith(
-            "pane.open",
-            { view: "agent", stack_onto_block_id: "source-block", meta: { view: "agent" } },
-            {},
-        );
-        expect(pushBlockOntoStack).toHaveBeenCalledWith(expect.anything(), "node-1", "new-block-1");
+        // A tab of the source block's own pane — the same primitive Agent
+        // History and the "+" new-tab button use, NOT a WorkspaceService.CreateTab call.
+        expect(openBlockInStack).toHaveBeenCalledWith(expect.anything(), { blockId: "source-block" }, "agent", {
+            view: "agent",
+        });
         expect(launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [forkedDef, overrides, targetBlockId, targetTabId] = launchAgentDefinition.mock.calls[0];
         expect(forkedDef).toEqual({ id: "forked-def", name: "X #2", agent_type: "host" });
@@ -237,10 +233,11 @@ describe("quickForkAgent", () => {
         resolveForkCommand!({ id: "forked-def", name: "X #2", agent_type: "host" });
         await pending;
 
-        expect(rpcCall).toHaveBeenCalledWith(
-            "pane.open",
-            expect.objectContaining({ stack_onto_block_id: "source-block" }),
-            {},
+        expect(openBlockInStack).toHaveBeenCalledWith(
+            expect.anything(),
+            { blockId: "source-block" },
+            "agent",
+            expect.anything()
         );
         const [, , , targetTabId] = launchAgentDefinition.mock.calls[0];
         expect(targetTabId).toBe("tab-original");
@@ -315,21 +312,19 @@ describe("quickForkAgent", () => {
         launchAgentDefinition.mockRejectedValue(new Error("boom"));
         getNodeByBlockId
             .mockReturnValueOnce({ id: "node-1", data: { blockStack: ["source-block"] } }) // initial check
-            .mockReturnValueOnce({ id: "node-1", data: { blockStack: ["source-block"] } }) // pre-push re-check
             .mockReturnValueOnce(undefined); // catch-block cleanup lookup
         expect(await quickForkAgent(model)).toBe(false);
         expect(closeBlockInStack).not.toHaveBeenCalled();
         expect(deleteBlock).toHaveBeenCalledWith("new-block-1");
     });
 
-    it("deletes the new block and returns false if the pane closed while the RPCs were in flight", async () => {
-        getNodeByBlockId
-            .mockReturnValueOnce({ id: "node-1", data: { blockStack: ["source-block"] } }) // initial check
-            .mockReturnValueOnce(undefined); // re-check after pane.open
+    it("returns false without launching if the pane closed while the RPCs were in flight", async () => {
+        // openBlockInStack has already deleted the new block in this case.
+        openBlockInStack.mockResolvedValue(null);
         expect(await quickForkAgent(model)).toBe(false);
-        expect(deleteBlock).toHaveBeenCalledWith("new-block-1");
-        expect(pushBlockOntoStack).not.toHaveBeenCalled();
         expect(launchAgentDefinition).not.toHaveBeenCalled();
+        expect(closeBlockInStack).not.toHaveBeenCalled();
+        expect(deleteBlock).not.toHaveBeenCalled();
     });
 
     // Spec §5 (revised 2026-08-22): always inherit the source's own bound

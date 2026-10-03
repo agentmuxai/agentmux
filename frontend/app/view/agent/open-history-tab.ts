@@ -23,9 +23,7 @@
  * gate wrapping both the create-new and switch-to-existing paths below).
  */
 
-import { getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
-import { TabRpcClient } from "@/app/store/rpc-util";
-import { ObjectService } from "@/app/store/services";
+import { getLayoutModelForStaticTab, openBlockInStack, setActiveBlockInStack } from "@/layout/index";
 import { pushNotification, MOS } from "@/app/store/global";
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 
@@ -109,26 +107,15 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
         // its own, since it's never actually launched.
         const liveMeta = MOS.getObjectValue<Block>(MOS.makeORef("block", currentBlockId))?.meta;
 
-        let paneOpenResult: { block_id: string };
         try {
-            paneOpenResult = (await TabRpcClient.rpcCall(
-                "pane.open",
-                {
-                    view: "agent",
-                    // Created and placed in one backend step — never in no pane
-                    // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §3.3).
-                    stack_onto_block_id: currentBlockId,
-                    meta: {
-                        view: "agent",
-                        agentId,
-                        [HISTORY_TAB_FOR_META_KEY]: agentId,
-                        [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId,
-                        agentOutputFormat: liveMeta?.["agentOutputFormat"],
-                        agentName: liveMeta?.["agentName"],
-                    },
-                },
-                {},
-            )) as { block_id: string };
+            await openBlockInStack(layoutModel, { blockId: currentBlockId }, "agent", {
+                view: "agent",
+                agentId,
+                [HISTORY_TAB_FOR_META_KEY]: agentId,
+                [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId,
+                agentOutputFormat: liveMeta?.["agentOutputFormat"],
+                agentName: liveMeta?.["agentName"],
+            });
         } catch (e: unknown) {
             pushNotification({
                 icon: "fa-triangle-exclamation",
@@ -138,18 +125,7 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
                 type: "error",
                 expiration: Date.now() + 8000,
             });
-            return;
         }
-
-        // The pane could have closed while the RPC above was in flight —
-        // re-resolve fresh rather than trusting the pre-await `node`
-        // reference (same defensive check as AgentViewWrapper's handleNewAgentTab).
-        const freshNode = layoutModel.getNodeByBlockId(currentBlockId);
-        if (!freshNode) {
-            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-            return;
-        }
-        pushBlockOntoStack(layoutModel, freshNode.id, paneOpenResult.block_id);
     } finally {
         // Pair with holdLeafRevealGate above — runs on every exit path.
         scheduleLeafRevealLift(node.id, revealGen);
