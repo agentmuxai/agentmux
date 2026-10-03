@@ -14,8 +14,7 @@ use crate::backend::storage::error::StoreError;
 /// Returned by the injection entry points when an **oauth-class** provider
 /// the agent is supposed to have credentials for (a binding exists, or the
 /// provider is the agent definition's own CLI provider) has no resolvable
-/// account AND the agent has not opted into ambient login
-/// (`use_ambient_login = 0`, the default). The spawn callers surface
+/// account. There is no per-agent opt-out. The spawn callers surface
 /// `Display` verbatim in the agent pane (same `error_during_execution`
 /// frame other spawn failures use) — the wording is the spec's.
 ///
@@ -25,21 +24,21 @@ use crate::backend::storage::error::StoreError;
 /// was deleted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpawnGateError {
-    /// The gate's credentials verdict: no resolvable account, no opt-in.
+    /// The gate's credentials verdict: no resolvable account.
     MissingCredentials { provider: String },
     /// The injection task itself could not run to completion (task-join
     /// failure — e.g. a panic inside the blocking closure, which also
     /// poisons the `Store` mutex for every later call). The gate FAILS
     /// CLOSED on this: an open fallback would silently convert one panic
-    /// anywhere in the store into a permanent, systemic bypass of
-    /// `use_ambient_login = false` (reagent P1, PR #2164 round 1). A
+    /// anywhere in the store into a permanent, systemic bypass of the
+    /// oauth gate (reagent P1, PR #2164 round 1). A
     /// blocked spawn is retryable and visible; a silent ambient launch
     /// is neither.
     InjectionUnavailable { detail: String },
     /// The bound account's `SecretRef::OAuthConfigDir` resolves to the
     /// provider's own literal ambient home directory (e.g. `~/.claude`)
-    /// instead of an AgentMux-isolated dir. Blocked unconditionally,
-    /// regardless of `use_ambient_login` — a real, currently-live account
+    /// instead of an AgentMux-isolated dir. Blocked unconditionally — a
+    /// real, currently-live account
     /// configured exactly this way was found in this repo's own data
     /// (`docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`
     /// §8); this variant is the enforcement that closes that gap. See

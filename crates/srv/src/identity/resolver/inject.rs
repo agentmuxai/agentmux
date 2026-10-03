@@ -58,8 +58,8 @@ use super::secret::resolve_secret;
 ///    - **Oauth-class** failures (account row missing, lookup error,
 ///      non-OAuthConfigDir secret_ref) are always BLOCKING: the function
 ///      returns [`SpawnGateError`] before the CLI process is created.
-///      `use_ambient_login` no longer exempts an agent; it is read only for
-///      the `identity.spawn.blocked:` log line (the opt-out was retired, see
+///      `use_ambient_login` no longer exempts an agent and is not read
+///      here (the opt-out was retired, see
 ///      m0017_ambient_login_grandfather.rs).
 /// 5. If the agent definition's own provider is oauth-class and no binding
 ///    for it exists at all (fresh/never-bound or post-delete-cascade), the
@@ -121,7 +121,7 @@ pub async fn inject_identity_env_async(
             // Fail CLOSED. A join failure means the closure panicked (or
             // was cancelled) — the gate never rendered a verdict, and the
             // panic has likely poisoned the Store mutex, so failing open
-            // here would bypass use_ambient_login=false for every later
+            // here would bypass the oauth gate for every later
             // spawn too (reagent P1, PR #2164 round 1). See
             // SpawnGateError::InjectionUnavailable.
             tracing::warn!(
@@ -492,9 +492,9 @@ pub(crate) fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
 /// first. Short version: an unbound oauth-class provider used to
 /// auto-route to an AgentMux-owned isolated dir (no user action, no global
 /// exposure); a 2026-07-08 refactor orphaned that path without meaning to,
-/// and it was never restored — today's gate only chooses between "block"
-/// and "true ambient" (`use_ambient_login=true`, zero isolation), not the
-/// isolated-auto-provision option that used to exist implicitly.
+/// and it was never restored. Today's gate always blocks an unbound
+/// oauth-class provider; the per-agent "true ambient" opt-out
+/// (`use_ambient_login`) is no longer read.
 pub fn inject_identity_env_with_broker(
     mstore: Arc<Store>,
     id_store: Arc<Store>,
@@ -1266,8 +1266,7 @@ mod tests {
 
         let mut env: HashMap<String, String> = HashMap::new();
         // Spec §2.5 regression: a resolvable oauth account injects
-        // unchanged — the layer-3 gate never fires (Ok even with
-        // use_ambient_login=0).
+        // unchanged — the layer-3 gate never fires.
         inject_identity_env(store.clone(), store.clone(), store, "block-oauth", &mut env).unwrap();
 
         // OAuth dispatch sets the provider's config-dir env var.
@@ -1741,7 +1740,7 @@ mod tests {
         // An oauth-class provider (claude) bound to an account whose
         // SecretRef is the API-key shape (Env) is a misconfiguration:
         // the account is unresolvable for the provider, so the layer-3
-        // gate blocks the spawn (use_ambient_login=0) instead of
+        // gate blocks the spawn instead of
         // mis-injecting the wrong secret or silently launching on the
         // user's global login.
         let store = make_store();
