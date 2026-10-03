@@ -1,7 +1,7 @@
 # SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side
 
 **Date:** 2026-10-03
-**Status:** implemented — 2026-10-03 (Phase C keeps a Column's chain across chip slots; `extendResizeHandlesThroughChips` in `layoutGeometry.ts` adds the chip-edge handles after the whole tree is laid out; tests in `layoutModel.test.ts` "resize through collapsed panes"). See §7.
+**Status:** implemented — 2026-10-03, PR #4260 (Phase C keeps a Column's chain across chip slots; `extendResizeHandlesThroughChips` in `layoutGeometry.ts` adds the chip-edge handles after the whole tree is laid out; tests in `layoutModel.test.ts` "resize through collapsed panes"). See §7.
 **Author:** AgentY, at the owner's request
 **Amends:** `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md` invariant I3 (§5 below).
 **Related:** `SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21.md`, `SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md` (docking a collapsed pane onto a neighbour), `docs/analysis/ANALYSIS_PANE_MINIMIZE_ROW_BRANCH_DISTORTIONS_2026_08_30.md` §3 and PR #2855 (the Row-parent version of this problem, fixed), `SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md` and its `_DIRECTION_FIX_2026_08_17` follow-up, `SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md`.
