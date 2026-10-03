@@ -122,7 +122,8 @@ fn send_message_outcome_names_the_state_and_the_id() {
     // (agentmux-cloud#138): a likely typo, still queued.
     let t = ok(json!({ "success": true, "request_id": "inj-43", "target_in_account": false }));
     assert!(t.starts_with("QUEUED for Camper via the cloud relay"), "{t}");
-    assert!(t.contains("No agent of that name has signed in from your account, so check the spelling"), "{t}");
+    assert!(t.contains("No agent of that name has signed in from your account yet, so check the spelling"), "{t}");
+    assert!(t.contains("one of your agents with that name signs in within 30 minutes"), "not \"only another account\" (Codex P2 on #4249): {t}");
     assert!(t.ends_with(" id=inj-43") && !t.contains("  "), "{t:?}");
     let t = ok(json!({ "success": true, "request_id": "inj-44", "target_in_account": true }));
     assert!(!t.contains("signed in from your account"), "{t}");
