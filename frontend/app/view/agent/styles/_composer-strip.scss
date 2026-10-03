@@ -652,7 +652,7 @@
     overflow: hidden;
     // Containing block for xterm's own internal absolutely-positioned layers
     // (viewport/screen), matching the real Terminal pane's .view-term
-    // { position: relative } (term.scss:20) -- defends against them
+    // { position: relative } (in term.scss) -- defends against them
     // resolving against some distant positioned ancestor instead.
     position: relative;
 }

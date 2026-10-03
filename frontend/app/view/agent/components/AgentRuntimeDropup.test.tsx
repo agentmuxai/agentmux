@@ -160,7 +160,7 @@ describe("AgentRuntimeDropup — superseded persisted model migration", () => {
     // current — the dropdown silently loses its selection display.
     // reagent P1, PR #2990.
     // getRuntimeConfig reads a nested object under "agent:runtime", not
-    // dotted keys — see buildRuntimeArgs.ts:153.
+    // dotted keys — see it in buildRuntimeArgs.ts.
     const metaWith = (model: string) => ({
         "agent:runtime": { model, permissionMode: "default", effort: "high" },
     });

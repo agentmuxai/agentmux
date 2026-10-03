@@ -267,7 +267,9 @@ pub fn restore_torn_off_tab(
         // Choose pinnedtabids vs tabids based on the tab's original
         // status. Without this, a pinned tab torn off and cancel-backed
         // would silently come back as unpinned. (gemini PR #567 round-6
-        // MEDIUM @ tabbar.tsx:154 + dnd.rs:345)
+        // MEDIUM on this branch.) Pinning has since left the UI — tabbar.tsx
+        // folds legacy `pinnedtabids` into `tabids` on mount — so this only
+        // matters for a workspace whose pins have not been migrated yet.
         let insert_at = if was_pinned {
             let idx = insert_index.unwrap_or(dest_ws.pinnedtabids.len());
             let insert_at = idx.min(dest_ws.pinnedtabids.len());

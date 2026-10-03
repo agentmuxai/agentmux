@@ -3150,9 +3150,10 @@ mod tests {
     fn spawn_gate_resolves_provider_through_the_bound_bundle_not_the_drifted_definition_column() {
         let mstore = make_store();
         // Real shared-store schema, not open_in_memory's channel schema —
-        // db_agent_identity_links only has a `db_agent_definitions` FK in
-        // the channel schema (migrations.rs:334); the shared-store schema
-        // (migrations.rs:829) deliberately omits it, since agent
+        // db_agent_identity_links only has a `db_agents` FK in the
+        // channel schema (`run_object_schema` in migrations.rs); the
+        // shared-store schema (`run_shared_store_schema`) deliberately
+        // omits it, since agent
         // definitions never live in the shared store. Using two
         // open_in_memory() stores here would incorrectly enforce an FK
         // that doesn't exist in production's real id_store.

@@ -592,7 +592,8 @@ wrap_task! {
             //   2. Register in ACTIVE_FLOATER_HWNDS keyed by parent_main_hwnd
             //      so the cascade hook affects only this window's floaters.
             //   3. Embed a CEF browser inside via `set_as_child` —
-            //      same pattern as `browser_pane/creation.rs:109`.
+            //      same pattern as `CreateBrowserPaneTask`'s Windows path in
+            //      `browser_pane/creation.rs`.
 
             // Every early-return from execute() AFTER the host's
             // `post_create_floating_window` enqueued a
@@ -754,10 +755,10 @@ pub fn post_create_floating_window(
     // workspaceId threads through to the floater's `initApp` →
     // `initHostNewWindow` path which already understands a `?workspaceId=`
     // URL param (the existing tab tear-off uses the same handoff —
-    // see frontend/app-init.ts:236). Phase 1 floaters didn't pass it
-    // and rendered the placeholder shell; Phase 2 callers (#1077) pass
-    // the newly-created workspace id so the floater renders the actual
-    // `<Block>` via the standard new-window init.
+    // see initHostNewWindow in frontend/app-init.ts). Phase 1 floaters
+    // didn't pass it and rendered the placeholder shell; Phase 2 callers
+    // (#1077) pass the newly-created workspace id so the floater renders
+    // the actual `<Block>` via the standard new-window init.
     let url = match crate::commands::window::resolve_frontend_base_url(ipc_port) {
         Ok(base_url) => {
             let separator = if base_url.contains('?') { "&" } else { "?" };
@@ -1276,9 +1277,10 @@ fn create_popup(
     // client area fills the window. Combined with our WndProc's
     // `WM_NCCALCSIZE`/`WM_NCACTIVATE`/`WM_NCHITTEST`, this gives a truly
     // chrome-free outer HWND. The docked-pane's standard
-    // `BlockFrame_Header` (33 CSS px, `--header-height` in theme.scss:97)
-    // is the sole chrome — drag is JS-driven from
-    // `frontend/app/workspace/floating-pane-workspace.tsx`.
+    // `BlockFrame_Header` (33 CSS px, `--header-height` in theme.scss's
+    // `:root`) is the sole chrome — drag is started from the `onMount` in
+    // `frontend/app/workspace/floating-pane-workspace.tsx`, and on Windows
+    // the move loop itself runs host-side in `Win32BeginMoveTask`.
     unsafe {
         use windows_sys::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
         use windows_sys::Win32::UI::Controls::MARGINS;

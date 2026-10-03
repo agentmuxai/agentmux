@@ -155,9 +155,10 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     // previously be silently dropped forever (same spec, §2.2.6).
     const [wrapLoaded, setWrapLoaded] = createSignal(false);
 
-    // Reactive accessor for the sub-block's OWN meta — the same wave-object
-    // atom mechanism TermViewModel uses (termViewModel.ts:86,237-246), just
-    // targeting this sub-block's id instead of a top-level Terminal pane's.
+    // Reactive accessor for the sub-block's OWN meta — the same mux-object
+    // atom mechanism TermViewModel's meta comes through (pane-tab-host.tsx's
+    // `makePaneTabHostContext`, read by termViewModel.ts's `termZoomAtom`),
+    // just targeting this sub-block's id instead of a top-level Terminal pane's.
     // This is what makes zoom a property of the terminal, not the agent pane.
     const subBlockAtom = createMemo(() => {
         const id = subBlockId();
@@ -331,9 +332,9 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
     );
 
     // Apply zoom-driven font-size changes to the live terminal in place —
-    // mirrors term.tsx:234-241. Only for LIVE updates (Ctrl+Wheel while the
-    // shell is already open, or a meta push from elsewhere); the initial
-    // mount's font size is seeded correctly before TermWrap is even
+    // mirrors `TerminalView`'s font effect in term.tsx. Only for LIVE updates
+    // (Ctrl+Wheel while the shell is already open, or a meta push from
+    // elsewhere); the initial mount's font size is seeded correctly before TermWrap is even
     // constructed (see the onMount IIFE below), so this effect's first
     // real-work firing is normally a no-op re-application of the same value.
     createEffect(() => {
@@ -424,7 +425,8 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
         // which would otherwise resolve `target.closest("[data-blockid]")` to
         // the AGENT pane's block (the nearest ancestor with that attribute,
         // since this sub-block is headless and never gets one) and zoom the
-        // whole pane instead of just this shell. Mirrors term.tsx:212-231,
+        // whole pane instead of just this shell. Mirrors `TerminalView`'s
+        // `handleCtrlWheel` in term.tsx,
         // writing to the sub-block's OWN meta rather than the agent's.
         const handleCtrlWheel = (ev: WheelEvent) => {
             // Ctrl+Shift+Scroll is AppAllPanesZoomHandler's all-panes gesture

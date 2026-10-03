@@ -364,11 +364,11 @@ impl Store {
     ///
     /// The mirror of `managed_delete`'s ref purge, from the other side: that
     /// one runs when a catalog row goes away, this one when a bundle does.
-    /// Neither can rely on the declared foreign keys, which only cascade when
-    /// `PRAGMA foreign_keys` is ON — and it is only ever set in tests. The
-    /// bundle side additionally *cannot* have an enforcing FK at all, since
-    /// `db_bundles` lives in a different physical database from the ref tables
-    /// (`migrations.rs:721-741`).
+    /// Neither can rely on foreign keys: the ref tables declare none to the
+    /// catalog rows or to `db_bundles`. The bundle side *cannot* have an
+    /// enforcing FK at all, since `db_bundles` lives in a different physical
+    /// database from the ref tables (see the `db_bundle_skills_ref` comment
+    /// in migrations.rs).
     ///
     /// Returns the number of refs removed.
     pub(super) fn managed_unbind_all_for_bundle<R: ManagedResource>(

@@ -16,7 +16,7 @@
  *  - no `<StatusBar>`
  *  - no extra title bar — the floater renders the block's standard
  *    `BlockFrame_Header` (33 CSS px, `--header-height` in
- *    `theme.scss:97`) as its sole chrome.
+ *    `theme.scss`'s `:root`) as its sole chrome.
  *  - window drag, installed by the `onMount` below. On Windows the host runs
  *    `Win32BeginMoveTask` (manual SetCapture + GetMessage + SetWindowPos loop,
  *    zero per-move IPC, emits hover host-side). On macOS + Linux the drag is
@@ -90,10 +90,10 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     // Auto-close the floating window when its only pane is closed.
     // The Workspace MuxObj has `tabids` but NO `blockids` field — the
     // block-membership signal lives on the Tab (`tab.blockids`, see
-    // `frontend/types/srv-types.d.ts:1491`). We subscribe to the active
-    // tab and trigger close as soon as its blockids array transitions
-    // from non-empty → empty. The `hadBlocks` latch avoids closing on
-    // the brief empty state during initial workspace load.
+    // the `Tab` type in `frontend/types/srv-types.d.ts`). We subscribe to
+    // the active tab and trigger close as soon as its blockids array
+    // transitions from non-empty → empty. The `hadBlocks` latch avoids
+    // closing on the brief empty state during initial workspace load.
     //
     // useMuxObjectValue installs an onCleanup tied to the surrounding
     // reactive owner — calling it inside createEffect refreshes the
@@ -140,7 +140,8 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
     //
     // `preventDefault()` on the qualifying mousedown is load-bearing:
     // it suppresses the HTML5 dragstart pragmatic-dnd would otherwise
-    // use to initiate a pane tear-off (TileLayout.win32.tsx:443-471).
+    // use to initiate a pane tear-off (the header `draggable()` that
+    // TileLayout.core.tsx's `DisplayNode` registers on every platform).
     // Without it, dragging a floater's header would tear the block off
     // into ANOTHER floating window — the "double tear-off" bug.
     //

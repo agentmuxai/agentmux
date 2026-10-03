@@ -74,7 +74,8 @@ function CrossWindowDragMonitor(): JSX.Element {
             // top-left-origin screen coords in CSS px (= DIP), which is what
             // CEF Views window positioning expects on Linux. Don't round-trip
             // through `get_cursor_point` — that command is Windows-only
-            // (returns 0,0 on non-Windows builds, drag.rs:211-212), which
+            // (returns 0,0 on non-Windows builds, drag.rs's
+            // `get_cursor_point`), which
             // would open the floater at the screen corner.
             const dropX = e.screenX;
             const dropY = e.screenY;

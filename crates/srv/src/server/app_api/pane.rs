@@ -344,7 +344,7 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
 /// block may not have finished mounting its `EditorViewModel` by the time a
 /// second back-to-back `OpenEditor` call reuses it. `persist: N` closes that
 /// race but opens a *worse* one: `Broker::unsubscribe_all` clears a route's
-/// replay marker on disconnect (`crates/srv/src/backend/mps.rs:312-323`),
+/// replay marker on disconnect (`crates/srv/src/backend/mps.rs`),
 /// so any later, unrelated reconnect would replay the *entire* persisted
 /// history again — reopening files the user has since closed. The broker
 /// has no ack/consume concept, so nothing marks a persisted event "already
@@ -364,7 +364,7 @@ const META_PENDING_OPEN_FILES: &str = "editor:pending_open_files";
 /// version of this function resolved the reused block's layout leaf id and
 /// dispatched `Command::SetFocusedNode` — reagent (PR #2404) confirmed the
 /// leaf-id resolution itself was correct, then found a deeper problem:
-/// the frontend's `onBackendUpdate` (`frontend/layout/lib/layoutPersistence.ts:59-82`)
+/// the frontend's `onBackendUpdate` (`frontend/layout/lib/layoutPersistence.ts`)
 /// only re-derives `focusedNodeId` at initial model construction or via a
 /// `pendingBackendActions`-driven tree action — a bare `focusednodeid`
 /// MuxObj push to an ALREADY-MOUNTED `LayoutModel` (confirmed by reading

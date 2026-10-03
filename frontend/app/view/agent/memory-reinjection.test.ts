@@ -32,7 +32,7 @@ function personalEntry(label: string, body: string, sizeBytes = body.length): Me
 describe("memorySizeBand", () => {
     // Revised 2026-09-22, second pass: bands Personal memory's ESTIMATED
     // TOKEN total against a FRACTION OF THE PANE'S CONTEXT WINDOW, mirroring
-    // ctxBand()'s own denominator choice (AgentComposerStrip.tsx:550-556),
+    // ctxBand()'s own denominator choice (in AgentComposerStrip.tsx),
     // not an arbitrary absolute byte number. Same 0.5/0.75/0.9 boundary
     // fractions, applied to `contextWindow * fraction` instead of a flat
     // "healthy byte count" — see SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_

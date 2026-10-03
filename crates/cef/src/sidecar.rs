@@ -81,8 +81,7 @@ pub fn use_launcher_endpoints(
     // "fall back to spawn_backend" — the latter would spawn a
     // SECOND srv against the same data dir while the launcher's
     // already-running srv keeps going, corrupting state. Better to
-    // fail fast and surface the launcher bug. (codex P2 @
-    // sidecar.rs:35, PR #571 round-4.)
+    // fail fast and surface the launcher bug.
     let ws = std::env::var("AGENTMUX_BACKEND_WS").ok()?;
     if ws.is_empty() {
         return Some(Err(

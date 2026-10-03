@@ -208,7 +208,7 @@ wrap_window_delegate! {
                 // former blockers are resolved.
                 //
                 // NOTE: init_pool() is called from on_after_created("main") in
-                // client/mod.rs:664 on ALL platforms — this block (on_window_created)
+                // client/lifecycle.rs on ALL platforms — this block (on_window_created)
                 // only runs the CEF Views window registration for non-Windows.
                 // No duplicate pool init call needed here.
             }
@@ -534,11 +534,11 @@ wrap_app! {
                 //
                 // The AGENTMUX_CEF_EXTRA_FLAGS guard further down covers only
                 // that one ingress. This covers the other: the launcher
-                // collects its own argv verbatim
-                // (`crates/launcher/src/main.rs:309`) and passes it to the
-                // host via `.args(args)` (`host_spawn.rs:41`/`:138`), so
-                // `agentmux.exe --enable-media-stream` reaches CEF without ever
-                // touching the env-var path.
+                // collects its own argv verbatim (`launcher_main` in
+                // `crates/launcher/src/main.rs`) and passes it to the host via
+                // `.args(args)` (`spawn_host_supervised` / `spawn_host_unix` in
+                // `host_spawn.rs`), so `agentmux.exe --enable-media-stream`
+                // reaches CEF without ever touching the env-var path.
                 //
                 // Both must be closed for the guarantee to hold — see
                 // docs/specs/SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.8

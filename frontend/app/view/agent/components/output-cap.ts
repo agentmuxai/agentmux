@@ -99,14 +99,14 @@ const BASHWRAP_STARTING_PREFIX = "[bashwrap] starting:";
  * chunk. `kind: "system"` is a shared, actively-used channel for several
  * other genuinely informative messages that must keep rendering (codex P1,
  * caught after this function's first version filtered by kind alone):
- *   - `[exited N]` — `useToolChunkStream.ts:83-87` synthesizes this on the
- *     MPS `terminal` event; it's the ONLY exit-status signal a Bash tool
- *     with no structured result ever gets.
+ *   - `[exited N]` — `useToolChunkStream.ts`'s MPS handler synthesizes this
+ *     on a `tool_chunk` event with `op: "terminal"`; it's the ONLY
+ *     exit-status signal a Bash tool with no structured result ever gets.
  *   - `[cwd not found: ... — running in the server's working directory]` —
- *     `shell_node.rs:360-368`, a real behavior-deviation warning for a
- *     persistent shell node.
- *   - `[spawn error: {e}]` — `shell_node.rs:407`, often the ONLY output a
- *     shell that failed to spawn at all will ever produce.
+ *     `shell_node.rs`'s `ShellNodeRunner::run`, a real behavior-deviation
+ *     warning for a persistent shell node.
+ *   - `[spawn error: {e}]` — `shell_node.rs`'s `ShellNodeRunner::run`, often
+ *     the ONLY output a shell that failed to spawn at all will ever produce.
  * A kind-only filter would have silently swallowed all three.
  *
  * Called by each renderer (`ChunkList` in ToolOverlayLog.tsx,

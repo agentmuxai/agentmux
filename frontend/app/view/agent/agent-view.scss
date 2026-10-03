@@ -404,7 +404,8 @@
 // matching ancestor, so:
 //   * inside the presentation view, `.agent-view-zoomed` is nearer and wins —
 //     `@container agent-pane` keeps measuring the ZOOMED width it always did;
-//   * `AgentPicker.tsx:957,971` and `AgentHistoryTabView.tsx:56` render a BARE
+//   * `AgentPicker.tsx`'s `AgentPicker` (both branches) and
+//     `AgentHistoryTabView.tsx`'s `AgentHistoryTabView` render a BARE
 //     `.agent-view` with `zoom` applied directly and no wrapper, and this
 //     declaration is the only thing keeping `@container agent-pane` matching
 //     there at all.

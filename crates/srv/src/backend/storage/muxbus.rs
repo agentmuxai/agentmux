@@ -90,8 +90,9 @@ fn field_key(ns: &str, field: &str) -> String {
 /// Since Windows stores the value as UTF-16 (2 bytes/char), the real
 /// character budget is `CRED_MAX_CREDENTIAL_BLOB_SIZE / 2` = 1280, not 2560
 /// — `keyring-2.3.3/src/windows.rs:182` vs. its own error text at
-/// `error.rs:72`. 1800 was 40% over that real limit. Budget well under 1280
-/// here, not just under the misleading 2560 the error text implies.
+/// that crate's `error.rs` (its `TooLong` message). 1800 was 40% over that
+/// real limit. Budget well under 1280 here, not just under the misleading
+/// 2560 the error text implies.
 const MAX_CHUNK_LEN: usize = 1000;
 
 fn chunk_key(field_key: &str, index: usize) -> String {

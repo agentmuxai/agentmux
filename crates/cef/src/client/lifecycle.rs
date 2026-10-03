@@ -953,10 +953,11 @@ impl AgentMuxHandler {
         let posted = post_task(ThreadId::UI, Some(&mut task));
         if posted == 0 {
             // post_task can fail during teardown if the UI thread's message
-            // loop already tore down its task queue (see the doc note at
-            // lifecycle.rs:416 for the analogous close_browser case). Nothing
-            // recoverable to do — the process is already on its way out one
-            // way or another; log so a future investigation isn't blind.
+            // loop already tore down its task queue (see the stage-1 note in
+            // ui_tasks/window.rs's `begin_drain_and_cascade` for the
+            // analogous close_browser case). Nothing recoverable to do — the
+            // process is already on its way out one way or another; log so a
+            // future investigation isn't blind.
             tracing::warn!(target: "wrr", "[wrr] quit_after_backend_notify: post_task(UI) failed — process is likely already exiting");
         }
     }
@@ -1548,10 +1549,11 @@ impl AgentMuxHandler {
     /// so it's callable from any UI-thread CEF callback that observes
     /// `reconcile_quit`'s decision via `DispatchOutput.request_drain` — not
     /// just the close-edge that happened to trigger it this time. This is
-    /// the "action" half of the decision/action split (`reducer/quit.rs:49-54`):
-    /// callers must have already confirmed `request_drain.is_some()` (the
-    /// DECISION) before calling this (the ACTION) — this function does not
-    /// re-check anything, it just executes.
+    /// the "action" half of the decision/action split (the THREADING CONTRACT
+    /// note above `reconcile_quit` in `reducer/quit.rs`): callers must have
+    /// already confirmed `request_drain.is_some()` (the DECISION) before
+    /// calling this (the ACTION) — this function does not re-check anything,
+    /// it just executes.
     ///
     /// Only flips `QuitState` and closes the (already-hidden) pool browsers.
     /// Never calls `quit_message_loop()` — that stays Stage 2, gated

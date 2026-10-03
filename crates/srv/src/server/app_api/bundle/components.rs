@@ -15,10 +15,10 @@ use super::*;
 /// #3153), so this exists to make "both" mean one implementation.
 ///
 /// `bundle_delete` runs on the store that owns `db_bundles`, which has no ref
-/// tables — they sit beside the catalog tables they key into, in the other
-/// database, which is also why no foreign key reaches across
-/// (`migrations.rs:721-741`). So the purge cannot live inside it and has to be
-/// driven from a handler, where both stores are in scope.
+/// tables — they live in the channel store, a different database, which is
+/// also why no foreign key reaches across (the `db_bundle_skills_ref` comment
+/// in `migrations.rs`'s `run_object_schema`). So the purge cannot live inside
+/// it and has to be driven from a handler, where both stores are in scope.
 ///
 /// Best-effort by design: the bundle row is already gone by the time this
 /// runs, so a failure here must not turn a successful delete into an error.
@@ -47,7 +47,9 @@ pub(crate) fn purge_bundle_component_refs(
 /// the ref tables exist to end.
 ///
 /// **Must run after `bundle_upsert`.** Both bind paths check the bundle exists
-/// in `id_store` first (`storage/managed.rs:291`) and refuse otherwise.
+/// in `id_store` first (`managed_bind_bundle` and
+/// `managed_upsert_unique_for_bundle` in `storage/managed.rs`) and refuse
+/// otherwise.
 ///
 /// Returns warnings rather than failing: by this point the bundle row is
 /// already committed, so aborting would leave a half-imported bundle behind. A
@@ -95,9 +97,10 @@ pub(crate) struct ResolvedComponents {
 ///
 /// Phase 0b of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Before
 /// this, export read the inline `bundle.skills` / `bundle.mcp_servers` columns
-/// while agent launch read the ref tables (`app_api/agent_open.rs:793`, `:812`),
-/// and nothing kept the two in step — so a skill bound in the Armory ran at
-/// launch but exported as an empty `skills/` directory, with no warning. One
+/// while agent launch read the ref tables (`write_agent_config_files` in
+/// `app_api/agent_open.rs`), and nothing kept the two in step — so a skill
+/// bound in the Armory ran at launch but exported as an empty `skills/`
+/// directory, with no warning. One
 /// resolver, used by every export path, is what stops that recurring.
 ///
 /// **Scope note:** this is deliberately narrower than `effective_skills` /
@@ -111,9 +114,10 @@ pub(crate) struct ResolvedComponents {
 /// rather than just the bound rows, hence the filter; and because it joins
 /// through the catalog table, a ref whose catalog row has been deleted
 /// resolves to nothing rather than reporting itself. `skill_delete` /
-/// `mcp_server_delete` both purge refs (`storage/managed.rs:232`), so that
-/// state is not reachable through the app — but the FK that would enforce it
-/// is inert, since `PRAGMA foreign_keys` is only ever set ON in tests.
+/// `mcp_server_delete` both purge refs (`managed_delete` in
+/// `storage/managed.rs`), so that state is not reachable through the app
+/// within one channel — but no FK enforces it: the ref tables' catalog FK was
+/// dropped in schema v34, once the catalog moved to `identity_store`.
 pub(crate) fn resolve_bundle_components(
     mstore: &crate::backend::storage::store::Store,
     identity_store: &crate::backend::storage::store::Store,
@@ -171,8 +175,9 @@ pub(crate) fn resolve_bundle_components(
 /// asymmetry worth fixing was never that `bundle.export` omits memory — a
 /// bundle detached from any agent has no memory to carry, and omitting it is
 /// correct. It is that import *announces* the omission and export did not,
-/// while every `components` key is optional (`bundle_export.rs:586-606`), so a
-/// missing `memory` key is indistinguishable from "this bundle had none".
+/// while every `components` key is optional (`export_bundle` in
+/// `bundle_export.rs` inserts each only when non-empty), so a missing `memory`
+/// key is indistinguishable from "this bundle had none".
 pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
     "memory: this bundle is bound to an agent with native memory, which bundle.export does not carry — use bundle.export_for_agent to include it";
 
@@ -182,9 +187,9 @@ pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
 /// different columns: `AgentDefinition.memory_id` is the agent's own dedicated
 /// bundle (stored in `db_agents.default_memory_id`), while
 /// `AgentInstance.memory_id` is one *launch* deliberately pointed at some other
-/// bundle (`storage/agents.rs:164-175`). Checking only the definition would
-/// miss exactly the case the operator is most likely to hit — exporting the
-/// bundle a running instance was launched with. Native memory is keyed on the
+/// bundle (`AgentDefinition::memory_id` in `storage/agents.rs`). Checking only
+/// the definition would miss exactly the case the operator is most likely to
+/// hit — exporting the bundle a running instance was launched with. Native memory is keyed on the
 /// definition id either way (`build_export_for_agent` resolves the agent with
 /// `agent_def_get` before reading memory), so the instance path resolves
 /// through `definition_id`.
@@ -200,11 +205,11 @@ pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
 /// currently be made visible.** Both lookups resolve the binding from
 /// channel-local SQLite: `instance_list` reads this channel's rows, and
 /// `agent_def_list`'s global overlay only preserves `memory_id` when a local
-/// row exists (`storage/agents.rs:468`). An agent created in another channel
-/// has no local row, so it comes back with an empty `memory_id` — because
-/// `DefinitionRecordV1` does not carry the field at all
-/// (`storage/def_registry_mirror.rs:128-133`). The bundle and the memory mirror
-/// are global; only the binding between them is not. So exporting a shared
+/// row exists (`agent_def_list` in `storage/agents.rs`). An agent created in
+/// another channel has no local row, so it comes back with an empty
+/// `memory_id` — because `DefinitionRecordV1` does not carry the field at all
+/// (`record_to_agent_definition` in `storage/def_registry_mirror.rs`). The
+/// bundle and the memory mirror are global; only the binding between them is not. So exporting a shared
 /// bundle from a channel other than the one its agent was created in will not
 /// warn, which is exactly the portability case the warning is for (Codex, PR
 /// #3147).
@@ -274,7 +279,7 @@ pub(super) fn bound_agent_has_native_memory(
 /// installing somebody else's instructions.
 ///
 /// The manifest is built as an inline `json!` literal in `bundle_export.rs`
-/// with no struct behind it (`bundle_export.rs:615`), so every agent-aware
+/// with no struct behind it (`export_bundle`), so every agent-aware
 /// component has to reopen and rewrite it. Shared by the memory splice below
 /// and the history splice, which otherwise duplicated the find-parse-rewrite
 /// dance byte for byte.

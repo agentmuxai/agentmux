@@ -26,7 +26,8 @@ const SHELL_DRAWER_DEFAULT_HEIGHT = 176;
  * element. The terminal has to render at a 1:1 device-pixel ratio, so it
  * must not be inside the per-pane `zoom`. It stays a flex child of
  * `.agent-view` so the composer still shifts up to make room for it.
- * Same move `agent-view.scss:350` records for the progress bar, and the
+ * Same move `agent-view.scss` records for the progress bar (the note on
+ * `.agent-pane-progress-bar`), and the
  * same cure as SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md.
  */
 export const AgentShellDrawer = (props: {

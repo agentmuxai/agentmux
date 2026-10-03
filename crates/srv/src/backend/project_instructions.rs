@@ -31,10 +31,10 @@ use super::providers;
 
 /// Per-file read ceiling.
 ///
-/// Matches native memory's own cap (`native_memory_handlers.rs:494`) rather
-/// than the far larger ABF one: this content is surfaced in a UI and hashed on
-/// every observation, and an instruction file that large is pathological
-/// regardless. Oversized files are still *reported*, with `content` empty and
+/// Matches native memory's own cap (`MAX_MEMORY_FILE_BYTES` in
+/// `native_memory_handlers.rs`) rather than the far larger ABF one: this
+/// content is surfaced in a UI and hashed on every observation, and an
+/// instruction file that large is pathological regardless. Oversized files are still *reported*, with `content` empty and
 /// `truncated` set — the operator needs to know the file is there even when
 /// showing it is impractical, which is the whole point of the feature.
 pub const MAX_INSTRUCTION_FILE_BYTES: u64 = 10 * 1024 * 1024;
@@ -71,9 +71,10 @@ pub struct ProjectInstructionFile {
     /// Set when the file exists but could not be read — a permissions problem,
     /// or bytes that are not UTF-8. Distinguished from absence on purpose:
     /// `write_claude_md_respecting_ownership` treats unreadable as foreign
-    /// rather than as absent for the same reason (`agent_config.rs:1122`), and
-    /// silently reporting "no instructions" for a file that exists would be
-    /// the same class of lie this feature exists to remove.
+    /// rather than as absent for the same reason (its doc comment in
+    /// `agent_config.rs`), and silently reporting "no instructions" for a file
+    /// that exists would be the same class of lie this feature exists to
+    /// remove.
     pub error: Option<String>,
 }
 
@@ -149,11 +150,11 @@ pub fn effective_working_dir(working_directory: &str, agent_name: &str) -> Strin
 ///
 /// `.claude/AGENTMUX_MEMORY.md` is the exception, and it has to be: AgentMux
 /// writes that file's content **raw**, with no marker
-/// (`agent_config.rs:1207`), because it is not a file anyone else was ever
-/// going to own — `agent_config.rs:990` calls it "100% AgentMux's own
-/// content". Testing it by marker returns `foreign` every time, which is
-/// backwards for the one field that decides whether a file is ours to touch
-/// (ReAgent, PR #3156).
+/// (`write_claude_md_respecting_ownership` in `agent_config.rs`), because it is
+/// not a file anyone else was ever going to own — that function's doc comment
+/// calls it "100% AgentMux's own content". Testing it by marker returns
+/// `foreign` every time, which is backwards for the one field that decides
+/// whether a file is ours to touch (#3156).
 ///
 /// Classifying it by path is not a guess: AgentMux creates that exact path,
 /// regenerates it on every launch, and the ownership protection exists
@@ -553,8 +554,9 @@ mod tests {
         assert!(side.exists);
         assert_eq!(side.content, "side file");
         // AgentMux writes this file's content raw, with no marker
-        // (`agent_config.rs:1207`), so a marker test would call the one file
-        // that is unambiguously ours `foreign` (ReAgent, PR #3156).
+        // (`write_claude_md_respecting_ownership` in `agent_config.rs`), so a
+        // marker test would call the one file that is unambiguously ours
+        // `foreign` (#3156).
         assert_eq!(
             side.owner,
             InstructionOwner::Agentmux,

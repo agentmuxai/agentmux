@@ -111,11 +111,11 @@ pub struct CommandFleetGroupDeleteData {
 
 /// Input for `fleet.group.list`. The handler ignores its payload entirely, but
 /// this must still be a struct rather than `()`: the stub calls it with `{}`
-/// (swarm-model.ts:1588), and serde deserializes `()` ONLY from JSON `null`, so
-/// a unit Req would reject every real call at runtime while compiling and
-/// passing every CI gate. That is the exact bug found on `bookmarks.list`.
-/// An empty struct generates `Record<string, never>`, which is what the
-/// hand-written stub already declared.
+/// (swarm-model.ts's `loadFleetGroups`), and serde deserializes `()` ONLY from
+/// JSON `null`, so a unit Req would reject every real call at runtime while
+/// compiling and passing every CI gate. That is the exact bug found on
+/// `bookmarks.list`. An empty struct generates `Record<string, never>`, which
+/// is what the hand-written stub already declared.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandFleetGroupListData {}
@@ -145,7 +145,7 @@ mod req_shape_tests {
     use super::*;
     use serde_json::json;
 
-    // swarm-model.ts:1556
+    // swarm-model.ts's `broadcastToSelection`
     #[test]
     fn broadcast_accepts_the_payload_the_stub_sends() {
         let r: CommandFleetBroadcastData =
@@ -154,8 +154,8 @@ mod req_shape_tests {
         assert_eq!(r.targets.len(), 2);
     }
 
-    // swarm-model.ts:1573 spreads `...opts`, so bulk-stop is called both with
-    // and without the two optional fields. Both must parse.
+    // swarm-model.ts's `bulkStopSelection` spreads `...opts`, so bulk-stop is
+    // called both with and without the two optional fields. Both must parse.
     #[test]
     fn bulk_stop_accepts_the_bare_and_the_fully_staged_payload() {
         let bare: CommandFleetBulkStopData =
@@ -187,7 +187,7 @@ mod req_shape_tests {
         );
     }
 
-    // swarm-model.ts:1597
+    // swarm-model.ts's `saveSelectionAsGroup`
     #[test]
     fn group_create_accepts_the_payload_the_stub_sends() {
         serde_json::from_value::<CommandFleetGroupCreateData>(
@@ -196,10 +196,11 @@ mod req_shape_tests {
         .expect("fleet.group.create must accept name and member_ids");
     }
 
-    // swarm-model.ts:1588 calls this with `{}`. This is the case that broke
-    // `bookmarks.list`: serde deserializes `()` ONLY from JSON `null`, so a
-    // unit Req would reject every real call. The assertion below pins both
-    // halves — that the struct accepts `{}`, and that `()` would not have.
+    // swarm-model.ts's `loadFleetGroups` calls this with `{}`. This is the
+    // case that broke `bookmarks.list`: serde deserializes `()` ONLY from JSON
+    // `null`, so a unit Req would reject every real call. The assertion below
+    // pins both halves — that the struct accepts `{}`, and that `()` would
+    // not have.
     #[test]
     fn group_list_accepts_the_empty_object_the_stub_sends() {
         serde_json::from_value::<CommandFleetGroupListData>(json!({}))
@@ -223,7 +224,7 @@ mod req_shape_tests {
         assert!(only_id.name.is_none() && only_id.member_ids.is_none());
     }
 
-    // swarm-model.ts:1602
+    // swarm-model.ts's `deleteFleetGroup`
     #[test]
     fn group_delete_accepts_the_payload_the_stub_sends() {
         serde_json::from_value::<CommandFleetGroupDeleteData>(json!({"id": "g1"}))

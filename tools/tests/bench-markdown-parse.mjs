@@ -20,11 +20,14 @@
 //   - if it RISES and crosses a frame budget at realistic message sizes, §2 is
 //     confirmed and incremental parsing is the fix.
 //
-// Deliberately measures the REAL pipeline from `markdown.tsx:271-286` — same
-// plugins, same order, including the two app-local remark plugins — not a
-// lookalike. What it does NOT cover is `toJsxRuntime` + Solid's DOM reconcile,
-// which run after this and cost MORE on top. So every number here is a LOWER
-// BOUND on a real commit.
+// Deliberately measures the REAL pipeline from markdown.tsx's `buildProcessor`
+// — same plugin order, including the app-local `remarkMermaidToTag` and
+// content-block remark plugins — not a lookalike. It omits the app-local
+// `remarkGithubAlerts` and `rehypeLocalImageSrc` and the two rehype plugins
+// noted in this file's `buildProcessor`, all of which only add cost. What it
+// does NOT cover is `toJsxRuntime` + Solid's DOM reconcile, which run after
+// this and cost MORE on top. So every number here is a LOWER BOUND on a real
+// commit.
 //
 // USAGE
 //   npx tsx tools/tests/bench-markdown-parse.mjs
@@ -49,7 +52,7 @@ import remarkMermaidToTag from "../../frontend/app/element/remark-mermaid-to-tag
 import { createContentBlockPlugin } from "../../frontend/app/element/markdown-contentblock-plugin";
 import { findSafeSplitPoint } from "../../frontend/app/element/markdown-incremental";
 
-// STREAM_RENDER_MS from MarkdownBlock.tsx:30 — the commit interval this is
+// STREAM_RENDER_MS from MarkdownBlock.tsx — the commit interval this is
 // simulating. Kept as a literal (not imported) so the bench does not drag the
 // whole Solid component graph in; if that constant changes, change this.
 const STREAM_RENDER_MS = 90;
@@ -121,7 +124,8 @@ function buildCorpus(targetBytes, seed = 42) {
 }
 
 // ---------------------------------------------------------------------------
-// The pipeline — mirrors markdown.tsx:230-286 exactly, including plugin order.
+// The pipeline — mirrors markdown.tsx's `buildProcessor` in plugin order,
+// minus the plugins listed in the header comment.
 // ---------------------------------------------------------------------------
 const ALIGN_CLASS_REGEX = /^align-(left|center|right)$/;
 

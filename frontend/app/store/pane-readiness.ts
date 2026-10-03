@@ -32,7 +32,8 @@
  *
  * ## Mount gating vs reveal gating — do not blur these
  *
- * `block.tsx:380-398` records a P0 DEADLOCK from exactly that mistake: folding a
+ * The comment above `subagentBackfillSettled` in `block.tsx`'s `Block` records
+ * a P0 DEADLOCK from exactly that mistake: folding a
  * gate into `ready()` meant `BlockFull` never mounted, but mounting was the only
  * thing that triggered the backfill the gate waited on. Gate and producer
  * deadlocked.

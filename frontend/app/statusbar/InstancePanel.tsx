@@ -218,8 +218,8 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     // For THIS window's row, fall back to atoms.muxWindow()?.oid when
     // the entry's windowId is still null. WindowEntry.windowId is null
     // for the first ~100ms after a window opens — until the
-    // registerBackendWindow IPC round-trip completes (see comment at
-    // global.ts:145). Without this fallback, the panel shows "Window N"
+    // registerBackendWindow IPC round-trip completes (see the `WindowEntry`
+    // comment in global.ts). Without this fallback, the panel shows "Window N"
     // for the current window during early-startup while the OS title
     // (which uses initOpts.windowId directly) correctly shows the
     // workspace name — visible inconsistency the user reported.

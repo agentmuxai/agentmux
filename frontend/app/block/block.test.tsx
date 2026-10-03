@@ -167,7 +167,8 @@ vi.mock("./blockframe", () => ({
 // #3464). `backfillSettled` is a real signal so a test can flip it.
 //
 // NOTE the default here is `true`, while the REAL hook initialises `settled` to
-// `false` (useSubagentBackfillGate.ts:113) and only flips it when the async
+// `false` (useSubagentBackfillGate.ts's `useSubagentBackfillGate`) and, when
+// a backfill is pending, only flips it when the async
 // backfill completes. That divergence is deliberate — most tests in this file
 // are about ViewModel/cover concerns and want a pane with nothing outstanding —
 // but it is also load-bearing: defaulting to the convenient value is what hid

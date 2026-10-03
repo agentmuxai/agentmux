@@ -1139,7 +1139,7 @@ fn move_node_same_parent_later_index() {
     // [a, b, c], move a to index 2 — TS oracle: [b, a, c].
     // (cur=0, target=2; the TS insert-then-remove flow lands a between b
     // and c. Detach-then-insert in Rust must compensate by inserting at
-    // index 1 to match.) See PR #691 Codex P1 + frontend layoutTree.ts:248.
+    // index 1 to match.) See frontend layoutTree.ts's `moveNode` (#691).
     let a = leaf("a", "b1", 5.0);
     let b = leaf("b", "b2", 5.0);
     let c = leaf("c", "b3", 5.0);

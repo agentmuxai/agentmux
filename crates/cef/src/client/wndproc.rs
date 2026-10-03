@@ -1026,9 +1026,9 @@ fn flush_session_snapshot_once(
         "[session-flush] OS session ending ({}) -- flushing snapshot",
         reason
     );
-    // Same accessors the close path uses (`lifecycle.rs:1402-1403`): both are
-    // behind mutexes, so clone out before the blocking call rather than
-    // holding a lock across it during shutdown.
+    // Same accessors the close path uses (`on_before_close` in
+    // `lifecycle.rs`): both are behind mutexes, so clone out before the
+    // blocking call rather than holding a lock across it during shutdown.
     let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
     let auth_key = state.auth_key.lock().clone();
     let saved = super::helpers::backend_save_session_snapshot(&web_endpoint, &auth_key);

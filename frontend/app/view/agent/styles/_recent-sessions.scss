@@ -184,7 +184,8 @@
     @media (prefers-reduced-motion: reduce) {
         // Backstop for the JS-side gate in MyAgentsList.tsx (which swaps
         // these classes to "" entirely) — mirrors the existing two-layer
-        // pattern documented at app.scss:295-311 for view transitions: the
+        // pattern app.scss documents for its reduced-motion view-transition
+        // backstop (`::view-transition-old/new(workspace-tab-content)`): the
         // app-wide `.prefers-reduced-motion` class only zeroes
         // `transition-*`, never `animation-*`, so a `@keyframes`-driven
         // poof needs its own explicit reduced-motion handling here.

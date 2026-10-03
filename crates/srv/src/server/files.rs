@@ -193,7 +193,8 @@ fn mime_from_path(path: &std::path::Path) -> &'static str {
 /// by absolute path, for `<img>`/`<video>` display. Deliberately matches
 /// `readeditorfile`'s existing posture (any absolute path the frontend
 /// sends, gated by OS-level permissions rather than an in-app allowlist —
-/// see `editor_handlers.rs:47-53`'s "root scoping, not a sandbox" note) so
+/// see the "root scoping, not a sandbox" note on the macOS `list_drives` in
+/// `editor_handlers.rs`) so
 /// this route isn't a stricter one-off next to an already-shipped read path
 /// with the same shape. Size-capped (see `STREAM_LOCAL_FILE_MAX_BYTES`)
 /// rather than truly unbounded.

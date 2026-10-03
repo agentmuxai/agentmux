@@ -399,9 +399,9 @@ function EndIcons(props: {
                 stray header mic that then vanished. Only `term` wants one here
                 (agent panes render their own beside the composer,
                 SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md;
-                browser/editor expose no voiceHandle at all — keymodel.ts:163), so
-                naming it makes the unresolved state render nothing, which is the
-                safe default. See SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4.
+                browser/editor expose no voiceHandle at all — see keymodel.ts's
+                Ctrl+Shift+V handler), so naming it makes the unresolved state
+                render nothing, which is the safe default. See SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md §5.4.
                 The name check is now the `headerMic` capability (term's
                 manifest, Pane Tab contract Phase 5): still positive, still
                 nothing while the view is unresolved. */}

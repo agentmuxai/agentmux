@@ -329,9 +329,9 @@ fn register_bundle_self_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 ///
 /// **`check_s1` authenticates a SLUG, not a UUID.** `RpcContext.agent_id` is
 /// "slug of the authenticated agent from bus:register"
-/// (`rpc_types/misc.rs:221`), while `agent_def_get` queries `db_agents` by its
-/// UUID primary key — so calling it with the authenticated value returns
-/// `None` for every real caller (ReAgent P0, PR #3156).
+/// (its doc in `rpc_types/misc.rs`), while `agent_def_get` queries `db_agents`
+/// by its UUID primary key — so calling it with the authenticated value
+/// returns `None` for every real caller (#3156).
 ///
 /// Delegates to `resolve_agent_definition_id`, the existing resolver for
 /// exactly this, rather than hand-rolling the lookup: it already carries the

@@ -1381,10 +1381,11 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 );
                 // `register_typed` always sends a `data` field, so this `()`
                 // puts `"data": null` on the wire where the old untyped
-                // `Ok(None)` omitted the key entirely. Both frontend callers
-                // (agent-native-memory-model.ts:200,:240) await and discard the
-                // result, and no other crate invokes this command, so the
-                // difference is unobservable.
+                // `Ok(None)` omitted the key entirely. All three frontend
+                // callers (agent-native-memory-model.ts's draft `save` and
+                // `createFile`, NativeMemoryFileView.tsx's draft `save`) await
+                // and discard the result, and no other crate invokes this
+                // command, so the difference is unobservable.
                 Ok(())
             }
         },
