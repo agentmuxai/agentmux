@@ -28,7 +28,7 @@ const SKILL = {
     skill_type: "prompt",
     description: "Re-run tool verification checks and report status table",
     content:
-        "Check your GitHub identity (`gh auth status`), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
+        "Check your GitHub identity with `gh-agent auth status` (plain `gh` reports \"not logged in\" for agents on purpose; never run `gh auth login`, and run `gh-agent doctor` if the identity check fails), your git identity (`git config user.name` and `git config user.email`), and that the AgentMux MCP server is connected (list peer agents). Report a status table with OK/FAIL for each check. Fix any failures automatically if possible.",
 };
 
 // Catalog-aligned seed. Keep in lockstep with
