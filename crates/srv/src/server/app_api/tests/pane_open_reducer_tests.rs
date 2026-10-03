@@ -66,6 +66,8 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         stack_onto_block_id: None,
         reuse_editor_pane: None,
         select: None,
+        connection: None,
+        auth: None,
     };
     let res = open_pane(&state, cmd).await.expect("open_pane docked");
 
@@ -162,6 +164,8 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         stack_onto_block_id: Some(anchor.clone()),
         reuse_editor_pane: None,
         select: None,
+        connection: None,
+        auth: None,
     };
     let res = open_pane(&state, cmd).await.expect("open_pane stack_onto_block_id");
     assert!(res.created);
@@ -530,6 +534,8 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         stack_onto_block_id: None,
         reuse_editor_pane: None,
         select: None,
+        connection: None,
+        auth: None,
     };
     let res = open_pane(&state, cmd).await.expect("open_pane skip_placement");
     assert!(res.created);
@@ -568,6 +574,8 @@ fn editor_open_cmd(
         stack_onto_block_id: None,
         reuse_editor_pane,
         select: None,
+        connection: None,
+        auth: None,
     }
 }
 

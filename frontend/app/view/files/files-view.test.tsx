@@ -411,7 +411,7 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
         await waitFor(() =>
             expect(h.rpcCall).toHaveBeenCalledWith(
                 "pane.open",
-                expect.objectContaining({ view: "editor", file: `${HOST_HOME}/notes.md`, meta: { connection: "user@box" } }),
+                expect.objectContaining({ view: "editor", file: `${HOST_HOME}/notes.md`, connection: "user@box" }),
                 {}
             )
         );
@@ -420,6 +420,13 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
         await v.model.paste();
         expect(await v.model.transfer("copy", [`${HOME}\b.txt`])).toBe(false);
         expect(h.rpc.FsOpStartCommand).not.toHaveBeenCalled();
+        // No preview (it reads through this computer's media stream), and no
+        // mention in a local agent by keyboard either.
+        void v.ctx.setMeta({ "files:preview": true });
+        expect(v.model.showPreview()).toBe(false);
+        fireEvent.click(v.row("notes.md"));
+        fireEvent.keyDown(v.list(), { key: "k", code: "KeyK", altKey: true });
+        await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toContain("Mentioning files in an agent isn't available"));
         // Nothing is dragged out.
         const drag = new Event("dragstart", { bubbles: true, cancelable: true });
         Object.defineProperty(drag, "dataTransfer", { value: { setData: vi.fn(), effectAllowed: "" } });

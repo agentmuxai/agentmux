@@ -295,7 +295,9 @@ export class FilesModel {
     readonly sortDir = (): SortDir => (this.ctx.meta()?.[META_SORTDIR] === "desc" ? "desc" : "asc");
     readonly showHidden = (): boolean => this.ctx.meta()?.[META_HIDDEN] === true;
     readonly showSidebar = (): boolean => this.ctx.meta()?.[META_SIDEBAR] !== false;
-    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true;
+    /** The preview reads files through this computer's media stream, so not
+     *  on a host (it would show whatever is at that path here). */
+    readonly showPreview = (): boolean => this.ctx.meta()?.[META_PREVIEW] === true && !this.connection();
     /** Details (rows and columns) or a grid of thumbnails (§5.2). */
     readonly viewMode = (): "details" | "grid" => (this.ctx.meta()?.[META_VIEW] === "grid" ? "grid" : "details");
 

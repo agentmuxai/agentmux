@@ -61,7 +61,7 @@ export async function openInPane(
             split_direction: "right",
             split_reference_block_id: besideBlockId,
             // An editor on the host the file is on (editor-model's connection()).
-            ...(connection ? { meta: { connection } } : {}),
+            ...(connection ? { connection } : {}),
         },
         {}
     );
@@ -85,7 +85,7 @@ export async function openTerminalHere(dir: string, besideBlockId: string, conne
             cwd: dir,
             split_direction: "right",
             split_reference_block_id: besideBlockId,
-            ...(connection ? { meta: { connection } } : {}),
+            ...(connection ? { connection } : {}),
         },
         {}
     );

@@ -216,7 +216,7 @@ pub(super) async fn open_pane_floating(
 }
 
 /// Build the metadata map for a pane.open request, validating required args.
-pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
+pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, String> {
     let mut meta = MetaMapType::new();
 
     match cmd.view.as_str() {
@@ -291,6 +291,19 @@ pub(super) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         meta.insert("frame:title".to_string(), json!(title));
     }
 
+    // The connection the pane works on, for the views that have one; media
+    // reads this computer's files only.
+    if let Some(conn) = cmd.connection.as_deref().map(str::trim).filter(|c| !c.is_empty() && *c != "local") {
+        match cmd.view.as_str() {
+            "editor" | "term" | "files" => {
+                meta.insert("connection".to_string(), json!(conn));
+            }
+            "media" if crate::backend::fs_ops::remote::ssh_connection(Some(conn)).is_some() => {
+                return Err(format!("INVALID_ARG: media files on {conn} can't be shown yet"));
+            }
+            _ => {}
+        }
+    }
     Ok(meta)
 }
 

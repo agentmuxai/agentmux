@@ -22,7 +22,9 @@
         "floating",
         "meta",
         "skip_placement",
-        "reuse_editor_pane"
+        "reuse_editor_pane",
+        "connection",
+        "auth"
       ],
       "responseFields": ["block_id", "tab_id", "view", "created"],
       "usedBy": ["muxsh open (view=editor)", "muxsh web (view=browser)", "muxsh view", "muxsh edit", "muxsh config edit"]

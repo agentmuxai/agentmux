@@ -579,6 +579,11 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
      */
     const mentionIn = (list: FsEntry[]): void => {
         if (list.length === 0) return;
+        // A host's paths mean nothing to an agent on this computer.
+        if (model.connection()) {
+            model.notOnHost("Mentioning files in an agent");
+            return;
+        }
         const agents = agentTargets();
         const target = agents.find((t) => t.blockId === lastAgentBlock) ?? (agents.length === 1 ? agents[0] : undefined);
         if (!target) {
@@ -615,6 +620,10 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     };
 
     const attachTo = (target: { blockId: string; name: string }, list: FsEntry[]): void => {
+        if (model.connection()) {
+            model.notOnHost("Attaching files to an agent");
+            return;
+        }
         const paths = list.map((e) => model.pathOf(e.name));
         void dropPathsOnto(target.blockId, paths).then(
             (ok) =>
@@ -1291,12 +1300,15 @@ function GridTile(props: {
     onRenameDone: () => void;
 }): JSX.Element {
     const path = () => props.model.pathOf(props.entry.name);
-    const [thumb, setThumb] = createSignal<string | undefined>(cachedThumbnail(path(), props.entry.mtime));
+    // Thumbnails read through this computer's media stream: none for a host's
+    // files, which would show whatever is at that path here.
+    const local = () => !props.model.connection();
+    const [thumb, setThumb] = createSignal<string | undefined>(local() ? cachedThumbnail(path(), props.entry.mtime) : undefined);
     createEffect(
         on(
             () => [path(), props.entry.mtime, props.entry.size] as const,
             ([p, mtime, size]) => {
-                if (!hasThumbnail(props.entry.name, size)) {
+                if (!local() || !hasThumbnail(props.entry.name, size)) {
                     setThumb(undefined);
                     return;
                 }
