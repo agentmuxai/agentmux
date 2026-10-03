@@ -134,6 +134,8 @@ Target invariant, stated once:
 > shuffle) may target a minimized node or a dissolved column, nor insert into one.
 > **I3.** A locked edge presents no affordance: no resize handle, no resize cursor.
 
+*Amended 2026-10-03 by `SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md` §5: a collapsed pane's own size is still never resized, but an edge of a collapsed pane that lies between two expanded panes of the same column is a handle for those two panes.*
+
 ### Option A — point-guards in every caller (rejected as the strategy)
 
 Patch each row of the §4 table individually. This is the "cooperating writers" model that

@@ -406,6 +406,7 @@ partial list.
 | [`SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25`](SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md) | SPEC: Agent-pane status cleanup — remove "unresponsive" detection, consolidate Reconnecting/Compacting/Working |
 | [`SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06`](SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md) | Spec: `replaceChild` crash in the agent-pane virtualizer — full analysis and fix plan |
 | [`SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26`](SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md) | SPEC: Resize refinements — flip group/direct defaults, and Shift+window-resize feeding only the edge panes |
+| [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
 | [`SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24`](SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md) | SPEC: Move the narrow-width responsive tab bar to the top (from the bottom) |
 | [`SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19`](SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) | Spec: Make `settings.json` isolated-by-default for every non-`stable` channel |
 | [`SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22`](SPEC_SETTINGS_LIVE_COMMIT_AND_TERMINAL_APPLY_GAPS_2026_09_22.md) | SPEC — Settings commit on blur, not on change; plus the remaining terminal live-apply gaps |
@@ -725,7 +726,6 @@ partial list.
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
 | [`SPEC_RELEASE_CICD_CORRECTION_2026_06_30`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md) | Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication |
 | [`SPEC_REMOVE_PIN_FEATURE`](SPEC_REMOVE_PIN_FEATURE.md) | SPEC: Remove Tab Pinning, Uniform Inter-Tab Separator |
-| [`SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03`](SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md) | SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side |
 | [`SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01`](SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md) | SPEC: Finishing the runtime menu — approval prompts, a remembered runtime, the resolved model, and install cleanup |
 | [`SPEC_SHARED_AGENT_REGISTRY_2026_05_12`](SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md) | Spec: Shared agent registry — cross-version "Continue agent" dropdown |
 | [`SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04`](SPEC_SHUTDOWN_COUNTDOWN_MODAL_2026_09_04.md) | A formal shutdown sequence: countdown-confirm modal + splash-style progress |

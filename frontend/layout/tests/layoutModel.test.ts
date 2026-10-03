@@ -574,3 +574,141 @@ describe("LayoutModel", () => {
         expect(model.minimizedNodeIds()).toEqual(new Set([stillMinimized!.id]));
     });
 });
+
+// SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md: every edge of a run of
+// collapsed panes between two expanded panes in a column is a handle for
+// those two panes. Through the REAL updateTree.
+describe("resize through collapsed panes", () => {
+    const leaf = (id: string, min = false) => {
+        const n = newLayoutNode(FlexDirection.Column, 10, undefined, { blockId: id });
+        if (min) n.minimized = true;
+        return n;
+    };
+    const handlesOf = (model: LayoutModel, nodeId: string) =>
+        [...(model.additionalProps()[nodeId]?.resizeHandles ?? [])].sort((a, b) => a.centerPx - b.centerPx);
+
+    it("one collapsed pane in a column: both its edges resize the panes above and below (was none)", () => {
+        const model = createLayoutModel();
+        const A = leaf("A"), B = leaf("B", true), C = leaf("C");
+        const root = newLayoutNode(FlexDirection.Column, 10, [A, B, C]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handles = handlesOf(model, root.id);
+        expect(handles).toHaveLength(2);
+        for (const h of handles) {
+            expect(h.parentIndex).toBe(0); // A
+            expect(h.afterIndex).toBe(2); // C, never the collapsed B
+        }
+        expect(new Set(handles.map((h) => h.id)).size).toBe(2);
+        const a = props[A.id].rect, b = props[B.id].rect, c = props[C.id].rect;
+        expect(handles[0].centerPx).toBeCloseTo(a.top + a.height, 3);
+        expect(handles[1].centerPx).toBeCloseTo(b.top + b.height, 3);
+        expect(handles[1].centerPx).toBeCloseTo(c.top, 3);
+    });
+
+    it("three collapsed panes: four handles, one per edge, all on the same expanded pair", () => {
+        const model = createLayoutModel();
+        const A = leaf("A"), E = leaf("E");
+        const chips = [leaf("B", true), leaf("C", true), leaf("D", true)];
+        const root = newLayoutNode(FlexDirection.Column, 10, [A, ...chips, E]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handles = handlesOf(model, root.id);
+        expect(handles).toHaveLength(4);
+        expect(handles.every((h) => h.parentIndex === 0 && h.afterIndex === 4)).toBe(true);
+        const edges = [props[A.id].rect, ...chips.map((c) => props[c.id].rect)].map((r) => r.top + r.height);
+        handles.forEach((h, i) => expect(h.centerPx).toBeCloseTo(edges[i], 3));
+    });
+
+    it("a pane docked on top of the lower pane inside a nested Row: its bottom edge is a handle too", () => {
+        const model = createLayoutModel();
+        const Top = leaf("Top"), Mid = leaf("Mid", true), Bottom = leaf("Bottom");
+        const row = newLayoutNode(FlexDirection.Row, 10, [Mid, Bottom]);
+        const root = newLayoutNode(FlexDirection.Column, 10, [Top, row]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handles = handlesOf(model, root.id);
+        // Was one: only the chip's top edge (Top's bottom).
+        expect(handles).toHaveLength(2);
+        expect(handles.every((h) => h.parentIndex === 0 && h.afterIndex === 1)).toBe(true);
+        const mid = props[Mid.id].rect;
+        expect(handles[0].centerPx).toBeCloseTo(mid.top, 3);
+        expect(handles[1].centerPx).toBeCloseTo(mid.top + mid.height, 3);
+        expect(handles[1].centerPx).toBeCloseTo(props[Bottom.id].rect.top, 3);
+    });
+
+    it("a collapsed run at the edge of the column adds no handle (nothing to resize against)", () => {
+        const model = createLayoutModel();
+        const root = newLayoutNode(FlexDirection.Column, 10, [leaf("A"), leaf("B"), leaf("C", true)]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+        const handles = handlesOf(model, root.id);
+        expect(handles).toHaveLength(1); // A|B only
+        expect(handles[0].afterIndex).toBe(1);
+    });
+
+    it("dragging the lowest edge resizes exactly like dragging the highest, in both modes", () => {
+        for (const group of [false, true]) {
+            const results: string[] = [];
+            for (const pick of ["first", "last"] as const) {
+                const model = createLayoutModel();
+                const A = leaf("A"), C = leaf("C");
+                const root = newLayoutNode(FlexDirection.Column, 10, [A, leaf("B", true), C]);
+                model.treeState.rootNode = root;
+                model.updateTree();
+                const handles = handlesOf(model, root.id);
+                const h = pick === "first" ? handles[0] : handles[handles.length - 1];
+                model.onResizeMove(h, 100, h.centerPx + 40, group);
+                const pending = model.getter(model.pendingTreeAction.currentValueAtom) as any;
+                const ops = pending?.resizeOperations ?? pending?.action?.resizeOperations;
+                results.push(
+                    JSON.stringify(
+                        (ops ?? []).map((o: any) => [o.nodeId === A.id ? "A" : o.nodeId === C.id ? "C" : "?", Math.round(o.size * 1000)])
+                    )
+                );
+            }
+            expect(results[0]).not.toBe("[]");
+            expect(results[1]).toBe(results[0]);
+        }
+    });
+
+    it("a chip's grab zones stop a third of the way in, so its middle stays clickable", () => {
+        const model = createLayoutModel();
+        model.gapSizePx._set(20); // a large tile gap: 40 px handles
+        const B = leaf("B", true);
+        const root = newLayoutNode(FlexDirection.Column, 10, [leaf("A"), B, leaf("C")]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+        const b = model.additionalProps()[B.id].rect;
+        // The handle added at the chip's bottom edge.
+        const added = handlesOf(model, root.id).filter((h) => Math.abs(h.centerPx - (b.top + b.height)) < 0.01);
+        expect(added).toHaveLength(1);
+        // setTransform positions by translate3d(left, top) and floors it.
+        const m = /translate3d\(\s*[-\d.]+px\s*,\s*([-\d.]+)px/.exec(String(added[0].transform.transform));
+        expect(m).not.toBeNull();
+        const zoneTop = parseFloat(m![1]);
+        // At most a third of the way up into the chip (1 px for the floor).
+        expect(zoneTop).toBeGreaterThanOrEqual(b.top + (2 * b.height) / 3 - 1);
+        // Without the clamp a 40 px handle would reach 20 px into this chip.
+        expect(b.top + b.height - zoneTop).toBeLessThan(20);
+    });
+
+    it("a Row's collapsed pane is unchanged: one handle spanning it", () => {
+        const model = createLayoutModel();
+        const rowLeaf = (id: string, min = false) => {
+            const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+            if (min) n.minimized = true;
+            return n;
+        };
+        const root = newLayoutNode(FlexDirection.Row, 10, [rowLeaf("A"), rowLeaf("B", true), rowLeaf("C")]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+        expect(model.additionalProps()[root.id]?.resizeHandles ?? []).toHaveLength(1);
+    });
+});

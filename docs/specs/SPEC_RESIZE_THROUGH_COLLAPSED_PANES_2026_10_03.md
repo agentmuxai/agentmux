@@ -1,7 +1,7 @@
 # SPEC: resize through collapsed panes — every edge of a collapsed run resizes the expanded panes either side
 
 **Date:** 2026-10-03
-**Status:** proposed — not built.
+**Status:** implemented — 2026-10-03 (Phase C keeps a Column's chain across chip slots; `extendResizeHandlesThroughChips` in `layoutGeometry.ts` adds the chip-edge handles after the whole tree is laid out; tests in `layoutModel.test.ts` "resize through collapsed panes"). See §7.
 **Author:** AgentY, at the owner's request
 **Amends:** `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md` invariant I3 (§5 below).
 **Related:** `SPEC_PANE_MINIMIZE_AND_TOOLCALL_FAILCOLLAPSE_2026_06_21.md`, `SPEC_PANE_MINIMIZE_REFINEMENTS_2026_06_24.md` (docking a collapsed pane onto a neighbour), `docs/analysis/ANALYSIS_PANE_MINIMIZE_ROW_BRANCH_DISTORTIONS_2026_08_30.md` §3 and PR #2855 (the Row-parent version of this problem, fixed), `SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md` and its `_DIRECTION_FIX_2026_08_17` follow-up, `SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md`.
@@ -92,7 +92,16 @@ Through the real `updateTree` (the existing `layoutMinimize.test.ts:669-737` blo
 7. The chip's click target: with the default handle size, a pointer at the chip's vertical middle is not inside any handle rect (R6).
 8. Row parent `A | B(collapsed) | C`: unchanged, one spanning handle (R7).
 
-## 7. Open questions
+## 7. As built
+
+- **Phase C** (`layoutGeometry.ts`): in a Column a chip slot no longer resets the pairing chain, so the expanded panes above and below a run get their handle at the upper pane's bottom edge (`parentIndex`/`afterIndex` = those two panes). A Row still resets (R7).
+- **`extendResizeHandlesThroughChips`**, called once from `updateTree` after the walk, when every rect is final. That includes chips docked inside a nested Row, which Phase B lays out only after the outer Column's handles exist, so 4.2 is a post-pass rather than a Phase B export. For each vertical-stack handle it walks down through collapsed leaves whose rect starts at the current edge (0.5 px tolerance) and overlaps the handle's span. It adds a handle at each chip's bottom with the same pair, id `${id}-${n}` and span narrowed to the chip. One pass covers §4.1, §4.2, a mix, and the chips of a fully-minimized branch.
+- **R6:** an added handle's zone is `min(resizeHandleSizePx / 2, chipHeight / 3)` each side. The original handle at the upper pane's bottom keeps its usual size.
+- **No change** to `onResizeMove`, group resize or the reducer.
+- **Tests (§6):** 1–5 and 8 are in `layoutModel.test.ts` through the real `updateTree`. 7 checks a 40 px handle (tile gap 20) is clamped on a 53 px chip. 6 is the existing guard and reducer tests, unchanged. The mirrored pairing rule in `layoutMinimize.test.ts` now expects `[[0, 2]]` for a Column chip (was `[]`).
+- **Not verified by hand in a running build yet.**
+
+## 8. Open questions
 
 1. Which tree the owner's window has. Both are in scope, so this decides only which case to verify first by hand. A quick way to tell: in tree (b) the collapsed chip is exactly as wide as the bottom pane; in tree (a) it spans the column.
 2. Should a run at the edge of a column (R4) instead resize the column against its own parent's neighbour (a cross-level handle)? Not proposed: Phase C never crosses levels today, and the window-edge rules (`SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md`) already cover the outer edges.
