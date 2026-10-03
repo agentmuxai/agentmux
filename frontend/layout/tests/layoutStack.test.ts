@@ -8,19 +8,21 @@
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { LayoutModel } from "@/layout/lib/layoutModel";
 import { newLayoutNode } from "@/layout/lib/layoutNode";
-import { activeKeyFor, getNodeByBlockId } from "@/layout/lib/layoutNodeModels";
+import { activeKeyFor, getNodeByBlockId, paneStackIds } from "@/layout/lib/layoutNodeModels";
 import { closeNode, removeMovedBlock } from "@/layout/lib/layoutMagnify";
 import {
     addWidgetAsPaneTab,
     closeBlockInStack,
     effectiveStack,
     moveBlockInStack,
+    openBlockInStack,
     pushBlockOntoStack,
     setActiveBlockInStack,
 } from "@/layout/lib/layoutStack";
+import type { NodeModel } from "@/layout/lib/types";
 import { LayoutNodeAdditionalProps, LayoutTreeActionType, LayoutTreeInsertNodeAction } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
@@ -1191,5 +1193,108 @@ describe("addWidgetAsPaneTab", () => {
         await expect(addWidgetAsPaneTab(model, nodeId, { meta: { view: "browser" } } as BlockDef)).resolves.toBeUndefined();
         expect(rpcCall).not.toHaveBeenCalled();
         expect(deleteBlock).not.toHaveBeenCalled();
+    });
+});
+
+describe("openBlockInStack", () => {
+    beforeEach(() => {
+        rpcCall.mockReset();
+        deleteBlock.mockReset();
+        deleteBlock.mockResolvedValue(undefined);
+    });
+
+    it("by node id: anchors on the pane's block, pushes the new block and returns its id", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        rpcCall.mockResolvedValue({ block_id: "b2" });
+
+        const id = await openBlockInStack(model, { nodeId }, "term", { view: "term" });
+
+        expect(id).toBe("b2");
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            { view: "term", stack_onto_block_id: "b1", meta: { view: "term" } },
+            {}
+        );
+        expect(model.treeState.rootNode!.data!.blockStack).toEqual(["b1", "b2"]);
+        expect(model.treeState.rootNode!.data!.activeBlockId).toBe("b2");
+    });
+
+    it("by block id: anchors on that block even when it is a background tab", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        pushBlockOntoStack(model, nodeId, "b2"); // b1 is now a background tab
+        rpcCall.mockResolvedValue({ block_id: "b3" });
+
+        const id = await openBlockInStack(model, { blockId: "b1" }, "agent", { view: "agent", agentId: "a" });
+
+        expect(id).toBe("b3");
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            { view: "agent", stack_onto_block_id: "b1", meta: { view: "agent", agentId: "a" } },
+            {}
+        );
+        expect(model.treeState.rootNode!.data!.blockStack).toEqual(["b1", "b2", "b3"]);
+        expect(model.treeState.rootNode!.data!.activeBlockId).toBe("b3");
+    });
+
+    it("by node id: returns null without an RPC when the pane is already gone", async () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        model.treeState.rootNode = undefined;
+
+        expect(await openBlockInStack(model, { nodeId }, "term", { view: "term" })).toBeNull();
+        expect(rpcCall).not.toHaveBeenCalled();
+    });
+
+    it("by block id: deletes the new block and returns null if the pane closed during the RPC", async () => {
+        const model = createLayoutModel();
+        insertRootBlock(model, "b1");
+        rpcCall.mockImplementation(async () => {
+            vi.spyOn(model, "getNodeByBlockId").mockReturnValue(null);
+            return { block_id: "b2" };
+        });
+
+        expect(await openBlockInStack(model, { blockId: "b1" }, "agent", { view: "agent" })).toBeNull();
+        expect(deleteBlock).toHaveBeenCalledWith("b2");
+        expect(model.treeState.rootNode!.data!.blockStack ?? []).not.toContain("b2");
+    });
+
+    it("rejects when pane.open does, creating and deleting nothing", async () => {
+        const model = createLayoutModel();
+        insertRootBlock(model, "b1");
+        rpcCall.mockRejectedValue(new Error("boom"));
+
+        await expect(openBlockInStack(model, { blockId: "b1" }, "agent", { view: "agent" })).rejects.toThrow("boom");
+        expect(deleteBlock).not.toHaveBeenCalled();
+    });
+});
+
+describe("paneStackIds", () => {
+    function nodeModelFor(model: LayoutModel, nodeId: string, activeBlockId?: () => string): NodeModel {
+        return { layoutModel: model, nodeId, blockId: "frozen", activeBlockId } as unknown as NodeModel;
+    }
+
+    it("is the leaf's stack, and the active block alone before the leaf has one", () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        expect(paneStackIds(nodeModelFor(model, nodeId, () => "b1"))).toEqual(["b1"]);
+        // No reactive activeBlockId: the frozen blockId field.
+        expect(paneStackIds(nodeModelFor(model, nodeId))).toEqual(["frozen"]);
+
+        pushBlockOntoStack(model, nodeId, "b2");
+        expect(paneStackIds(nodeModelFor(model, nodeId, () => "b2"))).toEqual(["b1", "b2"]);
+    });
+
+    it("recomputes a memo built on it when the pane's stack changes", () => {
+        const model = createLayoutModel();
+        const nodeId = insertRootBlock(model, "b1");
+        createRoot((dispose) => {
+            const ids = createMemo(() => paneStackIds(nodeModelFor(model, nodeId, () => "b1")));
+            expect(ids()).toEqual(["b1"]);
+            pushBlockOntoStack(model, nodeId, "b2");
+            expect(ids()).toEqual(["b1", "b2"]);
+            dispose();
+        });
     });
 });

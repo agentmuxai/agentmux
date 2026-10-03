@@ -13,6 +13,7 @@ import { setCurrentDragPayload } from "@/app/drag/CrossWindowDragMonitor";
 import { Logger } from "@/util/logger";
 import { isWindows } from "@/util/platformutil";
 import { takeWindowTabSnapshot } from "@/app/drag/tearoff-snapshot";
+import { openTearOffWindow } from "@/app/drag/tear-off-pool-helper";
 
 /**
  * Phase 2 — orchestrates the Chrome-faithful tear-off when the cursor
@@ -101,9 +102,11 @@ async function requestTearOff(
         // flash). Per spec §0 this fallback should never fire in
         // practice; if it does we'll see WARN logs and tear_off.pool_
         // exhausted increments and can investigate the underlying race.
+        const snapshot = await snapshotTaken;
         let destWindowLabel: string;
         try {
-            destWindowLabel = await getApi().tearOffPoolPromote(
+            const dest = await openTearOffWindow(
+                getApi(),
                 newWsId,
                 cursorX,
                 cursorY,
@@ -111,31 +114,17 @@ async function requestTearOff(
                 sourceHeight,
                 tabAnchorX,
                 tabAnchorY,
-                await snapshotTaken,
+                snapshot
             );
-            Logger.info("dnd", "tear-off used warm pool", { destWindowLabel });
-        } catch (poolErr) {
-            Logger.warn("dnd", "tear-off pool exhausted, falling back to cold path", {
-                error: String(poolErr),
-            });
-            try {
-                destWindowLabel = await getApi().openWindowAtPosition(
-                    cursorX,
-                    cursorY,
-                    newWsId,
-                    sourceWidth,
-                    sourceHeight,
-                    tabAnchorX,
-                    tabAnchorY,
-                );
-            } catch (coldErr) {
-                // F1.B safe-restore signal: cold-path API itself
-                // threw. The host couldn't post the create command,
-                // so no window will materialize. Re-throw to outer
-                // catch which will dispatch RestoreTornOffTab.
-                coldPathFailed = true;
-                throw coldErr;
-            }
+            destWindowLabel = dest.label;
+            if (dest.pooled) Logger.info("dnd", "tear-off used warm pool", { destWindowLabel });
+        } catch (coldErr) {
+            // F1.B safe-restore signal: openTearOffWindow only rejects when
+            // the cold-path create itself threw, so no window will
+            // materialize. Re-throw to outer catch which will dispatch
+            // RestoreTornOffTab.
+            coldPathFailed = true;
+            throw coldErr;
         }
         if (skipScMove) {
             // Commit-on-release: the window was already created + shown at

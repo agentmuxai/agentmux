@@ -65,11 +65,6 @@ function setActive(data: TabLayoutData, blockId: string, stack: string[]): void 
  * own inline "+" handler, #3335) — `pane.open` with `stack_onto_block_id`
  * creates the block AND places it in this pane's stack in one backend step
  * (`CreateBlockInStack`).
- *
- * Re-resolves `nodeId` fresh after the RPC rather than trusting a pre-await
- * reference — the pane can close while the request is in flight. If it has,
- * the new block's pane is gone too; delete it instead of
- * leaving an orphaned, unreachable block behind.
  */
 export async function addWidgetAsPaneTab(
     model: LayoutModel,
@@ -96,25 +91,51 @@ export async function addWidgetAsPaneTab(
 ): Promise<void> {
     const meta = extraMeta ? { ...(blockDef.meta as Record<string, unknown>), ...extraMeta } : blockDef.meta;
     const view = (blockDef.meta as Record<string, unknown> | undefined)?.["view"];
-    // Created AND placed in one backend step (`stack_onto_block_id` →
-    // `CreateBlockInStack`), so the block is never in the tab without a pane —
-    // `skip_placement` + a later push could be interrupted in between
-    // (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.1, §3.3). The local
-    // push below just shows the tab without waiting for the queued
-    // `stackpush`; both add the same member, idempotently.
-    const target = findNode(model.treeState.rootNode, nodeId)?.data?.blockId;
-    if (!target) return;
+    await openBlockInStack(model, { nodeId }, view, meta);
+}
+
+/** The pane `openBlockInStack` adds a tab to: the leaf with this layout node
+ *  id, or the leaf holding this block as any member of its stack. */
+export type PaneTabTarget = { nodeId: string } | { blockId: string };
+
+/**
+ * Create a block (`view`, `meta`) as a new tab of `target`'s pane and make it
+ * the active tab. Returns the new block's id, or null when the pane is gone.
+ * Rejects when `pane.open` does.
+ *
+ * Created AND placed in one backend step (`stack_onto_block_id` →
+ * `CreateBlockInStack`), so the block is never in the tab without a pane —
+ * `skip_placement` + a later push could be interrupted in between
+ * (SPEC_PANE_TABS_REDUCER_COMMANDS_2026_09_18.md §2.1, §3.3). The local push
+ * just shows the tab without waiting for the queued `stackpush`; both add the
+ * same member, idempotently.
+ *
+ * The pane is looked up again after the RPC, not trusted from before it: it
+ * can close while the request is in flight, and then the new block is
+ * deleted rather than left orphaned and unreachable.
+ */
+export async function openBlockInStack(
+    model: LayoutModel,
+    target: PaneTabTarget,
+    view: unknown,
+    meta: Record<string, unknown> | undefined
+): Promise<string | null> {
+    const findPane = () =>
+        "nodeId" in target ? findNode(model.treeState.rootNode, target.nodeId) : model.getNodeByBlockId(target.blockId);
+    const anchor = "nodeId" in target ? findPane()?.data?.blockId : target.blockId;
+    if (!anchor) return null;
     const paneOpenResult = (await TabRpcClient.rpcCall(
         "pane.open",
-        { view, stack_onto_block_id: target, meta },
+        { view, stack_onto_block_id: anchor, meta },
         {}
     )) as { block_id: string };
-    const node = findNode(model.treeState.rootNode, nodeId);
+    const node = findPane();
     if (!node) {
         await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-        return;
+        return null;
     }
-    pushBlockOntoStack(model, nodeId, paneOpenResult.block_id);
+    pushBlockOntoStack(model, node.id, paneOpenResult.block_id);
+    return paneOpenResult.block_id;
 }
 
 export function pushBlockOntoStack(model: LayoutModel, nodeId: string, blockId: string): void {

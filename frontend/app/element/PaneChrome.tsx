@@ -34,7 +34,7 @@ import { getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
-import { findNode } from "@/layout/lib/layoutNode";
+import { paneStackIds } from "@/layout/lib/layoutNodeModels";
 import "./PaneChrome.scss";
 import { openPaneTabWidgetPicker } from "./pane-tab-picker";
 import { PaneHeaderTabStrip } from "./PaneHeaderTabStrip";
@@ -62,7 +62,6 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // that field's own doc comment (layout/lib/types.ts) and
     // SPEC_PANE_CHROME_LAYOUT_MODEL_TAB_BINDING_2026_09_18.md.
     const layoutModel = nodeModel.layoutModel;
-    const getOwnNode = () => findNode(layoutModel.treeState.rootNode, nodeModel.nodeId);
     const activeBlockId = () => nodeModel.activeBlockId?.() ?? nodeModel.blockId;
     const activeBlockData = createMemo(() => MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", activeBlockId()))());
 
@@ -98,15 +97,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
 
     // Tabs are keyed by blockId strings, so PaneTabStrip's <For> keeps each
     // pill's DOM node across recomputes; label/icon are looked up per id.
-    const stackIds = createMemo<string[]>(
-        () => {
-            layoutModel.localTreeStateAtom();
-            const stack = getOwnNode()?.data?.blockStack;
-            return stack?.length ? [...stack] : [activeBlockId()];
-        },
-        undefined,
-        { equals: sameIds }
-    );
+    const stackIds = createMemo<string[]>(() => [...paneStackIds(nodeModel)], undefined, { equals: sameIds });
     const extraTabs = createMemo(() => model()?.extraTabs?.() ?? []);
     const tabIds = createMemo<string[]>(
         () => {
