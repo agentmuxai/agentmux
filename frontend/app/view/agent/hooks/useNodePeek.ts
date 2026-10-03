@@ -65,7 +65,8 @@ export function useNodePeek(delayMs: number = PEEK_ENTER_DELAY_MS): NodePeek {
         timer = setTimeout(() => {
             if (isPrimaryButtonDown()) return;
             const bridging = peekBridgeRow();
-            if (bridging && bridging !== rowEl()) {
+            // A bridge whose row has left the DOM is stale: ignore it.
+            if (bridging && bridging !== rowEl() && bridging.isConnected) {
                 waitingForBridge = true;
                 return;
             }
