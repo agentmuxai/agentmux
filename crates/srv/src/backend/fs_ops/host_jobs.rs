@@ -302,8 +302,11 @@ impl End {
     /// Flush a file's contents to disk.
     fn sync(&self, rt: &Handle, path: &str) -> Result<(), String> {
         match self {
+            // Read-only on Unix (fsync needs no write access, and a read-only
+            // file must sync too); Windows flushes only a handle it can write.
             End::Local => std::fs::OpenOptions::new()
-                .write(true)
+                .read(cfg!(unix))
+                .write(!cfg!(unix))
                 .open(path)
                 .and_then(|f| f.sync_all())
                 .map_err(|e| e.to_string()),
@@ -772,14 +775,8 @@ impl Transfer<'_> {
                 break;
             }
         }
-        // The source's permissions and time, on the temp file before it goes
-        // in: never a half-kept file in place, and a moved program still runs.
-        // Best effort, as for a local copy: a disk that refuses (FAT, some
-        // network shares) still gets the file.
-        if let Err(e) = self.dest.set_meta(self.rt, &temp, info.mode, info.mtime) {
-            tracing::debug!(path = %shown, error = %e, "fs.op: a host copy's permissions or time weren't kept");
-        }
-        // A move deletes the only other copy next: on disk first.
+        // A move deletes the only other copy next: on disk first (before the
+        // source's mode, which may make the file read-only).
         if self.kind == FsOpKind::Move {
             if let Err(e) = self.dest.sync(self.rt, &temp) {
                 discard(self);
@@ -787,6 +784,12 @@ impl Transfer<'_> {
                 job.advance(1, 0);
                 return Outcome::NotDone;
             }
+        }
+        // The source's permissions and time, on the temp file before it goes
+        // in, so a moved program still runs. Best effort, as for a local
+        // copy: a disk that refuses (FAT, some network shares) still gets it.
+        if let Err(e) = self.dest.set_meta(self.rt, &temp, info.mode, info.mtime) {
+            tracing::debug!(path = %shown, error = %e, "fs.op: a host copy's permissions or time weren't kept");
         }
         // Replacing: in one step, so what is there goes only once the copy is.
         let placed = if replace {
@@ -1592,6 +1595,40 @@ mod tests {
         )
         .await;
         assert!(protected.is_err());
+    }
+
+    /// A read-only file moves between machines and lands read-only (synced
+    /// before its mode is set, so the sync can open it).
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_read_only_file_moves_and_stays_read_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let local = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        let f = local.path().join("ro.txt");
+        std::fs::write(&f, b"ro").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let h = host(remote.path()).await;
+        let (emit, seen) = events();
+        start(
+            FsOpKind::Move,
+            End::Local,
+            vec![display_path(&f)],
+            h,
+            display_path(remote.path()),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        assert!(end.failures.is_none(), "{end:?}");
+        let landed = remote.path().join("ro.txt");
+        assert_eq!(std::fs::read(&landed).unwrap(), b"ro");
+        assert_eq!(
+            std::fs::metadata(&landed).unwrap().permissions().mode() & 0o777,
+            0o444
+        );
+        assert!(!f.exists());
     }
 
     #[test]

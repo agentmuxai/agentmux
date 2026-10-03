@@ -170,7 +170,10 @@ pub fn handle(home: &Path, req: Request) -> Reply {
             let p = resolve(home, &path);
             match fs::symlink_metadata(&p) {
                 Ok(m) if m.is_file() => fs::OpenOptions::new()
-                    .write(true)
+                    // Read-only on Unix (fsync needs no write access, and a read-only file
+                    // must sync too); Windows flushes only a handle it can write.
+                    .read(cfg!(unix))
+                    .write(!cfg!(unix))
                     .open(&p)
                     .and_then(|f| f.sync_all())
                     .map(|()| Reply::Done),
@@ -348,14 +351,15 @@ fn list(dir: &Path, offset: u32, limit: u32) -> io::Result<Reply> {
 
 fn read(p: &Path, offset: u64, len: u32) -> io::Result<Reply> {
     use std::io::{Seek, SeekFrom};
-    // Never through a link swapped in after it was listed, and never stuck
-    // opening a pipe: whatever this opened must be a regular file.
+    // Never stuck opening a pipe: whatever this opened must be a regular
+    // file. A link is read through, as the editor opens a linked dotfile
+    // (a transfer skips links before it reads).
     #[cfg(unix)]
     let mut f = {
         use std::os::unix::fs::OpenOptionsExt;
         fs::OpenOptions::new()
             .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .custom_flags(libc::O_NONBLOCK)
             .open(p)?
     };
     #[cfg(not(unix))]
@@ -782,8 +786,8 @@ mod tests {
         ));
     }
 
-    /// A pipe is refused at once (never a read that waits for a writer),
-    /// and a link is never read through.
+    /// A pipe is refused at once (never a read that waits for a writer); a
+    /// link is read through.
     #[cfg(unix)]
     #[test]
     fn a_read_takes_only_a_regular_file() {
@@ -825,8 +829,25 @@ mod tests {
             "{:?}",
             r[0]
         );
-        assert!(matches!(r[1], Reply::Err { .. }), "{:?}", r[1]);
+        assert_eq!(
+            r[1],
+            Reply::Read {
+                data: b"r".to_vec(),
+                eof: true
+            },
+            "a link is read through"
+        );
         assert_eq!(r[2], Reply::Done);
+        // A read-only file syncs too.
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(h.join("real"), fs::Permissions::from_mode(0o444)).unwrap();
+        let r = exchange(
+            h,
+            &[Request::Sync {
+                path: "~/real".into(),
+            }],
+        );
+        assert_eq!(r[0], Reply::Done);
     }
 
     #[test]
