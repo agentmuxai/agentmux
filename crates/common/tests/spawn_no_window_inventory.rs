@@ -215,6 +215,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/blockcontroller/shell/lifecycle.rs", "\"wsl.exe\"", 1,
      "pty: portable-pty CommandBuilder, runs on a ConPTY pseudoconsole (a WSL pane)"),
+    ("crates/srv/src/backend/blockcontroller/shell/lifecycle.rs", "ssh_path", 1,
+     "pty: portable-pty CommandBuilder, runs on a ConPTY pseudoconsole (an SSH pane)"),
     ("crates/srv/src/backend/blockcontroller/shell/pty.rs", "\"where\"", 2,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,

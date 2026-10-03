@@ -36,6 +36,53 @@ pub fn set(
     status: &str,
     error: Option<&str>,
 ) -> ConnStatus {
+    update(broker, connection, |entry| apply(entry, status, error))
+}
+
+/// A pane's process on `connection` started (an SSH pane's `ssh`): one more
+/// pane has it open, and it is connected, so the overlay never covers the
+/// terminal while `ssh` asks there for a password.
+pub fn pane_started(broker: Option<&Broker>, connection: &str) -> ConnStatus {
+    update(broker, connection, |entry| {
+        entry.activeconnnum += 1;
+        apply(entry, state::CONNECTED, None);
+    })
+}
+
+/// A pane's process on `connection` ended. A status is shared by every pane on
+/// the connection, and the overlay covers each of them, so while another pane
+/// still has it open it stays connected. The last one leaves it `error` with
+/// `error` when it could not connect, and `disconnected` otherwise.
+pub fn pane_ended(broker: Option<&Broker>, connection: &str, error: Option<&str>) -> ConnStatus {
+    update(broker, connection, |entry| {
+        entry.activeconnnum = (entry.activeconnnum - 1).max(0);
+        if entry.activeconnnum == 0 {
+            match error {
+                Some(message) => apply(entry, state::ERROR, Some(message)),
+                None => apply(entry, state::DISCONNECTED, None),
+            }
+        }
+    })
+}
+
+fn apply(entry: &mut ConnStatus, status: &str, error: Option<&str>) {
+    entry.status = status.to_string();
+    entry.connected = status == state::CONNECTED;
+    if entry.connected {
+        entry.hasconnected = true;
+    }
+    entry.error = if status == state::ERROR {
+        error.unwrap_or_default().to_string()
+    } else {
+        String::new()
+    };
+}
+
+fn update(
+    broker: Option<&Broker>,
+    connection: &str,
+    change: impl FnOnce(&mut ConnStatus),
+) -> ConnStatus {
     let updated = {
         let mut map = registry().lock().unwrap_or_else(|e| e.into_inner());
         let entry = map
@@ -48,16 +95,7 @@ pub fn set(
                 activeconnnum: 0,
                 error: String::new(),
             });
-        entry.status = status.to_string();
-        entry.connected = status == state::CONNECTED;
-        if entry.connected {
-            entry.hasconnected = true;
-        }
-        entry.error = if status == state::ERROR {
-            error.unwrap_or_default().to_string()
-        } else {
-            String::new()
-        };
+        change(entry);
         entry.clone()
     };
     if let Some(broker) = broker {
@@ -101,5 +139,32 @@ mod tests {
         let s = set(None, name, state::CONNECTING, Some("ignored"));
         assert!(s.error.is_empty(), "an error is cleared by the next state");
         assert!(all().iter().any(|c| c.connection == name));
+    }
+
+    /// Two panes on one host: the first one ending, even with a failure, does
+    /// not cover the second, still-open one; the last one says why.
+    #[test]
+    fn a_connection_stays_connected_while_any_pane_has_it_open() {
+        let name = "test-status-two-panes";
+        pane_started(None, name);
+        let s = pane_started(None, name);
+        assert_eq!((s.status.as_str(), s.activeconnnum), (state::CONNECTED, 2));
+        let s = pane_ended(None, name, Some("could not connect"));
+        assert_eq!((s.status.as_str(), s.activeconnnum), (state::CONNECTED, 1));
+        let s = pane_ended(None, name, Some("could not connect"));
+        assert_eq!(
+            (s.status.as_str(), s.activeconnnum, s.error.as_str()),
+            (state::ERROR, 0, "could not connect")
+        );
+
+        let name = "test-status-clean-exit";
+        pane_started(None, name);
+        let s = pane_ended(None, name, None);
+        assert_eq!(
+            (s.status.as_str(), s.activeconnnum),
+            (state::DISCONNECTED, 0)
+        );
+        let s = pane_ended(None, name, None);
+        assert_eq!(s.activeconnnum, 0, "never below zero");
     }
 }

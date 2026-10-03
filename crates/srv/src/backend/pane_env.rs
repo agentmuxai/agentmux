@@ -258,6 +258,8 @@ mod spawn_site_coverage {
          "sanitized: the configured login shell, covered by the same sanitize_pty_command"),
         ("src/backend/blockcontroller/shell/lifecycle.rs", "\"wsl.exe\"", 1,
          "sanitized: a WSL pane's wsl.exe, covered by the same sanitize_pty_command"),
+        ("src/backend/blockcontroller/shell/lifecycle.rs", "ssh_path", 1,
+         "sanitized: an SSH pane's system ssh, covered by the same sanitize_pty_command"),
         ("src/backend/blockcontroller/shell/pty.rs", "\"where\"", 2,
          "probe: OS builtin PATH lookup, output parsed then discarded"),
         ("src/backend/blockcontroller/shell/tests.rs", "\"sleep\"", 1,
