@@ -3,7 +3,7 @@
 **Date:** 2026-10-02
 **Author:** agent3
 **Baseline:** `main` @ `9e3e01438` (pulled 2026-10-02 from `agentmuxai/agentmux`)
-**Status:** analysis. Step A of the recommendation (§5) ships in the same PR as this report; steps B and C are not started. No source comment was changed.
+**Status:** analysis. Step A of the recommendation (§5) shipped in #4246 with this report; §6 (dead file references, 2026-10-03) and its guard follow in a second PR. Steps B and C are not started.
 **Related:** [`SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30`](../specs/SPEC_CODE_COMMENT_DENSITY_AND_CONDENSING_2026_09_30.md) (#4065)
 
 The request had three questions: (1) was this done before, (2) what does outside practice say, (3) is it worth it.
@@ -214,6 +214,54 @@ The honest summary: the *accuracy* argument is evidence-backed, the *context* ar
 - Token counts are chars / 4, about ±20%.
 
 ---
+
+## 6. Dead file references: full triage (2026-10-03)
+
+§4.1 named accuracy as the best-evidenced benefit. This section measures it for one concrete kind of rot, comments naming a file that does not exist, and sets the tiers of the C7 guard (spec §9.1) from the result.
+
+### 6.1 Method
+
+- `node scripts/check-comment-hygiene.mjs --dead-refs --json` on `85c7a0b57` listed every file name (ending `.rs .ts .tsx .mjs .cjs .sh .ps1 .scss .css .md`) in a `.ts`/`.tsx`/`.rs` comment that no tracked file matches by full path, path suffix or basename. Runtime names AgentMux writes (`CLAUDE.md`, …) were excluded up front. Result: 417 occurrences of 177 names in 251 files.
+- Every name was checked, not sampled. Four sub-agents each took a quarter. For each occurrence they read the comment in context and used git history (`--diff-filter=DR` renames and deletes, `git log -S`, `git grep` for the symbol the comment names) to give a verdict, the file it should name now, and the evidence.
+- I re-checked a handful by hand. Two of five held exactly, one target was half right (`acp.rs:818` names a publish step that lives in `persistent/status.rs`, not `persistent/input.rs`), and one "never existed" claim was wrong (`agentmux-cef/src/app.rs` did exist). So the verdicts are good enough to tune a guard, but every fix is re-read in context before it is applied.
+
+### 6.2 Results
+
+| Verdict | Occurrences |
+|---|---:|
+| Stale: the file moved or was split, and the comment should name the new one | 186 |
+| Stale: the file and what the comment describes are gone | 34 |
+| Wrong name: never existed under that name; the intended file exists | 12 |
+| Cited doc never committed under any name (checker: unsure) | 9 |
+| **Genuinely broken, total** | **241 (58%) in 156 files** |
+| Deliberate history ("ported from `src-tauri/…`", "split out of …") | 62 |
+| Not a file (`item.ts` is a property; `a.ts/b.ts` is a list) | 51 |
+| Example or test-fixture name | 30 |
+| A file in another repo | 24 |
+| A runtime file | 9 |
+
+- **Cause:** 176 of the 241 point at a file that a rename, split or deletion removed. The top names are `persistent.rs` (43), `bootstrap.rs` (24), `browser_panes.rs` (10), `app.rs`, `app_api.rs` and `identity/resolver.rs` (9 each). Nothing updated the pointers when the module split.
+- **The other 65 never existed under that name.** 12 cited doc names were never committed anywhere (often a date written `2026-05-14` instead of `2026_05_14`, or a spec that was planned and never written). `mstore.rs` comes from a bulk `wstore`→`mstore` rename (#3287) rewriting a reference that was already stale.
+- **Stale beyond the name:** some comments name the wrong file *and* describe behaviour that has since changed (the `bundle_export.rs` notes on `parse_json_field_or_warn`). A guard catches the name; the sentence still needs a reader.
+
+### 6.3 What it means for the guard
+
+Precision per tier, after splitting `a.ts/b.ts` lists and treating sibling repos, `src-tauri/` and Copilot's runtime instruction files as foreign (that removed 31 reports, none of them stale):
+
+| Tier | Reported | Genuinely broken | Guard |
+|---|---:|---:|---|
+| Repo-rooted path (`crates/…`, `frontend/…`) | 22 | 95% | error on added lines |
+| Doc name (`SPEC_…`, `docs/…`) | 32 | 72% | error on added lines; the message says how to cite another repo or mark an example |
+| Partial path (`identity/resolver.rs`) | 67 | 58% | warning |
+| Bare name (`persistent.rs`) | 265 | 59% | warning |
+
+The rename trigger needs no precision estimate: it only fires on a name the branch itself just removed. On a trial rename of `pane_env.rs` it flagged the two comments naming it, and skipped the third mention, which is a path string in a test's code.
+
+### 6.4 Backlog
+
+The scan was later widened to comments in JavaScript-family files and stylesheets (spec §9.1), which adds a few more, e.g. `muxlog.mjs` naming `bootstrap.rs` and stylesheets citing never-committed specs; they are fixed the same way.
+
+The 241 broken references stay until fixed. 196 have a verified replacement path; 45 need rewording (the target is gone, or the cited doc never existed). They are fixed in a separate comment-only PR, proven with `--code-equal`, so the guard PR stays reviewable on its own.
 
 ## Appendix A: top 15 non-test files by comment characters (`9e3e01438`)
 
