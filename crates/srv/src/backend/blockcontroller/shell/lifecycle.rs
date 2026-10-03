@@ -421,6 +421,25 @@ impl Controller for ShellController {
             return Ok(());
         }
 
+        // A pane on a WSL or SSH connection must not quietly get a local shell
+        // under a remote name: until WSL (P1) and SSH (P2) terminals exist, it
+        // gets no shell, and its connection overlay says why
+        // (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md, P0). The
+        // test-only mock factory keeps its own path.
+        if self.conn_factory.lock().unwrap().is_none() {
+            let conn = Self::get_conn_name(&block_meta);
+            match crate::backend::remote::ConnTarget::parse(&conn) {
+                Ok(target) if target.is_local() => {}
+                Ok(target) => {
+                    return Err(format!(
+                        "connection {} is not available yet: this version of AgentMux runs local terminals only",
+                        target.name()
+                    ));
+                }
+                Err(e) => return Err(format!("connection {conn:?}: {e}")),
+            }
+        }
+
         // Try to acquire run lock
         if !self.try_lock_run() {
             return Err("controller is already running".to_string());

@@ -65,6 +65,7 @@ pub mod notify;
 pub mod oref;
 pub mod process_tracker;
 pub mod reactive;
+pub mod remote;
 pub mod registry_reconcile;
 pub mod resume_preflight;
 pub mod rpc;

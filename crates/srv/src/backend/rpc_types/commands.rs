@@ -402,6 +402,21 @@ pub const COMMAND_AGENT_TRACKED_BLOCKS: &str = "agent.tracked-blocks";
 /// sections below its own tree. Returns `backend::swarm_remote::SwarmOtherInstancesResult`.
 /// docs/specs/SPEC_SWARM_OTHER_HOSTS_AND_CHANNELS_2026_10_02.md
 pub const COMMAND_SWARM_OTHER_INSTANCES: &str = "swarm.other-instances";
+// Connections (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md). The
+// names are the ones the frontend's connection UI has always called
+// (rpc-api/workspace.ts); they had no handler until P0.
+/// Configured, recent and ssh-config connection names. `[]` until P2.
+pub const COMMAND_CONN_LIST: &str = "connlist";
+/// WSL distribution names. `[]` until P1.
+pub const COMMAND_WSL_LIST: &str = "wsllist";
+/// The S3 list the Wave code had. Always `[]`: not part of the plan.
+pub const COMMAND_CONN_LIST_AWS: &str = "connlistaws";
+/// `{ connname, logblockid? }`: make sure a connection is usable.
+pub const COMMAND_CONN_ENSURE: &str = "connensure";
+/// `{ host, keywords?, logblockid? }`: connect (or reconnect) explicitly.
+pub const COMMAND_CONN_CONNECT: &str = "connconnect";
+/// The connection name: disconnect it.
+pub const COMMAND_CONN_DISCONNECT: &str = "conndisconnect";
 /// Ambient call outcomes since srv started, by purpose then outcome label
 /// (`ambient::outcome::snapshot`). For the Instance panel.
 pub const COMMAND_AMBIENT_OUTCOMES: &str = "ambient.outcomes";
