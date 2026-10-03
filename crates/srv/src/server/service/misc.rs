@@ -14,8 +14,15 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
     match (call.service.as_str(), call.method.as_str()) {
         // ---- UserInputService ----
         ("userinput", "SendUserInputResponse") => {
-            // Accept but drop — user input routing not yet wired
-            WebReturnType::success_empty()
+            // To whoever is waiting on it (userinput::ask). An answer nobody
+            // waits for any more (timed out, or its ssh exited) is dropped.
+            match service::get_arg::<crate::backend::userinput::UserInputResponse>(args, 0) {
+                Ok(response) => {
+                    let _ = crate::backend::userinput::global().deliver(response);
+                    WebReturnType::success_empty()
+                }
+                Err(e) => WebReturnType::error(e),
+            }
         }
 
         // ---- BlockService ----

@@ -84,6 +84,20 @@ pub fn launch(
     args
 }
 
+/// The `ssh` arguments for one command run without a terminal (an agent's
+/// `Shell`): [`launch`]'s, with `-T` in place of `-tt`, since its output is
+/// read, not a session shown.
+pub fn launch_exec(
+    dest: &SshDest,
+    cmd: &str,
+    cwd: &str,
+    control_dir: Option<&Path>,
+) -> Vec<String> {
+    let mut args = launch(dest, cmd, &[], cwd, control_dir);
+    args[0] = "-T".into();
+    args
+}
+
 /// The command line `ssh` hands to the remote user's login shell: the pane's
 /// command, run in `cwd` when one is set, or for a plain pane with a cwd, the
 /// login shell started there. `None` for a plain pane with no cwd: ssh then
@@ -242,6 +256,17 @@ mod tests {
     }
 
     #[test]
+    fn a_command_without_a_terminal_is_dash_capital_t() {
+        let args = launch_exec(&dest("area54", Some(22)), "make test", "~/proj", None);
+        assert_eq!(args[0], "-T");
+        assert!(!args.iter().any(|a| a == "-tt"));
+        assert_eq!(
+            &args[args.len() - 3..],
+            ["--", "area54", "cd ~/proj; make test"]
+        );
+    }
+
+    #[test]
     fn only_a_connection_failure_is_an_error() {
         assert!(exit_message("area54", 255)
             .unwrap()
@@ -258,7 +283,11 @@ mod tests {
         assert_eq!(quote_path("~/"), "~/");
         assert_eq!(quote_path("~/my proj"), "~/'my proj'");
         assert_eq!(quote_path("~/src"), "~/src");
-        assert_eq!(quote_path("/a/~b"), "'/a/~b'", "a tilde inside a path stays literal");
+        assert_eq!(
+            quote_path("/a/~b"),
+            "'/a/~b'",
+            "a tilde inside a path stays literal"
+        );
         assert_eq!(quote_path("~bob/x"), "'~bob/x'", "only the user's own home");
         assert_eq!(
             remote_command("", &[], "~/proj"),

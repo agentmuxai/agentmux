@@ -306,9 +306,13 @@ pub struct ShellNodeRunner {
     /// `ShellStatusInfo`/`list_active` can show it without a second lookup.
     pub title: String,
     pub cwd: Option<String>,
-    /// `wsl.exe` arguments when the command runs in a WSL distro
-    /// (`remote::wsl::launch`); `None` runs it here through `cmd`/`sh`.
-    pub wsl_args: Option<Vec<String>>,
+    /// The program and arguments when the command runs elsewhere: `wsl.exe`
+    /// for a WSL distro (`remote::wsl::launch`), `ssh` for an SSH host
+    /// (`remote::ssh::launch_exec`). `None` runs it here through `cmd`/`sh`.
+    pub launch: Option<(String, Vec<String>)>,
+    /// The askpass secret of an SSH command (`remote::askpass`), revoked when
+    /// this runner ends, however it ends.
+    pub askpass_secret: Option<String>,
     pub extra_env: HashMap<String, String>,
     pub broker: Arc<Broker>,
     /// Stop registry — the runner registers its `shell_id` here so
@@ -326,8 +330,9 @@ impl ShellNodeRunner {
         let block_id = self.block_id.clone();
         let broker = self.broker.clone();
 
-        let mut child_cmd = if let Some(args) = &self.wsl_args {
-            let mut c = tokio::process::Command::new("wsl.exe");
+        let _askpass = self.askpass_secret.clone().map(crate::backend::remote::askpass::Revoke);
+        let mut child_cmd = if let Some((program, args)) = &self.launch {
+            let mut c = tokio::process::Command::new(program);
             c.args(args);
             c
         } else if cfg!(windows) {

@@ -16,19 +16,29 @@ pub(super) async fn handle_shell_create(
     Json(req): Json<ShellCreateRequest>,
 ) -> impl IntoResponse {
     // Where it runs. Checked before anything is published, so a refused
-    // connection (SSH before P2, a distro that isn't installed, a bad name)
-    // fails the call with its reason instead of running the command here.
-    let wsl_distro = match super::app_api::connections::for_agent(
-        &state.broker,
-        req.connection.as_deref(),
-    )
-    .await
-    {
-        Ok(d) => d,
+    // connection (no ssh, a distro that isn't installed, a bad name) fails the
+    // call with its reason instead of running the command here.
+    use super::app_api::connections::{self, AgentTarget};
+    let target = match connections::for_agent(&state.broker, req.connection.as_deref()).await {
+        Ok(t) => t,
         Err(e) => {
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
     };
+    // An SSH host runs with the user's identity: their consent first (asked
+    // once, or remembered as "always"), then every ssh prompt goes to them
+    // through the askpass bridge, never to the agent.
+    if let AgentTarget::Ssh(_) = &target {
+        let connection = req.connection.as_deref().unwrap_or_default();
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, connection, &req.cmd).await {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
+        }
+    }
+    let wsl_distro = match &target {
+        AgentTarget::Wsl(d) => Some(d.clone()),
+        _ => None,
+    };
+    let remote = !matches!(target, AgentTarget::Local);
 
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
@@ -45,9 +55,9 @@ pub(super) async fn handle_shell_create(
     // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
     // (typically the portable runtime/ dir) instead of the project dir.
     //
-    // In WSL the cwd is a path inside the distro, given as is, and the agent's
-    // own (Windows) directory is no fallback for it: the distro's home is.
-    let effective_cwd = if wsl_distro.is_some() {
+    // In WSL or over SSH the cwd is a path on the other side, given as is, and
+    // the agent's own directory is no fallback for it: the remote home is.
+    let effective_cwd = if remote {
         req.cwd.clone()
     } else {
         req.cwd.clone().or_else(|| {
@@ -62,7 +72,7 @@ pub(super) async fn handle_shell_create(
     // inside a bash shell and emit MSYS paths like `/c/Users/asafe/project`;
     // passing those straight to `Command::current_dir` fails with os error 267
     // (ERROR_DIRECTORY). This converts them to native form and expands `~`.
-    let effective_cwd = if wsl_distro.is_some() {
+    let effective_cwd = if remote {
         effective_cwd
     } else {
         effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c))
@@ -104,22 +114,40 @@ pub(super) async fn handle_shell_create(
     crate::backend::account_login_guard::strip_account_login(&mut effective_env);
     // WSL passes on only what WSLENV names: the caller's own variables and the
     // gh guard, never the rest of the agent's env.
-    let wsl_args = wsl_distro.as_ref().map(|distro| {
-        effective_env.insert(
-            "WSLENV".to_string(),
-            crate::backend::remote::wsl::wslenv_with(
-                &std::env::var("WSLENV").unwrap_or_default(),
-                caller_keys.iter().map(String::as_str),
-            ),
-        );
-        crate::backend::remote::wsl::launch(
-            distro,
-            &req.cmd,
-            &[],
-            effective_cwd.as_deref().unwrap_or_default(),
-        )
-        .args
-    });
+    let cwd_there = effective_cwd.as_deref().unwrap_or_default();
+    let mut askpass_secret = None;
+    let launch = match &target {
+        AgentTarget::Local => None,
+        AgentTarget::Wsl(distro) => {
+            effective_env.insert(
+                "WSLENV".to_string(),
+                crate::backend::remote::wsl::wslenv_with(
+                    &std::env::var("WSLENV").unwrap_or_default(),
+                    caller_keys.iter().map(String::as_str),
+                ),
+            );
+            let args = crate::backend::remote::wsl::launch(distro, &req.cmd, &[], cwd_there).args;
+            Some(("wsl.exe".to_string(), args))
+        }
+        AgentTarget::Ssh(dest) => {
+            use crate::backend::remote::{askpass, ssh};
+            let (Some(ssh_path), Some(askpass_program)) = (ssh::binary(), askpass::program()) else {
+                let e = "this AgentMux has no ssh or no askpass helper (agentmux-bashwrap) to run an agent's SSH command with";
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+            };
+            let secret = askpass::grant(askpass::AskpassGrant {
+                agent_block_id: req.agent_block_id.clone(),
+                agent: effective_env.get("AGENTMUX_AGENT_ID").cloned().unwrap_or_else(|| "an agent".into()),
+                connection: req.connection.clone().unwrap_or_default(),
+            });
+            let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
+            effective_env.extend(askpass::ssh_env(&secret, &askpass_program, &local_url, &state.auth_key));
+            askpass_secret = Some(secret);
+            let control = ssh::control_dir(&crate::backend::base::get_mux_config_dir());
+            let args = ssh::launch_exec(dest, &req.cmd, cwd_there, control.as_deref());
+            Some((ssh_path.to_string_lossy().into_owned(), args))
+        }
+    };
 
     tracing::info!(
         block_id = %req.agent_block_id,
@@ -127,6 +155,7 @@ pub(super) async fn handle_shell_create(
         cmd = %req.cmd,
         cwd = ?effective_cwd,
         wsl = ?wsl_distro,
+        ssh = matches!(target, AgentTarget::Ssh(_)),
         "shell.create"
     );
 
@@ -158,8 +187,9 @@ pub(super) async fn handle_shell_create(
         block_id: req.agent_block_id,
         cmd: req.cmd,
         title,
-        cwd: if wsl_args.is_some() { None } else { effective_cwd },
-        wsl_args,
+        cwd: if launch.is_some() { None } else { effective_cwd },
+        launch,
+        askpass_secret,
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),

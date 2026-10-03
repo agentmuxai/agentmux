@@ -27,21 +27,31 @@ pub(super) async fn handle_pty_shell_create(
 ) -> impl IntoResponse {
     // Where the shell runs, checked the way a pane's connection is: a refused
     // one fails the call with its reason rather than opening a local shell.
-    let wsl_distro = match super::app_api::connections::for_agent(
-        &state.broker,
-        req.connection.as_deref(),
-    )
-    .await
-    {
-        Ok(d) => d,
+    use super::app_api::connections::{self, AgentTarget};
+    let target = match connections::for_agent(&state.broker, req.connection.as_deref()).await {
+        Ok(t) => t,
         Err(e) => {
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
     };
-    let connection = match &wsl_distro {
-        Some(d) => crate::backend::remote::ConnTarget::Wsl(d.clone()).name(),
-        None => "local".to_string(),
+    let connection = match &target {
+        AgentTarget::Local => "local".to_string(),
+        AgentTarget::Wsl(d) => crate::backend::remote::ConnTarget::Wsl(d.clone()).name(),
+        AgentTarget::Ssh(dest) => crate::backend::remote::ConnTarget::Ssh(dest.clone()).name(),
     };
+    // An SSH host runs with the user's identity: their consent first, and the
+    // askpass helper must exist, since its prompts may never reach the
+    // terminal the agent reads (`remote::askpass`).
+    if let AgentTarget::Ssh(_) = &target {
+        if crate::backend::remote::askpass::program().is_none() {
+            let e = "this AgentMux has no askpass helper (agentmux-bashwrap) to run an agent's SSH shell with";
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &connection, "an interactive shell (PtyShell)").await {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
+        }
+    }
+    let remote = !matches!(target, AgentTarget::Local);
     let existing_id = state
         .mstore
         .get::<crate::backend::obj::Block>(&req.agent_block_id)
@@ -116,11 +126,11 @@ pub(super) async fn handle_pty_shell_create(
     // A WSL shell is the distro's own login shell (`wsl.exe -d`), which has no
     // such handshake, and `cmd.exe` would be looked up inside the distro.
     #[cfg(windows)]
-    if wsl_distro.is_none() {
+    if !remote {
         meta.insert(blockcontroller::META_KEY_CMD.to_string(), json!("cmd.exe"));
         meta.insert("cmd:interactive".to_string(), json!(true));
     }
-    if wsl_distro.is_some() {
+    if remote {
         meta.insert(blockcontroller::META_KEY_CONNECTION.to_string(), json!(connection));
     }
     // If the caller didn't supply a cwd, fall back to the agent block's own
@@ -130,7 +140,18 @@ pub(super) async fn handle_pty_shell_create(
     // (typically the portable runtime/ dir), not the agent's worktree.
     //
     // In WSL the cwd is a distro path, kept as given; no Windows fallback.
-    if wsl_distro.is_some() {
+    if let AgentTarget::Ssh(_) = &target {
+        let agent = state
+            .mstore
+            .get::<crate::backend::obj::Block>(&req.agent_block_id)
+            .ok()
+            .flatten()
+            .and_then(|b| b.meta.get("cmd:env").and_then(|e| e.get("AGENTMUX_AGENT_ID")).and_then(|v| v.as_str()).map(str::to_string))
+            .unwrap_or_else(|| "an agent".to_string());
+        meta.insert(crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.to_string(), json!(req.agent_block_id));
+        meta.insert(crate::backend::remote::askpass::META_KEY_AGENT.to_string(), json!(agent));
+    }
+    if remote {
         if let Some(cwd) = req.cwd.as_deref().filter(|c| !c.trim().is_empty()) {
             meta.insert(blockcontroller::META_KEY_CMD_CWD.to_string(), json!(cwd));
         }
@@ -146,7 +167,7 @@ pub(super) async fn handle_pty_shell_create(
                 if cwd.is_empty() { None } else { Some(cwd) }
             })
     });
-    let effective_cwd = effective_cwd.filter(|_| wsl_distro.is_none());
+    let effective_cwd = effective_cwd.filter(|_| !remote);
     if let Some(cwd) = &effective_cwd {
         // Same MSYS→native normalization createsubblock's WS handler applies —
         // the PTY spawn path reads cmd:cwd raw with no conversion, so a
