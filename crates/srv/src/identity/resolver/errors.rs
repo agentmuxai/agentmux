@@ -31,7 +31,7 @@ pub enum SpawnGateError {
     /// poisons the `Store` mutex for every later call). The gate FAILS
     /// CLOSED on this: an open fallback would silently convert one panic
     /// anywhere in the store into a permanent, systemic bypass of the
-    /// oauth gate (reagent P1, PR #2164 round 1). A
+    /// oauth gate (#2164). A
     /// blocked spawn is retryable and visible; a silent ambient launch
     /// is neither.
     InjectionUnavailable { detail: String },
