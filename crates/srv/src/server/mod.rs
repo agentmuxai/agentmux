@@ -91,6 +91,7 @@ use agentmux_common::api_types::{
 mod state;
 mod routes;
 mod http_health;
+mod http_fleet;
 mod http_shell;
 mod http_pty_shell;
 mod http_open;
@@ -102,6 +103,7 @@ mod auth;
 pub use state::*;
 pub use routes::*;
 use http_health::*;
+use http_fleet::*;
 pub(crate) use http_shell::*;
 use http_pty_shell::*;
 use http_open::*;

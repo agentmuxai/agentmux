@@ -118,6 +118,10 @@ pub struct AppState {
     /// place — advertising without listening is the "discovered but
     /// unreachable" state described in `backend::lan_listeners`.
     pub lan_listeners: Arc<crate::backend::lan_listeners::LanListenerSupervisor>,
+    /// The names-only fleet feed behind `/agentmux/fleet` and
+    /// `/agentmux/fleet/events` (`backend::fleet_feed`). Its change-detection
+    /// task is started by `main.rs` once the shutdown token exists.
+    pub fleet_feed: Arc<crate::backend::fleet_feed::FleetFeed>,
     /// Language Server Protocol supervisor — owns the lifecycle of LSP
     /// server child processes (one per workspace/language) and proxies
     /// LSP messages between the editor pane and the server.

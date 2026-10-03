@@ -23,6 +23,7 @@ use tokio::sync::oneshot;
 
 use super::eventbus::{EventBus, WSEventType};
 
+mod lan_instances;
 mod udp_peers;
 pub(crate) use udp_peers::DESKTOP_DISCOVERY_PORT;
 
@@ -116,6 +117,10 @@ const UDP_RESPONSE_TYPE: &str = "agentmux_discover_response";
 /// Wire-protocol version. Bump alongside the mobile client if the schema
 /// changes; `is_valid_probe` rejects anything else.
 const UDP_PROTOCOL_VERSION: u64 = 1;
+/// How often an instance that could not bind `UDP_DISCOVERY_PORT` tries
+/// again, so another LAN-enabled channel on this host takes over the probe
+/// port when its holder stops (SPEC_LAN_FLEET_FEED_2026_10_03.md §3).
+const UDP_RESPONDER_RETRY: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Build the JSON response payload for a valid probe. Pure/free function
 /// (no `&self`) so it is trivially testable without spinning up a full
@@ -336,6 +341,14 @@ pub struct LanDiscovery {
     /// zero and the loop would otherwise keep issuing authenticated requests
     /// to peers forever — leaking one orphaned task per disable/enable cycle.
     agent_names_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Cancels `instance_record_loop`. Same contract as `udp_cancel`.
+    instance_record_cancel: Mutex<Option<oneshot::Sender<()>>>,
+    /// Where this instance's `lan_instances` record is written; `None` when
+    /// there is nowhere to write it (see `lan_instances::instances_dir`).
+    instances_dir: Option<std::path::PathBuf>,
+    /// `true` while the record may be (re)written; cleared for good by
+    /// `withdraw_instance_record`.
+    instance_record_live: Mutex<bool>,
     /// IPv4 addresses `mdns-sd` reported announcing our service on, from its
     /// monitor channel. An interface whose socket failed to bind never appears
     /// here (see `lan_mdns_health`). Filled by `monitor_loop`.
@@ -524,6 +537,9 @@ impl LanDiscovery {
             udp_cancel: Mutex::new(None),
             udp_peer_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
+            instance_record_cancel: Mutex::new(None),
+            instances_dir: lan_instances::instances_dir(),
+            instance_record_live: Mutex::new(true),
             announced_v4: announced_v4.clone(),
             monitored: monitor.is_some(),
             started_at: std::time::Instant::now(),
@@ -569,6 +585,14 @@ impl LanDiscovery {
                 .clone()
                 .agent_names_refresh_loop(names_cancel_rx),
         );
+
+        // Lists this instance as a sibling for whichever channel on this host
+        // holds the UDP probe port (`lan_instances`). Written now, then kept
+        // fresh; `shutdown()` withdraws it.
+        discovery.publish_instance_record();
+        let (record_cancel_tx, record_cancel_rx) = oneshot::channel();
+        *discovery.instance_record_cancel.lock() = Some(record_cancel_tx);
+        tokio::spawn(discovery.clone().instance_record_loop(record_cancel_rx));
 
         tracing::info!(
             instance_id = %instance_id,
@@ -787,10 +811,11 @@ impl LanDiscovery {
         Ok(buf)
     }
 
-    /// Build the JSON response payload for this instance's identity — see
+    /// Build the JSON identity payload for this instance — see
     /// `probe_response_json` for the pure field-assembly logic shared with
-    /// tests.
-    fn build_probe_response(&self) -> serde_json::Value {
+    /// tests. Desktop peers get this (`udp_peers`); phones get
+    /// [`Self::build_probe_response`].
+    fn build_identity_response(&self) -> serde_json::Value {
         let mut response = probe_response_json(
             &self.instance_id,
             &self.hostname,
@@ -805,6 +830,16 @@ impl LanDiscovery {
         response
     }
 
+    /// The 47891 reply: the identity payload plus `siblings`, the other
+    /// LAN-enabled channels on this host (`lan_instances`), kept within one
+    /// datagram (`lan_instances::MAX_REPLY_BYTES`). Each sibling carries its
+    /// own `lan_key`, which it already broadcasts over mDNS.
+    fn build_probe_response(&self) -> serde_json::Value {
+        let mut response = self.build_identity_response();
+        lan_instances::attach_siblings(&mut response, &self.sibling_entries(), lan_instances::MAX_REPLY_BYTES);
+        response
+    }
+
     /// UDP broadcast-probe responder loop (Layer 2 discovery fallback).
     ///
     /// Binds `0.0.0.0:UDP_DISCOVERY_PORT` and answers valid probes from
@@ -815,29 +850,62 @@ impl LanDiscovery {
     /// on Windows `SO_REUSEADDR` lets a second process silently steal a UDP
     /// port already owned by another — an inappropriate risk for a socket
     /// that hands out `auth_key`. If the bind fails (most likely because
-    /// another local instance already holds the port), this task logs and
-    /// exits quietly — mDNS discovery (already running via `event_loop`)
-    /// is unaffected, matching the "never fail `start()` over this" contract.
+    /// another local instance already holds the port), this task retries
+    /// every `UDP_RESPONDER_RETRY` until it gets the port or is cancelled, so
+    /// the next LAN-enabled channel takes over when the holder stops. mDNS
+    /// discovery (already running via `event_loop`) is unaffected either way,
+    /// matching the "never fail `start()` over this" contract.
     ///
     /// We do not call `set_broadcast(true)`: that flag is only required to
     /// *send* to a broadcast address, and this socket only receives (probes
     /// arrive as broadcast/subnet-broadcast datagrams addressed to us, which
     /// requires no special socket option on the receiving end) and replies
     /// with a plain unicast send back to the probe's source address.
-    async fn udp_responder_loop(self: Arc<Self>, mut cancel_rx: oneshot::Receiver<()>) {
-        let socket = match UdpSocket::bind(("0.0.0.0", UDP_DISCOVERY_PORT)).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::debug!(
-                    port = UDP_DISCOVERY_PORT,
-                    "UDP discovery responder not started (bind failed, likely a second \
-                     local instance already holds this port): {e}"
-                );
-                return;
+    async fn udp_responder_loop(self: Arc<Self>, cancel_rx: oneshot::Receiver<()>) {
+        self.udp_responder_loop_on(UDP_DISCOVERY_PORT, UDP_RESPONDER_RETRY, cancel_rx)
+            .await;
+    }
+
+    /// [`Self::udp_responder_loop`] on a given port and retry interval, so a
+    /// test can drive the takeover without the production port.
+    async fn udp_responder_loop_on(
+        self: Arc<Self>,
+        port: u16,
+        retry_every: std::time::Duration,
+        mut cancel_rx: oneshot::Receiver<()>,
+    ) {
+        let mut retrying = false;
+        let socket = loop {
+            match UdpSocket::bind(("0.0.0.0", port)).await {
+                Ok(s) => break s,
+                Err(e) => {
+                    // Logged once, not per attempt: a second channel on this
+                    // host retries for as long as the holder runs.
+                    if !retrying {
+                        tracing::debug!(
+                            port,
+                            "UDP discovery responder waiting for the port (bind failed, likely \
+                             another local instance holds it); retrying every {}s: {e}",
+                            retry_every.as_secs()
+                        );
+                        retrying = true;
+                    }
+                    tokio::select! {
+                        _ = tokio::time::sleep(retry_every) => {}
+                        _ = &mut cancel_rx => {
+                            tracing::debug!("UDP discovery responder stopping before it got the port");
+                            return;
+                        }
+                    }
+                }
             }
         };
 
-        tracing::debug!(port = UDP_DISCOVERY_PORT, "UDP discovery responder listening");
+        if retrying {
+            tracing::info!(port, "UDP discovery responder took over the probe port");
+        } else {
+            tracing::debug!(port, "UDP discovery responder listening");
+        }
 
         let mut buf = [0u8; 1024];
         loop {
@@ -1208,6 +1276,10 @@ impl LanDiscovery {
         if let Some(tx) = self.agent_names_cancel.lock().take() {
             let _ = tx.send(());
         }
+        if let Some(tx) = self.instance_record_cancel.lock().take() {
+            let _ = tx.send(());
+        }
+        self.withdraw_instance_record();
         if let Err(e) = self.daemon.unregister(&self.service_fullname) {
             // Likely already unregistered; do not warn loudly.
             tracing::debug!("mDNS unregister returned: {e}");
@@ -1663,6 +1735,15 @@ impl LanDiscoveryController {
             self.auth_key.clone(),
             self.event_bus.clone(),
         )
+    }
+
+    /// Remove this instance's `lan_instances` record on clean process exit,
+    /// when `LanDiscovery`'s own `Drop` may never run (its tasks hold `Arc`s).
+    /// Leaves mDNS and the sockets alone; the process is going away.
+    pub fn withdraw_instance_record(&self) {
+        if let Some(d) = self.slot.read().as_ref() {
+            d.withdraw_instance_record();
+        }
     }
 
     /// Should a daemon be running right now, per the last `apply`?
@@ -2352,6 +2433,9 @@ mod handle_event_tests {
             udp_cancel: Mutex::new(None),
             udp_peer_cancel: Mutex::new(None),
             agent_names_cancel: Mutex::new(None),
+            instance_record_cancel: Mutex::new(None),
+            instances_dir: None,
+            instance_record_live: Mutex::new(false),
             announced_v4: Arc::new(Mutex::new(BTreeSet::new())),
             monitored: true,
             started_at: std::time::Instant::now(),

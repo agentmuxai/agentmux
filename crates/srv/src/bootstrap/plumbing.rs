@@ -130,6 +130,12 @@ pub fn build_app_state(
     // docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
     let dev_proxy = crate::backend::dev_proxy::DevProxyRegistry::new();
 
+    let fleet_feed = Arc::new(crate::backend::fleet_feed::FleetFeed::new(
+        net.hostname.clone(),
+        crate::backend::reactive::registry::local_channel_id(),
+        version.clone(),
+    ));
+
     AppState {
         auth_key: config.auth_key.clone(),
         lan_key: config.lan_key.clone(),
@@ -153,6 +159,7 @@ pub fn build_app_state(
         history_service: bg.history_service,
         lan_discovery: net.lan_discovery.clone(),
         lan_listeners: net.lan_listeners.clone(),
+        fleet_feed,
         lsp_supervisor: net.lsp_supervisor.clone(),
         local_web_url: net.local_web_url.clone(),
         // Bounded request timeout: cross-instance reactive-inject forwards
