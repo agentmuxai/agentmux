@@ -76,7 +76,9 @@ export function useLaunchAuthGate(opts: UseLaunchAuthGateOpts) {
     // Bypasses:
     // - `isContinue` — prior launch already produced creds.
     // - API-key providers (muxcode/qwen/kimi/pi) — `launch-flow.ts` Phase 2
-    //   runs their own auth check and login instead (#847).
+    //   checks their auth instead; if it fails it only posts a notification
+    //   and returns "auth_failed", and login starts when the user clicks
+    //   "Log in" (#847).
     //
     // Hard auth-blockers: launch CANNOT proceed without the user
     // completing OAuth. Drives both the panel mount AND the launch
