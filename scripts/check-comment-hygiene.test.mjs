@@ -56,6 +56,13 @@ describe("lexSource: TypeScript", () => {
         expect(info.lines[0].text).toBe("// real");
     });
 
+    it("reads a regex literal after an arrow, keeping its whitespace and hiding its //", () => {
+        expect(ts("const r = () => /a b/;").code).not.toBe(ts("const r = () => /a  b/;").code);
+        expect(ts("const r = () => /x\\/\\//; // real").lines[0].text).toBe("// real");
+        // A comparison is still not a regex start.
+        expect(ts("const c = a > /* note */ b;").code).toBe(ts("const c = a > b;").code);
+    });
+
     it("does not read JSX closing tags as a regex", () => {
         const info = ts("const a = <p>x</p>; // note\n");
         expect(info.lines[0].text).toBe("// note");

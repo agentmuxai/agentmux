@@ -97,6 +97,7 @@ export function lexSource(src, lang) {
     // `return x`.
     let ws = null;
     let prevSig = "";
+    let prevTwo = "";
     let word = "";
 
     const flushWs = () => {
@@ -112,6 +113,7 @@ export function lexSource(src, lang) {
         out.push(ch);
         cur().code = true;
         prevSig = ch;
+        prevTwo = (prevTwo + ch).slice(-2);
         word = IDENT.test(ch) ? word + ch : "";
     };
     const str = (ch) => {
@@ -119,6 +121,7 @@ export function lexSource(src, lang) {
         out.push(ch);
         cur().code = true;
         prevSig = '"';
+        prevTwo = "";
         word = "";
     };
     const comment = (ch, kind) => {
@@ -287,7 +290,7 @@ export function lexSource(src, lang) {
             i++;
             continue;
         }
-        if (!rust && c === "/" && (prevSig === "" || REGEX_AFTER_CHARS.includes(prevSig) || (IDENT.test(prevSig) && REGEX_AFTER_WORDS.has(word)))) {
+        if (!rust && c === "/" && (prevSig === "" || prevTwo === "=>" || REGEX_AFTER_CHARS.includes(prevSig) || (IDENT.test(prevSig) && REGEX_AFTER_WORDS.has(word)))) {
             let j = i + 1;
             let inClass = false;
             let ok = false;
