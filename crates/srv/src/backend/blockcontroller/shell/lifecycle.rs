@@ -424,14 +424,19 @@ impl Controller for ShellController {
         // A pane on a connection AgentMux cannot run must not quietly get a
         // local shell under a remote name: it gets no shell, and its connection
         // overlay says why (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md).
-        // WSL runs on Windows (P1); SSH arrives in P2. The test-only mock
-        // factory keeps its own path.
+        // WSL runs on Windows (P1); SSH wherever the system `ssh` is (P2). The
+        // test-only mock factory keeps its own path.
         if self.conn_factory.lock().unwrap().is_none() {
             let conn = Self::get_conn_name(&block_meta);
             match crate::backend::remote::ConnTarget::parse(&conn) {
                 Ok(target) if target.is_local() => {}
                 #[cfg(windows)]
                 Ok(crate::backend::remote::ConnTarget::Wsl(_)) => {}
+                Ok(crate::backend::remote::ConnTarget::Ssh(_))
+                    if crate::backend::remote::ssh::binary().is_some() => {}
+                Ok(crate::backend::remote::ConnTarget::Ssh(_)) => {
+                    return Err(crate::backend::remote::ssh::missing_binary_message());
+                }
                 Ok(target) => {
                     return Err(format!(
                         "connection {} is not available yet: this version of AgentMux runs local terminals only",
@@ -642,6 +647,14 @@ impl Controller for ShellController {
             Ok(crate::backend::remote::ConnTarget::Wsl(d)) if cfg!(windows) => Some(d),
             _ => None,
         };
+        // An SSH pane runs the system `ssh` (remote::ssh). Its cwd is a path on
+        // the remote host, handed to the remote shell, never set here.
+        let ssh_plan = match crate::backend::remote::ConnTarget::parse(&conn_name) {
+            Ok(crate::backend::remote::ConnTarget::Ssh(dest)) => {
+                crate::backend::remote::ssh::binary().map(|path| (path, dest))
+            }
+            _ => None,
+        };
         let mut cmd = if let Some(distro) = &wsl_distro {
             let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
             let plan = crate::backend::remote::wsl::launch(distro, &cmd_str, &cmd_args, &cwd);
@@ -665,6 +678,16 @@ impl Controller for ShellController {
                     overrides.vars.iter().map(|(k, _)| k.as_str()),
                 ),
             );
+            c
+        } else if let Some((ssh_path, dest)) = &ssh_plan {
+            let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
+            let control = crate::backend::remote::ssh::control_dir(&crate::backend::base::get_mux_config_dir());
+            let args = crate::backend::remote::ssh::launch(dest, &cmd_str, &cmd_args, &cwd, control.as_deref());
+            tracing::info!(block_id = %self.block_id, dest = %dest.destination, args = ?args, "ssh spawn path");
+            let mut c = CommandBuilder::new(ssh_path);
+            c.args(args.iter().map(String::as_str));
+            c.env("TERM", "xterm-256color");
+            c.env("COLORTERM", "truecolor");
             c
         } else if !cmd_str.is_empty() && (!cmd_args.is_empty() || interactive) {
             // Direct spawn: cmd:args provided or cmd:interactive set.
@@ -886,7 +909,7 @@ impl Controller for ShellController {
 
         // Set working directory if specified
         let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
-        if !cwd.is_empty() && wsl_distro.is_none() {
+        if !cwd.is_empty() && wsl_distro.is_none() && ssh_plan.is_none() {
             cmd.cwd(&cwd);
         }
 
@@ -1002,7 +1025,10 @@ impl Controller for ShellController {
 
         // Seed cmd:cwd in block meta immediately after spawn so drag-and-drop works
         // before the shell emits its first OSC 7 (or for shells without integration).
-        if let Some(ref store) = self.mstore {
+        // Not for an SSH or WSL pane: its cwd is a path on the other side, and
+        // this machine's directory would be sent there on the next launch.
+        let remote_pane = ssh_plan.is_some() || wsl_distro.is_some();
+        if let Some(store) = self.mstore.as_ref().filter(|_| !remote_pane) {
             let effective_cwd = if !cwd.is_empty() {
                 cwd.clone()
             } else {
@@ -1257,6 +1283,15 @@ impl Controller for ShellController {
         let tab_id_wait = self.tab_id.clone();
         let agent_id_wait = agent_id_for_jekt.clone();
         let broker_wait = self.broker.clone();
+        // An SSH pane holds its connection open from here to the wait task's
+        // pane_ended (remote::status). Counted only now, after every step that
+        // can still fail and return, so each start has exactly one end.
+        if ssh_plan.is_some() {
+            crate::backend::remote::status::pane_started(self.broker.as_deref(), &conn_name);
+        }
+        let ssh_wait = ssh_plan
+            .as_ref()
+            .map(|(_, dest)| (conn_name.clone(), dest.destination.clone()));
         // For the agent-lease release below: clearing the `term:agentlockuntil`
         // meta copy (not just the in-memory registry) needs both, since that
         // is what the frontend's own gate reads.
@@ -1302,25 +1337,24 @@ impl Controller for ShellController {
             // `block_id_wait` in (rather than moving the outer binding)
             // since the rest of this task still needs it afterward.
             let block_id_reap = block_id_wait.clone();
-            let exit_code = tokio::task::spawn_blocking(move || {
+            let (exit_code, raw_exit_code) = tokio::task::spawn_blocking(move || {
                 let mut child = child;
                 match child.wait() {
-                    Ok(status) => {
-                        if status.success() {
-                            0
-                        } else {
-                            // portable-pty ExitStatus doesn't expose raw code on all platforms
-                            1
-                        }
-                    }
+                    // The pane keeps its 0 / 1 / -1; the raw code is for an
+                    // SSH pane, where 255 means ssh could not connect.
+                    Ok(status) => (if status.success() { 0 } else { 1 }, Some(status.exit_code())),
                     Err(e) => {
                         tracing::warn!("wait error for block {}: {}", block_id_reap, e);
-                        -1
+                        (-1, None)
                     }
                 }
             })
             .await
             .expect("PTY child wait task panicked");
+            if let Some((conn, dest)) = &ssh_wait {
+                let error = raw_exit_code.and_then(|code| crate::backend::remote::ssh::exit_message(dest, code));
+                crate::backend::remote::status::pane_ended(broker_wait.as_deref(), conn, error.as_deref());
+            }
 
             tracing::info!(block_id = %block_id_wait, exit_code = exit_code, "process exited");
 
