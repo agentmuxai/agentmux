@@ -157,6 +157,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentmux-remote"
+version = "0.59.7"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "agentmux-srv"
 version = "0.59.7"
 dependencies = [
