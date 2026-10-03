@@ -27,7 +27,8 @@
 //! orchestrator: dispatch a command, execute whatever the returned events
 //! say to do (call `is_fresh()`/`refresh()`), dispatch the result back in.
 //! Same split as every other reducer in this codebase (e.g. `agentmux-cef`'s
-//! host reducer emitting `HostEvent::Effect` for `AppState` to execute).
+//! host reducer emitting `WindowOpacityApplied`, which its IPC handler applies
+//! after dispatch).
 //!
 //! Preserve-on-failure (never overwrite a valid stored credential with a
 //! failed/partial refresh result) is NOT enforced here — it's the
