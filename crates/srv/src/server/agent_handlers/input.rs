@@ -1103,7 +1103,7 @@ pub async fn run_agent_turn(
             // AGENTMUX_LOCAL_URL is never explicitly set in env_vars for a host
             // agent either (see the PATH-block comment above) — a host
             // subprocess just inherits it from this process's own env
-            // (bootstrap.rs). `docker exec` over the Docker socket never
+            // (bootstrap/network.rs). `docker exec` over the Docker socket never
             // inherits host process env, so a container agent gets no sidecar
             // URL at all unless it's injected here. Rewritten to
             // host.docker.internal (routable from inside the container via

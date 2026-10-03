@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Armory Bundle Format (ABF) import — Phase 3
-// (crates/srv/src/server/app_api/bundle.rs). Window-scoped, no agent_id
+// (crates/srv/src/server/app_api/bundle/import.rs). Window-scoped, no agent_id
 // gate, same as the rest of `bundle.*`. See
 // docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 

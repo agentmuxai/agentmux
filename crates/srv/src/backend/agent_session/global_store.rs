@@ -38,9 +38,10 @@ pub fn global_transcript_store() -> Option<&'static Arc<FileStore>> {
 ///
 /// The block's `agentId` meta IS the agent `definition_id` (the same value the
 /// snapshot RPCs and `blockfile:read_range` fallback key on — see
-/// `app_api.rs`), so the zone the hot-path mirror *writes* and the zone the
-/// read fallback *reads* are identical by construction. Returns `None` when the
-/// block isn't agent-anchored or carries an invalid id (no mirror/fallback).
+/// `app_api/blockfile.rs`), so the zone the hot-path mirror *writes* and the
+/// zone the read fallback *reads* are identical by construction. Returns `None`
+/// when the block isn't agent-anchored or carries an invalid id (no
+/// mirror/fallback).
 pub fn agent_zone_for_block_meta(meta: &crate::backend::obj::MetaMapType) -> Option<String> {
     let def_id = crate::backend::obj::meta_get_string(meta, "agentId", "");
     if is_valid_definition_id(&def_id) {

@@ -125,7 +125,7 @@ pub async fn connect_to_srv(
                         // notice via the normal BrowserView-unmount ->
                         // invokeCommand("browser_pane_close") path. close()
                         // is a guaranteed no-op for a block_id with no
-                        // browser_panes entry (browser_panes.rs), so calling
+                        // browser_panes entry (browser_panes/close.rs), so calling
                         // it unconditionally for every cascaded block_id —
                         // including a large tab/workspace delete where only
                         // one block happens to be a browser pane — is safe.

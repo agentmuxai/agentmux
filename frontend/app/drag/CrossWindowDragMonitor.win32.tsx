@@ -311,7 +311,7 @@ async function performTearOff(
         // window's `initApp` → `initHostNewWindow` path attaches to
         // that workspace via the standard `?workspaceId=` URL param.
         // The floater renders the workspace in floating mode (no tab
-        // bar / widgets / status bar — see App.tsx floatingPaneId branch).
+        // bar / widgets / status bar — see app.tsx floatingPaneId branch).
         //
         // Tab tear-off (branch below) is unchanged — tabs continue
         // to spawn a brand-new instance with its own taskbar entry.

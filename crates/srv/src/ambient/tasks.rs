@@ -265,8 +265,9 @@ pub(crate) async fn generate_subagent_name(
 /// eagerly, the first time its first member is observed live (never called
 /// for a Solo dispatch — a Solo dispatch's name IS its one member's
 /// `display_name`, already covered by `generate_subagent_name`; never called
-/// during cold-backfill replay — see `subagent_watcher.rs`'s
-/// `trigger_eager_naming`/`process_jsonl_change`'s `live` gate).
+/// during cold-backfill replay — see the `live` gate on
+/// `process_jsonl_change`'s `trigger_eager_naming` call in
+/// `crates/srv/src/backend/subagent_watcher/jsonl.rs`).
 ///
 /// A workflow has no single task prompt the way a solo call does (members
 /// can have different prompts) — this reads `first_member_agent_id`'s own

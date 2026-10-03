@@ -13,7 +13,7 @@
  * docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md.
  *
  * Purely presentational — no data fetching/filtering/sorting of its own.
- * `NativeMemoryManager.tsx` owns the signals and does the actual filtering.
+ * `native-memory-manager.tsx` owns the signals and does the actual filtering.
  */
 
 import { Show, type Accessor, type JSX } from "solid-js";

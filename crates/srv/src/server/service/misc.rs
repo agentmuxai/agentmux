@@ -269,7 +269,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             WebReturnType::success_empty()
         }
 
-        // ---- App API (also reachable via WebSocket RPC in app_api.rs) ----
+        // ---- App API (also reachable via WebSocket RPC in app_api/) ----
         ("agent", "define") => {
             let data: crate::backend::rpc_types::CommandAgentDefineData =
                 match service::get_arg(args, 0) {

@@ -462,11 +462,13 @@ pub(crate) fn open_window_with_kind(
     is_reproject: bool,
 ) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
-    // See `SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md` and the smoke retro
-    // at `docs/retro/smoke-test-0.33.586-and-pr5-plan-2026-05-02.md`:
-    // creating a top-level CEF window while a pane is in `Closing` hits
-    // a Chromium v146 deadlock (HiddenSinceOpen + IPC backpressure)
-    // that wedges the message loop. Frontend should retry on next tick.
+    // The smoke retro at
+    // `docs/retro/smoke-test-0.33.586-and-pr5-plan-2026-05-02.md` blamed
+    // a Chromium v146 deadlock (HiddenSinceOpen + IPC backpressure) on
+    // creating a top-level CEF window while a pane is in `Closing`;
+    // `docs/retro/h7-freeze-fix-retro-2026-05-02.md` later found that
+    // diagnosis wrong (the gate never fired). Frontend should retry on
+    // next tick.
     if state.any_browser_pane_closing() {
         tracing::warn!(
             target: "wfr:gate",
@@ -638,8 +640,8 @@ pub(crate) fn open_window_with_kind(
 /// unboundedly on every ordinary (launcher-survives) crash — the exact
 /// scenario this PR's own E2E test exercises — because nothing ever staged
 /// a deferred close for it. See `reproject_from_snapshot_and_stage_closures`,
-/// which both fast-path call sites (`launcher_ipc.rs`, `client/lifecycle.rs`)
-/// now use instead of calling this function directly.
+/// which both fast-path call sites (`launcher_ipc/mod.rs`,
+/// `client/lifecycle.rs`) now use instead of calling this function directly.
 pub(crate) fn reproject_from_snapshot(
     state: &Arc<AppState>,
     windows: &[agentmux_common::ipc::WindowSnapshot],
@@ -742,7 +744,7 @@ pub(crate) fn reproject_from_snapshot(
 /// `reproject_from_srv` entry, the old (nonexistent-to-us) state just
 /// lingers rather than being lost.
 ///
-/// Both fast-path call sites (`launcher_ipc.rs`'s `RunFastPath` arm,
+/// Both fast-path call sites (`launcher_ipc/mod.rs`'s `RunFastPath` arm,
 /// `client/lifecycle.rs`'s `ReplayFastPath` arm) use this instead of
 /// calling `reproject_from_snapshot` directly, so neither can regress back
 /// to silently discarding the recreated pairs.

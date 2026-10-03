@@ -89,7 +89,7 @@ function resolveBlockDef(widgetKey: WidgetKey): BlockDef | null {
 // successfully with zero errors while the frontend's reactive layout
 // subscription for that tab still isn't wired up yet, so the block never
 // renders. See EditorViewModel.openInNewTab in
-// frontend/view/editor/editor-model.ts.
+// frontend/app/view/editor/editor-model.ts.
 export async function waitForLayoutModel(tabId: string, timeoutMs = 2000): Promise<any | null> {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
@@ -208,7 +208,7 @@ function placeNode(
 // server-side uicontext.active_tab_id routing — closes the TOCTOU
 // race where the user could click away to another tab between the
 // frontend check and the server-side handler. See backend
-// crates/srv/src/server/service.rs `("object", "CreateBlock")`.
+// crates/srv/src/server/service/object.rs `("object", "CreateBlock")`.
 
 // Create a block on the explicit target tab. We pass `expectedTabId`
 // to ObjectService.CreateBlock so the server routes it correctly
@@ -227,7 +227,7 @@ function placeNode(
 // for that specific brand-new tab. Going through treeReducer() directly
 // sidesteps that gap entirely (same reactive path applyTabPreset already
 // relies on). See EditorViewModel.openInNewTab in
-// frontend/view/editor/editor-model.ts.
+// frontend/app/view/editor/editor-model.ts.
 export async function createBlockOnModel(
     expectedTabId: string,
     layoutModel: any,

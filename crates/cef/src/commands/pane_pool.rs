@@ -21,8 +21,8 @@ use std::collections::HashMap;
 use crate::state::{AppState, WindowKind};
 // `Task`/`WrapTask`/`ImplTask` are what `cef::wrap_task!` expands into — needed
 // in scope for the `DestroyPanePoolHwndTask` definition below (B.5 Part 1, issue
-// #2218). Named imports rather than `use cef::*` (the pattern browser_panes.rs
-// uses) to avoid widening this namespace.
+// #2218). Named imports rather than `use cef::*` (the pattern
+// browser_panes/mod.rs uses) to avoid widening this namespace.
 #[cfg(target_os = "windows")]
 use cef::{rc::Rc, ImplTask, Task, WrapTask};
 

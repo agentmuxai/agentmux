@@ -17,10 +17,9 @@
 // ── Pane lifecycle (H.1) ─────────────────────────────────────────────────
 
 /// Lifecycle state of a browser pane (the `defwidget@browser` widget). Held
-/// inside `HostState.browser_panes` keyed by `block_id`. Mirrors the existing
-/// `PaneStateMachine::BrowserPaneLifecycle` (pane/lifecycle.rs:28); the existing
-/// type stays during PR #2's a→e migration. PR #2 step e deletes the
-/// pane/lifecycle.rs version and migrates all readers to this one.
+/// inside `HostState.browser_panes` keyed by `block_id`. Replaces the legacy
+/// `PaneStateMachine::BrowserPaneLifecycle`, which Phase H PR #5 (#661)
+/// deleted; all readers now use this one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum BrowserPaneLifecycle {
@@ -32,8 +31,8 @@ pub enum BrowserPaneLifecycle {
     Closing { since: std::time::Instant },
 }
 
-/// Per-pane reducer-managed entry. Replaces `pane::lifecycle::BrowserPaneEntry`
-/// (lifecycle.rs:42) at PR #2 step e.
+/// Per-pane reducer-managed entry. Replaces the deleted
+/// `pane::lifecycle::BrowserPaneEntry`.
 #[derive(Clone, Debug)]
 #[allow(dead_code)]
 pub struct BrowserPaneEntry {
@@ -45,15 +44,15 @@ pub struct BrowserPaneEntry {
     /// request whose `window_label` differs from this must NOT be served by
     /// re-navigating the existing browser in the OLD window (that leaves the
     /// requested window black). See the `AlreadyLiveElsewhere` handling in
-    /// `reducer/panes.rs` + `browser_panes.rs`.
+    /// `reducer/panes.rs` + `browser_panes/mod.rs`.
     pub window_label: String,
 }
 
 // ── Pane window-placement state (pane-state reducer, Phase 0) ─────────────
 //
-// SPEC_PANE_STATE_REDUCER_2026-05-28.md (REVISION 2026-05-29 — folded into
-// HostState rather than a standalone PaneStateMachine, mirroring the Phase-H
-// consolidation that deleted `pane::lifecycle::PaneStateMachine`).
+// Added in #1154, folded into HostState rather than a standalone
+// PaneStateMachine, mirroring the Phase-H consolidation that deleted
+// `pane::lifecycle::PaneStateMachine`.
 //
 // This tracks the OS-window placement of a FLOATING pane (its
 // maximize/restore state + the rect to restore to). It is deliberately

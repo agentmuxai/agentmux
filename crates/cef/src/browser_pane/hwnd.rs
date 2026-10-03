@@ -216,7 +216,7 @@ pub static LAST_FOCUSED_BY_ROOT: std::sync::LazyLock<
 
 /// Single write helper called from both intentional-focus sites (the
 /// pane subclass in this module and `MainFocusReclaimTask` in
-/// `ui_tasks.rs`). Resolves `child`'s top-level ancestor via
+/// `ui_tasks/window.rs`). Resolves `child`'s top-level ancestor via
 /// `GetAncestor(GA_ROOT)` and stores the pair into `LAST_FOCUSED_BY_ROOT`.
 ///
 /// Safety: `child` must be a live HWND that the caller intentionally
@@ -270,8 +270,7 @@ static BROWSER_PANE_REDIRECT_LAST_AT: std::sync::LazyLock<
 
 /// Returns `true` iff the pane WM_SETFOCUS subclass should redirect to
 /// `root` via `SetFocus(root)`. Two guards, both motivated by the
-/// 2026-05-02 multi-window freeze investigation
-/// (`docs/specs/SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md`):
+/// 2026-05-02 multi-window freeze investigation:
 ///
 /// 1. **Cross-window refusal.** If a *different* top-level HWND currently
 ///    owns OS foreground (per `GetForegroundWindow()`), refuse to redirect.

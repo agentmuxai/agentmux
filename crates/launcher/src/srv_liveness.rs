@@ -50,7 +50,7 @@ use std::time::{Duration, Instant};
 ///
 /// Success = a response starting with `HTTP/1.1 200`. `web_endpoint` is
 /// `srv_result.web_endpoint` — a bare `host:port` (e.g. `127.0.0.1:54321`),
-/// NOT a URL: `emit_estart` (`crates/srv/src/bootstrap.rs`) writes
+/// NOT a URL: `emit_estart` (`crates/srv/src/bootstrap/shutdown.rs`) writes
 /// `web:127.0.0.1:{port}` with no scheme, and `parse_estart`
 /// (`srv_spawner.rs`) carries that through verbatim — the same convention
 /// `host_spawn.rs` relies on when it passes this value straight through as

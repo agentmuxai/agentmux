@@ -180,7 +180,7 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.2. These are
 /// readonly-once-set: an ABF's portability guarantee (it's self-describing
 /// about what it needs to run) depends on them never silently changing
-/// after creation, and the UI-only disabling in `memory-manager.tsx` is
+/// after creation, and the UI-only disabling in `bundle-manager.tsx` is
 /// advisory, not a guarantee — this is the actual enforcement.
 ///
 /// `existing = None` (fresh insert) or an existing row with `provider`/

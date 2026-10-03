@@ -333,7 +333,7 @@ pub struct ArchiveSummary {
 /// `output.state.json`. Returns `("", 0)` on any error.
 ///
 /// Mirrors the heuristics used by `read_session_preview` in
-/// `agent_handlers.rs` (skip the bootstrap "# Session Context" message
+/// `agent_handlers/mod.rs` (skip the bootstrap "# Session Context" message
 /// when a later user_message exists; cap at 240 chars).
 fn read_archive_preview(filestore: &FileStore, zone: &str) -> (String, usize) {
     let bytes = match filestore.read_file(zone, SNAPSHOT_FILE) {

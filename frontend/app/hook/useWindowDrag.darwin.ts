@@ -14,9 +14,9 @@
 //
 // On left-mousedown in a `data-drag-region` element + threshold-crossing
 // motion, we send ONE `start_window_drag` IPC. The host then runs a manual
-// move loop (run_macos_native_drag_loop in crates/cef/src/ui_tasks.rs) that
-// pumps the drag events and repositions the window via CEF set_bounds until
-// mouse-up. Mirrors the Linux model (which routes the same IPC to
+// move loop (run_macos_native_drag_loop in crates/cef/src/ui_tasks/drag.rs)
+// that pumps the drag events and repositions the window via CEF set_bounds
+// until mouse-up. Mirrors the Linux model (which routes the same IPC to
 // `CefWindow::BeginWindowDrag`); macOS stays on stock libcef.
 
 import { hostHas } from "@/app/host/host-caps";

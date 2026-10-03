@@ -276,7 +276,7 @@ pub fn run_pending_migrations(data_dir: &Path) -> Result<usize, String> {
     };
 
     // Per-migration BEGIN/END stderr lines, inside the AGENTMUXSRV-MIGRATING
-    // window `bootstrap.rs` already opens. Without this, srv's launcher-
+    // window `bootstrap/stores.rs` already opens. Without this, srv's launcher-
     // supervised splash shows a bare, silently-running "Backend startup"
     // clock for the whole migration batch — up to 30 minutes
     // (MIGRATION_LOCK_WAIT) — with no indication anything unusual is

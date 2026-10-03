@@ -876,9 +876,8 @@ fn is_instance_label(label: &str) -> bool {
 // thread with its own CFRunLoop (mirrors the Windows hook thread's
 // GetMessage pump). It must NEVER touch AppKit/NSWindow/CEF Views objects
 // directly — those require the main thread. This is not a theoretical
-// concern in this codebase: docs/investigations/
-// tab-drag-tearoff-crash-macos.md documents a real (pre-CEF-migration)
-// crash from exactly this mistake (AppKit calls off the main thread).
+// concern in this codebase: a real (pre-CEF-migration) crash came from
+// exactly this mistake (AppKit calls off the main thread).
 // Cross-window hit-testing therefore uses `CGWindowListCopyWindowInfo`, a
 // Core Graphics *window-server query* API that never touches our own
 // NSWindow objects and is thread-safe by design — the macOS analogue of

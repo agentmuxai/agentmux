@@ -12,8 +12,6 @@
 // pane renders normally outside the overlay region; inside it, the HWND
 // is transparent so the DOM overlay painted at the same screen position
 // shows through. Empty overlay set → clip cleared → full pane visibility.
-//
-// See `BROWSER_PANE_Z_ORDER_FOCUS_REPORT.md` Issue 1 for the full diagnosis.
 
 import { getApi } from "@/app/store/app-api";
 import { anyPaneIntersects, paneCount } from "@/app/platform/pane-rect-registry";
@@ -143,7 +141,7 @@ async function flushClip(): Promise<void> {
     //
     // Convert CSS px → physical px HERE. The host computes each pane's
     // geometry from GetWindowRect (physical px) and subtracts these overlay
-    // rects directly (browser_panes.rs::set_pane_overlay_clip — no DPI
+    // rects directly (browser_panes/clip.rs::set_pane_overlay_clip — no DPI
     // scaling on that side). A CSS-px rect therefore punches the airspace
     // hole in the wrong place and at the wrong size on any display scale
     // != 100%: black voids where the hole misses the overlay, and the pane

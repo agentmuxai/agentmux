@@ -8,7 +8,7 @@
  * the format without importing from each other's files.
  *
  * Format: `<slug(name)>-MMDDh`, local time. Same-hour collisions are
- * resolved server-side by `crates/srv/src/server/app_api.rs::
+ * resolved server-side by `crates/srv/src/server/app_api/agent_define.rs::
  * allocate_agent_workdir`, called from `WriteAgentConfigCommand`
  * when the frontend sets `auto_allocate: true`. The atomic mkdir +
  * `<base>-N` retry there is the source of truth for collision

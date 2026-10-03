@@ -742,7 +742,7 @@ pub fn isolated_auth_enabled() -> bool {
 }
 
 /// Which rule decided [`isolated_auth_enabled`]'s result — for boot-time
-/// diagnostics (see `bootstrap.rs`'s "shared store: attached" log line)
+/// diagnostics (see `bootstrap/stores.rs`'s "shared store: attached" log line)
 /// so a developer staring at a fresh, empty Armory can tell at a glance
 /// whether that's an explicit choice or the new channel default, rather
 /// than re-deriving it from two env vars by hand. Callers that only need
@@ -879,8 +879,8 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 /// `docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md`
 /// for the incident this closes.
 ///
-/// `CloudSubscriber::init_global` (`crates/srv/src/bootstrap.rs`) runs
-/// unconditionally on every launch and performs a real, synchronous
+/// `CloudSubscriber::init_global` (`crates/srv/src/bootstrap/background.rs`)
+/// runs unconditionally on every launch and performs a real, synchronous
 /// OS-keychain read of the single global `muxbus:global` credential
 /// almost immediately. On macOS that read requires interactive OS consent
 /// the first time a given code signature touches it — and every local

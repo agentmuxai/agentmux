@@ -141,7 +141,7 @@ fn filter_for_kind(bundles: Vec<Bundle>, manifest: &SeedManifest, kind: &str) ->
 }
 
 /// Run Operator Config seeding on startup. Unconditional, every boot, no
-/// feature flag — called from `bootstrap.rs` next to `agent_seed`'s own
+/// feature flag — called from `bootstrap/stores.rs` next to `agent_seed`'s own
 /// call.
 pub fn auto_seed_on_startup(store: &Arc<Store>) {
     let manifest: SeedManifest = match serde_json::from_str(SEED_MANIFEST) {

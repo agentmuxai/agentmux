@@ -3586,9 +3586,10 @@ mod fleet_tests {
 /// literal string `"null"`, not the `"{}"` every no-provenance write path
 /// already uses. This is the same bug class already fixed once in this
 /// PR's review history for the WS-RPC sibling
-/// (`NativeMemoryWriteProvenance` in rpc_types/memory.rs) — recurring here
-/// in the HTTP/App-API request struct that backs `handle_agent_memory_write`
-/// (the `MemoryWrite` MCP tool's actual write path).
+/// (`NativeMemoryWriteProvenance` in rpc_types/native_memory.rs) —
+/// recurring here in the HTTP/App-API request struct that backs
+/// `handle_agent_memory_write` (the `MemoryWrite` MCP tool's actual write
+/// path).
 #[test]
 fn agent_memory_write_provenance_req_defaults_a_missing_detail_to_an_empty_object() {
     let req: AgentMemoryWriteProvenanceReq = serde_json::from_str(r#"{"source":"human"}"#).unwrap();

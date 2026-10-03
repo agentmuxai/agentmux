@@ -115,7 +115,7 @@ pub fn migrate_from_sqlite_once(
     // dir, and NOT under the P0.3-re-rooted registry's parent (`<home>/shared/
     // agents`). `home` is `~/.agentmux` (main.rs derives it as the registry root's
     // 3rd ancestor: registry → agents → shared → home). Anchor migrated records on
-    // this real workspace root so the reader (`agent_handlers.rs` reconstructs
+    // this real workspace root so the reader (`agent_handlers/session.rs` reconstructs
     // `source_agents_base.join(working_dir)`) resolves the actual workspace in
     // EVERY channel. NB this deliberately differs from the live mirror, which
     // strips against the per-channel `AGENTMUX_AGENTS_DIR` — that anchor never

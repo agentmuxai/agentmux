@@ -372,7 +372,7 @@ describe("useAgentQuestions — handleCancel fallback", () => {
         await Promise.resolve();
 
         // Exact literal, not a substring match — this is the frontend half of
-        // the cross-file sync pinned by persistent.rs's
+        // the cross-file sync pinned by persistent/tests/send_input.rs's
         // ask_user_question_deny_message_matches_frontend_cancel_fallback_text.
         // See CANCEL_FALLBACK_MESSAGE's own comment: no shared constant
         // crosses the Rust/TypeScript boundary, so both literals are

@@ -349,7 +349,7 @@ pub struct AppState {
     /// All mutations go through `host_dispatch`; reads use the
     /// `peek_back_pending_window_creation` snapshot helper.
     /// Future PRs will migrate `active_drag` and tear-off-hook state
-    /// here too. See `crates/cef/src/reducer.rs` and
+    /// here too. See `crates/cef/src/reducer/mod.rs` and
     /// `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
     pub host_state: Mutex<crate::reducer::HostState>,
 
@@ -614,7 +614,7 @@ pub struct AppState {
     /// once the window is fully shown (CEF Views returns NULL at on_after_created
     /// time). Stored as `isize` (the raw HWND value) so the map is `Send`.
     /// Read by `set_window_opacity` to target exactly one HWND instead of
-    /// enumerating all process windows. See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §5.
+    /// enumerating all process windows.
     #[cfg(target_os = "windows")]
     pub window_hwnds: Mutex<HashMap<String, isize>>,
 
@@ -1337,16 +1337,17 @@ impl AppState {
     ///
     /// Returns true iff ANY pane is in `Closing`. Top-level window
     /// creation paths (open_new_window, open_window_at_position,
-    /// spawn_pool_window) MUST refuse while this is true: empirically
-    /// (`SPEC_WINDOW_FLEET_REDUCER_2026-05-02.md`), creating a CEF
-    /// top-level mid-pane-close hits a Chromium v146 deadlock that
-    /// wedges the message loop with HiddenSinceOpen + IPC backpressure
-    /// (`pending=N` rising) and never recovers.
+    /// spawn_pool_window) MUST refuse while this is true. The gate was
+    /// added on the hypothesis that creating a CEF top-level
+    /// mid-pane-close hits a Chromium v146 deadlock (HiddenSinceOpen +
+    /// IPC backpressure, `pending=N` rising); the follow-up retro
+    /// (`docs/retro/h7-freeze-fix-retro-2026-05-02.md`) found the gate
+    /// never fired and that hypothesis was wrong.
     ///
     /// The check is small enough to inline at each call site with no
     /// async surface. If it turns out the gate needs to widen
     /// ("any pane present" rather than "any pane Closing"), that's a
-    /// one-line edit. Spec §5 escape hatch.
+    /// one-line edit.
     pub fn any_browser_pane_closing(&self) -> bool {
         self.host_state
             .lock()

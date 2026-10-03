@@ -122,11 +122,11 @@ pub struct ShellController {
     /// this process's own environment right after startup (PR #801) — so it
     /// has to be threaded in explicitly instead.
     pub(super) auth_key: String,
-    /// The live, file-watched config (`bootstrap.rs`'s `config_watcher`, kept
-    /// current by `config_watcher_fs` and the `setconfig` handler), read at
-    /// each spawn for the global `cmd:env` defaults. `None` in tests and mock
-    /// contexts, which then get no global defaults. Set via
-    /// [`with_config`](Self::with_config).
+    /// The live, file-watched config (`bootstrap/background.rs`'s
+    /// `config_watcher`, kept current by `config_watcher_fs` and the
+    /// `setconfig` handler), read at each spawn for the global `cmd:env`
+    /// defaults. `None` in tests and mock contexts, which then get no global
+    /// defaults. Set via [`with_config`](Self::with_config).
     pub(super) config: Option<Arc<ConfigState>>,
 }
 
@@ -230,9 +230,9 @@ impl ShellController {
             is_agent_pane: inner.is_agent_pane,
             // The shell/PTY controller has no NDJSON-derived health monitor
             // (no structured turn-end marker to key off, unlike
-            // persistent.rs/acp.rs) — leave unset rather than guess. Mount
-            // reconciliation falls back to today's Idle default for these
-            // panes, same as before this field existed.
+            // persistent/spawn.rs and acp.rs) — leave unset rather than
+            // guess. Mount reconciliation falls back to today's Idle default
+            // for these panes, same as before this field existed.
             turn_active: false,
         }
     }

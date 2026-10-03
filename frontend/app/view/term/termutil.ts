@@ -52,8 +52,7 @@ function applyTransparencyToColor(hexColor: string, transparency: number): strin
 // Builds a TermThemeType from the currently-active app theme's --term-*
 // custom properties (theme.scss + frontend/app/themes/*.scss), so a
 // terminal with no explicit term:theme picks up whatever window:theme is
-// active instead of a fixed, theme-independent palette. See
-// SPEC_TERMINAL_THEME_PENETRATION_2026_07_07.md.
+// active instead of a fixed, theme-independent palette (#2010).
 //
 // No dedicated --term-cursor token exists (only --term-cursor-accent) —
 // cursor reuses --term-foreground, the common "cursor matches text color"

@@ -5,8 +5,8 @@
 // (crates/srv/src/server/app_api/skill.rs). Agent-scoped: every command is
 // `check_s1`-gated (ctx.agent_id must equal the request's agent_id), so
 // these only work from an authenticated agent connection. Distinct from the
-// legacy agent-scoped AgentSkill (`agent_skill_*` / `db_agent_skills`,
-// `AgentSkillCard.tsx` et al.) — this is the v1 standalone primitive
+// legacy agent-scoped AgentSkill (`agent_skill_*` / `db_agent_skills`)
+// — this is the v1 standalone primitive
 // (`db_skills`). The skill.catalog.* commands are the window-scoped
 // counterpart (no agent_id, global rows only) — that's what the Armory's
 // Skills tab uses.

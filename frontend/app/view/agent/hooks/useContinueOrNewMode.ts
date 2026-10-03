@@ -132,10 +132,10 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
         // bundleId intentionally does NOT get the same treatment: unlike
         // account_id, memory_id has no FK constraint, and legitimate
         // bundle ids are routinely non-UUID ("blank", "seed-*" —
-        // memory_bundles.rs/bundle.rs) rather than legacy garbage — a
-        // UUID-shape filter here would silently drop a real carry-over
-        // (reagentx P2 on #2464, which found the same mistake newly
-        // introduced elsewhere).
+        // storage/bundles.rs, app_api/bundle/mod.rs) rather than legacy
+        // garbage — a UUID-shape filter here would silently drop a real
+        // carry-over (#2464, which found the same mistake newly introduced
+        // elsewhere).
         const carry = row
             ? {
                   name: row.instance_name,

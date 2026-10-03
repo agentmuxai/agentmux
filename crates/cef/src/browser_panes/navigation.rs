@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Navigation operations for `BrowserPaneManager`: `navigate`, `go_back`,
-//! `go_forward`, `reload`, `resize`. Split out of `browser_panes.rs` — see
+//! `go_forward`, `reload`, `resize`. Split out of `browser_panes/mod.rs` — see
 //! that module's doc comment.
 
 use std::sync::Arc;

@@ -75,7 +75,7 @@ pub fn resolve_shared_store_path() -> Option<std::path::PathBuf> {
 /// cross-channel presence registry for live reactive-injection targets
 /// (agent_id -> local_url/block_id/pid/auth_key, one entry per channel),
 /// used by MuxBus Tier 2b same-host cross-channel delivery
-/// (issue #1916 / `SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md`).
+/// (issue #1916 / PR #2350).
 ///
 /// Sibling of [`resolve_shared_registry_dir`] in *location* (both live
 /// under `shared/agents/`), but a different *concern*: that registry

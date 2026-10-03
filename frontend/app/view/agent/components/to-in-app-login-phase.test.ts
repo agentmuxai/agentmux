@@ -3,9 +3,8 @@
 
 /**
  * Tests for `toInAppLoginPhase` — the mapping that drives the credential-loss
- * relogin surface's InAppLoginPanel phase line (Fix 3b of
- * ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md). Derived
- * from useAgentControllerStatus.ts's existing `authUrl`/`launchPhase`
+ * relogin surface's InAppLoginPanel phase line. Derived from
+ * useAgentControllerStatus.ts's existing `authUrl`/`launchPhase`
  * signals without changing that hook — this pins the derivation itself,
  * particularly the one non-obvious case: `LaunchPhase`'s
  * "waiting-for-login-completion" variant covers BOTH tier 1's post-URL wait

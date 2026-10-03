@@ -45,17 +45,18 @@ pub(super) async fn handle_shell_create(
 
     // Env parity with the agent CLI: start from the agent block's stored
     // cmd:env (the per-agent env the agent process is launched with — same
-    // shape app_api.rs / websocket.rs read), then let the caller-supplied
-    // req.env override on top (explicit Shell env wins). This forwards the
-    // concrete per-agent env so `Shell(...)` runs with the same env the agent
-    // itself sees, mirroring the cmd:cwd fallback above.
+    // shape app_api/agent_io.rs / websocket.rs read), then let the
+    // caller-supplied req.env override on top (explicit Shell env wins). This
+    // forwards the concrete per-agent env so `Shell(...)` runs with the same
+    // env the agent itself sees, mirroring the cmd:cwd fallback above.
     //
-    // NOT forwarded here: the dynamic identity bindings (resolver.rs) and the
-    // bundled tools/bin PATH prefix that blockcontroller/shell.rs injects at
-    // agent-CLI spawn time — those are resolved live per spawn, not stored in
-    // cmd:env. The MCP server (agentmux-mcp) is itself launched by the agent
-    // CLI through the bundled tools/bin, so tools it spawns inherit that PATH;
-    // shells created here run from agentmux-srv's env plus cmd:env + req.env.
+    // NOT forwarded here: the dynamic identity bindings
+    // (identity/resolver/inject.rs) and the bundled tools/bin PATH prefix
+    // that blockcontroller/shell/lifecycle.rs injects at agent-CLI spawn
+    // time — those are resolved live per spawn, not stored in cmd:env. The
+    // MCP server (agentmux-mcp) is itself launched by the agent CLI through
+    // the bundled tools/bin, so tools it spawns inherit that PATH; shells
+    // created here run from agentmux-srv's env plus cmd:env + req.env.
     let mut effective_env: std::collections::HashMap<String, String> = agent_block
         .as_ref()
         .and_then(|block| match block.meta.get("cmd:env") {

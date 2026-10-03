@@ -15,7 +15,7 @@
 //! `db_identity_bundles`/`db_identity_bindings`) was retired in Phase 4c
 //! of `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` — direct links had
 //! already fully superseded it as the credential-resolution path (see
-//! `identity/resolver.rs::resolve_bindings_for_instance`).
+//! `identity/resolver/inject.rs::resolve_bindings_for_instance`).
 //!
 //! Extracted from `store.rs` in Phase R.2 of the storage
 //! modularization plan

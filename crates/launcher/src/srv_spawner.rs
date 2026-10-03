@@ -127,10 +127,10 @@ pub const MIGRATION_FAILED_DIALOG_TITLE: &str = "AgentMux — database migration
 ///
 /// We deliberately do NOT claim "your data has not been changed" or "a
 /// snapshot was taken": the backup step is one of the things that can be
-/// the failure, and bootstrap.rs's separate `maybe_snapshot_pre_migration`
-/// is best-effort (non-fatal on error, `Ok(None)` when it decides none is
-/// needed). An earlier revision of this text made that claim
-/// unconditionally — reagent P1 on PR #3043.
+/// the failure, and bootstrap/stores.rs's separate
+/// `maybe_snapshot_pre_migration` is best-effort (non-fatal on error,
+/// `Ok(None)` when it decides none is needed). An earlier revision of this
+/// text made that claim unconditionally (#3043).
 pub fn migration_failed_dialog_body(reason: &str) -> String {
     format!(
         "AgentMux could not update its data store and will not start.\n\n\

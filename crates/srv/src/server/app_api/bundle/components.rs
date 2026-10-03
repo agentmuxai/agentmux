@@ -192,9 +192,9 @@ pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
 /// Reads the `db_agent_native_memory` mirror and deliberately does NOT call
 /// `refresh_memory_mirror_from_live_fs` first, unlike `build_export_for_agent`
 /// (which must, because it is about to *copy* the files —
-/// `app_api/bundle.rs:558`). Refreshing writes to the store, and an agent-less
-/// export has no business mutating per-agent state as a side effect of
-/// producing a warning.
+/// `app_api/bundle/export_for_agent.rs`). Refreshing writes to the store, and
+/// an agent-less export has no business mutating per-agent state as a side
+/// effect of producing a warning.
 ///
 /// **Known limitation — a cross-channel binding is invisible here, and cannot
 /// currently be made visible.** Both lookups resolve the binding from
@@ -307,8 +307,9 @@ pub(super) fn set_manifest_component(
 /// wrote into the archive under `components.history`.
 ///
 /// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.5: the files were
-/// pushed into `export.files` (`app_api/bundle.rs:797`) and counted in the RPC
-/// response, but the manifest was never touched after the memory splice — so a
+/// pushed into `export.files` (`app_api/bundle/export_for_agent.rs`) and
+/// counted in the RPC response, but the manifest was never touched after the
+/// memory splice — so a
 /// consumer reading `components.*` to learn what an archive holds could not see
 /// history at all. The paths are caller-supplied rather than re-derived here so
 /// this cannot drift from what was actually written.

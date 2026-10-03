@@ -15,7 +15,7 @@
 //!   AGENTMUX_LOCAL_URL    — sidecar HTTP base URL
 //!   AGENTMUX_AUTH_KEY     — X-AuthKey header secret
 //!   AGENTMUX_BLOCKID      — block UUID for shell event scoping (preferred).
-//!                           Injected by agent_handlers.rs into every persistent
+//!                           Injected by agent_handlers/input.rs into every persistent
 //!                           subprocess env; inherited by this MCP subprocess.
 //!   AGENTMUX_AGENT_BUS_ID — MuxBus routing identifier (fallback only).
 //!                           Often set to the agent type string (e.g. "claude")
@@ -71,7 +71,7 @@ use window_capture::*;
 async fn main() {
     let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
     let auth_key = std::env::var("AGENTMUX_AUTH_KEY").unwrap_or_default();
-    // AGENTMUX_BLOCKID is the canonical block UUID injected by agent_handlers.rs
+    // AGENTMUX_BLOCKID is the canonical block UUID injected by agent_handlers/input.rs
     // into the persistent subprocess env. It is what the frontend subscribes to
     // for shell_node_create events (`block:<uuid>`), so it MUST be used here.
     //

@@ -5,7 +5,7 @@
  * RPC contract guard (architecture-audit action A1).
  *
  * The frontend↔backend RPC wire contract is hand-maintained. The FE
- * declares command bindings in `frontend/app/store/rpc-api.ts` (each
+ * declares command bindings in `frontend/app/store/rpc-api/` (each
  * method wraps exactly one `client.rpcCall("name", …)`), and the
  * backend registers handlers in `agentmux-srv` via
  * `engine.register_handler(NAME, …)` where NAME is either a string
@@ -25,7 +25,7 @@
  *     Wave-inherited telemetry / conn / wsl surface never reimplemented
  *     in Rust. Fix by implementing the handler or deleting the dead FE
  *     call — never add a new entry here.
- *   • declaredUnregistered — `rpc-api.ts` methods with no backend
+ *   • declaredUnregistered — `rpc-api/` methods with no backend
  *     handler (dead Wave-inherited binding surface; see A12). Shrinks as
  *     dead methods are deleted.
  *   • registeredUndeclared — backend handlers with no FE binding:
@@ -33,7 +33,7 @@
  *     `rpcCall`, not an `RpcApi` method), and the RPC engine's test
  *     stubs (`echo`/`failme`/`slow`/`checkctx`).
  *
- * A NEW drift — a fresh `rpc-api.ts` method without a handler, a new
+ * A NEW drift — a fresh `rpc-api/` method without a handler, a new
  * live call to an unhandled command, or a removed handler still bound
  * by the FE — changes one of these sets and fails this test. That is
  * the guardrail the deleted generator used to provide, at a fraction of
@@ -132,7 +132,7 @@ function deriveContract(root: string): Contract {
     // an incomplete `registered` set.
     expect(unresolved, `unresolved register_handler/register_typed args: ${unresolved.join(", ")}`).toEqual([]);
 
-    // ── Frontend: declared bindings (method → command) in rpc-api.ts.
+    // ── Frontend: declared bindings (method → command) in rpc-api/*.ts.
     // Each binding is `Method(client: RpcClient, …): Ret { return
     // client.rpcCall|rpcStream("name", …); }`. Bound the search to each
     // method's own body — `[its signature, the next signature)` — and
@@ -172,7 +172,7 @@ function deriveContract(root: string): Contract {
     const declared = new Set<string>(methodToCmd.values());
 
     // ── Frontend: live usage — `RpcApi.Method(…)` resolved via the map,
-    // plus any direct `rpcCall("name")` outside rpc-api.ts.
+    // plus any direct `rpcCall("name")` outside rpc-api/.
     const feFiles = walk(path.join(root, "frontend"), [".ts", ".tsx"]).filter(
         (f) =>
             !f.includes(`${path.sep}store${path.sep}rpc-api${path.sep}`) &&
@@ -213,7 +213,7 @@ const KNOWN_LIVE_UNREGISTERED = [
     "wsllist",
 ];
 
-/** rpc-api.ts declares these methods, but no backend handler exists. */
+/** rpc-api/ declares these methods, but no backend handler exists. */
 const KNOWN_DECLARED_UNREGISTERED = [
     "activity",
     "connconnect",
@@ -231,7 +231,7 @@ const KNOWN_DECLARED_UNREGISTERED = [
 ];
 
 /**
- * Backend registers these handlers, but rpc-api.ts has no method.
+ * Backend registers these handlers, but rpc-api/ has no method.
  */
 const KNOWN_REGISTERED_UNDECLARED = [
     "agent.define",

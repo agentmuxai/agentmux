@@ -580,8 +580,8 @@ Connection: close
     // (not wait out LOGIN_TIMEOUT_SECS) and report a "cancelled" error
     // distinct from the supersede case above — otherwise the UI has no way
     // to tell "you cancelled this" from "a newer login attempt replaced
-    // this", which is what src/statusbar/HostPopover.tsx's Cancel button
-    // needs to show a quiet, non-error reset instead of a scary banner.
+    // this", which is what frontend/app/statusbar/HostPopover.tsx's Cancel
+    // button needs to show a quiet, non-error reset instead of a scary banner.
     #[tokio::test(flavor = "multi_thread")]
     async fn manual_cancel_resolves_promptly_with_cancelled_error() {
         let _serial = TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());

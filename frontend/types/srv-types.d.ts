@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Hand-maintained type bindings. Keep in sync with agentmux-srv (backend/obj.rs,
-// rpc_types.rs) and the wshrpc wire types. The original Go generator
+// rpc_types/) and the wshrpc wire types. The original Go generator
 // (cmd/generate/main-generatets.go) was removed with the Go backend.
 
 declare global {
@@ -208,7 +208,7 @@ declare global {
     // docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md.
 
     // ── Armory Bundle Format (ABF) import, Phase 3 ──────────────────────
-    // crates/srv/src/server/app_api/bundle.rs — bundle.import.preview /
+    // crates/srv/src/server/app_api/bundle/import.rs — bundle.import.preview /
     // bundle.import.commit. See docs/specs/SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md.
 
     // ── v1 composable model — standalone MCP Server + Skill primitives ─────

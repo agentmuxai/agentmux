@@ -26,7 +26,7 @@
  * `compacting` pane flag this hook sets.
  *
  * Codex P1 on PR #2378 (two rounds): this event is published with
- * `persist: 0` (`wps_client.rs`) — never retained/replayed — because
+ * `persist: 0` (`mps_client.rs`) — never retained/replayed — because
  * there is no completion tombstone (`compact_boundary` arrives over
  * the separate NDJSON stream, not MPS), so a replayed "started" ping
  * is indistinguishable from a genuinely active one and a timestamp-

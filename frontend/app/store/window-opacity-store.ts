@@ -3,7 +3,6 @@
 
 /**
  * Window-opacity store — dispatch layer for the window-opacity reducer slice.
- * See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §7.2.
  *
  * Responsibilities:
  *   - Hold the reducer's current state (a Solid signal, so UI can react to it).

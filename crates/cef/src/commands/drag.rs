@@ -409,7 +409,7 @@ pub fn tear_off_pool_promote(
 /// Creates a new CEF browser window positioned so the cursor lands in the title bar.
 pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
     // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
-    // See `commands/window.rs::open_window_with_kind` for rationale.
+    // See `commands/window/creation.rs::open_window_with_kind` for rationale.
     if state.any_browser_pane_closing() {
         tracing::warn!(
             target: "wfr:gate",

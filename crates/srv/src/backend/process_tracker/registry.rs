@@ -351,10 +351,10 @@ mod tests {
 
     #[test]
     fn track_spawned_is_a_safe_no_op_without_a_global_registry() {
-        // `GLOBAL` is only ever set by `bootstrap.rs` at real host startup —
-        // never in this test binary — so this exercises the exact "tests
-        // silently skip tracker registration" behavior the module doc for
-        // `AgentProcessRegistry` promises. Must not panic.
+        // `GLOBAL` is only ever set by `bootstrap/network.rs` at real host
+        // startup — never in this test binary — so this exercises the exact
+        // "tests silently skip tracker registration" behavior the module doc
+        // for `AgentProcessRegistry` promises. Must not panic.
         track_spawned("test-block-track-spawned-no-global", 999_999);
     }
 

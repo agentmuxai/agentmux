@@ -14,9 +14,9 @@
 //! migration ran on a second channel) are left untouched.
 //!
 //! **Must attach the global def registry itself.** `run_pending_migrations`
-//! runs before `bootstrap.rs` calls `Store::set_def_registry` on the
-//! server's real store (`bootstrap.rs`, global registry attached ~60 lines
-//! after the migration call) — a migration's own bare `Store::open()` has
+//! runs before `bootstrap/stores.rs` calls `Store::set_def_registry` on the
+//! server's real store (the global registry is attached after the
+//! migration call) — a migration's own bare `Store::open()` has
 //! no registry wired up unless it attaches one itself. Without this,
 //! `agent_def_list()` silently falls back to LOCAL-ONLY
 //! (`shared_def_registry() == None`), so this migration would only ever
@@ -55,9 +55,9 @@ impl Migration for M0020AgentColorBackfill {
         );
         // Attach the global registry (see module doc) so agent_def_list()
         // sees cross-channel agents, not just this channel's local rows.
-        // Best-effort, matching bootstrap.rs's own handling: if the shared
-        // dir can't be resolved or opened, proceed local-only rather than
-        // failing the whole migration — a later channel boot (which DOES
+        // Best-effort, matching bootstrap/stores.rs's own handling: if the
+        // shared dir can't be resolved or opened, proceed local-only rather
+        // than failing the whole migration — a later channel boot (which DOES
         // wire the registry before any agent.open) still backfills any
         // agent this run couldn't see.
         if let Some(def_dir) = resolve_shared_definitions_dir() {

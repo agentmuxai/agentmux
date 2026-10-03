@@ -281,7 +281,7 @@ async fn run_pty_output_flusher(
 /// frontend's `/agentmux/reactive/register` path instead (reagentx P1,
 /// round 2), even with THIS function never reading it directly. A pane with
 /// no block-scoped identity is simply not jekt-registered, matching
-/// persistent.rs's muxbus_agent_id_from_env, which never had either fallback.
+/// persistent/mod.rs's muxbus_agent_id_from_env, which never had either fallback.
 fn resolve_agent_id_for_jekt(block_meta: &MetaMapType) -> Option<String> {
     let cmd_env = block_meta.get(META_KEY_CMD_ENV).and_then(|m| m.as_object());
     for key in ["AGENTMUX_AGENT_ID", "WAVEMUX_AGENT_ID"] {
@@ -1225,13 +1225,13 @@ impl Controller for ShellController {
         // Awaiting it before `child.wait()` would then hang cleanup,
         // `STATUS_DONE` publication, and `run_lock` release for that
         // descendant's entire remaining lifetime — the pane reports running
-        // forever and can never restart. `persistent.rs`'s stdout/stderr
+        // forever and can never restart. `persistent/spawn.rs`'s stdout/stderr
         // reader cleanup hits the identical descendant-held-descriptor case
         // and already establishes the fix: reap the child first
         // (unconditional, not gated on any reader/flusher), then bound the
         // reader/flusher wait with a timeout rather than waiting forever —
         // see the timeout's own comment below for why expiry does NOT
-        // `abort()` here, unlike `persistent.rs`'s version of this bound.
+        // `abort()` here, unlike `persistent/spawn.rs`'s version of this bound.
         tokio::spawn(async move {
             // Reap the child (blocking OS call) on its own — depends only
             // on the direct child exiting, never on PTY EOF. Clones
@@ -1266,7 +1266,7 @@ impl Controller for ShellController {
             // P1, same round, on the timeout+abort version of this fix):
             // the flusher (consumer) and the PTY read loop (producer,
             // `spawn_blocking` doing a raw, un-cancellable OS-level
-            // `reader.read()`) are separate tasks, unlike persistent.rs's
+            // `reader.read()`) are separate tasks, unlike persistent/spawn.rs's
             // single combined reader task. Aborting only the flusher would
             // stop it draining `pty_tx` — but the read loop, still blocked
             // in real OS I/O, cannot be interrupted by tokio's cooperative
@@ -1903,7 +1903,7 @@ mod agent_id_for_jekt_tests {
 
     #[test]
     fn blank_value_is_treated_as_absent() {
-        // Matches persistent.rs's muxbus_agent_id_from_env: a present-but-
+        // Matches persistent/mod.rs's muxbus_agent_id_from_env: a present-but-
         // whitespace-only value doesn't count as a real identity.
         let meta = meta_with_env(&[("AGENTMUX_AGENT_ID", "   ")]);
         assert_eq!(resolve_agent_id_for_jekt(&meta), None);
@@ -1952,7 +1952,7 @@ mod global_cmd_env_tests {
         config.update_settings(settings);
     }
 
-    /// A config built like `bootstrap.rs`'s, with `settings_json` loaded.
+    /// A config built like `bootstrap/background.rs`'s, with `settings_json` loaded.
     fn live_config(settings_json: &str) -> Arc<ConfigState> {
         let config = Arc::new(ConfigState::with_config(wconfig::build_default_config()));
         load_settings(&config, settings_json);

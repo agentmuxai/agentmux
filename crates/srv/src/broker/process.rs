@@ -409,7 +409,7 @@ mod tests {
     fn subprocess_controller_is_always_agent_even_when_is_agent_pane_is_false() {
         // reagent/codex P1 on #2273: SubprocessController unconditionally
         // reports is_agent_pane: false in its own runtime status (see
-        // subprocess.rs) despite existing only for agent CLIs — is_agent()
+        // subprocess/mod.rs) despite existing only for agent CLIs — is_agent()
         // must not rely on the flag for this controller type.
         let status = process_status_with(blockcontroller::BLOCK_CONTROLLER_SUBPROCESS, false);
         assert!(status.is_agent());

@@ -19,8 +19,6 @@
  * would flash between Streaming promotion and agent-message-accepted.
  * See ANALYSIS_IDLE_SEND_RACE_2026_06_11 (never committed to this repo).
  *
- * See AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md.
- *
  * No "Send now" button — Esc on an empty composer delivers the queue to the
  * live agent immediately instead (mirrors Claude Code CLI's "stop and
  * consider this now" gesture). See

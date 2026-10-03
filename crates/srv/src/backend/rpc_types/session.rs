@@ -358,7 +358,7 @@ mod req_shape_tests {
         .expect("session:next_prompt_suggestion must accept block_id and generation");
     }
 
-    // useResumePreflight.ts:63 and AgentControlBar.tsx:56/:68/:80 — all four
+    // useResumePreflight.ts:63 and session-actions.ts:46/:50/:55 — all four
     // send exactly one field.
     #[test]
     fn the_four_block_id_only_commands_accept_a_bare_block_id() {
