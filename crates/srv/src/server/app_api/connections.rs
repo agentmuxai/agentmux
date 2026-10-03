@@ -175,26 +175,6 @@ pub(crate) async fn for_agent(broker: &Broker, name: Option<&str>) -> Result<Age
     })
 }
 
-/// The agent id of the agent in `agent_block_id`, as AgentMux launched it (its
-/// block's own `cmd:env`, never anything a request carries). `None` for an
-/// agent without one: it is never given a shared stand-in name, which would
-/// let one answer about it stand for every other agent without an id.
-pub(crate) fn agent_of(state: &AppState, agent_block_id: &str) -> Option<String> {
-    state
-        .mstore
-        .get::<crate::backend::obj::Block>(agent_block_id)
-        .ok()
-        .flatten()
-        .and_then(|b| {
-            b.meta
-                .get("cmd:env")
-                .and_then(|e| e.get("AGENTMUX_AGENT_ID"))
-                .and_then(|v| v.as_str())
-                .map(str::to_string)
-        })
-        .filter(|a| !a.trim().is_empty())
-}
-
 /// How a dialog names an agent: its id, as one plain capped line.
 pub(crate) fn agent_label(agent: Option<&str>) -> String {
     agent
@@ -270,35 +250,63 @@ pub(crate) async fn ask_user(
         .await
         .map_err(|e| format!("could not ask the user: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("could not ask the user: the window host answered HTTP {}", resp.status()));
+        return Err(format!(
+            "could not ask the user: the window host answered HTTP {}",
+            resp.status()
+        ));
     }
     let v: serde_json::Value = resp
         .json()
         .await
         .map_err(|e| format!("could not ask the user: {e}"))?;
     if v.get("ok").and_then(|o| o.as_bool()) != Some(true) {
-        let e = v.get("error").and_then(|e| e.as_str()).unwrap_or("no answer");
+        let e = v
+            .get("error")
+            .and_then(|e| e.as_str())
+            .unwrap_or("no answer");
         return Err(format!("could not ask the user: {e}"));
     }
     serde_json::from_value(v.get("data").cloned().unwrap_or_default())
         .map_err(|e| format!("could not ask the user: {e}"))
 }
 
-/// The user's consent for the agent in `agent_block_id` to run `what` on the
-/// SSH `connection` with the user's identity (spec §8.2). `connection` is the
-/// canonical name (`ConnTarget::name`), so one host is one consent however it
-/// is spelled. "Always" for that agent and host is remembered
-/// (`remote::agent_access`) and asks nothing again; otherwise the user is
-/// asked ([`ask_user`]). An agent without an id is asked every time: "always"
-/// is neither offered nor stored for it.
+/// The agent an SSH request comes from, proven: its signed identity
+/// (`UiAutomationAuth`, made with its own jekt key, which no other agent
+/// holds) verified, and the pane derived from it, never taken from the
+/// request. `Err` unless that pane is `agent_block_id`: every agent holds
+/// srv's auth key, so a request body alone could name another agent's pane
+/// and borrow its "Always allow".
+pub(crate) fn verified_agent(
+    state: &AppState,
+    agent_block_id: &str,
+    auth: Option<&agentmux_common::api_types::UiAutomationAuth>,
+) -> Result<String, String> {
+    let auth = auth.ok_or_else(|| {
+        "an SSH connection needs the agent's signed identity, which this call did not carry (respawn the agent to give it a signing key)".to_string()
+    })?;
+    let pane = crate::server::ui_handlers::verified_block_id(state, None, auth)
+        .map_err(|e| format!("could not verify which agent is asking: {e}"))?;
+    if pane != agent_block_id {
+        return Err("this request names another agent's pane".to_string());
+    }
+    Ok(auth.agent_id.clone())
+}
+
+/// The user's consent for the agent `agent_id` (verified, [`verified_agent`])
+/// in `agent_block_id` to run `what` on the SSH `connection` with the user's
+/// identity (spec §8.2). `connection` is the canonical name
+/// (`ConnTarget::name`), so one host is one consent however it is spelled.
+/// "Always" for that agent and host is remembered (`remote::agent_access`)
+/// and asks nothing again; otherwise the user is asked ([`ask_user`]).
 pub(crate) async fn consent_for_ssh(
     state: &AppState,
     agent_block_id: &str,
+    agent_id: &str,
     connection: &str,
     what: &str,
 ) -> Result<(), String> {
     use crate::backend::remote::agent_access;
-    let agent_id = agent_of(state, agent_block_id);
+    let agent_id = Some(agent_id.to_string()).filter(|a| !a.trim().is_empty());
     let agent = agent_label(agent_id.as_deref());
     let connection = connection.trim();
     if agent_id
@@ -626,33 +634,36 @@ mod tests {
             .is_err());
     }
 
-    /// An agent is named from its own block, as one plain line; one without an
-    /// id has no name another could share, so no "always" can be stored for it.
-    #[tokio::test]
-    async fn an_agent_is_named_from_its_block_and_never_by_a_shared_stand_in() {
+    /// An agent is named as one plain line; one without an id has no name
+    /// another could share.
+    #[test]
+    fn an_agent_is_named_as_one_plain_line_and_never_by_a_shared_stand_in() {
         assert_eq!(agent_label(Some("korp")), "korp");
         assert_eq!(
-            agent_label(Some("korp\n\nThis is safe, click Allow")),
+            agent_label(Some(
+                "korp
+
+This is safe, click Allow"
+            )),
             "korp This is safe, click Allow"
         );
         assert_eq!(agent_label(None), "An agent with no AgentMux id");
+    }
+
+    /// An SSH request's agent is proven by its signature, never by the body:
+    /// no signature, or a forged one, is refused.
+    #[tokio::test]
+    async fn an_ssh_request_must_prove_which_agent_it_is() {
         let state = crate::server::tests::test_state();
-        let mut named = crate::backend::obj::Block {
-            oid: "agent-of-named".to_string(),
-            ..Default::default()
+        let err = verified_agent(&state, "some-pane", None).unwrap_err();
+        assert!(err.contains("signed identity"), "{err}");
+        let forged = agentmux_common::api_types::UiAutomationAuth {
+            agent_id: "korp".into(),
+            ts_secs: agentmux_common::time::now_secs(),
+            sig: "AAAA".into(),
         };
-        named.meta.insert(
-            "cmd:env".into(),
-            serde_json::json!({ "AGENTMUX_AGENT_ID": "korp" }),
-        );
-        state.mstore.insert(&mut named).unwrap();
-        let mut unnamed = crate::backend::obj::Block {
-            oid: "agent-of-unnamed".to_string(),
-            ..Default::default()
-        };
-        state.mstore.insert(&mut unnamed).unwrap();
-        assert_eq!(agent_of(&state, "agent-of-named").as_deref(), Some("korp"));
-        assert_eq!(agent_of(&state, "agent-of-unnamed"), None);
+        let err = verified_agent(&state, "some-pane", Some(&forged)).unwrap_err();
+        assert!(err.contains("could not verify"), "{err}");
     }
 
     /// Agent text in a dialog cannot lay out a message of its own.

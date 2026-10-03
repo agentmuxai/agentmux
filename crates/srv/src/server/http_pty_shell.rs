@@ -42,12 +42,23 @@ pub(super) async fn handle_pty_shell_create(
     // An SSH host runs with the user's identity: their consent first, and the
     // askpass helper must exist, since its prompts may never reach the
     // terminal the agent reads (`remote::askpass`).
+    let mut ssh_agent = String::new();
     if let AgentTarget::Ssh(_) = &target {
         if crate::backend::remote::askpass::program().is_none() {
             let e = "this AgentMux has no askpass helper (agentmux-bashwrap) to run an agent's SSH shell with";
             return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
         }
-        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &connection, "an interactive shell (PtyShell)").await {
+        ssh_agent = match connections::verified_agent(&state, &req.agent_block_id, req.auth.as_ref()) {
+            Ok(a) => a,
+            Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
+        };
+        // A running shell on another connection is refused before anything
+        // is asked: consent (and an "always") for a shell that then cannot
+        // start would be a grant the user gave for nothing.
+        if let Some(conflict) = running_shell_conflict(&state, &req.agent_block_id, &connection) {
+            return conflict;
+        }
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, "an interactive shell (PtyShell)").await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
     }
@@ -141,7 +152,7 @@ pub(super) async fn handle_pty_shell_create(
     //
     // In WSL the cwd is a distro path, kept as given; no Windows fallback.
     if let AgentTarget::Ssh(_) = &target {
-        let agent = connections::agent_of(&state, &req.agent_block_id).unwrap_or_default();
+        let agent = ssh_agent.clone();
         meta.insert(crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.to_string(), json!(req.agent_block_id));
         meta.insert(crate::backend::remote::askpass::META_KEY_AGENT.to_string(), json!(agent));
     }
@@ -715,4 +726,23 @@ pub(super) async fn handle_pty_shell_stop(
 
     tracing::info!(block_id = %req.shell_id, released, "ptyshell.stop: released lock");
     (StatusCode::OK, Json(PtyShellStopResponse { released }))
+}
+
+/// The 409 for a pane whose agent shell is running on another connection than
+/// `connection`, checked without touching the shell (`try_attach_to_existing_shell`
+/// makes the same check, after its resync).
+fn running_shell_conflict(state: &AppState, agent_block_id: &str, connection: &str) -> Option<axum::response::Response> {
+    let shell_id = state
+        .mstore
+        .get::<crate::backend::obj::Block>(agent_block_id)
+        .ok()
+        .flatten()
+        .and_then(|b| b.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()).map(str::to_string))?;
+    let running = blockcontroller::get_block_controller_status(&shell_id)
+        .is_some_and(|s| s.shellprocstatus == blockcontroller::STATUS_RUNNING);
+    if !running {
+        return None;
+    }
+    let shell = state.mstore.get::<crate::backend::obj::Block>(&shell_id).ok().flatten()?;
+    super::http_shell::connection_conflict(&shell, connection)
 }

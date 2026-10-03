@@ -28,9 +28,14 @@ pub(super) async fn handle_shell_create(
     // An SSH host runs with the user's identity: their consent first (asked
     // once, or remembered as "always"), then every ssh prompt goes to them
     // through the askpass bridge, never to the agent.
+    let mut ssh_agent = String::new();
     if let AgentTarget::Ssh(dest) = &target {
+        ssh_agent = match connections::verified_agent(&state, &req.agent_block_id, req.auth.as_ref()) {
+            Ok(a) => a,
+            Err(e) => return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response(),
+        };
         let connection = crate::backend::remote::ConnTarget::Ssh(dest.clone()).name();
-        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &connection, &req.cmd).await {
+        if let Err(e) = connections::consent_for_ssh(&state, &req.agent_block_id, &ssh_agent, &connection, &req.cmd).await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
     }
@@ -139,7 +144,7 @@ pub(super) async fn handle_shell_create(
             // from the request, whose env the agent controls.
             let secret = askpass::grant(askpass::AskpassGrant {
                 agent_block_id: req.agent_block_id.clone(),
-                agent: connections::agent_of(&state, &req.agent_block_id).unwrap_or_default(),
+                agent: ssh_agent.clone(),
                 connection: crate::backend::remote::ConnTarget::Ssh(dest.clone()).name(),
             });
             let local_url = std::env::var("AGENTMUX_LOCAL_URL").unwrap_or_default();
@@ -559,7 +564,7 @@ fn clear_shell_pointer_if(state: &AppState, agent_block_id: &str, id: &str) {
 /// 409 when the pane's running shell is on another connection than `wanted`.
 /// PtyShellStop releases the keyboard lock and leaves the shell running, so
 /// ending the shell is the way to switch.
-fn connection_conflict(
+pub(super) fn connection_conflict(
     shell_block: &crate::backend::obj::Block,
     wanted: &str,
 ) -> Option<axum::response::Response> {

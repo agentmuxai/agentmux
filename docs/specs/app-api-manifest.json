@@ -41,7 +41,7 @@
       "exactMatch": true,
       "rustRequestStruct": "agentmux_common::api_types::ShellCreateRequest",
       "rustResponseStruct": "agentmux_common::api_types::ShellCreateResponse",
-      "requestFields": ["agent_block_id", "cmd", "cwd", "title", "env", "capture_stdin", "connection"],
+      "requestFields": ["agent_block_id", "cmd", "cwd", "title", "env", "capture_stdin", "connection", "auth"],
       "responseFields": ["shell_id"],
       "usedBy": ["muxsh run <cmd>"]
     },
