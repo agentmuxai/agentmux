@@ -1110,10 +1110,9 @@ pub async fn run_agent_turn(
             // the extra_hosts entry `create_and_start` sets — see
             // container.rs) since the loopback address this process sees is
             // not reachable from the container's own network namespace.
-            // #2939 workstream 1 (host integration) — this alone doesn't
-            // finish that workstream: agentmux-mcp/agentmux-bashwrap also
-            // need to actually exist in the container image, which they do
-            // not yet.
+            // #2939 workstream 1 (host integration) — the other half is the
+            // agentmux-mcp/agentmux-bashwrap binaries that
+            // docker/Dockerfile.agent-agentmux builds into the image.
             if let Ok(local_url) = std::env::var("AGENTMUX_LOCAL_URL") {
                 env_vars.insert(
                     "AGENTMUX_LOCAL_URL".to_string(),

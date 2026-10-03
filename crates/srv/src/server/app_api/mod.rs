@@ -117,10 +117,10 @@ mod memory_version_impl_tests;
 // ---------------------------------------------------------------------------
 // Shared helpers used by submodules (via `use super::*`)
 // ---------------------------------------------------------------------------
-/// If this channel has no local `output` for `block_id` but the agent's GLOBAL
-/// transcript zone (`agent:<defId>:current`) does, return `(global_store,
-/// agent_zone)`. Returns `None` when the local output is present and non-empty,
-/// the block isn't agent-anchored, there's no global store, or the global zone
+/// If the agent's GLOBAL transcript zone (`agent:<defId>:current`) has
+/// `output`, return `(global_store, agent_zone)` — preferred even when this
+/// channel's local `output` is non-empty. Returns `None` when the block isn't
+/// agent-anchored or is archived, there's no global store, or the global zone
 /// is empty — callers then read the per-channel store keyed by `block_id`.
 ///
 /// Only the agent `output` stream is globalized; every other file stays local.

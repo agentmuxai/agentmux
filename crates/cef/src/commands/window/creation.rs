@@ -441,7 +441,7 @@ pub fn open_subwindow(
 }
 
 /// SPEC_PILLAR1_STEP4 Phase 2 — `pub(crate)` (was private) so the reproject
-/// driver (`launcher_ipc::reproject_from_snapshot`) can call it directly,
+/// driver (`reproject_from_snapshot`, below) can call it directly,
 /// bypassing the IPC-handler wrappers (`open_new_window`/`open_subwindow`)
 /// that assume a live, frontend-originated request.
 ///
@@ -450,8 +450,8 @@ pub fn open_subwindow(
 /// and uses the given rect verbatim — the reproject driver's fast path
 /// passes the launcher snapshot's `last_rect` here so a recreated window
 /// lands roughly where it was, instead of at a new-window default position.
-/// `None` preserves today's behavior exactly (both existing callers pass
-/// `None`).
+/// `None` keeps the default placement (`open_new_window`/`open_subwindow`
+/// pass `None`; the tray panel and window-pool fallbacks may pass a rect).
 pub(crate) fn open_window_with_kind(
     state: &Arc<AppState>,
     kind: crate::state::WindowKind,

@@ -75,10 +75,12 @@ wrap_task! {
             use cef::ImplWindow;
             // CEF Views: close the WINDOW (CefWindow::close), which routes through
             // WindowDelegate::can_close (app/mod.rs) → try_close_browser → on_before_close
-            // → host quit cascade. Calling try_close_browser DIRECTLY on a
-            // Views-hosted browser tears the Window down WITHOUT firing
-            // on_before_close, so the browser is never unregistered and the host
-            // never quits — the orphaned-tree regression (Discussion #1680).
+            // → host quit cascade (on CEF 148 Views that chain often stalls
+            // before on_before_close — see the close-sequence notes below). Calling
+            // try_close_browser DIRECTLY on a Views-hosted browser tears the
+            // Window down WITHOUT firing on_before_close, so the browser is
+            // never unregistered and the host never quits — the orphaned-tree
+            // regression (Discussion #1680).
             //
             // The historical reason this used try_close_browser — window.close()'s
             // Widget::Close CHECKs !on_call_stack_ and aborts if the widget is
@@ -1636,9 +1638,9 @@ wrap_task! {
             tracing::info!(label = %self.label, "[create-window] task entered UI thread");
 
             let settings = BrowserSettings {
-                // ARGB alpha=0 → transparent, mirroring the MAIN window
-                // (app/mod.rs) and the global CefSettings.background_color
-                // (main.rs). CreateWindowTask builds every secondary window
+                // ARGB alpha=0 → transparent, mirroring the MAIN window when
+                // it is alpha-capable (app/mod.rs) and the global
+                // CefSettings.background_color (lib.rs). CreateWindowTask builds every secondary window
                 // on Linux/macOS — additional windows AND floating-pane
                 // tear-offs (open_floating_pane_window routes here on
                 // non-Windows; the dedicated post_create_floating_window is

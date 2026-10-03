@@ -182,7 +182,7 @@ pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
 /// different columns: `AgentDefinition.memory_id` is the agent's own dedicated
 /// bundle (stored in `db_agents.default_memory_id`), while
 /// `AgentInstance.memory_id` is one *launch* deliberately pointed at some other
-/// bundle (`storage/agents.rs:153-163`). Checking only the definition would
+/// bundle (`storage/agents.rs:164-175`). Checking only the definition would
 /// miss exactly the case the operator is most likely to hit — exporting the
 /// bundle a running instance was launched with. Native memory is keyed on the
 /// definition id either way (`build_export_for_agent` resolves the agent with
@@ -200,7 +200,7 @@ pub(crate) const MEMORY_NOT_EXPORTED_WARNING: &str =
 /// currently be made visible.** Both lookups resolve the binding from
 /// channel-local SQLite: `instance_list` reads this channel's rows, and
 /// `agent_def_list`'s global overlay only preserves `memory_id` when a local
-/// row exists (`storage/agents.rs:462`). An agent created in another channel
+/// row exists (`storage/agents.rs:468`). An agent created in another channel
 /// has no local row, so it comes back with an empty `memory_id` — because
 /// `DefinitionRecordV1` does not carry the field at all
 /// (`storage/def_registry_mirror.rs:128-133`). The bundle and the memory mirror

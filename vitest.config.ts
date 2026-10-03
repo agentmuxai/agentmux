@@ -32,8 +32,8 @@ export default mergeConfig(
                 // in case the location moves.
                 "**/.claude/**",
                 "**/worktrees/**",
-                // `tools/**` holds standalone Node tooling (muxlog, bench
-                // analysis) with `.mjs` tests that aren't frontend and don't run
+                // `tools/**` holds standalone Node tooling (bench analysis,
+                // instance discovery) with `.mjs` tests that aren't frontend and don't run
                 // under this jsdom + RPC-mock setup (e.g. tools/tests/lib/
                 // bench-stats.test.mjs). They belong to their own runner, not the
                 // frontend suite. See SPEC_CI_TEST_RUNNER_2026_06_22.md §6.4.

@@ -223,12 +223,12 @@ pub fn handle_append_block_file(
             }
         }
         // Note: output.idx is NOT updated incrementally here. It is a lazily-built,
-        // self-validating cache rebuilt by the read path whenever output grows (see
-        // `extend_output_idx` / `rebuild_output_idx` in shell/indexing.rs, invoked
-        // from the blockfile:read_range handler in app_api/blockfile.rs). This
-        // avoids every incremental-index failure mode (desync on write failure,
-        // chunk-split lines, blank-line miscounting) at the cost of one rescan per
-        // output-size change.
+        // self-validating cache the read path brings up to date whenever output
+        // grows (see `extend_output_idx` in shell/indexing.rs, invoked from the
+        // blockfile:read_range handler in app_api/blockfile.rs). This avoids
+        // every incremental-index failure mode (desync on write failure,
+        // chunk-split lines, blank-line miscounting) at the cost of scanning the
+        // appended bytes on the next read.
     }
 
     // Mirror the agent's `output` stream into the GLOBAL transcript zone

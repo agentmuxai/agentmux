@@ -481,10 +481,10 @@ impl AcpController {
                             // subscribers see "turn ended" immediately,
                             // mirroring persistent/spawn.rs's matching publish
                             // on its own normal (non-kill, non-exit)
-                            // turn-end path. Without this, the ONLY
-                            // controllerstatus publishes for an ACP
-                            // controller (Gemini/Codex/Kimi in
-                            // catalog.ts) are on kill or process exit —
+                            // turn-end path. Without this, nothing
+                            // publishes turn_active: false for an ACP
+                            // controller (OpenClaw/Copilot/Pi in
+                            // catalog.ts) until kill or process exit —
                             // a normal turn-end here left the frontend's
                             // `wasTurnActive` signal (fed only by live
                             // controllerstatus events, never local
@@ -495,8 +495,7 @@ impl AcpController {
                             // wasTurnActive === false — before running a
                             // /login-deferred controller restart) until
                             // an unrelated event happened to republish
-                            // status. reagentx P1 on PR #2338
-                            // (twenty-second re-review).
+                            // status (#2338).
                             if let Some(ref broker) = broker_clone {
                                 let status = {
                                     let locked = inner_clone.lock().unwrap();
@@ -827,8 +826,7 @@ impl Controller for AcpController {
             // by a premature frontend Done transition, would see
             // isBackendTurnConfirmedIdle() read true from that stale
             // signal and force-restart the controller, killing the
-            // actually-active turn. codex P1 on PR #2338 (twenty-third
-            // re-review).
+            // actually-active turn (#2338).
             self.publish_status();
 
             let send_result = {

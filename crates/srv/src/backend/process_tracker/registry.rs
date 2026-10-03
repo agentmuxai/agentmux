@@ -39,9 +39,9 @@ pub fn global() -> Option<Arc<AgentProcessRegistry>> {
 
 /// Assign a freshly-spawned child PID to `block_id`'s tracker, creating the
 /// tracker if needed. The single call site every `Controller` impl should use
-/// immediately after its own spawn — no-ops cleanly (with a warn log) if the
-/// registry global isn't initialized (tests) or the platform tracker rejects
-/// the PID, since this is opportunistic enrichment, not a liveness signal on
+/// immediately after its own spawn — no-ops silently if the registry global
+/// isn't initialized (tests), and with a warn log if the platform tracker
+/// rejects the PID, since this is opportunistic enrichment, not a liveness signal on
 /// its own (see `broker::process::ProcessStatus`'s own doc comment).
 pub fn track_spawned(block_id: &str, pid: u32) {
     let Some(registry) = global() else { return };
@@ -353,8 +353,8 @@ mod tests {
     fn track_spawned_is_a_safe_no_op_without_a_global_registry() {
         // `GLOBAL` is only ever set by `bootstrap/network.rs` at real host
         // startup — never in this test binary — so this exercises the exact
-        // "tests silently skip tracker registration" behavior the module doc
-        // for `AgentProcessRegistry` promises. Must not panic.
+        // "tests silently skip tracker registration" behavior the doc comment
+        // on `GLOBAL` promises. Must not panic.
         track_spawned("test-block-track-spawned-no-global", 999_999);
     }
 

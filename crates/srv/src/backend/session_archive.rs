@@ -10,9 +10,9 @@
 //!   2. Storage cap: after archiving, prune oldest `.gz` files until total archive
 //!      disk usage is below `max_total_bytes` (default 2 GB).
 //!
-//! The archive/restore/export logic used by the sweep is the same as the
-//! RPC handlers in `server/app_api/session.rs` — both call
-//! `archive_session_output` and `read_session_output` from this module.
+//! The sweep archives through the same `archive_session_output` the RPC
+//! handlers in `server/app_api/session.rs` call; those handlers also use
+//! `restore_session_output` and `read_session_output` from this module.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

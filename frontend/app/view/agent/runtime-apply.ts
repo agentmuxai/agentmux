@@ -28,7 +28,7 @@
  * tearing it down mid-flight. Nothing is lost by waiting — these flags are baked
  * in at spawn, so they could never have applied to the turn already running.
  *
- * Shared by the `/model`·`/effort`·`/mode` slash commands
+ * Shared by the `/model`·`/effort`·`/permission-mode` slash commands
  * (`commands/global/runtime.ts`) AND the GUI Mode/Model/Effort drop-up
  * (`components/AgentRuntimeDropup.tsx`).
  */
@@ -62,9 +62,9 @@ export async function applyRuntimeChange(
      *   `provider.controllerType === "persistent"` alone — an unmigrated copy
      *   of the rule `launch-args.ts` now owns (reagent P1 on PR #2867). On a
      *   container agent that rewrote `--input-format stream-json` straight back
-     *   into persisted `cmd:args` on every /model, /effort or /mode change,
-     *   undoing the launch-time fix, and forced a controller restart the
-     *   container path never needed.
+     *   into persisted `cmd:args` on every /model, /effort or /permission-mode
+     *   change, undoing the launch-time fix, and forced a controller restart
+     *   the container path never needed.
      * - `agent:provider_flags`. The rebuild below starts from the provider
      *   catalog, so without reapplying these the user's flags are dropped from
      *   `cmd:args` by the first runtime change (#2872).

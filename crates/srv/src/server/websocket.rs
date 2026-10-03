@@ -1208,10 +1208,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // subprocess's stdin via `blockcontroller::send_input`. Codex P1
     // on PR #557 caught that this would fail: `SubprocessController::
     // send_input` (and `PersistentSubprocessController::send_input`)
-    // both reject raw `input_data`, returning `Err("...use
-    // AgentInputCommand")`. The deeper truth is that AgentMux runs
-    // the agent CLI in non-interactive `--print` mode — the CLI
-    // never reads stdin and a y/n write would be a no-op even if
+    // both reject raw `input_data` with an `Err`. The deeper truth is
+    // that AgentMux runs the agent CLI in non-interactive `--print`
+    // mode — the CLI shows no y/n prompt and stdin carries only the
+    // structured message stream, so a y/n write would be meaningless even if
     // the controller accepted it. Real delivery is the same
     // control_response mechanism `agent.answer` uses below for
     // AskUserQuestion. See SPEC_DECISION_PROMPT_2026_04_24.md §9.1

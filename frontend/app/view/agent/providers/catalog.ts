@@ -145,10 +145,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // ("Error: Answer questions?") unless launched with `--permission-prompt-tool
         // stdio` and answered via a control_response. `--dangerously-skip-permissions`
         // DISABLES that routing, so it must NOT be here. The persistent controller's
-        // ControlChannel auto-allows ordinary tools to preserve today's yolo UX and
-        // surfaces only AskUserQuestion to the user. Keep in sync with `static CLAUDE`
-        // in crates/srv/src/backend/providers.rs. controllerType selects persistentLaunchArgs
-        // over launchArgs in useAgentCommands.ts.
+        // control-frame handler (`handle_control_frame`) auto-allows ordinary tools to
+        // preserve today's yolo UX and surfaces only AskUserQuestion to the user. Keep
+        // in sync with `static CLAUDE` in crates/srv/src/backend/providers.rs.
+        // controllerType selects persistentLaunchArgs over launchArgs in agent-model.ts.
         // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
         controllerType: "persistent",
         persistentLaunchArgs: ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--exclude-dynamic-system-prompt-sections", "--permission-prompt-tool", "stdio", "--permission-mode", "default"],

@@ -19,7 +19,7 @@ impl BrowserPaneManager {
     /// `frontend/app/store/zoom.ts`'s WHEEL_STEP uses for every other
     /// pane type, for a consistent feel even though this path never touches
     /// that frontend module (browser-pane content is unreachable from the
-    /// DOM — see the module doc on `AppState::browser_pane_zoom`).
+    /// DOM — see the doc comment on `AppState::browser_pane_zoom`).
     const ZOOM_STEP: f64 = 0.05;
 
     pub fn zoom_in(&self, block_id: &str, state: &Arc<AppState>) {

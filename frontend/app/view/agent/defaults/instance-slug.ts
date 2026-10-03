@@ -17,9 +17,9 @@
 
 /**
  * Slugify a user-entered name: lowercase, spaces → "-", strip
- * anything outside [a-z0-9-_]. Matches the legacy logic in
- * `AgentPicker.handleRename` so existing definitions keep the
- * same disk paths.
+ * anything outside [a-z0-9-_]. Matches the legacy rename logic (once
+ * `AgentPicker.handleRename`, since removed) so existing definitions
+ * keep the same disk paths.
  */
 export function slugifyInstanceName(name: string): string {
     return (name || "")

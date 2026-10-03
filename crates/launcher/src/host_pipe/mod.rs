@@ -418,9 +418,9 @@ impl HostPipe {
 
     /// Send an event without a session check — only safe in tests
     /// or single-session contexts.
-    /// Writes RAW `Event` JSON (no `HostFrame` envelope) to match the
-    /// host's existing parser (`crates/cef/src/launcher_ipc/mod.rs`),
-    /// which expects raw Event lines.
+    /// Writes RAW `Event` JSON (no `HostFrame` envelope). The host's
+    /// parser (`crates/cef/src/launcher_ipc/mod.rs`) tries a `HostFrame`
+    /// first and still accepts a raw `Event` line as a legacy fallback.
     #[cfg(test)]
     pub async fn send_event(&self, event: &Event) -> Result<(), HostPipeError> {
         let writer = {

@@ -125,7 +125,7 @@
 
 /* Last rendered frame of the native pane, shown while the pane surface is
    airspace-hidden under a DOM overlay (macOS/Linux whole-pane hide — see
-   the freeze-frame block in browser-view.tsx). Geometry comes inline from
+   use-freeze-frame.ts). Geometry comes inline from
    freezeStyle() — aligned to the native pane's DPR-rounded physical rect,
    not this placeholder's fractional CSS box, so the live→snapshot swap
    doesn't shift content by a subpixel. */

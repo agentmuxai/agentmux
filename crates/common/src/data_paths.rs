@@ -879,8 +879,9 @@ pub fn isolated_settings_reason() -> IsolatedSettingsReason {
 /// `docs/retro/retro-macos-0560-stale-cef-cache-launch-crash-2026-09-16.md`
 /// for the incident this closes.
 ///
-/// `CloudSubscriber::init_global` (`crates/srv/src/bootstrap/background.rs`)
-/// runs unconditionally on every launch and performs a real, synchronous
+/// Without this flag, `CloudSubscriber::init_global`
+/// (`crates/srv/src/bootstrap/background.rs`) runs on every launch (unless
+/// `AGENTMUX_DISABLE_CLOUD_SUBSCRIBER` is set) and performs a real, synchronous
 /// OS-keychain read of the single global `muxbus:global` credential
 /// almost immediately. On macOS that read requires interactive OS consent
 /// the first time a given code signature touches it — and every local

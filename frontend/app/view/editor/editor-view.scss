@@ -241,7 +241,8 @@
 }
 
 // ── Tab strip (editor tabs Phase 1B, #1088) ──────────────────────────────
-// Tabs flex 80–140px; overflow chip lands in Phase 2.
+// Tabs size to their label, capped at 240px; there is no overflow chip, the
+// strip scrolls horizontally instead (both in PaneTabStrip.scss).
 //
 // The strip chrome itself (.pane-tab-strip/.pane-tab/.pane-tab-label/
 // .pane-tab-close/.pane-tab-tip) was promoted to the shared

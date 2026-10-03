@@ -23,7 +23,8 @@ use super::zone_naming::{agent_current_zone, is_valid_definition_id};
 /// block-controller constructor purely to reach the stdout-reader hot path.
 static GLOBAL_TRANSCRIPT_STORE: std::sync::OnceLock<Arc<FileStore>> = std::sync::OnceLock::new();
 
-/// Install the global transcript store. Called once from `main.rs` startup.
+/// Install the global transcript store. Called once at startup from
+/// `bootstrap/stores.rs`.
 /// Idempotent — a second call is ignored (the first store wins).
 pub fn set_global_transcript_store(store: Arc<FileStore>) {
     let _ = GLOBAL_TRANSCRIPT_STORE.set(store);
@@ -38,10 +39,10 @@ pub fn global_transcript_store() -> Option<&'static Arc<FileStore>> {
 ///
 /// The block's `agentId` meta IS the agent `definition_id` (the same value the
 /// snapshot RPCs and `blockfile:read_range` fallback key on — see
-/// `app_api/blockfile.rs`), so the zone the hot-path mirror *writes* and the
-/// zone the read fallback *reads* are identical by construction. Returns `None`
-/// when the block isn't agent-anchored or carries an invalid id (no
-/// mirror/fallback).
+/// `global_output_source` in `app_api/mod.rs`), so the zone the hot-path
+/// mirror *writes* and the zone the read fallback *reads* are identical by
+/// construction. Returns `None` when the block isn't agent-anchored or carries
+/// an invalid id (no mirror/fallback).
 pub fn agent_zone_for_block_meta(meta: &crate::backend::obj::MetaMapType) -> Option<String> {
     let def_id = crate::backend::obj::meta_get_string(meta, "agentId", "");
     if is_valid_definition_id(&def_id) {

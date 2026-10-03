@@ -170,11 +170,11 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        (agent_def_update's SET clause deliberately omits it, same
 ///        immutable-after-creation treatment as is_seeded/slug/parent_id).
 ///        Distinct from db_agent_instances.memory_id (a specific launch's
-///        bundle, can still diverge on purpose) and NOT dual-written into
-///        db_agents — that column is
-///        instance-only by existing convention and this predates the
-///        Phase 3b reader flip that would need to decide how the two
-///        interact. Defaults to '' for existing rows; the m0021 migration
+///        bundle, can still diverge on purpose). Mirrored into db_agents as
+///        a SEPARATE default_memory_id column, not db_agents.memory_id —
+///        that column is instance-only by existing convention (see
+///        db_agents' CREATE TABLE comment). Defaults to '' for existing
+///        rows; the m0021 migration
 ///        backfills every unbound definition to a freshly-provisioned
 ///        bundle. See ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
 ///   v20 — db_agent_lan_keys: per-agent Ed25519 keypair for LAN-tier jekt

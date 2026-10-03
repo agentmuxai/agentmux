@@ -1079,7 +1079,8 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         // cascade in the patched libcef.so (see cef commits b921ffe18 +
         // 68e0dc668). The CSS layer's rgba(_,_,_,<1) body bg then composites
         // with the desktop instead of being clamped to opaque white.
-        // Pair: BrowserSettings.background_color must also be 0 (app/mod.rs).
+        // Pair: BrowserSettings.background_color must also be 0 (app/mod.rs
+        // sets it so only for alpha-capable windows).
         // Pair: WindowDelegate must return is_frameless=true (already does
         // for the main window).
         // Spec: docs/research/cef-transparency-research-2026-05-10.md.

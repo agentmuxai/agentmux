@@ -187,9 +187,9 @@ pub(crate) fn read_window_transparent_setting() -> bool {
             // re-exports the same value under that legacy name and this
             // function may run in a process that only has one of the two set.
             //
-            // No DataPaths::from_env() fallback here (reagentx P1 on
-            // #2664): from_env() itself requires AGENTMUX_CONFIG_DIR via
-            // `?` (data_paths.rs:307), so it can only ever succeed in
+            // No DataPaths::from_env() fallback here (#2664): from_env()
+            // itself requires AGENTMUX_CONFIG_DIR via `?`
+            // (crates/common/src/data_paths.rs), so it can only ever succeed in
             // exactly the case already handled above, and can only be
             // reached here when that case already failed — i.e. it would
             // always return None too. A branch that can never produce a

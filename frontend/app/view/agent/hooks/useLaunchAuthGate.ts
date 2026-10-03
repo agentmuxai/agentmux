@@ -75,8 +75,8 @@ export function useLaunchAuthGate(opts: UseLaunchAuthGateOpts) {
     //
     // Bypasses:
     // - `isContinue` — prior launch already produced creds.
-    // - API-key providers (kimi/pi) — their existing `launch-flow.ts`
-    //   Phase 2 prompts for the key in-line. Reagent + codex P1 on #847.
+    // - API-key providers (muxcode/qwen/kimi/pi) — `launch-flow.ts` Phase 2
+    //   runs their own auth check and login instead (#847).
     //
     // Hard auth-blockers: launch CANNOT proceed without the user
     // completing OAuth. Drives both the panel mount AND the launch
@@ -90,8 +90,8 @@ export function useLaunchAuthGate(opts: UseLaunchAuthGateOpts) {
     // error, which is worse than being blocked up front with a clear reason. The
     // gate's ambient escape hatch is now removed entirely (single point,
     // not global — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7),
-    // so "no account selected" must block here again, for every provider,
-    // with no exception.
+    // so "no account selected" must block here again, for every OAuth
+    // provider, with no exception.
     const authBlocksLaunch = () =>
         !isContinue()
         && provider()?.authType === "oauth"

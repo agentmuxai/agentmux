@@ -795,8 +795,7 @@ struct SenderCandidate {
     /// this codebase currently calls `update_last_seen` to refresh
     /// `AgentRegistration.last_seen` after registration — applying a
     /// staleness cutoff to it would eventually flag every healthy,
-    /// long-running host-tier agent as stale (codex review on PR #2702,
-    /// P1). `false` for WAN too (`last_seen_ms` is always `None` there —
+    /// long-running host-tier agent as stale (#2702). `false` for WAN too (`last_seen_ms` is always `None` there —
     /// `cloud_subscriber` doesn't track a per-agent heartbeat). `true` for
     /// cross-channel (the same 20s heartbeat task above re-writes the
     /// shared registry's `updated_at` for every live host-tier agent) and

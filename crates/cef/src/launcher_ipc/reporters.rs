@@ -208,8 +208,9 @@ pub fn report_host_counts(windows: u32, pool: u32) {
 
 /// Phase B.5 (window_id_map step b) — sync API: report the
 /// frontend's `register_backend_window` IPC to the launcher.
-/// Called from `commands/window/meta.rs::register_backend_window`
-/// after the host's local `window_id_map` insert. No-op if the
+/// Called from `commands/window/meta.rs::register_backend_window`,
+/// which (since step d) no longer inserts into the host's own
+/// `window_id_map` — the launcher is sole authority. No-op if the
 /// launcher pipe isn't connected.
 pub fn report_backend_window_id_registered(label: String, window_id: String) {
     let Some(tx) = super::COMMAND_TX.get() else {

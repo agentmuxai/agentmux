@@ -641,9 +641,9 @@ pub fn export_bundle(
         // `check_provider_model_immutable` in `server/app_api/bundle/mod.rs`) —
         // carried through export so a re-imported ABF is self-describing
         // about what it needs to run, not silently reset to unbound.
-        // Omitted (not just empty-stringed) when the source bundle itself
-        // has none set yet, so older/still-unbound bundles don't export a
-        // misleadingly-present-but-empty field.
+        // Written as `null` (not an empty string) when the source bundle
+        // itself has none set yet, so older/still-unbound bundles don't
+        // export a misleadingly-present-but-empty value.
         "provider": if bundle.provider.is_empty() { Value::Null } else { json!(bundle.provider) },
         "model": if bundle.model.is_empty() { Value::Null } else { json!(bundle.model) },
         "components": Value::Object(components),
@@ -970,7 +970,7 @@ mod tests {
         // `bundle.skills` column with this exact helper (until #3152 made the
         // ref tables authoritative), which previously had the same
         // unwrap_or_default() silent-loss bug already fixed here for
-        // context_files/mcp_servers.
+        // context_files (and, until #3152, mcp_servers).
         let mut warnings = Vec::new();
         let blank: Vec<String> = parse_json_field_or_warn("", "skills", &mut warnings);
         assert!(blank.is_empty());
