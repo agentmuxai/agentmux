@@ -330,16 +330,21 @@ impl End {
         }
     }
 
-    /// The last part of `path` as this side spells paths: on a host `/` only
-    /// (a `\` there is part of a name); here, either separator.
+    /// The last part of `path` as this side spells paths: `/` only on a host
+    /// and on Linux or macOS (a `\` there is part of a name); on Windows,
+    /// either separator.
     fn name(&self, path: &str) -> String {
-        match self {
-            End::Local => file_name(path),
-            End::Host { .. } => path
-                .rsplit('/')
+        let posix = |p: &str| {
+            p.rsplit('/')
                 .find(|s| !s.is_empty())
-                .unwrap_or(path)
-                .to_string(),
+                .unwrap_or(p)
+                .to_string()
+        };
+        match self {
+            // This computer's own rules: Windows takes either separator; on
+            // Linux and macOS a backslash is part of a name, as on a host.
+            End::Local if cfg!(windows) => file_name(path),
+            End::Local | End::Host { .. } => posix(path),
         }
     }
 
@@ -1668,6 +1673,32 @@ mod tests {
             0o444
         );
         assert!(!f.exists());
+    }
+
+    /// A local name with a backslash (Linux, macOS) goes up as itself.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_local_backslash_name_goes_up_as_itself() {
+        let local = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        let name = format!("a{}b.txt", '\u{5c}');
+        std::fs::write(local.path().join(&name), b"x").unwrap();
+        let h = host(remote.path()).await;
+        let (emit, seen) = events();
+        start(
+            FsOpKind::Copy,
+            End::Local,
+            vec![display_path(&local.path().join(&name))],
+            h,
+            display_path(remote.path()),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        assert_eq!(end.state, FsOpEventState::Done, "{end:?}");
+        assert_eq!(std::fs::read(remote.path().join(&name)).unwrap(), b"x");
+        assert!(!remote.path().join("b.txt").exists());
     }
 
     /// A host's name never becomes more than one name here (#4296).
