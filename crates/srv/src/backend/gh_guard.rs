@@ -25,6 +25,21 @@ use std::path::{Path, PathBuf};
 
 pub const GH_CONFIG_DIR: &str = "GH_CONFIG_DIR";
 
+/// Block meta on an agent's PtyShell: the agent's guard directory, which the
+/// PTY spawn sets as `GH_CONFIG_DIR` (`blockcontroller::shell::lifecycle`). A
+/// PTY shell's env is built from its own block, not from the agent's, so the
+/// guard has to travel on that block.
+pub const META_KEY_PTYSHELL_GH_CONFIG_DIR: &str = "ptyshell:ghconfigdir";
+
+/// The guard directory for an agent whose stored `cmd:env` is `agent_env`
+/// (the slug is read from it, as for the agent's own spawns), prepared the
+/// same way: created, with any login in it cleared.
+pub fn guard_dir_for(agent_env: &HashMap<String, String>) -> String {
+    let mut env = agent_env.clone();
+    apply_gh_guard(&mut env);
+    env.remove(GH_CONFIG_DIR).unwrap_or_default()
+}
+
 /// The file `gh` records its accounts in. Its absence is what "logged out"
 /// means; nothing else in the directory is touched.
 const GH_HOSTS_FILE: &str = "hosts.yml";
@@ -117,6 +132,21 @@ mod tests {
 
     fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    /// A PtyShell's guard is the agent's own directory, the one its Shell and
+    /// its CLI get, read from the agent's stored env.
+    #[test]
+    fn a_ptyshell_gets_the_agents_own_guard_dir() {
+        let dir = guard_dir_for(&env(&[("AGENTMUX_AGENT_ID", "PtyGuardTest")]));
+        assert_eq!(
+            PathBuf::from(&dir),
+            agent_gh_config_dir(&guard_config_home(), Some("ptyguardtest"))
+        );
+        let mut shell_env = env(&[("AGENTMUX_AGENT_ID", "PtyGuardTest")]);
+        apply_gh_guard(&mut shell_env);
+        assert_eq!(shell_env.get(GH_CONFIG_DIR), Some(&dir), "same as the agent's Shell");
+        assert!(!guard_dir_for(&HashMap::new()).is_empty(), "unattributed is still guarded");
     }
 
     #[test]
