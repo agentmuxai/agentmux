@@ -677,13 +677,14 @@ describe("resize handles span a slipped (zero-width) minimized pane", () => {
         return n;
     };
     // Mirror of Phase C's own pairing rule, kept in lockstep with the source.
-    const pairs = (children: LayoutNode[], slip: Set<string>) => {
+    // `isRow` defaults to true: every case here but the Column one is a Row.
+    const pairs = (children: LayoutNode[], slip: Set<string>, isRow = true) => {
         const out: Array<[number, number]> = [];
         let before = -1;
         for (let i = 0; i < children.length; i++) {
             const c = children[i];
             if (slip.has(c.id)) continue;
-            if (isEffectivelyMinimized(c)) { before = -1; continue; }
+            if (isEffectivelyMinimized(c)) { if (isRow) before = -1; continue; }
             if (before < 0) { before = i; continue; }
             out.push([before, i]);
             before = i;
@@ -719,13 +720,16 @@ describe("resize handles span a slipped (zero-width) minimized pane", () => {
         expect(pairs(kids, new Set())).toEqual([[0, 1], [1, 2]]);
     });
 
-    it("a Column's minimized chip has real extent, so it is NOT spanned", () => {
+    it("a Column's minimized chip keeps A and C paired across it", () => {
         // No slip in a Column (slip is Row-only), so the chip occupies a real
-        // header-height slot between A and C — they are not adjacent, and a
-        // handle across the chip would float on top of it.
+        // header-height slot between A and C. Since
+        // SPEC_RESIZE_THROUGH_COLLAPSED_PANES_2026_10_03.md the pair survives
+        // (it was []): Phase C places its handle at A's bottom edge and
+        // extendResizeHandlesThroughChips adds one at the chip's bottom edge.
+        // layoutModel.test.ts checks the real geometry.
         const kids = [leaf("A"), leaf("B", true), leaf("C")];
         const slip = new Set<string>(); // Column: resolveRowSlipTargets isn't consulted
-        expect(pairs(kids, slip)).toEqual([]);
+        expect(pairs(kids, slip, false)).toEqual([[0, 2]]);
     });
 
     it("an all-minimized row yields no handles (nothing expanded to resize)", () => {

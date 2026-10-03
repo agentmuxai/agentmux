@@ -321,6 +321,11 @@ export interface ResizeHandleProps {
     perpMaxPx: number;
     transform: CSSProperties;
     flexDirection: FlexDirection;
+    /** Half the handle's thickness on the main axis, when it is not the
+     *  usual `resizeHandleSizePx / 2`: a handle on a collapsed chip's edge is
+     *  clamped to a third of the chip (extendResizeHandlesThroughChips), and
+     *  anything hit-testing a handle by `centerPx` must use the same extent. */
+    halfSizePx?: number;
 }
 
 export interface LayoutNodeAdditionalProps {
