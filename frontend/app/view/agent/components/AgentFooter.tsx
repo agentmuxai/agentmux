@@ -120,7 +120,7 @@ interface AgentWorkingRowProps {
      *  bar is labeled as an estimate. Read once when the compaction starts, so
      *  the estimate doesn't move mid-run. No earlier compactions → no bar. */
     compactionContextTokens?: number | null;
-    /** Resolved model id, to estimate from that model's past compactions. */
+    /** The pane's model key (`compactionModelKey`), to estimate from that model's past compactions. */
     compactionModel?: string | null;
     /** Live "recovering from a stale --resume session id" state, or null —
      *  same relocation as `compacting` above. Fires ONLY after the

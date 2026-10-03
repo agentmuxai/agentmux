@@ -16,6 +16,10 @@
  * decision (spec §3).
  */
 
+import { getRuntimeConfig } from "./buildRuntimeArgs";
+import { PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { effectiveModel } from "./runtime-capabilities";
+
 /** One finished compaction. */
 export interface CompactionSample {
     /** The boundary frame's uuid — a frame seen twice counts once. */
@@ -23,7 +27,7 @@ export interface CompactionSample {
     /** Tokens in context when compaction started. */
     preTokens: number;
     durationMs: number;
-    /** Resolved model id that ran the compaction, when known. */
+    /** The model the compaction ran on (see `compactionModelKey`), when known. */
     model?: string;
 }
 
@@ -106,6 +110,20 @@ export function recordCompactionSample(
     } catch {
         /* storage full or denied: the estimate just has fewer samples */
     }
+}
+
+/**
+ * The model a pane's compaction samples are kept under: the model the process is
+ * configured to run (runtime selection, or a `--model` in the agent's own flags),
+ * so a `/model` switch counts before the next reply arrives; else the resolved
+ * model id from the replies.
+ */
+export function compactionModelKey(
+    blockMeta: Record<string, any> | undefined,
+    resolvedModel: string | null | undefined
+): string | undefined {
+    const configured = effectiveModel(getRuntimeConfig(blockMeta).model ?? "", blockMeta?.[PROVIDER_FLAGS_META_KEY]);
+    return configured || resolvedModel || undefined;
 }
 
 /**

@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    compactionModelKey,
     compactionProgress,
     estimateCompactionMs,
     parseCompactionSample,
@@ -211,5 +212,20 @@ describe("per-model samples", () => {
         const kept = readCompactionSamples(store);
         expect(kept).toHaveLength(30);
         expect(kept[0].uuid).toBe("s10");
+    });
+});
+
+describe("compactionModelKey", () => {
+    it("uses the configured model, so a /model switch counts before the next reply", () => {
+        expect(compactionModelKey({ "agent:runtime": { model: "opus" } }, "claude-sonnet-5-5")).toBe("opus");
+    });
+
+    it("lets a --model in the agent's own flags win, as the process does", () => {
+        const meta = { "agent:runtime": { model: "opus" }, "agent:provider_flags": "--model haiku" };
+        expect(compactionModelKey(meta, null)).toBe("haiku");
+    });
+
+    it("uses the runtime default when nothing is configured", () => {
+        expect(compactionModelKey(undefined, "claude-opus-5-5")).toBe("sonnet");
     });
 });
