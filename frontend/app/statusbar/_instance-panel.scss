@@ -240,8 +240,8 @@
     font-style: italic;
 }
 
-// Inline per-row opacity control (SPEC_PER_WINDOW_OPACITY_2026-05-14.md §3,
-// condensed onto the name row by instance-panel-floating-panes.md §3.3).
+// Inline per-row opacity control (condensed onto the name row by
+// instance-panel-floating-panes.md §3.3).
 // Fixed-width slider + value columns so percentages align vertically across
 // window and floating-pane rows; the name column's ellipsis absorbs overflow
 // and the row never wraps to two lines. The "Opacity" text label is dropped
