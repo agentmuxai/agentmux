@@ -3,6 +3,11 @@
 **Date:** 2026-08-10
 **Status:** implemented — see §9 for a TDD-driven revision made during
 implementation, before this PR opened. — #2514
+**Superseded in part (2026-10-02):** the flat 15s window from `mouseenter`
+is replaced by a quiet window that restarts on every real pointer move
+(`SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md` §4). A parked cursor still can't hold the
+timeout: entering the panel and layout-shift moves aren't activity (§4.3
+there). The countdown now lives in `store/question-timer.ts`.
 **Builds on:** `docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md`
 (implemented, PR #2441, verified in code 2026-08-10). This spec amends only
 that spec's *timer-arming* logic (§2.3). Its recommended-option detection

@@ -5,7 +5,7 @@
 // pane-selection focus path consults before moving the caret.
 
 import { afterEach, describe, expect, it } from "vitest";
-import { eventBelongsToBlock, eventBelongsToPaneOf, userCaretInBlock } from "./focusutil";
+import { eventBelongsToBlock, eventBelongsToPaneOf, isEditableTarget, userCaretInBlock } from "./focusutil";
 
 function mountBlock(blockId: string, inner: string): HTMLElement {
     const block = document.createElement("div");
@@ -149,5 +149,24 @@ describe("eventBelongsToBlock", () => {
         const e = keydownFrom(document.body);
         expect(eventBelongsToBlock(e, "A")).toBe(false);
         expect(eventBelongsToBlock(e, "B")).toBe(true);
+    });
+});
+
+// One copy for the decision and question panels (it used to be written out in
+// both). A plain text input counts (#2060).
+describe("isEditableTarget", () => {
+    it("is true for inputs, textareas and contentEditable", () => {
+        expect(isEditableTarget(document.createElement("input"))).toBe(true);
+        expect(isEditableTarget(document.createElement("textarea"))).toBe(true);
+        // jsdom doesn't implement isContentEditable; a browser derives it.
+        const div = document.createElement("div");
+        Object.defineProperty(div, "isContentEditable", { value: true });
+        expect(isEditableTarget(div)).toBe(true);
+    });
+
+    it("is false for anything else, and for no target", () => {
+        expect(isEditableTarget(document.createElement("button"))).toBe(false);
+        expect(isEditableTarget(document.createElement("div"))).toBe(false);
+        expect(isEditableTarget(null)).toBe(false);
     });
 });

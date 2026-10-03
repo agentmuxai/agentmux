@@ -1,6 +1,6 @@
 # SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout
 
-**Status:** proposed
+**Status:** implemented — #4250. The two open questions are decided (§8).
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"we simply want the working/idle extended with "question" (use the theme primary color) when an agent is currently asking a question. Also, piggyback a fix on that, question panel in the agent pane should reset their timeout on both mouse movement AND typing (currently it appears to be only for mouse movement)"*, and *"also, in the swarm, put a countdown that mirrors the one on the question panel"*; *"ideally its a single DRY path, one timer surfaced multiple places"*; *"also, take any other opportunities to DRY the code in the area you are working in"* (§5).
@@ -52,13 +52,13 @@ The panel's "Auto-selects recommended in 23s" and the Swarm chip's "question 23s
 ### 2.2 Publishing across windows
 Swarm can run in another window, which is another renderer, so the owner also writes the state to its block's meta under `term:question_timer` (same shape, `null` removes the key). Readers outside the owner's renderer read it from there.
 - Written on edges only: start, pause, resume, end. Never per tick. Activity while already paused changes nothing and writes nothing.
-- `null` on end and on unmount. Unlike `term:awaiting_user`, the question is still pending after an unmount, but nothing is counting any more.
+- `null` when the question ends: answered, cancelled or expired. **Nothing on unmount**: whichever window mounts the pane next writes its state on mount (rule 3 below), so a pane moving between windows has one writer. A `null` from the old window, sent over its own connection, could otherwise land after the new window's countdown and blank it everywhere (Codex P2 on #4250). Per renderer, writes for a block go out one at a time, latest state last. A write the old window already had in flight can still land after the new owner's, so the owner re-publishes its state whenever block meta differs from it and none of its own writes is in flight (`reconcileQuestionTimer`).
 - Same machine, same clock: every window and the owner share `Date.now()`, so `endsAt` reads the same everywhere.
 - Remote rows (another channel or host) never have this key in this window's store; they show plain `question` (§3.3).
 - **Stale values.** A renderer crash or a closed window skips the unmount, so the key can outlive its owner. Three rules keep that from showing:
   1. `questionCountdown` returns no state for a published `counting` whose `endsAt` has passed, so the chip shows plain `question`, never `0s` or a negative.
   2. Readers use the key only while §3.2's question condition holds (turn in flight and `term:awaiting_user`). Once the turn ends, a leftover `paused` or `counting` is ignored, the same guard §5.3 keeps for `term:awaiting_user`.
-  3. The owner always writes the key when its panel mounts: the live state if a question is pending, `null` otherwise. A reload or a restored window therefore overwrites whatever the crash left behind. A closed window takes its blocks with it, so no Swarm row is left reading the key.
+  3. The owner always writes the key when its panel mounts: the live state if a question is pending, `null` otherwise. A reload, a restored window, or the window a pane moved to therefore overwrites whatever was left behind. A closed window takes its blocks with it, so no Swarm row is left reading the key.
 
 ## 3. Swarm: the "question" chip and its countdown
 
@@ -69,7 +69,7 @@ Swarm can run in another window, which is another renderer, so the owner also wr
 - `ChipStatus` becomes `"working" | "question" | "idle"`.
 - **question** when the row's agent has a turn in flight (`node.agentStatus === "running"`, or the mounted pane's phase maps to working/tools) **and** its block meta has `term:awaiting_user === true`. This is the condition `resolveSwarmLine` already uses for "Waiting for you", including its guard: the flag counts only while a turn is in flight, so one left behind by a crash can't outrank idle.
 - Precedence: question over working over idle.
-- Label `question`. Colour `var(--accent-color)` (the theme's primary colour; every theme defines it). The dot is steady, not pulsing: pulsing means "busy", and this state means "waiting on you".
+- Label `question`. Colour `var(--accent-color)` (the theme's primary colour; every theme defines it). The dot pulses like working's (repo owner, 2026-10-02: "just like working and idle, a strobing dot, but the color is the theme primary"); the colour is what tells it apart.
 - Subagent rows are unchanged: a subagent never asks the user; its parent does.
 - `chipStatus(status)` becomes `chipStatus(status, awaitingUser)`; the row computes `awaitingUser` with the same helper the row line uses (§5.3), from the `blockMeta()` it already reads.
 
@@ -138,12 +138,13 @@ Besides the countdown itself (§2), the panel's `countdownSeverity()` thresholds
   - activity → paused, then counting at the full duration 15s after the last activity;
   - activity while paused restarts the quiet timer and writes nothing;
   - dormant pauses and waking re-arms;
-  - end and unmount clear the state and the published key;
+  - end clears the state and the published key; unmount clears the local state and writes nothing;
+  - the owner re-publishes when a late write from another window leaves block meta different from its state;
   - edges-only meta writes;
   - a non-owner renderer reads the published copy and never schedules an expiry;
   - `questionCountdown` seconds and bands;
   - stale values (§2.2): a published `counting` past its `endsAt` reads as no state; a leftover key is ignored once the turn ends; mounting the panel overwrites a leftover key.
-- **Chip**: `chipStatus` for working + flag → question; idle + stale flag → idle; subagent rows unchanged. A render test for the label, `--accent-color` class, steady dot, countdown text, the warning and critical bands, `paused`, and no countdown without timer state.
+- **Chip**: `chipStatus` for working + flag → question; idle + stale flag → idle; subagent rows unchanged. A render test for the label, `--accent-color` class, pulsing dot, countdown text, the warning and critical bands, `paused`, and no countdown without timer state.
 - **Panel**:
   - typing in the composer pauses the countdown;
   - continuous typing (keydowns 2s apart for 60s) never lets it fire, and it fires a full timeout after the last key;
@@ -158,6 +159,7 @@ Besides the countdown itself (§2), the panel's `countdownSeverity()` thresholds
 ## 7. Rollout
 One PR: the timer module, the panel moved onto it with the activity rule, the Swarm chip reading it, and §5's consolidations (they touch the same files). They share one timer, so they land together. On merge, the hover-pause spec's §9, the keyboard-pause spec's §8 and the auto-timeout spec get a pointer here (the countdown moved to the module, and the flat window is replaced for the reasons in §4.3).
 
-## 8. Open questions
-1. **Composer typing.** §4.2 counts keystrokes anywhere in the agent's pane, the composer included. The keyboard-pause spec deliberately excluded the composer ("not engagement with this question"). Proposed: include it, since typing a reply is engagement; the alternative is panel-only typing, which keeps today's composer gap.
-2. **Dot.** Steady (proposed) or pulsing like working.
+## 8. Decisions
+Both decided by the repo owner on 2026-10-02.
+1. **Composer typing counts.** §4.2 counts keystrokes anywhere in the agent's pane, the composer included, since typing a reply is attending to the question. The keyboard-pause spec had excluded the composer ("not engagement with this question"); this replaces that.
+2. **The dot pulses**, like working's, in the theme's primary colour (§3.2).
