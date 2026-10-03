@@ -7,15 +7,16 @@
 //!
 //! Each session represents one user-initiated "Connect with OAuth"
 //! attempt. The frontend creates a session via `start_session`,
-//! polls via `poll_session`, optionally pastes a callback URL via
-//! `submit_callback_url`, and cancels via `cancel_session`.
+//! polls via `poll_session`, optionally pastes a callback URL (the
+//! `auth.submitcallback` handler forwards it via `send_to_stdin`),
+//! and cancels via `cancel_session`.
 //!
 //! PR A scope: the session-state machine + per-line stdout
 //! interpretation + lifecycle (timeout, cancel, cleanup). The
-//! actual CLI spawn lives in the handler (so it can use AppState's
-//! CLI resolver) but emits frames into this module via
-//! `record_line` / `record_exit`. That keeps this module pure and
-//! testable.
+//! actual CLI spawn lives in the handler (`server/identity_auth_spawn.rs`,
+//! so it can use AppState's CLI resolver) but emits frames into this
+//! module via `record_line` / `finish_success` / `finish_failure`.
+//! That keeps this module pure and testable.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

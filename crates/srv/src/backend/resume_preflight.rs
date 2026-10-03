@@ -87,7 +87,7 @@ impl Verdict {
 }
 
 /// One line in the pane's progress list while the preflight runs. Mirrors the
-/// launcher splash's `StageRow` shape (`crates/launcher/src/splash.rs`) so
+/// launcher splash's `StageEntry` row (`crates/launcher/src/splash_core.rs`) so
 /// the two read as the same idea in two places.
 #[derive(Debug, Clone)]
 pub struct Step {

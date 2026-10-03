@@ -224,7 +224,7 @@ export type BrowserPaneCommand =
      * Remove the tab. If it was active, activate its right neighbour
      * (or the new last tab when it was the rightmost). Pushes a
      * `ClosedBrowserTab` entry onto the `recentlyClosed` stack.
-     * Emits `LastTabClosed` when the pane becomes tabless.
+     * Emits `last-tab-closed` when the pane becomes tabless.
      */
     | { type: "CloseTab"; tabId: string; source?: BrowserCommandSource }
     /**

@@ -219,13 +219,11 @@ fn copy_tsidx_best_effort(src_store: &FileStore, src_zone: &str, dst_store: &Fil
 /// Best-effort — used after the global-preferred archive has persisted the
 /// content, to retire this channel's (subset) copy.
 ///
-/// Also clears `output.idx` (reagent P1 on #2701, mirroring codex's P2 on the
-/// global-zone twin of this function): `blockfile:read_range`'s freshness
-/// check is a `covered_size` byte comparison against the current `output`, so
-/// a stale index left behind after `output` is deleted and rewritten from
-/// scratch could be spuriously accepted the moment the new output happens to
-/// reach the same byte size, silently serving the old session's cached line
-/// count/offsets.
+/// Also clears `output.idx` (#2701): an index left behind after `output` is
+/// deleted and rewritten could otherwise be accepted for a new output of the
+/// same byte size, serving the old session's line count/offsets. Since #3634
+/// the index also carries the output generation it was built for, which
+/// catches that too; deleting it here keeps the zone clean regardless.
 pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
     // One transaction (5a-2b); absent files are not an error.
     if let Err(e) = filestore.delete_files(zone, &[SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"]) {
@@ -239,12 +237,11 @@ pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
 /// errors are logged but never propagated. Keeps the global zone in lockstep
 /// with the per-channel `:current` clear in [`archive_session`].
 ///
-/// Also clears `output.idx` (codex P2 on #2701): its freshness check is a
-/// `covered_size` byte comparison against the current `output`, so a stale
-/// index left behind after `output` is deleted and rewritten from scratch
-/// could be spuriously accepted as fresh the moment the new output happens
-/// to reach the same byte size, silently reporting the old session's line
-/// count. Deleting it here forces a rebuild against the new content instead.
+/// Also clears `output.idx` (#2701): an index left behind after `output` is
+/// deleted and rewritten could otherwise be accepted for a new output of the
+/// same byte size. Since #3634 the index also carries the output generation it
+/// was built for, which catches that too; deleting it here forces a rebuild
+/// against the new content regardless.
 pub fn clear_global_current_zone(definition_id: &str) {
     let Some(gfs) = global_transcript_store() else {
         return;

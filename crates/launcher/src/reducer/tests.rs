@@ -2461,9 +2461,9 @@ fn promote_after_open_marks_existing_mirror_foregrounded() {
     // the existing mirror directly INSTEAD of leaking an entry into
     // just_promoted_labels that will never be drained.
     //
-    // Caught by the `just_promoted_labels_drained_by_open_or_close`
-    // proptest after codex P2 PR #709 round 1 pointed out that the
-    // original strategy used disjoint label spaces.
+    // Caught by the `both_drain_paths_remove_just_promoted_entry`
+    // proptest once its strategy stopped using disjoint label spaces
+    // (#709).
     let (mut state, c) = registered_host_state();
     let _ = update(
         &mut state,
@@ -3366,8 +3366,9 @@ fn arb_b8_host_command() -> impl proptest::strategy::Strategy<Value = Command> {
 /// `ReportPoolWindowPromoted("a")` is followed (with non-trivial
 /// probability) by `ReportWindowOpened { label: "a", .. }` or
 /// `ReportWindowClosed { label: "a" }`. Used by the
-/// `just_promoted_labels_drained_by_open_or_close` proptest, which
-/// codex flagged in PR #709 round 1: with the disjoint label space
+/// `both_drain_paths_remove_just_promoted_entry` and
+/// `just_promoted_labels_bounded_by_distinct_labels_ever_promoted`
+/// proptests (#709): with the disjoint label space
 /// in `arb_b8_host_command`, the cleanup paths in
 /// `handle_report_window_opened/Closed` never ran on promoted labels,
 /// so the property test would still pass with the cleanups removed.

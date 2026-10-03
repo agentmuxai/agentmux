@@ -710,7 +710,7 @@ export type AgentPaneCommand =
     | { type: "StopFailed" }
     /**
      * Interrupt timeout watchdog fired (caller-scheduled setTimeout — see
-     * `ScheduleInterruptTimeout` event). Bounded `Interrupting → Done`
+     * `schedule-interrupt-timeout` event). Bounded `Interrupting → Done`
      * force-transition: if the agent never acks the SIGINT (backend died,
      * stream dropped, etc.) the pane was previously stuck in Interrupting
      * forever and the working animation would never settle. This command

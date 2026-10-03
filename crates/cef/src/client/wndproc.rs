@@ -133,8 +133,9 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
 }
 
 /// Original WndProc table for the floater cascade hook.
-/// Module-level so `cascade_hook` (an `extern "system" fn`) can access it
-/// — inner-function statics are not in scope for nested `extern fn` items.
+/// Module-level so `floater_cascade_wndproc` (an `extern "system" fn`) can
+/// access it — inner-function statics are not in scope for nested
+/// `extern fn` items.
 #[cfg(target_os = "windows")]
 static FLOATER_CASCADE_ORIGINALS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, isize>>,

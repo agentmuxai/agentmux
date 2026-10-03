@@ -17,7 +17,8 @@ pub fn is_valid_definition_id(s: &str) -> bool {
 }
 
 /// `agent:<definition_id>:current`. Panics in debug if `definition_id`
-/// is invalid; callers should `validate_definition_id` first in release.
+/// is invalid; callers should check `is_valid_definition_id` first (or use
+/// `validate_and_current`) in release.
 pub fn agent_current_zone(definition_id: &str) -> String {
     debug_assert!(
         is_valid_definition_id(definition_id),

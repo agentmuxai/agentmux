@@ -57,9 +57,9 @@ export function usePaneReveal(opts: {
     // window instead of fixing it. `scheduleOnSettle` (same Long-Task-quiet
     // detector `tab-reveal.ts` uses for the analogous tab-switch case) waits
     // for the main thread to actually go quiet post-dispatch before the
-    // fade starts. `showLoadingOverlay` then unmounts the overlay entirely
-    // once the fade transition has had time to finish, instead of leaving
-    // an invisible-but-present pointer-events:none div forever.
+    // fade starts. `readiness.revealComplete()` then unmounts the overlay
+    // entirely once the fade transition has had time to finish, instead of
+    // leaving an invisible-but-present pointer-events:none div forever.
     // One readiness authority for this pane — see
     // docs/specs/SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md. Phase 1 changes no
     // behaviour: the same two conditions gate the reveal, the fade still runs for
@@ -84,11 +84,11 @@ export function usePaneReveal(opts: {
     });
     const releaseHistoryGate = readiness.gate("history");
     const releaseAuthGate = readiness.gate("auth");
-    // Separate from `historyLoaded` below: this only means "the transcript
-    // has actually painted" — the effect after `status` is defined (further
-    // down) decides whether that's enough to start the fade, or whether the
-    // auth-panel pop-in flicker fix also needs to hold the overlay a bit
-    // longer.
+    // Not "history parsed" (`onHistoryReady`, which only calls
+    // `startPaintWait`): this means "the transcript has actually painted".
+    // `connectLaunchStatus` (further down) releases the `history` gate from
+    // it; the separate `auth` gate decides whether the auth-panel pop-in
+    // flicker fix also needs to hold the overlay a bit longer.
     const [historyPainted, setHistoryPainted] = createSignal(false);
     let cancelSettleWait: (() => void) | undefined;
     let loadingOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;

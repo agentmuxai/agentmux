@@ -190,10 +190,11 @@ pub trait SagaActionRunner: Send + Sync {
     /// architecture the host's `on_before_close` already drains
     /// panes synchronously when a window closes, so this is a
     /// best-effort acknowledge — the saga relies on the organic
-    /// `Event::PanesReaped` (via `report_panes_reaped` in
-    /// `client.rs`) for the real signal. The Report this returns
-    /// is a saga-correlated echo so the saga's `expected_saga_id`
-    /// filter matches.
+    /// `Event::PanesReaped` (via `launcher_ipc::report_panes_reaped`)
+    /// for the real signal. The `ReportPanesReaped` that
+    /// `dispatch_host_command` builds after this call is a
+    /// saga-correlated echo so the saga's `ctx.saga_id` filter
+    /// matches.
     fn reap_panes(&self, label: &str);
 
     /// Run the `DrainPoolIfLast` action for the named window.

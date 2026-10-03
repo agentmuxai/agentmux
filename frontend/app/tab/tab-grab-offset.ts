@@ -9,8 +9,9 @@
  *
  * Set in `droppable-tab.tsx::onGenerateDragPreview` (the earliest
  * pragmatic-dnd hook that exposes `DragLocation`); read in
- * `tabbar.tsx::performTabTearOff` and the cross-window drag
- * monitors. Cleared on drop / drag end.
+ * `tab-tearoff-rpc.ts::createTearOffTabAtRelease` and the cross-window
+ * drag monitors. Deliberately NOT cleared on drop (see the comment in
+ * `droppable-tab.tsx`'s `onDrop`); the next drag's preview overwrites it.
  *
  * Spec: docs/specs/SPEC_TAB_TEAROFF_POSITION_AND_PAINT_2026-05-07.md
  */

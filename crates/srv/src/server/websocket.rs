@@ -761,10 +761,11 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     let config_watcher = state.config_watcher.clone();
     // The RESPONSE stays `serde_json::Value`, deliberately. Redaction runs on
     // the serialized form (`redact_full_config_for_renderer` walks the JSON and
-    // strips secrets), so what goes on the wire is NOT `FullConfig` -- it is
-    // `FullConfig` minus fields that a type would still claim are there.
-    // Generating `FullConfig` here would produce a binding that promises the
-    // renderer secrets it will never receive, which is worse than `unknown`.
+    // strips secrets), so what goes on the wire is NOT `FullConfigType` -- it
+    // is `FullConfigType` minus fields that a type would still claim are
+    // there. Generating `FullConfigType` here would produce a binding that
+    // promises the renderer secrets it will never receive, which is worse
+    // than `unknown`.
     engine.register_typed(
         COMMAND_GET_FULL_CONFIG,
         move |_req: Option<NoArgsReq>, _ctx| {

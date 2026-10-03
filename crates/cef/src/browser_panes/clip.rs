@@ -43,8 +43,7 @@ impl BrowserPaneManager {
     /// This is the Win32 "airspace" workaround — native HWNDs always paint
     /// above DOM regardless of CSS z-index, and `SetWindowRgn` is the one
     /// mechanism that lets DOM bleed through a specific region of a child
-    /// HWND. Empty `overlay_rects` restores full pane visibility (same as
-    /// calling `clear_pane_overlay_clip`).
+    /// HWND. Empty `overlay_rects` restores full pane visibility.
     ///
     /// Windows only. Linux and macOS use the Views-based equivalent below,
     /// which hides an overlapped pane instead of clipping it.

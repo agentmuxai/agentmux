@@ -61,17 +61,15 @@ function setActive(data: TabLayoutData, blockId: string, stack: string[]): void 
 /**
  * Universal Pane Tabs (SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17.md
  * §4.5) — create a fresh block for `blockDef` and push it onto `nodeId`'s
- * stack as a new Pane Tab. Generalizes the exact create-then-push sequence
- * agent's own "+" handler already used inline
- * (`frontend/app/view/agent/agent-view.tsx`'s `handleNewAgentTab`) — `pane.open`
- * with `stack_onto_block_id` creates the block AND places it in this pane's
- * stack in one backend step (`CreateBlockInStack`), for any widget type.
+ * stack as a new Pane Tab, for any widget type (it replaced the agent pane's
+ * own inline "+" handler, #3335) — `pane.open` with `stack_onto_block_id`
+ * creates the block AND places it in this pane's stack in one backend step
+ * (`CreateBlockInStack`).
  *
  * Re-resolves `nodeId` fresh after the RPC rather than trusting a pre-await
  * reference — the pane can close while the request is in flight. If it has,
  * the new block's pane is gone too; delete it instead of
- * leaving an orphaned, unreachable block behind (same race agent's handler
- * already guards).
+ * leaving an orphaned, unreachable block behind.
  */
 export async function addWidgetAsPaneTab(
     model: LayoutModel,

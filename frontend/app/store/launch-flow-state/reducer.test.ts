@@ -344,7 +344,7 @@ describe("launch-flow-state reducer", () => {
         it("inner events are wrapped + surfaced via outer ReducerResult.events", () => {
             // Drive the inner machine into a state where it emits an
             // event. `Connect` from unauthenticated kicks off the
-            // OAuth start RPC via `StartAuth` event.
+            // OAuth start RPC via a `start-requested` event.
             let s = update(initialState(), {
                 type: "Auth",
                 cmd: { type: "Selected", providerId: "claude", bundleId: "", outcome: "needs-account" },

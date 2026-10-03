@@ -2727,7 +2727,8 @@ describe("agent-pane-state reducer", () => {
         });
 
         it("Late TurnEnd after SubmitTimeoutElapsed does NOT overwrite errored (first-done-wins)", () => {
-            // PR C added `alreadyDone` to the TurnEnd arm so a late
+            // PR C gave the TurnEnd arm a first-done-wins guard (an
+            // existing `Done` keeps its outcome) so a late
             // graceful ack after a forced Done can't reclassify the
             // outcome. PR D inherits the same guarantee: timeout fires,
             // turn lands in Done.errored, a stray backend TurnEnd that

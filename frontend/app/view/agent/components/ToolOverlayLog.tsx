@@ -106,7 +106,8 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // it had was filtered out), instead of falling through to the
     // `!hasChunks() && !hasResult()` branch's "⏳ Running…" placeholder a
     // few lines down. The net effect: the tool panel auto-expanded (see
-    // ToolBlock.tsx's `autoExpanded()`, gated on status alone) straight
+    // `rowDisclosure` in `virtualization/disclosure.ts`, gated on status
+    // alone) straight
     // into a visibly blank body for however long real output took to
     // arrive, between the Working row's "Thinking…" and the first real
     // chunk — the exact gap user reports still exist after

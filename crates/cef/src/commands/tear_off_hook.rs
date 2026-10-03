@@ -18,10 +18,11 @@
 //
 // Architecture:
 //   * `start_tear_off_tracking()` is called from the IPC handler
-//     BEFORE the SC_MOVE post. Spawns a thread, installs the hook,
-//     returns a `TrackingHandle` that's dropped when the user releases
-//     the mouse (the thread's GetMessage loop sees WM_LBUTTONUP and
-//     calls PostQuitMessage).
+//     BEFORE the SC_MOVE post. Spawns a thread, installs the hook and
+//     returns once it is installed; the thread runs until the user
+//     releases the mouse (the thread's GetMessage loop sees
+//     WM_LBUTTONUP and calls PostQuitMessage) or
+//     `stop_active_hook_session` posts it WM_QUIT.
 //   * On every WM_MOUSEMOVE, the callback does WindowFromPoint →
 //     GetAncestor(GA_ROOT) and looks the HWND up in `state.browsers`
 //     (skipping the dragged window itself). If the candidate target
@@ -931,9 +932,10 @@ mod macos {
         is_last_tab: bool,
         current_target: RefCell<Option<String>>,
         finalized: RefCell<bool>,
-        /// Throttle for `candidate_label_under_cursor`'s
-        /// `CGWindowListCopyWindowInfo` call — see that function's doc
-        /// comment for why this exists. `(when the cached result was
+        /// Throttle for `candidate_label_under_cursor_uncached`'s
+        /// `CGWindowListCopyWindowInfo` call — see
+        /// `HIT_TEST_MIN_INTERVAL`'s doc comment for why this exists.
+        /// `(when the cached result was
         /// computed, that result)`.
         last_hit_test: RefCell<(std::time::Instant, Option<String>)>,
     }
@@ -1092,10 +1094,10 @@ mod macos {
     /// changes.
     ///
     /// Falls back to a silent no-op when Accessibility isn't granted —
-    /// the existing `DragOverlay` append-only cross-window drag path
-    /// (already shipped, works on macOS today) keeps working exactly as
-    /// it does now; this hook is a pure upgrade on top of it, never a
-    /// replacement it depends on.
+    /// the existing `CrossWindowDropOverlay` append-only cross-window
+    /// drag path (already shipped, works on macOS today) keeps working
+    /// exactly as it does now; this hook is a pure upgrade on top of it,
+    /// never a replacement it depends on.
     pub fn start_tab_drag_tracking(
         state: Arc<AppState>,
         source_label: String,
@@ -1395,9 +1397,9 @@ mod macos {
             // another AgentMux window — emit tabdrag:merge-direct and
             // let that window strip-hit-test and move the tab. Release
             // over the source window (in-window reorder) or over
-            // nothing (existing DragOverlay cross-window append path) is
-            // owned by the existing pipelines; emitting nothing here
-            // keeps them un-double-processed. Mirrors Windows'
+            // nothing (existing CrossWindowDropOverlay cross-window
+            // append path) is owned by the existing pipelines; emitting
+            // nothing here keeps them un-double-processed. Mirrors Windows'
             // handle_button_up TabDrag branch exactly.
             if let Some(target_label) = &candidate {
                 if target_label != &ctx.source_label {

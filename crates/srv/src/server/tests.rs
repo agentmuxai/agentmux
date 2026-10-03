@@ -4551,7 +4551,8 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
     // isn't published until the wait/cleanup task's flusher-drain wait
     // resolves, and that hits its full 10s `FLUSHER_DRAIN_TIMEOUT` on
     // essentially every ordinary `cmd.exe` exit on Windows (discovered live
-    // while adding `ptyshell_shell_pane_closes_itself_after_exit` — see its
+    // while adding the close-on-exit tests — see
+    // `ptyshell_create_does_not_close_the_parented_shell_pane_after_exit`'s
     // own comment, and the close-on-exit trigger's comment in lifecycle.rs).
     let mut done = false;
     for _ in 0..60 {

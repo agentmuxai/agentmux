@@ -50,8 +50,8 @@
  *
  * Publish transport
  * -----------------
- * The frontend `EventPublishCommand` RPC has no srv handler (the srv
- * only registers `eventsub` / `eventunsub` / `eventreadhistory`). The
+ * There is no event-publish RPC (the srv only registers `eventsub` /
+ * `eventunsub` / `eventunsuball` / `eventreadhistory`). The
  * auth-gated HTTP endpoint `POST /agentmux/wps/publish` *does* forward
  * arbitrary `{event, scopes, persist, data}` to the broker — that is the
  * publish path `agentmux-bashwrap` uses, and the one we use here.

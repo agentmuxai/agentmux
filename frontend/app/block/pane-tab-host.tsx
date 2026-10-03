@@ -5,8 +5,8 @@
  * The host side of a NATIVE pane tab (a manifest with `create(ctx)`, Pane Tab
  * contract Phase 2b — docs/specs/SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §3/§4):
  * the context the host hands an instance, and the adapter that presents the
- * instance as the ViewModel the rest of the host consumes today. Legacy
- * ViewModel classes (`legacyAdapter`) never pass through here.
+ * instance as the ViewModel the rest of the host consumes today. Every pane
+ * tab is native since #3836 removed the pre-contract ViewModel-class path.
  */
 
 import { RpcApi } from "@/app/store/rpc-api";

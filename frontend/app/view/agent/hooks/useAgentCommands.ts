@@ -122,7 +122,7 @@ export interface UseAgentCommandsOptions {
     /**
      * Called on the next animation frame after `sendMessage` queues a user
      * message; wired to the document's `scrollToBottomFn` so the message is
-     * visible even if `autoScroll` was switched off while the composer grew.
+     * visible even if `stickToBottom` was switched off while the composer grew.
      * See SPEC_AGENT_PANE_FOLLOWUPS_2026_04_13.md item #1.
      */
     onSent?: () => void;

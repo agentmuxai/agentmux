@@ -382,11 +382,11 @@ describe("computeComposerRows", () => {
         ]);
     });
 
-    // Codex P1, PR #2812: the single-row fit check only summed slot
-    // widths, never the stats zone that shares the same physical line as
-    // a third flex child whenever `rows().length === 1` (spec §3.4).
-    // Slots alone fitting `availableWidth` doesn't mean slots-plus-stats
-    // do — `reservedWidth` closes that gap.
+    // #2812: the single-row fit check only summed slot widths, never the
+    // stats zone that shares the same physical line as a third flex child
+    // whenever `rows().length === 1` (spec §3.4). Slots alone fitting
+    // `availableWidth` doesn't mean slots-plus-stats do — a `reservedWidth`
+    // parameter once closed that gap; it has since been removed (below).
     it("decides row membership from slot widths alone — the stats zone can no longer force a slot split (supersedes Codex P1, PR #2812)", () => {
         // User-reported regression: with live stats ticking, the strip
         // jumped straight from 1 visual line to 3 (2 slot rows + the

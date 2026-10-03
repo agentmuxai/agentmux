@@ -38,8 +38,9 @@
  *
  *  Two terminal-ish variants:
  *  - `authenticated`: CLI auth confirmed but no bundle row exists yet.
- *    User chooses a name → frontend fires `auth.savebundle` → backend
- *    transitions to `success` with the real bundleId.
+ *    User chooses a name → frontend would fire `auth.savebundle` →
+ *    backend transitions to `success` with the real bundleId. That RPC
+ *    is planned (PR C-2) and not built yet; see `ApiKeyAccepted` below.
  *  - `success`: post-save final state, bundleId is the real row id.
  *
  *  `accountId` (issue #1624 PR-C Part B) is set only for a direct-

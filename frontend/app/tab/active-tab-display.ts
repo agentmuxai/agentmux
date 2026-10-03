@@ -31,7 +31,8 @@
  *
  * So the pill renders off an OPTIMISTIC value instead — the tab the user
  * just clicked, applied before the RPC is even issued. This is not a new
- * pattern: `pendingHidden` below is the same trick, already shipped for the
+ * pattern: the `hiddenTabIds` promotion below (fed from tabbar.tsx's
+ * `pendingHiddenTabIds`) is the same trick, already shipped for the
  * close flow (`SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` §8-9),
  * where the strip promotes the neighbor the backend is *about to* activate
  * rather than waiting for `CloseTab` to resolve. This module just extends

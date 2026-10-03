@@ -13,7 +13,7 @@
  * a secondary check (e.g. Node removed after install), not the primary gate
  * (tracking issue #2940).
  *
- * Probed pre-launch via the `resolve_prereqs` RPC. Missing prereqs
+ * Probed pre-launch via the `resolve.prereqs` RPC. Missing prereqs
  * open the `AgentPrereqModal` with platform-aware install links.
  * See docs/specs/SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
  */

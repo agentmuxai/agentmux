@@ -751,17 +751,17 @@ wrap_task! {
                 // zone and wasn't cancelled.
                 //
                 // Recomputed from the release cursor rather than reusing the
-                // cached `in_snap_zone` flag. That flag only reflects the last
-                // WM_MOUSEMOVE we actually processed, and the top-of-loop
+                // cached `snap_preview_rect` state. That state only reflects the
+                // last WM_MOUSEMOVE we actually processed, and the top-of-loop
                 // GetAsyncKeyState fast-path above can break out before the
                 // final mousemove for the true release point is ever dequeued
                 // (its own comment documents that physical button state leads
                 // the message queue). Committing off the cached value would
                 // therefore maximize — or fail to — based on a stale position
                 // whenever the user crosses the zone boundary quickly right
-                // before releasing. reagentx P1, raised across four review
-                // rounds. The flag stays authoritative for the PREVIEW, which
-                // is inherently about transitions during the drag.
+                // before releasing. The cached state stays authoritative for
+                // the PREVIEW, which is inherently about transitions during the
+                // drag.
                 let released_in_zone = !cancelled
                     && snap_eligible
                     && snap_work_area_for_cursor(release_cursor.x, release_cursor.y)

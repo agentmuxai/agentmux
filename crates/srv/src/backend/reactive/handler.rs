@@ -121,7 +121,8 @@ pub struct Handler {
     message_sender: Option<MessageSender>,
     /// Queries a resolved delivery target's own live identity before
     /// delivering, as a check independent of this handler's own
-    /// `agent_to_block` map. See `AgentIdentityConfirmer`'s doc comment and
+    /// `uid_to_block` / `name_to_blocks` registry. See
+    /// `AgentIdentityConfirmer`'s doc comment and
     /// `set_agent_identity_confirmer`.
     agent_identity_confirmer: Option<AgentIdentityConfirmer>,
     /// Same shape as `agent_identity_confirmer`, but backed by
@@ -2088,7 +2089,8 @@ impl ReactiveHandler {
     ///
     /// Skipping in that case loses nothing: `inject_message` only reaches
     /// the spawn fallback after resolving `target_agent` through
-    /// `agent_to_block`, so this exact agent/block pair is registered BY
+    /// `resolve_target` (the `uid_to_block` / `name_to_blocks` registry),
+    /// so this exact agent/block pair is registered BY
     /// CONSTRUCTION before this call is ever reached on that path — the
     /// same "redundant, not just deadlock-prone" reasoning documented on
     /// `TurnRegistration::Skip` for the sibling re-lock it guards.

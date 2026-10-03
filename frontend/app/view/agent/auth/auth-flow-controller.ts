@@ -332,7 +332,8 @@ export class AuthFlowController {
     async cancel(): Promise<void> {
         const s = this.state();
         // Reagent P1 on #853: also honor `authenticated` — backend
-        // session is held alive there too (awaiting auth.savebundle).
+        // session is held alive there too (awaiting the planned
+        // auth.savebundle, which is not built yet).
         // Clicking Cancel from the SaveBundle panel must fire
         // auth.cancel so the orphan session is released. Mirrors
         // dispose()'s coverage of both kinds.
@@ -344,7 +345,7 @@ export class AuthFlowController {
         // SessionStarted is dropped and the orphan session gets
         // cancelled by connect()'s stale-token path. User intent wins.
         // Reagent P1 on #853 round 9: also cover `saving` — the
-        // backend session is still alive during the `auth.savebundle`
+        // backend session is still alive during the planned `auth.savebundle`
         // RPC (cleared only by `BundleSaved`); Cancel clicked there
         // must release it like in `waiting`/`authenticated`.
         if (s.kind !== "waiting" && s.kind !== "authenticated" && s.kind !== "saving") {
@@ -541,7 +542,7 @@ export class AuthFlowController {
         // Fire-and-forget auth.cancel for any in-flight session so we
         // don't leave an orphan CLI subprocess on the backend. Reagent
         // P1 on #853: covers `authenticated` (CLI is done, backend
-        // session held alive awaiting `auth.savebundle`) AND `saving`
+        // session held alive awaiting the planned `auth.savebundle`) AND `saving`
         // (savebundle RPC in flight, session cleared only by
         // BundleSaved) — unmounting from any of these kinds must
         // still tell the backend to release the session.

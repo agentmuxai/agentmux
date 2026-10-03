@@ -586,8 +586,8 @@ pub(crate) unsafe fn find_own_top_level_window() -> *mut std::ffi::c_void {
 #[cfg(target_os = "windows")]
 pub(crate) fn capture_hwnd_for_label(state: &Arc<AppState>, label: &str) {
     // If a known-good outer HWND was already inserted by the creator
-    // of this window (e.g. `floating_pane.rs::create_owned_popup`
-    // registers the outer floater HWND it built via CreateWindowExW),
+    // of this window (e.g. `floating_pane.rs` registers the outer
+    // floater HWND it built via `create_popup`/CreateWindowExW),
     // DO NOT overwrite it. The fast path below uses
     // `host.window_handle()` which for `set_as_child` browsers returns
     // the CEF inner WS_CHILD HWND — replacing the outer HWND with the

@@ -759,7 +759,9 @@ impl PersistentSubprocessController {
             super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Cloned before `global_output_zone` moves into the stdout-reader
         // task below — the process-waiter task (spawned further down) needs
-        // its own copy to flush a held-back `pending_error_result_line`.
+        // its own copy for the segment-end record and to append the resume
+        // state machine's exit-time lines (a held-back error-result line, a
+        // session-outcome event).
         let global_output_zone_wait = global_output_zone.clone();
         // Writer-side fence on that shared record
         // (SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24 Phase 3): once this
@@ -773,11 +775,11 @@ impl PersistentSubprocessController {
         // process-waiter task can await this task's full completion before
         // resolving the retry decision, mirroring `stderr_reader_handle`
         // below. `child.wait()` resolving is NOT proof this task has already
-        // read and stashed the doomed attempt's terminal error-result line
-        // in `pending_error_result_line` — without this wait, the waiter
-        // could clear `pending_resume_retry` and launch the retry first,
-        // after which this (now-lagging) reader would find
-        // `pending_resume_retry` already `None` and append the error line
+        // read and held back the doomed attempt's terminal error-result line
+        // (`ResumeState`'s `held_error_line`) — without this wait, the
+        // waiter could resolve the resume state (`ProcessExited`) and launch
+        // the retry first, after which this (now-lagging) reader would find
+        // the state already `NotTracking` and persist the error line
         // immediately, reproducing the exact bubble this PR exists to
         // suppress.
         let stdout_reader_handle: tokio::task::JoinHandle<()> = tokio::spawn(async move {
@@ -815,9 +817,9 @@ impl PersistentSubprocessController {
                 // Set (instead of persisted immediately) when this line turns
                 // out to be a terminal `result`/`is_error:true` event arriving
                 // while a stale-`--resume` retry could still be confirmed for
-                // this exact attempt — see
-                // `PersistentInner::pending_error_result_line`. `false` for
-                // every other line, matching today's behavior exactly.
+                // this exact attempt — see `persistent_resume::ResumeState`'s
+                // `held_error_line`. `false` for every other line, matching
+                // today's behavior exactly.
                 let mut hold_back_for_resume_retry = false;
                 // Parse JSON for control-frame handling, turn-active tracking,
                 // and session ID capture
@@ -1416,9 +1418,10 @@ impl PersistentSubprocessController {
         // `event_bus_read`'s equivalent clone for the stdout-reader task.
         let event_bus_wait = self.event_bus.clone();
         let health_wait = Arc::clone(&self.health_monitor);
-        // Needed only to flush a held-back `pending_error_result_line` when
-        // the stale-resume retry is NOT confirmed (or is overridden by an
-        // explicit stop) — see the exit-handler's own comment below.
+        // Needed to append the resume state machine's exit-time lines: a
+        // held-back error-result line when the stale-resume retry is NOT
+        // confirmed (or is overridden by an explicit stop), and the
+        // session-outcome event — see the exit-handler's own comment below.
         let filestore_wait = self.filestore.clone();
         // Captured so the waiter can deregister this agent from muxbus on exit.
         let agent_id_wait = agent_id_for_muxbus.clone();
@@ -1426,8 +1429,9 @@ impl PersistentSubprocessController {
         // detached task call back into an instance method once the process
         // actually exits, to transparently retry a stale-`--resume` failure.
         let self_ref_wait = self.self_ref.lock().unwrap().clone().unwrap_or_default();
-        // This exact spawn's identity — see `stop_requested_generation`'s
-        // doc comment for why the retry decision below needs it.
+        // This exact spawn's identity — every resume event below carries it,
+        // and `persistent_resume::update()` ignores one whose generation
+        // isn't the tracked one (see that module's doc comment).
         let my_generation_wait = my_generation;
         // This exact spawn's OS pid, for the compare-and-clear below — the
         // unconditional clear could wipe a fallback respawn's fresh
@@ -1467,8 +1471,9 @@ impl PersistentSubprocessController {
                     // conversation found" line, or finished ITS OWN
                     // subsequent `persist_session_id("")` call. Without
                     // this, two failure modes were possible: (1) this task
-                    // could clear `pending_resume_retry` below before the
-                    // stderr reader ever promotes it, permanently losing
+                    // could resolve the resume state (`ProcessExited`) below
+                    // before the stderr reader ever promotes it to
+                    // `ConfirmedRetry`, permanently losing
                     // the retry for the exact case it exists to catch, and
                     // (2) a confirmed retry's fresh session id (persisted
                     // by the NEW process's own stdout reader once
@@ -1950,16 +1955,15 @@ impl PersistentSubprocessController {
                         crate::backend::agent_admission::fenced_zone(global_output_zone_wait.as_deref(), &record_fence_wait),
                     );
 
-                    // reagentx P1 on PR #2371: mirror the child.wait() arm's
-                    // bounded await+abort of both reader tasks (above,
-                    // codex P1) before taking `pending_error_result_line`
-                    // below. Without this, a stop racing the doomed
-                    // attempt's in-flight terminal error line could take
-                    // `None` here while the stdout reader is still about to
-                    // stash it — silently losing a genuine error the stop
-                    // itself interrupted, and leaving a stale stash for a
-                    // LATER, unrelated exit on a reused controller instance
-                    // to wrongly pick up.
+                    // Mirror the child.wait() arm's bounded await+abort of
+                    // both reader tasks (above) before resolving the resume
+                    // state (`StopRequested` + `ProcessExited`) below
+                    // (#2371). Without this, a stop racing the doomed
+                    // attempt's in-flight terminal error line could resolve
+                    // the state before the stdout reader holds the line
+                    // back; the lagging reader would then find `NotTracking`
+                    // and persist the line on its own, instead of it being
+                    // flushed below as part of this stop.
                     if let Some(handle) = stderr_reader_handle {
                         let abort_handle = handle.abort_handle();
                         if tokio::time::timeout(std::time::Duration::from_millis(500), handle).await.is_err() {

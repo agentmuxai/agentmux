@@ -62,16 +62,15 @@ const PERMISSION_STRIP = new Set([
  */
 const CONTROL_PROTOCOL_FLAG = "--permission-prompt-tool";
 
-// Default codex model. The Claude-named `ModelChoice` (opus/sonnet/haiku) does
-// not apply to codex, and codex 0.116.0's baked default (gpt-5.3-codex) was
-// rejected for ChatGPT-account auth. gpt-5.5 remains valid — re-verified
-// 2026-09-12 against OpenAI's Codex model docs when the CLI pin bumped to
-// 0.154.0. It is still supported for ChatGPT sign-in auth and described as the
+// Last-resort codex model: used only when the catalog's codex `models` list
+// marks no `default` (the codex branch of `buildRuntimeArgs` prefers a valid
+// user pick, then that default). codex 0.116.0's baked default
+// (gpt-5.3-codex) was rejected for ChatGPT-account auth. gpt-5.5 remains
+// valid — re-verified 2026-09-12 against OpenAI's Codex model docs when the
+// CLI pin bumped to 0.154.0. It is still supported for ChatGPT sign-in auth and described as the
 // "previous-generation flagship" (gpt-6-astra is newer but in a staged,
 // limited-org rollout as of that date, so gpt-5.5 stays the safer default).
-// Per-provider model selection is a follow-up — see
-// docs/specs/SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md
-// (re-verify ChatGPT-account availability when bumping the codex CLI pin).
+// Re-verify ChatGPT-account availability when bumping the codex CLI pin.
 const CODEX_DEFAULT_MODEL = "gpt-5.5";
 
 /**
@@ -144,7 +143,7 @@ export function buildRuntimeArgs(
         args.push(...permFlags);
     }
 
-    // --model: claude only. ModelChoice values (opus/sonnet/haiku) are Claude
+    // --model: claude only. The opus/sonnet/haiku values are Claude
     // model names; codex (handled below) and gemini use their own model
     // namespaces, so a Claude name is rejected. gemini falls back to its CLI
     // default until a per-provider model list lands. --effort: claude only.

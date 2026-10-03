@@ -215,13 +215,14 @@ pub fn verify_trusted_reagent_jekt(
 /// Generate a fresh Ed25519 keypair for a newly-registered agent's LAN
 /// signing key. Returns `(public_key_bytes, private_key_seed_bytes)`, both
 /// 32 bytes raw — callers base64-encode for storage/transport (mirrors
-/// `agent_jekt_keys.rs`'s `random_key_bytes` + `BASE64.encode` split).
+/// the `random_seed_bytes` + `BASE64.encode` split in the srv crate's
+/// `agent_lan_keys.rs`).
 ///
 /// No RNG dependency needed beyond what's already used for HMAC key
 /// generation: `SigningKey::from_bytes` accepts any 32 bytes of randomness
 /// as a valid seed (deterministic key derivation from the seed, not a
 /// call into an RNG itself) — reusing the two-v4-UUIDs CSPRNG source
-/// `agent_jekt_keys.rs::random_key_bytes` already established avoids
+/// `agent_lan_keys.rs::random_seed_bytes` already established avoids
 /// adding a `rand`/`getrandom` dependency here too.
 pub fn generate_lan_keypair(seed: [u8; 32]) -> ([u8; 32], [u8; 32]) {
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);

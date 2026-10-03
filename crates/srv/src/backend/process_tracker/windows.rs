@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #![cfg(windows)]
 
-//! Windows `ProcessTreeTracker` implementation backed by Job Objects.
+//! Windows `TrackerHandle` implementation backed by Job Objects.
 //!
 //! Flow:
 //! 1. `JobObjectTracker::new(block_id)` creates an anonymous job and sets

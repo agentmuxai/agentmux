@@ -25,7 +25,7 @@
 //!   The pipe path remains as a safety net and is the only path that
 //!   preserves the stdout/stderr split — PTY collapses both onto
 //!   one stream. See `docs/specs/SPEC_LIVE_LOG_PTY_REWORK_2026_05_16.md`.
-//! - Bash is located via `$BASH` → `$AGENTMUX_BASH` → PATH search →
+//! - Bash is located via `$AGENTMUX_BASH` → `$BASH` → PATH search →
 //!   well-known Windows locations (Git Bash). Fails loud if missing.
 //! - Each line is published as its own chunk with `kind` set to
 //!   `"stdout"` (PTY path always; pipe path for stdout reads) or

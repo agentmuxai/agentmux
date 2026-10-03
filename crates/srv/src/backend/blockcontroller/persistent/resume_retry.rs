@@ -7,50 +7,13 @@
 use super::*;
 
 impl PersistentSubprocessController {
-    /// Retries the message that triggered a `--resume <sid>` attempt this
-    /// controller's own stderr reader just confirmed is unreachable ("No
-    /// conversation found with session ID" — see `poison_resume`). Called
-    /// from the process-waiter task once the doomed process has actually
-    /// exited, via the weak self-reference (mirrors `SubprocessController`'s
-    /// queued-message drain — see `set_self_ref`), and ONLY when
-    /// `confirmed_stale_resume_retry` was actually set — never for an
-    /// unrelated exit.
-    ///
-    /// Spawns fresh with `session_id` cleared, so no `--resume` is attempted
-    /// again. Redelivers EVERY message the doomed process's stdin channel
-    /// had accepted (see `pending_resume_retry`'s own doc comment for why
-    /// this is a batch, not just the one that triggered the spawn) — does
-    /// NOT re-persist to the blockfile or re-emit `agent-message-accepted`
-    /// for any of them, since both already happened correctly on each
-    /// message's original (failed) attempt; only the underlying CLI
-    /// process needed a fresh, resume-less start.
-    ///
-    /// This is itself a spawn attempt, and must not race a genuinely
-    /// concurrent `send_message` call the same way the ORIGINAL doomed
-    /// spawn could — see `PersistentInner::spawning_in_progress`'s doc
-    /// comment. By the time this runs, the original `send_message` call
-    /// that triggered the doomed process has long since returned (its own
-    /// spawn-claim-and-deliver sequence completed synchronously, well
-    /// before this process even exited), so the WHOLE batch can safely go
-    /// through `decide_retry_batch_action` — the SAME decision
-    /// `send_message` uses, but enqueueing everything atomically in one
-    /// lock acquisition (see its own doc comment for why per-message
-    /// decisions aren't safe for a batch).
-    /// codex P2 on PR #2371: a held-back error line must reach the user
-    /// if a confirmed retry turns out NOT to actually launch (this
-    /// controller already being torn down, or the fresh `spawn_process`
-    /// call itself failing) — otherwise an already-accepted prompt ends
-    /// in total silence: neither the original error nor a replacement
-    /// one. `held_error_line` is dropped only when delivery is CONFIRMED
-    /// (a successful `BecomeSpawner` spawn, or every message in a
-    /// `DeliverDirect` batch landing via `try_send`) — every OTHER path
-    /// (`Queued`, or `DeliverDirect`'s own `any_failed` fallback via
-    /// `drain_queue_after_successful_spawn`) hands off to a background
-    /// drain whose own `stalled_with_leftovers` branch already publishes
-    /// a status update on genuine total failure, so those paths drop the
-    /// line instead — see reagentx P1 (round 2 on PR #2371) on the
-    /// `Queued` arm below for why flushing eagerly there would reproduce
-    /// this PR's own bug via a different path.
+    /// Appends a terminal error-result line to this block's output now and
+    /// surfaces its classified failure: a held-back line confirmed final
+    /// outside the process-waiter task (its retry failed to launch, or its
+    /// generation was superseded), or an error frame synthesized for
+    /// prompts that could not be delivered. See
+    /// `retry_after_resume_failure`'s doc comment for when a held line is
+    /// flushed rather than dropped.
     pub(super) fn flush_error_line_now(&self, line: String) {
         let Some(ref broker) = self.broker else { return };
         let global_output_zone = super::super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
@@ -283,6 +246,50 @@ impl PersistentSubprocessController {
         Some(candidate)
     }
 
+    /// Retries the message that triggered a `--resume <sid>` attempt this
+    /// controller's own stderr reader just confirmed is unreachable ("No
+    /// conversation found with session ID" — see `poison_resume`). Called
+    /// from the process-waiter task once the doomed process has actually
+    /// exited, via the weak self-reference (mirrors `SubprocessController`'s
+    /// queued-message drain — see `set_self_ref`), and ONLY for a
+    /// `persistent_resume::ResumeEffect::FireRetry` (a `ConfirmedRetry`
+    /// generation's exit) — never for an unrelated exit.
+    ///
+    /// Respawns with the stale `session_id` replaced: by a recovered
+    /// on-disk session if `find_recovery_session_id` finds one, otherwise
+    /// cleared so no `--resume` is attempted. Redelivers EVERY message the
+    /// doomed process's stdin channel had accepted (the drain appends each
+    /// later delivery to the batch —
+    /// `persistent_resume::ResumeEvent::MessageAppendedToRetryBatch` — so
+    /// this is a batch, not just the one that triggered the spawn) — does
+    /// NOT re-persist to the blockfile or re-emit `agent-message-accepted`
+    /// for any of them, since both already happened correctly on each
+    /// message's original (failed) attempt; only the underlying CLI
+    /// process needed a fresh start.
+    ///
+    /// This is itself a spawn attempt, and must not race a genuinely
+    /// concurrent `send_message` call the same way the ORIGINAL doomed
+    /// spawn could — see `PersistentInner::spawning_in_progress`'s doc
+    /// comment. By the time this runs, the original `send_message` call
+    /// that triggered the doomed process has long since returned (its own
+    /// spawn-claim-and-deliver sequence completed synchronously, well
+    /// before this process even exited), so the WHOLE batch can safely go
+    /// through `decide_retry_batch_action` — the SAME decision
+    /// `send_message` uses, but enqueueing everything atomically in one
+    /// lock acquisition (see its own doc comment for why per-message
+    /// decisions aren't safe for a batch).
+    ///
+    /// A held-back error line must reach the user if a confirmed retry
+    /// turns out NOT to actually launch (#2371) — otherwise an
+    /// already-accepted prompt ends in total silence: neither the original
+    /// error nor a replacement one. It is flushed only when a
+    /// `BecomeSpawner` respawn fails; the `FlushClaimed` and `Queued` arms
+    /// hand off to a background drain whose own `stalled_with_leftovers`
+    /// branch already publishes a status update on genuine total failure,
+    /// so those arms drop the line instead — see the `Queued` arm below
+    /// for why flushing eagerly there would reproduce the very bubble
+    /// #2371 removed.
+    ///
     /// `retry_generation` is the spawn generation whose `ProcessExited`
     /// fired this retry (the process-waiter's own `my_generation_wait`) —
     /// `decide_retry_batch_action` needs it to tell a live NEWER spawn

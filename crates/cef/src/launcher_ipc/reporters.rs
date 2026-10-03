@@ -428,35 +428,28 @@ pub fn report_startup_stage_end(
 /// from `AppState` and report them. Callers invoke this AFTER
 /// each window/pool transition.
 ///
-/// Atomic snapshot: holds both `unpromoted_pool_labels` and
-/// `browsers` simultaneously so the reported `(windows, pool)`
-/// pair is from one consistent state. Without this, a concurrent
-/// mutation between the two lock acquisitions (CEF lifecycle on
-/// the UI thread vs. IPC handler in `commands/drag.rs`) could
-/// produce a mismatched snapshot and trigger a spurious
-/// `Event::DriftDetected`. (codex P2 PR #578 round-1.)
+/// Atomic snapshot: `AppState::host_counts_snapshot` reads the
+/// host reducer's pool inventory and `browsers` under ONE
+/// `host_state` lock so the reported `(windows, pool)` pair is
+/// from one consistent state. Without this, a concurrent mutation
+/// between two separate reads (CEF lifecycle on the UI thread vs.
+/// IPC handler in `commands/drag.rs`) could produce a mismatched
+/// snapshot and trigger a spurious `Event::DriftDetected`. (#578)
 ///
-/// Lock order: `unpromoted_pool_labels` first, then `browsers`.
-/// Matches the existing snapshot pattern in
-/// `client.rs::on_before_close` (line ~418) and is the only place
-/// in the codebase that holds both locks simultaneously, so no
-/// other path can race in the reverse order.
-///
-/// Counts (matching the launcher's mirror semantics):
+/// Counts (matching the launcher's mirror semantics; full filter
+/// rules on `host_counts_snapshot`):
 /// * `windows` — top-level user-visible windows in `browsers`,
-///   excluding `browser-pane-*` child HWNDs and any label still
-///   in `unpromoted_pool_labels`.
-/// * `pool` — pre-promote pool labels (`unpromoted_pool_labels.len()`).
+///   excluding `browser-pane-*` / `floating-pool-*` labels and any
+///   label still in the tab-pool inventory.
+/// * `pool` — tab-pool inventory (`pool.unpromoted` ∪ `pool.queue`).
 ///
-/// **Why this reads host's `browsers` and `unpromoted_pool_labels`
+/// **Why this reads the host reducer's `browsers` and `pool`
 /// directly (not the shadow):** this fn IS the source for the
 /// launcher's mirror — its output is what gets compared against
 /// `state.windows.len()` / `state.pool.len()` in the drift-detection
 /// path. Reading from the shadow would compare the shadow against
 /// itself (always agrees) and defeat the entire B.4 drift-detection
-/// design. Once the host reducer arrives in Phase F (see
-/// `docs/retro/multi-reducer-proposal-2026-04-28.md`), this becomes
-/// "report host's authoritative reducer-state to the launcher."
+/// design.
 pub fn compute_and_report_host_counts(state: &std::sync::Arc<crate::state::AppState>) {
     // Atomic snapshot — pool inventory + browsers under ONE
     // `host_state` lock. Two-lock variants race against
