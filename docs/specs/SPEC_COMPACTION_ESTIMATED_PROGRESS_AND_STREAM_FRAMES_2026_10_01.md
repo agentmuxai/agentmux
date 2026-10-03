@@ -100,7 +100,7 @@ It should be designed together with the §3 fix. Seeding the sample store from t
 
 - **D1 — fix the boundary casing (and re-key node ids on `uuid`) so the live compaction path actually runs?** Recommended: yes, as its own PR, with memory reinjection's id fixed first and a check of what hidden reinjection does after every compaction. Alternative: leave the live path as it is and rely on history replay.
 - **D2 — the rest of status-frame handling (§6: a hook-independent start, a heartbeat)** after D1, or not at all? The failure notice is built (§10).
-- **D3 — sample store scope:** global (as built) or per account/model.
+- **D3 — sample store scope:** decided 2026-10-03: per model, with a fallback to every sample when the current model has none yet (duration depends mostly on which model summarizes; the context-size scaling already covers the rest, and the account does not matter). Samples are keyed by the model the process is configured to run (the runtime selection, or a `--model` in the agent's own flags), so a `/model` switch counts before the next reply; the resolved model id from the replies is the fallback. The store keeps the last 30. Samples recorded before this have no model and serve only the fallback.
 
 ## 9. Delivery
 

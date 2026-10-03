@@ -17,7 +17,7 @@ import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import type { AgentViewModel } from "../agent-model";
-import { compactionProgress, estimateCompactionMs, readCompactionSamples } from "../compaction-estimate";
+import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
 import { turnAddedInput } from "@/app/store/agent-pane-state/turn-contribution";
@@ -120,6 +120,8 @@ interface AgentWorkingRowProps {
      *  bar is labeled as an estimate. Read once when the compaction starts, so
      *  the estimate doesn't move mid-run. No earlier compactions → no bar. */
     compactionContextTokens?: number | null;
+    /** The pane's model key (`compactionModelKey`), to estimate from that model's past compactions. */
+    compactionModel?: string | null;
     /** Live "recovering from a stale --resume session id" state, or null —
      *  same relocation as `compacting` above. Fires ONLY after the
      *  underlying process has already crashed/exited, so this can be set
@@ -244,7 +246,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         compactStartedAt() == null
             ? null
             : estimateCompactionMs(
-                  readCompactionSamples(),
+                  samplesForModel(readCompactionSamples(), untrack(() => props.compactionModel)),
                   untrack(() => props.compactionContextTokens)
               )
     );

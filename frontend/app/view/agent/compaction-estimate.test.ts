@@ -3,11 +3,13 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    compactionModelKey,
     compactionProgress,
     estimateCompactionMs,
     parseCompactionSample,
     readCompactionSamples,
     recordCompactionSample,
+    samplesForModel,
     type CompactionSample,
 } from "./compaction-estimate";
 
@@ -147,15 +149,6 @@ describe("sample store", () => {
         expect(readCompactionSamples(st)).toHaveLength(1);
     });
 
-    it("keeps only the newest 10", () => {
-        const st = memoryStore();
-        for (let i = 0; i < 14; i++) recordCompactionSample(sample(`s${i}`, 1000, 10000 + i), st);
-        const got = readCompactionSamples(st);
-        expect(got).toHaveLength(10);
-        expect(got[0].uuid).toBe("s4");
-        expect(got[9].uuid).toBe("s13");
-    });
-
     it.each([
         ["not JSON", "{{"],
         ["not an array", '{"a":1}'],
@@ -185,5 +178,54 @@ describe("sample store", () => {
     it("behaves as empty when there is no storage at all", () => {
         expect(readCompactionSamples(null)).toEqual([]);
         expect(() => recordCompactionSample(sample("a", 1000, 20000), null)).not.toThrow();
+    });
+});
+
+describe("per-model samples", () => {
+    it("records the model a compaction ran on, and keeps it through storage", () => {
+        const store = memoryStore();
+        recordCompactionSample(parseCompactionSample(REAL_STDOUT_FRAME, "claude-opus-5-5"), store);
+        const [s] = readCompactionSamples(store);
+        expect(s.model).toBe("claude-opus-5-5");
+        expect(parseCompactionSample(REAL_STDOUT_FRAME)?.model).toBeUndefined();
+    });
+
+    it("estimates from the current model's samples when it has any", () => {
+        const all: CompactionSample[] = [
+            { ...sample("a", 50000, 10000), model: "fast" },
+            { ...sample("b", 50000, 60000), model: "slow" },
+            { ...sample("c", 50000, 62000), model: "slow" },
+        ];
+        expect(samplesForModel(all, "slow").map((s) => s.uuid)).toEqual(["b", "c"]);
+        expect(estimateCompactionMs(samplesForModel(all, "fast"), 50000)).toBe(10000);
+    });
+
+    it("falls back to every sample for an unseen or unknown model", () => {
+        const all: CompactionSample[] = [sample("old", 50000, 20000), { ...sample("a", 50000, 10000), model: "fast" }];
+        expect(samplesForModel(all, "new-model")).toHaveLength(2);
+        expect(samplesForModel(all, null)).toHaveLength(2);
+    });
+
+    it("keeps up to 30 samples so several models don't crowd each other out", () => {
+        const store = memoryStore();
+        for (let i = 0; i < 40; i++) recordCompactionSample(sample(`s${i}`, 1000, 1000 + i), store);
+        const kept = readCompactionSamples(store);
+        expect(kept).toHaveLength(30);
+        expect(kept[0].uuid).toBe("s10");
+    });
+});
+
+describe("compactionModelKey", () => {
+    it("uses the configured model, so a /model switch counts before the next reply", () => {
+        expect(compactionModelKey({ "agent:runtime": { model: "opus" } }, "claude-sonnet-5-5")).toBe("opus");
+    });
+
+    it("lets a --model in the agent's own flags win, as the process does", () => {
+        const meta = { "agent:runtime": { model: "opus" }, "agent:provider_flags": "--model haiku" };
+        expect(compactionModelKey(meta, null)).toBe("haiku");
+    });
+
+    it("uses the runtime default when nothing is configured", () => {
+        expect(compactionModelKey(undefined, "claude-opus-5-5")).toBe("sonnet");
     });
 });
