@@ -202,7 +202,7 @@ impl PressureTracker {
 /// refilled. Refilling creates windows, and on Windows a new pool window
 /// activates during creation and takes keyboard focus from the window the user
 /// is typing in. Commit pressure flaps while builds run (151 transitions in a
-/// day on a 62 GB machine), so refilling on every return to `Normal` stole
+/// day on one machine), so refilling on every return to `Normal` stole
 /// focus dozens of times a day, and built windows that were destroyed again
 /// minutes later.
 /// docs/reports/REPORT_INPUT_FOCUS_STOLEN_BY_POOL_REFILL_2026_10_03.md
