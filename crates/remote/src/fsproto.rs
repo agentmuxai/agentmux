@@ -70,6 +70,23 @@ pub enum Request {
         path: String,
         recursive: bool,
     },
+    /// Rename the file `from` over the file `to` in one step: what was at
+    /// `to` is gone only once `from` is there (never a folder, either side).
+    Replace {
+        from: String,
+        to: String,
+    },
+    /// `path` with every link and `..` resolved: [`Reply::Path`].
+    Realpath {
+        path: String,
+    },
+    /// Give a file its permission bits (`mode`, 0 to leave them) and its
+    /// modification time (`mtime_ms`, 0 to leave it).
+    SetMeta {
+        path: String,
+        mode: u32,
+        mtime_ms: i64,
+    },
 }
 
 /// What kind of thing an entry is (a symlink is reported as what it points
@@ -164,6 +181,8 @@ pub enum Reply {
         eof: bool,
     },
     Done,
+    /// A path ([`Request::Realpath`]).
+    Path(String),
     Err {
         kind: ErrKind,
         message: String,
@@ -180,6 +199,9 @@ mod op {
     pub const RENAME: u8 = 7;
     pub const DELETE: u8 = 8;
     pub const APPEND: u8 = 9;
+    pub const REPLACE: u8 = 10;
+    pub const REALPATH: u8 = 11;
+    pub const SETMETA: u8 = 12;
 }
 
 mod status {
@@ -188,6 +210,7 @@ mod status {
     pub const LIST: u8 = 3;
     pub const READ: u8 = 4;
     pub const DONE: u8 = 5;
+    pub const PATH: u8 = 6;
     pub const ERR: u8 = 255;
 }
 
@@ -331,6 +354,19 @@ impl Request {
             Request::Delete { path, recursive } => {
                 w.u8(op::DELETE).str(path).u8(u8::from(*recursive));
             }
+            Request::Replace { from, to } => {
+                w.u8(op::REPLACE).str(from).str(to);
+            }
+            Request::Realpath { path } => {
+                w.u8(op::REALPATH).str(path);
+            }
+            Request::SetMeta {
+                path,
+                mode,
+                mtime_ms,
+            } => {
+                w.u8(op::SETMETA).str(path).u32(*mode).i64(*mtime_ms);
+            }
         }
         w.message()
     }
@@ -372,6 +408,16 @@ impl Request {
                 path: r.str()?,
                 recursive: r.u8()? != 0,
             },
+            op::REPLACE => Request::Replace {
+                from: r.str()?,
+                to: r.str()?,
+            },
+            op::REALPATH => Request::Realpath { path: r.str()? },
+            op::SETMETA => Request::SetMeta {
+                path: r.str()?,
+                mode: r.u32()?,
+                mtime_ms: r.i64()?,
+            },
             other => return Err(format!("unknown request {other}")),
         };
         r.done()?;
@@ -402,6 +448,9 @@ impl Reply {
             }
             Reply::Done => {
                 w.u8(status::DONE);
+            }
+            Reply::Path(p) => {
+                w.u8(status::PATH).str(p);
             }
             Reply::Err { kind, message } => {
                 w.u8(status::ERR).u8(*kind as u8).str(message);
@@ -439,6 +488,7 @@ impl Reply {
                 data: r.bytes()?,
             },
             status::DONE => Reply::Done,
+            status::PATH => Reply::Path(r.str()?),
             status::ERR => Reply::Err {
                 kind: ErrKind::from_u8(r.u8()?),
                 message: r.str()?,
@@ -536,6 +586,16 @@ mod tests {
                 path: "/d".into(),
                 recursive: false,
             },
+            Request::Replace {
+                from: "/t".into(),
+                to: "/x".into(),
+            },
+            Request::Realpath { path: "~/l".into() },
+            Request::SetMeta {
+                path: "/x".into(),
+                mode: 0o755,
+                mtime_ms: 1_700_000_000_000,
+            },
         ];
         let replies = vec![
             Reply::Hello {
@@ -553,6 +613,7 @@ mod tests {
                 eof: true,
             },
             Reply::Done,
+            Reply::Path("/home/u/a".into()),
             Reply::Err {
                 kind: ErrKind::NotFound,
                 message: "no such file".into(),

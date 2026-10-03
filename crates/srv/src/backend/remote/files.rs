@@ -224,7 +224,12 @@ impl RemoteFiles {
 
     /// One range of a file: up to `len` bytes from `offset`, and whether the
     /// file ends there.
-    pub async fn read_range(&self, path: &str, offset: u64, len: u32) -> Result<(Vec<u8>, bool), RemoteError> {
+    pub async fn read_range(
+        &self,
+        path: &str,
+        offset: u64,
+        len: u32,
+    ) -> Result<(Vec<u8>, bool), RemoteError> {
         match self
             .call(Request::Read {
                 path: path.into(),
@@ -236,6 +241,34 @@ impl RemoteFiles {
             Reply::Read { data, eof } => Ok((data, eof)),
             r => Err(unexpected(&r)),
         }
+    }
+
+    /// Rename the file `from` over the file `to` in one step.
+    pub async fn replace(&self, from: &str, to: &str) -> Result<(), RemoteError> {
+        self.done(Request::Replace {
+            from: from.into(),
+            to: to.into(),
+        })
+        .await
+    }
+
+    /// `path` with its links and `..` resolved.
+    pub async fn realpath(&self, path: &str) -> Result<String, RemoteError> {
+        match self.call(Request::Realpath { path: path.into() }).await? {
+            Reply::Path(p) => Ok(p),
+            r => Err(unexpected(&r)),
+        }
+    }
+
+    /// A file's permission bits (`mode`, 0 to leave) and modification time
+    /// (`mtime_ms`, 0 to leave).
+    pub async fn set_meta(&self, path: &str, mode: u32, mtime_ms: i64) -> Result<(), RemoteError> {
+        self.done(Request::SetMeta {
+            path: path.into(),
+            mode,
+            mtime_ms,
+        })
+        .await
     }
 
     pub async fn mkdir(&self, path: &str, parents: bool) -> Result<(), RemoteError> {

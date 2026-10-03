@@ -153,6 +153,33 @@ pub fn handle(home: &Path, req: Request) -> Reply {
             }
             fs::rename(&from, &to).map(|()| Reply::Done)
         }
+        Request::Replace { from, to } => {
+            let (from, to) = (resolve(home, &from), resolve(home, &to));
+            // Files only: `rename` over a file is atomic, and a folder is
+            // never replaced this way.
+            for p in [&from, &to] {
+                match fs::symlink_metadata(p) {
+                    Ok(m) if m.is_dir() => return invalid("only a file is replaced in one step"),
+                    Ok(_) => {}
+                    Err(e) => return err(e),
+                }
+            }
+            fs::rename(&from, &to).map(|()| Reply::Done)
+        }
+        Request::Realpath { path } => fs::canonicalize(resolve(home, &path))
+            .map(|p| Reply::Path(p.to_string_lossy().into_owned())),
+        Request::SetMeta {
+            path,
+            mode,
+            mtime_ms,
+        } => {
+            let p = resolve(home, &path);
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.is_file() => set_meta(&p, mode, mtime_ms).map(|()| Reply::Done),
+                Ok(_) => return invalid("only a file's metadata is set"),
+                Err(e) => Err(e),
+            }
+        }
         Request::Delete { path, recursive } => {
             let p = resolve(home, &path);
             // `..` is never needed to name a thing to delete, and it is how a
@@ -198,6 +225,26 @@ pub fn handle(home: &Path, req: Request) -> Reply {
         }
     };
     result.unwrap_or_else(err)
+}
+
+/// A file's permission bits (`mode`, when not 0, on Unix) and modification
+/// time (`mtime_ms`, when not 0).
+fn set_meta(p: &Path, mode: u32, mtime_ms: i64) -> io::Result<()> {
+    if mtime_ms > 0 {
+        let t = UNIX_EPOCH + std::time::Duration::from_millis(mtime_ms as u64);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(p)?
+            .set_modified(t)?;
+    }
+    #[cfg(unix)]
+    if mode != 0 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(p, fs::Permissions::from_mode(mode & 0o7777))?;
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    Ok(())
 }
 
 fn entry_of(p: &Path) -> io::Result<Entry> {
@@ -638,6 +685,71 @@ mod tests {
         );
         assert_eq!(fs::read(h.join("up")).unwrap(), b"abcd");
         assert!(!h.join("missing").exists());
+    }
+
+    #[test]
+    fn replace_realpath_and_set_meta() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        fs::write(h.join("new"), b"new").unwrap();
+        fs::write(h.join("old"), b"old").unwrap();
+        fs::create_dir(h.join("d")).unwrap();
+        let r = exchange(
+            h,
+            &[
+                Request::Replace {
+                    from: "~/new".into(),
+                    to: "~/old".into(),
+                },
+                Request::Replace {
+                    from: "~/old".into(),
+                    to: "~/d".into(),
+                },
+                Request::Realpath {
+                    path: "~/d/../old".into(),
+                },
+                Request::SetMeta {
+                    path: "~/old".into(),
+                    mode: 0o751,
+                    mtime_ms: 1_600_000_000_000,
+                },
+                Request::SetMeta {
+                    path: "~/d".into(),
+                    mode: 0o700,
+                    mtime_ms: 0,
+                },
+            ],
+        );
+        assert_eq!(r[0], Reply::Done);
+        assert_eq!(fs::read(h.join("old")).unwrap(), b"new");
+        assert!(!h.join("new").exists());
+        assert!(
+            matches!(
+                r[1],
+                Reply::Err {
+                    kind: ErrKind::Invalid,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[1]
+        );
+        match &r[2] {
+            Reply::Path(p) => assert_eq!(Path::new(p), fs::canonicalize(h.join("old")).unwrap()),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(r[3], Reply::Done);
+        let e = entry_of(&h.join("old")).unwrap();
+        assert_eq!(e.mtime_ms, 1_600_000_000_000);
+        #[cfg(unix)]
+        assert_eq!(e.mode, 0o751);
+        assert!(matches!(
+            r[4],
+            Reply::Err {
+                kind: ErrKind::Invalid,
+                ..
+            }
+        ));
     }
 
     #[test]

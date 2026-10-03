@@ -49,8 +49,12 @@ pub enum End {
 struct Info {
     is_dir: bool,
     is_link: bool,
+    /// A regular file (not a device, socket or pipe).
+    is_file: bool,
     size: u64,
     mtime: Option<u64>,
+    /// Unix permission bits; 0 where there are none.
+    mode: u32,
 }
 
 impl Info {
@@ -120,6 +124,8 @@ impl End {
                 Ok(m) => Ok(Some(Info {
                     is_dir: m.is_dir(),
                     is_link: m.file_type().is_symlink(),
+                    is_file: m.is_file(),
+                    mode: local_mode(&m),
                     size: m.len(),
                     mtime: m
                         .modified()
@@ -134,6 +140,8 @@ impl End {
                 Ok(e) => Ok(Some(Info {
                     is_dir: e.kind == agentmux_remote::fsproto::Kind::Dir && !e.symlink,
                     is_link: e.symlink,
+                    is_file: e.kind == agentmux_remote::fsproto::Kind::File && !e.symlink,
+                    mode: e.mode,
                     size: e.size,
                     mtime: (e.mtime_ms > 0).then_some(e.mtime_ms as u64),
                 })),
@@ -246,6 +254,51 @@ impl End {
         }
     }
 
+    /// Rename the file `from` over the file `to` in one step: what is there
+    /// goes only once the new one is in place.
+    fn replace(&self, rt: &Handle, from: &str, to: &str) -> Result<(), String> {
+        match self {
+            End::Local => std::fs::rename(from, to).map_err(|e| e.to_string()),
+            End::Host { files, .. } => rt.block_on(files.replace(from, to)).map_err(host_error),
+        }
+    }
+
+    /// Give a file the source's permission bits and modification time.
+    fn set_meta(
+        &self,
+        rt: &Handle,
+        path: &str,
+        mode: u32,
+        mtime: Option<u64>,
+    ) -> Result<(), String> {
+        let mtime_ms = mtime.unwrap_or(0) as i64;
+        match self {
+            End::Local => {
+                if mtime_ms > 0 {
+                    let t =
+                        std::time::UNIX_EPOCH + std::time::Duration::from_millis(mtime_ms as u64);
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(path)
+                        .and_then(|f| f.set_modified(t))
+                        .map_err(|e| e.to_string())?;
+                }
+                #[cfg(unix)]
+                if mode != 0 {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode & 0o7777))
+                        .map_err(|e| e.to_string())?;
+                }
+                #[cfg(not(unix))]
+                let _ = mode;
+                Ok(())
+            }
+            End::Host { files, .. } => rt
+                .block_on(files.set_meta(path, mode, mtime_ms))
+                .map_err(host_error),
+        }
+    }
+
     /// Remove a file, a link, or an empty folder.
     fn remove(&self, rt: &Handle, path: &str) -> Result<(), String> {
         match self {
@@ -287,6 +340,20 @@ fn posix_parent(path: &str) -> String {
     match path.rfind('/') {
         Some(0) | None => "/".to_string(),
         Some(i) => path[..i].to_string(),
+    }
+}
+
+/// A local entry's Unix permission bits (0 elsewhere).
+fn local_mode(m: &std::fs::Metadata) -> u32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode() & 0o7777
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = m;
+        0
     }
 }
 
@@ -390,6 +457,17 @@ impl Transfer<'_> {
             job.advance(1, 0);
             return Outcome::NotDone;
         }
+        if !info.is_dir && !info.is_link && !info.is_file {
+            job.fail(
+                &shown,
+                format!(
+                    "“{}” isn't a regular file (a device, socket or pipe): not copied.",
+                    file_name(src)
+                ),
+            );
+            job.advance(1, 0);
+            return Outcome::NotDone;
+        }
         if let Some(why) = self.dest.refusal(dest) {
             job.fail(&shown, why);
             self.pass_over(job, src);
@@ -452,12 +530,18 @@ impl Transfer<'_> {
         // Within one host, a move is a rename there. A link only ever moves
         // this way (never read through): to replace, what is there goes first.
         if info.is_link && replace {
-            if let Err(e) = self.dest.remove(self.rt, &dest) {
-                job.fail(&shown, e);
-                job.advance(1, 0);
-                return Outcome::NotDone;
-            }
-            replace = false;
+            // Only a move within one host gets here: in one step there.
+            return match self.src.replace(self.rt, src, &dest) {
+                Ok(()) => {
+                    self.pass_over_after_rename(job, &dest);
+                    Outcome::Done
+                }
+                Err(e) => {
+                    job.fail(&shown, e);
+                    job.advance(1, 0);
+                    Outcome::NotDone
+                }
+            };
         }
         if self.kind == FsOpKind::Move && !replace && one_host {
             match self.src.rename_no_replace(self.rt, src, &dest) {
@@ -498,7 +582,7 @@ impl Transfer<'_> {
             }
             return out;
         }
-        self.file(job, src, &dest, &shown, info.size, replace)
+        self.file(job, src, &dest, &shown, info, replace)
     }
 
     /// After a rename within one host, count what moved as done.
@@ -553,9 +637,10 @@ impl Transfer<'_> {
         src: &str,
         dest: &str,
         shown: &str,
-        size: u64,
+        info: Info,
         replace: bool,
     ) -> Outcome {
+        let size = info.size;
         let dir = self.dest.parent(dest);
         let temp = match self.dest.create_temp(self.rt, &dir) {
             Ok(t) => t,
@@ -600,15 +685,23 @@ impl Transfer<'_> {
                 break;
             }
         }
-        if replace {
-            if let Err(e) = self.dest.remove(self.rt, dest) {
-                discard(self);
-                job.fail(shown, e);
-                job.advance(1, 0);
-                return Outcome::NotDone;
-            }
+        // The source's permissions and time, on the temp file before it goes
+        // in: never a half-kept file in place, and a moved program still runs.
+        if let Err(e) = self.dest.set_meta(self.rt, &temp, info.mode, info.mtime) {
+            discard(self);
+            job.fail(shown, format!("Couldn't keep its permissions or time: {e}"));
+            job.advance(1, 0);
+            return Outcome::NotDone;
         }
-        match self.dest.rename_no_replace(self.rt, &temp, dest) {
+        // Replacing: in one step, so what is there goes only once the copy is.
+        let placed = if replace {
+            self.dest
+                .replace(self.rt, &temp, dest)
+                .map_err(RenameError::Other)
+        } else {
+            self.dest.rename_no_replace(self.rt, &temp, dest)
+        };
+        match placed {
             Ok(()) => {}
             Err(RenameError::Taken) => {
                 discard(self);
@@ -661,17 +754,20 @@ fn under(path: &str, dir: &str) -> bool {
 /// move into the folder it is in is nothing to do, a copy there is a
 /// duplicate; and no destination lands on a folder holding another source.
 /// Between two machines none of this can happen.
+/// `sources` are `(as given, resolved)` pairs: the resolved one has its
+/// parent's links resolved (`Realpath`), its own name kept, so a link to an
+/// ancestor isn't taken for the ancestor; `dest_dir` is resolved too.
 fn plan_on_one_host(
     kind: FsOpKind,
     src: &End,
-    sources: &[String],
+    sources: &[(String, String)],
     dest: &End,
     dest_dir: &str,
 ) -> Result<Vec<Item>, String> {
     if !src.same_host(dest) {
         return Ok(sources
             .iter()
-            .map(|s| Item {
+            .map(|(s, _)| Item {
                 src: s.clone(),
                 duplicate: false,
             })
@@ -683,11 +779,12 @@ fn plan_on_one_host(
         "copy"
     };
     let mut items = Vec::new();
-    for s in sources {
-        if dest_dir == s || under(dest_dir, s) {
+    let mut keys = Vec::new();
+    for (s, key) in sources {
+        if dest_dir == key || under(dest_dir, key) {
             return Err(format!("Can't {verb} a folder into itself."));
         }
-        let in_dest_already = src.parent(s) == dest_dir;
+        let in_dest_already = src.parent(key) == dest_dir;
         if in_dest_already && kind == FsOpKind::Move {
             continue;
         }
@@ -695,6 +792,7 @@ fn plan_on_one_host(
             src: s.clone(),
             duplicate: in_dest_already,
         });
+        keys.push(key.clone());
     }
     // E.g. copying `/a/d/d` into `/a` would merge into `/a/d`, which holds
     // the source itself.
@@ -703,11 +801,11 @@ fn plan_on_one_host(
         .filter(|i| !i.duplicate)
         .map(|i| file_name(&i.src))
         .collect();
-    for item in &items {
+    for (item, key) in items.iter().zip(&keys) {
         let rest = if dest_dir == "/" {
-            item.src.strip_prefix('/')
+            key.strip_prefix('/')
         } else {
-            item.src.strip_prefix(&format!("{dest_dir}/"))
+            key.strip_prefix(&format!("{dest_dir}/"))
         };
         let Some(rest) = rest else { continue };
         let mut parts = rest.split('/').filter(|p| !p.is_empty());
@@ -721,6 +819,35 @@ fn plan_on_one_host(
         }
     }
     Ok(items)
+}
+
+/// `path`'s entry on `end`, awaited (before the op's thread exists).
+async fn stat_now(end: &End, path: &str) -> Result<Option<()>, String> {
+    match end {
+        End::Local => match std::fs::symlink_metadata(path) {
+            Ok(_) => Ok(Some(())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.to_string()),
+        },
+        End::Host { files, .. } => match files.stat(path).await {
+            Ok(_) => Ok(Some(())),
+            Err(e) if e.is_not_found() => Ok(None),
+            Err(e) => Err(host_error(e)),
+        },
+    }
+}
+
+/// `path` with its links resolved, awaited; as given when it can't be.
+async fn realpath_now(end: &End, path: &str) -> String {
+    match end {
+        End::Local => std::fs::canonicalize(path)
+            .map(|p| display_path(&p))
+            .unwrap_or_else(|_| path.to_string()),
+        End::Host { files, .. } => files
+            .realpath(path)
+            .await
+            .unwrap_or_else(|_| path.to_string()),
+    }
 }
 
 /// Start a copy or move of `sources` (on `src`) into `dest_dir` (on `dest`)
@@ -765,7 +892,37 @@ pub async fn start(
     if sources.is_empty() {
         return Err("Nothing to copy.".to_string());
     }
-    let items = plan_on_one_host(kind, &src, &sources, &dest, &dest_dir)?;
+    // Each source there, and nothing protected, before an op id is given: a
+    // cut is used up only once the move has been accepted.
+    for s in &sources {
+        match stat_now(&src, s).await? {
+            Some(_) => {}
+            None => return Err(format!("“{}” isn't there anymore.", file_name(s))),
+        }
+        if let Some(why) = dest.refusal(&dest.join(&dest_dir, &file_name(s))) {
+            return Err(why);
+        }
+        if kind == FsOpKind::Move {
+            if let Some(why) = src.refusal(s) {
+                return Err(why);
+            }
+        }
+    }
+    // Within one host, compare where things really are.
+    let (keyed, dest_key) = if src.same_host(&dest) {
+        let mut keyed = Vec::with_capacity(sources.len());
+        for s in &sources {
+            let parent = realpath_now(&src, &src.parent(s)).await;
+            keyed.push((s.clone(), src.join(&parent, &file_name(s))));
+        }
+        (keyed, realpath_now(&dest, &dest_dir).await)
+    } else {
+        (
+            sources.iter().map(|s| (s.clone(), s.clone())).collect(),
+            dest_dir.clone(),
+        )
+    };
+    let items = plan_on_one_host(kind, &src, &keyed, &dest, &dest_key)?;
     let shown_dest = dest.show(&dest_dir);
     let requested = sources.len();
     JOBS.start_host(
@@ -1060,28 +1217,18 @@ mod tests {
         let remote = tempfile::tempdir().unwrap();
         std::fs::write(local.path().join("a.txt"), b"a").unwrap();
         let h = host(remote.path()).await;
-        let (emit, seen) = events();
-        start(
+        // Refused before an op exists.
+        let err = start(
             FsOpKind::Copy,
             End::Local,
             vec![display_path(&local.path().join("a.txt"))],
             h,
             "/etc".into(),
-            emit,
+            events().0,
         )
         .await
-        .unwrap();
-        let end = finished(&seen).await;
-        let failures = end.failures.unwrap_or_default();
-        assert_eq!(failures.len(), 1, "{failures:?}");
-        assert!(
-            failures[0]
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("doesn't change"),
-            "{failures:?}"
-        );
+        .unwrap_err();
+        assert!(err.contains("doesn't change"), "{err}");
         assert!(!std::path::Path::new("/etc/a.txt").exists());
     }
 
@@ -1198,6 +1345,120 @@ mod tests {
             "{failures:?}"
         );
         assert!(!remote.path().join("to/l2").exists());
+    }
+
+    /// A link that is the folder itself is caught (#4296); a FIFO is
+    /// refused; the source's mode and time are kept.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn aliases_specials_and_metadata() {
+        let local = tempfile::tempdir().unwrap();
+        let remote = tempfile::tempdir().unwrap();
+        let r = display_path(remote.path());
+        std::fs::create_dir_all(remote.path().join("a")).unwrap();
+        std::os::unix::fs::symlink(remote.path().join("a"), remote.path().join("link")).unwrap();
+        let h = host(remote.path()).await;
+        // `link` is `a`: copying `a` into it is into itself.
+        let err = start(
+            FsOpKind::Copy,
+            h.clone(),
+            vec![format!("{r}/a")],
+            h.clone(),
+            format!("{r}/link"),
+            events().0,
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("into itself"), "{err}");
+
+        // A FIFO isn't streamed (it would block): refused with why.
+        let fifo = remote.path().join("pipe");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap()
+            .success());
+        let (emit, seen) = events();
+        start(
+            FsOpKind::Copy,
+            h.clone(),
+            vec![format!("{r}/pipe")],
+            End::Local,
+            display_path(local.path()),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        let failures = end.failures.unwrap_or_default();
+        assert!(
+            failures[0]
+                .error
+                .as_deref()
+                .unwrap_or("")
+                .contains("isn't a regular file"),
+            "{failures:?}"
+        );
+
+        // Mode and time come along.
+        use std::os::unix::fs::PermissionsExt;
+        let tool = local.path().join("tool.sh");
+        std::fs::write(&tool, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o750)).unwrap();
+        let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&tool)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+        let (emit, seen) = events();
+        start(
+            FsOpKind::Move,
+            End::Local,
+            vec![display_path(&tool)],
+            h,
+            r.clone(),
+            emit,
+        )
+        .await
+        .unwrap();
+        let end = finished(&seen).await;
+        assert_eq!(end.state, FsOpEventState::Done, "{end:?}");
+        let landed = std::fs::metadata(remote.path().join("tool.sh")).unwrap();
+        assert_eq!(landed.permissions().mode() & 0o7777, 0o750);
+        assert_eq!(landed.modified().unwrap(), when);
+        assert!(!tool.exists());
+    }
+
+    /// A missing source or a protected place is refused before the op starts.
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bad_sources_are_refused_before_an_op_exists() {
+        let remote = tempfile::tempdir().unwrap();
+        let r = display_path(remote.path());
+        let h = host(remote.path()).await;
+        let missing = start(
+            FsOpKind::Move,
+            h.clone(),
+            vec![format!("{r}/nope")],
+            End::Local,
+            "/tmp".into(),
+            events().0,
+        )
+        .await;
+        assert!(missing.unwrap_err().contains("isn't there anymore"));
+        std::fs::write(remote.path().join("f"), b"f").unwrap();
+        let protected = start(
+            FsOpKind::Copy,
+            h,
+            vec![format!("{r}/f")],
+            End::Local,
+            "/etc".into(),
+            events().0,
+        )
+        .await;
+        assert!(protected.is_err());
     }
 
     #[test]

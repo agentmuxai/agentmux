@@ -887,6 +887,10 @@ export class FilesModel {
     /** What dropping `sources` here does: move within a drive when the drag
      *  came from another Hangar pane, copy otherwise (as file managers do). */
     dropKind(sources: string[], fromHangar: boolean, destDir: string = this.path()): "copy" | "move" {
+        // Onto a host: always a copy. The sources are on this computer (drags
+        // out of a host pane are off), and their roots looking alike (`/` and
+        // `/`) says nothing about it being one disk.
+        if (this.connection()) return "copy";
         return fromHangar && sameVolume(sources, destDir) ? "move" : "copy";
     }
 

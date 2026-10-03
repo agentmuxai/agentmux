@@ -421,6 +421,10 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
                 {}
             )
         );
+        // A drop onto a host pane is a copy, even from a local Hangar pane
+        // whose root (`/`) looks like the host's: never a move that deletes
+        // the original here.
+        expect(v.model.dropKind(["/tmp/notes.md"], true)).toBe("copy");
         // A local clipboard pasted onto the host is an upload: the sources on
         // this computer, the destination on the host.
         setClipboard({ kind: "copy", paths: [`${HOME}\\b.txt`] });
