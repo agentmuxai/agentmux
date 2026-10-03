@@ -59,6 +59,24 @@ export function outcomeText(payload: any): Outcome | null {
     }
 }
 
+/** What the headline means, for a human who hasn't read the spec. */
+export function adoptionHint(accounts: number, held: number): string {
+    const parts = [];
+    if (accounts > 0) {
+        parts.push(
+            "Memory is kept in a separate folder for each provider account an agent signs in with, so what this agent saved under an earlier account stayed there. " +
+                "Adopting copies the files you pick into its current memory. Files it already has keep their current text, with the older text kept in history. " +
+                "The earlier folders aren't changed.",
+        );
+    }
+    if (held > 0) {
+        parts.push(
+            "Held files were already in its folder when AgentMux first saw it, but match another agent's memory, so they wait for you to adopt them.",
+        );
+    }
+    return parts.join(" ");
+}
+
 export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Element => {
     const [list, setList] = createSignal<NativeMemoryAdoptionList | null>(null);
     const [open, setOpen] = createSignal(false);
@@ -144,6 +162,7 @@ export const MemoryAdoptionPanel = (props: MemoryAdoptionPanelProps): JSX.Elemen
                         <i class={`fa-solid fa-chevron-${open() ? "down" : "right"}`} aria-hidden="true" />
                         {headline()}
                     </button>
+                    <p class="memory-adoption-panel-hint">{adoptionHint(count(), heldCount())}</p>
                 </Show>
                 <Show when={open() && candidates().length > 0}>
                     <div class="memory-adoption-panel-list">
