@@ -24,7 +24,8 @@ pub(crate) const SHELL_TOOL: &str = r#"{
       "cwd":            { "type": "string",  "description": "Working directory (defaults to agent workdir)" },
       "title":          { "type": "string",  "description": "Display label shown in the conversation row (defaults to cmd)" },
       "env":            { "type": "object",  "description": "Extra environment variables", "additionalProperties": { "type": "string" } },
-      "capture_stdin":  { "type": "boolean", "description": "Pipe stdin so ShellInput() can write to it. Default false — avoids blocking programs that read stdin to EOF (e.g. `cat` with no args). Set true only when you intend to use ShellInput()." }
+      "capture_stdin":  { "type": "boolean", "description": "Pipe stdin so ShellInput() can write to it. Default false — avoids blocking programs that read stdin to EOF (e.g. `cat` with no args). Set true only when you intend to use ShellInput()." },
+      "connection":     { "type": "string",  "description": "Where it runs: \"local\" (default, this machine) or \"wsl://<distro>\" for a WSL distribution on this Windows machine. ConnList shows what is available. SSH hosts are not supported yet. In WSL, cmd runs under the distro's sh -c, cwd is a path inside the distro (default: its home), and only the env you pass (plus terminal variables) crosses into it." }
     },
     "required": ["cmd"]
   }
@@ -75,7 +76,8 @@ pub(crate) const PTY_SHELL_TOOL: &str = r#"{
     "properties": {
       "cwd":  { "type": "string", "description": "Working directory (defaults to agent workdir)" },
       "rows": { "type": "integer", "description": "Initial terminal rows (default 25)" },
-      "cols": { "type": "integer", "description": "Initial terminal columns (default 200)" }
+      "cols": { "type": "integer", "description": "Initial terminal columns (default 200)" },
+      "connection": { "type": "string", "description": "Where it runs: \"local\" (default, this machine) or \"wsl://<distro>\" for a WSL distribution on this Windows machine. ConnList shows what is available. SSH hosts are not supported yet. A WSL shell is the distro's login shell, and cwd is a path inside the distro. The pane has one shell: to switch connection, PtyShellStop it first." }
     }
   }
 }"#;
@@ -570,6 +572,15 @@ pub(crate) const LAYOUT_TOOL: &str = r#"{
     "properties": {
       "query": { "type": "string", "enum": ["layout", "windows", "workspaces", "tabs"], "description": "What to return (default: layout)" }
     }
+  }
+}"#;
+
+pub(crate) const CONN_LIST_TOOL: &str = r#"{
+  "name": "ConnList",
+  "description": "List the connections you can pass as `connection` to Shell and PtyShell: local (this machine), each installed WSL distribution (wsl://<name>), and any other connection used this session, each with its status (connected, available, error with the reason). Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
   }
 }"#;
 

@@ -306,6 +306,9 @@ pub struct ShellNodeRunner {
     /// `ShellStatusInfo`/`list_active` can show it without a second lookup.
     pub title: String,
     pub cwd: Option<String>,
+    /// `wsl.exe` arguments when the command runs in a WSL distro
+    /// (`remote::wsl::launch`); `None` runs it here through `cmd`/`sh`.
+    pub wsl_args: Option<Vec<String>>,
     pub extra_env: HashMap<String, String>,
     pub broker: Arc<Broker>,
     /// Stop registry — the runner registers its `shell_id` here so
@@ -323,7 +326,11 @@ impl ShellNodeRunner {
         let block_id = self.block_id.clone();
         let broker = self.broker.clone();
 
-        let mut child_cmd = if cfg!(windows) {
+        let mut child_cmd = if let Some(args) = &self.wsl_args {
+            let mut c = tokio::process::Command::new("wsl.exe");
+            c.args(args);
+            c
+        } else if cfg!(windows) {
             let mut c = tokio::process::Command::new("cmd");
             c.args(["/C", &self.cmd]);
             c

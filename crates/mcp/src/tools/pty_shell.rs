@@ -28,7 +28,14 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let cols = arguments.get("cols").and_then(|v| v.as_u64()).map(|n| n as u16);
 
             let url = format!("{}/api/v1/ptyshell/create", local_url.trim_end_matches('/'));
-            let req = PtyShellCreateRequest { agent_block_id: block_id.to_string(), cwd, rows, cols };
+            let connection = arguments.get("connection").and_then(|v| v.as_str()).map(str::to_string);
+            let req = PtyShellCreateRequest {
+                agent_block_id: block_id.to_string(),
+                cwd,
+                rows,
+                cols,
+                connection,
+            };
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)

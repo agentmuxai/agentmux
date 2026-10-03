@@ -15,6 +15,21 @@ pub(super) async fn handle_shell_create(
     State(state): State<AppState>,
     Json(req): Json<ShellCreateRequest>,
 ) -> impl IntoResponse {
+    // Where it runs. Checked before anything is published, so a refused
+    // connection (SSH before P2, a distro that isn't installed, a bad name)
+    // fails the call with its reason instead of running the command here.
+    let wsl_distro = match super::app_api::connections::for_agent(
+        &state.broker,
+        req.connection.as_deref(),
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
+    };
+
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
     let now_ms = agentmux_common::time::now_ms_u64();
@@ -29,19 +44,29 @@ pub(super) async fn handle_shell_create(
     // cmd:cwd — the working directory the agent pane was launched with.
     // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
     // (typically the portable runtime/ dir) instead of the project dir.
-    let effective_cwd = req.cwd.or_else(|| {
+    //
+    // In WSL the cwd is a path inside the distro, given as is, and the agent's
+    // own (Windows) directory is no fallback for it: the distro's home is.
+    let effective_cwd = if wsl_distro.is_some() {
+        req.cwd.clone()
+    } else {
+        req.cwd.clone().or_else(|| {
         agent_block.as_ref().and_then(|block| {
             let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
             if cwd.is_empty() { None } else { Some(cwd.to_string()) }
         })
-    });
+        })
+    };
 
     // Normalize the cwd before it reaches the spawner. Agents on Windows run
     // inside a bash shell and emit MSYS paths like `/c/Users/asafe/project`;
     // passing those straight to `Command::current_dir` fails with os error 267
     // (ERROR_DIRECTORY). This converts them to native form and expands `~`.
-    let effective_cwd =
-        effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c));
+    let effective_cwd = if wsl_distro.is_some() {
+        effective_cwd
+    } else {
+        effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c))
+    };
 
     // Env parity with the agent CLI: start from the agent block's stored
     // cmd:env (the per-agent env the agent process is launched with — same
@@ -67,6 +92,7 @@ pub(super) async fn handle_shell_create(
             _ => None,
         })
         .unwrap_or_default();
+    let caller_keys: Vec<String> = req.env.iter().flat_map(|e| e.keys().cloned()).collect();
     if let Some(req_env) = req.env {
         effective_env.extend(req_env);
     }
@@ -75,12 +101,31 @@ pub(super) async fn handle_shell_create(
     // Nor can it hand that command the account's cloud login.
     crate::backend::gh_guard::apply_gh_guard(&mut effective_env);
     crate::backend::account_login_guard::strip_account_login(&mut effective_env);
+    // WSL passes on only what WSLENV names: the caller's own variables and the
+    // gh guard, never the rest of the agent's env.
+    let wsl_args = wsl_distro.as_ref().map(|distro| {
+        effective_env.insert(
+            "WSLENV".to_string(),
+            crate::backend::remote::wsl::agent_wslenv(
+                &std::env::var("WSLENV").unwrap_or_default(),
+                caller_keys.iter().map(String::as_str),
+            ),
+        );
+        crate::backend::remote::wsl::launch(
+            distro,
+            &req.cmd,
+            &[],
+            effective_cwd.as_deref().unwrap_or_default(),
+        )
+        .args
+    });
 
     tracing::info!(
         block_id = %req.agent_block_id,
         shell_id = %shell_id,
         cmd = %req.cmd,
         cwd = ?effective_cwd,
+        wsl = ?wsl_distro,
         "shell.create"
     );
 
@@ -112,7 +157,8 @@ pub(super) async fn handle_shell_create(
         block_id: req.agent_block_id,
         cmd: req.cmd,
         title,
-        cwd: effective_cwd,
+        cwd: if wsl_args.is_some() { None } else { effective_cwd },
+        wsl_args,
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),
@@ -120,7 +166,7 @@ pub(super) async fn handle_shell_create(
     };
     tokio::spawn(runner.run());
 
-    (StatusCode::OK, Json(ShellCreateResponse { shell_id }))
+    (StatusCode::OK, Json(ShellCreateResponse { shell_id })).into_response()
 }
 
 /// `POST /api/v1/shell/stop` — stop a running persistent shell.
@@ -299,13 +345,27 @@ pub(super) fn broadcast_meta_update(
 /// claim" fallback in `handle_pty_shell_create`: resync `id`'s controller
 /// and reply, or return `None` if `id` doesn't resolve to a real block
 /// (stale pointer), OR if its shell has already exited, so the caller
-/// falls through to creating a fresh one.
+/// falls through to creating a fresh one. A pane has one agent shell: asking
+/// for it on another connection than the one it runs on is refused (409), not
+/// answered with the shell on the wrong machine.
 pub(super) async fn try_attach_to_existing_shell(
     state: &AppState,
     agent_block_id: &str,
     id: &str,
+    connection: &str,
 ) -> Option<axum::response::Response> {
     let block = state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
+    let running_on = crate::backend::obj::meta_get_string(
+        &block.meta,
+        blockcontroller::META_KEY_CONNECTION,
+        "local",
+    );
+    if !same_connection(&running_on, connection) {
+        let error = format!(
+            "this pane's shell runs on '{running_on}', not '{connection}'; stop it with PtyShellStop first"
+        );
+        return Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response());
+    }
 
     // Baseline BEFORE resync — see `answer_conpty_handshake_if_seen`'s doc
     // comment (Codex P1 on PR #3194) for why this matters: the `term` file
@@ -427,4 +487,26 @@ pub(super) async fn try_attach_to_existing_shell(
     answer_conpty_handshake_if_seen(state, id, baseline_len).await;
     tracing::info!(block_id = %id, parent_id = %agent_block_id, "ptyshell.create: reused");
     Some((StatusCode::OK, Json(PtyShellCreateResponse { shell_id: id.to_string() })).into_response())
+}
+
+/// Whether two connection names mean the same place (`""` and `local` do).
+fn same_connection(a: &str, b: &str) -> bool {
+    use crate::backend::remote::ConnTarget;
+    match (ConnTarget::parse(a), ConnTarget::parse(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::same_connection;
+
+    #[test]
+    fn a_pane_shell_is_reused_only_on_its_own_connection() {
+        assert!(same_connection("local", ""));
+        assert!(same_connection("wsl://Ubuntu", " wsl://Ubuntu "));
+        assert!(!same_connection("local", "wsl://Ubuntu"));
+        assert!(!same_connection("wsl://Ubuntu", "wsl://Debian"));
+    }
 }

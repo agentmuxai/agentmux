@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Shell, ShellStop, ShellInput, ShellStatus: pipe shells in the agent pane.
+//! ConnList: the connections those and PtyShell can run on.
 
 use super::*;
 
@@ -42,6 +43,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 local_url.trim_end_matches('/')
             );
             let capture_stdin = arguments.get("capture_stdin").and_then(|v| v.as_bool());
+            let connection = arguments.get("connection").and_then(|v| v.as_str()).map(str::to_string);
             let req = ShellCreateRequest {
                 agent_block_id: block_id.to_string(),
                 cmd: cmd.to_string(),
@@ -49,6 +51,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 cwd,
                 env,
                 capture_stdin,
+                connection,
             };
 
             let resp = client
@@ -202,6 +205,12 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 let code = result.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string());
                 format!("shell {shell_id} has exited — exit_code: {code}, {} lines total", result.line_count)
             })
+        }
+        "ConnList" => {
+            crate::srv_http::require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/api/v1/conn/list", local_url.trim_end_matches('/'));
+            let result = crate::srv_http::srv_get_json(client, &url, auth_key, &[], "ConnList").await?;
+            Ok(serde_json::to_string_pretty(&result)?)
         }
         _ => Err(not_in_family()),
     }

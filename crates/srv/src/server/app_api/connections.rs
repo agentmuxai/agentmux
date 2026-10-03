@@ -133,6 +133,82 @@ pub(crate) fn ensure_with(
     Err(message)
 }
 
+/// The connection an agent's `Shell` or `PtyShell` call asked for, checked the
+/// same way a pane's is ([`ensure`]): `Ok(None)` for this machine, `Ok(Some(distro))`
+/// for an installed WSL distro, `Err` with the reason otherwise.
+pub(crate) async fn for_agent(
+    broker: &Broker,
+    name: Option<&str>,
+) -> Result<Option<String>, String> {
+    let name = name.unwrap_or_default();
+    ensure(broker, name).await?;
+    Ok(match ConnTarget::parse(name)? {
+        ConnTarget::Wsl(distro) => Some(distro),
+        _ => None,
+    })
+}
+
+/// One row of the agent `ConnList` tool.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub(crate) struct ConnEntry {
+    pub connection: String,
+    /// `local`, `wsl` or `ssh`.
+    pub kind: &'static str,
+    /// `connected`, `available` (usable, not opened yet), or a status from
+    /// `remote::status` (`connecting`, `disconnected`, `error`).
+    pub status: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub error: String,
+}
+
+/// What an agent may connect to: this machine, each installed WSL distro, and
+/// any other connection a pane has used this session, with its status.
+pub(crate) fn list(wsl_installed: &[String], known: &[ConnStatus]) -> Vec<ConnEntry> {
+    let status_of = |name: &str| known.iter().find(|s| s.connection == name);
+    let mut out = vec![ConnEntry {
+        connection: "local".to_string(),
+        kind: "local",
+        status: state::CONNECTED.to_string(),
+        error: String::new(),
+    }];
+    for distro in wsl_installed {
+        let name = ConnTarget::Wsl(distro.clone()).name();
+        let (status, error) = match status_of(&name) {
+            Some(s) => (s.status.clone(), s.error.clone()),
+            None => ("available".to_string(), String::new()),
+        };
+        out.push(ConnEntry {
+            connection: name,
+            kind: "wsl",
+            status,
+            error,
+        });
+    }
+    for s in known {
+        if out.iter().any(|e| e.connection == s.connection) {
+            continue;
+        }
+        let kind = match ConnTarget::parse(&s.connection) {
+            Ok(ConnTarget::Wsl(_)) => "wsl",
+            Ok(ConnTarget::Ssh(_)) => "ssh",
+            _ => continue,
+        };
+        out.push(ConnEntry {
+            connection: s.connection.clone(),
+            kind,
+            status: s.status.clone(),
+            error: s.error.clone(),
+        });
+    }
+    out
+}
+
+/// `GET /api/v1/conn/list`: the agent `ConnList` tool (spec §8.1).
+pub(crate) async fn handle_conn_list() -> axum::Json<Vec<ConnEntry>> {
+    let installed = crate::backend::remote::wsl::list().await;
+    axum::Json(list(&installed, &status::all()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +268,57 @@ mod tests {
             let _ = ensure_with(&broker, raw, none, true);
             assert!(status::all().iter().any(|s| s.connection == raw), "{raw:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn an_agent_gets_local_or_the_distro_and_never_a_silent_fallback() {
+        let broker = Broker::new();
+        assert_eq!(for_agent(&broker, None).await, Ok(None));
+        assert_eq!(for_agent(&broker, Some("local")).await, Ok(None));
+        // SSH is refused, not run locally under a remote name.
+        let err = for_agent(&broker, Some("test-agent-host"))
+            .await
+            .unwrap_err();
+        assert!(err.contains("SSH terminals are not available"), "{err}");
+        assert!(for_agent(&broker, Some("-oProxyCommand=calc"))
+            .await
+            .is_err());
+    }
+
+    fn st(connection: &str, status: &str, error: &str) -> ConnStatus {
+        ConnStatus {
+            status: status.to_string(),
+            connection: connection.to_string(),
+            error: error.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_list_is_local_then_the_distros_then_what_panes_have_used() {
+        let installed = vec!["Ubuntu".to_string(), "Debian".to_string()];
+        let known = vec![
+            st("wsl://Ubuntu", state::CONNECTED, ""),
+            st("area54", state::ERROR, "SSH terminals are not available"),
+            st("wsl://Arch", state::ERROR, "not installed"),
+            // Not a connection: never listed.
+            st("local", state::CONNECTED, ""),
+        ];
+        let got: Vec<(String, &str, String)> = list(&installed, &known)
+            .into_iter()
+            .map(|e| (e.connection, e.kind, e.status))
+            .collect();
+        let want = [
+            ("local", "local", "connected"),
+            ("wsl://Ubuntu", "wsl", "connected"),
+            ("wsl://Debian", "wsl", "available"),
+            ("area54", "ssh", "error"),
+            ("wsl://Arch", "wsl", "error"),
+        ];
+        let want: Vec<(String, &str, String)> = want
+            .iter()
+            .map(|(c, k, s)| (c.to_string(), *k, s.to_string()))
+            .collect();
+        assert_eq!(got, want);
     }
 }

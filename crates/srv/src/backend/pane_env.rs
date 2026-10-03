@@ -288,6 +288,8 @@ mod spawn_site_coverage {
          "sanitized: persistent shell node, choke-point sanitize_process_command"),
         ("src/backend/shell_node.rs", "\"sh\"", 1,
          "sanitized: Unix branch of the same node, one sanitize_process_command covers both"),
+        ("src/backend/shell_node.rs", "\"wsl.exe\"", 1,
+         "sanitized: an agent Shell run in a WSL distro, the same sanitize_process_command"),
         ("src/backend/tool_store.rs", "\"where\"", 2,
          "probe: Windows PATH lookup for a tool; output parsed for a path, never executed"),
         ("src/backend/tool_store.rs", "\"which\"", 2,
