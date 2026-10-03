@@ -437,6 +437,18 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         None => mstore.clone(),
     };
 
+    // Shared auth: carry what earlier per-channel (isolated) builds kept to
+    // themselves into the shared store, once and without touching the sources
+    // (SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md). Only when this channel
+    // really runs on the shared store; an isolated one never reads another's.
+    if !agentmux_common::isolated_auth_enabled() {
+        if let (Some(ss), Some(path)) = (shared_store.as_ref(), registry::resolve_shared_store_path()) {
+            if Arc::ptr_eq(ss, &id_store) {
+                crate::adoption::run_at_boot(ss, &path);
+            }
+        }
+    }
+
     // Permanently-global identity store (agent→account links, memory
     // bundles, drone definitions, muxbus/agent M2M credentials, native
     // memory, cron jobs) — see

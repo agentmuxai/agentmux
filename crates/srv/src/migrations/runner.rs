@@ -1501,14 +1501,12 @@ mod tests {
         clear();
     }
 
-    /// Same invariant as `home_is_invariant_to_isolated_auth`, but for
-    /// isolation reached via the channel-based default
-    /// (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) rather than
-    /// an explicit `AGENTMUX_ISOLATED_AUTH=1`. `resolve_home()` must
-    /// still anchor to the true global root even when a non-"stable"
-    /// `AGENTMUX_CHANNEL` alone is what triggers isolation.
+    /// Same invariant as `home_is_invariant_to_isolated_auth`, with a
+    /// non-"stable" channel and an instance dir present. Auth is shared by
+    /// default on every channel now (SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md),
+    /// so the channel alone changes nothing: neither the home nor the store path.
     #[test]
-    fn home_is_invariant_to_channel_default_isolation() {
+    fn home_and_store_are_invariant_to_the_channel_when_auth_is_shared() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
@@ -1516,8 +1514,7 @@ mod tests {
         let home_default = resolve_home().unwrap();
         let shared_store_path_default = resolve_shared_store_path().unwrap();
 
-        // No AGENTMUX_ISOLATED_AUTH set at all — only a non-"stable"
-        // channel, which is now sufficient on its own to isolate.
+        // No AGENTMUX_ISOLATED_AUTH set at all — only a non-"stable" channel.
         std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
         std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/dev/some-branch");
         let home_isolated = resolve_home().unwrap();
@@ -1525,12 +1522,17 @@ mod tests {
 
         assert_eq!(
             home_default, home_isolated,
-            "resolve_home() must be invariant to channel-default isolation too"
+            "resolve_home() must not depend on the channel"
         );
-        assert_ne!(
+        assert_eq!(
             shared_store_path_default, shared_store_path_isolated,
-            "resolve_shared_store_path() must actually isolate on channel default alone"
+            "a non-stable channel alone must not move the shared store"
         );
+
+        // An explicit opt-in still isolates, and still leaves the home alone.
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        assert_eq!(resolve_home().unwrap(), home_default);
+        assert_ne!(resolve_shared_store_path().unwrap(), shared_store_path_default);
 
         clear();
     }
