@@ -146,13 +146,21 @@ const HOVER_BRIDGE_MS = 150;
 /** The longest an approaching pointer can keep the grace period going, in total. */
 const HOVER_BRIDGE_MAX_MS = 1000;
 /**
- * The narrowest a peek panel ("end" mode) may be, in the panel's own pixels (it
- * scales with pane zoom). A very narrow, very tall panel (a long command made of
- * short lines) looked broken. Placement treats the panel as at least this wide
- * (so a panel wider than its row goes left-pinned, over the pane border), and
+ * The narrowest a TALL peek panel ("end" mode) may be, in the panel's own pixels
+ * (it scales with pane zoom). A very narrow, very tall panel (a long command made
+ * of short lines) looked broken. Placement treats such a panel as at least this
+ * wide (so one wider than its row goes left-pinned, over the pane border), and
  * caps it to the room actually available.
  */
 const PEEK_MIN_WIDTH_PX = 600;
+/**
+ * The minimum width applies only to a panel more than two lines tall, so the
+ * small panels (a time/estimate line, a one-line command) stay compact. Measured
+ * in panel px at the width the panel would have WITHOUT the minimum. Two lines
+ * come to about 45px (a 13px x 1.4 meta line + a 13px x 1.45 body line, the 2px
+ * gap, 2+2px padding, 1+1px border); three lines to about 64px. 54 splits them.
+ */
+const PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX = 54;
 
 /**
  * This overlay's owning pane's zoom factor, read off the anchor row.
@@ -391,20 +399,20 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         // pointer is never inside the panel — is swept by its tests.
         const viewport = { width: window.innerWidth, height: window.innerHeight };
         const rowRect = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
-        // PEEK_MIN_WIDTH_PX is in the panel's own pixels, so it scales with the
-        // pane's zoom like the text inside it; placement works in viewport px.
-        const hz = computePeekHorizontal({
-            row: rowRect,
-            viewport,
-            naturalWidth: measureWidth(),
-            minWidth: PEEK_MIN_WIDTH_PX * paneZoom,
-        });
-        const placeAt = {
-            row: rowRect,
-            container,
-            viewport,
-            naturalHeight: measureHeightAt(hz.maxWidth, hz.minWidth, paneZoom),
-        };
+        // Placed first without a minimum, to see the panel's natural shape. Only
+        // if that is more than two lines tall does the minimum width apply
+        // (PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX), and the panel is re-placed with it.
+        // Both measurements are at fixed inputs, so the outcome never depends on
+        // the previous placement. The px constants are in the panel's own pixels,
+        // so they scale with the pane's zoom; placement works in viewport px.
+        const naturalWidth = measureWidth();
+        let hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth });
+        let naturalHeight = measureHeightAt(hz.maxWidth, 0, paneZoom);
+        if (naturalHeight > PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX * paneZoom) {
+            hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth, minWidth: PEEK_MIN_WIDTH_PX * paneZoom });
+            naturalHeight = measureHeightAt(hz.maxWidth, hz.minWidth, paneZoom);
+        }
+        const placeAt = { row: rowRect, container, viewport, naturalHeight };
         let vt: ReturnType<typeof computePeekVertical>;
         if (pinnedOffsetY != null) {
             vt = computePeekVertical({ ...placeAt, mouseY: rect.top + pinnedOffsetY, flushToRow: true });
