@@ -323,6 +323,25 @@ impl DurableSshController {
     }
 }
 
+/// Show the pane `done` with `done.code`; a session that is over is
+/// forgotten, so the next start makes a new one.
+fn show_done(this: Option<&Arc<dyn super::Controller>>, done: Done) {
+    let Some(ctrl) = this.and_then(|c| c.as_any().downcast_ref::<DurableSshController>()) else {
+        return;
+    };
+    {
+        let mut inner = ctrl.inner.lock().unwrap();
+        inner.status = STATUS_DONE.to_string();
+        inner.version += 1;
+        inner.exit_code = done.code;
+        inner.input_tx = None;
+    }
+    if done.session_over {
+        ctrl.write_block_meta(META_KEY_SESSION_ID, serde_json::Value::Null);
+    }
+    ctrl.publish();
+}
+
 impl Controller for DurableSshController {
     fn start(
         &self,
@@ -395,30 +414,21 @@ impl Controller for DurableSshController {
             _askpass_grant: askpass_grant,
         };
         let this = super::get_controller(&self.block_id);
+        let shown = this.clone();
         tokio::spawn(async move {
-            let ended = run.run(input_rx, leave_rx).await;
+            let ended = run
+                .run(
+                    input_rx,
+                    leave_rx,
+                    Box::new(move |done| show_done(shown.as_ref(), done)),
+                )
+                .await;
             let _ = done_tx.send(true);
             // Only the session's own end (or a helper that is not there) makes
             // the pane `done`; a detach or an end asked for leaves that to
             // whoever asked.
             if let Some(done) = ended {
-                if let Some(ctrl) = this
-                    .as_ref()
-                    .and_then(|c| c.as_any().downcast_ref::<DurableSshController>())
-                {
-                    {
-                        let mut inner = ctrl.inner.lock().unwrap();
-                        inner.status = STATUS_DONE.to_string();
-                        inner.version += 1;
-                        inner.exit_code = done.code;
-                        inner.input_tx = None;
-                    }
-                    // The session is over: the next start makes a new one.
-                    if done.session_over {
-                        ctrl.write_block_meta(META_KEY_SESSION_ID, serde_json::Value::Null);
-                    }
-                    ctrl.publish();
-                }
+                show_done(this.as_ref(), done);
             }
         });
         Ok(())
@@ -622,11 +632,14 @@ enum Ended {
 impl Run {
     /// Connect, and reconnect for as long as the pane wants the session.
     /// `Some` when the session (or the attempt to reach it) is over and the
-    /// pane should show it done; `None` when the pane left.
+    /// pane should show it done; `None` when the pane left. A refused login
+    /// shows the pane done through `stopped` and stays until the pane leaves
+    /// (see there).
     async fn run(
         mut self,
         mut input_rx: mpsc::UnboundedReceiver<Frame>,
         mut leave_rx: watch::Receiver<Leave>,
+        stopped: Box<dyn FnOnce(Done) + Send>,
     ) -> Option<Done> {
         let mut attempt = 0u32;
         let mut noted_drop = false;
@@ -712,10 +725,29 @@ impl Run {
                             self.conn
                         ))
                         .await;
-                        return Some(Done {
+                        stopped(Done {
                             code: EXIT_SSH_FAILED,
                             session_over: false,
                         });
+                        // Stay until the pane leaves: closing it still ends
+                        // the session (one `end`, best effort, any prompt to
+                        // the user), as for any durable pane. A restart
+                        // replaces this run: its leave sender goes, and this
+                        // returns.
+                        loop {
+                            if leave_rx.changed().await.is_err() {
+                                return None;
+                            }
+                            let how = *leave_rx.borrow();
+                            match how {
+                                Leave::Stay => {}
+                                Leave::Detach => return None,
+                                Leave::End => {
+                                    self.end_remote().await;
+                                    return None;
+                                }
+                            }
+                        }
                     }
                     if attached {
                         attempt = 0;
@@ -881,7 +913,10 @@ impl Run {
                     }
                 }
                 _ = ping.tick() => {
-                    if last_heard.elapsed() > STALLED_AFTER {
+                    // Only once attached: before the helper's Hello, ssh may
+                    // be waiting on the user to answer a prompt (askpass),
+                    // which takes as long as it takes.
+                    if attached && last_heard.elapsed() > STALLED_AFTER {
                         break None; // stalled: replace this ssh rather than wait on it
                     }
                     if stdin.write_all(&Frame::Ping.encode()).await.is_err() {
@@ -1235,9 +1270,12 @@ time.sleep(5)
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let ended = tokio::time::timeout(Duration::from_secs(30), run.run(input_rx, leave_rx))
-            .await
-            .expect("the run ends");
+        let ended = tokio::time::timeout(
+            Duration::from_secs(30),
+            run.run(input_rx, leave_rx, Box::new(|_| {})),
+        )
+        .await
+        .expect("the run ends");
         assert_eq!(
             ended,
             Some(Done {
@@ -1343,7 +1381,7 @@ sys.exit(0 if remote[1] == 'end' else 255)
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let task = tokio::spawn(run.run(input_rx, leave_rx));
+        let task = tokio::spawn(run.run(input_rx, leave_rx, Box::new(|_| {})));
         // Let it fail an attach and start backing off, then close the pane.
         tokio::time::sleep(Duration::from_millis(1500)).await;
         leave_tx.send(Leave::End).unwrap();
@@ -1466,9 +1504,12 @@ elif ' attach ' in remote:
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
-        let ended = tokio::time::timeout(Duration::from_secs(30), run.run(input_rx, leave_rx))
-            .await
-            .expect("the run ends");
+        let ended = tokio::time::timeout(
+            Duration::from_secs(30),
+            run.run(input_rx, leave_rx, Box::new(|_| {})),
+        )
+        .await
+        .expect("the run ends");
         std::env::remove_var("AGENTMUX_REMOTE_HELPER_DIR");
         assert_eq!(
             ended,
@@ -1527,18 +1568,20 @@ elif ' attach ' in remote:
         assert!(!login_refused(""));
     }
 
-    /// The host refuses the login (stderr is the point; every attach is one).
+    /// The host refuses the login (stderr is the point); each run logs its
+    /// helper command (`attach` or `end`).
     const FAKE_SSH_REFUSED: &str = r#"
 import os, sys
 with open(os.environ['FAKE_SSH_LOG3'], 'ab') as log:
-    log.write(b'attach\n')
+    log.write((sys.argv[-1].split()[1] + '\n').encode())
 sys.stderr.write('user@fakehost: Permission denied (publickey).\n')
 sys.exit(255)
 "#;
 
     /// A refused login stops the pane at once with the reason, rather than
     /// asking again every 30 s, and keeps the session id: the session may
-    /// still be on the host for the pane's restart to reattach to.
+    /// still be on the host for the pane's restart to reattach to. Closing
+    /// the pane then still ends the session there.
     #[tokio::test]
     async fn a_refused_login_stops_the_pane_and_keeps_its_session() {
         let Some(python) = python() else {
@@ -1595,20 +1638,39 @@ sys.exit(255)
             _askpass_grant: None,
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
-        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(run.run(
+            input_rx,
+            leave_rx,
+            Box::new(move |done| {
+                let _ = stopped_tx.send(done);
+            }),
+        ));
         // Well inside the first backoff: no retry was waited for.
-        let ended = tokio::time::timeout(Duration::from_secs(15), run.run(input_rx, leave_rx))
+        let stopped = tokio::time::timeout(Duration::from_secs(15), stopped_rx)
             .await
-            .expect("the run ends");
+            .expect("the pane is shown done")
+            .unwrap();
         assert_eq!(
-            ended,
-            Some(Done {
+            stopped,
+            Done {
                 code: EXIT_SSH_FAILED,
                 session_over: false
-            })
+            }
         );
         let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
         assert_eq!(log, "attach\n", "asked once, not again");
+
+        // Closing the pane: one `end` for the session it kept.
+        leave_tx.send(Leave::End).unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(15), task)
+            .await
+            .expect("the run ends")
+            .unwrap();
+        assert_eq!(ended, None);
+        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
+        assert_eq!(log, "attach\nend\n");
         let term = state.filestore.read_file(block, "term").unwrap().unwrap();
         let text = String::from_utf8_lossy(&term).into_owned();
         assert!(
