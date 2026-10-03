@@ -325,8 +325,9 @@ pub(crate) fn bind_socket_with_recovery(
     match std::os::unix::net::UnixStream::connect(socket_path) {
         Ok(_) => {
             // Real second-instance. Forward an `open_new_window` request to the
-            // already-running launcher's host (Windows-parity — main.rs:1292),
-            // then exit cleanly. SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
+            // already-running launcher's host (Windows-parity: `run_windows`'s
+            // `already_running` branch in supervisor/windows.rs), then exit
+            // cleanly. SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
             if channel.starts_with("dev-") {
                 print_dev_instance_collision(channel, data_dir, socket_path);
             } else {

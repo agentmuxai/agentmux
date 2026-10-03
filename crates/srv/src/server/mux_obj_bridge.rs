@@ -7,7 +7,8 @@
 //! reducer publishes mutations to) and translates each event into one or
 //! more `MuxObjUpdate` records, broadcast to all connected WS clients via
 //! the existing `event_bus.broadcast_event(...)` plumbing — the same path
-//! that `service.rs:39-52`'s response-broadcast loop uses.
+//! `service/mod.rs`'s `run_service_call` response broadcast ends in (via
+//! `EventBus::broadcast_mux_obj_updates`, as one batched frame).
 //!
 //! Why this exists: per-RPC handlers were responsible for attaching
 //! `MuxObjUpdate`s to their responses (`success_with_updates(...)`).
@@ -39,8 +40,8 @@ use crate::backend::obj::{
 use crate::backend::storage::store::Store;
 
 /// JSON shape that gets broadcast as the `data` payload of a
-/// `waveobj:update` WS event. Matches the shape of `MuxObjUpdate` in
-/// `crates/srv/src/backend/obj.rs:465-474` so the frontend's existing
+/// `waveobj:update` WS event. Matches the shape of the `MuxObjUpdate` struct
+/// in `crates/srv/src/backend/obj.rs` so the frontend's existing
 /// `updateMuxObject` handler accepts it without changes.
 fn build_update_payload(
     updatetype: &str,
@@ -59,8 +60,8 @@ fn build_update_payload(
 }
 
 /// Push one `MuxObjUpdate` payload to all connected WS clients via the
-/// shared event_bus. Mirrors the response-broadcast loop in
-/// `service.rs:39-52`.
+/// shared event_bus — the single-update counterpart of the batched response
+/// broadcast in `service/mod.rs`'s `run_service_call`.
 fn emit(event_bus: &EventBus, otype: &str, oid: &str, payload: serde_json::Value) {
     let oref = format!("{otype}:{oid}");
     event_bus.broadcast_event(&WSEventType {
@@ -122,7 +123,7 @@ async fn emit_fetched<T: StoreObj + Send + 'static>(
 }
 
 /// Broadcast a "delete" `waveobj:update` for the given oid. No fetch
-/// needed — the frontend's `updateMuxObject` (`mos.ts:263-265`) handles
+/// needed — the frontend's `updateMuxObject` (`mos.ts`) handles
 /// the delete arm with just the oid.
 fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
     let payload = build_update_payload("delete", otype, oid, None);
@@ -131,7 +132,7 @@ fn emit_delete(event_bus: &EventBus, otype: &'static str, oid: &str) {
 
 /// Broadcast the singleton `Client` StoreObj. SrvWindowOpened /
 /// SrvWindowClosed mutate `Client.windowids` (per
-/// `apply_srv_window_opened` in persist_subscriber.rs:518) so renderers
+/// `apply_srv_window_opened` in persist_subscriber.rs) so renderers
 /// holding a pinned Client need to see the new windowids list — without
 /// this broadcast they'd render stale window membership until reload.
 /// Codex P2 on PR #861.
@@ -246,15 +247,17 @@ async fn emit_layout_for_tab(
 /// Translate one reducer event into zero or more `waveobj:update` broadcasts.
 ///
 /// **Read source — post-event state guarantee:**
-/// For events emitted via the HTTP `service.rs` RPC handlers,
-/// `apply_event_to_mstore` is called synchronously (`service.rs:1297-1304`
-/// for workspace; equivalent path for tab/block/window/layout commands)
-/// before `publish_events` (`service.rs:1305`). So when the bridge
+/// For events emitted via the HTTP `server/service` RPC handlers,
+/// `apply_event_to_mstore` is called synchronously
+/// (`workspace_lifecycle.rs`'s `handle_update_workspace` for workspace;
+/// equivalent path for tab/block/window/layout commands) before
+/// `publish_events` (`reducer_helpers.rs`). So when the bridge
 /// receives such an event, SQLite is already up-to-date.
 ///
-/// **IPC-path caveat:** the launcher → IPC path in `srv_ipc/server.rs:295`
-/// dispatches reducer events directly without first calling
-/// `apply_event_to_mstore`; the persist subscriber and bridge then race.
+/// **IPC-path caveat:** the launcher → IPC path in `srv_ipc/server.rs`'s
+/// `handle_connection` dispatches reducer events directly without first
+/// calling `apply_event_to_mstore`; the persist subscriber and bridge then
+/// race.
 /// At time of writing none of the events the bridge handles are emitted
 /// via that path (verified for `Command::UpdateWindowMeta` and the
 /// workspace family). When that changes, options are: (a) make the IPC
@@ -572,7 +575,8 @@ async fn run_mux_obj_bridge(
                 }
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                // The broadcast channel has 1024 capacity (main.rs:624).
+                // The broadcast channel has 1024 capacity
+                // (`spawn_reducer_plumbing` in bootstrap/plumbing.rs).
                 // If we lag, frontend MOS state diverges silently — log it
                 // loudly so operators can correlate with user-visible drift
                 // (e.g. the InstancePanel/title showing stale names).

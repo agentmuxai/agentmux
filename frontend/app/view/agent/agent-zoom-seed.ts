@@ -20,8 +20,8 @@
  * flows) can't leave a stale zoom from whatever agent previously occupied
  * that block (`SetMetaCommand` merges meta rather than replacing it —
  * reagent/codex P2, PR #2477). `null` is also term.tsx's own "reset to
- * default" sentinel (term.tsx:347), so it round-trips through the same
- * read path the drag-to-zoom handler already uses.
+ * default" sentinel (term.tsx's `handleCtrlWheel`), so it round-trips
+ * through the same read path the Ctrl+Wheel zoom handler already uses.
  */
 export function parseSeedZoom(raw: string | null | undefined): number | null {
     const trimmed = raw?.trim();

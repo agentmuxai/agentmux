@@ -125,7 +125,7 @@ pub struct CommandBlockInputData {
     pub seq: Option<u64>,
 }
 
-/// Matches TS `CommandCreateSubBlockData` (frontend/types/srv-types.d.ts:238-241).
+/// Matches TS `CommandCreateSubBlockData` (frontend/types/srv-types.d.ts).
 /// Creates a headless sub-block (no tab/layout entry) parented to
 /// `parentblockid` — e.g. a `term`-view PTY embedded in an agent
 /// pane's details drawer.
@@ -136,7 +136,7 @@ pub struct CommandCreateSubBlockData {
 }
 
 /// Matches TS `CommandDeleteBlockData` as used by `DeleteSubBlockCommand`
-/// (frontend/app/store/rpc-api/block.ts:64-66) — same shape as a plain
+/// (frontend/app/store/rpc-api/block.ts) — same shape as a plain
 /// block delete, but routed to the sub-block teardown path (kills the
 /// controller, deletes the row, unlinks from the parent's `subblockids`;
 /// does not touch tab bookkeeping since sub-blocks are never tab-referenced).
@@ -748,8 +748,8 @@ pub struct CommandPaneOpenData {
     /// a second Editor pane. Explicit opt-in, set only by the `OpenEditor`
     /// MCP tool — NOT inferred from `meta`/`split_reference_block_id` being
     /// present, since other legitimate callers of this same `pane.open` RPC
-    /// (`EditorViewModel.openToTheSide`/`openInTerminal`,
-    /// `frontend/app/view/editor/editor-model.ts:958-984`) also set
+    /// (`EditorViewModel.openToTheSide`/`openInTerminal` in
+    /// `frontend/app/view/editor/editor-model.ts`) also set
     /// `split_reference_block_id` to their OWN block id purely for split
     /// placement and must NOT trigger reuse (reagent P1 on PR #2404 — an
     /// earlier version of this field inferred intent from `meta.is_none()`,
@@ -1060,7 +1060,8 @@ mod blockfile_req_shape_tests {
     use super::*;
     use serde_json::json;
 
-    // AgentHistoryView.tsx:165, useHistoryPagination.ts:331
+    // AgentHistoryView.tsx's `load`, useHistoryPagination.ts's
+    // `needsHwmWidening` probe
     #[test]
     fn line_count_accepts_the_payload_the_stub_sends() {
         serde_json::from_value::<CommandBlockfileLineCountData>(
@@ -1069,7 +1070,7 @@ mod blockfile_req_shape_tests {
         .expect("blockfile:line_count must accept block_id and filename");
     }
 
-    // AgentHistoryView.tsx:178
+    // AgentHistoryView.tsx's `load`
     #[test]
     fn read_range_accepts_the_payload_the_stub_sends() {
         let r: CommandBlockfileReadRangeData = serde_json::from_value(

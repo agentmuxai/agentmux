@@ -830,7 +830,8 @@ $transcript-preview-max-height: calc(50vh / 3);
         // header — a direct child on both paths — scrolled before Shiki
         // resolved and wrapped after, flipping layout mid-render. It also made
         // any future direct text child silently wrap on one path only.
-        // DiffViewer.tsx:288 vs :306.
+        // DiffViewer.tsx's `pre.agent-diff` fallback vs its
+        // `div.agent-diff--highlighted` Shiki path.
         white-space: pre;
 
         .agent-diff-header {

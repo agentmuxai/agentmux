@@ -82,11 +82,12 @@ pub async fn run(
     // saga keeps a soft pre-check here as a UX guard; the TOCTOU
     // window (two concurrent CloseTabs on different tabs in a 2-tab
     // workspace) is reachable in theory but the user-facing call
-    // sites (tabbar close button at `tabbar.tsx:63`, keyboard handler
-    // at `keymodel.ts::simpleCloseStaticTab`) gate with
-    // `if (allTabs.length <= 1) return`, so user-driven concurrent
-    // CloseTabs can't reach this saga. Automated test harnesses
-    // could still race; document the limitation, accept it.
+    // sites (the tabbar close button and the keyboard handler
+    // `simpleCloseStaticTab` in keymodel-nav.ts, both routed through
+    // tabbar.tsx's `requestClose`) refuse once only one tab is left,
+    // so user-driven concurrent CloseTabs can't reach this saga.
+    // Automated test harnesses could still race; document the
+    // limitation, accept it.
     {
         let s = state.srv_state.lock().await;
         let Some(workspace) = s.workspaces.get(&workspace_id) else {

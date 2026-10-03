@@ -558,8 +558,7 @@ where
 
         // Dispatch through the reducer. Mutex held briefly — compute
         // the timestamp BEFORE acquiring so syscalls + string
-        // formatting don't show up in lock-hold time. (gemini
-        // MEDIUM @ server.rs:259, PR #574 round-1.)
+        // formatting don't show up in lock-hold time.
         let now_rfc3339 = chrono::Utc::now().to_rfc3339();
         // Phase B.9.1 — monotonic ms since launcher start. Used by
         // the WRR arm for per-window observability ages.

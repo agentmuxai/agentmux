@@ -596,7 +596,8 @@ wrap_task! {
 }
 
 /// Pillar 2 Stage-1 drain executor (SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.G) —
-/// the ACTION half of the decision/action split (`reducer/quit.rs:49-54`).
+/// the ACTION half of the decision/action split (`reducer/quit.rs`'s
+/// THREADING CONTRACT comment).
 /// Callers must have already observed `reconcile_quit`'s decision via
 /// `DispatchOutput.request_drain` (the DECISION) before calling this — it does
 /// not re-check anything, it just executes. Extracted verbatim from

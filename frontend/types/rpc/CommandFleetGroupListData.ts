@@ -3,10 +3,10 @@
 /**
  * Input for `fleet.group.list`. The handler ignores its payload entirely, but
  * this must still be a struct rather than `()`: the stub calls it with `{}`
- * (swarm-model.ts:1588), and serde deserializes `()` ONLY from JSON `null`, so
- * a unit Req would reject every real call at runtime while compiling and
- * passing every CI gate. That is the exact bug found on `bookmarks.list`.
- * An empty struct generates `Record<string, never>`, which is what the
- * hand-written stub already declared.
+ * (swarm-model.ts's `loadFleetGroups`), and serde deserializes `()` ONLY from
+ * JSON `null`, so a unit Req would reject every real call at runtime while
+ * compiling and passing every CI gate. That is the exact bug found on
+ * `bookmarks.list`. An empty struct generates `Record<string, never>`, which
+ * is what the hand-written stub already declared.
  */
 export type CommandFleetGroupListData = Record<string, never>;

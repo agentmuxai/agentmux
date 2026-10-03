@@ -7,14 +7,15 @@
 use super::*;
 use serde_json::json;
 
-// agent-native-memory-model.ts:128
+// agent-native-memory-model.ts (`loadFiles`)
 #[test]
 fn list_req_accepts_the_payload_the_stub_sends() {
     serde_json::from_value::<CommandNativeMemoryListData>(json!({"agent_id": "a1"}))
         .expect("agent:memory:list must accept {agent_id}");
 }
 
-// agent-native-memory-model.ts:167, native-memory-history-model.ts:176
+// agent-native-memory-model.ts (`readSelected`, `selectFile`),
+// native-memory-history-model.ts (`nativeMemoryHistorySource`'s `readContent`)
 #[test]
 fn read_file_req_accepts_the_payload_the_stub_sends() {
     serde_json::from_value::<CommandNativeMemoryReadFileData>(
@@ -23,8 +24,9 @@ fn read_file_req_accepts_the_payload_the_stub_sends() {
     .expect("agent:memory:read_file must accept {agent_id, filename}");
 }
 
-// agent-native-memory-model.ts:201 and :237 — BOTH call sites send
-// `provenance: { source: "human" }` and neither sends `detail`, so the
+// agent-native-memory-model.ts (the draft's `save` and `createFile`) and
+// NativeMemoryFileView.tsx (the draft's `save`) — EVERY call site sends
+// `provenance: { source: "human" }` and none sends `detail`, so the
 // nested `default_detail` path is the only one the UI ever exercises.
 #[test]
 fn write_file_req_accepts_provenance_without_detail() {
@@ -71,7 +73,7 @@ fn write_file_req_accepts_a_base_sha256() {
     assert_eq!(req.base_sha256.as_deref(), Some("abc123"));
 }
 
-// native-memory-history-model.ts:196
+// native-memory-history-model.ts (`nativeMemoryHistorySource`'s `listVersions`)
 #[test]
 fn history_req_accepts_the_payload_the_stub_sends() {
     serde_json::from_value::<CommandNativeMemoryHistoryData>(
@@ -80,9 +82,10 @@ fn history_req_accepts_the_payload_the_stub_sends() {
     .expect("agent:memory:history must accept {agent_id, filename}");
 }
 
-// native-memory-history-model.ts:242. `agent_id` is required here on
-// purpose (reagent P1: without it any caller could read another agent's
-// memory by version id), so a payload missing it must be REJECTED.
+// native-memory-history-model.ts (`nativeMemoryHistorySource`'s `diff`).
+// `agent_id` is required here on purpose (without it any caller could read
+// another agent's memory by version id), so a payload missing it must be
+// REJECTED.
 #[test]
 fn diff_req_accepts_the_payload_the_stub_sends_and_requires_agent_id() {
     serde_json::from_value::<CommandNativeMemoryDiffData>(
@@ -98,7 +101,7 @@ fn diff_req_accepts_the_payload_the_stub_sends_and_requires_agent_id() {
     );
 }
 
-// native-memory-history-model.ts:270
+// native-memory-history-model.ts (`nativeMemoryHistorySource`'s `revert`)
 #[test]
 fn revert_req_accepts_the_payload_the_stub_sends() {
     serde_json::from_value::<CommandNativeMemoryRevertData>(

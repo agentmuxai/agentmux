@@ -119,7 +119,8 @@ export function useAuthHealth(opts: {
     // Bounded retry around recheckAuthAfterBind — NOT a stylistic choice, a
     // correctness fix. `agentidentities:changed` is published by the
     // backend SYNCHRONOUSLY inside the `LinkAgentIdentityCommand` handler,
-    // before it even responds to the RPC (agent_handlers/identity.rs:590-611);
+    // before it even responds to the RPC (the `COMMAND_LINK_AGENT_IDENTITY`
+    // handler in agent_handlers/identity.rs);
     // RPC responses and WS events share one in-order connection, so this
     // pane's subscription below fires before `bindAccountToAgent`'s own
     // `SetMetaCommand` — which only runs AFTER that same Link RPC resolves

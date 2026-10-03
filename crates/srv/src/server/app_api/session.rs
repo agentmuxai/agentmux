@@ -122,10 +122,12 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
 /// falsehood confidently.
 ///
 /// `agent:resume_flag` defaulting to `"--resume"` is that rule doing real
-/// work (reagent P1 on PR #2833): it was `""` here while all four real
-/// spawn-path readers default to `"--resume"`
-/// (`agent_handlers/input.rs:400,422`, `app_api/agent_io.rs:265,287` — the
-/// first of those is the exact line that builds `PersistentSpawnConfig`).
+/// work (#2833): it was `""` here while all five real spawn-path readers
+/// default to `"--resume"` (the persistent and subprocess branches of
+/// `agent_handlers/input.rs`'s `run_agent_turn` and of
+/// `app_api/agent_io.rs`'s `register_agent_send`, plus the eager-resume path
+/// in `eager_resume.rs` — the persistent branch of `run_agent_turn` is the
+/// one that builds `PersistentSpawnConfig` for a pane's message send).
 /// `agent_open.rs` only started writing the key recently, so any Claude pane
 /// created before that and not respawned since has no `agent:resume_flag`
 /// at all: the spawn still attaches `--resume`, but the preflight was
@@ -137,8 +139,9 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
 ///
 /// For an agent bound to an Armory OAuth identity, the `cmd:env` snapshot is
 /// simply not where the CLI will look: the real spawn resolves the isolated
-/// dir dynamically through `inject_identity_env_async`
-/// (`agent_handlers/input.rs:224`, `app_api/agent_io.rs:184`), and
+/// dir dynamically through `inject_identity_env_async` (via
+/// `agent_handlers/input.rs`'s `build_persistent_spawn_env`, which
+/// `app_api/agent_io.rs`'s `agent_send_spawn_env` also calls), and
 /// `reactive.rs` already documents that "identity-bound agents' real
 /// `CLAUDE_CONFIG_DIR` is never the stale `cmd:env` snapshot"
 /// (`SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`).

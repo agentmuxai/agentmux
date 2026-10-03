@@ -143,8 +143,8 @@ pub fn log_summary() {
     let Ok(guard) = recorder().lock() else { return };
     let Some(timings) = guard.as_ref() else { return };
     // The key is repeated in the MESSAGE, not just the target, on purpose:
-    // `muxlog`'s grep matches `fields.message` only
-    // (`backend/shellintegration/muxlog.mjs:157`), so the documented
+    // `muxlog`'s grep matches `fields.message` only (`renderLine` in
+    // `backend/shellintegration/muxlog.mjs`), so the documented
     // `muxlog srv grep boot_timing` would filter this very line out if the
     // key lived in the target alone (codex P2 on PR #3267). The target is
     // kept as well, so `muxlog srv --target boot_timing` works too.

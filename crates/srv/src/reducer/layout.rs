@@ -921,7 +921,7 @@ pub(super) fn handle_layout_insert_node_at_index(
     // Build the new tree on a clone, balance, and commit only on success
     // (atomic — no partial mutation on error). Matches the frontend oracle:
     // `insertNodeAtIndex` PROMOTES the node to root when the tree is empty
-    // (frontend/layout/lib/layoutTree.ts:303-304), so strong-reducer authority
+    // (frontend/layout/lib/layoutTree.ts), so strong-reducer authority
     // promotes too rather than rejecting — `index_arr` is moot on an empty
     // tree. (Replay stays consistent: the same insert-at-index semantics
     // promote on empty; the event documents the request.)
@@ -2432,7 +2432,7 @@ mod tests {
     #[test]
     fn layout_insert_node_at_index_into_empty_promotes_to_root() {
         // Matches the frontend oracle (insertNodeAtIndex promotes to root on
-        // an empty tree; layoutTree.ts:303-304) — not a reject.
+        // an empty tree, in layoutTree.ts) — not a reject.
         let (mut state, tab_id) = fresh_tab();
         seed_block(&mut state, &tab_id, "b");
         let events = update(

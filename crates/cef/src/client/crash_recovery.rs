@@ -234,9 +234,10 @@ impl AgentMuxHandler {
         // Resolve the real frontend URL so the Reload button can navigate
         // back to the live app instead of reloading the recovery page
         // itself. Matches the format used by
-        // commands::window::resolve_frontend_base_url and its callers
-        // (see window.rs:400, window.rs:430, drag.rs:294 — all use the
-        // same ipc_port / ipc_token query params).
+        // commands::window::resolve_frontend_base_url (window/creation.rs)
+        // and its callers (see window/creation.rs's open_window_with_kind,
+        // drag.rs's open_window_at_position — all use the same ipc_port /
+        // ipc_token query params).
         //
         // If the resolver returns Err (frontend assets missing — the
         // 2026-05-28 incident pattern where an external `rm -rf` of a

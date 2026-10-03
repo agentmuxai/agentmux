@@ -381,11 +381,11 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // cancelInFlight), before measuring.
     let lastBranch: LogBranch | undefined;
     // Guards the same `<Index>` slot-position hazard `ToolBlock.tsx` guards
-    // via `prevNodeId` (PR #1317, `AgentDocumentVirtualList.tsx:193-194`): a
-    // streaming-buffer cap-advance can swap a different tool node into this
-    // component instance without it ever unmounting. Without this guard a
-    // pending commit captured for the OUTGOING node would fire against the
-    // INCOMING node's first render, FLIPping from the old tool's height to
+    // via `prevNodeId` (PR #1317; see the "WHY <Index> NOT <Key>" note in
+    // `AgentDocumentVirtualList.tsx`): a streaming-buffer cap-advance can swap
+    // a different tool node into this component instance without it ever
+    // unmounting. Without this guard a pending commit captured for the
+    // OUTGOING node would fire against the INCOMING node's first render, FLIPping from the old tool's height to
     // the new tool's height (reagent P1 round 2 on PR #1975).
     let lastNodeId: string = props.node.id;
     let pendingCommit: (() => void) | undefined;

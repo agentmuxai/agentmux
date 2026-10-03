@@ -748,10 +748,10 @@ function installWindowTitleEffect(windowId: string): void {
     // This window's launcher label, fetched async. Used as a fallback
     // when entry.windowId-based findIndex returns -1 (which happens at
     // startup before registerBackendWindow has populated the entry's
-    // windowId — see global.ts:145 comment). Without the label fallback,
-    // a freshly-opened second window resolves to idx=0 and the title
-    // shows "Window 1" while the InstancePanel correctly shows "Window 2"
-    // (because the panel iterates entries with positional indices).
+    // windowId — see the `WindowEntry` comment in global.ts). Without the
+    // label fallback, a freshly-opened second window resolves to idx=0 and
+    // the title shows "Window 1" while the InstancePanel correctly shows
+    // "Window 2" (because the panel iterates entries with positional indices).
     // Same root cause as the InstancePanel resolveEntryWindowId fallback.
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));

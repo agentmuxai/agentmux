@@ -17,10 +17,10 @@
 //! Two stores, deliberately, as of when this migration was written.
 //! `db_bundles` lives in the shared store (`run_shared_store_schema`), while
 //! `db_skills`/`db_mcp_servers` and both ref tables lived in the channel
-//! store alone (`run_object_schema`, `migrations.rs:742`/`:749`) — the ref
-//! tables had to sit next to the catalog tables they carried foreign keys
-//! to, which is also why they never had an FK to `db_bundles`
-//! (`migrations.rs:721-741`). So this reads bundles from the shared store
+//! store alone (`run_object_schema` in `migrations.rs`) — the ref tables had
+//! to sit next to the catalog tables they carried foreign keys to, which is
+//! also why they never had an FK to `db_bundles` (the comment above
+//! `db_bundle_skills_ref` in `run_object_schema`). So this reads bundles from the shared store
 //! and writes refs into the channel store, resolving the former exactly the
 //! way `m0021` does. **Now stale in one respect** (Phase 2 of
 //! `SPEC_DURABLE_BINDINGS_2026_09_10.md`, `m0032_drop_catalog_fk_from_ref_tables`):

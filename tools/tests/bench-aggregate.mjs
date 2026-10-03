@@ -45,7 +45,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 const PRESETS = {
     agent: { script: "bench-agent-keystroke.mjs", metricPath: "keystroke.stats.p95", label: "agent-keystroke P95" },
-    // `quiet` is always present in the term bench output (bench-term-echo.mjs:431);
+    // `quiet` is always present in the term bench output (bench-term-echo.mjs's
+    // `main` sets `results.quiet` unconditionally);
     // `busy`/`stream_*` only appear with --busy/--stream, so they're not safe defaults.
     term: { script: "bench-term-echo.mjs", metricPath: "quiet.p95", label: "term-echo quiet P95" },
 };

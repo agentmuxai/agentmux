@@ -58,8 +58,10 @@ pub struct CatalogModel {
 /// Read the Claude OAuth access token from an isolated auth dir's
 /// `.credentials.json` (`claudeAiOauth.accessToken`). Returns `None` when the
 /// file/token is absent — notably on **macOS**, where the CLI stores creds in
-/// the Keychain rather than this file (`cli_handlers.rs:371-378`); the caller
-/// falls back to the bundled catalog there. Windows/Linux keep the token here.
+/// the Keychain rather than this file (see the `COMMAND_CHECK_CLI_AUTH`
+/// handler in `cli_handlers.rs`); [`resolve_access_token`] then tries its
+/// other sources before falling back to the bundled catalog. Windows/Linux
+/// keep the token here.
 pub fn read_oauth_access_token(config_dir: &Path) -> Option<String> {
     let creds_path = config_dir.join(".credentials.json");
     let content = std::fs::read_to_string(&creds_path).ok()?;
