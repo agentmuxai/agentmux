@@ -134,6 +134,9 @@ pub enum FsPlaceKind {
     Known,
     /// A drive letter (Windows) or a mount (Linux). None on macOS.
     Drive,
+    /// An installed WSL distribution, at its root through `\\wsl.localhost`
+    /// (Windows only).
+    Wsl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]

@@ -316,6 +316,8 @@ mod spawn_site_coverage {
          "sanitized: Files pane open/reveal (file manager, default app), sanitize_external_std_command in platform::spawn_detached"),
         ("src/backend/fs_ops/platform.rs", "\"xdg-open\"", 2,
          "sanitized: Files pane open/reveal (file manager, default app), sanitize_external_std_command in platform::spawn_detached"),
+        ("src/backend/fs_watch/pool.rs", "\"wsl.exe\"", 2,
+         "test: an ignored test writes and removes a file inside a WSL distro"),
         ("src/server/editor_handlers.rs", "\"explorer.exe\"", 1,
          "sanitized: file manager, strict policy (I7 fix, this PR)"),
         ("src/server/editor_handlers.rs", "\"open\"", 1,

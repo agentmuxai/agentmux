@@ -811,7 +811,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 <Show when={model.showSidebar()}>
                     <nav class="files-places" aria-label="Places">
                         <div class="files-places-heading">Places</div>
-                        <For each={model.places().filter((p) => p.kind !== "drive")}>
+                        <For each={model.places().filter((p) => p.kind !== "drive" && p.kind !== "wsl")}>
                             {(p) => (
                                 <button type="button" class="files-place" title={p.path} onClick={() => void model.navigate(p.path)}>
                                     <i class={`fa fa-${p.kind === "home" ? "house" : "folder"}`} />
@@ -825,6 +825,17 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                 {(p) => (
                                     <button type="button" class="files-place" title={p.path} onClick={() => void model.navigate(p.path)}>
                                         <i class="fa fa-hard-drive" />
+                                        <span>{p.label}</span>
+                                    </button>
+                                )}
+                            </For>
+                        </Show>
+                        <Show when={model.places().some((p) => p.kind === "wsl")}>
+                            <div class="files-places-heading">WSL</div>
+                            <For each={model.places().filter((p) => p.kind === "wsl")}>
+                                {(p) => (
+                                    <button type="button" class="files-place" title={p.path} onClick={() => void model.navigate(p.path)}>
+                                        <i class="fa-brands fa-linux" />
                                         <span>{p.label}</span>
                                     </button>
                                 )}

@@ -520,6 +520,9 @@ impl ProtectedPaths {
         if target.parent().is_none() {
             return Err(ROOT_REFUSAL.to_string());
         }
+        if let Some(share) = crate::backend::remote::wsl_fs::share_of(target) {
+            return self.check_in_distro(&share);
+        }
         let key = path_key(target);
         let contains = |protected: &Path| protected.starts_with(&key);
 
@@ -574,6 +577,30 @@ impl ProtectedPaths {
                     return Err("This is a protected system folder; AgentMux won't change it.".to_string());
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// [`Self::check`] for a WSL distro's file through `\\wsl.localhost`
+    /// (`remote::wsl_fs`). Its `/mnt/<letter>` is a Windows drive, so the
+    /// Windows rules decide; its own system folders and home folders are
+    /// protected as this machine's are.
+    fn check_in_distro(&self, share: &crate::backend::remote::wsl_fs::SharePath) -> Result<(), String> {
+        use crate::backend::remote::wsl_fs;
+        if share.linux == "/" {
+            return Err(ROOT_REFUSAL.to_string());
+        }
+        if let Some(windows) = wsl_fs::drive_path(&share.linux) {
+            return self.check(Path::new(&windows));
+        }
+        if wsl_fs::is_system_path(&share.linux) {
+            return Err(format!(
+                "This is a system folder of the {} WSL distribution; AgentMux won't change it.",
+                share.distro
+            ));
+        }
+        if share.linux == "/home" || wsl_fs::is_home(&share.linux) {
+            return Err("AgentMux won't rename, move or delete a home folder.".to_string());
         }
         Ok(())
     }

@@ -1,7 +1,7 @@
 # SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan
 
 **Date:** 2026-10-02
-**Status:** active — P0 (connection model, status, the connection RPCs) merged in #4248; P1 (WSL terminals for panes, and `Shell`/`PtyShell` `connection` plus `ConnList` for agents) in PR #4253, Hangar and editor on WSL still to come; P2 to P6 not started. The section 11 decisions were answered on 2026-10-02 (the recommendations, see 11.1).
+**Status:** active — P0 (connection model, status, the connection RPCs) merged in #4248; P1 (WSL terminals for panes, and `Shell`/`PtyShell` `connection` plus `ConnList` for agents) merged in #4253, Hangar and editor on WSL folders (through `\\wsl.localhost`) in PR #4257; P2 to P6 not started. The section 11 decisions were answered on 2026-10-02 (the recommendations, see 11.1).
 **Author:** AgentX (narko), at the owner's request ("lets get both remote terminals and durable sessions in, lets work first on that ... this would also need support across the 3 platforms")
 **Affects:** `crates/srv` (blockcontroller/shell, a new `remote/` module, fs_ops, wconfig, server/service), a new crate `crates/remote` (the remote helper), `crates/cef` (none expected), `frontend/app` (term view, block frame, conntypeahead, Hangar, settings), `Taskfile.yml` and `.github/workflows` (new build targets)
 **Builds on:** `docs/reports/REPORT_WAVETERM_FEATURE_GAP_2026_10_02.md` §2.10 (what Wave has), `docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md` (the `term` blockfile and offset replay a durable session plugs into), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why the last remote helper was removed, and what not to repeat)
