@@ -66,6 +66,7 @@ export function adoptionHint(accounts: number, held: number): string {
         parts.push(
             "Memory is kept in a separate folder for each provider account an agent signs in with, so what this agent saved under an earlier account stayed there. " +
                 "Adopting copies the files you pick into its current memory. Files it already has keep their current text, with the older text kept in history. " +
+                "The one exception is the MEMORY.md index: the earlier entries are merged into it, so every adopted topic stays listed. " +
                 "The earlier folders aren't changed.",
         );
     }
