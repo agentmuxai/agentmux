@@ -309,7 +309,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
-    pinned_version: "2.1.287",
+    pinned_version: "2.1.288",
     // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
     base_url_env_var: Some("ANTHROPIC_BASE_URL"),
@@ -523,7 +523,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "openclaw",
-    pinned_version: "2026.9.7",
+    pinned_version: "2026.9.8",
     base_url_env_var: None,
     supported_vendors: &["openai", "anthropic", "google"],
     // Confirmed convention, UNCONFIRMED path: docs.openclaw.ai/reference/AGENTS.default
