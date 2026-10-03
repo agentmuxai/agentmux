@@ -26,7 +26,8 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { BackgroundTaskBucket, SubagentBackgroundTasks, visibleBackgroundTasks } from "./swarm-background-tasks";
 import type { BackgroundTaskView } from "@/app/store/rpc-api";
 import { swarmRowColors } from "./swarm-row-colors";
-import { swarmLineTooltip } from "@/app/store/swarm-line";
+import { isAwaitingUser, swarmLineTooltip } from "@/app/store/swarm-line";
+import { questionCountdown } from "@/app/store/question-timer";
 import { remoteSections, seenAgo } from "./swarm-remote";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
@@ -475,7 +476,11 @@ export function AgentRow({
                     <Show when={node.contextTokens != null}>
                         <span class="swarm-ctx-size">{fmtCtx(node.contextTokens!)}</span>
                     </Show>
-                    <AgentStatusChip status={displayStatus()} />
+                    <AgentStatusChip
+                        status={displayStatus()}
+                        awaitingUser={isAwaitingUser(blockMeta(), node.agentStatus)}
+                        blockId={node.blockId}
+                    />
                 </div>
                 {/* Never empty: the generated title, or a fallback shown muted
                     with a tooltip saying it is one (store/swarm-line.ts). */}
@@ -1251,27 +1256,56 @@ function SubagentRow({
 // ── Status chip ──────────────────────────────────────────────────────────
 
 /**
- * The chip shows exactly two states (user, 2026-09-27): **working** — the
- * agent is mid-turn, whether generating, running tools, or stopping — in red,
- * and **idle** — everything else — in green. The finer-grained
- * AgentDisplayStatus is still computed and still drives other logic (e.g. which
- * subagent rows can be retired); only what the chip shows collapses.
+ * The chip collapses the finer AgentDisplayStatus to three states:
+ * **working**, the agent is mid-turn, whether generating, running tools, or
+ * stopping, in red (user, 2026-09-27); **question**, mid-turn and waiting on
+ * the user's answer, in the theme's primary colour; and **idle**, everything
+ * else, in green. The finer-grained AgentDisplayStatus is still computed and
+ * still drives other logic (e.g. which subagent rows can be retired); only
+ * what the chip shows collapses.
+ * docs/specs/SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md §3.
  */
-export type ChipStatus = "working" | "idle";
+export type ChipStatus = "working" | "question" | "idle";
 
-export function chipStatus(status: AgentDisplayStatus): ChipStatus {
-    return status === "working" || status === "tools" || status === "stopping" ? "working" : "idle";
+/** `awaitingUser` is `isAwaitingUser(meta, agentStatus)` from swarm-line.ts,
+ *  the same check as the row's "Waiting for you" line. */
+export function chipStatus(status: AgentDisplayStatus, awaitingUser = false): ChipStatus {
+    const working = status === "working" || status === "tools" || status === "stopping";
+    if (!working) return "idle";
+    return awaitingUser ? "question" : "working";
 }
 
 // Reads `props.status`, not a destructured `status`: in Solid a destructured
 // prop is read once at creation, so the chip would never follow the agent from
 // working to idle.
-export function AgentStatusChip(props: { status: AgentDisplayStatus }): JSX.Element {
-    const chip = () => chipStatus(props.status);
+//
+// A question shows the one question timer's countdown (store/question-timer.ts),
+// the same seconds as the question panel: "question 23s", or "question · paused"
+// while the user is active. No timer state (the pane isn't mounted anywhere, or
+// a remote row) shows plain "question".
+export function AgentStatusChip(props: {
+    status: AgentDisplayStatus;
+    awaitingUser?: boolean;
+    blockId?: string;
+}): JSX.Element {
+    const chip = () => chipStatus(props.status, props.awaitingUser);
+    const countdown = () => (chip() === "question" && props.blockId ? questionCountdown(props.blockId) : null);
     return (
         <span class={`swarm-status-chip swarm-status-chip--${chip()}`}>
             <span class={`swarm-status-dot swarm-status-dot--${chip()}`} />
             {chip()}
+            <Show when={countdown()}>
+                {(cd) => (
+                    <Show
+                        when={!cd().paused}
+                        fallback={<span class="swarm-status-countdown">· paused</span>}
+                    >
+                        <span class={`swarm-status-countdown swarm-status-countdown--${cd().band}`}>
+                            {cd().seconds}s
+                        </span>
+                    </Show>
+                )}
+            </Show>
         </span>
     );
 }

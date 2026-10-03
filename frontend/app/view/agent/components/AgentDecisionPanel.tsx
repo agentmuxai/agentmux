@@ -17,8 +17,8 @@
  * downstream of "user clicked Allow / Deny" can be exercised.
  */
 
-import { createEffect, createMemo, createSignal, createUniqueId, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
-import { eventBelongsToPaneOf } from "@/util/focusutil";
+import { createEffect, createMemo, createSignal, createUniqueId, For, Show, type Accessor, type JSX } from "solid-js";
+import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { PermissionRequestEvent, ToolNode } from "../types";
@@ -188,27 +188,12 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         setDenyError(null);
     };
 
-    const isEditableTarget = (target: EventTarget | null): boolean => {
-        const el = target as HTMLElement | null;
-        if (!el) return false;
-        const tag = el.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA") return true;
-        if (el.isContentEditable) return true;
-        return false;
-    };
-
-    const handleKey = (e: KeyboardEvent) => {
-        const target = e.target as HTMLElement | null;
-        // Scope every shortcut to events originating inside this
-        // panel's own pane. Without this check, a pending prompt in
-        // pane A would react to keys from pane B (Esc, Enter, etc.)
-        // and multiple open prompts in different panes would all
-        // dispatch on the same keystroke. Codex P1 on PR #556.
-        if (!eventBelongsToPaneOf(e, rootRef)) return;
-
-        const inPanel = !!rootRef && !!target && rootRef.contains(target);
-        const editable = isEditableTarget(target);
-        const inFeedback = inPanel && target?.tagName === "TEXTAREA";
+    // Keys reach this only from this panel's own pane (usePanelKeys below):
+    // otherwise a prompt in pane A would react to Esc/Enter typed in pane B,
+    // and prompts open in several panes would all fire on one keystroke.
+    // Codex P1 on PR #556.
+    const handleKey = (e: KeyboardEvent, { inPanel, editable }: PanelKeyContext) => {
+        const inFeedback = inPanel && (e.target as HTMLElement | null)?.tagName === "TEXTAREA";
 
         if (e.key === "Escape") {
             // Esc minimizes ONLY when focus is non-editable or in the
@@ -267,18 +252,8 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
         }
     };
 
-    // Install a global capture-phase keydown listener while the panel
-    // is open so decision shortcuts work even when focus is elsewhere
-    // (e.g. the composer textarea). Codex P1 on PR #556: previously the
-    // panel's `onKeyDown` only fired when the panel itself was focused,
-    // but the panel has tabIndex=-1 and never auto-focuses, so keys
-    // never reached the handler in practice.
-    createEffect(() => {
-        if (!request()) return;
-        const onWindowKey = (e: KeyboardEvent) => handleKey(e);
-        window.addEventListener("keydown", onWindowKey, true);
-        onCleanup(() => window.removeEventListener("keydown", onWindowKey, true));
-    });
+    // Decision shortcuts work while focus is elsewhere (e.g. the composer).
+    usePanelKeys(() => rootRef, () => !!request(), handleKey);
 
     const previewText = (): string | null => {
         const p = request()?.preview;

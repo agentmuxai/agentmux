@@ -104,6 +104,21 @@ export function eventBelongsToPaneOf(e: Event, el: Element | null | undefined): 
     return eventBelongsToBlock(e, paneId);
 }
 
+/**
+ * Whether a key event's target is somewhere the user types: any `<input>`,
+ * `<textarea>` or contentEditable. The decision and question panels use it so
+ * Enter/Escape aren't stolen from the composer or the Ctrl+F search bar
+ * (reagent P1, PR #2060: a narrower check let Enter in the search input submit
+ * a pending question). `composer-focus.ts` and `userCaretInBlock` differ on
+ * purpose (SELECT; non-text inputs) and keep their own.
+ */
+export function isEditableTarget(target: EventTarget | null): boolean {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return true;
+    return el.isContentEditable === true;
+}
+
 export function focusedBlockId(): string {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement) {

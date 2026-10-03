@@ -19,20 +19,21 @@
  * the agent's turn forever: any question the user hasn't touched by zero is
  * filled in with its recommended option and the (possibly-merged) answer is
  * submitted automatically. See §2.3 for why this merges rather than
- * disarming on first interaction. Hovering the panel — or, as of the
- * keyboard-pause spec below, pressing any key while focus is inside the
- * panel (Tab-navigating options, typing into "Other") — hides the countdown
- * and pauses the underlying deadline for a flat 15s from that trigger, then
- * unconditionally resumes at a fresh timeout regardless of whether the mouse
- * or keyboard is still active — a bounded, self-resuming pause, not the
- * permanent disarm §2.3/§5.1 rejected. Both triggers share one mechanism —
- * see the keyboard-pause spec below.
+ * disarming on first interaction.
+ *
+ * The countdown is the one question timer in `store/question-timer.ts`, which
+ * the Swarm chip reads too. This panel starts and ends it, and reports
+ * activity: a real mouse move over the panel, a keystroke anywhere in this
+ * agent's pane (the composer included, but not a held key's auto-repeat), and
+ * focus moving into the panel. Activity hides the countdown; it resumes at a
+ * fresh full timeout 15s after the LAST activity. A parked cursor and a held
+ * key aren't activity, so nobody being there can't hold it forever, and
+ * activity only defers the timeout, never cancels it (§5.1).
  *
  * Also paused for as long as this panel's own agent tab is a backgrounded,
- * kept-alive pane-tab-strip member (`isDormant` prop) — unbounded, unlike
- * the flat 15s hover/keyboard pause, since there's no way for a user to
- * "interact" with a tab they can't see. Re-arms a fresh countdown on reveal,
- * same as every other re-arm here. See
+ * kept-alive pane-tab-strip member (`isDormant` prop) — unbounded, since
+ * there's no way for a user to "interact" with a tab they can't see. Re-arms
+ * a fresh countdown on reveal. See
  * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
@@ -40,11 +41,19 @@
  * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md,
- * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
+ * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md,
+ * docs/specs/SPEC_SWARM_QUESTION_STATE_AND_QUESTION_TIMEOUT_ACTIVITY_2026_10_02.md.
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
-import { eventBelongsToPaneOf } from "@/util/focusutil";
+import { createEffect, createMemo, createSignal, createUniqueId, For, on, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
+import {
+    endQuestionTimer,
+    noteQuestionActivity,
+    questionCountdown,
+    setQuestionTimerDormant,
+    startQuestionTimer,
+} from "@/app/store/question-timer";
+import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getSettingsKeyAtom } from "@/app/store/global";
@@ -57,14 +66,6 @@ import "./AgentQuestionPanel.scss";
  *  configurable in v1... a reasonable follow-up if requested later"); now
  *  user-configurable, this is only the default. */
 const DEFAULT_AUTO_TIMEOUT_MS = 30_000;
-
-/** How long the countdown stays hidden after a hover into the panel, before
- *  an unanswered question-set's timer resumes (fresh autoTimeoutMs(), not
- *  resumed from wherever it was paused) — a flat window timed from the
- *  triggering `mouseenter`, unconditional regardless of whether the mouse is
- *  still over the panel when it elapses. See
- *  SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3. */
-const HOVER_HIDE_GRACE_MS = 15_000;
 
 /** Matches a Claude Code AskUserQuestion "(Recommended)" label suffix,
  *  case-insensitively, with optional trailing whitespace. */
@@ -106,6 +107,10 @@ export interface AnswerOutcome {
 }
 
 interface AgentQuestionPanelProps {
+    /** The agent pane's block. The question timer is published under it so
+     *  the Swarm chip in another window can show the countdown. Optional for
+     *  tests; without it the timer stays local to this panel. */
+    blockId?: string;
     /** Pending questions, oldest first. The panel shows the head. */
     pending: Accessor<ToolNode[]>;
     /** User answer. Caller advances the queue by transitioning the node. */
@@ -118,13 +123,12 @@ interface AgentQuestionPanelProps {
      * one visible tab per pane before agent keep-alive existed) keeps
      * working unchanged; defaults to "never dormant."
      *
-     * Gates the auto-timeout the same way `hidden()`'s hover-pause already
-     * does (see the timer effect below): a hidden tab must not silently
-     * auto-answer a question the user was never shown. Unlike hover-pause
-     * this isn't a bounded grace window — it pauses for exactly as long as
-     * the tab stays backgrounded and re-arms a fresh countdown the moment
-     * it's revealed again, matching "fresh retrigger, not resumed from
-     * wherever it was paused." See
+     * Pauses the auto-timeout: a hidden tab must not silently auto-answer a
+     * question the user was never shown. Unlike the activity pause this
+     * isn't a bounded window — it pauses for exactly as long as the tab
+     * stays backgrounded and re-arms a fresh countdown the moment it's
+     * revealed again, matching "fresh retrigger, not resumed from wherever
+     * it was paused." See
      * docs/specs/SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_18.md.
      */
     isDormant?: Accessor<boolean>;
@@ -163,9 +167,8 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
      *  (not cached) so a mid-session settings change takes effect on the
      *  next question rather than requiring a reload.
      *
-     *  `untrack`ed deliberately: every call site below lives inside a
-     *  `createEffect` keyed on `tool_use_id`/`hidden()`, not on this
-     *  setting. Without `untrack`, Solid registers the settings read as a
+     *  `untrack`ed deliberately: it's read inside the `createEffect` keyed
+     *  on `tool_use_id`, not on this setting. Without `untrack`, Solid registers the settings read as a
      *  dependency of whichever enclosing effect calls this — so the
      *  question-reset effect (which unconditionally wipes `state`/
      *  `minimized`/`hidden` — "keyed on tool_use_id so we never inherit a
@@ -181,75 +184,20 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     };
 
     const [state, setState] = createSignal<QState[]>([]);
-    /** Milliseconds left before the auto-timeout fires. See the timer effect
-     *  below (defined after `submit`, once all its dependencies exist). */
-    const [remainingMs, setRemainingMs] = createSignal(autoTimeoutMs());
-    /** True while the countdown is suppressed by a recent hover. Drives both
-     *  the UI (rendered nothing while true, §3.4 of the hover-pause spec)
-     *  and whether the timer effect below is armed. Bounded, NOT tied to
-     *  "is the mouse currently over the panel" — see the doc comment on
-     *  `onPanelPointerEnter` below for why. */
-    const [hidden, setHidden] = createSignal(false);
-    let hideTimeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    const clearHideTimer = () => {
-        if (hideTimeoutId !== undefined) {
-            clearTimeout(hideTimeoutId);
-            hideTimeoutId = undefined;
-        }
-    };
-    // The hide timer is a raw setTimeout, not owned by a reactive effect (it
-    // must survive across hidden()/tool_use_id changes within its own
-    // window) — so it needs its own top-level cleanup on unmount, same as
-    // every interval elsewhere in this file gets via its owning effect.
-    onCleanup(clearHideTimer);
+    /** The question timer's key: the pane's block, or a local key in tests. */
+    const timerKey = props.blockId ?? `question-panel-${createUniqueId()}`;
+    const publish = props.blockId !== undefined;
+    const countdown = () => questionCountdown(timerKey);
 
     // Reset working state whenever the head question changes (new tool_use_id,
     // queue advance). Keyed on tool_use_id so we never inherit a prior
-    // question's selections. Also resets hover/hidden state so a fresh
-    // question-set never inherits a stale hover history from the previous
-    // one (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.3).
+    // question's selections.
     createEffect(() => {
         const r = request();
         void r?.tool_use_id; // touch so the effect re-runs on change
         setState((r?.questions ?? []).map(() => ({ selected: [], other: "" })));
-        setRemainingMs(autoTimeoutMs());
-        clearHideTimer();
-        setHidden(false);
     });
-
-    // Mouse enters the expanded panel. See
-    // SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.1 for why
-    // this is scoped to the whole panel (not just the "Other" input) and
-    // excludes the minimized chip entirely — wired only on the expanded
-    // panel's root div below.
-    //
-    // Hides for a flat HOVER_HIDE_GRACE_MS from THIS entry, then
-    // unconditionally resumes — deliberately NOT "stays hidden for as long
-    // as the mouse remains over the panel." An earlier version of this
-    // feature did that and a test caught the resulting regression:
-    // `userEvent.click()` on any option inside the panel fires a real
-    // `mouseenter` on the way to the click (the pointer has to be over the
-    // target to click it — true in a real browser too, not just this test
-    // harness), so answering by mouse and then stepping away with the
-    // cursor left parked over the panel would have paused the timer
-    // indefinitely, since nothing ever fires `mouseleave`. That's the exact
-    // "work does not stop" failure §5.1 of the original timeout spec
-    // rejected, reintroduced through hover instead of a permanent disarm on
-    // click. Bounding every hide to a flat window, timed from entry and
-    // independent of whether the mouse is still there, closes that gap: the
-    // worst case is "paused for at most HOVER_HIDE_GRACE_MS," never
-    // indefinite. A fresh `mouseenter` (the mouse actually leaving and
-    // coming back) re-arms a new window — that's the "recursively" behavior
-    // the feature asks for.
-    const onPanelPointerEnter = () => {
-        clearHideTimer();
-        setHidden(true);
-        hideTimeoutId = setTimeout(() => {
-            hideTimeoutId = undefined;
-            setHidden(false); // timer effect below re-arms at a fresh autoTimeoutMs()
-        }, HOVER_HIDE_GRACE_MS);
-    };
 
     const setQ = (i: number, next: Partial<QState>) => {
         setState((prev) => prev.map((q, idx) => (idx === i ? { ...q, ...next } : q)));
@@ -404,41 +352,28 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     // survives untouched. See
     // docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.1.
     //
-    // Gated on `hidden()` (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md
-    // §3.3): this is a *live, strictly bounded* pause, not a permanent
-    // disarm — a hover starts a flat HOVER_HIDE_GRACE_MS window, and once it
-    // elapses this effect re-runs and re-arms at a fresh autoTimeoutMs()
-    // UNCONDITIONALLY, regardless of whether the mouse is still over the
-    // panel (see onPanelPointerEnter's doc comment and spec §9 for why —
-    // an earlier, rejected version of this stayed hidden for as long as the
-    // mouse remained over the panel, which reopened §5.1's exact failure
-    // mode via a click's own mouseenter). That distinction is why this
-    // doesn't reopen §5.1's rejected design: the countdown can never be
-    // suppressed for longer than one HOVER_HIDE_GRACE_MS window per hover.
-    //
-    // A separate effect (rather than folding into the reset effect above)
-    // because it depends on `submit`/`applyRecommendedDefaults`, which in
-    // turn depend on `setQ`/`questionAnswered`/`allAnswered` — keeping the
-    // reset effect's own dependencies minimal and unchanged.
-    createEffect(() => {
-        const r = request();
-        void r?.tool_use_id; // touch so the effect re-runs on change, same as the reset effect
-        const dormant = props.isDormant?.() ?? false;
-        if (!r || hidden() || dormant) return; // paused while hidden OR backgrounded; re-arms when either flips false
-
-        setRemainingMs(autoTimeoutMs()); // fresh retrigger, not resumed from wherever it was paused
-        const intervalId = setInterval(() => {
-            setRemainingMs((prev) => {
-                if (prev <= 1000) {
-                    clearInterval(intervalId);
-                    submit(applyRecommendedDefaults());
-                    return 0;
+    // A fresh full timer per head question. With nothing pending this also
+    // clears a timer key a crashed owner left in block meta (§2.2 of the
+    // Swarm question spec).
+    createEffect(
+        on(
+            () => request()?.tool_use_id,
+            (id) => {
+                if (!id) {
+                    endQuestionTimer(timerKey, { publish });
+                    return;
                 }
-                return prev - 1000;
-            });
-        }, 1000);
-        onCleanup(() => clearInterval(intervalId));
-    });
+                startQuestionTimer(timerKey, {
+                    durationMs: autoTimeoutMs(),
+                    onExpire: () => submit(applyRecommendedDefaults()),
+                    dormant: untrack(() => props.isDormant?.() ?? false),
+                    publish,
+                });
+            }
+        )
+    );
+    createEffect(() => setQuestionTimerDormant(timerKey, props.isDormant?.() ?? false));
+    onCleanup(() => endQuestionTimer(timerKey));
 
     // Cancel — a REAL protocol-level decline delivered to the agent (Cancel
     // button / Escape), replacing the old "Answer later" defer/minimize
@@ -451,139 +386,56 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     // hand off. See docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
     const cancel = () => {
         const r = request();
-        clearHideTimer();
-        setHidden(false);
+        endQuestionTimer(timerKey);
         if (r) props.onCancel(r.tool_use_id);
     };
 
-    // Any `<input>`/`<textarea>`/contentEditable is "editable" — this is the
-    // broad check (reagent P1, PR #2060: an earlier version of this file
-    // narrowed it to TEXTAREA/contentEditable only, so it no longer
-    // recognized a plain text `<input>` elsewhere in the pane — e.g. the
-    // Ctrl+F search bar, AgentSearchBar.tsx — as something Enter shouldn't
-    // be stolen from, silently submitting a fully-answered pending question
-    // while the user was just navigating search matches).
-    const isEditableTarget = (target: EventTarget | null): boolean => {
-        const el = target as HTMLElement | null;
-        if (!el) return false;
-        if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") return true;
-        return el.isContentEditable;
-    };
-
-    // Shared gate for both keyboard-pause trigger paths below (`handleKey`'s
-    // keydown and `handleFocusIn`'s focusin). A target counts as
-    // pause-worthy engagement only if it's actually inside this panel's own
-    // DOM AND we're not already paused:
-    //  - `!hidden()`: only the *transition into* the paused state re-arms
-    //    the flat HOVER_HIDE_GRACE_MS window. Unlike `mouseenter` — which a
-    //    real browser only fires on an actual boundary-crossing, so it can't
-    //    be spammed by normal use — `keydown` fires on every keystroke,
-    //    including OS key-repeat while a key is held and every character of
-    //    continuous typing. Re-arming unconditionally on every one of those
-    //    (the original implementation) meant typing faster than 15s apart,
-    //    or simply holding a key, suppressed the auto-timeout indefinitely —
-    //    reagentx P1, PR #2787, breaking the "paused for at most one
-    //    HOVER_HIDE_GRACE_MS window" invariant documented on the timer
-    //    effect above. Gating here bounds every pause to exactly one window
-    //    regardless of how many qualifying events fire inside it; a fresh
-    //    trigger only re-arms once that window has actually elapsed and
-    //    `hidden()` has flipped back to false.
-    const maybePauseFor = (target: EventTarget | null) => {
-        const inPanel = !!rootRef && !!target && rootRef.contains(target as Node);
-        if (inPanel && !hidden()) onPanelPointerEnter();
-    };
-
-    const handleKey = (e: KeyboardEvent) => {
-        const target = e.target as HTMLElement | null;
-        // Scope to this panel's own pane so a question in pane A doesn't
-        // react to keystrokes typed in pane B. Mirrors AgentDecisionPanel
-        // (codex P1, PR #556).
-        if (!eventBelongsToPaneOf(e, rootRef)) return;
-
-        // Whether the keystroke actually originated inside this panel's own
-        // DOM (an option, the "Other" input, or the panel root itself) —
-        // mirrors AgentDecisionPanel's `inPanel` (AgentDecisionPanel.tsx:208).
-        const inPanel = !!rootRef && !!target && rootRef.contains(target);
-
-        // Any keydown that lands inside this panel counts as engagement,
-        // the same as a mouseenter — reuses the exact same pause mechanism
-        // (hide the countdown, resume unconditionally after a flat
-        // HOVER_HIDE_GRACE_MS) rather than a parallel one, so a user
-        // answering entirely by keyboard (Tab between options, typing into
-        // "Other") gets the same breathing room a mouse-hovering user
-        // already does. Scoped to `inPanel`, NOT the broader `paneRoot`
-        // scope Escape uses below — a keystroke elsewhere in this pane
-        // (the chat composer, Ctrl+F) isn't engagement with this question.
-        // Deliberately unconditional on which key, including Enter/Escape:
-        // both already tear down or reset this same pause state via their
-        // own existing paths immediately below/in `cancel()`, so firing this
-        // first for them is a harmless, immediately-superseded no-op, not
-        // worth special-casing out. See
-        // SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md §2,
-        // and §8 for the `maybePauseFor` gating added after review.
-        maybePauseFor(target);
+    // Activity defers the timeout (store/question-timer.ts). A key anywhere in
+    // this pane counts, the composer included, since typing a reply is
+    // attending to the question; a held key's auto-repeat doesn't, or holding
+    // a key would stop the timeout forever.
+    const handleKey = (e: KeyboardEvent, { inPanel, editable }: PanelKeyContext) => {
+        if (!e.repeat) noteQuestionActivity(timerKey);
 
         if (e.key === "Enter" && !e.shiftKey) {
             // Outside the panel, don't hijack Enter from a real editable
             // control elsewhere in the pane (composer textarea, Ctrl+F
-            // search input, etc.). Inside the panel, every control (options,
-            // "Other" free-text input) submits on Enter regardless — none of
-            // them treat Enter as "insert a newline".
-            if (!inPanel && isEditableTarget(target)) return;
+            // search input, etc.; reagent P1, PR #2060). Inside the panel,
+            // every control (options, "Other" free-text input) submits on
+            // Enter regardless — none of them treat Enter as "insert a newline".
+            if (!inPanel && editable) return;
             e.preventDefault();
             submit();
         } else if (e.key === "Escape") {
             // Same editable-target guard as Enter above, and it matters more
-            // here now than it used to: Escape used to call defer(), a
-            // reversible, purely-local minimize, so misfiring from a stray
-            // Escape elsewhere in the pane was harmless. It now calls
-            // cancel() — a real, irreversible protocol-level decline
-            // delivered to the agent (agent.cancel -> behavior: "deny").
-            // Without this guard, pressing Escape to clear the composer
-            // textarea or dismiss an unrelated search/autocomplete input
-            // anywhere in the pane would silently and permanently decline
-            // the pending question. reagent P1, PR #2950.
-            if (!inPanel && isEditableTarget(target)) return;
+            // here: Escape calls cancel() — a real, irreversible
+            // protocol-level decline delivered to the agent (agent.cancel ->
+            // behavior: "deny"). Without this guard, pressing Escape to clear
+            // the composer textarea or dismiss an unrelated search/autocomplete
+            // input anywhere in the pane would silently and permanently
+            // decline the pending question. reagent P1, PR #2950.
+            if (!inPanel && editable) return;
             e.preventDefault();
             cancel();
         }
     };
 
-    // Tab moving focus INTO the panel from outside it fires its `keydown`
-    // with `e.target` still the element that's *about to lose* focus —
-    // browsers move focus only after the keydown's default action runs — so
-    // `handleKey`'s `inPanel` check above misses exactly the keystroke that
-    // causes a keyboard-only user's first entry into the panel via Tab.
-    // `focusin` bubbles and fires once focus has actually landed inside the
-    // panel, so listening for it separately (reusing the same
-    // `maybePauseFor` gate) catches that case without complicating
-    // `handleKey`'s own target-at-dispatch-time logic — codex P2, PR #2787.
-    const handleFocusIn = (e: FocusEvent) => maybePauseFor(e.target);
+    // Focus moving into the panel (Tab from outside: the keydown's target is
+    // still the element losing focus, codex P2, PR #2787) counts as activity.
+    usePanelKeys(() => rootRef, () => !!request(), handleKey, () => noteQuestionActivity(timerKey));
 
-    // Global capture-phase listener, mirroring AgentDecisionPanel: the panel
-    // has tabindex=-1 and never auto-focuses, so a plain onKeyDown on the
-    // root div only fired once the user had already clicked something
-    // inside it — Enter otherwise never reached the handler at all.
-    createEffect(() => {
-        if (!request()) return;
-        const onWindowKey = (e: KeyboardEvent) => handleKey(e);
-        window.addEventListener("keydown", onWindowKey, true);
-        // `focusin` already bubbles to `window`, so no capture flag needed.
-        window.addEventListener("focusin", handleFocusIn);
-        onCleanup(() => {
-            window.removeEventListener("keydown", onWindowKey, true);
-            window.removeEventListener("focusin", handleFocusIn);
-        });
-    });
-
-    const countdownSeconds = () => Math.ceil(remainingMs() / 1000);
-    /** Color-escalation band for the countdown chip. Thresholds/tokens per
-     *  SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §2.4/§5.3. */
-    const countdownSeverity = (): "default" | "warning" | "critical" => {
-        const s = countdownSeconds();
-        if (s <= 5) return "critical";
-        if (s <= 10) return "warning";
-        return "default";
+    // A real mouse move over the panel is activity; a parked cursor is not.
+    // Chromium sends a move with unchanged coordinates when the layout shifts
+    // under a still cursor, and entering the panel (a click's own mouseenter)
+    // only records where the pointer is.
+    let lastPointer: { x: number; y: number } | undefined;
+    const onPointerEnter = (e: PointerEvent) => {
+        lastPointer = { x: e.clientX, y: e.clientY };
+    };
+    const onPointerMove = (e: PointerEvent) => {
+        if (lastPointer && lastPointer.x === e.clientX && lastPointer.y === e.clientY) return;
+        lastPointer = { x: e.clientX, y: e.clientY };
+        noteQuestionActivity(timerKey);
     };
 
     return (
@@ -598,7 +450,8 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                         role="group"
                         aria-label="Agent question"
                         tabindex={-1}
-                        onMouseEnter={onPanelPointerEnter}
+                        onPointerEnter={onPointerEnter}
+                        onPointerMove={onPointerMove}
                     >
                         <div class="agent-question-panel-header">
                             <span class="agent-question-panel-icon" aria-hidden="true">❓</span>
@@ -606,18 +459,20 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                             <Show when={queueDepth() > 1}>
                                 <span class="agent-question-panel-queue">+{queueDepth() - 1} more</span>
                             </Show>
-                            {/* Rendered nothing (not just visually hidden) while hidden() —
+                            {/* Rendered nothing (not just visually hidden) while paused —
                                 SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.4. */}
-                            <Show when={!hidden()}>
-                                <span
-                                    class="agent-question-panel-countdown"
-                                    classList={{
-                                        "agent-question-panel-countdown--warning": countdownSeverity() === "warning",
-                                        "agent-question-panel-countdown--critical": countdownSeverity() === "critical",
-                                    }}
-                                >
-                                    Auto-selects recommended in {countdownSeconds()}s
-                                </span>
+                            <Show when={countdown()?.paused === false && countdown()}>
+                                {(cd) => (
+                                    <span
+                                        class="agent-question-panel-countdown"
+                                        classList={{
+                                            "agent-question-panel-countdown--warning": cd().band === "warning",
+                                            "agent-question-panel-countdown--critical": cd().band === "critical",
+                                        }}
+                                    >
+                                        Auto-selects recommended in {cd().seconds}s
+                                    </span>
+                                )}
                             </Show>
                         </div>
 
