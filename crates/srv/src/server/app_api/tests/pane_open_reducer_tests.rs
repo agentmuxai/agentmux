@@ -744,7 +744,7 @@ async fn open_editor_reuses_existing_pane_in_callers_tab() {
 
 /// An Editor on an SSH host is never reused for a file on this computer (or
 /// the other way): its reads and saves go to its host, so the file would be
-/// read there (ReAgent on #4294). The same host is reused as before.
+/// read there (#4294). The same host is reused as before.
 #[tokio::test]
 async fn open_editor_reuses_only_an_editor_on_the_same_connection() {
     let state = test_state();
