@@ -455,6 +455,23 @@ describe("PeekOverlay", () => {
             }
         });
 
+        it("a held-off peek does not open mid-drag when the bridge ends with the button down", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const waiting = otherRow();
+                setShow(false);
+                waiting.handlePeekEnter();
+                vi.advanceTimersByTime(60); // held off by the bridge
+                window.dispatchEvent(new PointerEvent("pointerdown", { button: 0, bubbles: true }));
+                vi.advanceTimersByTime(200); // bridge ends while the selection drag is on
+                expect(waiting.isPeeking()).toBe(false);
+            } finally {
+                window.dispatchEvent(new PointerEvent("pointerup", { button: 0, bubbles: true }));
+                vi.useRealTimers();
+            }
+        });
+
         it("the panel's own row is never held off by its bridge", () => {
             vi.useFakeTimers();
             try {
