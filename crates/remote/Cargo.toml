@@ -1,0 +1,16 @@
+[package]
+name = "agentmux-remote"
+version.workspace = true
+edition = "2021"
+description = "AgentMux's remote helper: durable terminal sessions on an SSH host"
+license = "Apache-2.0"
+
+# Small and dependency-light on purpose: it is uploaded to remote hosts and
+# built as a static musl binary for any Linux (spec §6.1, §6.4). std + libc.
+
+[[bin]]
+name = "agentmux-remote"
+path = "src/main.rs"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
