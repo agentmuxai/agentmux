@@ -634,7 +634,10 @@ pub async fn run(mut args: Args) -> Result<i32> {
     }
 
     let buf = buffered.lock().await;
-    let model_blob = format_model_blob(&buf, status, elapsed);
+    let mut model_blob = format_model_blob(&buf, status, elapsed);
+    if let Some(hint) = access_denied_hint(&buf, status) {
+        model_blob.push_str(hint);
+    }
     print!("{}", model_blob);
     Ok(status)
 }
@@ -2291,6 +2294,39 @@ pub(crate) fn format_model_blob(
     )
 }
 
+/// Output fragments that mean an API refused the caller rather than the
+/// command being wrong: AWS (`AccessDenied`, `AccessDeniedException`,
+/// `... is not authorized to perform: ...`, EC2's `UnauthorizedOperation`)
+/// and the GitHub API as an App (`Resource not accessible by integration`).
+const ACCESS_DENIED_MARKERS: &[&str] = &[
+    "AccessDenied",
+    "is not authorized to perform",
+    "UnauthorizedOperation",
+    "Resource not accessible by integration",
+];
+
+/// Appended after a failed command whose output shows an access denial.
+/// Generic on purpose: how to escalate differs per deployment, and this only
+/// has to make the agent look it up instead of working around the denial.
+pub(crate) const ACCESS_DENIED_HINT: &str = "\n[agentmux] This failed with an access denial. Don't work around it with \
+another credential or by skipping the step. Use this environment's documented escalation path (check your Global \
+Memory and CLAUDE.md), with a stated reason; if there is none, ask the human operator.\n";
+
+/// The hint for the model, if the command failed and its output shows an
+/// access denial. The whole buffer is searched, including any part the
+/// model blob elides. A successful command never gets the hint, so a `grep`
+/// or a log that merely mentions `AccessDenied` stays untouched.
+pub(crate) fn access_denied_hint(buf: &[u8], exit_code: i32) -> Option<&'static str> {
+    if exit_code == 0 {
+        return None;
+    }
+    let denied = ACCESS_DENIED_MARKERS.iter().any(|marker| {
+        let needle = marker.as_bytes();
+        buf.windows(needle.len()).any(|window| window == needle)
+    });
+    denied.then_some(ACCESS_DENIED_HINT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2680,6 +2716,50 @@ mod tests {
         let out = format_model_blob(body, 0, std::time::Duration::from_millis(123));
         assert!(out.starts_with("<exited 0 in 0.12s>\n"));
         assert!(out.contains("hello world"));
+    }
+
+    #[test]
+    fn access_denied_hint_on_failed_denials() {
+        // Real outputs: the AWS CLI, CDK, EC2 and the GitHub API as an App.
+        for output in [
+            "An error occurred (AccessDeniedException) when calling the GetCostAndUsage operation: User: arn:aws:sts::1:assumed-role/R/s is not authorized to perform: ce:GetCostAndUsage",
+            "User: arn:aws:sts::1:assumed-role/R/s is not authorized to perform: cloudformation:DescribeStacks on resource: arn:aws:cloudformation:us-east-1:1:stack/x/y",
+            "An error occurred (UnauthorizedOperation) when calling the DescribeInstances operation",
+            "An error occurred (AccessDenied) when calling the ListBuckets operation: Access Denied",
+            "gh: Resource not accessible by integration (HTTP 403)",
+        ] {
+            assert_eq!(access_denied_hint(output.as_bytes(), 254), Some(ACCESS_DENIED_HINT), "{output}");
+        }
+    }
+
+    #[test]
+    fn access_denied_hint_not_on_success_or_other_failures() {
+        // Exit 0: a grep or a log that only mentions a denial.
+        assert_eq!(access_denied_hint(b"docs/x.md:12: AccessDenied means escalate", 0), None);
+        // Failed, but not a denial.
+        assert_eq!(access_denied_hint(b"error: could not compile `x`", 101), None);
+        assert_eq!(access_denied_hint(b"", 1), None);
+    }
+
+    #[test]
+    fn access_denied_hint_searches_output_the_blob_elides() {
+        // The denial sits in the middle of output over the model blob's cap.
+        let mut buf = vec![b'x'; MODEL_BLOB_HEAD_BYTES + 10];
+        buf.extend_from_slice(b" is not authorized to perform: s3:PutObject ");
+        buf.extend(vec![b'y'; MODEL_BLOB_TAIL_BYTES + 10]);
+        let blob = format_model_blob(&buf, 1, std::time::Duration::from_millis(1));
+        assert!(!blob.contains("is not authorized"), "precondition: the blob elides the denial");
+        assert_eq!(access_denied_hint(&buf, 1), Some(ACCESS_DENIED_HINT));
+    }
+
+    #[test]
+    fn access_denied_hint_is_generic_and_says_not_to_work_around() {
+        // AgentMux ships to every deployment: no deployment's own commands.
+        for specific in ["secrets escalate", "gh-agent", "a5af"] {
+            assert!(!ACCESS_DENIED_HINT.contains(specific), "{specific}");
+        }
+        assert!(ACCESS_DENIED_HINT.contains("Don't work around it"));
+        assert!(ACCESS_DENIED_HINT.contains("ask the human operator"));
     }
 
     #[test]
