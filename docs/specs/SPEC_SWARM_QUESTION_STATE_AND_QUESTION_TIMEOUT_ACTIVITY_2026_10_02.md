@@ -1,6 +1,6 @@
 # SPEC: Swarm "question" state and countdown, and activity that resets a question's timeout
 
-**Status:** implemented (korp/swarm-question-timer). The two open questions are decided (§8).
+**Status:** implemented — #4250. The two open questions are decided (§8).
 **Date:** 2026-10-02
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-02: *"we simply want the working/idle extended with "question" (use the theme primary color) when an agent is currently asking a question. Also, piggyback a fix on that, question panel in the agent pane should reset their timeout on both mouse movement AND typing (currently it appears to be only for mouse movement)"*, and *"also, in the swarm, put a countdown that mirrors the one on the question panel"*; *"ideally its a single DRY path, one timer surfaced multiple places"*; *"also, take any other opportunities to DRY the code in the area you are working in"* (§5).
