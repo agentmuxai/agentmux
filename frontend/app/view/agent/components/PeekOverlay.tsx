@@ -50,9 +50,22 @@
  * never reach the pointer, and the rest scrolls. The old code clamped the
  * position into the container and let the panel grow back over the pointer,
  * which flickers (the row sees `mouseleave`, the panel closes, the row sees
- * `mouseenter`, it reopens). A panel that had to be cut scrolls, so it is meant
- * to be entered: it lingers briefly after the row's `mouseleave` and stays while
- * the pointer is on it.
+ * `mouseenter`, it reopens).
+ *
+ * A panel that had to be cut scrolls, so it is meant to be ENTERED, and four
+ * things make sure the pointer can get there:
+ *  1. it is PINNED once it turns out to scroll: it stops following the pointer
+ *     (a panel that follows moves away from a pointer heading for it, and its
+ *     height, cut to the room left, shrinks as it does);
+ *  2. its near edge is FLUSH with the row (`flushToRow`), so the way to it does
+ *     not cross a strip of the next row;
+ *  3. it lingers after the row's `mouseleave`, and the linger is re-armed while
+ *     the pointer keeps closing in on it (HOVER_BRIDGE_MS, up to
+ *     HOVER_BRIDGE_MAX_MS), then stays while the pointer is on it;
+ *  4. meanwhile other rows' peeks wait (peek-bridge.ts), so one the pointer
+ *     passes over on the way cannot open on top of it.
+ * A panel that fits behaves as before: it follows the pointer and closes the
+ * instant the pointer leaves the row.
  * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md
  *
  * `align="end"` mode additionally tracks the mouse's Y position while
@@ -71,6 +84,7 @@ import { createSignal, createComputed, createEffect, on, onCleanup, Show, untrac
 import { Portal } from "solid-js/web";
 import { findScrollContainerRect } from "./hover-anchor";
 import { BOTTOM_MARGIN_PX, computePeekHorizontal, computePeekVertical } from "./peek-placement";
+import { beginPeekBridge, endPeekBridge } from "./peek-bridge";
 
 interface PeekOverlayProps {
     /** Whether the overlay should be mounted right now. */
@@ -117,11 +131,15 @@ interface PeekOverlayProps {
 }
 
 /**
- * How long the panel lingers after the pointer leaves the row, so the pointer
- * can cross the gap to a `beside` panel and enter it. Entering the panel then
- * holds it open (scroll bar, text selection). Standard hover-card grace.
+ * How long an enterable panel lingers after the pointer leaves its row, so the
+ * pointer can reach it. Re-armed on every move that brings the pointer closer
+ * to the panel, so a slow or diagonal approach still makes it; a pointer moving
+ * away lets it close after this long. Entering the panel then holds it open
+ * (scroll bar, text selection). Standard hover-card grace.
  */
 const HOVER_BRIDGE_MS = 150;
+/** The longest an approaching pointer can keep the grace period going, in total. */
+const HOVER_BRIDGE_MAX_MS = 1000;
 
 /**
  * This overlay's owning pane's zoom factor, read off the anchor row.
@@ -211,16 +229,51 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     const [open, setOpen] = createSignal(props.show);
     let held = false;
     let bridgeTimer: ReturnType<typeof setTimeout> | undefined;
+    let bridgeStartedAt = 0;
+    let closestApproach = Infinity;
+
+    // How far the pointer is from the panel (0 inside it).
+    const distanceToPanel = (x: number, y: number): number => {
+        const r = floatingEl?.getBoundingClientRect();
+        if (!r) return Infinity;
+        const dx = Math.max(r.left - x, 0, x - r.right);
+        const dy = Math.max(r.top - y, 0, y - r.bottom);
+        return Math.hypot(dx, dy);
+    };
+    // During the grace period: a move that brings the pointer closer than it has
+    // been re-arms the timer (up to HOVER_BRIDGE_MAX_MS in total).
+    const onApproach = (e: MouseEvent) => {
+        const d = distanceToPanel(e.clientX, e.clientY);
+        if (d < closestApproach) {
+            closestApproach = d;
+            armBridgeTimer();
+        }
+    };
     const clearBridgeTimer = () => {
         if (bridgeTimer !== undefined) clearTimeout(bridgeTimer);
         bridgeTimer = undefined;
+        document.removeEventListener("mousemove", onApproach);
+    };
+    const armBridgeTimer = () => {
+        if (bridgeTimer !== undefined) clearTimeout(bridgeTimer);
+        const budget = HOVER_BRIDGE_MAX_MS - (Date.now() - bridgeStartedAt);
+        bridgeTimer = setTimeout(endLinger, Math.max(0, Math.min(HOVER_BRIDGE_MS, budget)));
+    };
+    const endLinger = () => {
+        clearBridgeTimer();
+        if (!held && !props.show) {
+            endPeekBridge(props.rowEl());
+            setOpen(false);
+        }
     };
     const startLinger = () => {
         clearBridgeTimer();
-        bridgeTimer = setTimeout(() => {
-            bridgeTimer = undefined;
-            if (!held && !props.show) setOpen(false);
-        }, HOVER_BRIDGE_MS);
+        bridgeStartedAt = Date.now();
+        closestApproach = Infinity;
+        // Other rows' peeks wait while the pointer crosses to this panel.
+        beginPeekBridge(props.rowEl());
+        document.addEventListener("mousemove", onApproach, { passive: true });
+        armBridgeTimer();
     };
     createComputed(
         on(
@@ -228,6 +281,8 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             (show) => {
                 clearBridgeTimer();
                 if (show) {
+                    // The pointer is back on the row: nothing is being crossed.
+                    endPeekBridge(props.rowEl());
                     setOpen(true);
                 } else if (bridges() && untrack(open) && lastEnterable) {
                     // Only a panel that had to be cut (it scrolls) is meant to be
@@ -253,6 +308,13 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // the rest of this component's positioning.
     let lastMouseY: number | null = null;
     let mouseMoveRaf: number | null = null;
+    // Pointer Y relative to the row's top, frozen the first time the panel turns
+    // out to be enterable (it scrolls). From then until it closes, placement uses
+    // this instead of the live pointer, so the panel holds still while the pointer
+    // moves toward it, and it still moves with the row if the transcript scrolls.
+    // Following the live pointer made a tall panel unreachable: each move toward
+    // it moved it away and cut its height again.
+    let pinnedOffsetY: number | null = null;
 
     const update = () => {
         const row = props.rowEl();
@@ -285,14 +347,21 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         const viewport = { width: window.innerWidth, height: window.innerHeight };
         const rowRect = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
         const hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth: measureWidth() });
-        const vt = computePeekVertical({
-            row: rowRect,
-            mouseY: lastMouseY,
-            container,
-            viewport,
-            naturalHeight: measureHeightAt(hz.maxWidth, paneZoom),
-        });
-        lastEnterable = vt.scrolls;
+        const placeAt = { row: rowRect, container, viewport, naturalHeight: measureHeightAt(hz.maxWidth, paneZoom) };
+        let vt: ReturnType<typeof computePeekVertical>;
+        if (pinnedOffsetY != null) {
+            vt = computePeekVertical({ ...placeAt, mouseY: rect.top + pinnedOffsetY, flushToRow: true });
+        } else {
+            vt = computePeekVertical({ ...placeAt, mouseY: lastMouseY });
+            // Enterable: pin it, and keep its near edge on the row so the way to
+            // it does not cross another row. Decided on the unpinned placement
+            // and then sticky until it closes, so the two never alternate.
+            if (vt.scrolls && lastMouseY != null) {
+                pinnedOffsetY = lastMouseY - rect.top;
+                vt = computePeekVertical({ ...placeAt, mouseY: lastMouseY, flushToRow: true });
+            }
+        }
+        lastEnterable = pinnedOffsetY != null;
         setOutside(hz.extendsPastRow || vt.leavesContainer);
         setFloatingStyle(
             withPaneZoom(
@@ -350,7 +419,8 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             if (mouseMoveRaf != null) return;
             mouseMoveRaf = requestAnimationFrame(() => {
                 mouseMoveRaf = null;
-                if (props.show) update();
+                // A pinned panel does not follow the pointer (see pinnedOffsetY).
+                if (props.show && pinnedOffsetY == null) update();
             });
         };
         row.addEventListener("mousemove", onMouseMove);
@@ -392,6 +462,12 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             cleanupAutoUpdate?.();
             cleanupAutoUpdate = null;
             floatingEl = undefined;
+            // Closed: the next opening places itself afresh, and nothing is
+            // being crossed to any more.
+            pinnedOffsetY = null;
+            lastEnterable = false;
+            clearBridgeTimer();
+            endPeekBridge(props.rowEl());
         });
     };
 
@@ -412,6 +488,9 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                         if (!bridges()) return;
                         clearBridgeTimer();
                         held = true;
+                        // Arrived. Keep other rows' peeks shut while the pointer
+                        // is here (it is over them, under the panel).
+                        beginPeekBridge(props.rowEl());
                     }}
                     onMouseLeave={() => {
                         if (!bridges()) return;
@@ -419,6 +498,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                         // Pointer left the panel: linger briefly (it may be heading
                         // back to the row, whose mouseenter will re-show it).
                         if (!props.show) startLinger();
+                        else endPeekBridge(props.rowEl());
                     }}
                     style={floatingStyle()}
                 >
