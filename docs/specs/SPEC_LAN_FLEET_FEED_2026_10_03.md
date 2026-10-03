@@ -1,7 +1,7 @@
 # SPEC: A names-only fleet feed for LAN peers — snapshot, event stream, UDP siblings
 
 **Date:** 2026-10-03
-**Status:** implemented — branch `clamk/lan-fleet-feed`; not yet verified against the phone client on real hosts (section 7).
+**Status:** implemented — PR #4297 (phone client: agentmuxai/agentmux-mobile#34). Checked against the phone client on an isolated loopback srv; `siblings` not yet seen live on real hosts (section 7).
 **Author:** Clamk, at the owner's request
 **Affects:** `crates/srv/src/backend/fleet_feed.rs` (new), `crates/srv/src/server/http_fleet.rs` (new), `crates/srv/src/server/routes.rs`, `crates/srv/src/server/http_health.rs`, `crates/srv/src/backend/lan_discovery.rs`, `crates/srv/src/backend/lan_discovery/lan_instances.rs` (new), `crates/srv/src/backend/lan_discovery/udp_peers.rs`, `crates/srv/src/registry/paths.rs`, `crates/srv/src/main.rs`
 **Source of the contract:** agentmux-mobile's [`SPEC_LIVE_FLEET_TOPOLOGY_2026_10_03.md`](https://github.com/agentmuxai/agentmux-mobile/blob/main/docs/specs/SPEC_LIVE_FLEET_TOPOLOGY_2026_10_03.md) §4 (adopted 2026-10-03). Field names, headers, timings and limits are defined there; this document records the desktop side and where it differs.
