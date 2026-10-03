@@ -83,30 +83,14 @@ pub(super) async fn handle_agent_memory_read(
 }
 
 #[derive(serde::Deserialize)]
-pub(super) struct AgentMemoryWriteProvenanceReq {
-    pub(super) source: String,
-    // reagent P2 on PR #2674 (re-review): plain #[serde(default)] on a bare
-    // serde_json::Value yields Value::Null when the caller supplies `source`
-    // but omits `detail` — `.to_string()` on that is the literal string
-    // "null", not the "{}" every no-provenance write path uses. Same bug
-    // class already fixed once in rpc_types/native_memory.rs's sibling
-    // NativeMemoryWriteProvenance (its own `default_detail()`), just
-    // recurring here in this HTTP/App-API request struct.
-    #[serde(default = "default_agent_memory_write_detail")]
-    pub(super) detail: serde_json::Value,
-}
-
-pub(super) fn default_agent_memory_write_detail() -> serde_json::Value {
-    serde_json::json!({})
-}
-
-#[derive(serde::Deserialize)]
 pub(super) struct AgentMemoryWriteRequest {
     pub(super) agent_id: String,
     pub(super) filename: String,
     pub(super) content: String,
+    /// Same wire shape as the WebSocket RPC's provenance, including a missing
+    /// `detail` defaulting to `{}` rather than `null`.
     #[serde(default)]
-    pub(super) provenance: Option<AgentMemoryWriteProvenanceReq>,
+    pub(super) provenance: Option<crate::backend::rpc_types::NativeMemoryWriteProvenance>,
 }
 
 /// `POST /api/v1/agent/memory/write` — create/overwrite one of the agent's own
@@ -328,7 +312,7 @@ pub(super) async fn handle_agent_memory_revert(
 pub(super) struct AgentGlobalMemoryWriteProvenanceReq {
     pub(super) source: String,
     // Same "default() on a bare Value yields Null, not {}" trap as
-    // AgentMemoryWriteProvenanceReq above — see that struct's own comment.
+    // NativeMemoryWriteProvenance in rpc_types — see `detail` there.
     #[serde(default = "default_agent_globalmemory_write_detail")]
     pub(super) detail: serde_json::Value,
 }

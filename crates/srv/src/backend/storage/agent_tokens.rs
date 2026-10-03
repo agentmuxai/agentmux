@@ -44,21 +44,17 @@ use std::sync::{Arc, RwLock};
 
 use rusqlite::params;
 
+use super::agent_lan_keys::random_seed_bytes;
 use super::error::StoreError;
 use super::store::Store;
 
 use agentmux_common::time::now_secs;
 
-/// 32 bytes of CSPRNG randomness, hex-encoded (64 chars). Same source as
-/// `agent_lan_keys::random_seed_bytes` — `uuid`'s v4 generation is already
-/// CSPRNG-backed and already a dependency; hex rather than base64 so the
-/// value is safe in any environment-variable or shell context without
-/// quoting.
+/// 32 bytes of CSPRNG randomness from `random_seed_bytes`, hex-encoded
+/// (64 chars); hex rather than base64 so the value is safe in any
+/// environment-variable or shell context without quoting.
 fn random_token() -> String {
-    let mut bytes = [0u8; 32];
-    bytes[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    bytes[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-    hex::encode(bytes)
+    hex::encode(random_seed_bytes())
 }
 
 /// token → UID, in memory, so attributing a request never reads the store

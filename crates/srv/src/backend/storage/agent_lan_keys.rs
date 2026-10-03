@@ -23,7 +23,7 @@ use super::store::Store;
 use agentmux_common::time::now_secs;
 
 /// 32 bytes of randomness via two v4 UUIDs, for every key table in this
-/// module (LAN, WAN, jekt, WAN identity). Avoids adding a `rand`/`getrandom`
+/// module (LAN, WAN, jekt, WAN identity) and the agent tokens. Avoids adding a `rand`/`getrandom`
 /// dependency: `uuid`'s v4 generation is already CSPRNG-backed, and
 /// `ed25519_dalek::SigningKey::from_bytes` accepts any 32 bytes of
 /// randomness as a valid seed (deterministic derivation from the seed, not

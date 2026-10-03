@@ -328,19 +328,27 @@ pub struct ArchiveSummary {
 
 /// Pull a small preview + node_count out of an archive's
 /// `output.state.json`. Returns `("", 0)` on any error.
-///
-/// Mirrors the heuristics used by `read_session_preview` in
-/// `agent_handlers/mod.rs` (skip the bootstrap "# Session Context" message
-/// when a later user_message exists; cap at 240 chars).
 fn read_archive_preview(filestore: &FileStore, zone: &str) -> (String, usize) {
     let bytes = match filestore.read_file(zone, SNAPSHOT_FILE) {
         Ok(Some(b)) => b,
         _ => return (String::new(), 0),
     };
-    if bytes.len() > 4 * 1024 * 1024 {
+    if bytes.len() > MAX_PREVIEW_SNAPSHOT_BYTES {
         return (String::new(), 0);
     }
-    let json: serde_json::Value = match serde_json::from_slice(&bytes) {
+    snapshot_preview(&bytes)
+}
+
+/// Snapshots larger than this are not parsed for a preview, so a corrupted one
+/// can't stall a listing.
+pub(crate) const MAX_PREVIEW_SNAPSHOT_BYTES: usize = 4 * 1024 * 1024;
+
+/// `(preview, node_count)` from an `output.state.json` snapshot's bytes, or
+/// `("", 0)` when they don't parse or have no `nodes` array. The preview is
+/// the first `user_message`, skipping a leading "# Session Context" bootstrap
+/// message when a later one exists, collapsed to one line of at most 240 chars.
+pub(crate) fn snapshot_preview(bytes: &[u8]) -> (String, usize) {
+    let json: serde_json::Value = match serde_json::from_slice(bytes) {
         Ok(v) => v,
         Err(_) => return (String::new(), 0),
     };
@@ -364,6 +372,7 @@ fn read_archive_preview(filestore: &FileStore, zone: &str) -> (String, usize) {
             continue;
         }
         if preview.is_empty() && msg.starts_with("# Session Context") {
+            // Stash as fallback in case there's no later user_message.
             preview = collapse_preview(msg);
             continue;
         }
@@ -373,13 +382,15 @@ fn read_archive_preview(filestore: &FileStore, zone: &str) -> (String, usize) {
     (preview, node_count)
 }
 
-fn collapse_preview(s: &str) -> String {
+/// Collapse newlines + extra whitespace, cap at 240 chars. Output is
+/// safe to render inline in a single-line preview row.
+pub(crate) fn collapse_preview(s: &str) -> String {
     const MAX_CHARS: usize = 240;
     let mut buf = String::with_capacity(s.len().min(MAX_CHARS + 4));
     let mut prev_space = false;
     for ch in s.chars() {
         if buf.chars().count() >= MAX_CHARS {
-            buf.push('\u{2026}');
+            buf.push('\u{2026}'); // "…"
             return buf;
         }
         if ch.is_whitespace() {
@@ -393,4 +404,22 @@ fn collapse_preview(s: &str) -> String {
         }
     }
     buf
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::snapshot_preview;
+
+    #[test]
+    fn snapshot_preview_skips_a_leading_session_context_and_counts_nodes() {
+        let snap = serde_json::json!({ "nodes": [
+            { "type": "user_message", "message": "# Session Context\nboilerplate" },
+            { "type": "markdown", "content": "ack" },
+            { "type": "user_message", "message": "  fix the\n\nbug  " },
+        ]});
+        let bytes = serde_json::to_vec(&snap).unwrap();
+        assert_eq!(snapshot_preview(&bytes), ("fix the bug".to_string(), 3));
+        assert_eq!(snapshot_preview(b"not json"), (String::new(), 0));
+        assert_eq!(snapshot_preview(br#"{"nodes":{}}"#), (String::new(), 0));
+    }
 }

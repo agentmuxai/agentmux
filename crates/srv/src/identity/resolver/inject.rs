@@ -478,11 +478,7 @@ fn bound_oauth_config_dir(
 /// The agent a block names (`agentId`, or legacy `agent:id`), if any.
 pub(crate) fn block_agent_id(mstore: &Store, block_id: &str) -> Option<String> {
     let block: crate::backend::obj::Block = mstore.get(block_id).ok().flatten()?;
-    block
-        .meta
-        .get("agentId")
-        .and_then(|v| v.as_str())
-        .or_else(|| block.meta.get("agent:id").and_then(|v| v.as_str()))
+    crate::backend::obj::block_meta_agent_id(&block.meta)
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(str::to_string)
