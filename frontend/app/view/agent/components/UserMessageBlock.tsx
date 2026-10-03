@@ -141,7 +141,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     // never fire for this one call site, silently reproducing the very
     // stuck-closed defect that resync exists to fix (reagentx P1 on #3470).
     // One element reference, owned by the hook.
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } =
+    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } =
         useNodePeek();
 
     // The collapsible path's own drag-release resync. `useNodePeek` already
@@ -156,7 +156,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
         }),
     );
     const peekTimeText = createMemo(() => {
-        if (collapsible() || !isPeeking()) return null;
+        if (collapsible() || !peekPanelVisible()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
         const ts = props.node.timestamp;
         if (ts == null) return null;

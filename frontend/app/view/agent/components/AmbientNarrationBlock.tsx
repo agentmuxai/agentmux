@@ -36,9 +36,9 @@ interface AmbientNarrationBlockProps {
 export const AmbientNarrationBlock = (props: AmbientNarrationBlockProps): JSX.Element => {
     // Don't destructure `node` — see MarkdownBlock for why.
     const peekTick = useTick(1000);
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
     const peekTimeText = createMemo(() => {
-        if (!isPeeking()) return null;
+        if (!peekPanelVisible()) return null;
         peekTick();
         return `${formatExactTime(props.node.timestamp)} · ${formatTimeAgo(props.node.timestamp)}`;
     });

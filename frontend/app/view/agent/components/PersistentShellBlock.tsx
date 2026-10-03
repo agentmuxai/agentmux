@@ -76,9 +76,9 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
     // Suppressed once expanded — the full command is already visible in the
     // panel header (`.agent-shell-header-cmd`), same rule ToolBlock uses.
     const peekTick = useTick(1000);
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
     const peekTimeText = createMemo(() => {
-        if (!isPeeking()) return null;
+        if (!peekPanelVisible()) return null;
         peekTick();
         return `${formatExactTime(props.node.spawnedAt)} · ${formatTimeAgo(props.node.spawnedAt)}`;
     });

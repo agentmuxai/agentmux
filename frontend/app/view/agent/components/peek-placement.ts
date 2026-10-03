@@ -18,8 +18,9 @@
  *  - Fits within the row's width: right edge on the row's right edge, growing
  *    leftward (what it always did).
  *  - Wider than the row: **pinned to the row's left edge** and extending right,
- *    over the pane border, up to the window edge. It uses as much width as
- *    exists, and never less than the row.
+ *    over the pane border, by at most half the row's width
+ *    (`MAX_OVERSHOOT_FRACTION`: a 500px pane gives a panel up to 750px) and never
+ *    past the window edge. Never less wide than the row.
  *
  * Vertical (`computePeekVertical`)
  *  - Fits on one side of the pointer inside the transcript container: placed
@@ -57,6 +58,8 @@ export const CURSOR_GAP_PX = 12;
 export const BOTTOM_MARGIN_PX = 4;
 /** Clearance kept from the window edge when the panel leaves the pane. */
 export const VIEWPORT_MARGIN_PX = 8;
+/** How far past its row's right edge a wide panel may reach, as a fraction of the row's width. */
+export const MAX_OVERSHOOT_FRACTION = 0.5;
 
 // ── Horizontal ───────────────────────────────────────────────────────────────
 
@@ -65,12 +68,21 @@ export interface PeekHorizontalInput {
     viewport: { width: number; height: number };
     /** The panel's max-content width, with no width cap. */
     naturalWidth: number;
+    /**
+     * The narrowest the panel may be (viewport px). It is placed as if it were at
+     * least this wide, so a panel narrower than this but wider than its row goes
+     * left-pinned and over the pane border like any wide panel. Capped to the room
+     * actually available, so it never runs off the window.
+     */
+    minWidth?: number;
 }
 
 export interface PeekHorizontal {
     /** The panel's left edge, or its RIGHT edge when `alignRight`. */
     left: number;
     maxWidth: number;
+    /** The min-width to apply: the requested minimum, capped to `maxWidth`. */
+    minWidth: number;
     /** True: `left` is the panel's right edge (apply `translateX(-100%)`). */
     alignRight: boolean;
     /** True when the panel reaches past the row's own edges. */
@@ -79,23 +91,29 @@ export interface PeekHorizontal {
 
 export function computePeekHorizontal(input: PeekHorizontalInput): PeekHorizontal {
     const { row, viewport, naturalWidth } = input;
+    const requestedMin = Math.max(0, input.minWidth ?? 0);
+    // The width the panel will actually want: its content, or the minimum.
+    const width = Math.max(naturalWidth, requestedMin);
     const rowWidth = row.right - row.left;
     const rightAligned: PeekHorizontal = {
         left: row.right,
         maxWidth: rowWidth,
+        minWidth: Math.min(requestedMin, rowWidth),
         alignRight: true,
         extendsPastRow: false,
     };
-    if (naturalWidth <= rowWidth) return rightAligned;
-    // Wider than the row: pin the left edge and use the room to the window's
-    // right edge. If that is no more than the row has, nothing is gained.
-    const room = viewport.width - VIEWPORT_MARGIN_PX - row.left;
+    if (width <= rowWidth) return rightAligned;
+    // Wider than the row: pin the left edge and extend right, by at most half the
+    // row's width and never past the window's right edge. If that is no more
+    // than the row has, nothing is gained.
+    const room = Math.min(viewport.width - VIEWPORT_MARGIN_PX - row.left, rowWidth * (1 + MAX_OVERSHOOT_FRACTION));
     if (room <= rowWidth) return rightAligned;
     return {
         left: row.left,
         maxWidth: room,
+        minWidth: Math.min(requestedMin, room),
         alignRight: false,
-        extendsPastRow: Math.min(naturalWidth, room) > rowWidth,
+        extendsPastRow: Math.min(width, room) > rowWidth,
     };
 }
 
@@ -186,6 +204,6 @@ export function placedExtent(v: PeekVertical): { top: number; bottom: number } {
 
 /** Horizontal extent the placed panel occupies, for a panel of this natural width. */
 export function placedSpan(hz: PeekHorizontal, naturalWidth: number): { left: number; right: number } {
-    const w = Math.min(naturalWidth, hz.maxWidth);
+    const w = Math.min(Math.max(naturalWidth, hz.minWidth), hz.maxWidth);
     return hz.alignRight ? { left: hz.left - w, right: hz.left } : { left: hz.left, right: hz.left + w };
 }

@@ -31,3 +31,26 @@ export function beginPeekBridge(row: HTMLElement | undefined): void {
 export function endPeekBridge(row: HTMLElement | undefined): void {
     if (row && bridgingRow() === row) setBridgingRow(null);
 }
+
+// ── The panel that is still open after its row was left ──────────────────────
+//
+// A tall panel lingers after its row's `mouseleave`, and stays while the pointer
+// is on it. The row is no longer hovered then, so `useNodePeek().isPeeking()` is
+// false, but the panel is still on screen and its content (time, token
+// estimate) must stay. Callers gate that content on `panelVisible()`, which is
+// "row hovered, or this row's panel still open". Only `PeekOverlay` writes this.
+
+const [openAfterLeaveRow, setOpenAfterLeaveRow] = createSignal<HTMLElement | null>(null);
+
+/** The row whose peek panel is open although the row is no longer hovered, or null. */
+export const peekPanelOpenAfterLeaveRow = openAfterLeaveRow;
+
+/** This row's panel is still open while its row is not hovered (lingering, or the pointer on it). */
+export function markPeekPanelOpenAfterLeave(row: HTMLElement | undefined): void {
+    if (row) setOpenAfterLeaveRow(row);
+}
+
+/** It no longer is (closed, or the row is hovered again), if it was this row's. */
+export function clearPeekPanelOpenAfterLeave(row: HTMLElement | undefined): void {
+    if (row && openAfterLeaveRow() === row) setOpenAfterLeaveRow(null);
+}

@@ -196,7 +196,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
     // one `<Show>` branch (and hence only one of these six anchors) is ever
     // actually mounted for a given node, so sharing is safe.
     const peekTick = useTick(1000);
-    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const { isPeeking, panelVisible: peekPanelVisible, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
 
     // This row's dispatch match, equality-gated. `dispatchMatches` is a memo
     // over the WHOLE document array (AgentDocumentView.tsx), so it produces a
@@ -382,7 +382,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     // visible in the row itself, and there's no free-text body to
                     // estimate a token count from.
                     const timeText = createMemo(() => {
-                        if (!isPeeking()) return null;
+                        if (!peekPanelVisible()) return null;
                         peekTick();
                         return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
                     });
@@ -415,7 +415,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     // Node uses `startedAt`, not `timestamp` — same time-only peek
                     // shape as context_compacted above.
                     const timeText = createMemo(() => {
-                        if (!isPeeking()) return null;
+                        if (!peekPanelVisible()) return null;
                         peekTick();
                         return `${formatExactTime(n.startedAt)} · ${formatTimeAgo(n.startedAt)}`;
                     });
@@ -455,7 +455,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     // pattern the other compaction-family nodes already use
                     // above rather than a second, different disclosure UI.
                     const breakdownText = createMemo(() => {
-                        if (!isPeeking()) return null;
+                        if (!peekPanelVisible()) return null;
                         peekTick();
                         const lines = n.perEntryTokens.map(
                             (e) => `${e.source === "global" ? "🌐" : "👤"} ${e.label} — ~${fmt(e.tokens)} tok (est.), ${fmt(e.sizeBytes)} B`,
@@ -509,7 +509,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     // human day name, so this just adds precision, no estimate line
                     // (a day label has no free-text body worth estimating).
                     const timeText = createMemo(() => {
-                        if (!isPeeking()) return null;
+                        if (!peekPanelVisible()) return null;
                         peekTick();
                         return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
                     });
@@ -624,7 +624,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     // debug info this node's own visible label doesn't surface
                     // anywhere else.
                     const timeText = createMemo(() => {
-                        if (!isPeeking()) return null;
+                        if (!peekPanelVisible()) return null;
                         peekTick();
                         return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
                     });
