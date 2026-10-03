@@ -577,7 +577,7 @@ export function useAgentStream({
                     // progress bar) with its own parser — it reads the frame's
                     // real stdout shape, and changes nothing below. See
                     // SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §3/§5.
-                    recordCompactionSample(parseCompactionSample(rawEvent));
+                    recordCompactionSample(parseCompactionSample(rawEvent, lastSeenModelId));
                     // Compaction happens MID-turn — flushParserPending() is
                     // only called at finalizeTurn (useTurnLifecycle.ts), so
                     // without an explicit flush here the parser's

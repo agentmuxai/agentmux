@@ -246,6 +246,7 @@ export const AgentBottomPanels = (props: {
                     })()}
                     compacting={props.paneModel.state.compacting}
                     compactionContextTokens={props.paneModel.state.lastContextTokens}
+                    compactionModel={props.paneModel.state.lastContextModel}
                     reconnecting={props.paneModel.state.reconnecting}
                 />
             </Show>
