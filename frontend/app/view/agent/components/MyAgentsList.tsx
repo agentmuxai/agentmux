@@ -123,30 +123,22 @@ export const FETCH_ERROR = "Couldn't load your agents — check the connection a
 export const noMatchText = (query: string): string => `No agents match "${query}".`;
 
 /**
- * Copy for a row with no preview text and no snapshot, split into its
- * three genuinely distinct causes — collapsing them into one generic
- * "(no conversation snapshot)" made a real backend error and a
- * cross-channel row both read as "this agent has no history," which
- * isn't true for either. See
- * docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
- * §5.
+ * Copy for a row with no preview text. The history comes from the agent's
+ * global transcript, so the cases are about that transcript, not about this
+ * channel:
  *
- * - `snapshot_check_failed` — the filestore lookup itself errored
- *   (transient I/O/lock/DB failure); the real state is unknown, not
- *   confirmed empty. Checked first: a stat() error on a cross-channel
- *   row can't actually happen (session.rs skips the call entirely when
- *   `block_id_hint` is empty), but ordering this first keeps the two
- *   conditions from ever silently depending on which one wins.
- * - `block_id_hint === ""` — a synthetic cross-channel row (no local
- *   SQLite instance backs it); this channel's filestore genuinely has
- *   nothing, but the real conversation may exist in another version.
- * - otherwise — a genuine, confirmed `Ok(None)`: the block really never
- *   wrote a snapshot.
+ * - `snapshot_check_failed` — the transcript could not be read; the real state
+ *   is unknown, not confirmed empty.
+ * - `has_snapshot` — a transcript exists but holds no user prompt in the part
+ *   that was searched (a long run of tool work).
+ * - otherwise — the agent has no transcript at all.
+ *
+ * SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md §5.3.
  */
-export const noSnapshotText = (row: Pick<RecentSessionRow, "snapshot_check_failed" | "block_id_hint">): string => {
-    if (row.snapshot_check_failed) return "(couldn't check for history)";
-    if (!row.block_id_hint) return "(history may exist in another version)";
-    return "(no conversation snapshot)";
+export const noPreviewText = (row: Pick<RecentSessionRow, "snapshot_check_failed" | "has_snapshot">): string => {
+    if (row.snapshot_check_failed) return "Couldn't read history";
+    if (row.has_snapshot) return "No prompt in recent history";
+    return "No conversations yet";
 };
 /** Backend hard cap (`CommandListRecentSessionsData`, instance.rs) — the
  * limit MyAgentsList requests once a name filter is active, so filtering
@@ -1074,7 +1066,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 when={row.preview}
                                                 fallback={
                                                     <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
-                                                        {row.has_snapshot ? "(no user message yet)" : noSnapshotText(row)}
+                                                        {noPreviewText(row)}
                                                     </span>
                                                 }
                                             >
