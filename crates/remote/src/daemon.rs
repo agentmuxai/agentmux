@@ -159,7 +159,7 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
                 attach(stream, reader, sessions, id, offset, cols, rows)
             }
             ["END", id] => {
-                let found = end_session(sessions, id);
+                let found = end_session(sessions, id, None);
                 out.write_all(if found { b"ok\n" } else { b"none\n" })
             }
             ["LIST"] => {
@@ -187,8 +187,34 @@ fn handle(stream: UnixStream, sessions: &Sessions) -> io::Result<()> {
     }
 }
 
-fn end_session(sessions: &Sessions, id: &str) -> bool {
-    let Some(s) = sessions.lock().unwrap().remove(id) else {
+/// Take `session` out of the map, if the entry for its id is still this very
+/// session: a newer session made under the same id in between is never
+/// removed by a cleanup meant for an older one.
+fn remove_if_same(sessions: &Sessions, session: &Arc<Session>) -> bool {
+    let mut map = sessions.lock().unwrap();
+    if map
+        .get(&session.id)
+        .is_some_and(|s| Arc::ptr_eq(s, session))
+    {
+        map.remove(&session.id);
+        true
+    } else {
+        false
+    }
+}
+
+/// End the session `id` (the END control line), or, given `only`, that exact
+/// session (an End frame from its own client).
+fn end_session(sessions: &Sessions, id: &str, only: Option<&Arc<Session>>) -> bool {
+    let removed = {
+        let mut map = sessions.lock().unwrap();
+        match (map.get(id), only) {
+            (Some(s), Some(o)) if !Arc::ptr_eq(s, o) => None,
+            (Some(_), _) => map.remove(id),
+            (None, _) => None,
+        }
+    };
+    let Some(s) = removed else {
         return false;
     };
     let mut inner = s.inner.lock().unwrap();
@@ -279,7 +305,7 @@ fn attach(
         if let Some(code) = inner.exited {
             out.write_all(&Frame::Exited { code }.encode())?;
             drop(inner);
-            sessions.lock().unwrap().remove(id);
+            remove_if_same(sessions, &session);
             return Ok(());
         }
         if let Some((_, old)) = inner.client.replace((generation, out)) {
@@ -318,7 +344,7 @@ fn attach(
                     return Ok(());
                 }
                 Frame::End => {
-                    end_session(sessions, id);
+                    end_session(sessions, id, Some(&session));
                     return Ok(());
                 }
                 _ => {}
@@ -384,7 +410,7 @@ fn start_reader(session: Arc<Session>, mut child: std::process::Child, sessions:
             let _ = c.write_all(&Frame::Exited { code }.encode());
             let _ = c.shutdown(std::net::Shutdown::Both);
             drop(inner);
-            sessions.lock().unwrap().remove(&session.id);
+            remove_if_same(&sessions, &session);
         } else {
             drop(inner);
             // Ended (taken out of the map) already: nothing to keep.
