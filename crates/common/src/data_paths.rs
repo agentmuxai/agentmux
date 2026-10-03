@@ -379,11 +379,10 @@ impl DataPaths {
     ///
     /// When [`isolated_auth_enabled`] is set, this resolves to
     /// `instance_dir/identities/` instead — a channel-scoped credential
-    /// tree, now the DEFAULT for every non-`"stable"` channel as of
-    /// `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`
-    /// (this doc comment previously said "opt-in only; default behavior
-    /// above is unchanged" — that was accurate before that spec, stale
-    /// since, corrected 2026-08-16). Originally scoped to destructive
+    /// tree, used only with `AGENTMUX_ISOLATED_AUTH=1`: auth is shared on
+    /// every channel by default
+    /// (`docs/specs/SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`).
+    /// Originally scoped to destructive
     /// Armory testing (delete-account flows) that must never touch the
     /// real global identity store other channels/instances use.
     ///
@@ -716,61 +715,47 @@ fn ensure_owner_only_dir_inner(dir: &Path, user_home: Option<&Path>) -> std::io:
 /// `from_env()` (downstream host/srv).
 ///
 /// Resolution order:
-/// 1. `AGENTMUX_ISOLATED_AUTH=1` / `=0` — explicit override, always wins.
-/// 2. Otherwise, defaults to isolated for every channel except
-///    `"stable"`. `stable` is the real release channel — the
-///    daily-driver install(s) this machine's actual work depends on —
-///    and keeps the old always-global behavior so nobody's production
-///    login gets wiped by a channel-name coincidence. Every `task dev`
-///    branch and every `task package` local build now starts with a
-///    genuinely empty identity store by default, so routine testing
-///    actually exercises the real OAuth login/relogin surfaces instead
-///    of silently inheriting a fully-authenticated global session.
-/// 3. If `AGENTMUX_CHANNEL` isn't set yet (e.g. a bare `cargo test`
-///    invocation before any `DataPaths` has been resolved/exported),
-///    stays global — conservative default when channel context is
-///    unknown, not a guess.
+/// 1. `AGENTMUX_ISOLATED_AUTH=1` — isolate this channel's auth. Meant for
+///    testing the login and relogin paths from an empty store.
+/// 2. Any other value of `AGENTMUX_ISOLATED_AUTH` — shared (explicit opt-out).
+/// 3. Unset — **shared, on every channel**. A new build, a rebuilt branch,
+///    `task dev` and a release all read the same accounts, provider login
+///    folders, bundles, drones, native memory, Global Memory and MuxBus
+///    sign-in, so a new build needs no login
+///    (`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md`). Until 2026-10-03 every
+///    channel except `stable` defaulted to isolated
+///    (`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`).
 ///
 /// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (the
 /// underlying mechanism — channel-scoped store + credential dirs — this
-/// flag drives, still authoritative) and
-/// `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (this
-/// default, amending the July 27 spec's "isolation must never be the
-/// default" stance).
+/// flag drives, still authoritative).
 pub fn isolated_auth_enabled() -> bool {
     isolated_auth_reason().is_isolated()
 }
 
 /// Which rule decided [`isolated_auth_enabled`]'s result — for boot-time
 /// diagnostics (see `bootstrap/stores.rs`'s "shared store: attached" log line)
-/// so a developer staring at a fresh, empty Armory can tell at a glance
-/// whether that's an explicit choice or the new channel default, rather
-/// than re-deriving it from two env vars by hand. Callers that only need
-/// the boolean should use [`isolated_auth_enabled`] directly — this
-/// exists purely so the two never drift (one resolution, two views).
+/// so a developer staring at an empty Armory can tell at a glance whether
+/// that is an explicit choice, rather than re-deriving it from the env by
+/// hand. Callers that only need the boolean should use
+/// [`isolated_auth_enabled`] directly — this exists purely so the two never
+/// drift (one resolution, two views).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsolatedAuthReason {
     /// `AGENTMUX_ISOLATED_AUTH=1`.
     ExplicitOptIn,
-    /// `AGENTMUX_ISOLATED_AUTH` is set to anything other than exactly
-    /// `"1"` (`"0"`, `""`, a typo like `"false"`, anything). Fail-safe by
-    /// construction: before this default-by-channel change,
-    /// `isolated_auth_enabled()` was `.map(|v| v == "1")` — every
-    /// non-`"1"` value already meant global, including malformed ones.
-    /// Preserving that exact rule (rather than only special-casing `"0"`)
-    /// means a typo in an opt-out attempt can't silently isolate a
-    /// non-stable channel instead of the safe fallback (reagentx P2 on
-    /// PR #2431).
+    /// `AGENTMUX_ISOLATED_AUTH` is set to anything other than exactly `"1"`
+    /// (`"0"`, `""`, a typo like `"false"`, anything): shared. Fail-safe by
+    /// construction: a malformed opt-in can never silently isolate a channel
+    /// (#2431), and since 2026-10-03 the unset default is shared as well.
     ExplicitOptOut,
-    /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
-    ChannelDefaultIsolated,
-    /// No override; `AGENTMUX_CHANNEL` is `"stable"` or unset entirely.
-    ChannelDefaultGlobal,
+    /// No override: shared, on every channel.
+    DefaultShared,
 }
 
 impl IsolatedAuthReason {
     pub fn is_isolated(self) -> bool {
-        matches!(self, Self::ExplicitOptIn | Self::ChannelDefaultIsolated)
+        matches!(self, Self::ExplicitOptIn)
     }
 
     /// Short, log-friendly label.
@@ -778,25 +763,18 @@ impl IsolatedAuthReason {
         match self {
             Self::ExplicitOptIn => "explicit opt-in",
             Self::ExplicitOptOut => "explicit opt-out",
-            Self::ChannelDefaultIsolated => "channel default — isolated",
-            Self::ChannelDefaultGlobal => "channel default — global",
+            Self::DefaultShared => "default — shared",
         }
     }
 }
 
 pub fn isolated_auth_reason() -> IsolatedAuthReason {
     match std::env::var("AGENTMUX_ISOLATED_AUTH") {
-        // Exactly "1" isolates. Any OTHER value the var is explicitly set
-        // to — "0", "", a typo — falls to ExplicitOptOut, not through to
-        // the channel default. See ExplicitOptOut's doc comment: this
-        // preserves the pre-existing `.map(|v| v == "1")` fail-safe rule
-        // for every malformed value, not just "0".
+        // Exactly "1" isolates; any other value the var is explicitly set to
+        // ("0", "", a typo) is an explicit opt-out.
         Ok(v) if v == "1" => IsolatedAuthReason::ExplicitOptIn,
         Ok(_) => IsolatedAuthReason::ExplicitOptOut,
-        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
-            Ok(ch) if ch != "stable" => IsolatedAuthReason::ChannelDefaultIsolated,
-            _ => IsolatedAuthReason::ChannelDefaultGlobal,
-        },
+        Err(_) => IsolatedAuthReason::DefaultShared,
     }
 }
 
@@ -1665,13 +1643,12 @@ mod tests {
 
     #[test]
     fn identities_dir_is_shared_on_stable_channel() {
-        // stable is the real release channel — the one default this
-        // spec (SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md)
-        // deliberately does not change. AGENTMUX_CHANNEL is set to
-        // "stable" explicitly (mirroring what a real host/srv process
-        // always has via from_env(), per to_env_vars()) rather than left
-        // unset, so this test exercises the "stable" branch of the
-        // resolution order specifically, not the "channel unknown"
+        // Auth is shared on every channel by default
+        // (SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md); this pins the real
+        // release channel. AGENTMUX_CHANNEL is set to "stable" explicitly
+        // (mirroring what a real host/srv process always has via from_env(),
+        // per to_env_vars()) rather than left unset, so the test names the
+        // "stable" channel, not the "channel unknown"
         // fallback covered by identities_dir_is_shared_when_channel_unset.
         with_home_override(|_root| {
             clear_channel_env();
@@ -1686,13 +1663,11 @@ mod tests {
     }
 
     #[test]
-    fn identities_dir_is_isolated_by_default_on_non_stable_channel() {
-        // The behavior change this spec introduces: a task-dev branch
-        // (or any local task-package build, or a custom AGENTMUX_CHANNEL
-        // override) now gets an isolated identity store with NO explicit
-        // AGENTMUX_ISOLATED_AUTH set at all — contrast with the old
-        // identities_dir_is_shared_by_default, which asserted the
-        // opposite for this exact case.
+    fn identities_dir_is_shared_by_default_on_a_non_stable_channel() {
+        // SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md: a task-dev branch, a
+        // task-package local build and a custom AGENTMUX_CHANNEL all share the
+        // global identities with NO explicit AGENTMUX_ISOLATED_AUTH set. This
+        // was the opposite until 2026-10-03.
         with_home_override(|_root| {
             clear_channel_env();
             std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
@@ -1703,10 +1678,10 @@ mod tests {
             .unwrap();
             std::env::set_var("AGENTMUX_CHANNEL", &dev.channel);
 
-            assert_eq!(dev.identities_dir(), dev.instance_dir.join("identities"));
+            assert!(dev.identities_dir().ends_with("shared/identities"));
             assert!(
-                !dev.identities_dir().starts_with(&dev.shared_dir),
-                "isolated-by-default identities_dir must NOT live under the global shared_dir"
+                dev.identities_dir().starts_with(&dev.shared_dir),
+                "a shared-by-default identities_dir lives under the global shared_dir"
             );
             std::env::remove_var("AGENTMUX_CHANNEL");
         });
@@ -1726,7 +1701,7 @@ mod tests {
             )
             .unwrap();
             // AGENTMUX_CHANNEL deliberately left unset here, unlike the
-            // isolated-by-default test above.
+            // non-stable-channel test above.
 
             assert!(dev.identities_dir().ends_with("shared/identities"));
         });
@@ -1786,7 +1761,7 @@ mod tests {
     }
 
     #[test]
-    fn isolated_auth_reason_classifies_all_four_states() {
+    fn isolated_auth_reason_classifies_all_three_states() {
         let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         clear_channel_env();
@@ -1799,28 +1774,24 @@ mod tests {
         assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ExplicitOptOut);
         assert!(!isolated_auth_reason().is_isolated());
 
+        // No override: shared on EVERY channel, not only `stable`.
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
-        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
-        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultIsolated);
-        assert!(isolated_auth_reason().is_isolated());
-
-        std::env::set_var("AGENTMUX_CHANNEL", "stable");
-        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultGlobal);
-        assert!(!isolated_auth_reason().is_isolated());
+        for channel in ["dev-some-branch", "local-main-b28b7a-051fbf53", "stable", "custom-channel"] {
+            std::env::set_var("AGENTMUX_CHANNEL", channel);
+            assert_eq!(isolated_auth_reason(), IsolatedAuthReason::DefaultShared, "{channel}");
+            assert!(!isolated_auth_reason().is_isolated(), "{channel}");
+        }
 
         clear_channel_env();
-        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::ChannelDefaultGlobal);
+        assert_eq!(isolated_auth_reason(), IsolatedAuthReason::DefaultShared);
         assert!(!isolated_auth_reason().is_isolated());
     }
 
     #[test]
     fn isolated_auth_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
-        // reagentx P2 on PR #2431: a typo'd opt-out attempt (anything other
-        // than exactly "1") must land on ExplicitOptOut (global), matching
-        // the pre-existing `.map(|v| v == "1")` rule for every non-"1"
-        // value — it must NOT fall through to the channel default and
-        // silently isolate a non-stable channel just because the intended
-        // "0" was misspelled.
+        // Anything other than exactly "1" is an explicit opt-out (global),
+        // matching the original `.map(|v| v == "1")` rule for every non-"1"
+        // value (#2431): a misspelled value must never isolate a channel.
         let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear_channel_env();
         std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
@@ -1920,7 +1891,9 @@ mod tests {
             "AGENTMUX_ISOLATED_AUTH=0 must not disable settings isolation"
         );
 
-        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        // Auth is shared by default now, so isolate it explicitly to see that
+        // turning settings isolation off leaves it alone.
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
         std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "0");
         assert!(!isolated_settings_enabled());
         assert!(
@@ -2061,14 +2034,15 @@ mod tests {
         // this independence test's own channel-default assertions below
         // wrong for muxbus specifically, unrelated to what this test
         // actually checks (that the three env-var overrides don't leak
-        // into each other). A local-package-shaped channel keeps all
-        // three flags isolated by their shared channel default, so the
-        // test only exercises the override independence it's named for.
+        // into each other). A local-package-shaped channel isolates settings
+        // and the muxbus reconnect by their channel default; auth is opted in
+        // explicitly below, since it is shared by default.
         std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
         let _guard_a = IsolatedAuthGuard;
         let _guard_s = IsolatedSettingsGuard;
         let _guard_m = IsolatedMuxbusReconnectGuard;
 
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
         std::env::set_var("AGENTMUX_ISOLATED_MUXBUS", "0");
         assert!(!isolated_muxbus_reconnect_enabled());
         assert!(

@@ -1,7 +1,7 @@
 # SPEC: share authentication across channels — no re-login on every build
 
 **Date:** 2026-10-03
-**Status:** proposed — not built. §7 lists the decisions that need the owner before Phase 1.
+**Status:** active — Phase 1 built in #4281 (the default flip and adoption); the confirmation on destructive auth operations, the import action, the additive-migration CI test, the keychain-token reverse adoption and the pruner guard are not built. §10 records what Phase 1 does differently from §5.2, and why.
 **Author:** AgentY, at the owner's request
 **Amends:** `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (reverses its default), `SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (the opt-in mechanism stays), and the per-channel half of `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` (#4190).
 **Related:** `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` (invariant INV-PC), `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`, `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`, `SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`, `SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`, `SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md` (this spec is its prerequisite).
@@ -164,3 +164,26 @@ Phase 0 first: adoption is the only step that can lose a login, and it should be
 ## 9. Not in this spec
 
 Per-channel **settings** (a separate flag and spec). Splitting Global Memory, bundles and drones out of the account store (the unfinished identity-store split). Migrating existing provider login folders into `shared/identities`. The My Agents tile changes themselves, which follow this spec.
+
+## 10. As built — Phase 1 (#4281)
+
+**Phase 0 ran first, on the owner's real stores, and changed the design.** It read the 46 per-channel identity stores and `shared/store.db` read-only (counts and names only). What it showed:
+
+- The newest channels hold **no** accounts and no native memory; the shared store already holds the real **14 accounts and 133 bundles**. So the default flip alone brings the real logins back to every build.
+- **4,740 distinct bundles** across the 46 stores are per-agent bundles each channel made for itself (some single channels hold over 1,000). Only **5 are real Global Memory** (`is_global`, not system), and all 5 were stranded in other channels' stores.
+- **111 distinct native-memory entries** (agent, file) are spread over older channels; the shared store held none.
+- Only 21 distinct accounts exist across all 46 stores, all Claude OAuth, so account adoption is small and mostly duplicates.
+
+**What differs from §5.2:**
+
+| §5.2 said | Built | Why |
+|---|---|---|
+| Sources: own store, and the newest same-branch predecessor | Accounts and cloud credentials: own store plus the newest same-branch build **that holds an account** | the newest builds are often empty (`051fbf53` had none while `e629a0a7` had two) |
+| Adopt accounts, bundles, drones, native memory, Global Memory from those sources | **Global Memory and native memory from every channel store** (newest first, newest wins); accounts and credentials only as above; **non-global bundles and drones left behind** | memory is scattered, accounts are not; the bundles are junk |
+| Scan `dev/` instance folders | **Not scanned** (a dev channel's own store is still a source) | the first dry run found ~160 of them, every agent's throwaway dev builds |
+| A `db_adoptions` table in the shared store | A **ledger file**, `shared/adoption-ledger.json` | a schema change to the shared store would stop an older build opening it, which is hazard 1 in §3 |
+| Idempotent by UUID | Idempotent by UUID **and** the ledger records every key considered, so something deleted afterwards is **not put back** | otherwise deleting an adopted account or entry would undo itself at the next boot |
+
+**Cost and result on the owner's machine** (the ignored test `adoption_dry_run_against_a_real_home`): 46 sources in about 0.5 s; 6 Global Memory entries, 124 native-memory entries, 1 account and 2 agent credentials would be added; nothing refused. A boot after that reads nothing, because every source is unchanged. A source over the 8 s budget resumes on the next boot.
+
+**Still to build:** the Armory "Import from another channel…" action; the confirmation on destructive auth operations from a non-`stable` channel (R5); the additive-only migration CI test and the visible notice when the shared store cannot be opened (R4); the reverse keychain-token adoption (a channel that signed in to the cloud only under its own namespace copies its tokens to `muxbus:global` when that is empty); the pruner guard.
