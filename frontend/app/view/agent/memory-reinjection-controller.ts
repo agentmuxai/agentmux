@@ -135,7 +135,7 @@ export interface MemoryReinjectionControllerOpts {
      * rejection, means deliver: a duplicate beats no memory.
      *
      * A compaction is claimed when its boundary arrives, with the boundary's
-     * `uuid` (srv answers a repeat claim of one boundary with `false`); a
+     * `uuid` (srv answers `false` unless this block's own CLI wrote it); a
      * fresh session when it is about to fire.
      */
     claimFallback?: (reason: ReinjectionReason, boundaryUuid?: string) => Promise<boolean>;

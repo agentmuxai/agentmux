@@ -121,9 +121,9 @@ const CLAIM_WINDOW_MS: i64 = 60_000;
 const PENDING_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
 const PENDING_POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
-/// How many compaction boundaries' claims are remembered, so a repeat claim
-/// for one stands down. Boundary uuids are unique across blocks.
-const CLAIMED_BOUNDARIES_MAX: usize = 256;
+/// How many compaction boundaries' origins are remembered. Boundary uuids are
+/// unique across blocks.
+const BOUNDARY_ORIGINS_MAX: usize = 256;
 
 /// Deliveries and fallback claims, behind one lock so "who claimed this event
 /// first" is decided atomically.
@@ -136,8 +136,9 @@ struct DeliveryState {
     /// Re-deliveries srv composed for the frontend's fallback, by
     /// `delivery_id`, until the hidden message that sends one arrives.
     fallbacks: HashMap<String, FallbackDelivery>,
-    /// Compaction boundaries already claimed, by `uuid`, oldest first.
-    claimed_boundaries: VecDeque<String>,
+    /// Which block's CLI wrote each compaction boundary: (`uuid`, block),
+    /// oldest first.
+    boundary_origins: VecDeque<(String, String)>,
 }
 
 /// What the fallback's claim found.
@@ -192,17 +193,25 @@ impl DeliveryState {
         }
     }
 
-    /// A claim naming its compaction boundary: [`Self::claim_fallback`] the
-    /// first time, `Skip` for every later claim of the same boundary.
+    fn record_boundary(&mut self, uuid: &str, block_id: &str) {
+        if self.boundary_origins.iter().any(|(u, _)| u == uuid) {
+            return;
+        }
+        if self.boundary_origins.len() >= BOUNDARY_ORIGINS_MAX {
+            self.boundary_origins.pop_front();
+        }
+        self.boundary_origins.push_back((uuid.to_string(), block_id.to_string()));
+    }
+
+    /// A claim naming its compaction boundary. Only the block whose own CLI
+    /// wrote the boundary may deliver: another block of the agent reads it from
+    /// the shared transcript zone, and its CLI did not compact. A boundary no
+    /// stdout here wrote (another srv instance's) is not this block's either.
     fn claim_boundary(&mut self, block_id: &str, reason: Reason, boundary_uuid: Option<&str>, now: i64) -> FallbackClaim {
         if let Some(uuid) = boundary_uuid {
-            if self.claimed_boundaries.iter().any(|u| u == uuid) {
+            if !self.boundary_origins.iter().any(|(u, b)| u == uuid && b == block_id) {
                 return FallbackClaim::Skip;
             }
-            if self.claimed_boundaries.len() >= CLAIMED_BOUNDARIES_MAX {
-                self.claimed_boundaries.pop_front();
-            }
-            self.claimed_boundaries.push_back(uuid.to_string());
         }
         self.claim_fallback(block_id, reason, now)
     }
@@ -384,23 +393,22 @@ fn reason_for_fallback(reason: &str) -> Option<Reason> {
 /// (`false`). Waits out a hook delivery still in flight for up to
 /// [`PENDING_WAIT`], then lets the fallback deliver, so a hook that died
 /// part-way never leaves the agent without its memory. With a
-/// `boundary_uuid`, only the first claim of that compaction can deliver.
+/// `boundary_uuid`, only the block whose CLI compacted can deliver.
 pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: Option<&str>) -> bool {
     let Some(reason) = reason_for_fallback(reason) else { return true };
     let deadline = tokio::time::Instant::now() + PENDING_WAIT;
-    // Checked once: the polls below are this same claim.
-    let mut boundary_uuid = boundary_uuid.filter(|u| !u.is_empty());
+    let boundary_uuid = boundary_uuid.filter(|u| !u.is_empty());
     loop {
         let now = agentmux_common::time::now_ms();
         let claim = {
             let mut st = state_lock();
             st.prune(now);
-            st.claim_boundary(block_id, reason, boundary_uuid.take(), now)
+            st.claim_boundary(block_id, reason, boundary_uuid, now)
         };
         match claim {
             FallbackClaim::Deliver => return true,
             FallbackClaim::Skip => {
-                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: the hook delivered; fallback stands down");
+                tracing::info!(block_id, reason = reason.as_str(), "memory delivery: the hook delivered, or not this block's compaction; fallback stands down");
                 return false;
             }
             FallbackClaim::Pending if tokio::time::Instant::now() >= deadline => {
@@ -546,6 +554,12 @@ fn fallback_frame(
 /// The card of the fallback delivery `delivery_id`, taken once, when its
 /// hidden message reaches srv. `None` for an unknown or expired id, or one
 /// composed for another block.
+/// Records that `block_id`'s CLI wrote the compaction boundary `uuid`. Called
+/// from its stdout reader, before the line reaches any pane.
+pub(crate) fn record_compaction_boundary(block_id: &str, uuid: &str) {
+    state_lock().record_boundary(uuid, block_id);
+}
+
 pub(crate) fn take_fallback_frame(block_id: &str, delivery_id: &str) -> Option<serde_json::Value> {
     let mut st = state_lock();
     st.prune(agentmux_common::time::now_ms());
@@ -929,27 +943,34 @@ mod tests {
     }
 
     #[test]
-    fn a_repeat_claim_of_one_boundary_stands_down() {
+    fn only_the_block_that_compacted_claims_its_boundary() {
         let mut st = DeliveryState::default();
-        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Deliver);
-        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
+        st.record_boundary("u1", "b");
         assert_eq!(
             st.claim_boundary("other", Reason::Compact, Some("u1"), NOW),
             FallbackClaim::Skip,
-            "another pane of the agent, same boundary"
+            "another block of the agent, reading the shared zone"
         );
         assert_eq!(
             st.claim_boundary("b", Reason::Compact, Some("u2"), NOW),
+            FallbackClaim::Skip,
+            "a boundary no stdout here wrote"
+        );
+        assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Deliver);
+        assert_eq!(
+            st.claim_boundary("b", Reason::Compact, Some("u1"), NOW),
             FallbackClaim::Deliver,
-            "a new boundary takes the usual path"
+            "a repeat by the same block delivers again: a duplicate over missing memory"
         );
     }
 
     #[test]
-    fn a_new_boundary_still_stands_down_for_a_hook_delivery_in_the_window() {
+    fn a_boundary_claim_still_stands_down_for_a_hook_delivery_in_the_window() {
         let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        st.record_boundary("u1", "b");
         assert_eq!(st.claim_boundary("b", Reason::Compact, Some("u1"), NOW), FallbackClaim::Skip);
         let mut st = state_with_hook_delivery("b", Reason::Compact, true);
+        st.record_boundary("u1", "b");
         assert_eq!(
             st.claim_boundary("b", Reason::Compact, Some("u1"), NOW + CLAIM_WINDOW_MS + 1),
             FallbackClaim::Deliver,
@@ -961,18 +982,17 @@ mod tests {
     fn a_claim_without_a_boundary_keeps_the_old_behaviour() {
         let mut st = DeliveryState::default();
         assert_eq!(st.claim_boundary("b", Reason::Compact, None, NOW), FallbackClaim::Deliver);
-        assert_eq!(st.claim_boundary("b", Reason::Compact, None, NOW), FallbackClaim::Deliver);
-        assert!(st.claimed_boundaries.is_empty());
     }
 
     #[test]
-    fn claimed_boundaries_are_bounded() {
+    fn boundary_origins_are_bounded() {
         let mut st = DeliveryState::default();
-        for i in 0..=CLAIMED_BOUNDARIES_MAX {
-            st.claim_boundary("b", Reason::Compact, Some(&format!("u{i}")), NOW);
+        for i in 0..=BOUNDARY_ORIGINS_MAX {
+            st.record_boundary(&format!("u{i}"), "b");
         }
-        assert_eq!(st.claimed_boundaries.len(), CLAIMED_BOUNDARIES_MAX);
-        assert_eq!(st.claimed_boundaries.front().map(String::as_str), Some("u1"));
+        st.record_boundary("u5", "b");
+        assert_eq!(st.boundary_origins.len(), BOUNDARY_ORIGINS_MAX);
+        assert_eq!(st.boundary_origins.front().map(|(u, _)| u.as_str()), Some("u1"));
     }
 
     #[test]
