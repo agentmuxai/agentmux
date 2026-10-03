@@ -198,7 +198,8 @@ impl PersistentSubprocessController {
         // agent start / resume / respawn; a flapping or restart-heavy session
         // accumulates dozens. stdio is piped here, so the console is never needed.
         // See docs/retro/retro-windows-terminal-window-leak-2026-06-21.md.
-        // Matches acp.rs / subprocess.rs; sibling of shell.rs's PTY path.
+        // Matches acp.rs / subprocess/host_spawn.rs; sibling of shell/pty.rs's
+        // PTY path.
         #[cfg(windows)]
         {
             cmd.no_window();

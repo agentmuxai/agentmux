@@ -32,10 +32,12 @@ pub struct WindowMeta {
 }
 
 /// Phase B.5 (window_meta step d) — pre-create handoff. Caller
-/// (`drag.rs::tear_off`, `commands/window.rs::open_new_window`,
-/// `window_pool.rs::spawn_pool_window`, `pane/creation.rs`) pushes
-/// one entry per window CEF is about to create; `client.rs::on_after_created`
-/// pops the head entry and uses `kind` for the Subwindow
+/// (`drag.rs::open_window_at_position`,
+/// `commands/window/creation.rs::open_new_window`,
+/// `window_pool.rs::spawn_pool_window`, `browser_pane/creation.rs`) pushes
+/// one entry per window CEF is about to create;
+/// `client/lifecycle.rs::on_after_created` pops the head entry and uses
+/// `kind` for the Subwindow
 /// taskbar-hide branch + as the payload for `ReportWindowOpened`.
 ///
 /// Replaces the previous `pending_window_labels: VecDeque<String>`

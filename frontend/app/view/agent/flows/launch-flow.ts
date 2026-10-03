@@ -383,7 +383,7 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
             // STRONGER resume signal than "done". Missing this case (as an
             // earlier revision of this file did) left that path completely
             // silent — not just unstyled, no log line at all. reagent P1 on
-            // PR #2303 (confirmed real via persistent.rs's STATUS_RUNNING
+            // PR #2303 (confirmed real via persistent/spawn.rs's STATUS_RUNNING
             // and useControllerStatusEvents.test.ts).
             resumed = true;
             // "done" and "running" get distinct wording — "previous turn

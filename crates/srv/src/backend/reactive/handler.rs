@@ -2073,7 +2073,7 @@ impl ReactiveHandler {
     ///
     /// The case that matters is this exact call running on the same OS
     /// thread as an in-flight `inject_message` — the reactive-delivery spawn
-    /// fallback (`bootstrap.rs`'s `install_agent_turn_delivery`) runs a
+    /// fallback (`bootstrap/delivery.rs`'s `install_agent_turn_delivery`) runs a
     /// respawn synchronously on the injecting thread via `block_in_place`,
     /// and that respawn's own auto-registration (this method's caller,
     /// `PersistentSubprocessController::spawn_process`) used to re-lock this
@@ -2137,7 +2137,7 @@ impl ReactiveHandler {
         // ordinary-contention case nothing in the near-universal case
         // where the next attempt lands after the brief holder is done —
         // "bounded stalling beats silent loss", the same tradeoff
-        // `bootstrap.rs`'s `block_in_place` fallback already makes.
+        // `bootstrap/delivery.rs`'s `block_in_place` fallback already makes.
         let mut guard = self.try_lock_bounded()?;
         guard.register_agent_with_nonce(agent_id, block_id, tab_id, registration_nonce, alias)
     }

@@ -7,9 +7,10 @@
 //!
 //! Background: the registry `session_id` is **read** on launch (surfaced to the
 //! picker, which passes it as `--resume <sid>` on the first turn of a reattached
-//! block — `agent_handlers.rs`) but was **never written** by production code, so
-//! it was always `null`. A fresh-build / cross-channel open therefore had no sid
-//! to resume and spawned a brand-new session, which then shadowed the original.
+//! block — `agent_handlers/session.rs`) but was **never written** by production
+//! code, so it was always `null`. A fresh-build / cross-channel open therefore
+//! had no sid to resume and spawned a brand-new session, which then shadowed
+//! the original.
 //! See docs/retro/retro-cross-channel-conversation-continuity-regression-2026-06-16.md.
 //!
 //! Once populated, `--resume` keeps the same session id across turns, so a single

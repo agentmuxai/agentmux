@@ -7,7 +7,7 @@
  * (`PersistentSubprocessController::decide_tool_permission`) — real
  * delivery, not just logging, as of the Phase 2 plumbing landing.
  * **Still inert in practice**: nothing populates a pending decision
- * yet, because `should_route_to_decision_panel` (persistent.rs) is
+ * yet, because `should_route_to_decision_panel` (persistent/mod.rs) is
  * hardcoded false pending a product decision on which tools/modes
  * should prompt at all (see that function's own doc comment — the
  * spec's own §7 flags "permission chatter" as a real regression risk,

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Hand-maintained service-RPC bindings. Keep in sync with the agentmux-srv
-// RPC handlers (backend/rpc_types.rs, server/websocket.rs). The original Go
+// RPC handlers (backend/rpc_types/, server/websocket.rs). The original Go
 // generator (cmd/generate/main-generatets.go) was removed with the Go backend.
 
 import * as MOS from "./mos";

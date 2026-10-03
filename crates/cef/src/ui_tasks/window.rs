@@ -74,7 +74,7 @@ wrap_task! {
         fn execute(&self) {
             use cef::ImplWindow;
             // CEF Views: close the WINDOW (CefWindow::close), which routes through
-            // WindowDelegate::can_close (app.rs) → try_close_browser → on_before_close
+            // WindowDelegate::can_close (app/mod.rs) → try_close_browser → on_before_close
             // → host quit cascade. Calling try_close_browser DIRECTLY on a
             // Views-hosted browser tears the Window down WITHOUT firing
             // on_before_close, so the browser is never unregistered and the host
@@ -1034,7 +1034,7 @@ pub fn post_set_window_alpha(state: &Arc<AppState>, label: &str, alpha: f64) {
 }
 
 /// `[[nsview window] setAlphaValue:alpha]` — raw libobjc FFI, mirroring
-/// `ensure_macos_native_window_buttons` in app.rs. `alphaValue` takes CGFloat
+/// `ensure_macos_native_window_buttons` in app/mod.rs. `alphaValue` takes CGFloat
 /// (f64 on both arm64 and x86_64, passed in a float register, so plain
 /// objc_msgSend is correct). AppKit call — must run on the UI/main thread,
 /// which SetWindowAlphaTask guarantees. Returns false when the NSView has no
@@ -1114,7 +1114,7 @@ unsafe fn macos_set_window_alpha_by_number(wnum: isize, alpha: f64) -> bool {
 // CEF/renderer cooperation. Native Wayland, the default on Wayland sessions,
 // has no equivalent protocol; there the task fades the page itself with CSS
 // (`uniform_fade_js`, theme.scss `am-uniform-fade`) on the alpha-capable
-// window (app.rs `alpha_capable`).
+// window (app/mod.rs `alpha_capable`).
 
 #[cfg(target_os = "linux")]
 wrap_task! {
@@ -1131,7 +1131,7 @@ wrap_task! {
             // state.windows fallback there). state.windows is populated at
             // on_window_created and stays valid for the window's lifetime.
             // Native Wayland has no uniform-alpha protocol, but every window
-            // there is alpha-capable (app.rs `alpha_capable`), so the page can
+            // there is alpha-capable (app/mod.rs `alpha_capable`), so the page can
             // fade itself: CSS `opacity` on the body (theme.scss
             // `am-uniform-fade`) gives the same uniform whole-window fade as
             // _NET_WM_WINDOW_OPACITY below. Fading the
@@ -1637,7 +1637,7 @@ wrap_task! {
 
             let settings = BrowserSettings {
                 // ARGB alpha=0 → transparent, mirroring the MAIN window
-                // (app.rs:679) and the global CefSettings.background_color
+                // (app/mod.rs) and the global CefSettings.background_color
                 // (main.rs). CreateWindowTask builds every secondary window
                 // on Linux/macOS — additional windows AND floating-pane
                 // tear-offs (open_floating_pane_window routes here on

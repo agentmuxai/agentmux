@@ -11,11 +11,10 @@
 //! `browser_panes`, which is why eviction is keyed by label here (not by
 //! block_id via the `browser_panes` close path).
 //!
-//! Design + rationale: `SPEC_PANE_STATE_REDUCER_2026-05-28.md`
-//! (REVISION 2026-05-29 — folded into `HostState` instead of a standalone
+//! Design (#1154): folded into `HostState` instead of a standalone
 //! `PaneStateMachine`, mirroring the Phase-H consolidation that deleted
 //! `pane::lifecycle::PaneStateMachine` in commit 151f42e2 because a parallel
-//! pane-state store drifted from the reducer's).
+//! pane-state store drifted from the reducer's.
 //!
 //! ## What this module owns
 //!

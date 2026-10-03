@@ -321,7 +321,7 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
         // which reagent correctly flagged as broken by `focus_window`
         // reordering — see `ui_thread_gate.pending_slow_path`'s doc
         // comment). Check-and-clear under the gate's lock so this and a
-        // late-arriving fast-path snapshot (`launcher_ipc.rs`'s
+        // late-arriving fast-path snapshot (`launcher_ipc/mod.rs`'s
         // `Event::Snapshot` arm) can't both fire.
         if label == "main" {
             let should_run_slow_path = state.ui_thread_gate.lock().on_main_backend_window_registered();

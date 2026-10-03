@@ -34,7 +34,7 @@ use super::secret::resolve_secret;
 ///
 /// This is the public entry point called from the CLI-spawn paths
 /// (`AgentInputCommand` in websocket.rs and `AgentSendCommand` in
-/// app_api.rs). Resolution flow:
+/// app_api/agent_io.rs). Resolution flow:
 ///
 /// 1. Look up the active `AgentInstance` for this block. If none
 ///    exists, the caller didn't go through the launch modal — return
@@ -84,10 +84,10 @@ pub fn inject_identity_env(
 /// branch can publish `identityaccounts:changed` on a status change
 /// discovered by the expiry probe. The broker is `Option<Arc<Broker>>`
 /// — `None` (the legacy entry point, kept for test ergonomics) skips the
-/// publish; in production both call sites (`app_api.rs` AgentSendCommand
-/// + `websocket.rs` AgentInputCommand) pass `Some(broker.clone())` so any
-/// live account list flips its status badge without a reload. Per spec
-/// §4.4.
+/// publish; in production both call sites (`app_api/agent_io.rs`
+/// AgentSendCommand + `websocket.rs` AgentInputCommand) pass
+/// `Some(broker.clone())` so any live account list flips its status badge
+/// without a reload. Per spec §4.4.
 /// Async wrapper around [`inject_identity_env_with_broker`] for use from
 /// async spawn handlers. The underlying path does blocking I/O — synchronous
 /// SQLite reads and, for `SecretRef::Keychain` accounts, a blocking

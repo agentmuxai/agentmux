@@ -181,7 +181,7 @@ wrap_task! {
 /// macOS and we track deltas (absolute origin / screen height cancel out), so
 /// only the vertical axis is flipped (`origin.y - dy`).
 ///
-/// Raw libobjc FFI, mirroring `ensure_macos_native_window_buttons` in app.rs.
+/// Raw libobjc FFI, mirroring `ensure_macos_native_window_buttons` in app/mod.rs.
 /// Like the Windows loop this blocks the UI thread until mouse-up — the
 /// accepted trade-off for a window drag (content freezes briefly, as it does
 /// for any native title-bar drag).
@@ -201,7 +201,7 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
         fn objc_getClass(name: *const c_char) -> Id;
         fn objc_msgSend();
     }
-    // objc_msgSend transmuted per call signature (the app.rs idiom). NSPoint is
+    // objc_msgSend transmuted per call signature (the app/mod.rs idiom). NSPoint is
     // two doubles → returned in registers on both arm64 and x86_64, so plain
     // objc_msgSend is correct (no objc_msgSend_stret); that is why we reposition
     // via CEF set_bounds rather than reading an NSRect frame.

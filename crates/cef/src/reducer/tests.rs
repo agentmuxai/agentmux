@@ -200,7 +200,7 @@ fn pane_close_idempotent_for_missing() {
     let out = update(&mut state, HostCommand::EnqueueBrowserPaneClose { block_id: "missing".into() });
     assert!(out.events.is_empty()); // idempotent no-op
     // The load-bearing property for issue #2218 B.4:
-    // BrowserPaneManager::close() (browser_panes.rs) checks exactly this
+    // BrowserPaneManager::close() (browser_panes/close.rs) checks exactly this
     // field to decide whether to do any HWND/UI-thread work at all. B.4
     // calls close() unconditionally for every block_id cascaded out of a
     // deleted tab/workspace (most of which are never browser panes), so

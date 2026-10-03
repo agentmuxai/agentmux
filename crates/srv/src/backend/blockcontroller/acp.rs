@@ -324,7 +324,7 @@ impl AcpController {
         let outstanding_prompt_ids_clone = self.outstanding_prompt_ids.clone();
         let mstore_clone = self.mstore.clone();
         let event_bus_clone = self.event_bus.clone();
-        // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
+        // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs).
         let global_output_zone =
             super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         tokio::spawn(async move {
@@ -441,7 +441,8 @@ impl AcpController {
                             // Persist to block metadata and broadcast so the frontend's
                             // "My Agents" reattach path can read agent:sessionid from
                             // block.meta. ACP previously captured the ID in memory only —
-                            // this mirrors the careful path from persistent.rs / subprocess.rs.
+                            // this mirrors the careful path from persistent/spawn.rs /
+                            // subprocess/host_spawn.rs.
                             core::persist_session_id(&block_id_stdout, &sid_owned, &mstore_clone, &event_bus_clone);
                         }
                     }
@@ -478,7 +479,7 @@ impl AcpController {
                             health_clone.set_active_turn(false);
                             // Publish the flip so live controllerstatus
                             // subscribers see "turn ended" immediately,
-                            // mirroring persistent.rs's matching publish
+                            // mirroring persistent/spawn.rs's matching publish
                             // on its own normal (non-kill, non-exit)
                             // turn-end path. Without this, the ONLY
                             // controllerstatus publishes for an ACP
@@ -518,7 +519,7 @@ impl AcpController {
                     }
                 }
 
-                // Persist + broadcast via the shared helper (same as subprocess.rs)
+                // Persist + broadcast via the shared helper (same as subprocess/host_spawn.rs)
                 if let Some(ref broker) = broker_clone {
                     let line_with_newline = format!("{}\n", line);
                     super::shell::handle_append_block_file(
@@ -800,7 +801,7 @@ impl Controller for AcpController {
             // `mark_turn_active_returning_was_active` (not the plain
             // `set_active_turn(true)` this used to call) is atomic across
             // the read-and-write, so a mid-turn steering send racing this
-            // one can't both observe "was idle" — see persistent.rs's
+            // one can't both observe "was idle" — see persistent/input.rs's
             // identical guard.
             //
             // Established BEFORE the stdin enqueue below (not after) — a
@@ -815,10 +816,10 @@ impl Controller for AcpController {
             // different bug (see the rollback below) by moving this after
             // the enqueue, reintroducing this race.
             self.health_monitor.mark_turn_active_returning_was_active();
-            // Publish the turn_active flip, mirroring persistent.rs's
-            // send_message/send_user_message (which both call
-            // self.publish_status() right after this same
-            // mark_turn_active_returning_was_active() call). Without this,
+            // Publish the turn_active flip, mirroring persistent/queue.rs's
+            // send_message and persistent/input.rs's send_user_message
+            // (which both call self.publish_status() right after the same
+            // atomic turn-active mark). Without this,
             // wasTurnActive === false left over from an EARLIER turn's
             // end-of-turn publish (or the initial spawn publish) is
             // indistinguishable from genuine current idleness — a `/login`
@@ -1128,9 +1129,9 @@ mod tests {
     /// idleness: useAgentCommands.ts's `isBackendTurnConfirmedIdle()` (fed
     /// only by live controllerstatus events) would read stale-true and let
     /// `flushPendingControllerRefresh` force-restart a controller that is
-    /// actually mid-turn. Mirrors persistent.rs's send_message/
-    /// send_user_message, which both call `publish_status()` right after
-    /// the same `mark_turn_active_returning_was_active()` call.
+    /// actually mid-turn. Mirrors persistent/queue.rs's send_message and
+    /// persistent/input.rs's send_user_message, which both call
+    /// `publish_status()` right after the same atomic turn-active mark.
     #[tokio::test]
     async fn send_input_publishes_the_turn_active_flip() {
         let broker = Arc::new(mps::Broker::new());

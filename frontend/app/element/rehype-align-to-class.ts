@@ -12,8 +12,8 @@ const ALIGN_CLASS: Record<string, string> = {
 
 // Sanitize allowlist for the classes this plugin emits. Used by markdown.tsx,
 // which runs this plugin BEFORE its rehype-sanitize call and so must allow
-// the resulting className through. The streamdown path runs this plugin
-// AFTER streamdown's default sanitize and does not need a schema extension.
+// the resulting className through. A caller that runs this plugin AFTER
+// the default sanitize does not need a schema extension.
 export const ALIGN_CLASS_REGEX = /^text-(left|center|right)$/;
 
 // Rehype plugin: converts remark-gfm's deprecated `align` attribute on <th>/<td>
@@ -21,7 +21,8 @@ export const ALIGN_CLASS_REGEX = /^text-(left|center|right)$/;
 //   - BEFORE rehype-sanitize, when the sanitize schema explicitly allows the
 //     emitted className on th/td (markdown.tsx).
 //   - AFTER rehype-sanitize, since `align` is in hast-util-sanitize's default
-//     global attribute allowlist and survives the sanitize step (streamdown.tsx).
+//     global attribute allowlist and survives the sanitize step (no current
+//     caller).
 export function rehypeAlignToClass() {
     return (tree: Root) => {
         visit(tree, "element", (node: Element) => {

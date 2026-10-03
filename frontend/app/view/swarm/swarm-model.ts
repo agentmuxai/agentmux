@@ -129,7 +129,7 @@ export interface AgentDispatch {
      *  `ActiveSubagent.display_name`. `null` until resolved.
      *
      *  For a Solo-kind dispatch: mirrors that one member's own
-     *  `display_name` directly (`subagent_watcher.rs`'s `solo_dispatch()`) —
+     *  `display_name` directly (`subagent_watcher/query.rs`'s `solo_dispatch()`) —
      *  there's no separate dispatch-level naming call for Solo, so this is
      *  `null` until that member's `display_name` itself resolves, same
      *  timing as `ActiveSubagent.display_name`, not always `null`. */
@@ -449,7 +449,7 @@ export function collectClearableRows(nodes: AgentTreeNode[]): { rowKey: string; 
  *
  * `slug` is NOT a per-subagent-unique identifier — it's read straight
  * through from whatever the Claude Code CLI happened to write into the
- * first line of the subagent's own JSONL file (`subagent_watcher.rs`'s
+ * first line of the subagent's own JSONL file (`subagent_watcher/parse.rs`'s
  * `read_jsonl_from_offset`), which in practice is that CLI's own
  * per-session/per-batch codename. A whole Task/Workflow-tool batch of
  * genuinely distinct, unrelated subagents legitimately shares one slug —
@@ -776,7 +776,7 @@ export function mergeDispatchActivityEntries(
  * SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 §4) shows this: every
  * member's new events, merged into one chronological, member-tagged stream,
  * fed by the backend's coalesced `dispatch:activity` broadcast
- * (`subagent_watcher.rs`'s `flush_pending_dispatch_activity` — as of Phase A
+ * (`subagent_watcher/jsonl.rs`'s `flush_pending_dispatch_activity` — as of Phase A
  * this fires for solo `dispatch_id`s too, dual-emitted alongside the
  * existing immediate `subagent:activity`).
  *
@@ -1086,7 +1086,7 @@ export class SwarmViewModel {
     private lastSubscribedBlockIds: Set<string> = new Set();
 
     // Backend broadcasts one subagent:spawned/subagent:completed event per
-    // subagent file (see subagent_watcher.rs's process_jsonl_change) — a
+    // subagent file (see subagent_watcher/jsonl.rs's process_jsonl_change) — a
     // backfill scan on pane reopen can fire dozens of these in a burst.
     // Debounce the resulting loadSubagents() RPC here instead of batching the
     // broadcasts themselves, since activity/subagent-source.ts (a different

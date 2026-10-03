@@ -89,7 +89,7 @@ export function utf8Bytes(s: string): number {
  *  preview matches exactly what lands in the agent's startup instructions
  *  file. `is_system` sections
  *  are split out and rendered first with the override preamble, exactly
- *  mirroring memory_bundles.rs's split (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md).
+ *  mirroring bundles.rs's split (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md).
  *  Exported for direct unit testing against the Rust version's fixtures. */
 export function formatGlobalBundleBlock(sections: Bundle[]): string {
     const nonEmpty = sections.filter((s) => (s.instructions ?? "").trim().length > 0);

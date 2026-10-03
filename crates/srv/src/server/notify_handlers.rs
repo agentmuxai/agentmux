@@ -472,7 +472,8 @@ mod live_tests {
     async fn header_authed_client_receives_router_events_over_ws() {
         let state = crate::server::tests::test_state();
         // test_state() leaves the broker without its fan-out client; wire it
-        // exactly as bootstrap.rs does so published events reach /ws clients.
+        // exactly as bootstrap/background.rs does so published events reach
+        // /ws clients.
         state
             .broker
             .set_client(Box::new(crate::backend::eventbus::EventBusBridge::new(state.event_bus.clone())));

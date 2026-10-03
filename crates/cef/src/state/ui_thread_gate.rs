@@ -73,7 +73,7 @@ impl UiThreadGate {
     /// and a positional-vs-value identity bug), each only caught by manual
     /// live-kill verification. Extracted into pure, directly unit-testable
     /// methods so future edits have more than that to lean on. Callers
-    /// (`client/lifecycle.rs`, `launcher_ipc.rs`, `commands/window/meta.rs`)
+    /// (`client/lifecycle.rs`, `launcher_ipc/mod.rs`, `commands/window/meta.rs`)
     /// still own all I/O (taking the stash's data, actually calling
     /// `reproject_from_snapshot`/`reproject_from_srv`) — these methods only
     /// decide, they never act.

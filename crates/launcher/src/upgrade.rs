@@ -38,7 +38,7 @@
 //! applying anything (`crates/srv/src/migrations/runner.rs`'s
 //! `backup_stores` call) — a launcher-side snapshot would be redundant with,
 //! not a replacement for, that one. The spec's §4.3 step 3 was written
-//! assuming the launcher would re-implement what `bootstrap.rs` does for
+//! assuming the launcher would re-implement what `bootstrap/stores.rs` does for
 //! the in-process path; going through the CLI subcommand instead means that
 //! safety property already exists on this path.
 

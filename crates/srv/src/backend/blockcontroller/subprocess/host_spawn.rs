@@ -296,7 +296,7 @@ impl SubprocessController {
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let session_id_field = config.session_id_field.clone();
-        // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
+        // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs).
         let global_output_zone =
             shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         // Retain the terminal `result` frame so a failure reported on STDOUT
@@ -335,7 +335,7 @@ impl SubprocessController {
                         }
 
                         // Track session metadata (debounced 1 s).
-                        // Use `line.len()` (not `trimmed.len()`) to match persistent.rs
+                        // Use `line.len()` (not `trimmed.len()`) to match persistent/spawn.rs
                         // so token_estimate stays consistent across controller types.
                         stats.record_line(line.len(), &mstore_read);
 
@@ -391,7 +391,7 @@ impl SubprocessController {
                         if let Some(ref broker) = broker_read {
                             // debug, not info: fires on every NDJSON line, and
                             // logs the FULL line content (not just length like
-                            // persistent.rs's sibling) — a real contributor
+                            // persistent/spawn.rs's sibling) — a real contributor
                             // (~6%) to an unrotated 406 MB launcher-log mirror
                             // on a real machine (SPEC_WIN10_PAGEFILE_OOM_CRASH_
                             // 2026_06_29 P1). muxlog.mjs already treats this

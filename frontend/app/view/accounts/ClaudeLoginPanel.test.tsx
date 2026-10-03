@@ -13,9 +13,8 @@
  *
  * Uses `screen.findByText` (document-wide), not `render()`'s own bound
  * `findByText` — ClaudeLoginPanel now renders through the canonical `Modal`
- * (ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md's Fix 3),
- * which `<Portal>`s outside the test's render container; container-scoped
- * queries can't see it.
+ * (#2423), which `<Portal>`s outside the test's render container;
+ * container-scoped queries can't see it.
  */
 
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";

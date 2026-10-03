@@ -3,8 +3,7 @@
 
 /**
  * Type definitions for the window-opacity reducer slice.
- * See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §7.2 and
- * docs/specs/frontend-reducer-conventions-2026-05-03.md.
+ * See docs/specs/frontend-reducer-conventions-2026-05-03.md.
  *
  * Tracks the current opacity (0.35–1.0) for each window by **label**.
  * Keyed by label (not windowId) since instance-panel-floating-panes.md §3.2:

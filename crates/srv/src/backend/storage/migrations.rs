@@ -171,7 +171,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        immutable-after-creation treatment as is_seeded/slug/parent_id).
 ///        Distinct from db_agent_instances.memory_id (a specific launch's
 ///        bundle, can still diverge on purpose) and NOT dual-written into
-///        db_agents (see dual_write.rs's module doc) — that column is
+///        db_agents — that column is
 ///        instance-only by existing convention and this predates the
 ///        Phase 3b reader flip that would need to decide how the two
 ///        interact. Defaults to '' for existing rows; the m0021 migration
@@ -532,7 +532,7 @@ const LEGACY_INDEX_DROPS: &[&str] = &[
 /// `db_identity_bindings` were dropped outright rather than renamed
 /// forward in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md —
 /// `db_agent_identity_links`/`db_accounts` is the sole credential-
-/// resolution path (`identity/resolver.rs::resolve_bindings_for_instance`),
+/// resolution path (`identity/resolver/inject.rs::resolve_bindings_for_instance`),
 /// confirmed via the already-applied `m0013`/`m0014` backfill migrations
 /// (see SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md §6/§8a).
 const DEAD_TABLE_DROPS: &[&str] = &[
@@ -1755,8 +1755,9 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        AUTHORITATIVE catalogs as of this version; the per-channel copies
 ///        in `run_object_schema` keep their declarations (never removed —
 ///        see that spec's §5.1 and §8 item 3) and continue to exist only as
-///        the same best-effort degraded-mode fallback `bootstrap.rs` already
-///        substitutes for every other identity-store table (`mstore` in
+///        the same best-effort degraded-mode fallback
+///        `bootstrap/stores.rs` already substitutes for every other
+///        identity-store table (`mstore` in
 ///        place of `identity_store` when the identity store can't be
 ///        resolved, created, or opened). Deliberately NOT declared with the
 ///        ref tables (`db_agent_skills_ref`, `db_bundle_skills_ref`, and

@@ -4,10 +4,9 @@
 // Phase E.6 — renderer multi-source dispatcher with saga buffering.
 //
 // Shared infrastructure for `srv-events.ts` and `launcher-events.ts`.
-// Same per-source state machine drives both pipes. Phase F will add
-// a third (`host-events.ts`) when host events cross IPC; this module
-// is source-agnostic so adding the third bucket is a constructor
-// call away.
+// Same per-source state machine drives both pipes. This module is
+// source-agnostic, so adding a third source is a constructor call
+// away.
 //
 // **Three jobs:**
 //

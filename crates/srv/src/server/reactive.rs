@@ -2613,7 +2613,7 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
                             .filter(|e| !is_self_registration(&e.local_url, &state.local_web_url))
                             // A crashed sibling instance's entry otherwise
                             // lingers until the next startup-only
-                            // cleanup_stale_shared sweep (bootstrap.rs) —
+                            // cleanup_stale_shared sweep (bootstrap/network.rs) —
                             // up to hours later — showing a false "Also
                             // registered elsewhere" badge in the meantime
                             // (reagentx P2). PID-liveness is authoritative

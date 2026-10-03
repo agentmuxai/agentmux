@@ -332,7 +332,7 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // CALLING renderer (the floater that's about to close). The
     // TARGET window's renderer is a different process and won't
     // see the layout change unless we explicitly broadcast on
-    // the event bus. Mirrors the pattern in `app_api.rs:399-410`.
+    // the event bus. Mirrors the pattern in `app_api/agent_open.rs`.
     // Without this the target tab.blockids includes the new
     // block but its layout.leaforder doesn't → block invisible.
     // One batched frame so the renderer applies all of them in a single

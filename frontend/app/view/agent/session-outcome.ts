@@ -4,7 +4,7 @@
 /**
  * Shared parsing for AgentMux's own `system`/`agentmux_session_outcome` raw
  * stream-json frame — emitted by the backend
- * (`crates/srv/src/backend/blockcontroller/persistent.rs`,
+ * (`crates/srv/src/backend/blockcontroller/persistent/mod.rs`,
  * `session_outcome_line`) the moment a `--resume <sid>` attempt's fate
  * becomes definitively known (see
  * docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2). Mirrors

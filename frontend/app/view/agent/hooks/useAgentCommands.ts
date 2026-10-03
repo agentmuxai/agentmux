@@ -601,7 +601,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // Set by /login's finalizeLoginSuccess (login.ts) when it must skip an
     // immediate forceControllerRefresh because a turn is actively streaming
     // — forcing a restart mid-turn would kill it. Persistent providers
-    // (agentmux-srv's persistent.rs) keep the controller alive across MANY
+    // (agentmux-srv's persistent/) keep the controller alive across MANY
     // turns, not just this one, so treating the skip as "done" and clearing
     // every fast-fail guard right away would leave the controller on the
     // stale credential indefinitely (until the pane is manually reopened),
@@ -1119,9 +1119,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         if (attachments.length > 0) attachmentsByMessage.set(messageId, attachments);
 
         // Append to the pending zone. No direct write to `document` —
-        // the acceptance event promotes it. This is the architecture
-        // from AGENT_PANE_QUEUED_MESSAGE_FEEDBACK_SPEC.md (two lists,
-        // migration on accept).
+        // the acceptance event promotes it (two lists, migration on
+        // accept).
         // Soft variant — cascade-during-dispatch could dispose the pane
         // before this fires; retro 2026-05-23 (agent-pane cascade →
         // replaceChild quick-win).

@@ -989,7 +989,7 @@ pub fn prepare_provider_auth_dir(
 /// (not calling `get_home_dir()` internally) so it's directly testable
 /// against a tempdir instead of the real `$HOME`/`%USERPROFILE%` — same
 /// "inject the path, don't resolve it internally" pattern
-/// `read_claude_global_config` already uses (`agent_handlers/memory.rs`).
+/// `read_claude_global_config` already uses (`agent_handlers/bundle.rs`).
 fn paths_resolve_to_same_dir(reference: &std::path::Path, candidate: &str) -> bool {
     let candidate_path = std::path::Path::new(candidate);
 

@@ -8,7 +8,7 @@
 //! `db_identity_bindings` were dropped in Phase 4c of
 //! SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md — credential resolution
 //! reads only `db_agent_identity_links`/`db_accounts`
-//! (`identity/resolver.rs::resolve_bindings_for_instance`), which this
+//! (`identity/resolver/inject.rs::resolve_bindings_for_instance`), which this
 //! migration never populated. The migration id stays registered
 //! (already-applied installs must never re-run a Global migration) but
 //! the body is now a documented no-op; `identity::migration` (the module

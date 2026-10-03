@@ -18,7 +18,7 @@
 // must stay in CSS — do NOT set `--chrome-header-width` (or any width) from
 // JS on any platform:
 //
-//   - Windows: `calc(100vw / var(--zoomfactor, 1))` in window-header.scss.
+//   - Windows: `calc(100vw / var(--zoomfactor, 1))` in window-header.win32.scss.
 //     Setting the width from JS breaks Windows.
 //   - macOS:   `width: 100%` in window-header.darwin.scss. Do NOT switch
 //     it to the `calc(100vw / …)` form — that double-divides on WebKit and

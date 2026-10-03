@@ -89,7 +89,7 @@ pub(super) struct AgentMemoryWriteProvenanceReq {
     // serde_json::Value yields Value::Null when the caller supplies `source`
     // but omits `detail` — `.to_string()` on that is the literal string
     // "null", not the "{}" every no-provenance write path uses. Same bug
-    // class already fixed once in rpc_types/memory.rs's sibling
+    // class already fixed once in rpc_types/native_memory.rs's sibling
     // NativeMemoryWriteProvenance (its own `default_detail()`), just
     // recurring here in this HTTP/App-API request struct.
     #[serde(default = "default_agent_memory_write_detail")]

@@ -3,8 +3,7 @@
 
 /**
  * Pure reducer for the window-opacity slice.
- * See SPEC_PER_WINDOW_OPACITY_2026-05-14.md §7.2 and
- * docs/specs/frontend-reducer-conventions-2026-05-03.md.
+ * See docs/specs/frontend-reducer-conventions-2026-05-03.md.
  *
  * Invariants:
  *   1. Opacity is clamped to [0.35, 1.0] at the reducer boundary.

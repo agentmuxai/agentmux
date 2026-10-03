@@ -72,8 +72,8 @@ const EVENT_SINGLETON_CLAIM = "singleton:claim";
 /**
  * Kind of singleton modal. Open enum (string) so future singletons add a
  * value without touching this module — each consumer defines its own
- * kind constant (e.g. `SINGLETON_KIND_BUNDLE_MANAGER` in
- * `bundle-manager-modal.tsx`).
+ * kind constant. (The original consumer, the bundle-manager modal, was
+ * removed in #1789; no kind is defined today.)
  */
 export type SingletonKind = string;
 

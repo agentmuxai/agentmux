@@ -37,8 +37,8 @@
  * persists per shell. Each drawer owns its own key — they are independent
  * surfaces and must not clobber each other's remembered size.
  *
- * Per SPEC_LOG_TO_SHELL_PANE_2026_07_02.md §5.1: "make the region a
- * resizable drawer ... not the current fixed short strip."
+ * Added so the region is a resizable drawer, not a fixed short strip
+ * (#1945).
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";

@@ -30,7 +30,7 @@ import { createEffect, on, type Accessor } from "solid-js";
  * on the single most common user action — clicking/refocusing a pane to check
  * on it — making that race far more visible than it needs to be. The live
  * useControllerStatusEvents subscription still reconciles TurnPhase from the
- * backend's periodic status heartbeat (persistent.rs's spawn_status_heartbeat,
+ * backend's periodic status heartbeat (persistent/status.rs's spawn_status_heartbeat,
  * every 20s while a turn is active) independent of focus, so the original
  * stuck-Working-forever gap this mechanism was built for is still bounded —
  * just by that heartbeat's cadence instead of an instant refocus.

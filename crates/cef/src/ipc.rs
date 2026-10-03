@@ -855,8 +855,7 @@ async fn route_command(
             // Apply a clip region to every pane HWND that excludes the given
             // overlay rectangles. The pane stays visible everywhere except
             // under the overlays — DOM overlays render through the holes.
-            // Empty list restores full visibility. See
-            // BROWSER_PANE_Z_ORDER_FOCUS_REPORT.md Issue 1.
+            // Empty list restores full visibility.
             //
             // `window_label` scopes the clip to panes owned by the
             // requesting window so a modal in window B doesn't also

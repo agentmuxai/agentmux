@@ -426,7 +426,7 @@ impl SubprocessController {
             let mut last_result_frame: Option<serde_json::Value> = None;
             let mut last_inband_error: Option<serde_json::Value> = None;
 
-            // Resolve the agent's GLOBAL transcript zone once (see persistent.rs)
+            // Resolve the agent's GLOBAL transcript zone once (see persistent/spawn.rs)
             // so every container-exec `output` line is also mirrored to the
             // cross-channel store. `None` for non-agent blocks.
             let global_output_zone =

@@ -497,10 +497,9 @@ export function update(
             // updates — those with no matching new node in this batch
             // AND no prior state entry — still drop, preserving the
             // existing contract (see "drops updates targeting unknown
-            // IDs" test). See REPORT_AGENT_PANE_TEXT_TRUNCATION_2026-
-            // 05-28.md for the user-visible symptom (assistant
+            // IDs" test). The user-visible symptom was an assistant
             // response "Yep, still here. What do you need?" rendered
-            // as "Y").
+            // as "Y" (#1122).
             let appendedNew = 0;
             let collidedAndUpdated = 0;
             let nextIdSet: Set<string> | null = null;

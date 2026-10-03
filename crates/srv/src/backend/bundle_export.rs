@@ -638,7 +638,7 @@ pub fn export_bundle(
         "description": bundle.description,
         // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3/§7.5 step
         // 6: harness + vendor, readonly-once-set on the source bundle (see
-        // `check_provider_model_immutable` in `server/app_api/bundle.rs`) —
+        // `check_provider_model_immutable` in `server/app_api/bundle/mod.rs`) —
         // carried through export so a re-imported ABF is self-describing
         // about what it needs to run, not silently reset to unbound.
         // Omitted (not just empty-stringed) when the source bundle itself
@@ -662,13 +662,12 @@ pub fn export_bundle(
     }
 }
 
-/// Parse a `db_bundles` JSON-array column (`context_files`/`mcp_servers`,
-/// and — via the `bundle.export` RPC handler in `app_api/bundle.rs` —
-/// `skills`), treating a blank/whitespace-only value as "genuinely no
-/// data" (not an error) but pushing a warning to `warnings` for anything
-/// non-blank that fails to parse, rather than silently discarding it via
-/// `unwrap_or_default()` — an export that quietly loses data defeats its
-/// own backup/portability purpose (reagent P1, PR #2333).
+/// Parse a `db_bundles` JSON column (`context_files`,
+/// `instructions_by_provider`), treating a blank/whitespace-only value as
+/// "genuinely no data" (not an error) but pushing a warning to `warnings`
+/// for anything non-blank that fails to parse, rather than silently
+/// discarding it via `unwrap_or_default()` — an export that quietly loses
+/// data defeats its own backup/portability purpose (#2333).
 pub(crate) fn parse_json_field_or_warn<T: serde::de::DeserializeOwned + Default>(
     raw: &str,
     field_name: &str,
@@ -967,10 +966,11 @@ mod tests {
 
     #[test]
     fn parse_json_field_or_warn_direct_unit_test() {
-        // reagent P1, PR #2333: `bundle.export`'s RPC handler
-        // (app_api/bundle.rs) reuses this exact helper for `bundle.skills`,
-        // which previously had the same unwrap_or_default() silent-loss bug
-        // already fixed here for context_files/mcp_servers.
+        // PR #2333: `bundle.export`'s RPC handler used to parse the inline
+        // `bundle.skills` column with this exact helper (until #3152 made the
+        // ref tables authoritative), which previously had the same
+        // unwrap_or_default() silent-loss bug already fixed here for
+        // context_files/mcp_servers.
         let mut warnings = Vec::new();
         let blank: Vec<String> = parse_json_field_or_warn("", "skills", &mut warnings);
         assert!(blank.is_empty());

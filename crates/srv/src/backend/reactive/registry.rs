@@ -532,9 +532,9 @@ pub fn local_channel_id() -> String {
 /// for the same reason: a mismatch here doesn't fail loudly, it selects a
 /// different key and renders a valid message as an active forgery.
 ///
-/// Falls back to `"unknown"` exactly as `bootstrap.rs` already does for the
-/// LAN advertisement, rather than erroring — an unresolvable hostname must not
-/// block spawning an agent.
+/// Falls back to `"unknown"` exactly as `bootstrap/network.rs` already does for
+/// the LAN advertisement, rather than erroring — an unresolvable hostname must
+/// not block spawning an agent.
 pub fn local_host_label() -> String {
     whoami::fallible::hostname()
         .unwrap_or_else(|_| "unknown".to_string())
@@ -780,7 +780,7 @@ mod shared_tests {
     #[test]
     fn a_shared_entry_publishes_the_agents_real_store_public_key() {
         // Store-backed, not a stub: the closure installed here is the SAME
-        // shape bootstrap.rs installs, so this exercises the real
+        // shape bootstrap/stores.rs installs, so this exercises the real
         // resolver → Store → entry wiring rather than just the plumbing
         // around it. That distinction matters — the last time a jekt key
         // feature shipped, the code was correct and the real call path simply

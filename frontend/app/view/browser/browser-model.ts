@@ -500,9 +500,9 @@ export class BrowserViewModel {
         // Click-to-focus: the pane HWND captures clicks at the Win32 level,
         // so the DOM onMouseDown on `.browser-placeholder` never fires. The
         // backend emits this event directly from its WndProc's WM_LBUTTONDOWN
-        // handler (see `pane/hwnd.rs`) using a HWND→block_id map registered
-        // at pane creation. We drive refocusNode so the layout marks this
-        // block as focused (blue border + keyboard shortcut target).
+        // handler (see `browser_pane/hwnd.rs`) using a HWND→block_id map
+        // registered at pane creation. We drive refocusNode so the layout
+        // marks this block as focused (blue border + keyboard shortcut target).
         void getApi().listen<{ block_id: string }>("browser-pane-clicked", (payload) => {
             if (this.closed) {
                 this.diag(`post-close-event-dropped name=browser-pane-clicked`);

@@ -14,7 +14,7 @@
 //! SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md, once this migration had
 //! already run on every real install and `db_agent_identity_links` was
 //! confirmed the sole credential-resolution path
-//! (`identity/resolver.rs::resolve_bindings_for_instance`). The migration
+//! (`identity/resolver/inject.rs::resolve_bindings_for_instance`). The migration
 //! id stays registered — already-applied installs must never re-run a
 //! Global migration — but `backfill_direct_links`'s body is now a
 //! documented no-op.

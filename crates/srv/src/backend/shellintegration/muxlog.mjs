@@ -31,7 +31,7 @@ const AGENTMUX = path.join(HOME, ".agentmux");
 //   ~/.agentmux/dev/<branch>/<hash>/logs/              (task dev, keyed on branch)
 //   ~/.agentmux/channels/<channel>/versions/<v>/logs/  (portable/per-build; both
 //                                                        host AND srv as of
-//                                                        crates/srv/src/bootstrap.rs
+//                                                        crates/srv/src/bootstrap/logging.rs
 //                                                        honoring AGENTMUX_LOG_DIR —
 //                                                        see REPORT_MUXSPECT_MUXLOG_
 //                                                        CROSS_CHANNEL_INSPECTION_2026_08_22.md)
@@ -138,7 +138,7 @@ export function renderLine(raw, opt) {
     // parsing and regardless of it, because a dispatch/subagent id can show
     // up either in the rendered message OR as a bare structured field value
     // (`dispatch_id`, `session_id`, `agent_id`, ... — the exact field name
-    // varies per call site, see subagent_watcher.rs's own tracing calls).
+    // varies per call site, see the tracing calls in subagent_watcher/).
     // `--grep` only ever matches the message text (phases' own doc comment
     // above), which would silently miss a field-only occurrence; a plain
     // substring check on the whole raw line catches both uniformly without
@@ -1315,7 +1315,7 @@ async function main() {
         // parent_block_id a subagent is bound to on backfill — the fields a
         // NAME-based grouping/dedup bug in the Swarm view needs, without
         // wading through the (usually much larger) agent-transcript log.
-        // All emitted srv-side from subagent_watcher.rs's tracing target
+        // All emitted srv-side from the subagent_watcher/ module's tracing target
         // (`agentmux_srv::backend::subagent_watcher`, rendered as
         // `srv:subagent_watcher` by shortTarget) — there is no host-side
         // subagent logging to combine in (checked: agentmux-cef has none).
@@ -1355,10 +1355,10 @@ async function main() {
         // "auth success (direct-account)" persistence, OAuth config-dir
         // wiring), server/cli_handlers.rs (CheckCliAuth, "claude auth:"
         // credential seeding), identity/auth_session.rs (cancel_session,
-        // session timeout), identity/resolver.rs ("oauth probe"), and the
+        // session timeout), identity/resolver/inject.rs ("oauth probe"), and the
         // logout side in server/app_api/identity.rs + agent_handlers/
         // identity.rs ("identity.unlink:", "identity.delete:"), plus the
-        // layer-3 spawn gate in identity/resolver.rs
+        // layer-3 spawn gate in identity/resolver/inject.rs
         // ("identity.spawn.blocked:", "identity.spawn.ambient:"), and the
         // login/logout-round credential-state diagnostics in
         // server/cli_handlers.rs ("auth.credstate:", a redacted
