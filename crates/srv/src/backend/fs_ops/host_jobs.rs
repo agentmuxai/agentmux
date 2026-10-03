@@ -391,6 +391,35 @@ fn local_mode(m: &std::fs::Metadata) -> u32 {
     }
 }
 
+/// Whether `name` is one plain name on a side (`windows`: this computer is
+/// Windows): never a path. A host's names can hold `\`, `:` or `..\` that
+/// would mean other folders here, so whatever a host names is checked before
+/// it becomes a path on this computer.
+fn name_ok(name: &str, windows: bool) -> bool {
+    if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\0') {
+        return false;
+    }
+    if windows {
+        let bad =
+            |c: char| matches!(c, '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*') || c.is_control();
+        // A trailing dot or space is dropped by Windows: `a.` would be `a`.
+        if name.chars().any(bad) || name.ends_with('.') || name.ends_with(' ') {
+            return false;
+        }
+    }
+    true
+}
+
+impl End {
+    /// Whether `name` (from the other side) can be one name here.
+    fn accepts_name(&self, name: &str) -> bool {
+        match self {
+            End::Local => name_ok(name, cfg!(windows)),
+            End::Host { .. } => name_ok(name, false),
+        }
+    }
+}
+
 /// A local source file, opened once: never through a link swapped in after
 /// it was checked, never stuck opening a pipe; whatever was opened must be a
 /// regular file.
@@ -691,11 +720,17 @@ impl Transfer<'_> {
         };
         let mut all = Outcome::Done;
         for name in names {
-            match self.entry(
-                job,
-                &self.src.join(src, &name),
-                &self.dest.join(dest, &name),
-            ) {
+            let child = self.src.join(src, &name);
+            if !self.dest.accepts_name(&name) {
+                job.fail(
+                    &self.src.show(&child),
+                    format!("“{name}” can't be a file name there: not copied."),
+                );
+                self.pass_over(job, &child);
+                all = Outcome::NotDone;
+                continue;
+            }
+            match self.entry(job, &child, &self.dest.join(dest, &name)) {
                 Outcome::Stopped => return Outcome::Stopped,
                 Outcome::NotDone => all = Outcome::NotDone,
                 Outcome::Done => {}
@@ -1008,7 +1043,11 @@ pub async fn start(
             Some(_) => {}
             None => return Err(format!("“{}” isn't there anymore.", src.name(s))),
         }
-        if let Some(why) = dest.refusal(&dest.join(&dest_dir, &src.name(s))) {
+        let name = src.name(s);
+        if !dest.accepts_name(&name) {
+            return Err(format!("“{name}” can't be a file name there."));
+        }
+        if let Some(why) = dest.refusal(&dest.join(&dest_dir, &name)) {
             return Err(why);
         }
         if kind == FsOpKind::Move {
@@ -1629,6 +1668,28 @@ mod tests {
             0o444
         );
         assert!(!f.exists());
+    }
+
+    /// A host's name never becomes more than one name here (#4296).
+    #[test]
+    fn only_a_plain_name_crosses_to_this_computer() {
+        for bad in ["", ".", "..", "a/b", "nul\0x"] {
+            assert!(!name_ok(bad, false) && !name_ok(bad, true), "{bad:?}");
+        }
+        for bad in [
+            "..\\..\\x",
+            "a\\b.txt",
+            "c:x",
+            "a:b",
+            "x?",
+            "trail.",
+            "trail ",
+        ] {
+            assert!(!name_ok(bad, true), "{bad:?} on Windows");
+        }
+        // Fine on a Unix machine: a backslash or colon is just a character.
+        assert!(name_ok("a\\b.txt", false) && name_ok("a:b", false));
+        assert!(name_ok("notes.md", true) && name_ok(".bashrc", true));
     }
 
     #[test]
