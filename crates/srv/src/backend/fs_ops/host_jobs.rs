@@ -79,10 +79,6 @@ impl End {
         End::Host { files, home }
     }
 
-    fn is_host(&self) -> bool {
-        matches!(self, End::Host { .. })
-    }
-
     /// Both are the same host's helper.
     fn same_host(&self, other: &End) -> bool {
         match (self, other) {
@@ -94,13 +90,7 @@ impl End {
     fn join(&self, dir: &str, name: &str) -> String {
         match self {
             End::Local => display_path(&Path::new(dir).join(name)),
-            End::Host { .. } => {
-                if dir.ends_with('/') {
-                    format!("{dir}{name}")
-                } else {
-                    format!("{dir}/{name}")
-                }
-            }
+            End::Host { .. } => posix_join(dir, name),
         }
     }
 
@@ -110,10 +100,7 @@ impl End {
                 .parent()
                 .map(display_path)
                 .unwrap_or_default(),
-            End::Host { .. } => match path.rfind('/') {
-                Some(0) | None => "/".to_string(),
-                Some(i) => path[..i].to_string(),
-            },
+            End::Host { .. } => posix_parent(path),
         }
     }
 
@@ -283,6 +270,23 @@ impl End {
             End::Local => display_path(&PathBuf::from(path)),
             End::Host { home, .. } => super::remote::resolve(home, path),
         }
+    }
+}
+
+/// `name` in `dir`, a host's POSIX path.
+fn posix_join(dir: &str, name: &str) -> String {
+    if dir.ends_with('/') {
+        format!("{dir}{name}")
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
+/// The folder a host's POSIX path is in; `/` at the top.
+fn posix_parent(path: &str) -> String {
+    match path.rfind('/') {
+        Some(0) | None => "/".to_string(),
+        Some(i) => path[..i].to_string(),
     }
 }
 
@@ -1123,11 +1127,14 @@ mod tests {
 
     #[test]
     fn host_paths_join_and_split_as_posix() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let _g = rt.enter();
-        let local = End::Local;
+        assert_eq!(posix_join("/home/u", "a.txt"), "/home/u/a.txt");
+        assert_eq!(posix_join("/", "a"), "/a");
+        assert_eq!(posix_parent("/home/u/a.txt"), "/home/u");
+        assert_eq!(posix_parent("/a"), "/");
+        assert_eq!(posix_parent("/"), "/");
+        // Names from either side: a host's path, or this computer's.
         assert_eq!(file_name("/a/b/c.txt"), "c.txt");
         assert_eq!(file_name("C:\\x\\y.md"), "y.md");
-        let _ = local;
+        assert_eq!(file_name("/a/b/"), "b");
     }
 }
