@@ -404,32 +404,33 @@ fn start_reader(session: Arc<Session>, mut child: std::process::Child, sessions:
         let code = child.wait().ok().and_then(|s| s.code()).unwrap_or(-1);
         let mut inner = session.inner.lock().unwrap();
         inner.exited = Some(code);
-        // An attached client hears it and the session goes; otherwise it waits
-        // for the next attach to replay its last output and the exit.
-        if let Some((_, mut c)) = inner.client.take() {
-            let _ = c.write_all(&Frame::Exited { code }.encode());
-            let _ = c.shutdown(std::net::Shutdown::Both);
-            drop(inner);
+        // An attached client that hears the exit lets the session go. Otherwise
+        // (no client, or the exit could not be written to it) the session
+        // waits for the next attach to replay its last output and the exit,
+        // so srv learns it ended rather than finding a new shell.
+        let delivered = match inner.client.take() {
+            Some((_, mut c)) => {
+                let ok = c.write_all(&Frame::Exited { code }.encode()).is_ok();
+                let _ = c.shutdown(std::net::Shutdown::Both);
+                ok
+            }
+            None => false,
+        };
+        drop(inner);
+        if delivered {
             remove_if_same(&sessions, &session);
-        } else {
-            drop(inner);
-            // Ended (taken out of the map) already: nothing to keep.
-            let still_listed = sessions
-                .lock()
-                .unwrap()
-                .get(&session.id)
-                .is_some_and(|s| Arc::ptr_eq(s, &session));
-            if !still_listed {
-                return;
-            }
-            std::thread::sleep(EXITED_TTL);
-            let mut map = sessions.lock().unwrap();
-            if map
-                .get(&session.id)
-                .is_some_and(|s| Arc::ptr_eq(s, &session))
-            {
-                map.remove(&session.id);
-            }
+            return;
         }
+        // Ended (taken out of the map) already: nothing to keep.
+        let still_listed = sessions
+            .lock()
+            .unwrap()
+            .get(&session.id)
+            .is_some_and(|s| Arc::ptr_eq(s, &session));
+        if !still_listed {
+            return;
+        }
+        std::thread::sleep(EXITED_TTL);
+        remove_if_same(&sessions, &session);
     });
 }
