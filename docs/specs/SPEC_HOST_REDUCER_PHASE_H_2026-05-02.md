@@ -382,6 +382,8 @@ HostCommand::ConfirmDrained                          // pool empty + browsers em
 
 This is PR #651's idea, redesigned per the no-timer directive.
 
+> **2026-10-03:** the dormant H.6 implementation (never dispatched in production) was removed from `agentmux-cef` per `REPORT_REDUCER_STACK_AUDIT_2026_07_26.md` item 9; the design is kept here.
+
 ### State (already declared in H.0)
 
 `HostState.top_level_creation` with queue, in-flight slot, history.

@@ -100,8 +100,7 @@ pub struct TabRecord {
     /// go through the wcore-direct path (per
     /// `srv-phase-e4b-implementation-plan-2026-05-03.md` Phase 7);
     /// reducer arms mutate this field but no production code
-    /// dispatches to them yet — same "no-callers-yet" discipline H.6
-    /// follows in the host reducer.
+    /// dispatches to them yet.
     pub rootnode: Option<agentmux_common::LayoutNode>,
 }
 

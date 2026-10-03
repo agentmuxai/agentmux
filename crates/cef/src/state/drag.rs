@@ -30,3 +30,13 @@ pub struct DragSession {
     pub payload: DragPayload,
     pub started_at: u64,
 }
+
+/// Phase 4b — ghost state stored per target-window label during a floating-pane
+/// redock drag. The target renderer pushes `block_id + dir` when it shows the
+/// ghost overlay; the floater reads it at drop time to pass a directional hint
+/// to the `RedockFloatingPane` saga.
+#[derive(Clone, Debug)]
+pub struct FloatingRedockGhostState {
+    pub block_id: String,
+    pub dir: u8,
+}

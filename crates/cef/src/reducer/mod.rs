@@ -33,16 +33,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use cef::Browser;
 
 use crate::state::{
-    BrowserHandle, BrowserKind, CompletedCreation, CreationPhase, DragSession, EffectKind,
-    InFlightCreation, BrowserPaneEntry, BrowserPaneLifecycle, PanePoolState, PaneWindowState,
-    PendingWindowCreation, PoolState, QuitReason, QuitState, TopLevelCreationOutcome,
-    TopLevelCreationRequest, TopLevelCreationState, TopLevelSource, WindowPlacement,
+    BrowserHandle, BrowserKind, DragSession, BrowserPaneEntry, BrowserPaneLifecycle,
+    PanePoolState, PaneWindowState, PendingWindowCreation, PoolState, QuitReason, QuitState,
+    WindowPlacement,
 };
-
-/// Capacity of `TopLevelCreationState.history` ring buffer. Configurable
-/// via `~/.agentmux/config.toml [host.reducer]` once H.5 (config) lands;
-/// hard-coded for PR #1.
-pub(crate) const TOP_LEVEL_CREATION_HISTORY_CAP: usize = 50;
 
 /// Lifecycle phase of the host reducer. Mirrors the launcher and srv
 /// reducers' phase enum.
@@ -179,16 +173,6 @@ pub struct HostState {
     /// began before a host crash is still correctly open.
     pub background_unattended: bool,
 
-    /// H.6 — top-level window creation runner state (queue, in-flight,
-    /// history). Event-driven; no watchdog. **Currently DORMANT** — the
-    /// reducer arms (`EnqueueTopLevelWindow`, `TopLevelCallbackFired`,
-    /// etc.) exist but no production code dispatches to them. The
-    /// `ui_tasks::post_create_window` direct-call path is still
-    /// authoritative. Wire-up is a low-priority structural improvement;
-    /// see master spec §4.3 and discussion #707.
-    #[allow(dead_code)]
-    pub top_level_creation: TopLevelCreationState,
-
     /// Per-window opacity state. Keyed by label, value is clamped [0.0, 1.0].
     /// Absent means fully opaque (1.0). Mutated by `SetWindowOpacity`; read by
     /// `get_window_opacity` and the restore path in app-init. Win32 side-effect
@@ -243,7 +227,6 @@ impl Default for HostState {
             saw_live_user_window: false,
             background_service_enabled: std::env::var("AGENTMUX_BACKGROUND_SERVICE").is_ok(),
             background_unattended: false,
-            top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),
             pending_browser_pane_creates: HashMap::new(),
@@ -420,7 +403,7 @@ pub enum HostCommand {
 
     /// Pool window was destroyed before renderer-ready (e.g., user
     /// closed it externally during pre-warm). Remove from `unpromoted`,
-    /// clear `respawn_in_flight`. Reducer may emit a refill effect.
+    /// clear `respawn_in_flight`.
     PoolWindowDestroyedBeforePromote { label: String },
 
     /// Promote a pool window into a user-visible top-level. Removes from
@@ -497,29 +480,6 @@ pub enum HostCommand {
     /// nothing-to-close-but-maybe-drain arm. NOT a polling mechanism — never
     /// wire it into hot paths. SPEC_PILLAR2_SANITIZE_THEN_DECIDE §1.H.
     ReconcileQuit,
-
-    // ── H.6 — top-level window creation runner ──────────────────────────
-
-    /// Caller requests a top-level window. Reducer either:
-    /// - rejects (User-initiated + busy) with Error; caller propagates
-    ///   visible error to frontend.
-    /// - queues (Background) for later auto-advance.
-    /// - starts immediately (idle slot) and emits `Effect::PostCreateWindow`.
-    EnqueueTopLevelWindow { request: TopLevelCreationRequest },
-
-    /// CEF on_after_created fired for `label`. If matches in-flight,
-    /// mark Completed and advance queue. If doesn't match (orphan from
-    /// stale state), emit `Effect::CloseOrphanBrowser`.
-    TopLevelCallbackFired { label: String },
-
-    /// CEF on_render_process_terminated fired for the renderer process
-    /// associated with `label`. If matches in-flight, mark Failed and
-    /// advance queue.
-    TopLevelRendererTerminated { label: String, status: String },
-
-    /// CEF on_before_close fired for `label` while still in-flight.
-    /// User or external code closed the window mid-creation. Mark Failed.
-    TopLevelExternallyClosed { label: String },
 
     // ── Opacity ─────────────────────────────────────────────────────────────
 
@@ -676,24 +636,6 @@ impl std::fmt::Debug for HostCommand {
                 .finish(),
             HostCommand::ConfirmDrained => f.write_str("ConfirmDrained"),
             HostCommand::ReconcileQuit => f.write_str("ReconcileQuit"),
-            HostCommand::EnqueueTopLevelWindow { request } => f
-                .debug_struct("EnqueueTopLevelWindow")
-                .field("label", &request.label)
-                .field("source", &request.source)
-                .finish(),
-            HostCommand::TopLevelCallbackFired { label } => f
-                .debug_struct("TopLevelCallbackFired")
-                .field("label", label)
-                .finish(),
-            HostCommand::TopLevelRendererTerminated { label, status } => f
-                .debug_struct("TopLevelRendererTerminated")
-                .field("label", label)
-                .field("status", status)
-                .finish(),
-            HostCommand::TopLevelExternallyClosed { label } => f
-                .debug_struct("TopLevelExternallyClosed")
-                .field("label", label)
-                .finish(),
             HostCommand::SetWindowOpacity { label, opacity } => f
                 .debug_struct("SetWindowOpacity")
                 .field("label", label)
@@ -846,36 +788,6 @@ pub enum HostEvent {
     },
     QuitReady { version: u64 },
 
-    // ── H.6 — top-level creation events ─────────────────────────────────
-
-    TopLevelCreationRequested {
-        creation_id: u64,
-        source: TopLevelSource,
-        label: String,
-        version: u64,
-    },
-    TopLevelCreationStarted {
-        creation_id: u64,
-        label: String,
-        version: u64,
-    },
-    TopLevelCreationCompleted {
-        creation_id: u64,
-        label: String,
-        latency_ms: u64,
-        version: u64,
-    },
-    TopLevelCreationFailed {
-        creation_id: u64,
-        label: String,
-        outcome: TopLevelCreationOutcome,
-        version: u64,
-    },
-    TopLevelQueueLengthChanged {
-        len: usize,
-        version: u64,
-    },
-
     // ── Opacity events ──────────────────────────────────────────────────
 
     /// Opacity set successfully. IPC handler applies Win32 side-effect.
@@ -906,18 +818,6 @@ pub enum HostEvent {
     FloatingAlwaysOnTopChanged {
         label: String,
         on: bool,
-        version: u64,
-    },
-
-    // ── Effect carrier ──────────────────────────────────────────────────
-
-    /// Side-effect descriptor. The reducer emits these but never executes
-    /// them, and no executor exists yet: `AppState::host_dispatch` only
-    /// logs them (`log_host_event`), and the H.6 top-level commands that
-    /// emit them are not dispatched in production. See `EffectKind` for
-    /// variants.
-    Effect {
-        effect: EffectKind,
         version: u64,
     },
 
@@ -1103,7 +1003,6 @@ mod pane_window;
 mod panes;
 mod pool;
 mod quit;
-mod top_level;
 
 /// Shared with `AppState::count_live_user_windows` (the live last-window quit
 /// gate) so the count has a single definition. (`is_live_user_window` stays
@@ -1236,19 +1135,6 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         // Pure poke — no state change; the quit-relevant recomputation below
         // does the only work this command exists for.
         HostCommand::ReconcileQuit => DispatchOutput::default(),
-        // H.6 top-level runner
-        HostCommand::EnqueueTopLevelWindow { request } => {
-            top_level::handle_enqueue_top_level_window(state, request)
-        }
-        HostCommand::TopLevelCallbackFired { label } => {
-            top_level::handle_top_level_callback_fired(state, label)
-        }
-        HostCommand::TopLevelRendererTerminated { label, status } => {
-            top_level::handle_top_level_renderer_terminated(state, label, status)
-        }
-        HostCommand::TopLevelExternallyClosed { label } => {
-            top_level::handle_top_level_externally_closed(state, label)
-        }
         // Opacity
         HostCommand::SetWindowOpacity { label, opacity } => {
             handle_set_window_opacity(state, label, opacity)
@@ -1351,8 +1237,9 @@ fn handle_dequeue_pending_window_creation(state: &mut HostState) -> DispatchOutp
 //
 // All arms are pure: `&mut HostState` in, `DispatchOutput` (events) out.
 // No I/O, no async, no logging (logging happens in `state::log_host_event`
-// after dispatch returns). Reducer arms emit Effect events; no effect
-// executor exists yet, so `AppState::host_dispatch` only logs them.
+// after dispatch returns). Side effects are applied by the caller after
+// dispatch. The dormant H.6 `Effect` carrier and top-level creation runner
+// were removed (design: docs/specs/SPEC_HOST_REDUCER_PHASE_H_2026-05-02.md).
 // ─────────────────────────────────────────────────────────────────────────
 
 pub(super) fn emit_error(state: &mut HostState, message: String) -> DispatchOutput {

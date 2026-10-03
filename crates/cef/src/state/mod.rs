@@ -14,24 +14,19 @@ mod browser_pane;
 mod browser_handle;
 mod pool;
 mod quit;
-mod top_level_creation;
 mod pending_reproject;
 mod promote_liveness;
 mod ui_thread_gate;
 
-pub use drag::{DragType, DragPayload, DragSession};
+pub use drag::{DragType, DragPayload, DragSession, FloatingRedockGhostState};
 pub use window_meta::{WindowKind, WindowMeta, PendingWindowCreation};
 pub use browser_pane::{
     BrowserPaneLifecycle, BrowserPaneEntry, PaneRect, WindowPlacement, PaneWindowState,
+    PendingBrowserPaneCreate,
 };
 pub use browser_handle::{BrowserHandle, BrowserKind};
 pub use pool::{PoolState, PanePoolState};
 pub use quit::{QuitState, QuitReason};
-pub use top_level_creation::{
-    TopLevelCreationRequest, TopLevelSource, InFlightCreation, CreationPhase,
-    CompletedCreation, TopLevelCreationOutcome, TopLevelCreationState, EffectKind,
-    PendingBrowserPaneCreate, FloatingRedockGhostState,
-};
 pub use pending_reproject::PendingReprojectClosures;
 pub use promote_liveness::{
     PromoteLivenessWatches, should_open_fallback, PROMOTE_LIVENESS_TIMEOUT,
@@ -1592,38 +1587,6 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             version,
             "[host-reducer] drain complete; host quitting",
         ),
-        // ── H.6 top-level runner ─────────────────────────────────────────
-        HostEvent::TopLevelCreationRequested {
-            creation_id, source, label, version,
-        } => tracing::info!(
-            target: "host-reducer",
-            event = "TopLevelCreationRequested",
-            creation_id, source = ?source, label = %label, version,
-        ),
-        HostEvent::TopLevelCreationStarted { creation_id, label, version } => tracing::info!(
-            target: "host-reducer",
-            event = "TopLevelCreationStarted",
-            creation_id, label = %label, version,
-        ),
-        HostEvent::TopLevelCreationCompleted {
-            creation_id, label, latency_ms, version,
-        } => tracing::info!(
-            target: "host-reducer",
-            event = "TopLevelCreationCompleted",
-            creation_id, label = %label, latency_ms, version,
-        ),
-        HostEvent::TopLevelCreationFailed {
-            creation_id, label, outcome, version,
-        } => tracing::error!(
-            target: "host-reducer",
-            event = "TopLevelCreationFailed",
-            creation_id, label = %label, outcome = ?outcome, version,
-        ),
-        HostEvent::TopLevelQueueLengthChanged { len, version } => tracing::debug!(
-            target: "host-reducer",
-            event = "TopLevelQueueLengthChanged",
-            len, version,
-        ),
         // ── Opacity ──────────────────────────────────────────────────────
         HostEvent::WindowOpacityApplied { label, opacity, version } => tracing::debug!(
             target: "host-reducer",
@@ -1650,12 +1613,6 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             label = %label,
             on,
             version,
-        ),
-        // ── Effect carrier ───────────────────────────────────────────────
-        HostEvent::Effect { effect, version } => tracing::debug!(
-            target: "host-reducer",
-            event = "Effect",
-            effect = ?effect, version,
         ),
         HostEvent::Error { message, version } => tracing::warn!(
             target: "host-reducer",
