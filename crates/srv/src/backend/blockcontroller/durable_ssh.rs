@@ -133,6 +133,16 @@ pub fn accept(expected: u64, offset: u64, len: usize) -> Accept {
     }
 }
 
+/// A session id as the helper accepts it: letters, digits, `-` and `_`, up to
+/// 64 (`agentmux-remote`'s `daemon::valid_session_id`).
+pub fn valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Where the helper is installed on the host: a versioned path, so two
 /// AgentMux versions can use one host (spec §6.2). `~` is the remote home.
 pub fn helper_path() -> String {
@@ -233,8 +243,11 @@ impl DurableSshController {
 
     /// The pane's session id, made and recorded on first start.
     fn session_id(&self, meta: &MetaMapType) -> String {
+        // Restored, imported or edited meta may hold anything; this id goes
+        // into a command the remote shell parses, so only the helper's own
+        // grammar is used, and anything else is replaced with a fresh id.
         let existing = obj::meta_get_string(meta, META_KEY_SESSION_ID, "");
-        if !existing.is_empty() {
+        if valid_session_id(&existing) {
             return existing;
         }
         let id = format!("amx-{}", uuid::Uuid::new_v4().simple());
@@ -462,6 +475,59 @@ impl Controller for DurableSshController {
     }
 }
 
+/// Append to the pane's `term` file, then tell the frontend where the bytes
+/// landed (the same `blockfile` append event a PTY's output produces). Unlike
+/// the PTY path's `handle_append_block_file`, which logs and swallows a store
+/// error, this says whether the bytes were stored, so the remote offset never
+/// moves past output that was lost.
+fn append_checked(broker: &mps::Broker, fs: &FileStore, block_id: &str, data: &[u8]) -> bool {
+    use base64::Engine;
+    match fs.stat(block_id, "term") {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            if let Err(e) = fs.make_file(
+                block_id,
+                "term",
+                std::collections::HashMap::new(),
+                crate::backend::storage::filestore::FileOpts::default(),
+            ) {
+                if !matches!(e, crate::backend::storage::error::StoreError::AlreadyExists) {
+                    tracing::warn!(block_id = %block_id, error = %e, "durable ssh: could not create term");
+                    return false;
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(block_id = %block_id, error = %e, "durable ssh: term stat failed");
+            return false;
+        }
+    }
+    let start = match fs.append_data_at(block_id, "term", data) {
+        Ok(start) => start.max(0) as u64,
+        Err(e) => {
+            tracing::warn!(block_id = %block_id, error = %e, "durable ssh: term append failed");
+            return false;
+        }
+    };
+    let event_data = mps::WSFileEventData {
+        zoneid: block_id.to_string(),
+        filename: "term".to_string(),
+        fileop: mps::FILE_OP_APPEND.to_string(),
+        data64: base64::engine::general_purpose::STANDARD.encode(data),
+        offset: Some(start),
+        pos: Vec::new(),
+        echo: None,
+    };
+    broker.publish(mps::MuxEvent {
+        event: mps::EVENT_BLOCK_FILE.to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 0,
+        data: serde_json::to_value(&event_data).ok(),
+    });
+    true
+}
+
 /// One durable pane's connection loop.
 struct Run {
     block_id: String,
@@ -504,6 +570,7 @@ impl Run {
     ) -> Option<i32> {
         let mut attempt = 0u32;
         let mut noted_drop = false;
+        let mut installed_once = false;
         loop {
             let how = *leave_rx.borrow();
             if how != Leave::Stay {
@@ -531,14 +598,29 @@ impl Run {
                     stderr,
                 } => {
                     if !attached && code == Some(EXIT_COMMAND_NOT_FOUND) {
-                        self.note(&format!(
-                            "AgentMux's helper is not installed on {} ({}), so this pane cannot be durable. \
-                             Turn off term:durable for a plain SSH terminal.",
-                            self.conn,
-                            helper_path()
-                        ))
-                        .await;
-                        return Some(EXIT_COMMAND_NOT_FOUND);
+                        // No helper on the host (yet): install it once, then
+                        // attach again; a failed install stops the pane.
+                        if installed_once {
+                            self.note(&format!(
+                                "AgentMux's helper still is not runnable on {} ({}).",
+                                self.conn,
+                                helper_path()
+                            ))
+                            .await;
+                            return Some(EXIT_COMMAND_NOT_FOUND);
+                        }
+                        installed_once = true;
+                        match self.install_helper().await {
+                            Ok(()) => continue,
+                            Err(e) => {
+                                self.note(&format!(
+                                    "Could not install AgentMux's helper on {}: {e}. Turn off \"Keep Session Alive\" for a plain SSH terminal.",
+                                    self.conn
+                                ))
+                                .await;
+                                return Some(EXIT_COMMAND_NOT_FOUND);
+                            }
+                        }
                     }
                     if attached {
                         attempt = 0;
@@ -579,21 +661,10 @@ impl Run {
         use crate::backend::remote::{ssh, status};
         let mut expected = self.read_offset();
         let remote = attach_command(&self.session, expected, self.size.0, self.size.1);
-        // No terminal on the remote side: frames, not a session, go over it.
-        let mut args = ssh::launch(&self.dest, &remote, &[], "", self.control_dir.as_deref());
-        args[0] = "-T".to_string();
-        let mut cmd = tokio::process::Command::new(&self.ssh_path);
-        cmd.args(&args)
-            .stdin(std::process::Stdio::piped())
+        let mut cmd = self.ssh_command(&remote);
+        cmd.stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true);
-        #[cfg(windows)]
-        {
-            use agentmux_common::win32::NoWindow;
-            cmd.no_window();
-        }
-        crate::backend::pane_env::sanitize_process_command(&mut cmd);
+            .stderr(std::process::Stdio::piped());
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -639,6 +710,7 @@ impl Run {
                     last_heard = tokio::time::Instant::now();
                     let Ok(frames) = decoder.push(&buf[..n]) else { break None };
                     let mut exited: Option<i32> = None;
+                    let mut store_failed = false;
                     for frame in frames {
                         match frame {
                             Frame::Hello { created, .. } => {
@@ -652,14 +724,23 @@ impl Run {
                             }
                             Frame::Output { offset, data } => match accept(expected, offset, data.len()) {
                                 Accept::Seen => {}
+                                // The offset moves only past bytes that were
+                                // stored: a failed write drops this ssh, and the
+                                // reattach asks for them again.
                                 Accept::Append { skip, next } => {
-                                    self.append(data[skip..].to_vec()).await;
+                                    if !self.append(data[skip..].to_vec()).await {
+                                        store_failed = true;
+                                        break;
+                                    }
                                     expected = next;
                                     self.write_offset(next);
                                 }
                                 Accept::Gap { from, to, next } => {
                                     self.note(&format!("{} bytes of output were lost while detached.", to - from)).await;
-                                    self.append(data).await;
+                                    if !self.append(data).await {
+                                        store_failed = true;
+                                        break;
+                                    }
                                     expected = next;
                                     self.write_offset(next);
                                 }
@@ -680,6 +761,9 @@ impl Run {
                             let _ = child.kill().await;
                             return Ended::Exited(code);
                         }
+                    }
+                    if store_failed {
+                        break None;
                     }
                 }
                 frame = input_rx.recv() => {
@@ -752,29 +836,116 @@ impl Run {
     /// running there with nothing able to reach it. Best effort, bounded.
     async fn end_remote(&self) {
         let remote = format!("{} end --session {}", helper_path(), self.session);
+        let mut cmd = self.ssh_command(&remote);
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        if let Ok(mut child) = cmd.spawn() {
+            let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
+        }
+    }
+
+    /// `ssh -T ... -- <host> <remote>`: no terminal on the remote side
+    /// (frames or a script's output, not a session, go over it). The one place
+    /// this pane runs ssh; the caller sets its stdio.
+    fn ssh_command(&self, remote: &str) -> tokio::process::Command {
         let mut args = crate::backend::remote::ssh::launch(
             &self.dest,
-            &remote,
+            remote,
             &[],
             "",
             self.control_dir.as_deref(),
         );
         args[0] = "-T".to_string();
         let mut cmd = tokio::process::Command::new(&self.ssh_path);
-        cmd.args(&args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true);
+        cmd.args(&args).kill_on_drop(true);
         #[cfg(windows)]
         {
             use agentmux_common::win32::NoWindow;
             cmd.no_window();
         }
         crate::backend::pane_env::sanitize_process_command(&mut cmd);
-        if let Ok(mut child) = cmd.spawn() {
-            let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
+        cmd
+    }
+
+    /// Run `remote` over ssh with `input` on its stdin; its exit code and
+    /// output. Bounded: an install step never hangs the pane.
+    async fn ssh_run(
+        &self,
+        remote: &str,
+        input: Option<Vec<u8>>,
+    ) -> Result<(Option<i32>, String), String> {
+        let mut cmd = self.ssh_command(remote);
+        cmd.stdin(if input.is_some() {
+            std::process::Stdio::piped()
+        } else {
+            std::process::Stdio::null()
+        })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| format!("could not run ssh: {e}"))?;
+        if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+            stdin
+                .write_all(&bytes)
+                .await
+                .map_err(|e| format!("upload: {e}"))?;
+            drop(stdin);
         }
+        let out = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output())
+            .await
+            .map_err(|_| "ssh took too long".to_string())?
+            .map_err(|e| format!("ssh: {e}"))?;
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(err
+                .lines()
+                .last()
+                .unwrap_or("ssh failed")
+                .trim()
+                .to_string());
+        }
+        Ok((out.status.code(), text))
+    }
+
+    /// Put this version's helper on the host (spec §6.2): probe the
+    /// platform, get the matching build (checked against the release's
+    /// hashes), upload it over this ssh, check its hash there, move it in.
+    async fn install_helper(&self) -> Result<(), String> {
+        use crate::backend::remote::helper_install as hi;
+        let version = env!("CARGO_PKG_VERSION");
+        let (_, out) = self.ssh_run(&hi::probe_command(version), None).await?;
+        let probe = hi::parse_probe(&out, version);
+        if probe.installed {
+            return Ok(());
+        }
+        let target = hi::target_for(&probe.uname).ok_or_else(|| {
+            format!(
+                "AgentMux has no helper build for this host ({})",
+                probe.uname.trim()
+            )
+        })?;
+        let cache = crate::backend::base::get_mux_config_dir().join("remote-helper");
+        let (bytes, hash) =
+            hi::local_build(version, target, &cache, &reqwest::Client::new()).await?;
+        self.note(&format!(
+            "Installing AgentMux's helper on {} ({} KB, in ~/.agentmux-remote) so this pane can stay alive…",
+            self.conn,
+            bytes.len() / 1024
+        ))
+        .await;
+        self.ssh_run(&hi::upload_command(version), Some(bytes))
+            .await?;
+        let (_, out) = self
+            .ssh_run(&hi::install_command(version, &hash), None)
+            .await?;
+        if out.trim() != "ok" {
+            return Err(format!(
+                "the uploaded helper did not check out on the host ({})",
+                out.trim()
+            ));
+        }
+        Ok(())
     }
 
     fn read_offset(&self) -> u64 {
@@ -796,27 +967,20 @@ impl Run {
     }
 
     /// Append to the pane's terminal, exactly as a PTY's output is appended.
-    async fn append(&self, data: Vec<u8>) {
-        let Some(broker) = self.broker.clone() else {
-            return;
+    async fn append(&self, data: Vec<u8>) -> bool {
+        let (Some(broker), Some(fs)) = (self.broker.clone(), self.filestore.clone()) else {
+            return false;
         };
-        let (block_id, filestore) = (self.block_id.clone(), self.filestore.clone());
-        let _ = tokio::task::spawn_blocking(move || {
-            super::shell::handle_append_block_file(
-                &broker,
-                &block_id,
-                "term",
-                &data,
-                filestore.as_ref(),
-                None,
-            );
-        })
-        .await;
+        let block_id = self.block_id.clone();
+        tokio::task::spawn_blocking(move || append_checked(&broker, &fs, &block_id, &data))
+            .await
+            .unwrap_or(false)
     }
 
     /// A line from AgentMux in the pane, dimmed, on its own line.
     async fn note(&self, text: &str) {
-        self.append(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").into_bytes())
+        let _ = self
+            .append(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").into_bytes())
             .await;
     }
 }
@@ -824,6 +988,20 @@ impl Run {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_helper_session_id_reaches_a_command_line() {
+        assert!(valid_session_id("amx-0123abcd") && valid_session_id("a_b-C"));
+        for bad in [
+            "",
+            "bad/id; touch /tmp/pwn",
+            "a b",
+            "$(id)",
+            &"x".repeat(65),
+        ] {
+            assert!(!valid_session_id(bad), "{bad:?}");
+        }
+    }
 
     #[test]
     fn reconnecting_backs_off_and_never_stops() {
@@ -1011,11 +1189,23 @@ sys.exit(0 if remote[1] == 'end' else 255)
         std::fs::write(&script, FAKE_SSH_DOWN).unwrap();
         let ssh_path = if cfg!(windows) {
             let cmd = dir.path().join("fake_ssh_down.cmd");
-            std::fs::write(&cmd, format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display())).unwrap();
+            std::fs::write(
+                &cmd,
+                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
+            )
+            .unwrap();
             cmd
         } else {
             let sh = dir.path().join("fake_ssh_down");
-            std::fs::write(&sh, format!("#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n", python.display(), script.display())).unwrap();
+            std::fs::write(
+                &sh,
+                format!(
+                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
+                    python.display(),
+                    script.display()
+                ),
+            )
+            .unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -1030,7 +1220,10 @@ sys.exit(0 if remote[1] == 'end' else 255)
         let run = Run {
             block_id: "durable-down-block".to_string(),
             conn: "downhost".to_string(),
-            dest: SshDest { destination: "downhost".to_string(), port: None },
+            dest: SshDest {
+                destination: "downhost".to_string(),
+                port: None,
+            },
             ssh_path,
             control_dir: None,
             session: "amx-down".to_string(),
@@ -1044,11 +1237,115 @@ sys.exit(0 if remote[1] == 'end' else 255)
         // Let it fail an attach and start backing off, then close the pane.
         tokio::time::sleep(Duration::from_millis(1500)).await;
         leave_tx.send(Leave::End).unwrap();
-        let ended = tokio::time::timeout(Duration::from_secs(20), task).await.expect("the run ends").unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(20), task)
+            .await
+            .expect("the run ends")
+            .unwrap();
         assert_eq!(ended, None, "closed, not the session's own end");
         let calls = std::fs::read_to_string(&log).unwrap();
         assert!(calls.lines().any(|l| l.starts_with("attach")), "{calls:?}");
-        assert_eq!(calls.lines().last(), Some("end --session"), "the last ssh ends the session: {calls:?}");
+        assert_eq!(
+            calls.lines().last(),
+            Some("end --session"),
+            "the last ssh ends the session: {calls:?}"
+        );
+    }
+
+    /// A host without the helper: attach fails with 127 until the helper is
+    /// installed; the probe, upload and install steps behave as on a real
+    /// host, the install step checking the uploaded file's hash itself.
+    const FAKE_SSH_FRESH_HOST: &str = r#"
+import hashlib, os, struct, sys
+remote = sys.argv[-1]
+d = os.environ['FAKE_HOST_DIR']
+log = open(os.path.join(d, 'log'), 'ab', buffering=0)
+helper = os.path.join(d, 'helper')
+if remote.startswith('sh -c') and 'uname -sm' in remote:
+    log.write(b'probe\n')
+    sys.stdout.write('Linux x86_64\n')
+elif remote.startswith('sh -c') and 'cat >' in remote:
+    log.write(b'upload\n')
+    open(helper + '.tmp', 'wb').write(sys.stdin.buffer.read())
+elif remote.startswith('sh -c') and 'mv -f' in remote:
+    log.write(b'install\n')
+    got = hashlib.sha256(open(helper + '.tmp', 'rb').read()).hexdigest()
+    if got in remote:
+        os.replace(helper + '.tmp', helper)
+        sys.stdout.write('ok\n')
+    else:
+        sys.stdout.write('mismatch ' + got + '\n')
+elif ' attach ' in remote:
+    if not os.path.exists(helper):
+        log.write(b'attach-missing\n')
+        sys.exit(127)
+    log.write(b'attach\n')
+    out = sys.stdout.buffer
+    def frame(kind, payload):
+        out.write(struct.pack('>BI', kind, len(payload)) + payload)
+        out.flush()
+    frame(14, struct.pack('>Q', 0) + bytes([1]) + b'amx-fresh')
+    frame(10, struct.pack('>Q', 0) + b'ready\r\n')
+    frame(12, struct.pack('>i', 0))
+    import time; time.sleep(5)
+"#;
+
+    /// A first durable pane on a host without the helper installs it (probe,
+    /// upload, hash-checked install) and then attaches.
+    #[tokio::test]
+    async fn a_host_without_the_helper_gets_it_installed_then_attaches() {
+        let Some(python) = python() else {
+            eprintln!("skipped: no python to stand in for ssh");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake_ssh_fresh.py");
+        std::fs::write(&script, FAKE_SSH_FRESH_HOST).unwrap();
+        let ssh_path = if cfg!(windows) {
+            let cmd = dir.path().join("fake_ssh_fresh.cmd");
+            std::fs::write(&cmd, format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display())).unwrap();
+            cmd
+        } else {
+            let sh = dir.path().join("fake_ssh_fresh");
+            std::fs::write(&sh, format!("#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n", python.display(), script.display())).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            sh
+        };
+        std::env::set_var("FAKE_HOST_DIR", dir.path());
+        // The "release" build, from a local folder.
+        let builds = dir.path().join("builds");
+        std::fs::create_dir_all(&builds).unwrap();
+        let name = crate::backend::remote::helper_install::asset_name(env!("CARGO_PKG_VERSION"), "x86_64-unknown-linux-musl");
+        std::fs::write(builds.join(name), b"the helper").unwrap();
+        std::env::set_var("AGENTMUX_REMOTE_HELPER_DIR", &builds);
+
+        let state = crate::server::tests::test_state();
+        let run = Run {
+            block_id: "durable-fresh-block".to_string(),
+            conn: "freshhost".to_string(),
+            dest: SshDest { destination: "freshhost".to_string(), port: None },
+            ssh_path,
+            control_dir: None,
+            session: "amx-fresh".to_string(),
+            size: (80, 24),
+            broker: Some(state.broker.clone()),
+            filestore: Some(state.filestore.clone()),
+        };
+        let (_input_tx, input_rx) = mpsc::unbounded_channel();
+        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        let ended = tokio::time::timeout(Duration::from_secs(30), run.run(input_rx, leave_rx))
+            .await
+            .expect("the run ends");
+        std::env::remove_var("AGENTMUX_REMOTE_HELPER_DIR");
+        assert_eq!(ended, Some(0));
+        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
+        assert_eq!(log, "attach-missing\nprobe\nupload\ninstall\nattach\n");
+        let term = state.filestore.read_file("durable-fresh-block", "term").unwrap().unwrap();
+        let text = String::from_utf8_lossy(&term).into_owned();
+        assert!(text.contains("Installing AgentMux's helper on freshhost") && text.contains("ready"), "{text:?}");
     }
 
     #[test]
