@@ -371,7 +371,20 @@ impl Controller for DurableSshController {
     /// A forced restart or a connection change: detach, so the session is
     /// still there if this pane comes back to it.
     fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
-        self.leave(Leave::Detach);
+        // Durable turned off (or the connection changed away from SSH): the
+        // pane will not come back to this session, so end it rather than
+        // leave a shell running on the host that nothing can reach.
+        let still_durable = self
+            .mstore
+            .as_ref()
+            .and_then(|s| s.get::<obj::Block>(&self.block_id).ok().flatten())
+            .map(|b| wants(&b.meta))
+            .unwrap_or(true);
+        self.leave(if still_durable {
+            Leave::Detach
+        } else {
+            Leave::End
+        });
         let mut inner = self.inner.lock().unwrap();
         inner.status = new_status.to_string();
         inner.version += 1;
@@ -428,6 +441,8 @@ impl Controller for DurableSshController {
                 rows: ts.rows.clamp(1, 1000) as u16,
             });
         }
+        // A signal from the pane (restart, kill) ends the remote session; the
+        // run then finishes and the pane offers a restart (Ended::EndedHere).
         if input.sig_name.is_some() {
             let _ = tx.send(Frame::End);
         }
@@ -465,8 +480,10 @@ struct Run {
 enum Ended {
     /// The session's shell exited with this code.
     Exited(i32),
-    /// The pane left (detach or end).
+    /// The pane left (detach or end) because it was stopped or closed.
     Left,
+    /// The pane's own input ended the session (a signal).
+    EndedHere,
     /// The link dropped or stalled: `ssh`'s exit code, and whether it reached
     /// the session at all.
     Dropped {
@@ -488,7 +505,11 @@ impl Run {
         let mut attempt = 0u32;
         let mut noted_drop = false;
         loop {
-            if *leave_rx.borrow() != Leave::Stay {
+            let how = *leave_rx.borrow();
+            if how != Leave::Stay {
+                if how == Leave::End {
+                    self.end_remote().await;
+                }
                 return None;
             }
             // Keystrokes typed while disconnected are not replayed into a
@@ -501,6 +522,9 @@ impl Run {
             match self.attach_once(&mut input_rx, &mut leave_rx).await {
                 Ended::Exited(code) => return Some(code),
                 Ended::Left => return None,
+                // The pane itself ended the session (a signal): it is over,
+                // and the pane offers a restart.
+                Ended::EndedHere => return Some(-1),
                 Ended::Dropped {
                     code,
                     attached,
@@ -538,7 +562,9 @@ impl Run {
                     attempt = attempt.saturating_add(1);
                     tokio::select! {
                         _ = tokio::time::sleep(wait) => {}
-                        _ = leave_rx.changed() => return None,
+                        // The top of the loop sees the leave and acts on it
+                        // (ending the session if asked), connected or not.
+                        _ = leave_rx.changed() => {}
                     }
                 }
             }
@@ -602,6 +628,7 @@ impl Run {
         let mut decoder = Decoder::new();
         let mut buf = vec![0u8; 64 * 1024];
         let mut attached = false;
+        let mut ended_here = false;
         let mut last_heard = tokio::time::Instant::now();
         let mut ping = tokio::time::interval(PING_EVERY);
         ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -656,7 +683,12 @@ impl Run {
                     }
                 }
                 frame = input_rx.recv() => {
-                    let Some(frame) = frame else { break Some(Leave::Detach) };
+                    let Some(frame) = frame else {
+                        // stop/shutdown drop the input after asking to leave:
+                        // keep what they asked (End on close), never assume.
+                        let how = *leave_rx.borrow();
+                        break Some(if how == Leave::Stay { Leave::Detach } else { how });
+                    };
                     if let Frame::Resize { cols, rows } = frame {
                         self.size = (cols, rows);
                     }
@@ -665,6 +697,7 @@ impl Run {
                         break None;
                     }
                     if end {
+                        ended_here = true;
                         break Some(Leave::End);
                     }
                 }
@@ -698,7 +731,11 @@ impl Run {
             let _ = stdin.shutdown().await;
             let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
             let _ = child.kill().await;
-            return Ended::Left;
+            return if ended_here {
+                Ended::EndedHere
+            } else {
+                Ended::Left
+            };
         }
         let _ = child.kill().await;
         let code = child.wait().await.ok().and_then(|s| s.code());
@@ -707,6 +744,36 @@ impl Run {
             code,
             attached,
             stderr,
+        }
+    }
+
+    /// End the session on the host with one short `ssh` (`agentmux-remote
+    /// end`): a pane closed while disconnected must not leave its shell
+    /// running there with nothing able to reach it. Best effort, bounded.
+    async fn end_remote(&self) {
+        let remote = format!("{} end --session {}", helper_path(), self.session);
+        let mut args = crate::backend::remote::ssh::launch(
+            &self.dest,
+            &remote,
+            &[],
+            "",
+            self.control_dir.as_deref(),
+        );
+        args[0] = "-T".to_string();
+        let mut cmd = tokio::process::Command::new(&self.ssh_path);
+        cmd.args(&args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        {
+            use agentmux_common::win32::NoWindow;
+            cmd.no_window();
+        }
+        crate::backend::pane_env::sanitize_process_command(&mut cmd);
+        if let Ok(mut child) = cmd.spawn() {
+            let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
         }
     }
 
@@ -919,6 +986,69 @@ time.sleep(5)
             .get(FILE_META_REMOTE_OFFSET)
             .cloned();
         assert_eq!(offset, Some(serde_json::json!(14)));
+    }
+
+    /// Every attach fails (the host is unreachable); `end` is logged.
+    const FAKE_SSH_DOWN: &str = r#"
+import os, sys
+remote = sys.argv[-1].split()
+with open(os.environ['FAKE_SSH_LOG2'], 'ab') as log:
+    log.write((' '.join(remote[1:3]) + '\n').encode())
+sys.exit(0 if remote[1] == 'end' else 255)
+"#;
+
+    /// A pane closed while its host is unreachable still ends its session
+    /// there (one `agentmux-remote end`), rather than leaving the shell
+    /// running with nothing able to reach it.
+    #[tokio::test]
+    async fn closing_while_disconnected_still_ends_the_session() {
+        let Some(python) = python() else {
+            eprintln!("skipped: no python to stand in for ssh");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake_ssh_down.py");
+        std::fs::write(&script, FAKE_SSH_DOWN).unwrap();
+        let ssh_path = if cfg!(windows) {
+            let cmd = dir.path().join("fake_ssh_down.cmd");
+            std::fs::write(&cmd, format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display())).unwrap();
+            cmd
+        } else {
+            let sh = dir.path().join("fake_ssh_down");
+            std::fs::write(&sh, format!("#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n", python.display(), script.display())).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            sh
+        };
+        let log = dir.path().join("log2");
+        std::env::set_var("FAKE_SSH_LOG2", &log);
+
+        let state = crate::server::tests::test_state();
+        let run = Run {
+            block_id: "durable-down-block".to_string(),
+            conn: "downhost".to_string(),
+            dest: SshDest { destination: "downhost".to_string(), port: None },
+            ssh_path,
+            control_dir: None,
+            session: "amx-down".to_string(),
+            size: (80, 24),
+            broker: Some(state.broker.clone()),
+            filestore: Some(state.filestore.clone()),
+        };
+        let (_input_tx, input_rx) = mpsc::unbounded_channel();
+        let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        let task = tokio::spawn(run.run(input_rx, leave_rx));
+        // Let it fail an attach and start backing off, then close the pane.
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        leave_tx.send(Leave::End).unwrap();
+        let ended = tokio::time::timeout(Duration::from_secs(20), task).await.expect("the run ends").unwrap();
+        assert_eq!(ended, None, "closed, not the session's own end");
+        let calls = std::fs::read_to_string(&log).unwrap();
+        assert!(calls.lines().any(|l| l.starts_with("attach")), "{calls:?}");
+        assert_eq!(calls.lines().last(), Some("end --session"), "the last ssh ends the session: {calls:?}");
     }
 
     #[test]

@@ -132,7 +132,12 @@ export function buildSettingsMenuItems(model: TermViewModel): ContextMenuItem[] 
             type: "checkbox",
             checked: durable,
             click: () => {
-                void model.setMeta({ "term:durable": durable ? null : true }).then(() => model.forceRestartController());
+                // Off: forget the session too; srv ends it on the restart
+                // (a pane that is no longer durable never comes back to it).
+                const patch: MetaType = durable
+                    ? { "term:durable": null, "remote:session_id": null }
+                    : { "term:durable": true };
+                void model.setMeta(patch).then(() => model.forceRestartController());
             },
         });
     }
