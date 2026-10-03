@@ -1,6 +1,7 @@
 # REPORT — What Wave Terminal has that AgentMux doesn't, and what is worth bringing over
 
 **Date:** 2026-10-02
+**Status:** analysis — a comparison and recommendations; the remote terminals item is planned in `docs/specs/SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md`.
 **Author:** AgentX (narko)
 **Trigger:** Owner request: "take a look at https://docs.waveterm.dev/ .. we want to get some of the more innovative features into agentmux, like secrets. can you get the best stuff that isnt currently inside agentmux."
 **Method:** Read the Wave docs (home, secrets, durable sessions, connections, Wave AI, AI modes / BYOK, Claude Code integration, wsh reference, widgets, custom widgets, tabs, workspaces, keybindings, release notes v0.12.3 to v0.14.5). Checked each feature against AgentMux's code on `main` at `9d206f9d7` (srv, cef, mcp, frontend, specs). AgentMux descends from Wave, so several Wave-era leftovers exist in config types or services with nothing wired to them; those are called out as such, not as features.
