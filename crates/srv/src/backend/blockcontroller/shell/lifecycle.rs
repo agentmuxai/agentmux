@@ -2334,7 +2334,8 @@ mod flush_barrier_tests {
     /// Uses the real flusher with no broker, which makes it return
     /// immediately and close the channel — so this asserts the OTHER half:
     /// that a gone flusher resolves rather than hanging (see below). The
-    /// ordering itself is asserted by `barrier_resolves_only_after_the_batch`.
+    /// ordering itself is asserted by
+    /// `barrier_does_not_resolve_until_prior_output_is_committed`.
     #[tokio::test]
     async fn a_gone_flusher_resolves_the_barrier_instead_of_hanging() {
         let (tx, rx) = tokio::sync::mpsc::channel::<PtyReadChunk>(PTY_CHANNEL_CAPACITY);

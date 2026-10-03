@@ -624,8 +624,11 @@ pub fn is_effectively_minimized(node: &LayoutNode) -> bool {
 /// `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`): snap every
 /// locked node's `size` back to its recorded `minimizedLockedSize`,
 /// returning the delta to the nearest unlocked sibling (next preferred,
-/// then previous) so the parent's flex-unit budget is conserved. Mirrors
-/// `enforceMinimizedLocks` in `frontend/layout/lib/layoutMinimize.ts`.
+/// then previous) so the parent's flex-unit budget is conserved. It no
+/// longer has a frontend twin: since minimize became a display mode (#2197)
+/// the frontend drops `minimizedLockedSize` when it loads a tree
+/// (`rebuildMinimizedSet` in `frontend/layout/lib/layoutMinimize.ts`), so
+/// only a tree that pass has not migrated yet carries a size to snap to.
 /// Returns the number of snapped nodes (0 = tree already honored the locks
 /// — the common case, cheap to call unconditionally on every write).
 ///

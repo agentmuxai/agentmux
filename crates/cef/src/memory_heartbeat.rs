@@ -47,10 +47,11 @@ pub fn phys_total_mb() -> u64 {
 }
 
 /// On-demand synchronous probe of system commit-free (available page file), in
-/// MB. ~microsecond cost (a single `GlobalMemoryStatusEx`). Republishes the
-/// atomic so `last_commit_free_mb()` stays fresh. On non-Windows returns
-/// `u64::MAX` — commit-limit exhaustion is a Windows concern here and the
-/// recovery gate degrades to "always treat as ample" elsewhere.
+/// MB. ~microsecond cost (a single `GlobalMemoryStatusEx`). Republishes
+/// `COMMIT_FREE_MB`/`COMMIT_TOTAL_MB`, so `commit_total_mb()` and the cached
+/// reading this falls back to if the call fails stay fresh. On non-Windows
+/// returns `u64::MAX` — commit-limit exhaustion is a Windows concern here and
+/// the recovery gate degrades to "always treat as ample" elsewhere.
 #[cfg(target_os = "windows")]
 pub fn commit_free_mb() -> u64 {
     use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};

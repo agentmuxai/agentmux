@@ -12,8 +12,9 @@
 //!
 //! The reseed decision (§3.3 of the spec above) is ownership-based, not a
 //! field diff like `agent_seed.rs`'s own `reseed_if_needed`: a human can
-//! edit an Operator Config entry today via the unified Armory
-//! `MemoryEditor`, and the *entire* value of an entry is its content, so
+//! edit an Operator Config entry today via the Armory's Global Memory
+//! editor (`GlobalMemoryFullView`), and the *entire* value of an entry is
+//! its content, so
 //! there is no separate "identity field" to diff against safely. Instead
 //! `Store::bundle_reseed_system_if_owned` looks at the latest `db_bundle_
 //! versions` row for each manifest id — if `written_by` is this module's

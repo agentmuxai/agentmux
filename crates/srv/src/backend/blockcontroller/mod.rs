@@ -300,7 +300,7 @@ pub trait Controller: Send + Sync {
     /// This block's own live, spawn-time-captured jekt/muxbus identity, if
     /// it has one — an independent source of truth for the recipient-
     /// identity check in `ReactiveHandler::inject_message_inner`, deliberately
-    /// NOT derived from `ReactiveHandler`'s own `agent_to_block`/`agent_info`
+    /// NOT derived from `ReactiveHandler`'s own `name_to_blocks`/`agent_info`
     /// maps (checking a registry against itself would be a tautology and
     /// catch nothing). Default `None` for controller types that aren't
     /// jekt-addressable at all (e.g. plain terminals) — only `ShellController`
@@ -324,8 +324,8 @@ pub trait Controller: Send + Sync {
     /// `ReactiveHandler::register_agent`/`register_agent_with_nonce`
     /// (re-)registers THIS block's block_id under a (possibly different)
     /// agent_id, so the two independently-written copies never drift apart
-    /// (reagentx P1 on #2697: `agent_id()` was captured once at spawn and
-    /// never refreshed, while `agent_to_block` gets re-keyed on every
+    /// (#2697: `agent_id()` was captured once at spawn and never
+    /// refreshed, while the registry's name bindings get re-keyed on every
     /// `register_agent` call — e.g. `handle_reactive_register`'s
     /// frontend-initiated HTTP path — causing a legitimately renamed or
     /// reconfigured agent's own messages to be falsely rejected as an
@@ -706,15 +706,6 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
     Ok(AgentDelivery::Pty)
 }
 
-/// Resync a block's controller — the main entry point for starting/restarting blocks.
-/// Port of Go's `ResyncController`.
-///
-/// Logic:
-/// 1. Load block from database
-/// 2. Determine controller type from meta["controller"]
-/// 3. If existing controller needs replacing (type changed, conn changed, force), stop it
-/// 4. Create new controller if needed
-/// 5. Start if status is init or done
 /// Is this forced replace merely a runtime-config change (model / effort /
 /// permission) on a controller that stays persistent — i.e. the one case that
 /// may be deferred to the end of an in-flight turn rather than killing it?
@@ -735,6 +726,15 @@ fn is_runtime_config_only_replace(existing_type: &str, target_type: &str, force:
         && target_type == BLOCK_CONTROLLER_PERSISTENT
 }
 
+/// Resync a block's controller — the main entry point for starting/restarting blocks.
+/// Port of Go's `ResyncController`.
+///
+/// Logic, for the `block` passed in:
+/// 1. Determine controller type from meta["controller"]
+/// 2. If the existing controller needs replacing (type changed, conn changed, force), stop it
+/// 3. Create a new controller if needed
+/// 4. Start it if status is init, or done when `respawn_if_done` allows (below)
+///
 /// `respawn_if_done`: when the existing controller's status is
 /// `STATUS_DONE` (its process already exited), should this call revive it
 /// via `ctrl.start()` (the historical, unconditional behavior — pass

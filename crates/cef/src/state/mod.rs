@@ -314,10 +314,12 @@ pub struct AppState {
     // Phase H.2.e (PR #4) — `pub browsers: Mutex<HashMap<String, Browser>>`
     // deleted. Authoritative storage is now `HostState.browsers` (the host
     // reducer's map). Read access goes through `AppState::get_browser`,
-    // `list_browsers`, etc. (state.rs:704-742). The H.2 ratchet
+    // `list_browsers`, etc. (below, in `impl AppState`). The H.2 ratchet
     // (a → parallel writes, b → reads with fallback, c → flip reads,
     // d → drop legacy writes, e → delete) is complete for browsers.
-    // Pane lifecycle (`PaneStateMachine`) follows in PR #5.
+    // Pane lifecycle followed in PR #5 (#661): the legacy
+    // `pane::lifecycle::PaneStateMachine` was deleted in favour of
+    // `HostState.browser_panes`.
 
     /// Per-window metadata (kind, parent linkage).
     ///
@@ -1208,7 +1210,7 @@ impl AppState {
     /// ∪ queue) — NOT just unpromoted. The launcher's `state.pool`
     /// mirror is built from `ReportPoolWindowAdded` / `Removed` /
     /// `Promoted` events. On the host's unpromoted→queue transition
-    /// (when `pool_ready` fires) NO event is emitted, so the
+    /// (`HostCommand::PoolWindowReady`) NO event is emitted, so the
     /// launcher mirror retains the queued label. Reporting just
     /// `unpromoted.len()` would under-count and trigger spurious
     /// pool drift while the warm pool is idle and ready.

@@ -422,9 +422,9 @@ impl AppServerTransport {
             .await
     }
 
-    /// See `WriteOutcomeTracker`. `outcome` moves to `OutcomeUnconfirmed`
+    /// See `WriteOutcomeTracker`. `outcome` moves to `OUTCOME_UNCONFIRMED`
     /// the instant the frame is handed to `run_writer` — before awaiting
-    /// its write-confirmation ack — and to `ConfirmedUndelivered` if that
+    /// its write-confirmation ack — and to `CONFIRMED_UNDELIVERED` if that
     /// ack later reports a genuine failure, rather than staying stuck at
     /// "unconfirmed" forever for an outcome that in fact became known.
     async fn write_value_tracked(

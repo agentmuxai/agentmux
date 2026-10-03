@@ -34,7 +34,8 @@ export type ExpansionState = "collapsed" | "expanded";
  *  - `pin`     — user explicitly pinned it open. Outlives an auto-expand:
  *                a hold expiry collapses an `auto` row but is a no-op on a pin.
  *  - `auto`    — auto-expanded because the tool is running / in its
- *                post-completion hold (mirrors today's `autoExpanded()`).
+ *                post-completion hold (decided by `rowDisclosure()` in
+ *                frontend/app/view/agent/virtualization/disclosure.ts).
  *  - `default` — open by KIND default (agent_message, normal markdown / user
  *                message, subagent link, open section) rather than by a user or
  *                lifecycle action. Like `auto`/`pin` for height, but a hold

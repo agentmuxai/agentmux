@@ -99,8 +99,8 @@ pub(super) fn handle_report_pool_window_removed(state: &mut State, label: String
 /// IPC, replay, fuzzed sequence), update the existing mirror
 /// immediately so we don't leak a `just_promoted_labels` entry that
 /// will never be drained. The proptest in tests.rs
-/// (`just_promoted_labels_drained_by_open_or_close`) caught this
-/// gap on PR #709 round 2.
+/// (`both_drain_paths_remove_just_promoted_entry`) caught this
+/// gap (#709).
 ///
 /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
 pub(super) fn handle_report_pool_window_promoted(state: &mut State, label: String) -> Vec<Event> {

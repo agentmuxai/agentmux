@@ -24,8 +24,8 @@
 // drawers first, so all of them end with it.
 //
 // Phase 1 moved today's behaviour here unchanged, encoded as policies: the
-// close and quit paths are `close_pane::shutdown_one` and `self_quit`'s
-// claim/shell steps, verbatim; Stop is `ctrl.stop()`. Phase 2 adds controller
+// close and quit paths are the former `close_pane::shutdown_one` and
+// `self_quit`'s claim/shell steps, verbatim; Stop is `ctrl.stop()`. Phase 2 adds controller
 // replace (`stop_for_replace`, unchanged) and app exit, which now closes every
 // agent gracefully instead of leaving them to the launcher's backstop. Later
 // phases change what a policy covers (spec §10) without touching the consumers.

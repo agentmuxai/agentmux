@@ -5,8 +5,8 @@
 //
 // PR 5 of docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md (§5 decision 3) DEMOTED
 // this tab from full CRUD to a read-only summary. Full Memory-bundle
-// management now lives in exactly one place: the hamburger "Identity &
-// Memory" manager (`BundleManagerModal`).
+// management now lives in exactly one place: the Armory pane (the
+// "Identity & Memory" command, `openOrFocusPaneByView("armory")`).
 //
 // This file no longer renders `BundleManagerBody` — it renders the
 // CRUD-free `<BundleSummaryPanel/>`, which points the user at the

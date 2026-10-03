@@ -1757,7 +1757,7 @@ async fn release_spawn_claim_and_drain_queue_delivers_everything_on_success() {
     }
 
     // Never used for a fallback spawn in this test — the drain fully
-    // succeeds without ever stalling. `own_message` is only consulted
+    // succeeds without ever stalling. `own_seq` is only consulted
     // on the failed-spawn path, so its value doesn't matter here.
     c.release_spawn_claim_and_drain_queue(true, unreachable_fallback_config(), 0);
 
@@ -2622,13 +2622,11 @@ async fn retry_after_resume_failure_drops_the_held_error_line_when_the_respawn_s
     );
 }
 
-/// codex P1 on PR #2360 (sixth review pass, round 5): the drain must
-/// track every message it successfully delivers beyond the first
-/// (which `spawn_process` already stashed synchronously — see
-/// `pending_resume_retry`'s own doc comment) into
-/// `pending_resume_retry`'s own list, so a confirmed stale-resume
-/// retry redelivers the WHOLE batch rather than just the message that
-/// triggered the spawn.
+/// #2360: the drain must track every message it successfully delivers
+/// beyond the first (which `spawn_process` already seeded synchronously
+/// via `ResumeEvent::SpawnedWithResume`) into the `AwaitingOutcome`
+/// retry batch, so a confirmed stale-resume retry redelivers the WHOLE
+/// batch rather than just the message that triggered the spawn.
 #[tokio::test]
 async fn drain_appends_later_messages_to_the_pending_resume_retry_without_duplicating_the_first() {
     let c = controller();
@@ -2681,7 +2679,7 @@ async fn drain_appends_later_messages_to_the_pending_resume_retry_without_duplic
 }
 
 /// codex P2 on PR #2360 (round 15, commit fdb8db6fd): the message
-/// `spawn_process` already stashed into `pending_resume_retry` is not
+/// `spawn_process` already seeded into the retry batch is not
 /// always the FIRST thing this drain pops — a prior "second stall" can
 /// leave an older leftover queued ahead of a later spawner's own
 /// triggering message (`push_back` appends behind it). A purely
@@ -2689,9 +2687,9 @@ async fn drain_appends_later_messages_to_the_pending_resume_retry_without_duplic
 /// OLDER LEFTOVER as if it were the seed (dropping it from tracking
 /// entirely) while recording the ACTUAL trigger message a second time
 /// (once via the synchronous seed, once via this drain's own append).
-/// Confirms content-based matching identifies the true seed regardless
-/// of position: the older leftover is recorded, and the actual trigger
-/// is not duplicated.
+/// Confirms identity matching (`QueuedRetryEntry::seq`, #2365)
+/// identifies the true seed regardless of position: the older leftover
+/// is recorded, and the actual trigger is not duplicated.
 #[tokio::test]
 async fn drain_identifies_the_seed_by_content_even_when_a_leftover_is_delivered_first() {
     let c = controller();
@@ -2755,12 +2753,12 @@ async fn drain_identifies_the_seed_by_content_even_when_a_leftover_is_delivered_
     );
 }
 
-/// codex P1 on PR #2360 (sixth review pass, round 6): `poison_resume`
-/// (the stderr-reader task, running concurrently with this drain) can
-/// promote `pending_resume_retry` into `confirmed_stale_resume_retry`
-/// at any point. A message delivered right after that promotion must
-/// still be tracked — appending only to `pending_resume_retry` would
-/// silently drop it from the batch the replacement actually replays.
+/// #2360: `poison_resume` (the stderr-reader task, running
+/// concurrently with this drain) can promote the retry batch from
+/// `AwaitingOutcome` to `ConfirmedRetry` at any point. A message
+/// delivered right after that promotion must still be tracked —
+/// appending only while still `AwaitingOutcome` would silently drop it
+/// from the batch the replacement actually replays.
 #[tokio::test]
 async fn drain_appends_to_confirmed_retry_once_already_promoted_from_pending() {
     let c = controller();

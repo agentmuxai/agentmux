@@ -20,9 +20,10 @@
 // outcome consistently. PR 2's `compensate_unresolved` will rely on
 // that consistency.
 //
-// Cross-process saga (F.5 pool-respawn) is NOT covered — it's
-// logged-only today; full coverage ships when cross-process dispatch
-// lands in F.6/F.7. See the `pool_respawn_saga_is_logged_only` stub.
+// Cross-process saga (F.5 pool-respawn) is NOT covered here — it runs
+// in the launcher's saga coordinator
+// (crates/launcher/src/saga/pool_respawn.rs), whose own tests cover it.
+// See the `pool_respawn_saga_is_logged_only_today` stub.
 
 use agentmux_common::ipc::{Command, Event};
 
@@ -673,19 +674,13 @@ async fn crash_recovery_no_unresolved_returns_zero() {
 
 #[tokio::test]
 async fn pool_respawn_saga_is_logged_only_today() {
-    // F.5 (PR #634) wires the pool-respawn saga as logged-only — the
-    // cross-process dispatch surface (host → launcher → host) doesn't
-    // land until F.6/F.7. Until then, end-to-end coverage of the
-    // respawn flow is impossible from this test harness (no host
-    // process to dispatch to).
+    // F.5 (PR #634) added the pool-respawn saga. It runs in the
+    // launcher's saga coordinator (crates/launcher/src/saga/pool_respawn.rs),
+    // dispatching to the host process, so end-to-end coverage of the
+    // respawn flow is impossible from this srv test harness; the
+    // launcher's own saga tests cover it.
     //
-    // This stub fails closed if F.6/F.7 lands without updating the
-    // E.7 test plan: when cross-process dispatch becomes testable,
-    // delete this stub and replace with the real test.
-    //
-    // Today the assertion is trivial: the saga module exists, the
-    // saga log is wired into AppState. That's the whole logged-only
-    // surface F.5 ships.
+    // The assertion is trivial: the saga log is wired into AppState.
     let state = test_state();
     // saga_log is an Arc<SagaLog>; nothing to dispatch yet.
     assert!(state.saga_log.snapshot_recent(1).unwrap().is_empty());

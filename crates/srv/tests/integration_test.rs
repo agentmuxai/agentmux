@@ -265,7 +265,7 @@ fn restore_last_session_survives_a_real_process_restart() {
     );
     // The bootstrap workspace's initial tab can still be sitting in the
     // legacy `pinnedtabids` field rather than `tabids` (drained into
-    // `tabids` only on the next `TabsReordered` event) — check both, same
+    // `tabids` only on the next `TabsReorderedBulk` event) — check both, same
     // as `session_restore::snapshot_workspace`.
     let tab_id = workspace["tabids"][0]
         .as_str()

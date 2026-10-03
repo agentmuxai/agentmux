@@ -113,8 +113,9 @@ unsafe extern "system" fn wrapper_wndproc(
             }
         }
         // Belt-and-suspenders removal from the tracking map — the explicit
-        // close path (`destroy_wrapper`) already removes the entry before
-        // calling DestroyWindow, but WM_DESTROY also fires on any other
+        // close path (`take_wrapper_hwnd`, then `destroy_wrapper_hwnd`)
+        // already removes the entry before calling DestroyWindow, but
+        // WM_DESTROY also fires on any other
         // teardown path (e.g. a future parent-window close cascading down),
         // so this keeps PANE_WRAPPER_HWNDS from ever holding a dead HWND.
         WM_DESTROY => {

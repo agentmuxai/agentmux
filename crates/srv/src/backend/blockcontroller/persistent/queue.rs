@@ -38,20 +38,20 @@ impl PersistentSubprocessController {
     ///   the caller must then call `spawn_process` and, regardless of
     ///   outcome, call `release_spawn_claim_and_drain_queue`.
     ///
-    /// `skip_if_already_queued` — always `false` for the sole production
-    /// call site (`send_message`): a user legitimately re-sending the
-    /// exact same text while an unrelated spawn is in flight must still
-    /// queue both, so this must never dedup by content there.
+    /// `skip_if_seq_queued` is always `None` for the sole production call
+    /// site (`send_message_with_images_from`, which `send_message` reaches):
+    /// a user legitimately re-sending the exact same text while an
+    /// unrelated spawn is in flight must still queue both, so this must
+    /// never dedup there.
     ///
-    /// reagentx P2 on PR #2360 (round 16, commit ce1642d90): `true` is NOT
-    /// exercised by any production call site — `retry_after_resume_
-    /// failure` was refactored (round 6) to use `decide_retry_batch_
-    /// action` instead, a separate function with its own atomic,
+    /// `Some(seq)` is NOT exercised by any production call site (#2360) —
+    /// `retry_after_resume_failure` uses `decide_retry_batch_action`
+    /// instead, a separate function with its own atomic,
     /// batch-aware dedup/prepend logic (see that function's own doc
-    /// comment). The `true` path here now only exists for this file's own
-    /// unit tests, which document the exact scenario `decide_retry_batch_
-    /// action`'s own dedup check handles for a batch instead: codex P1 on
-    /// PR #2360 (sixth review pass, round 4) — a KNOWN re-delivery of
+    /// comment). The `Some` path here now only exists for unit tests
+    /// (`tests/send_input.rs`), which document the exact scenario
+    /// `decide_retry_batch_action`'s own dedup check handles for a batch
+    /// instead — a KNOWN re-delivery of
     /// content that may ALREADY be sitting in `pending_send_messages`,
     /// pushed by the very spawn attempt whose failure triggered a retry,
     /// if that spawn's own drain hasn't reached it yet; blindly queueing
@@ -213,7 +213,7 @@ impl PersistentSubprocessController {
     /// publish one.
     pub(super) fn release_spawn_claim_and_drain_queue(&self, spawn_succeeded: bool, retry_config: PersistentSpawnConfig, own_seq: u64) {
         if !spawn_succeeded {
-            // Discard only `own_message` — see this function's own doc
+            // Discard only the `own_seq` entry — see this function's own doc
             // comment above for why position (front) is not a safe
             // assumption. If anything else is queued (from other callers
             // already told "accepted"), hand off to a bounded fallback
@@ -297,12 +297,12 @@ impl PersistentSubprocessController {
         let block_id = self.block_id.clone();
         let self_ref = self.self_ref.lock().unwrap().clone().unwrap_or_default();
         tokio::spawn(async move {
-            // The message `spawn_process` already stashed synchronously
-            // into `pending_resume_retry` (before this task even existed —
-            // necessary so a process that dies before this task's first
-            // poll can't lose it, see that field's own doc comment) must
-            // be identified by CONTENT, not by "whatever this drain pops
-            // first" — codex P2 on PR #2360 (round 15, commit fdb8db6fd):
+            // The message `spawn_process` already seeded synchronously
+            // into the retry batch in `inner.resume` (before this task even
+            // existed — necessary so a process that dies before this task's
+            // first poll can't lose it, see `ResumeState`'s own doc comment)
+            // must be identified exactly, not by "whatever this drain pops
+            // first" (#2360):
             // a purely positional flag breaks exactly the way
             // `release_spawn_claim_and_drain_queue`'s front-popping
             // assumption did (see that function's own fix history): a

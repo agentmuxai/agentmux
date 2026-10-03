@@ -639,7 +639,7 @@ impl Store {
                 stamped_updated_at,
                 agent.is_seeded,
                 // Phase 2 (hide templates): new rows start visible. The
-                // user only hides via the explicit `agent_def_hide` RPC,
+                // user only hides via the explicit `agentdefhide` RPC,
                 // and the agent-seed re-sync forces user_hidden = 0 on
                 // any newly-added template id anyway, so honouring the
                 // caller-supplied value here is safe even when a stray
@@ -3322,10 +3322,9 @@ mod tests {
     // disambiguated by recency — meaning an App-API self-lookup call could
     // return an unrelated agent's memory/identity/bundle. This test builds
     // exactly that collision (agent A's `instance_name` == agent B's
-    // `slug` == "shared-name") and proves each single-purpose function
-    // stays within its own namespace: `instance_get_by_name` finds ONLY
-    // the literal-name match (A), `instance_get_by_slug` finds ONLY the
-    // slug match (B) — never each other's row.
+    // `slug` == "shared-name") and proves `instance_get_by_slug` stays
+    // within its own namespace: it finds ONLY the slug match (B), never
+    // A's row (its literal-name counterpart is gone — see below).
     #[test]
     fn instance_get_by_name_and_by_slug_never_cross_the_others_namespace() {
         let store = Store::open_in_memory().unwrap();

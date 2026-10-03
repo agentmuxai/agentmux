@@ -12,7 +12,7 @@
 //! successful probe means the MCP process itself started and speaks the
 //! protocol — NOT that the underlying app (Ableton Live) is running, since
 //! that dependency is only exercised when a tool is actually called. That
-//! gap is why the catalog's `prereq_note` (static remediation text, §4.6)
+//! gap is why the catalog's `prereqNote` (static remediation text, §4.6)
 //! exists alongside this dynamic check, not instead of it.
 //!
 //! Deliberately hand-rolled rather than pulling in an MCP client SDK crate

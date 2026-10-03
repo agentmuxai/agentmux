@@ -379,9 +379,9 @@ export class BundleViewModel {
 // -- ABF v0.2 §2.2 per-provider instructions: authoring-model seam --------
 //
 // The draft carries `instructions_by_provider` as a RAW JSON string, not a
-// parsed structure, and that is deliberate: reagent P1 on PR #2523 found that
-// editing any field of an imported bundle silently wiped its provider variants,
-// because `bundle_memory_upsert`'s ON CONFLICT UPDATE overwrites the column
+// parsed structure, and that is deliberate: PR #2523 found that editing any
+// field of an imported bundle silently wiped its provider variants, because
+// `Store::bundle_upsert`'s ON CONFLICT UPDATE overwrites the column
 // unconditionally. Round-tripping the raw string is what fixed it.
 //
 // The authoring UI needs a list, so these three functions are the seam. The

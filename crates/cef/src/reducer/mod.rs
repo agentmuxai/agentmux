@@ -912,8 +912,10 @@ pub enum HostEvent {
     // ── Effect carrier ──────────────────────────────────────────────────
 
     /// Side-effect descriptor. The reducer emits these but never executes
-    /// them; `AppState::host_dispatch_with_effects` is responsible for
-    /// running each kind. See `EffectKind` for variants.
+    /// them, and no executor exists yet: `AppState::host_dispatch` only
+    /// logs them (`log_host_event`), and the H.6 top-level commands that
+    /// emit them are not dispatched in production. See `EffectKind` for
+    /// variants.
     Effect {
         effect: EffectKind,
         version: u64,
@@ -1349,9 +1351,8 @@ fn handle_dequeue_pending_window_creation(state: &mut HostState) -> DispatchOutp
 //
 // All arms are pure: `&mut HostState` in, `DispatchOutput` (events) out.
 // No I/O, no async, no logging (logging happens in `state::log_host_event`
-// after dispatch returns). Reducer arms emit Effect events; the effect
-// handler in `AppState::host_dispatch_with_effects` (added in PR #4)
-// dispatches each Effect to its imperative handler.
+// after dispatch returns). Reducer arms emit Effect events; no effect
+// executor exists yet, so `AppState::host_dispatch` only logs them.
 // ─────────────────────────────────────────────────────────────────────────
 
 pub(super) fn emit_error(state: &mut HostState, message: String) -> DispatchOutput {

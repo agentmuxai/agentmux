@@ -50,11 +50,10 @@ pub const MAX_INIT_SCRIPT_SIZE: usize = 50 * 1024;
 /// Abstraction over a PTY-connected process.
 /// Port of Go's `shellexec.ConnInterface` which embeds `pty.Pty`.
 ///
-/// Implementations:
-/// - `CmdWrap` (local processes with PTY)
-/// - `SessionWrap` (SSH sessions)
-/// - `WslCmdWrap` (WSL processes)
-/// - `MockConn` (testing)
+/// The only implementation is `MockConn` (testing). The production shell
+/// path (`blockcontroller/shell/lifecycle.rs`) opens its PTY directly via
+/// `portable_pty`; it uses this trait only when a test installs a
+/// `conn_factory`.
 pub trait ConnInterface: Send + Sync {
     /// Start the process. Called once after creation.
     fn start(&mut self) -> io::Result<()>;

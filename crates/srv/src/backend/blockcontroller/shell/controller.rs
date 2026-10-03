@@ -109,8 +109,8 @@ pub struct ShellController {
     /// FileStore write-through target for PTY output persistence
     /// (SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1) — lets
     /// `handle_append_block_file`'s "term" writes survive a reconnect,
-    /// mirroring `PersistentController`/`SubprocessController`'s existing
-    /// filestore wiring.
+    /// mirroring `PersistentSubprocessController`/`SubprocessController`'s
+    /// existing filestore wiring.
     pub(super) filestore: Option<Arc<FileStore>>,
     /// This instance's API auth key, re-injected into the spawned PTY as
     /// `AGENTMUX_AUTH_KEY` (see `lifecycle.rs`) so `muxsh`/`muxspect`/

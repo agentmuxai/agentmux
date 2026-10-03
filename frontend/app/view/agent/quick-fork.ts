@@ -20,7 +20,7 @@
  * same `pane.open({stack_onto_block_id})` (create-and-place in one backend
  * step) + local `pushBlockOntoStack`
  * primitive `open-history-tab.ts`'s "Agent History" entry and the pane tab
- * strip's own "+" (`handleNewAgentTab`, `agent-view.tsx`) already use.
+ * strip's own "+" (`addWidgetAsPaneTab`, `layoutStack.ts`) already use.
  *
  * `getLayoutModelForStaticTab()` reads a plain global atom, not SolidJS
  * component context, so — like `open-history-tab.ts` — this is safely
@@ -133,8 +133,8 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
 
     // Hide this pane while the fork settles — the whole RPC chain below
     // (fork, identity lookup, pane.open, launch) precedes the same
-    // pushBlockOntoStack-forced remount `handleNewAgentTab`/
-    // `openOrFocusHistoryTab` are also gated against.
+    // pushBlockOntoStack-forced remount `openOrFocusHistoryTab` is also
+    // gated against.
     // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
     const revealGen = holdLeafRevealGate(node.id);
 
@@ -213,7 +213,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             // The pane could have closed while the RPCs above were in flight —
             // re-resolve fresh rather than trusting the pre-await `node`
             // reference (same defensive check as open-history-tab.ts /
-            // handleNewAgentTab).
+            // addWidgetAsPaneTab).
             const freshNode = layoutModel.getNodeByBlockId(model.blockId);
             if (!freshNode) {
                 await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});

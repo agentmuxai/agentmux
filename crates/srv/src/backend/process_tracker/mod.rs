@@ -10,14 +10,15 @@
 //! place what's still running on their machine, and kill it reliably
 //! when they're done.
 //!
-//! The API is a platform-agnostic trait. Per-platform impls use the
-//! strongest available mechanism:
+//! The API is a platform-agnostic trait. Only Windows has a real impl
+//! today; every other platform gets the no-op `StubTracker`. The Linux and
+//! macOS mechanisms below are planned, not built:
 //!
 //! | Platform | Impl            | Mechanism                                  | Confidence |
 //! |----------|-----------------|--------------------------------------------|------------|
 //! | Windows  | `JobObjectTracker` | `CreateJobObject` + `AssignProcessToJobObject` + `TerminateJobObject` | high       |
-//! | Linux    | `Cgroupv2Tracker`  | `systemd-run --user --scope` + `cgroup.procs` / `cgroup.kill`      | high       |
-//! | macOS    | `ProcessGroupTracker` | `POSIX_SPAWN_SETPGROUP` + `killpg`                               | best-effort |
+//! | Linux    | `StubTracker` (planned: cgroup v2) | `systemd-run --user --scope` + `cgroup.procs` / `cgroup.kill` | none (planned: high) |
+//! | macOS    | `StubTracker` (planned: process group) | `POSIX_SPAWN_SETPGROUP` + `killpg`                 | none (planned: best-effort) |
 //! | other    | `StubTracker`   | no-op                                                          | none       |
 //!
 //! The frontend's swarm panel surfaces the confidence level so users know
@@ -137,8 +138,8 @@ pub trait TrackerHandle: Send + Sync {
     /// Enumerate the current members of this tracked tree.
     ///
     /// Must be cheap enough to poll every ~2s. On Windows this is a
-    /// single Job Object query; on Linux it's a read of `cgroup.procs`;
-    /// on macOS it's a sysctl scan.
+    /// single Job Object query; the planned Linux and macOS impls would
+    /// read `cgroup.procs` and scan sysctl respectively.
     fn list_members(&self) -> Vec<TrackedProcess>;
 
     /// Forcibly terminate every process in this tracked tree.

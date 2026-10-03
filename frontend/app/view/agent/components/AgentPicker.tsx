@@ -899,13 +899,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             if (missing.length > 0) {
                 const proceedWithFlow = () => {
                     if (installed === false) {
-                        // Reagent P1 round 2: do NOT use the generic
-                        // `buildInstallRequest` here — its `onInstalled`
-                        // routes to `buildLaunchRequest(agent)` which
-                        // launches the seeded template directly,
-                        // defeating the template-clone migration. Open
-                        // the same template-aware install request the
-                        // non-prereq branch (line ~545) uses.
+                        // Open the same template-aware install request
+                        // the non-prereq branch below uses: an install
+                        // whose success path launched the seeded
+                        // template directly (`buildLaunchRequest(agent)`)
+                        // would defeat the template-clone migration.
                         modalLayer.replace(buildTemplateInstallRequest(agent));
                     } else {
                         openCreateFromTemplateModal(agent);
@@ -962,12 +960,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
 
-    // Template-aware install request. The generic `buildInstallRequest`
-    // routes `onInstalled → buildLaunchRequest(agent)` which launches
-    // the seeded template directly — defeats the template-clone
-    // migration. This variant routes the success path into
+    // Template-aware install request. Routes the success path into
     // `openCreateFromTemplateModal` so the install→create-clone→launch
-    // chain stays correct (reagent P1 on #1011 round 2).
+    // chain stays correct (#1011); launching the seeded template
+    // directly via `buildLaunchRequest(agent)` would defeat the
+    // template-clone migration.
     const buildTemplateInstallRequest = (agent: AgentDefinition) => ({
         kind: "install-agent" as const,
         agent,

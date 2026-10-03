@@ -113,8 +113,9 @@ interface InAppLoginUi {
 export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element => {
     // Controller is owned by the parent (AgentLaunchModal); panel
     // mount/unmount doesn't construct or dispose it. The parent
-    // reads `controller.state()` directly for `authStateKind()`
-    // — no more `onStateChange` callback wiring.
+    // reads auth state from the launch-flow slice (`flow.state.auth`,
+    // via `useLaunchAuthGate`'s `authReady()`) — no `onStateChange`
+    // callback wiring.
     const controller = props.controller;
 
     // In-app login session UI state (see InAppLoginPhase / InAppLoginUi).
@@ -293,14 +294,14 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         controller.state().kind === "saving"
                     }
                 >
-                    {/* Codex P1 on #853 round 7: minimal stub so the
-                        panel doesn't go blank when the reducer enters
-                        the new `authenticated`/`saving` kinds. The
-                        rich SaveBundle UI lands in PR C-4 along with
-                        the backend `auth.savebundle` RPC; this stub
-                        keeps the user informed in the interim.
-                        Reagent P2 on #853 round 11: surface the Cancel
-                        action so users aren't forced to close the modal. */}
+                    {/* Minimal stub (#853) so the panel doesn't go
+                        blank if the reducer enters the `authenticated`/
+                        `saving` kinds. No backend `auth.savebundle` RPC
+                        was ever built, and the backend's
+                        `AuthSessionStatus` (identity/auth_session.rs)
+                        has no `authenticated` status, so nothing
+                        reaches these kinds today. Surfaces Cancel so
+                        users aren't forced to close the modal. */}
                     <AuthenticatedStub
                         state={controller.state()}
                         onCancel={() => void controller.cancel()}

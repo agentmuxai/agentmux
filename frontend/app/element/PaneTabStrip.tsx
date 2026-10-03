@@ -401,12 +401,9 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // FLIP-style width transition, opt-in via `animateWidth` (see that
     // prop's own doc comment for why it's opt-in, and PaneTabStrip.scss's
     // comment for why a plain CSS transition can't do this at all). Tracks
-    // `tabs.length` specifically — that's the exact signal
-    // `visibleTabs()`/`visibleTermTabs()` flip on (empty when there's
-    // nothing to switch between, the full list once a 2nd tab exists),
-    // matching §2.4's actual complaint (the strip's sudden appearance/
-    // growth), not a general "animate on every possible width change"
-    // feature.
+    // `tabs.length` specifically — a tab added or removed is what makes the
+    // strip suddenly appear or grow, matching §2.4's actual complaint, not
+    // a general "animate on every possible width change" feature.
     //
     // Measure AFTER each change (Solid's effects run after the DOM patch,
     // so `getBoundingClientRect()` here already reflects the NEW tab

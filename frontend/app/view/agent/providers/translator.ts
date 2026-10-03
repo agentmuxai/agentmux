@@ -38,7 +38,7 @@ export interface OutputTranslator {
 /**
  * The user's message as the backend writes it into the transcript for CLIs
  * that don't echo their prompt (Claude's stdin line; for Codex and Kimi, the
- * per-turn subprocess controller's `persist_user_message`): a
+ * per-turn subprocess controller's `UserRecordSink`): a
  * `{"type":"user","message":{"content":"…"}}` record. On replay it becomes the
  * user_message node. Live, the pane already shows the message optimistically
  * and the transcript cursor hands the record to its echo ledger, so a live

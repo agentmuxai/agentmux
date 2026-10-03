@@ -225,13 +225,14 @@ fn mcp_server_looks_like_the_same_row(a: &McpServer, b: &McpServer) -> bool {
     a.name == b.name && a.config == b.config && a.transport == b.transport && a.created_at == b.created_at
 }
 
-/// Finish carrying a row whose `final_id` has already been resolved:
-/// (re-)insert into the identity store, and if the id differs from the
-/// row's current local id, insert a local copy under the new id, repoint
-/// this channel's own ref rows, and only then remove the stale local row —
-/// see the module doc's explanation of why that removal isn't optional.
+/// Finish carrying a row whose `final_id` has already been resolved (the
+/// caller has already inserted it into the identity store): if the id
+/// differs from the row's current local id, insert a local copy under the
+/// new id, repoint this channel's own ref rows, and only then remove the
+/// stale local row — see the module doc's explanation of why that removal
+/// isn't optional.
 ///
-/// `insert_local` / `insert_identity` / `rewrite_refs` / `delete_local` are
+/// `insert_local` / `rewrite_refs` / `delete_local` are
 /// closures over the skill-vs-mcp-server-specific store calls, so this one
 /// function drives both `carry_skills` and `carry_mcp_servers` without
 /// duplicating the sequencing logic — the part that was actually wrong.

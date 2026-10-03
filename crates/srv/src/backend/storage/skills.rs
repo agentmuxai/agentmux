@@ -462,8 +462,8 @@ impl Store {
     /// `bind_new`) bind it to the agent — all in one transaction so concurrent
     /// `skill.upsert` calls for the same name can't both pass a separate check
     /// and insert duplicates (the check+write is not split across lock releases).
-    /// Returns `NameConflict` if another skill visible to the agent (bound or
-    /// global) already uses the name.
+    /// Returns `StoreError::Other` ("… already bound to this agent") if another
+    /// skill visible to the agent (bound or global) already uses the name.
     pub fn skill_upsert_unique(
         &self,
         catalog: &Store,

@@ -78,9 +78,9 @@ impl Store {
         Ok(rows)
     }
 
-    /// List every mirrored file for `agent_id` (no content — callers that
-    /// only need list-view metadata should prefer this over
-    /// `agent_native_memory_list` to avoid loading full file bodies).
+    /// List every mirrored file for `agent_id` (no content — each row's
+    /// `content` is empty, so a list view never loads full file bodies;
+    /// `agent_native_memory_read` fetches one file's body).
     pub fn agent_native_memory_list_meta(
         &self,
         agent_id: &str,

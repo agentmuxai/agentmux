@@ -501,7 +501,8 @@ pub enum TurnRegistration {
     /// Skipping is required, for two independent reasons:
     ///
     /// 1. **Redundant.** That caller resolved this block *by looking the agent
-    ///    up in the reactive handler's own `agent_to_block` map*, so the agent
+    ///    up in the reactive handler's own registry* (`uid_to_block` /
+    ///    `name_to_blocks`), so the agent
     ///    is registered by construction. There is nothing to re-register.
     /// 2. **Deadlock.** `ReactiveHandler::inject_message` holds the global
     ///    `Mutex<Handler>` across the message-sender call, and that sender
@@ -1247,9 +1248,10 @@ pub async fn run_agent_turn(
     if matches!(registration, TurnRegistration::Register) {
         // Register with cloud subscriber + reactive handler so cloud-injected
         // messages (e.g. GitHub PR review notifications) reach this agent.
-        // Uses agentName (the logical display name, e.g. "smike") as the key —
-        // matching the namespace used by reactive.rs:233 (`req.agent_id`) and the
-        // delivery path (`agent_to_block` keyed by lowercased logical agent_id).
+        // Uses agentName (the logical display name, e.g. "smike") as the name
+        // binding — matching the namespace used by `handle_reactive_register`
+        // in server/reactive.rs (`req.agent_id`) and the delivery path's
+        // lowercased `name_to_blocks` map — with this turn's UID as the key.
         // PR bodies embed $AGENTMUX_AGENT_ID (same value) so the cloud injection
         // key and the poll key are always consistent.
         // Both calls are idempotent: add_agent skips the WS send if already

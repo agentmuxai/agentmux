@@ -164,10 +164,10 @@ interface DocumentNodeBodyProps {
  *
  * Reactivity discipline (carried over from the original
  * DocumentNodeRenderer comment): never destructure props in this
- * function. The toolPinned state lives in documentState (separate from
- * the document array that the parent <For> keys off), so a
- * destructured `toolPinned` would stay stale forever even though
- * ToolBlock uses props.pinned correctly. See PR #346 reagent.
+ * function. The pinned state (`documentState().pinnedNodes`) lives in
+ * documentState (separate from the document array that the parent <For>
+ * keys off), so a destructured pinned value would stay stale forever even
+ * though ToolBlock uses props.pinned correctly. See PR #346.
  */
 function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
     // SolidJS <Show> with keyed:false (the default) calls the child
