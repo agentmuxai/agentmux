@@ -23,7 +23,7 @@ import tseslint from "typescript-eslint";
 // opacity modifier.
 //
 // This is NOT a blanket ban on the words "white"/"black"/"gray" -- a fixed
-// white-on-a-fixed-dark-backdrop pane (dragoverlay.tsx) is genuinely
+// white-on-a-fixed-dark-backdrop pane is genuinely
 // theme-independent by design and gets an inline
 // eslint-disable-next-line with a one-line reason instead. The point is
 // that using one of these utilities is now a DELIBERATE, visible choice

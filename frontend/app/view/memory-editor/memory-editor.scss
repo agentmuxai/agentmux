@@ -248,7 +248,7 @@
     }
 }
 
-// MemoryHistory reuses NativeMemoryHistoryPanel.scss's item styles; inside the
+// MemoryHistory reuses memory-history.scss's item styles; inside the
 // pinned layout's top region it must not open a second scroll container.
 .native-memory-history.memory-history {
     overflow: visible;
