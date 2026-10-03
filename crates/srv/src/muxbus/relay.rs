@@ -172,7 +172,13 @@ pub(crate) fn wan_carry_gate(
 pub(crate) enum RelayOutcome {
     /// The cloud accepted and persisted the injection. **Queued, not
     /// delivered** — see the module doc.
-    Queued { injection_id: Option<String> },
+    Queued {
+        injection_id: Option<String>,
+        /// Whether the target is one of the sender's own account's agents,
+        /// when the relay says (agentmux-cloud#138). `Some(false)` is a likely
+        /// typo: the relay accepts any name.
+        target_in_account: Option<bool>,
+    },
     /// The cloud was reachable and said no, or the request never landed.
     Failed(String),
 }
@@ -257,6 +263,7 @@ pub(crate) async fn relay_inject(
                 .get("injection_id")
                 .and_then(|v| v.as_str())
                 .map(str::to_string),
+            target_in_account: body.get("target_in_account").and_then(|v| v.as_bool()),
         };
     }
 
@@ -421,8 +428,10 @@ mod tests {
         )
         .await;
         match out {
-            RelayOutcome::Queued { injection_id } => {
-                assert_eq!(injection_id.as_deref(), Some("inj-42"))
+            RelayOutcome::Queued { injection_id, target_in_account } => {
+                assert_eq!(injection_id.as_deref(), Some("inj-42"));
+                // An older relay says nothing about the account.
+                assert_eq!(target_in_account, None)
             }
             other => panic!("expected Queued, got {other:?}"),
         }
@@ -487,6 +496,24 @@ mod tests {
                 assert!(e.contains("upgrade_url"), "cloud's own body should pass through: {e}");
             }
             other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    /// agentmux-cloud#138: the relay says whether the target is one of the
+    /// sender's own account's agents; `false` reaches `SendMessage` as a
+    /// likely-typo hint.
+    #[tokio::test]
+    async fn a_queued_injection_carries_whether_the_target_is_the_senders() {
+        for (body, want) in [
+            (r#"{"success":true,"injection_id":"inj-7","target_in_account":false}"#, Some(false)),
+            (r#"{"success":true,"injection_id":"inj-8","target_in_account":true}"#, Some(true)),
+        ] {
+            let (url, _seen, _g) = stub_relay(axum::http::StatusCode::OK, body).await;
+            let out = relay_inject(&url, &reqwest::Client::new(), "tok", "agent2", "agnetx", "hello", "normal", None).await;
+            match out {
+                RelayOutcome::Queued { target_in_account, .. } => assert_eq!(target_in_account, want, "{body}"),
+                other => panic!("expected Queued, got {other:?}"),
+            }
         }
     }
 
