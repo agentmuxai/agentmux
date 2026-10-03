@@ -18,7 +18,9 @@
 // PR thread, and `(#NNNN)` is the whole citation. It is scoped to added lines
 // on purpose: a repo-wide gate would fail on the existing backlog and be
 // switched off (the same reason scripts/check-spec-citations.sh is scoped to
-// changed files). It also prints two warnings that never fail the build:
+// changed files). A comment the same diff also removes elsewhere (a split, a
+// move to another file, a re-indent) is not new and is not held to the rule, so
+// a move-only PR passes. It also prints two warnings that never fail the build:
 //   - a new `//` or `/* */` block longer than 8 lines (rule C3; doc comments
 //     are exempt, an interface doc may be long);
 //   - a file already above 40% comment lines whose ratio this branch raised.
@@ -32,6 +34,8 @@
 // compiler directives and doctest fences to be unchanged (rule C8), and lists
 // each `#NNNN` / `SPEC_...` citation the comments dropped, so a reviewer can
 // confirm each one was narration or a duplicate. Use it on a comment-only PR.
+// Only .ts/.tsx/.rs files are compared; any other file the branch changes is
+// listed as a warning, not verified.
 //
 // LIMITS of the lexer (shared by all modes). It is not a parser. JSX text that
 // contains `//` or an apostrophe, and a regex literal after an unusual token,
@@ -346,37 +350,83 @@ export function narrationRule(text) {
     return null;
 }
 
-/** Added-line numbers per file from `git diff -U0` output. */
-export function parseAddedLines(diff) {
+/**
+ * Added and removed line numbers per file from `git diff -U0` output:
+ * `added` is keyed by new path (new-side numbers), `removed` by old path
+ * (old-side numbers).
+ */
+export function parseDiff(diff) {
     const added = new Map();
-    let file = null;
+    const removed = new Map();
+    let oldFile = null;
+    let newFile = null;
+    let inHeader = false;
+    const range = (m, startIdx) => {
+        const start = Number(m[startIdx]);
+        const count = m[startIdx + 1] === undefined ? 1 : Number(m[startIdx + 1]);
+        return Array.from({ length: count }, (_, k) => start + k);
+    };
     for (const raw of diff.split("\n")) {
-        if (raw.startsWith("+++ ")) {
-            const p = raw.slice(4).trim();
-            file = p === "/dev/null" ? null : p.replace(/^b\//, "");
-            if (file && !added.has(file)) added.set(file, new Set());
+        if (raw.startsWith("diff --git ")) {
+            inHeader = true;
+            oldFile = newFile = null;
             continue;
         }
-        const m = file && /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(raw);
+        // File headers are only real before a hunk; inside one, a removed or
+        // added line can itself start with `--` or `++`.
+        if (inHeader && raw.startsWith("--- ")) {
+            const p = raw.slice(4).trim();
+            oldFile = p === "/dev/null" ? null : p.replace(/^a\//, "");
+            continue;
+        }
+        if (inHeader && raw.startsWith("+++ ")) {
+            const p = raw.slice(4).trim();
+            newFile = p === "/dev/null" ? null : p.replace(/^b\//, "");
+            if (newFile && !added.has(newFile)) added.set(newFile, new Set());
+            continue;
+        }
+        const m = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(raw);
         if (m) {
-            const start = Number(m[1]);
-            const count = m[2] === undefined ? 1 : Number(m[2]);
-            for (let k = 0; k < count; k++) added.get(file).add(start + k);
+            inHeader = false;
+            if (oldFile) {
+                if (!removed.has(oldFile)) removed.set(oldFile, new Set());
+                for (const n of range(m, 1)) removed.get(oldFile).add(n);
+            }
+            if (newFile) for (const n of range(m, 3)) added.get(newFile).add(n);
         }
     }
-    return added;
+    return { added, removed };
+}
+
+/** Added-line numbers per file (see parseDiff). */
+export const parseAddedLines = (diff) => parseDiff(diff).added;
+
+/**
+ * A comment line's text with its comment markers and spacing removed, so the
+ * same comment compares equal wherever it is indented or wrapped in a block.
+ */
+export function normalizeComment(text) {
+    return text
+        .replace(/^\s*(?:\/\/[/!]?|\/\*[*!]?|\*(?!\/))/, "")
+        .replace(/\*\/\s*$/, "")
+        .replace(/\s+/g, " ")
+        .trim();
 }
 
 /**
  * Gate findings for one file. `added` is a Set of 1-based line numbers this
- * branch added. Returns `{ errors, warnings }`, each `{ line, message }`.
+ * branch added. `moved` is a Set of normalized comment texts the same diff also
+ * removed elsewhere: a comment that only moved (a split, a relocation, a
+ * re-indent) is not new, so it is not held to the narration rule. Returns
+ * `{ errors, warnings }`, each `{ line, message }`.
  */
-export function gateFile(info, added) {
+export function gateFile(info, added, moved = new Set()) {
     const errors = [];
     const warnings = [];
     info.lines.forEach((l, idx) => {
         const ln = idx + 1;
         if (!added.has(ln) || !l.text) return;
+        if (moved.has(normalizeComment(l.text))) return;
         const rule = narrationRule(l.text);
         if (rule) {
             errors.push({
@@ -517,7 +567,21 @@ function runGate() {
         console.error("check-comment-hygiene: no merge base; nothing to check.");
         return 0;
     }
-    const added = parseAddedLines(git("diff", "-U0", "--no-color", "-M", mb, "--", "*.ts", "*.tsx", "*.rs"));
+    const { added, removed } = parseDiff(git("diff", "-U0", "--no-color", "-M", mb, "--", "*.ts", "*.tsx", "*.rs"));
+    // Comments this diff removes (from the base version of each file) are not
+    // new when they reappear: `-M` follows only whole-file renames, so a split or
+    // a move into another file would otherwise count every moved line as added.
+    const moved = new Set();
+    for (const [oldFile, lines] of removed) {
+        if (!isSourcePath(oldFile)) continue;
+        const before = gitShow(mb, oldFile);
+        if (before === null) continue;
+        const info = lexSource(before, langOf(oldFile));
+        for (const ln of lines) {
+            const t = info.lines[ln - 1] && normalizeComment(info.lines[ln - 1].text);
+            if (t) moved.add(t);
+        }
+    }
     for (const f of git("ls-files", "--others", "--exclude-standard", "--", "*.ts", "*.tsx", "*.rs").split("\n").filter(Boolean)) {
         const text = readWorking(f);
         if (text !== null) added.set(f, new Set(Array.from({ length: text.split("\n").length }, (_, k) => k + 1)));
@@ -530,7 +594,7 @@ function runGate() {
         if (text === null) continue;
         checked++;
         const info = lexSource(text, langOf(file));
-        const res = gateFile(info, lines);
+        const res = gateFile(info, lines, moved);
         for (const e of res.errors) annotate("error", file, e.line, e.message);
         for (const w of res.warnings) annotate("warning", file, w.line, w.message);
         errors += res.errors.length;
@@ -584,11 +648,21 @@ function runCodeEqual(base) {
         }
         if (res.dropped.length) annotate("notice", newPath, 1, `citations dropped from comments (confirm each was narration or a duplicate): ${res.dropped.join(", ")}`);
     }
+    // Only .ts/.tsx/.rs are compared. Anything else this branch touches (Cargo.toml,
+    // .scss, scripts, package.json, docs) is listed so a "comment-only" PR that
+    // also changes config is not mistaken for a verified one.
+    const others = git("diff", "--name-only", "-M", mb)
+        .split("\n")
+        .filter((f) => f && !isSourcePath(f));
+    if (others.length) {
+        const shown = others.slice(0, 10).join(", ") + (others.length > 10 ? `, and ${others.length - 10} more` : "");
+        annotate("warning", others[0], 1, `${others.length} changed file(s) are not compared (only .ts/.tsx/.rs are): ${shown}`);
+    }
     if (bad) {
         console.error(`\ncheck-comment-hygiene --code-equal: ${bad} problem(s).`);
         return 1;
     }
-    console.log(`check-comment-hygiene --code-equal: ok (${compared} file(s) compared; code identical)`);
+    console.log(`check-comment-hygiene --code-equal: ok (${compared} source file(s) compared; code identical${others.length ? `; ${others.length} other changed file(s) not compared` : ""})`);
     return 0;
 }
 

@@ -13,7 +13,9 @@ import {
     isSourcePath,
     lexSource,
     narrationRule,
+    normalizeComment,
     parseAddedLines,
+    parseDiff,
     protectedCounts,
     statsOf,
 } from "./check-comment-hygiene.mjs";
@@ -203,6 +205,52 @@ describe("parseAddedLines", () => {
         const added = parseAddedLines(diff);
         expect([...added.get("x.rs")]).toEqual([4, 5, 12]);
         expect(added.has("gone.ts")).toBe(false);
+    });
+});
+
+describe("parseDiff", () => {
+    it("also reads the old-side ranges, keyed by old path", () => {
+        const diff = [
+            "diff --git a/old.rs b/new.rs",
+            "--- a/old.rs",
+            "+++ b/new.rs",
+            "@@ -5,3 +7,0 @@",
+            "-x",
+            "-y",
+            "-z",
+            "@@ -20 +21 @@",
+            "-q",
+            "+r",
+        ].join("\n");
+        const { added, removed } = parseDiff(diff);
+        expect([...removed.get("old.rs")]).toEqual([5, 6, 7, 20]);
+        expect([...added.get("new.rs")]).toEqual([21]);
+    });
+
+    it("does not read a changed line that starts with -- or ++ as a file header", () => {
+        const diff = ["diff --git a/x.rs b/x.rs", "--- a/x.rs", "+++ b/x.rs", "@@ -1 +1 @@", "--- a/not-a-header", "+++ b/not-a-header"].join("\n");
+        const { added, removed } = parseDiff(diff);
+        expect([...added.keys()]).toEqual(["x.rs"]);
+        expect([...removed.keys()]).toEqual(["x.rs"]);
+    });
+});
+
+describe("normalizeComment", () => {
+    it("drops markers and spacing so a moved comment compares equal", () => {
+        const n = normalizeComment;
+        expect(n("    // reagent P1 on PR #2338:  keep")).toBe("reagent P1 on PR #2338: keep");
+        expect(n("/// reagent P1 on PR #2338: keep")).toBe("reagent P1 on PR #2338: keep");
+        expect(n("   * reagent P1 on PR #2338: keep")).toBe("reagent P1 on PR #2338: keep");
+        expect(n("/* reagent P1 on PR #2338: keep */")).toBe("reagent P1 on PR #2338: keep");
+    });
+});
+
+describe("gateFile: moved comments", () => {
+    it("does not hold a moved comment to the narration rule, but still catches a new one", () => {
+        const info = rs("// reagent P1 on PR #2338: moved\nfn a() {}\n// codex P2 on PR #4000: brand new\nfn b() {}\n");
+        const moved = new Set([normalizeComment("// reagent P1 on PR #2338: moved")]);
+        expect(gateFile(info, new Set([1, 3]), moved).errors.map((e) => e.line)).toEqual([3]);
+        expect(gateFile(info, new Set([1, 3])).errors.map((e) => e.line)).toEqual([1, 3]);
     });
 });
 
