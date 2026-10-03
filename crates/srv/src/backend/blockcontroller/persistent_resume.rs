@@ -19,8 +19,8 @@
 //! `update()` is a pure `(state, event) -> (state, effects)` function —
 //! every transition is exhaustively unit-testable without a real child
 //! process, a real tokio task, or any timing assumptions. Callers
-//! (`persistent/spawn.rs`'s I/O tasks, `persistent/stdout_reader.rs` and
-//! `persistent/process_waiter.rs`) are responsible for actually executing
+//! (the I/O tasks `persistent/spawn.rs` starts: `persistent/stdout_reader.rs`
+//! and `persistent/process_waiter.rs`) are responsible for actually executing
 //! the returned `ResumeEffect`s (persisting/dropping/flushing a line,
 //! firing the retry, publishing terminal status) — this module only
 //! decides, never performs I/O.

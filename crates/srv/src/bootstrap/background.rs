@@ -449,7 +449,7 @@ pub fn spawn_background_subsystems(
     // `SubagentWatcher`'s `broker` field doc comment for why this is a
     // post-construction setter rather than a constructor parameter.
     subagent_watcher.set_broker(broker.clone());
-    // Registered as a global so blockcontroller/persistent/spawn.rs's turn-end
+    // Registered as a global so blockcontroller/persistent/stdout_reader.rs's turn-end
     // reconciliation hook (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_
     // 2026_07_20 Phase A) can reach it without threading an Arc through
     // PersistentSubprocessController::new and every one of its callers.
