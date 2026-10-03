@@ -655,11 +655,44 @@ export function extendResizeHandlesThroughChips(
                     centerPx: edge,
                     perpMinPx: perpMin,
                     perpMaxPx: perpMax,
+                    halfSizePx: half,
                 });
             }
         }
         if (added.length) props.resizeHandles = [...handles, ...added];
     }
+}
+
+/**
+ * Whether a container-local point lies in a resize handle's zone, by each
+ * handle's own extent: `halfSizePx` when set (a clamped chip-edge handle),
+ * else `defaultHalfSizePx`. Used to refuse a pane drag that starts on a
+ * handle, so it must match what is rendered (ReAgent P2 on #4260).
+ */
+export function isInResizeHandleZone(
+    handles: readonly ResizeHandleProps[],
+    defaultHalfSizePx: number,
+    localX: number,
+    localY: number
+): boolean {
+    for (const rh of handles) {
+        const half = rh.halfSizePx ?? defaultHalfSizePx;
+        if (
+            rh.flexDirection === FlexDirection.Row &&
+            Math.abs(localX - rh.centerPx) <= half &&
+            localY >= rh.perpMinPx &&
+            localY <= rh.perpMaxPx
+        )
+            return true;
+        if (
+            rh.flexDirection === FlexDirection.Column &&
+            Math.abs(localY - rh.centerPx) <= half &&
+            localX >= rh.perpMinPx &&
+            localX <= rh.perpMaxPx
+        )
+            return true;
+    }
+    return false;
 }
 
 /**
