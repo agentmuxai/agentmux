@@ -12,6 +12,7 @@
 pub mod agent_access;
 pub mod askpass;
 pub mod conn;
+pub mod helper_install;
 pub mod ssh;
 pub mod ssh_config;
 pub mod status;

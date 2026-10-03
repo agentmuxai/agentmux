@@ -25,9 +25,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::frame::{Decoder, Frame, PROTOCOL};
+use agentmux_remote::frame::{Decoder, Frame, PROTOCOL};
 use crate::pty;
-use crate::ring::{Ring, DEFAULT_CAPACITY};
+use agentmux_remote::ring::{Ring, DEFAULT_CAPACITY};
 
 /// Largest output frame sent in one piece when replaying.
 const REPLAY_CHUNK: usize = 256 * 1024;

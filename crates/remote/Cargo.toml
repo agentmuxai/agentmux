@@ -8,6 +8,11 @@ license = "Apache-2.0"
 # Small and dependency-light on purpose: it is uploaded to remote hosts and
 # built as a static musl binary for any Linux (spec §6.1, §6.4). std + libc.
 
+# The protocol, shared with srv (which speaks it to `attach` over ssh).
+[lib]
+name = "agentmux_remote"
+path = "src/lib.rs"
+
 [[bin]]
 name = "agentmux-remote"
 path = "src/main.rs"
