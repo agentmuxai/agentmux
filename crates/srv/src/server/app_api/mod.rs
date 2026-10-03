@@ -252,21 +252,39 @@ pub(super) fn resolve_tab_id_for_block(mstore: &Store, block_id: &str) -> Result
     Err(format!("resolve_tab_id_for_block: block {block_id} not found in any tab"))
 }
 
-/// Find an existing Editor-view block in a tab, if any. Direct sibling of
-/// `find_agent_block` above, checking `meta.view == "editor"` instead of
-/// `meta.agentId`.
-pub(super) fn find_editor_block(mstore: &Store, tab_id: &str) -> Result<Option<Block>, String> {
+/// Find an existing Editor-view block in a tab on `connection` (its meta
+/// `connection`; absent and `local` are this computer), if any. Direct
+/// sibling of `find_agent_block` above, checking `meta.view == "editor"`
+/// instead of `meta.agentId`. An editor on another connection is never it:
+/// its reads and saves go there (remote terminals spec §6.3).
+pub(super) fn find_editor_block(mstore: &Store, tab_id: &str, connection: &str) -> Result<Option<Block>, String> {
     let tab: Tab = mstore.must_get(tab_id)
         .map_err(|e| format!("TAB_NOT_FOUND: {e}"))?;
 
     for block_id in &tab.blockids {
         if let Ok(Some(block)) = mstore.get::<Block>(block_id) {
-            if obj::meta_get_string(&block.meta, "view", "") == "editor" {
+            if obj::meta_get_string(&block.meta, "view", "") == "editor"
+                && same_pane_connection(&obj::meta_get_string(&block.meta, "connection", ""), connection)
+            {
                 return Ok(Some(block));
             }
         }
     }
     Ok(None)
+}
+
+/// Whether two panes' connections are one: absent and `local` are this
+/// computer; otherwise the same host however it is spelled.
+pub(super) fn same_pane_connection(a: &str, b: &str) -> bool {
+    let norm = |c: &str| {
+        let c = c.trim();
+        if c.is_empty() || c == "local" { String::new() } else { c.to_string() }
+    };
+    let (a, b) = (norm(a), norm(b));
+    if a.is_empty() || b.is_empty() {
+        return a == b;
+    }
+    crate::backend::remote::conn::same_connection(&a, &b)
 }
 
 // ---------------------------------------------------------------------------

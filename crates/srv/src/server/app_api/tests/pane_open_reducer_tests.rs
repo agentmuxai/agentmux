@@ -742,6 +742,66 @@ async fn open_editor_reuses_existing_pane_in_callers_tab() {
     assert_eq!(reused.tab_id, tab_id);
 }
 
+/// An Editor on an SSH host is never reused for a file on this computer (or
+/// the other way): its reads and saves go to its host, so the file would be
+/// read there (ReAgent on #4294). The same host is reused as before.
+#[tokio::test]
+async fn open_editor_reuses_only_an_editor_on_the_same_connection() {
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let caller = open_pane(&state, {
+        let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+        cmd.view = "sysinfo".into();
+        cmd.file = None;
+        cmd
+    })
+    .await
+    .expect("open_pane caller");
+    let on_host = open_pane(&state, {
+        let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/home/u/a.md", None, None);
+        cmd.connection = Some("user@box".into());
+        cmd
+    })
+    .await
+    .expect("open_pane host editor");
+
+    // A local file: a new Editor, not the host's.
+    let local = open_pane(
+        &state,
+        editor_open_cmd(None, "/tmp/local.md", Some(caller.block_id.clone()), Some(true)),
+    )
+    .await
+    .expect("open_pane local editor");
+    assert!(local.created, "a host's editor must not take a local file");
+    assert_ne!(local.block_id, on_host.block_id);
+
+    // Another file on the same host: that editor, however the host is spelled.
+    let same_host = open_pane(&state, {
+        let mut cmd = editor_open_cmd(None, "/home/u/b.md", Some(caller.block_id.clone()), Some(true));
+        cmd.connection = Some(" user@box ".into());
+        cmd
+    })
+    .await
+    .expect("open_pane same host");
+    assert!(!same_host.created);
+    assert_eq!(same_host.block_id, on_host.block_id);
+}
+
 /// Regression for codex P1 on PR #2404: 2+ reuse calls before the target
 /// pane's frontend ever drains its pending-files meta must all survive,
 /// not overwrite each other down to just the last one.
