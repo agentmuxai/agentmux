@@ -117,6 +117,15 @@ fn send_message_outcome_names_the_state_and_the_id() {
     let t = ok(json!({ "success": true, "request_id": "inj-42" }));
     assert!(t.starts_with("QUEUED for Camper via the cloud relay (unconfirmed, expires in 30 min)"), "{t}");
     assert!(t.contains("DiscoverAgents") && t.ends_with(" id=inj-42"), "{t}");
+    assert!(!t.contains("signed in from your account"), "no hint unless the relay says so: {t}");
+    // The relay says the target is not one of the sender's agents
+    // (agentmux-cloud#138): a likely typo, still queued.
+    let t = ok(json!({ "success": true, "request_id": "inj-43", "target_in_account": false }));
+    assert!(t.starts_with("QUEUED for Camper via the cloud relay"), "{t}");
+    assert!(t.contains("No agent of that name has signed in from your account, so check the spelling"), "{t}");
+    assert!(t.ends_with(" id=inj-43") && !t.contains("  "), "{t:?}");
+    let t = ok(json!({ "success": true, "request_id": "inj-44", "target_in_account": true }));
+    assert!(!t.contains("signed in from your account"), "{t}");
 
     let t = ok(json!({ "success": false, "held": true, "request_id": "1-2-3", "error": "agent Camper is not running" }));
     assert!(t.starts_with("HELD for Camper (not_running)"), "{t}");
@@ -155,7 +164,7 @@ fn send_message_description_lists_every_answer() {
     let v: Value = serde_json::from_str(SEND_MESSAGE_TOOL).unwrap();
     let d = v["description"].as_str().unwrap();
     for s in ["Delivered to X", "QUEUED for X — their agent is starting up", "HELD for X (not_running)", "HELD for X (needs_login)",
-              "via the cloud relay (unconfirmed", "(needs_login)", "(not_found)", "id="] {
+              "via the cloud relay (unconfirmed", "signed in from your account", "(needs_login)", "(not_found)", "id="] {
         assert!(d.contains(s), "missing {s:?}");
     }
 }
