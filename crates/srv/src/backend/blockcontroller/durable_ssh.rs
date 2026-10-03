@@ -64,17 +64,56 @@ pub fn note_app_exiting() {
     APP_EXITING.store(true, Ordering::SeqCst);
 }
 
-/// Whether a block is a durable SSH pane.
-pub fn wants(meta: &MetaMapType) -> bool {
-    meta.get(META_KEY_DURABLE).and_then(|v| v.as_bool()) == Some(true)
-        && matches!(
-            crate::backend::remote::ConnTarget::parse(&obj::meta_get_string(
-                meta,
-                super::META_KEY_CONNECTION,
-                ""
-            )),
-            Ok(crate::backend::remote::ConnTarget::Ssh(_))
-        )
+/// Whether a shell pane runs durable (spec §7.1). Only on an SSH connection:
+/// the pane's own `term:durable` first, then its connection's settings, then
+/// the global setting; with none of them set, yes on a host the helper has
+/// answered on (`remote::helper_hosts`).
+pub fn wants(meta: &MetaMapType, config: Option<&crate::backend::wconfig::FullConfigType>) -> bool {
+    let conn = obj::meta_get_string(meta, super::META_KEY_CONNECTION, "");
+    if !matches!(
+        crate::backend::remote::ConnTarget::parse(&conn),
+        Ok(crate::backend::remote::ConnTarget::Ssh(_))
+    ) {
+        return false;
+    }
+    // An agent's SSH shell (`PtyShell`, marked by http_pty_shell.rs) is never
+    // durable, whatever the defaults: its ssh's prompts must reach the user as
+    // the agent's (its own askpass grant), and the agent tools do not reattach
+    // a session yet (the `Shell` tool's `durable`, spec §8.1, still to come).
+    if !obj::meta_get_string(
+        meta,
+        crate::backend::remote::askpass::META_KEY_AGENT_BLOCK,
+        "",
+    )
+    .is_empty()
+    {
+        return false;
+    }
+    let conn_setting = config.and_then(|c| {
+        c.connections
+            .iter()
+            .find(|(name, _)| crate::backend::remote::conn::same_connection(name, &conn))
+            .and_then(|(_, k)| k.term_durable)
+    });
+    resolve_durable(
+        meta.get(META_KEY_DURABLE).and_then(|v| v.as_bool()),
+        conn_setting,
+        config.and_then(|c| c.settings.term_durable),
+        || crate::backend::remote::helper_hosts::known(&conn),
+    )
+}
+
+/// §7.1's order: pane, connection, global, then whether the host has the
+/// helper (asked only when nothing is set).
+pub fn resolve_durable(
+    pane: Option<bool>,
+    connection: Option<bool>,
+    global: Option<bool>,
+    host_has_helper: impl FnOnce() -> bool,
+) -> bool {
+    pane.or(connection)
+        .or(global)
+        .unwrap_or_else(host_has_helper)
 }
 
 /// The pane's size from its runtime options, as `(cols, rows)`; 80 x 24 when
@@ -224,6 +263,8 @@ pub struct DurableSshController {
     filestore: Option<Arc<FileStore>>,
     /// srv's auth key, for the askpass helper to reach srv with.
     auth_key: String,
+    /// Settings, for whether the pane is still durable ([`wants`]).
+    config: Option<Arc<crate::backend::wconfig::ConfigState>>,
     inner: Mutex<Inner>,
 }
 
@@ -235,6 +276,7 @@ impl DurableSshController {
         mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
         auth_key: String,
+        config: Option<Arc<crate::backend::wconfig::ConfigState>>,
     ) -> Self {
         Self {
             block_id,
@@ -243,6 +285,7 @@ impl DurableSshController {
             mstore,
             filestore,
             auth_key,
+            config,
             inner: Mutex::new(Inner {
                 status: STATUS_INIT.to_string(),
                 version: 0,
@@ -264,6 +307,7 @@ impl DurableSshController {
             shellprocstatus: inner.status.clone(),
             shellprocconnname: inner.conn_name.clone(),
             shellprocexitcode: inner.exit_code,
+            durable: true,
             spawn_ts_ms: inner.spawn_ts_ms,
             ..Default::default()
         }
@@ -432,7 +476,12 @@ impl Controller for DurableSshController {
             .mstore
             .as_ref()
             .and_then(|s| s.get::<obj::Block>(&self.block_id).ok().flatten())
-            .map(|b| wants(&b.meta))
+            .map(|b| {
+                wants(
+                    &b.meta,
+                    self.config.as_ref().map(|c| c.get_full_config()).as_deref(),
+                )
+            })
             .unwrap_or(true);
         self.leave(if still_durable {
             Leave::Detach
@@ -814,6 +863,8 @@ impl Run {
                             Frame::Hello { created, .. } => {
                                 attached = true;
                                 status::pane_started(self.broker.as_deref(), &self.conn);
+                                // New panes on this host are durable by default.
+                                crate::backend::remote::helper_hosts::remember(&self.conn);
                                 if created && expected > 0 {
                                     self.note("The previous session on this host is gone (the host restarted or it was ended); this is a new one.").await;
                                     expected = 0;
@@ -1471,11 +1522,45 @@ elif ' attach ' in remote:
             }
             m
         };
-        assert!(wants(&meta("area54", Some(true))));
-        assert!(!wants(&meta("area54", None)));
-        assert!(!wants(&meta("area54", Some(false))));
-        assert!(!wants(&meta("local", Some(true))));
-        assert!(!wants(&meta("wsl://Ubuntu", Some(true))));
+        assert!(wants(&meta("area54", Some(true)), None));
+        assert!(!wants(&meta("area54", Some(false)), None));
+        assert!(!wants(&meta("local", Some(true)), None));
+        assert!(!wants(&meta("wsl://Ubuntu", Some(true)), None));
+
+        // The connection's setting, then the global one, under the pane's.
+        let mut config = crate::backend::wconfig::FullConfigType::default();
+        config.settings.term_durable = Some(false);
+        config.connections.insert(
+            "durable-test-host".into(),
+            crate::backend::wconfig::ConnKeywords {
+                term_durable: Some(true),
+                ..Default::default()
+            },
+        );
+        assert!(wants(&meta("durable-test-host", None), Some(&config)));
+        assert!(!wants(
+            &meta("durable-test-host", Some(false)),
+            Some(&config)
+        ));
+        assert!(!wants(&meta("durable-test-other", None), Some(&config)));
+
+        // An agent's SSH shell: never, not even when asked or by default.
+        let mut agent = meta("durable-test-host", Some(true));
+        agent.insert(
+            crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.into(),
+            serde_json::json!("agent-block"),
+        );
+        assert!(!wants(&agent, Some(&config)));
+    }
+
+    #[test]
+    fn durable_is_the_pane_then_the_connection_then_global_then_the_helper() {
+        let never = || panic!("asked the host only when nothing is set");
+        assert!(resolve_durable(Some(true), Some(false), Some(false), never));
+        assert!(!resolve_durable(None, Some(false), Some(true), never));
+        assert!(resolve_durable(None, None, Some(true), never));
+        assert!(resolve_durable(None, None, None, || true));
+        assert!(!resolve_durable(None, None, None, || false));
     }
 
     #[test]

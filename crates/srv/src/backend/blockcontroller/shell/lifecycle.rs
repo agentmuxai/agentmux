@@ -1536,6 +1536,7 @@ impl Controller for ShellController {
                     let status = {
                         let inner = inner_wait.lock().unwrap();
                         BlockControllerRuntimeStatus {
+                            durable: false,
                             blockid: block_id_wait.clone(),
                             version: inner.status_version,
                             shellprocstatus: inner.proc_status.clone(),

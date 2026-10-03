@@ -51,6 +51,14 @@ export const TERMINAL_SETTINGS = {
         section: "terminal",
         keywords: ["newline", "multiline input", "composer keybinding", "term:shiftenternewline"],
     },
+    durableSsh: {
+        id: "terminal.durable_ssh",
+        label: "Keep SSH sessions alive",
+        description:
+            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. Each pane's menu can still turn it on or off.",
+        section: "terminal",
+        keywords: ["durable", "ssh", "reconnect", "remote", "session", "term:durable"],
+    },
     bracketedPaste: {
         id: "terminal.bracketed_paste",
         label: "Bracketed paste",
@@ -196,6 +204,28 @@ export function TerminalSection(): JSX.Element {
                         checked={!!(s()["term:shiftenternewline"] as boolean)}
                         onChange={(v) => set("term:shiftenternewline", v)}
                     />
+                }
+            />
+            <SettingRow
+                id={TERMINAL_SETTINGS.durableSsh.id}
+                label={TERMINAL_SETTINGS.durableSsh.label}
+                description={TERMINAL_SETTINGS.durableSsh.description}
+                control={
+                    <select
+                        class="setting-select"
+                        value={
+                            s()["term:durable"] === true ? "on" : s()["term:durable"] === false ? "off" : "auto"
+                        }
+                        onChange={(e) => {
+                            const v = e.currentTarget.value;
+                            // "auto" clears the setting: srv's default applies.
+                            set("term:durable", v === "on" ? true : v === "off" ? false : null);
+                        }}
+                    >
+                        <option value="auto">On hosts that have the helper</option>
+                        <option value="on">Always (installs the helper)</option>
+                        <option value="off">Never</option>
+                    </select>
                 }
             />
             <SettingRow

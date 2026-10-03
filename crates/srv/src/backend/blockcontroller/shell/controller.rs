@@ -219,6 +219,7 @@ impl ShellController {
     pub(super) fn get_status_snapshot(&self) -> BlockControllerRuntimeStatus {
         let inner = self.inner.lock().unwrap();
         BlockControllerRuntimeStatus {
+            durable: false,
             blockid: self.block_id.clone(),
             version: inner.status_version,
             shellprocstatus: inner.proc_status.clone(),
