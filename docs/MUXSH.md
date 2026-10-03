@@ -33,6 +33,7 @@ muxsh config edit               # open settings.json
 muxsh config path               # print AgentMux's data dir
 muxsh agent list                # list reachable agents
 muxsh agent send <name> <msg>   # message a running agent
+muxsh conn sessions <host>      # durable sessions on an SSH host
 muxsh help                      # full usage
 ```
 
@@ -133,6 +134,23 @@ joined with spaces to form the message.
 
 To *launch* an agent into a pane, use `muxopen <agent>` (a separate,
 already-shipped tool) — not duplicated here as `muxsh agent open`.
+
+## `conn sessions`
+
+```bash
+muxsh conn sessions user@box
+muxsh conn sessions user@box --json
+```
+
+The durable sessions on an SSH host: AgentMux's helper there keeps a
+durable pane's shell running. Each line gives the session id, how much
+output it has, and which pane holds it: a pane id, `no pane` (an orphan
+that nothing reattaches to), or `ended` with the exit code. This wraps
+`GET /api/v1/conn/sessions`, which runs the helper's `list` over ssh.
+
+It only lists. To reopen an orphan or end a session, use the terminal pane
+menu's "Sessions on <host>…". A host that needs a password says so here
+rather than asking, since the command has no pane to ask in.
 
 ## What's not here, and why
 

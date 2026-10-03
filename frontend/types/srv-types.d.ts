@@ -637,6 +637,17 @@ declare global {
         error?: string;
     };
 
+    // remote::sessions::HostSession: one durable session on an SSH host.
+    type HostSession = {
+        id: string;
+        /** Output the session has produced, in bytes. */
+        bytes: number;
+        /** The shell's exit code, once it has exited. */
+        exited?: number;
+        /** The pane on this connection holding it; absent for an orphan. */
+        blockid?: string;
+    };
+
     // wshrpc.CpuDataRequest
     type CpuDataRequest = {
         id: string;

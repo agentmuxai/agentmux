@@ -13,6 +13,7 @@
 use super::*;
 use crate::backend::mps::Broker;
 use crate::backend::remote::status::{self, state};
+use crate::backend::remote::sessions;
 use crate::backend::remote::ConnTarget;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -102,6 +103,52 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // A host's durable sessions, for the pane menu's "Sessions on <host>"
+    // (spec §7.6).
+    let (store, auth_key) = (state.mstore.clone(), state.auth_key.clone());
+    engine.register_handler(
+        COMMAND_CONN_SESSIONS,
+        Box::new(move |data, _ctx| {
+            let (store, auth_key) = (store.clone(), auth_key.clone());
+            Box::pin(async move {
+                let (conn, block) = (str_field(&data, "connname"), str_field(&data, "blockid"));
+                let ask = (!block.is_empty()).then_some(sessions::AskIn {
+                    block_id: &block,
+                    auth_key: &auth_key,
+                });
+                let list = sessions::list(&store, &conn, ask).await?;
+                Ok(Some(serde_json::json!(list)))
+            })
+        }),
+    );
+    let auth_key = state.auth_key.clone();
+    engine.register_handler(
+        COMMAND_CONN_SESSION_END,
+        Box::new(move |data, _ctx| {
+            let auth_key = auth_key.clone();
+            Box::pin(async move {
+                let (conn, id, block) = (
+                    str_field(&data, "connname"),
+                    str_field(&data, "sessionid"),
+                    str_field(&data, "blockid"),
+                );
+                let ask = (!block.is_empty()).then_some(sessions::AskIn {
+                    block_id: &block,
+                    auth_key: &auth_key,
+                });
+                let ended = sessions::end(&conn, &id, ask).await?;
+                Ok(Some(serde_json::json!(ended)))
+            })
+        }),
+    );
+}
+
+fn str_field(data: &serde_json::Value, key: &str) -> String {
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// What `connensure` and `connconnect` do: accept `local`; accept a WSL distro
@@ -535,6 +582,29 @@ pub(crate) async fn handle_conn_list() -> axum::Json<Vec<ConnEntry>> {
         .await
         .unwrap_or_default();
     axum::Json(list(&installed, &hosts, &status::all()))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct ConnSessionsQuery {
+    connection: String,
+}
+
+/// `GET /api/v1/conn/sessions?connection=<ssh host>`: the host's durable
+/// sessions (`muxsh conn sessions`, spec §7.6). Listing only, and with no
+/// pane to ask in: a host that needs a password says so rather than asking.
+pub(crate) async fn handle_conn_sessions(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<ConnSessionsQuery>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match sessions::list(&state.mstore, &q.connection, None).await {
+        Ok(list) => axum::Json(list).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            axum::Json(serde_json::json!({ "error": e })),
+        )
+            .into_response(),
+    }
 }
 
 #[cfg(test)]

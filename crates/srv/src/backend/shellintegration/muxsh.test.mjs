@@ -12,6 +12,7 @@ import {
     guessView,
     parseArgs,
     renderAgentList,
+    renderConnSessions,
     renderAgentSend,
     renderResult,
     renderShellCreate,
@@ -287,6 +288,39 @@ describe("muxsh parseArgs — config", () => {
 
     it("an unknown 'config' verb is rejected", () => {
         expect(parseArgs(["config", "bogus"]).error).toMatch(/unknown 'muxsh config' verb 'bogus'/);
+    });
+});
+
+describe("muxsh conn sessions", () => {
+    it("parses a host, with or without --json", () => {
+        expect(parseArgs(["conn", "sessions", "user@box"])).toEqual({
+            command: "conn-sessions",
+            host: "user@box",
+            json: false,
+        });
+        expect(parseArgs(["conn", "sessions", "--json", "box"])).toEqual({
+            command: "conn-sessions",
+            host: "box",
+            json: true,
+        });
+    });
+
+    it("needs exactly one host", () => {
+        expect(parseArgs(["conn", "sessions"]).error).toContain("requires an SSH host");
+        expect(parseArgs(["conn", "sessions", "-oProxyCommand=x"]).error).toContain("requires an SSH host");
+        expect(parseArgs(["conn", "sessions", "a", "b"]).error).toContain("unknown argument 'b'");
+        expect(parseArgs(["conn", "list"]).error).toContain("expected 'sessions'");
+    });
+
+    it("renders one line per session, saying where each is", () => {
+        expect(renderConnSessions("box", [])).toBe("no durable sessions on box");
+        expect(
+            renderConnSessions("box", [
+                { id: "amx-1", bytes: 10, blockid: "b-1" },
+                { id: "amx-2", bytes: 0 },
+                { id: "amx-3", bytes: 5, exited: 0 },
+            ]),
+        ).toBe("amx-1  10 bytes  pane b-1\namx-2  0 bytes  no pane\namx-3  5 bytes  ended (exit 0)");
     });
 });
 

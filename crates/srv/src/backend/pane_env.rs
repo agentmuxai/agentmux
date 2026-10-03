@@ -240,7 +240,7 @@ mod spawn_site_coverage {
          "test: re-runs the test harness as a child that sleeps, to prove the extraction deadline kills it"),
         ("src/backend/blockcontroller/app_server.rs", "fake_server_binary(", 1,
          "test: runs the fixture server built above; lives and dies with the test"),
-        ("src/backend/blockcontroller/durable_ssh.rs", "&self.ssh_path", 1,
+        ("src/backend/remote/host.rs", "&self.ssh_path", 1,
          "sanitized: a durable SSH pane's ssh (attach, end, helper install: one ssh_command), the same sanitize_process_command"),
         ("src/backend/blockcontroller/persistent/tests/eager_resume.rs", "\"taskkill\"", 1,
          "test: the eager-resume harness's Drop force-kills its stub CLI on Windows so a failed assertion cannot leave it running"),
