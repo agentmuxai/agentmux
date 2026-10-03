@@ -1,7 +1,7 @@
 # SPEC: My Agents tiles — larger tiles, an honest auth line, real history summaries, and no ambient credentials
 
 **Date:** 2026-10-03
-**Status:** proposed — not built. §8 lists the decisions that block Phase 4.
+**Status:** active — Phase 1 (#4285) and Phase 2a (#4290) built, see §11; Phase 2b and 3 not started; §8 lists the decisions that block Phase 4.
 **Author:** AgentY, at the owner's request
 **Related:** `docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md` (§4 the "(ambient creds)" regression, §5 the snapshot states, §5a the Haiku fallback), `SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md`, `SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md`, `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7 (the retired ambient-login escape hatch), `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md`, `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md`.
 
@@ -151,3 +151,17 @@ Phases 1-3 are independent of Phase 4 and can ship in that order.
 ## 10. Not in this spec
 
 Dropping the `use_ambient_login` column (a migration, no behaviour); the Swarm view's use of `agent:summary` (`SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md`); the agent history browser itself.
+
+
+## 11. As built
+
+**Phase 1 (#4285):** tiles at 480 px minimum width with a 3-line preview, `No auth` for an unbound agent, an empty line (not `No auth`) when the links or accounts lookup itself failed, the three retired account labels removed.
+
+**Phase 2a (history previews):** `agent_session/history_summary.rs`. For each distinct agent id in the list, `read_agent_history` stats `agent:<id>:current/output` (falling back to the newest `agent:<id>:archive:<ms>` that has output, found with a primary-key range scan, `FileStore::zone_ids_with_prefix`), then reads backwards from the end in 1 MiB chunks, at most 4 MiB, until it finds the newest real user prompt. A real prompt is a `user` record that is not a tool result, has no `parent_tool_use_id`, and does not start with harness scaffolding (`# Session Context`, `[JEKT:`, `[BROADCAST:`, `<system-reminder>`, and similar). The result is remembered by `(store, zone)` until the file's size or modified time changes. It runs on the blocking pool, once per distinct agent id per list call.
+
+Row states: a prompt is found → `preview` is that prompt, `has_snapshot` true, `last_active_at` is the transcript's modified time. A transcript with no prompt in the last 4 MiB → `has_snapshot` true, empty preview, shown as "No prompt in recent history". No transcript → the old per-block snapshot is consulted (old builds wrote it), else "No conversations yet". A failed read → `snapshot_check_failed`, shown as "Couldn't read history", and `transcript` is added to `degraded`.
+
+Differences from §5.3:
+- **No message count.** Counting messages would mean reading the whole transcript (a 1.5 GB file today), so `node_count` is 0 and the tile shows no count. The picker still sorts by last activity.
+- **`HistoryService` fallback not built.** An agent with no transcript zone reads "No conversations yet" even if a provider session file exists. Add it if that turns out to matter.
+- **Summary-first order not built.** The preview is the last user message; the ambient summary (R9) is Phase 2b, because it needs the refresh policy and the per-account rule to land together.

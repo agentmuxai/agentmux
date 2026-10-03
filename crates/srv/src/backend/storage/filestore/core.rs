@@ -743,6 +743,22 @@ impl FileStore {
             .map_err(StoreError::Sqlite)
     }
 
+    /// Zone IDs that start with `prefix`, in no particular order. A range scan
+    /// on the primary key, so it costs the number of matches, not the size of
+    /// the store (`get_all_zone_ids` walks every file row).
+    pub fn zone_ids_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare_cached(
+            "SELECT DISTINCT zoneid FROM db_wave_file \
+             WHERE zoneid >= ?1 AND zoneid < ?2",
+        )?;
+        // U+10FFFF sorts after every character a zone name can contain.
+        let upper = format!("{prefix}\u{10FFFF}");
+        let rows = stmt.query_map(params![prefix, upper], |row| row.get(0))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::Sqlite)
+    }
+
     /// Get all zone IDs that have files.
     #[allow(dead_code)]
     pub fn get_all_zone_ids(&self) -> Result<Vec<String>, StoreError> {
