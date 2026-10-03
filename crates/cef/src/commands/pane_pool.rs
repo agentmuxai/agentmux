@@ -548,6 +548,11 @@ pub fn promote_pane_pool_window(
         // `width` and `height` arrive pre-DPI-converted (physical pixels) from
         // `open_floating_pane_window`'s Windows block. `x` and `y` are in the
         // same coordinate space as `CreateWindowExW` (physical screen coords).
+        // SetWindowPos activates the window while it is still hidden, and with
+        // a snapshot it stays hidden until the renderer has put it up; keep
+        // the invisible-activation hand-back off it until then (to the end of
+        // this function).
+        let _promoting = crate::client::wndproc::PromoteActivationGuard::new(outer_hwnd as _);
         unsafe {
             let ok = SetWindowPos(outer_hwnd as HWND, HWND_TOP, x, y, width, height, 0);
             if ok == 0 {
