@@ -408,29 +408,8 @@ pub fn tear_off_pool_promote(
 /// Open a new window at a specific screen position (tear-off).
 /// Creates a new CEF browser window positioned so the cursor lands in the title bar.
 pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {
-    // PR #6 H.7 — refuse top-level creation while any pane is mid-close.
-    // See `commands/window/creation.rs::open_window_with_kind` for rationale.
-    if state.any_browser_pane_closing() {
-        tracing::warn!(
-            target: "wfr:gate",
-            "[wfr:gate] open_window_at_position refused — pane is mid-close (H.7 invariant)"
-        );
-        return Err("a pane is currently closing; retry shortly".to_string());
-    }
-
-    // Same draining guard as `open_window_with_kind` — a tear-off racing an
-    // explicit quit would otherwise strand a live window in a draining host
-    // (Codex P2 on PR #2996).
-    if !matches!(
-        state.host_state.lock().quit_state,
-        crate::state::QuitState::Running
-    ) {
-        tracing::warn!(
-            target: "wfr:gate",
-            "[wfr:gate] open_window_at_position refused — instance is draining/quitting"
-        );
-        return Err("the app is shutting down".to_string());
-    }
+    // Refuse while a pane is mid-close (H.7) or the instance is quitting.
+    state.check_top_level_creation_allowed("open_window_at_position")?;
 
     let screen_x = args.get("screenX").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);

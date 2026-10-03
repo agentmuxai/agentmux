@@ -1349,16 +1349,53 @@ impl AppState {
     /// (`docs/retro/h7-freeze-fix-retro-2026-05-02.md`) found the gate
     /// never fired and that hypothesis was wrong.
     ///
-    /// The check is small enough to inline at each call site with no
-    /// async surface. If it turns out the gate needs to widen
-    /// ("any pane present" rather than "any pane Closing"), that's a
-    /// one-line edit.
+    /// The refusing creators go through [`Self::check_no_pane_closing`];
+    /// the two pool refills defer (no error) and call this directly. If
+    /// the gate needs to widen ("any pane present" rather than "any pane
+    /// Closing"), that's a one-line edit.
     pub fn any_browser_pane_closing(&self) -> bool {
         self.host_state
             .lock()
             .browser_panes
             .values()
             .any(|e| matches!(e.lifecycle, BrowserPaneLifecycle::Closing { .. }))
+    }
+
+    /// H.7 gate for a top-level window creator: refuses while any pane is
+    /// mid-close (see [`Self::any_browser_pane_closing`]), logging under
+    /// `wfr:gate` as `caller`. The frontend retries on this error string
+    /// (it matches "currently closing").
+    pub fn check_no_pane_closing(&self, caller: &str) -> Result<(), String> {
+        if self.any_browser_pane_closing() {
+            tracing::warn!(
+                target: "wfr:gate",
+                "[wfr:gate] {caller} refused — pane is mid-close (H.7 invariant)"
+            );
+            return Err("a pane is currently closing; retry shortly".to_string());
+        }
+        Ok(())
+    }
+
+    /// [`Self::check_no_pane_closing`], then refuse once the instance has
+    /// decided to quit. Without the second gate, a window creation racing an
+    /// explicit `quit_app` would register AFTER the drain began —
+    /// `handle_register_browser` has no draining guard — leaving a live,
+    /// visible window in a draining host that the quit's own snapshot never
+    /// knew to close (#2996).
+    ///
+    /// Not specific to background-service mode: `QuitState` is monotonic, so
+    /// once it leaves `Running` no new top-level window is ever wanted, by
+    /// any caller — user, reproject, tear-off or pool fallback.
+    pub fn check_top_level_creation_allowed(&self, caller: &str) -> Result<(), String> {
+        self.check_no_pane_closing(caller)?;
+        if self.is_quitting() {
+            tracing::warn!(
+                target: "wfr:gate",
+                "[wfr:gate] {caller} refused — instance is draining/quitting"
+            );
+            return Err("the app is shutting down".to_string());
+        }
+        Ok(())
     }
 
     /// Phase B.5e — authoritative instance-number lookup. Reads

@@ -446,8 +446,9 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
     // PR #6 H.7 — refuse pool refill while any pane is mid-close. Pool
     // windows are CEF top-levels just like user-visible ones, so the same
     // gate applies whether or not the new window is on-screen. See
-    // `commands/window/creation.rs::open_window_with_kind` for its rationale
-    // (and why the v146-deadlock diagnosis behind it was later found wrong).
+    // `AppState::any_browser_pane_closing` for its rationale (and why the
+    // v146-deadlock diagnosis behind it was later found wrong). Deferred
+    // rather than refused, so not `check_no_pane_closing`.
     if state.any_browser_pane_closing() {
         tracing::warn!(
             target: "wfr:gate",
@@ -477,7 +478,7 @@ pub fn spawn_pool_window(state: &Arc<AppState>) {
 
     let window_id = uuid::Uuid::new_v4();
     // Use the `window-pool-` prefix so existing `is_instance_label`
-    // checks (tear_off_hook.rs, app-init.ts) pass naturally — they
+    // checks (tear_off_hook/windows.rs, app-init.ts) pass naturally — they
     // accept anything starting with `window-`. After promotion the
     // label stays the same; the reducer's `pool.unpromoted` is the
     // authoritative pool-vs-promoted distinction (cleared on

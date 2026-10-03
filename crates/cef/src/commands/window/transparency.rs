@@ -173,6 +173,21 @@ unsafe fn remove_window_opacity(hwnd: *mut std::ffi::c_void) {
     }
 }
 
+/// The `(label, opacity)` of each opacity event: `Some` for
+/// `WindowOpacityApplied`, `None` for `WindowOpacityCleared` (fully opaque).
+fn opacity_changes(events: &[crate::reducer::HostEvent]) -> Vec<(String, Option<f32>)> {
+    events
+        .iter()
+        .filter_map(|ev| match ev {
+            crate::reducer::HostEvent::WindowOpacityApplied { label, opacity, .. } => {
+                Some((label.clone(), Some(*opacity)))
+            }
+            crate::reducer::HostEvent::WindowOpacityCleared { label, .. } => Some((label.clone(), None)),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Set opacity on exactly one window by label.
 ///
 /// Routes through the host reducer (`HostCommand::SetWindowOpacity`) so the
@@ -206,70 +221,41 @@ pub fn set_window_opacity(
     // for opacity >= 1.0. Matching only `WindowOpacityApplied` left
     // windows semi-transparent after the user restored full opacity.
     // Match both arms.
+    let changes = opacity_changes(&out.events);
     #[cfg(target_os = "windows")]
-    for ev in &out.events {
-        match ev {
-            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
-                let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
-                if let Some(raw) = hwnd_raw {
-                    let hwnd = raw as *mut std::ffi::c_void;
-                    unsafe { apply_window_opacity(hwnd, *ev_opacity as f64); }
-                } else {
-                    tracing::warn!("[opacity] set_window_opacity: no hwnd for label={}", ev_label);
-                }
+    for (ev_label, ev_opacity) in &changes {
+        let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
+        match (hwnd_raw, ev_opacity) {
+            (Some(raw), Some(opacity)) => {
+                let hwnd = raw as *mut std::ffi::c_void;
+                unsafe { apply_window_opacity(hwnd, *opacity as f64); }
             }
-            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
-                let hwnd_raw = state.window_hwnds.lock().get(ev_label.as_str()).copied();
-                if let Some(raw) = hwnd_raw {
-                    let hwnd = raw as *mut std::ffi::c_void;
-                    unsafe { remove_window_opacity(hwnd); }
-                } else {
-                    tracing::warn!("[opacity] set_window_opacity: no hwnd for label={} (clear)", ev_label);
-                }
+            (Some(raw), None) => {
+                let hwnd = raw as *mut std::ffi::c_void;
+                unsafe { remove_window_opacity(hwnd); }
             }
-            _ => {}
+            (None, Some(_)) => {
+                tracing::warn!("[opacity] set_window_opacity: no hwnd for label={}", ev_label);
+            }
+            (None, None) => {
+                tracing::warn!("[opacity] set_window_opacity: no hwnd for label={} (clear)", ev_label);
+            }
         }
     }
 
-    // macOS mirror of the Windows arms above — same reducer events, same
-    // both-arms requirement (reagent P1 on #868: matching only Applied left
-    // windows semi-transparent after restore). Applies NSWindow.alphaValue
-    // on the UI thread via SetWindowAlphaTask.
-    #[cfg(target_os = "macos")]
-    for ev in &out.events {
-        match ev {
-            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
-                crate::ui_tasks::post_set_window_alpha(state, ev_label, *ev_opacity as f64);
-            }
-            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
-                crate::ui_tasks::post_set_window_alpha(state, ev_label, 1.0);
-            }
-            _ => {}
-        }
-    }
-
-    // Linux mirror — same reducer events, same both-arms requirement
-    // (reagent P1 on #868). SetWindowAlphaTask applies it on the UI thread:
-    // _NET_WM_WINDOW_OPACITY on X11, a CSS page fade on native Wayland.
-    #[cfg(target_os = "linux")]
-    for ev in &out.events {
-        match ev {
-            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
-                crate::ui_tasks::post_set_window_alpha(state, ev_label, *ev_opacity as f64);
-            }
-            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
-                crate::ui_tasks::post_set_window_alpha(state, ev_label, 1.0);
-            }
-            _ => {}
-        }
+    // macOS and Linux: SetWindowAlphaTask applies it on the UI thread —
+    // NSWindow.alphaValue on macOS; _NET_WM_WINDOW_OPACITY on X11, a CSS
+    // page fade on native Wayland.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    for (ev_label, ev_opacity) in &changes {
+        crate::ui_tasks::post_set_window_alpha(state, ev_label, ev_opacity.map_or(1.0, |o| o as f64));
     }
 
     // SPEC_PILLAR1_STEP2 Slice A Phase 2 — write-through to srv's durable
     // `Window.opacity` mirror (added in Phase 1, #1982) so a crashed/
     // restarted host can restore it instead of defaulting to fully opaque
-    // (`get_window_opacity` below reads it back). Platform-agnostic:
-    // `out.events` is the same regardless of which cfg-gated block above
-    // ran, so this fires once per call, not once per platform.
+    // (`get_window_opacity` below reads it back). Platform-agnostic, so this
+    // fires once per call, not once per platform.
     //
     // Debounced per label (see `next_opacity_write_generation` above,
     // reagent P1 on #1985) so a rapid burst — e.g. a slider drag, which
@@ -281,17 +267,7 @@ pub fn set_window_opacity(
     // a pre-promote pool window, or a floating pane — see
     // SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md §1.B,
     // floating panes have no srv `Window` row to write to at all).
-    for ev in &out.events {
-        let resolved = match ev {
-            crate::reducer::HostEvent::WindowOpacityApplied { label: ev_label, opacity: ev_opacity, .. } => {
-                Some((ev_label.clone(), Some(*ev_opacity)))
-            }
-            crate::reducer::HostEvent::WindowOpacityCleared { label: ev_label, .. } => {
-                Some((ev_label.clone(), None))
-            }
-            _ => None,
-        };
-        let Some((ev_label, ev_opacity)) = resolved else { continue };
+    for (ev_label, ev_opacity) in changes {
         let Some(window_id) = state.backend_window_id(&ev_label) else {
             tracing::debug!(
                 label = %ev_label,

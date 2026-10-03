@@ -91,13 +91,7 @@ pub fn open_panel(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     // cold path below inherits the guard from `open_window_with_kind`, but the
     // pool promote does not — so without this a tray click arriving mid-close
     // takes the unguarded path (Codex P1 on PR #3002).
-    if state.any_browser_pane_closing() {
-        tracing::warn!(
-            target: "wfr:gate",
-            "[wfr:gate] open_panel refused — pane is mid-close (H.7 invariant)"
-        );
-        return Err("a pane is currently closing; retry shortly".to_string());
-    }
+    state.check_no_pane_closing("open_panel")?;
 
     let work = panel_work_area();
     let scale = panel_scale(work);
