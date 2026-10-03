@@ -580,6 +580,26 @@ pub(super) fn connection_conflict(
         "local",
     );
     if crate::backend::remote::conn::same_connection(&running_on, wanted) {
+        // An SSH shell the user opened (not started for an agent) has an ssh
+        // that asks for passwords and host keys in its own terminal, which an
+        // agent reads and types into: it is never shared with an agent.
+        let ssh = matches!(
+            crate::backend::remote::ConnTarget::parse(&running_on),
+            Ok(crate::backend::remote::ConnTarget::Ssh(_))
+        );
+        let for_an_agent = !crate::backend::obj::meta_get_string(
+            &shell_block.meta,
+            crate::backend::remote::askpass::META_KEY_AGENT_BLOCK,
+            "",
+        )
+        .is_empty();
+        if ssh && !for_an_agent {
+            let error = format!(
+                "this pane's shell on '{running_on}' was opened by the user, and its ssh may ask for a \
+                 password in it, so an agent cannot share it. Use Shell instead, or ask the user to close it."
+            );
+            return Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response());
+        }
         return None;
     }
     let error = format!(
@@ -588,4 +608,32 @@ pub(super) fn connection_conflict(
          or call PtyShell with connection '{running_on}' to use it"
     );
     Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response())
+}
+
+#[cfg(test)]
+mod shared_shell_tests {
+    use super::connection_conflict;
+
+    fn shell(conn: &str, for_agent: bool) -> crate::backend::obj::Block {
+        let mut b = crate::backend::obj::Block::default();
+        b.meta.insert("connection".into(), serde_json::json!(conn));
+        if for_agent {
+            b.meta.insert(
+                crate::backend::remote::askpass::META_KEY_AGENT_BLOCK.into(),
+                serde_json::json!("agent-pane"),
+            );
+        }
+        b
+    }
+
+    /// The user's own SSH shell (its ssh prompts in its terminal) is never
+    /// handed to an agent; one started for an agent, or a local one, is.
+    #[test]
+    fn an_agent_never_shares_the_users_own_ssh_shell() {
+        assert!(connection_conflict(&shell("area54", false), "area54").is_some());
+        assert!(connection_conflict(&shell("area54", true), "area54").is_none());
+        assert!(connection_conflict(&shell("local", false), "local").is_none());
+        assert!(connection_conflict(&shell("wsl://Ubuntu", false), "wsl://Ubuntu").is_none());
+        assert!(connection_conflict(&shell("area54", true), "local").is_some(), "another connection");
+    }
 }
