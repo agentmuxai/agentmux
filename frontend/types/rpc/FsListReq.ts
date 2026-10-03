@@ -11,4 +11,13 @@ export type FsListReq = { path: string, cursor?: string,
 /**
  * Entries per page. Default 1000, capped at 5000.
  */
-limit?: number, };
+limit?: number, 
+/**
+ * An SSH connection to run this on (its helper, `fs_ops::remote`);
+ * absent, local, or WSL: this machine, as before.
+ */
+connection?: string, 
+/**
+ * The pane asking, whose window shows any ssh prompt for `connection`.
+ */
+block_id?: string, };

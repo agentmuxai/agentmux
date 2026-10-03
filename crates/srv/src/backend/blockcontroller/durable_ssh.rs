@@ -1001,53 +1001,17 @@ impl Run {
         self.host.command(remote)
     }
 
-    /// Run `remote` over ssh with `input` on its stdin; its output. Bounded:
-    /// an install step never hangs the pane.
-    async fn ssh_run(&self, remote: &str, input: Option<Vec<u8>>) -> Result<String, String> {
-        self.host
-            .run(remote, input, Duration::from_secs(120))
-            .await?
-            .ok()
-    }
-
-    /// Put this version's helper on the host (spec §6.2): probe the
-    /// platform, get the matching build (checked against the release's
-    /// hashes), upload it over this ssh, check its hash there, move it in.
+    /// Put this version's helper on the host (`helper_install::ensure`),
+    /// saying so in the pane.
     async fn install_helper(&self) -> Result<(), String> {
-        use crate::backend::remote::helper_install as hi;
-        let version = env!("CARGO_PKG_VERSION");
-        let out = self.ssh_run(&hi::probe_command(version), None).await?;
-        let probe = hi::parse_probe(&out, version);
-        if probe.installed {
-            return Ok(());
-        }
-        let target = hi::target_for(&probe.uname).ok_or_else(|| {
-            format!(
-                "AgentMux has no helper build for this host ({})",
-                probe.uname.trim()
-            )
-        })?;
-        let cache = crate::backend::base::get_mux_config_dir().join("remote-helper");
-        let (bytes, hash) =
-            hi::local_build(version, target, &cache, &reqwest::Client::new()).await?;
-        self.note(&format!(
-            "Installing AgentMux's helper on {} ({} KB, in ~/.agentmux-remote) so this pane can stay alive…",
-            self.conn,
-            bytes.len() / 1024
-        ))
-        .await;
-        self.ssh_run(&hi::upload_command(version, &self.session), Some(bytes))
-            .await?;
-        let out = self
-            .ssh_run(&hi::install_command(version, &self.session, &hash), None)
-            .await?;
-        if out.trim() != "ok" {
-            return Err(format!(
-                "the uploaded helper did not check out on the host ({})",
-                out.trim()
-            ));
-        }
-        Ok(())
+        crate::backend::remote::helper_install::ensure(&self.host, &self.session, |size| {
+            self.note_owned(format!(
+                "Installing AgentMux's helper on {} ({} KB, in ~/.agentmux-remote) so this pane can stay alive…",
+                self.conn,
+                size / 1024
+            ))
+        })
+        .await
     }
 
     fn read_offset(&self) -> u64 {
@@ -1080,6 +1044,10 @@ impl Run {
     }
 
     /// A line from AgentMux in the pane, dimmed, on its own line.
+    async fn note_owned(&self, text: String) {
+        self.note(&text).await
+    }
+
     async fn note(&self, text: &str) {
         let _ = self
             .append(format!("\r\n\x1b[2m[{text}]\x1b[0m\r\n").into_bytes())

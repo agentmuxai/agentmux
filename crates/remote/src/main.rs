@@ -24,7 +24,7 @@ mod attach;
 mod daemon;
 #[cfg(unix)]
 mod pty;
-mod serve;
+use agentmux_remote::serve;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();

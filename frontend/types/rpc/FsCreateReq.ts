@@ -5,4 +5,13 @@ import type { FsCreateKind } from "./FsCreateKind";
  * Request for `fs.create`: a new empty file or folder. Fails if the name is
  * taken.
  */
-export type FsCreateReq = { parent: string, name: string, kind: FsCreateKind, };
+export type FsCreateReq = { parent: string, name: string, kind: FsCreateKind, 
+/**
+ * An SSH connection to run this on (its helper, `fs_ops::remote`);
+ * absent, local, or WSL: this machine, as before.
+ */
+connection?: string, 
+/**
+ * The pane asking, whose window shows any ssh prompt for `connection`.
+ */
+block_id?: string, };
