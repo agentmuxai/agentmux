@@ -261,6 +261,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // `POST /api/v1/window/name` sets the window display name (taskbar title).
         // agentmux-mcp's `WhoAmI` / `SetWindowName` tools call these.
         .route("/api/v1/self", get(handle_self))
+        // The connections an agent's Shell/PtyShell may name (`ConnList` tool,
+        // SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §8.1).
+        .route("/api/v1/conn/list", get(app_api::connections::handle_conn_list))
         .route("/api/v1/window/name", post(handle_window_name))
         // Naming verbs (SPEC §4.3): rename the caller's own tab / pane / workspace
         // (or an explicit target). agentmux-mcp's SetTabName / SetPaneTitle /

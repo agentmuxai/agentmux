@@ -25,6 +25,23 @@ pub(super) async fn handle_pty_shell_create(
     State(state): State<AppState>,
     Json(req): Json<PtyShellCreateRequest>,
 ) -> impl IntoResponse {
+    // Where the shell runs, checked the way a pane's connection is: a refused
+    // one fails the call with its reason rather than opening a local shell.
+    let wsl_distro = match super::app_api::connections::for_agent(
+        &state.broker,
+        req.connection.as_deref(),
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
+    };
+    let connection = match &wsl_distro {
+        Some(d) => crate::backend::remote::ConnTarget::Wsl(d.clone()).name(),
+        None => "local".to_string(),
+    };
     let existing_id = state
         .mstore
         .get::<crate::backend::obj::Block>(&req.agent_block_id)
@@ -43,7 +60,7 @@ pub(super) async fn handle_pty_shell_create(
     // legitimate post-hoc operation via PtyShellResize, not a create-time
     // parameter for a process that already has a size.
     if let Some(id) = existing_id {
-        if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &id).await {
+        if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &id, &connection).await {
             return resp;
         }
         // `None` here means either a stale pointer (the block was deleted
@@ -56,6 +73,10 @@ pub(super) async fn handle_pty_shell_create(
     let child_id = uuid::Uuid::new_v4().to_string();
 
     let mut meta = crate::backend::obj::MetaMapType::new();
+    // Which srv run created this shell: a block with no controller is one this
+    // run is still starting (a concurrent create), not one left from before a
+    // restart (`try_attach_to_existing_shell`).
+    meta.insert(META_KEY_PTYSHELL_BOOT_ID.to_string(), json!(&*state.boot_id));
     meta.insert("view".to_string(), json!("term"));
     meta.insert(
         blockcontroller::META_KEY_CONTROLLER.to_string(),
@@ -77,16 +98,29 @@ pub(super) async fn handle_pty_shell_create(
     // general fix: any OTHER program that queries terminal capabilities via
     // escape sequences and blocks for a reply would hit the same class of
     // issue — see docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md §5.
+    //
+    // A WSL shell is the distro's own login shell (`wsl.exe -d`), which has no
+    // such handshake, and `cmd.exe` would be looked up inside the distro.
     #[cfg(windows)]
-    {
+    if wsl_distro.is_none() {
         meta.insert(blockcontroller::META_KEY_CMD.to_string(), json!("cmd.exe"));
         meta.insert("cmd:interactive".to_string(), json!(true));
+    }
+    if wsl_distro.is_some() {
+        meta.insert(blockcontroller::META_KEY_CONNECTION.to_string(), json!(connection));
     }
     // If the caller didn't supply a cwd, fall back to the agent block's own
     // cmd:cwd — the project directory the agent pane was launched with.
     // Mirrors `handle_shell_create`'s identical fallback (Codex P1 on PR
     // #3177): without this, the PTY spawns in agentmux-srv's own cwd
     // (typically the portable runtime/ dir), not the agent's worktree.
+    //
+    // In WSL the cwd is a distro path, kept as given; no Windows fallback.
+    if wsl_distro.is_some() {
+        if let Some(cwd) = req.cwd.as_deref().filter(|c| !c.trim().is_empty()) {
+            meta.insert(blockcontroller::META_KEY_CMD_CWD.to_string(), json!(cwd));
+        }
+    }
     let effective_cwd = req.cwd.clone().or_else(|| {
         state
             .mstore
@@ -98,6 +132,7 @@ pub(super) async fn handle_pty_shell_create(
                 if cwd.is_empty() { None } else { Some(cwd) }
             })
     });
+    let effective_cwd = effective_cwd.filter(|_| wsl_distro.is_none());
     if let Some(cwd) = &effective_cwd {
         // Same MSYS→native normalization createsubblock's WS handler applies —
         // the PTY spawn path reads cmd:cwd raw with no conversion, so a
@@ -192,7 +227,7 @@ pub(super) async fn handle_pty_shell_create(
         // pointer first. Pivot to reusing THEIRS rather than proceeding
         // with the block we prepared but never actually inserted.
         Ok(Some(winner_id)) => {
-            if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &winner_id).await {
+            if let Some(resp) = try_attach_to_existing_shell(&state, &req.agent_block_id, &winner_id, &connection).await {
                 return resp;
             }
             // Winner's block vanished between the transaction and now, OR

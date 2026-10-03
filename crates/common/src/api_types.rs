@@ -47,6 +47,11 @@ pub struct ShellCreateRequest {
     /// read stdin to EOF (e.g. `cat` with no args).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture_stdin: Option<bool>,
+    /// Where the command runs: `local` (the default) or `wsl://<distro>`. An
+    /// SSH destination is refused until SSH terminals ship
+    /// (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
 }
 
 /// Response from `POST /api/v1/shell/create`
@@ -150,6 +155,11 @@ pub struct PtyShellCreateRequest {
     pub rows: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cols: Option<u16>,
+    /// Where the shell runs: `local` (the default) or `wsl://<distro>`. An
+    /// SSH destination is refused until SSH terminals ship
+    /// (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §8).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<String>,
 }
 
 /// Response from `POST /api/v1/ptyshell/create`. `shell_id` is the new
@@ -748,6 +758,7 @@ mod app_api_manifest_contract_tests {
             title: Some("t".to_string()),
             env: Some(Default::default()),
             capture_stdin: Some(true),
+            connection: Some("wsl://Ubuntu".to_string()),
         };
         let value = serde_json::to_value(&instance).expect("must serialize");
         let struct_fields: HashSet<String> =

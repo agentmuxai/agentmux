@@ -4595,6 +4595,193 @@ async fn ptyshell_create_does_not_respawn_a_shell_that_already_exited() {
     blockcontroller::delete_controller(&second_shell_id);
 }
 
+/// A running pane shell is reused only on its own connection: asked for on
+/// another, the call is refused with 409 and a remedy, and the shell is left
+/// running as it was, not restarted (#4253). The shell here is a local one
+/// whose meta is relabelled as a WSL connection, so no WSL is needed. (An
+/// exited shell is replaced before any connection check, the path
+/// `ptyshell_create_does_not_respawn_a_shell_that_already_exited` covers;
+/// relabelling an exited shell here would instead trip the resync's own
+/// connection-change restart, which a real shell's fixed connection never does.)
+///
+/// `#[ignore]`d like the other real-PTY tests in this file. Run manually:
+/// `cargo test -p agentmux-srv --bin agentmux-srv
+/// a_running_ptyshell_on_another_connection_is_refused_and_left_running
+/// -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn a_running_ptyshell_on_another_connection_is_refused_and_left_running() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "conn-agent-block".to_string(),
+        ..Default::default()
+    };
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "conn-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let first_shell_id = json["shell_id"].as_str().unwrap().to_string();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    let mut shell_block: crate::backend::obj::Block =
+        state.mstore.must_get(&first_shell_id).expect("shell block exists");
+    shell_block.meta.insert(
+        blockcontroller::META_KEY_CONNECTION.to_string(),
+        serde_json::json!("wsl://Fake"),
+    );
+    state.mstore.update(&mut shell_block).expect("relabel the shell");
+
+    // Running on wsl://Fake: a local request is refused with a remedy that works.
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "conn-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json:?}");
+    let error = json["error"].as_str().unwrap_or_default();
+    assert!(error.contains("wsl://Fake") && error.contains("exit"), "{error}");
+
+    // Refused, not touched: the same shell still runs.
+    let (_, status_json) = post_json(
+        &app,
+        "/api/v1/ptyshell/status",
+        serde_json::json!({ "shell_id": first_shell_id, "agent_block_id": "conn-agent-block" }),
+    )
+    .await;
+    assert_eq!(status_json["running"], serde_json::json!(true));
+    let agent_block: crate::backend::obj::Block =
+        state.mstore.must_get("conn-agent-block").expect("agent block exists");
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some(first_shell_id.as_str())
+    );
+
+    blockcontroller::delete_controller(&first_shell_id);
+}
+
+/// Two first `PtyShell` calls on different connections: the claim's winner has
+/// inserted its block and pointer but not started its controller yet. The
+/// loser must not take that block for one left from before a restart: it gets
+/// 409 and the winner's pointer stays (#4253). No PTY is spawned, so this runs
+/// on CI.
+#[tokio::test]
+async fn a_concurrent_ptyshell_on_another_connection_leaves_the_winner_alone() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    // The winner's block, as the claim left it: stamped with this run, no controller yet.
+    let mut winner = crate::backend::obj::Block {
+        oid: "in-flight-shell".to_string(),
+        parentoref: "block:race-agent-block".to_string(),
+        ..Default::default()
+    };
+    winner.meta.insert(
+        blockcontroller::META_KEY_CONNECTION.to_string(),
+        serde_json::json!("wsl://Fake"),
+    );
+    winner.meta.insert(
+        super::http_shell::META_KEY_PTYSHELL_BOOT_ID.to_string(),
+        serde_json::json!(&*state.boot_id),
+    );
+    state.mstore.insert(&mut winner).expect("insert winner");
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "race-agent-block".to_string(),
+        subblockids: Some(vec!["in-flight-shell".to_string()]),
+        ..Default::default()
+    };
+    agent_block.meta.insert(
+        META_KEY_SHELL_SUBBLOCK_ID.to_string(),
+        serde_json::json!("in-flight-shell"),
+    );
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "race-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{json:?}");
+    assert!(blockcontroller::get_block_controller_status("in-flight-shell").is_none());
+    let agent_block: crate::backend::obj::Block =
+        state.mstore.must_get("race-agent-block").expect("agent block exists");
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some("in-flight-shell")
+    );
+}
+
+/// After a srv restart a pane's shell block has no controller. Asked for on
+/// another connection than the block's, it is replaced by a fresh shell, not
+/// revived on its old connection and then refused (#4253).
+///
+/// `#[ignore]`d like the other real-PTY tests here (the fresh shell is real).
+/// Run manually: `cargo test -p agentmux-srv --bin agentmux-srv
+/// a_pre_restart_ptyshell_on_another_connection_is_replaced -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn a_pre_restart_ptyshell_on_another_connection_is_replaced() {
+    let state = test_state();
+    let app = build_router(state.clone());
+
+    // A shell block as a previous srv run left it: on wsl://Fake, no controller.
+    let mut old_shell = crate::backend::obj::Block {
+        oid: "pre-restart-shell".to_string(),
+        parentoref: "block:restart-agent-block".to_string(),
+        ..Default::default()
+    };
+    old_shell.meta.insert("view".to_string(), serde_json::json!("term"));
+    old_shell.meta.insert(
+        blockcontroller::META_KEY_CONTROLLER.to_string(),
+        serde_json::json!(blockcontroller::BLOCK_CONTROLLER_SHELL),
+    );
+    old_shell.meta.insert(
+        blockcontroller::META_KEY_CONNECTION.to_string(),
+        serde_json::json!("wsl://Fake"),
+    );
+    state.mstore.insert(&mut old_shell).expect("insert old shell");
+    let mut agent_block = crate::backend::obj::Block {
+        oid: "restart-agent-block".to_string(),
+        subblockids: Some(vec!["pre-restart-shell".to_string()]),
+        ..Default::default()
+    };
+    agent_block.meta.insert(
+        META_KEY_SHELL_SUBBLOCK_ID.to_string(),
+        serde_json::json!("pre-restart-shell"),
+    );
+    state.mstore.insert(&mut agent_block).expect("insert agent block");
+
+    let (status, json) = post_json(
+        &app,
+        "/api/v1/ptyshell/create",
+        serde_json::json!({ "agent_block_id": "restart-agent-block" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json:?}");
+    let shell_id = json["shell_id"].as_str().unwrap().to_string();
+    assert_ne!(shell_id, "pre-restart-shell");
+    assert!(
+        blockcontroller::get_block_controller_status("pre-restart-shell").is_none(),
+        "the old shell must not be revived on its old connection"
+    );
+    let agent_block: crate::backend::obj::Block =
+        state.mstore.must_get("restart-agent-block").expect("agent block exists");
+    assert_eq!(
+        agent_block.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()),
+        Some(shell_id.as_str())
+    );
+
+    blockcontroller::delete_controller(&shell_id);
+}
+
 /// A shell that has EXITED must not still hold an agent lease over the
 /// human's keyboard (`blockcontroller::agent_lock`, wired from the
 /// wait/cleanup task in `shell/lifecycle.rs`).

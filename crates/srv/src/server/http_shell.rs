@@ -15,6 +15,21 @@ pub(super) async fn handle_shell_create(
     State(state): State<AppState>,
     Json(req): Json<ShellCreateRequest>,
 ) -> impl IntoResponse {
+    // Where it runs. Checked before anything is published, so a refused
+    // connection (SSH before P2, a distro that isn't installed, a bad name)
+    // fails the call with its reason instead of running the command here.
+    let wsl_distro = match super::app_api::connections::for_agent(
+        &state.broker,
+        req.connection.as_deref(),
+    )
+    .await
+    {
+        Ok(d) => d,
+        Err(e) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response();
+        }
+    };
+
     let shell_id = uuid::Uuid::new_v4().to_string();
     let title = req.title.as_deref().unwrap_or(&req.cmd).to_string();
     let now_ms = agentmux_common::time::now_ms_u64();
@@ -29,19 +44,29 @@ pub(super) async fn handle_shell_create(
     // cmd:cwd — the working directory the agent pane was launched with.
     // Without this, ShellNodeRunner would inherit agentmux-srv's cwd
     // (typically the portable runtime/ dir) instead of the project dir.
-    let effective_cwd = req.cwd.or_else(|| {
+    //
+    // In WSL the cwd is a path inside the distro, given as is, and the agent's
+    // own (Windows) directory is no fallback for it: the distro's home is.
+    let effective_cwd = if wsl_distro.is_some() {
+        req.cwd.clone()
+    } else {
+        req.cwd.clone().or_else(|| {
         agent_block.as_ref().and_then(|block| {
             let cwd = crate::backend::obj::meta_get_string(&block.meta, "cmd:cwd", "");
             if cwd.is_empty() { None } else { Some(cwd.to_string()) }
         })
-    });
+        })
+    };
 
     // Normalize the cwd before it reaches the spawner. Agents on Windows run
     // inside a bash shell and emit MSYS paths like `/c/Users/asafe/project`;
     // passing those straight to `Command::current_dir` fails with os error 267
     // (ERROR_DIRECTORY). This converts them to native form and expands `~`.
-    let effective_cwd =
-        effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c));
+    let effective_cwd = if wsl_distro.is_some() {
+        effective_cwd
+    } else {
+        effective_cwd.and_then(|c| crate::backend::base::normalize_working_dir(&c))
+    };
 
     // Env parity with the agent CLI: start from the agent block's stored
     // cmd:env (the per-agent env the agent process is launched with — same
@@ -67,6 +92,7 @@ pub(super) async fn handle_shell_create(
             _ => None,
         })
         .unwrap_or_default();
+    let caller_keys: Vec<String> = req.env.iter().flat_map(|e| e.keys().cloned()).collect();
     if let Some(req_env) = req.env {
         effective_env.extend(req_env);
     }
@@ -75,12 +101,31 @@ pub(super) async fn handle_shell_create(
     // Nor can it hand that command the account's cloud login.
     crate::backend::gh_guard::apply_gh_guard(&mut effective_env);
     crate::backend::account_login_guard::strip_account_login(&mut effective_env);
+    // WSL passes on only what WSLENV names: the caller's own variables and the
+    // gh guard, never the rest of the agent's env.
+    let wsl_args = wsl_distro.as_ref().map(|distro| {
+        effective_env.insert(
+            "WSLENV".to_string(),
+            crate::backend::remote::wsl::wslenv_with(
+                &std::env::var("WSLENV").unwrap_or_default(),
+                caller_keys.iter().map(String::as_str),
+            ),
+        );
+        crate::backend::remote::wsl::launch(
+            distro,
+            &req.cmd,
+            &[],
+            effective_cwd.as_deref().unwrap_or_default(),
+        )
+        .args
+    });
 
     tracing::info!(
         block_id = %req.agent_block_id,
         shell_id = %shell_id,
         cmd = %req.cmd,
         cwd = ?effective_cwd,
+        wsl = ?wsl_distro,
         "shell.create"
     );
 
@@ -112,7 +157,8 @@ pub(super) async fn handle_shell_create(
         block_id: req.agent_block_id,
         cmd: req.cmd,
         title,
-        cwd: effective_cwd,
+        cwd: if wsl_args.is_some() { None } else { effective_cwd },
+        wsl_args,
         extra_env: effective_env,
         broker: Arc::clone(&state.broker),
         registry: Arc::clone(&state.shell_sessions),
@@ -120,7 +166,7 @@ pub(super) async fn handle_shell_create(
     };
     tokio::spawn(runner.run());
 
-    (StatusCode::OK, Json(ShellCreateResponse { shell_id }))
+    (StatusCode::OK, Json(ShellCreateResponse { shell_id })).into_response()
 }
 
 /// `POST /api/v1/shell/stop` — stop a running persistent shell.
@@ -299,13 +345,46 @@ pub(super) fn broadcast_meta_update(
 /// claim" fallback in `handle_pty_shell_create`: resync `id`'s controller
 /// and reply, or return `None` if `id` doesn't resolve to a real block
 /// (stale pointer), OR if its shell has already exited, so the caller
-/// falls through to creating a fresh one.
+/// falls through to creating a fresh one. A pane has one agent shell: asking
+/// for it, while it runs, on another connection than its own is refused (409),
+/// not answered with the shell on the wrong machine. An exited one is replaced
+/// whatever its connection was.
 pub(super) async fn try_attach_to_existing_shell(
     state: &AppState,
     agent_block_id: &str,
     id: &str,
+    connection: &str,
 ) -> Option<axum::response::Response> {
     let block = state.mstore.get::<crate::backend::obj::Block>(id).ok().flatten()?;
+
+    // Settled before the resync, which would otherwise start a shell on the
+    // block's own connection: a running shell on another connection is refused
+    // and left as it is, and so is one this srv run created and is still
+    // starting (a concurrent create won the claim). One with no controller from
+    // an earlier run (before a srv restart) is replaced, like an exited one,
+    // rather than revived on the old connection. An exited one is replaced
+    // below whatever its connection was.
+    if let Some(conflict) = connection_conflict(&block, connection) {
+        let created_this_run = crate::backend::obj::meta_get_string(
+            &block.meta,
+            META_KEY_PTYSHELL_BOOT_ID,
+            "",
+        ) == *state.boot_id;
+        match blockcontroller::get_block_controller_status(id) {
+            Some(s) if s.shellprocstatus == blockcontroller::STATUS_RUNNING => return Some(conflict),
+            None if created_this_run => return Some(conflict),
+            None => {
+                clear_shell_pointer_if(state, agent_block_id, id);
+                tracing::info!(
+                    block_id = %id,
+                    parent_id = %agent_block_id,
+                    "ptyshell.create: pane's shell is not running and was on another connection — falling through to a fresh shell"
+                );
+                return None;
+            }
+            Some(_) => {}
+        }
+    }
 
     // Baseline BEFORE resync — see `answer_conpty_handshake_if_seen`'s doc
     // comment (Codex P1 on PR #3194) for why this matters: the `term` file
@@ -392,23 +471,7 @@ pub(super) async fn try_attach_to_existing_shell(
             // path). Not fully transactional (same as that existing
             // pattern) — a failed/skipped clear just costs one more round
             // trip through the fallback chain, not correctness.
-            if let Ok(mut parent) = state.mstore.must_get::<crate::backend::obj::Block>(agent_block_id) {
-                if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(id) {
-                    parent.meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::Value::Null);
-                    if state.mstore.update(&mut parent).is_ok() {
-                        state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                            eventtype: "waveobj:update".to_string(),
-                            oref: format!("block:{agent_block_id}"),
-                            data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
-                                updatetype: "update".into(),
-                                otype: "block".into(),
-                                oid: agent_block_id.to_string(),
-                                obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
-                            }).unwrap_or_default()),
-                        });
-                    }
-                }
-            }
+            clear_shell_pointer_if(state, agent_block_id, id);
             tracing::info!(
                 block_id = %id,
                 parent_id = %agent_block_id,
@@ -424,7 +487,61 @@ pub(super) async fn try_attach_to_existing_shell(
                 .into_response(),
         );
     }
+    // A shell that started or changed connection between the check above and
+    // the resync (a concurrent caller) is still not handed out on the wrong one.
+    if let Some(conflict) = connection_conflict(&block, connection) {
+        return Some(conflict);
+    }
     answer_conpty_handshake_if_seen(state, id, baseline_len).await;
     tracing::info!(block_id = %id, parent_id = %agent_block_id, "ptyshell.create: reused");
     Some((StatusCode::OK, Json(PtyShellCreateResponse { shell_id: id.to_string() })).into_response())
+}
+
+/// Block meta on a `PtyShell` block: the srv boot id of the run that created it.
+pub(super) const META_KEY_PTYSHELL_BOOT_ID: &str = "ptyshell:bootid";
+
+/// Clear the agent block's shell pointer, if it still names `id` (see the
+/// exited-shell branch of `try_attach_to_existing_shell` for why it is
+/// compare-before-clear), so the next create claims a fresh shell.
+fn clear_shell_pointer_if(state: &AppState, agent_block_id: &str, id: &str) {
+    if let Ok(mut parent) = state.mstore.must_get::<crate::backend::obj::Block>(agent_block_id) {
+        if parent.meta.get(META_KEY_SHELL_SUBBLOCK_ID).and_then(|v| v.as_str()) == Some(id) {
+            parent.meta.insert(META_KEY_SHELL_SUBBLOCK_ID.to_string(), serde_json::Value::Null);
+            if state.mstore.update(&mut parent).is_ok() {
+                state.event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+                    eventtype: "waveobj:update".to_string(),
+                    oref: format!("block:{agent_block_id}"),
+                    data: Some(serde_json::to_value(&crate::backend::obj::MuxObjUpdate {
+                        updatetype: "update".into(),
+                        otype: "block".into(),
+                        oid: agent_block_id.to_string(),
+                        obj: Some(crate::backend::obj::mux_obj_to_value(&parent)),
+                    }).unwrap_or_default()),
+                });
+            }
+        }
+    }
+}
+
+/// 409 when the pane's running shell is on another connection than `wanted`.
+/// PtyShellStop releases the keyboard lock and leaves the shell running, so
+/// ending the shell is the way to switch.
+fn connection_conflict(
+    shell_block: &crate::backend::obj::Block,
+    wanted: &str,
+) -> Option<axum::response::Response> {
+    let running_on = crate::backend::obj::meta_get_string(
+        &shell_block.meta,
+        blockcontroller::META_KEY_CONNECTION,
+        "local",
+    );
+    if crate::backend::remote::conn::same_connection(&running_on, wanted) {
+        return None;
+    }
+    let error = format!(
+        "this pane's shell is running on '{running_on}', not '{wanted}'. \
+         End it with PtyShellInput(text: \"exit\\r\") and call PtyShell again, \
+         or call PtyShell with connection '{running_on}' to use it"
+    );
+    Some((StatusCode::CONFLICT, Json(json!({ "error": error }))).into_response())
 }
