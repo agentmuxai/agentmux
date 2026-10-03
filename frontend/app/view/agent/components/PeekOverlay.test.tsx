@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 import { autoUpdate } from "@floating-ui/dom";
 import { PeekOverlay } from "./PeekOverlay";
+import { useNodePeek, type NodePeek } from "../hooks/useNodePeek";
 
 vi.mock("@floating-ui/dom", () => ({
     autoUpdate: vi.fn(() => vi.fn()),
@@ -129,20 +130,22 @@ describe("PeekOverlay", () => {
         }
     });
 
-    // Placement and the hover bridge. The panel always sits near the pointer. One
-    // too tall for the transcript leaves it, on the side with more room, with its
-    // height cut so it cannot reach the pointer; that panel scrolls, so it is
-    // meant to be ENTERED and lingers after the row's mouseleave. One that fits
-    // closes the instant the pointer leaves, as it always did.
+    // Placement and the hover bridge. Row 100-500 wide and 200-230 tall, transcript
+    // 100-400, window 1400x1000, pointer inside the row. A panel that fits follows
+    // the pointer and closes the instant the pointer leaves the row. One too tall
+    // to fit is meant to be ENTERED: pinned (holds still), flush with the row,
+    // lingering after the row's mouseleave (longer while the pointer approaches),
+    // and other rows' peeks wait for it. Before the pin, every move toward a tall
+    // panel moved it away and cut its height, so it could never be reached.
     describe("placement and hover bridge", () => {
         const panel = () => document.querySelector(".agent-node-peek-overlay") as HTMLElement | null;
         const rectOf = (el: Element, r: Partial<DOMRect>) =>
             vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
                 top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => {}, ...r,
             } as DOMRect);
+        const topOf = () => parseFloat(panel()!.style.top);
 
-        /** Row 100-500 wide, transcript 100-400 tall, window 1400x1000, pointer at y=250. */
-        function renderPeek(opts: { align?: "end" | "stretch"; panelHeight: number; panelWidth?: number }) {
+        function setup(opts: { align?: "end" | "stretch"; panelHeight: number; panelWidth?: number; mouseY?: number }) {
             const container = document.createElement("div");
             container.style.overflowY = "auto";
             document.body.appendChild(container);
@@ -159,20 +162,82 @@ describe("PeekOverlay", () => {
                 </PeekOverlay>
             ));
             vi.advanceTimersByTime(50);
-            rectOf(panel()!, { height: opts.panelHeight, width: opts.panelWidth ?? 300 });
-            row.dispatchEvent(new MouseEvent("mousemove", { clientY: 250, bubbles: true }));
-            vi.advanceTimersByTime(50);
-            return { setShow };
+            // Its measured size, and (for the approach tests) where it sits.
+            rectOf(panel()!, {
+                height: opts.panelHeight, width: opts.panelWidth ?? 300, top: 230, bottom: 830, left: 200, right: 500,
+            });
+            const moveTo = (y: number) => {
+                row.dispatchEvent(new MouseEvent("mousemove", { clientY: y, bubbles: true }));
+                vi.advanceTimersByTime(50);
+            };
+            moveTo(opts.mouseY ?? 215);
+            return { row, setShow, moveTo };
+        }
+        /** The pointer moving over the page (not the row), as during the crossing. */
+        const pointerAt = (x: number, y: number) =>
+            document.dispatchEvent(new MouseEvent("mousemove", { clientX: x, clientY: y }));
+        /** A row elsewhere using the real hover hook, to watch whether its peek opens. */
+        function otherRow(rowEl?: HTMLElement): NodePeek {
+            let peek!: NodePeek;
+            const el = rowEl ?? document.createElement("div");
+            function Probe() {
+                peek = useNodePeek();
+                peek.setRowEl(el);
+                return null;
+            }
+            render(() => <Probe />);
+            return peek;
         }
 
-        it("a panel too tall for the transcript stays below the pointer, reaching past the pane, and is tagged", () => {
+        it("a panel that fits follows the pointer, as before", () => {
             vi.useFakeTimers();
             try {
-                renderPeek({ panelHeight: 800 });
-                const top = parseFloat(panel()!.style.top);
-                expect(top).toBe(250 + 12); // near the pointer, not beside the pane
-                expect(parseFloat(panel()!.style.maxHeight)).toBeLessThanOrEqual(1000 - 8 - top);
+                const { moveTo } = setup({ panelHeight: 40 });
+                expect(topOf()).toBe(215 + 12);
+                moveTo(222);
+                expect(topOf()).toBe(222 + 12);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a panel too tall to fit is pinned: it holds still, and keeps its height, while the pointer moves toward it", () => {
+            vi.useFakeTimers();
+            try {
+                const { moveTo } = setup({ panelHeight: 800 });
+                const top = topOf();
+                const maxHeight = panel()!.style.maxHeight;
+                expect(top).toBe(215 + 12);
+                moveTo(222);
+                moveTo(228);
+                expect(topOf()).toBe(top);
+                expect(panel()!.style.maxHeight).toBe(maxHeight);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a pinned panel's near edge is flush with the row, so reaching it crosses no other row", () => {
+            vi.useFakeTimers();
+            try {
+                // Pointer near the row's bottom: pointer + 12 would leave a strip of the next row.
+                setup({ panelHeight: 800, mouseY: 228 });
+                expect(topOf()).toBe(230); // the row's bottom edge, not 240
                 expect(panel()!.hasAttribute("data-pane-overlay")).toBe(true);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a pinned panel still moves with its row when the transcript scrolls", () => {
+            vi.useFakeTimers();
+            try {
+                const { row } = setup({ panelHeight: 800 });
+                expect(topOf()).toBe(227);
+                const update = vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void;
+                rectOf(row, { top: 150, bottom: 180, left: 100, right: 500, width: 400 });
+                update();
+                expect(topOf()).toBe(150 + 15 + 12); // same offset into the row as when it was pinned
             } finally {
                 vi.useRealTimers();
             }
@@ -181,31 +246,19 @@ describe("PeekOverlay", () => {
         it("a panel wider than the row pins to the row's left edge and extends right", () => {
             vi.useFakeTimers();
             try {
-                renderPeek({ panelHeight: 40, panelWidth: 900 });
-                expect(panel()!.style.left).toBe("100px"); // the row's left edge
-                expect(panel()!.style.transform).toBe(""); // grows rightward, not leftward
+                setup({ panelHeight: 40, panelWidth: 900 });
+                expect(panel()!.style.left).toBe("100px");
+                expect(panel()!.style.transform).toBe("");
                 expect(parseFloat(panel()!.style.maxWidth)).toBe(1400 - 8 - 100);
-                expect(panel()!.hasAttribute("data-pane-overlay")).toBe(true);
             } finally {
                 vi.useRealTimers();
             }
         });
 
-        it("a panel narrower than the row stays right-aligned to it", () => {
+        it("a panel that fits stays inside the pane, untagged, and closes at once", () => {
             vi.useFakeTimers();
             try {
-                renderPeek({ panelHeight: 40, panelWidth: 300 });
-                expect(panel()!.style.left).toBe("500px"); // the row's right edge
-                expect(panel()!.style.transform).toBe("translateX(-100%)");
-            } finally {
-                vi.useRealTimers();
-            }
-        });
-
-        it("a short panel stays inside the pane, untagged, and closes at once", () => {
-            vi.useFakeTimers();
-            try {
-                const { setShow } = renderPeek({ panelHeight: 40 });
+                const { setShow } = setup({ panelHeight: 40 });
                 expect(panel()!.hasAttribute("data-pane-overlay")).toBe(false);
                 setShow(false);
                 expect(panel()).toBeNull();
@@ -214,10 +267,10 @@ describe("PeekOverlay", () => {
             }
         });
 
-        it("a panel that scrolls lingers briefly after show goes false, then closes", () => {
+        it("an enterable panel lingers after the row's mouseleave, then closes", () => {
             vi.useFakeTimers();
             try {
-                const { setShow } = renderPeek({ panelHeight: 5000 });
+                const { setShow } = setup({ panelHeight: 5000 });
                 setShow(false);
                 expect(panel()).not.toBeNull();
                 vi.advanceTimersByTime(200);
@@ -227,14 +280,64 @@ describe("PeekOverlay", () => {
             }
         });
 
+        it("the linger is re-armed while the pointer keeps closing in on the panel", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                setShow(false);
+                // Panel spans y 230-830; the pointer approaches from above, slowly.
+                for (const y of [150, 170, 190, 210]) {
+                    vi.advanceTimersByTime(100);
+                    pointerAt(300, y);
+                }
+                vi.advanceTimersByTime(100); // 500 ms in, well past the plain 150 ms
+                expect(panel()).not.toBeNull();
+                vi.advanceTimersByTime(200); // stopped moving: it closes
+                expect(panel()).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a pointer moving away does not keep it open", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                setShow(false);
+                vi.advanceTimersByTime(50);
+                pointerAt(300, 100); // first sighting (re-arms once: 50 + 150 = 200)
+                vi.advanceTimersByTime(50);
+                pointerAt(300, 60); // farther: no re-arm
+                vi.advanceTimersByTime(110);
+                expect(panel()).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("an approach cannot keep it open past the cap", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                setShow(false);
+                for (let i = 1; i <= 12; i++) {
+                    vi.advanceTimersByTime(100);
+                    pointerAt(300, i * 5); // always a little closer
+                }
+                expect(panel()).toBeNull(); // 1200 ms of approaching, cap is 1000
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         it("stays open while the pointer is on the panel, and closes after it leaves", () => {
             vi.useFakeTimers();
             try {
-                const { setShow } = renderPeek({ panelHeight: 5000 });
-                setShow(false); // row mouseleave: the pointer is crossing to the panel
+                const { setShow } = setup({ panelHeight: 5000 });
+                setShow(false);
                 panel()!.dispatchEvent(new MouseEvent("mouseenter"));
-                vi.advanceTimersByTime(1000);
-                expect(panel()).not.toBeNull(); // held open
+                vi.advanceTimersByTime(2000);
+                expect(panel()).not.toBeNull();
                 panel()!.dispatchEvent(new MouseEvent("mouseleave"));
                 vi.advanceTimersByTime(200);
                 expect(panel()).toBeNull();
@@ -246,7 +349,7 @@ describe("PeekOverlay", () => {
         it("a re-enter of the row (show to true) cancels the linger", () => {
             vi.useFakeTimers();
             try {
-                const { setShow } = renderPeek({ panelHeight: 5000 });
+                const { setShow } = setup({ panelHeight: 5000 });
                 setShow(false);
                 vi.advanceTimersByTime(50);
                 setShow(true);
@@ -257,10 +360,136 @@ describe("PeekOverlay", () => {
             }
         });
 
+        it("while the pointer crosses to an enterable panel, a row it passes over waits; it opens if the pointer never arrives", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const passedOver = otherRow();
+                setShow(false); // left this row, heading for the panel
+                passedOver.handlePeekEnter();
+                vi.advanceTimersByTime(60); // its enter delay (50 ms) has elapsed
+                expect(passedOver.isPeeking()).toBe(false); // waiting, not on top of the panel
+                vi.advanceTimersByTime(150); // the panel's grace ran out
+                expect(panel()).toBeNull();
+                expect(passedOver.isPeeking()).toBe(true); // still hovered, so it opens now
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("...and never opens if the pointer reached the panel (it left that row on the way)", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const passedOver = otherRow();
+                setShow(false);
+                passedOver.handlePeekEnter();
+                vi.advanceTimersByTime(60);
+                passedOver.handlePeekLeave();
+                panel()!.dispatchEvent(new MouseEvent("mouseenter"));
+                vi.advanceTimersByTime(1000);
+                expect(panel()).not.toBeNull();
+                expect(passedOver.isPeeking()).toBe(false);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a tall panel opened before any pointer move (no Y to pin to) still lingers on the row's mouseleave", () => {
+            vi.useFakeTimers();
+            try {
+                // No mousemove: e.g. the drag-release hover resync opened it.
+                const container = document.createElement("div");
+                container.style.overflowY = "auto";
+                document.body.appendChild(container);
+                const row = document.createElement("div");
+                container.appendChild(row);
+                rectOf(container, { top: 100, bottom: 400 });
+                rectOf(row, { top: 200, bottom: 230, left: 100, right: 500, width: 400 });
+                const [show, setShow] = createSignal(true);
+                render(() => (
+                    <PeekOverlay show={show()} rowEl={() => row}>
+                        <span>peek content</span>
+                    </PeekOverlay>
+                ));
+                vi.advanceTimersByTime(50);
+                rectOf(panel()!, { height: 5000, width: 300 });
+                (vi.mocked(autoUpdate).mock.calls.at(-1)![2] as () => void)(); // re-place, now measured
+                setShow(false);
+                expect(panel()).not.toBeNull(); // lingers so its scroll bar can be reached
+                vi.advanceTimersByTime(200);
+                expect(panel()).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a bridge whose row has left the page does not hold off other peeks", () => {
+            vi.useFakeTimers();
+            try {
+                const { row, setShow } = setup({ panelHeight: 5000 });
+                const elsewhere = otherRow();
+                setShow(false); // bridging this row
+                row.remove(); // ...which is then virtualized away
+                elsewhere.handlePeekEnter();
+                vi.advanceTimersByTime(60);
+                expect(elsewhere.isPeeking()).toBe(true);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("arriving on the panel ends the bridge: a peek held off meanwhile then opens if still hovered", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const waiting = otherRow();
+                setShow(false);
+                waiting.handlePeekEnter();
+                vi.advanceTimersByTime(60);
+                expect(waiting.isPeeking()).toBe(false);
+                panel()!.dispatchEvent(new MouseEvent("mouseenter")); // pointer arrives, bridge ends
+                expect(waiting.isPeeking()).toBe(true); // nothing is being crossed any more
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        it("a held-off peek does not open mid-drag when the bridge ends with the button down", () => {
+            vi.useFakeTimers();
+            try {
+                const { setShow } = setup({ panelHeight: 5000 });
+                const waiting = otherRow();
+                setShow(false);
+                waiting.handlePeekEnter();
+                vi.advanceTimersByTime(60); // held off by the bridge
+                window.dispatchEvent(new PointerEvent("pointerdown", { button: 0, bubbles: true }));
+                vi.advanceTimersByTime(200); // bridge ends while the selection drag is on
+                expect(waiting.isPeeking()).toBe(false);
+            } finally {
+                window.dispatchEvent(new PointerEvent("pointerup", { button: 0, bubbles: true }));
+                vi.useRealTimers();
+            }
+        });
+
+        it("the panel's own row is never held off by its bridge", () => {
+            vi.useFakeTimers();
+            try {
+                const { row, setShow } = setup({ panelHeight: 5000 });
+                const ownRow = otherRow(row);
+                setShow(false);
+                ownRow.handlePeekEnter();
+                vi.advanceTimersByTime(60);
+                expect(ownRow.isPeeking()).toBe(true);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         it("does not bridge the stretch variant, which sits flush over its row", () => {
             vi.useFakeTimers();
             try {
-                const { setShow } = renderPeek({ align: "stretch", panelHeight: 5000 });
+                const { setShow } = setup({ align: "stretch", panelHeight: 5000 });
                 setShow(false);
                 expect(panel()).toBeNull();
             } finally {
