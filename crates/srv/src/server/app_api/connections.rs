@@ -17,13 +17,20 @@ use crate::backend::remote::ConnTarget;
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Lists. Empty until the phases that fill them: the typeahead already adds
-    // `local` itself.
-    for command in [COMMAND_CONN_LIST, COMMAND_WSL_LIST, COMMAND_CONN_LIST_AWS] {
-        engine.register_handler(
-            command,
-            Box::new(|_data, _ctx| Box::pin(async move { Ok(Some(serde_json::json!([]))) })),
-        );
-    }
+    // `local` itself. One call each, with the constant spelled out: the RPC
+    // contract test resolves every registered command name statically.
+    engine.register_handler(
+        COMMAND_CONN_LIST,
+        Box::new(|_data, _ctx| Box::pin(async move { Ok(Some(serde_json::json!([]))) })),
+    );
+    engine.register_handler(
+        COMMAND_WSL_LIST,
+        Box::new(|_data, _ctx| Box::pin(async move { Ok(Some(serde_json::json!([]))) })),
+    );
+    engine.register_handler(
+        COMMAND_CONN_LIST_AWS,
+        Box::new(|_data, _ctx| Box::pin(async move { Ok(Some(serde_json::json!([]))) })),
+    );
 
     let broker = state.broker.clone();
     engine.register_handler(
@@ -69,7 +76,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let name = data.as_str().unwrap_or_default().to_string();
                 if let Ok(target) = ConnTarget::parse(&name) {
                     if !target.is_local() {
-                        status::set(Some(&broker), &target.name(), state::DISCONNECTED, None);
+                        status::set(Some(&broker), &name, state::DISCONNECTED, None);
                     }
                 }
                 Ok(None)
@@ -88,7 +95,11 @@ pub(crate) fn ensure(broker: &Broker, name: &str) -> Result<(), String> {
         ConnTarget::Wsl(_) => "WSL terminals are not available in this version of AgentMux yet",
         ConnTarget::Ssh(_) => "SSH terminals are not available in this version of AgentMux yet",
     };
-    status::set(Some(broker), &target.name(), state::ERROR, Some(message));
+    // Keyed by the name exactly as the pane's meta holds it, not the canonical
+    // form: the pane's overlay looks its status up by `meta.connection`, so
+    // " area54 " or "host:022" would otherwise never see their error (Codex P2
+    // on #4248).
+    status::set(Some(broker), name, state::ERROR, Some(message));
     Err(message.to_string())
 }
 
@@ -119,5 +130,14 @@ mod tests {
             .unwrap_err()
             .contains("cannot start with '-'"));
         assert!(!status::all().iter().any(|s| s.connection.starts_with('-')));
+    }
+
+    #[test]
+    fn the_status_is_keyed_by_the_name_the_pane_holds() {
+        let broker = Broker::new();
+        for raw in ["test-raw-host:022", " test-raw-spaced "] {
+            let _ = ensure(&broker, raw);
+            assert!(status::all().iter().any(|s| s.connection == raw), "{raw:?}");
+        }
     }
 }
