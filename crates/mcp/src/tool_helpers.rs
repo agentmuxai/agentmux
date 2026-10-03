@@ -229,13 +229,25 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
             }
             return Ok(format!("Delivered to {to} — injected into their running conversation.{id}"));
         }
+        // The relay accepts any name; it says when the target is not one of
+        // the sender's own account's agents (agentmux-cloud#138). An agent
+        // counts once it has run while signed in, so one of the sender's own
+        // that hasn't yet still gets `false` and can still receive it (Codex
+        // P2 on #4249): a hint, never "only another account".
+        let not_yours = if result.get("target_in_account").and_then(|v| v.as_bool()) == Some(false) {
+            " No agent of that name has signed in from your account yet, so check the spelling. \
+             It is still delivered if one of your agents with that name signs in within 30 \
+             minutes, or if another account has an agent with that name."
+        } else {
+            ""
+        };
         return Ok(format!(
             "QUEUED for {to} via the cloud relay (unconfirmed, expires in 30 min) — NOT yet \
              delivered. The relay accepted it; their AgentMux picks it up when it next syncs, \
              and the relay drops it after 30 minutes if nothing does (which is what happens if \
              that instance stays offline). You get this same result for an agent name that \
              does not exist anywhere, so check the spelling against DiscoverAgents if you \
-             expected local delivery.{id}"
+             expected local delivery.{not_yours}{id}"
         ));
     }
     if result.get("held").and_then(|v| v.as_bool()) == Some(true) {

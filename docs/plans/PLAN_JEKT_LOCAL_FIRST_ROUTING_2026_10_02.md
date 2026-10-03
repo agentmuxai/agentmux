@@ -1,7 +1,7 @@
 # PLAN: jekt routing that works without the relay — local first, the relay as an addition
 
 **Date:** 2026-10-02
-**Status:** active — R-1 and R-2 built 2026-10-02 (§6 option C): the relay's holder query is agentmux-cloud#136 (merged; staging deploys on merge, prod is a manual promotion), the client and routing are in the agentmux PR that adds this plan. R-3 to R-5 are proposed.
+**Status:** active — R-1 and R-2 built 2026-10-02 (§6 option C): the relay's holder query is agentmux-cloud#136 (merged; staging deploys on merge, prod is a manual promotion), the client and routing are in the agentmux PR that adds this plan. R-3 built 2026-10-02 as a hint rather than a refusal (§7.2): agentmux-cloud#138 (merged) and the agentmux PR that follows it. R-4 and R-5 are proposed.
 **Author:** AgentY, at the owner's request
 **Amends:** `docs/specs/SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md` Phase 0 item 2 (G2), and adds the relay-side work that item depends on.
 **Related:** `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md` (the lease), `SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md` (the 24 h hold), `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, PRs #4122, #4211, #4212.
@@ -85,9 +85,16 @@ Also possible without relay change, as a narrowing of A: hold first only for T w
 
 Do not emulate it with claim-then-release: a transient claim by an install where T is not running could fence a real start elsewhere (the newcomer-yields rule, `SPEC_AGENT_SINGLE_LIVE_INSTANCE` D1).
 
-### 7.2 Refuse unknown names
+### 7.2 Tell the sender when the target is not one of theirs (was: refuse unknown names)
 
-`relay_inject` for a target that no install of the account has ever subscribed returns `404 unknown_agent` instead of storing it. srv maps that to `failed (not_found)` (#4211 already renders the text). Needs the relay to keep the set of agent ids ever subscribed per account (it sees every subscription already).
+**Revised 2026-10-02, owner-approved.** Refusing names was dropped for two reasons:
+
+- the relay can only say "some account owns this name", so refusing names no account owns would let anyone probe which agent names exist in other accounts;
+- messages between accounts are legitimate (the GitHub consumer), so it cannot refuse names outside the sender's own account either.
+
+Instead the relay still accepts every message and `POST /reactive/inject` answers `target_in_account`: whether the **sender's own account** owns the target (`agent-ownership`, `isOwnAgent`). It is left out when that can't be said (no table, a read error), never a confident `false`. srv passes it through, and `SendMessage` appends *"No agent of that name has signed in from your account yet, so check the spelling. It is still delivered if one of your agents with that name signs in within 30 minutes, or if another account has an agent with that name."* (Not "only another account": one of the sender's own agents that has never run while signed in also reads `false` and can still receive it; Codex P2 on #4249.) to the relay answer on `false`.
+
+An agent counts as the account's once it has run while signed in: provisioning its per-agent credential records ownership (`agent-provisioning.ts`). That includes agents started before the user signs in, since srv subscribes and provisions every running agent at login (#4122 seeding, `cloud_subscriber`). Defined-but-closed agents are deliberately not provisioned at login: each new agent id consumes the account's `agent_provisions` quota. So the hint can be wrong for an agent that has never run while signed in, which is why it reads as a hint and the message is still sent.
 
 ### 7.3 Metadata log
 
@@ -116,7 +123,7 @@ Never the message text, its length or a hash of it. Best effort: a background qu
 | R-0 | This plan; spec Phase 0 item 2 points here | agentmux docs | — |
 | R-1 | Hold-first for T defined here (§5.2) with §6 option C; relay only per §6 | `reactive::route_for_absent` | built |
 | R-2 | `GET /agents/lease/:agent` (§7.1) | agentmux-cloud#136 (merged) and `wan_lease::holder()` | built; prod promotion pending |
-| R-3 | Unknown names refused (§7.2) | agentmux-cloud | relay owner |
+| R-3 | "Not one of yours" hint (§7.2) | agentmux-cloud#138 (merged), srv relay pass-through, `send_message_outcome` | built; prod promotion pending |
 | R-4 | Metadata log endpoint and srv's background reporter (§7.3) | agentmux-cloud, then srv | relay owner; retention decision |
 | R-5 | LAN account boundary (§10) | separate spec | owner discussion |
 
@@ -143,6 +150,6 @@ Any AgentMux on the same network is discovered and can forward messages to this 
 
 ## 13. Open questions for the owner
 
-1. Promote agentmux-cloud#136 to prod (Actions → Deploy, after staging succeeded).
+1. Promote agentmux-cloud#138 (R-3) to prod (Actions → Deploy, after staging succeeded). #136 (R-2) was promoted 2026-10-02 21:39 UTC.
 2. Metadata log (R-4) retention, and whether other installs of the account may read it or only the owner in the app.
 3. R-5: should LAN discovery be limited to the user's own installs?
