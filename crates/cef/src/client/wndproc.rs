@@ -11,6 +11,107 @@ static FOCUS_RESTORE_WNDPROCS: std::sync::LazyLock<
     std::sync::Mutex<std::collections::HashMap<usize, isize>>,
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
+/// What to do when a top-level window of ours is activated, given whether the
+/// user can see it (`activated_visible`), whether the window it took
+/// activation from is one the user can see (`previous_visible`), and whether
+/// an earlier invisible activation already remembered a window to hand back
+/// to (`remembered`).
+///
+/// An invisible window (a hidden or off-screen pre-warmed pool window) must
+/// never keep activation: it takes keyboard focus with it, so the user's
+/// typing goes to a window they cannot see. Pool refills activate the new
+/// window during its creation (`window_create_top_level`), and Windows then
+/// makes it the foreground window.
+/// docs/reports/REPORT_INPUT_FOCUS_STOLEN_BY_POOL_REFILL_2026_10_03.md
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum InvisibleActivation {
+    /// A window the user can see was activated: forget any remembered target.
+    Forget,
+    /// Remember the previous window and hand activation back to it.
+    HandBackToPrevious,
+    /// Hand activation back to the window remembered earlier (a chain of pool
+    /// windows activating one after another).
+    HandBackToRemembered,
+    /// Nothing to hand back to.
+    Nothing,
+}
+
+pub(crate) fn invisible_activation(
+    activated_visible: bool,
+    previous_visible: bool,
+    remembered: bool,
+) -> InvisibleActivation {
+    if activated_visible {
+        InvisibleActivation::Forget
+    } else if previous_visible {
+        InvisibleActivation::HandBackToPrevious
+    } else if remembered {
+        InvisibleActivation::HandBackToRemembered
+    } else {
+        InvisibleActivation::Nothing
+    }
+}
+
+/// The window an invisible activation took focus from, waiting for
+/// `WM_AGENTMUX_HAND_BACK_ACTIVATION` to give it back. 0 = none.
+#[cfg(target_os = "windows")]
+static HAND_BACK_TARGET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Posted to an invisible window that was just activated, so activation is
+/// handed back after the activation (and the window creation that caused it)
+/// has finished, not from inside `WM_ACTIVATE`.
+#[cfg(target_os = "windows")]
+const WM_AGENTMUX_HAND_BACK_ACTIVATION: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 0x51;
+
+/// True if the user can see `hwnd`: shown, and on some monitor (pool windows
+/// are parked at -32000,-32000, on none). A minimized window counts as seen,
+/// since `MonitorFromWindow` uses its restored rect.
+#[cfg(target_os = "windows")]
+unsafe fn user_can_see(hwnd: *mut std::ffi::c_void) -> bool {
+    use windows_sys::Win32::Graphics::Gdi::{MonitorFromWindow, MONITOR_DEFAULTTONULL};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindow, IsWindowVisible};
+    !hwnd.is_null()
+        && IsWindow(hwnd) != 0
+        && IsWindowVisible(hwnd) != 0
+        && !MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL).is_null()
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn is_own_window(hwnd: *mut std::ffi::c_void) -> bool {
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, &mut pid);
+    pid == GetCurrentProcessId()
+}
+
+/// Handle `WM_AGENTMUX_HAND_BACK_ACTIVATION`: if the foreground window is
+/// still an invisible window of ours, give activation back to the remembered
+/// window. Re-checked here rather than decided in `WM_ACTIVATE`: a pool window
+/// being promoted is activated while still hidden, then shown, and by the time
+/// this runs it is the visible foreground window the user asked for.
+#[cfg(target_os = "windows")]
+unsafe fn hand_back_activation() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
+    let target = HAND_BACK_TARGET.load(std::sync::atomic::Ordering::Relaxed) as *mut std::ffi::c_void;
+    if target.is_null() {
+        return;
+    }
+    let fg = GetForegroundWindow();
+    if fg.is_null() || user_can_see(fg) || !is_own_window(fg) {
+        return; // a window the user can see has it; leave it
+    }
+    if !user_can_see(target) {
+        HAND_BACK_TARGET.store(0, std::sync::atomic::Ordering::Relaxed);
+        return;
+    }
+    let ok = SetForegroundWindow(target) != 0;
+    tracing::info!(
+        "[focus-restore] handed activation back from invisible {:p} to {:p} ok={}",
+        fg, target, ok,
+    );
+}
+
 // Pane Win32 focus-redirect subclass + ALLOW_BROWSER_PANE_FOCUS_ONCE flag moved to
 // `crate::browser_pane::hwnd` in Phase 2 of the modularization split. See
 // `docs/specs/SPEC_BROWSER_PANE_MODULARIZATION.md`.
@@ -34,7 +135,8 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
     use std::sync::atomic::Ordering;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, DefWindowProcW, IsWindow, SetWindowLongPtrW, GWLP_WNDPROC, WM_ACTIVATE,
+        CallWindowProcW, DefWindowProcW, IsWindow, PostMessageW, SetWindowLongPtrW, GWLP_WNDPROC,
+        WM_ACTIVATE,
     };
 
     const WA_INACTIVE: u32 = 0;
@@ -45,11 +147,43 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
         wparam: usize,
         lparam: isize,
     ) -> isize {
+        if msg == WM_AGENTMUX_HAND_BACK_ACTIVATION {
+            hand_back_activation();
+            return 0;
+        }
         if msg == WM_ACTIVATE {
             // The low word of wParam is the activation state; the high word
             // is the minimized-state flag, which we don't care about.
             let activation_state = (wparam & 0xFFFF) as u32;
             if activation_state != WA_INACTIVE {
+                // An invisible window (a pool window) must not keep
+                // activation; see `invisible_activation`. lParam is the
+                // window losing activation (null if it is on another thread).
+                let previous = lparam as *mut std::ffi::c_void;
+                let remembered =
+                    HAND_BACK_TARGET.load(std::sync::atomic::Ordering::Relaxed) != 0;
+                match invisible_activation(
+                    user_can_see(hwnd),
+                    previous != hwnd && user_can_see(previous),
+                    remembered,
+                ) {
+                    InvisibleActivation::Forget => {
+                        HAND_BACK_TARGET.store(0, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    InvisibleActivation::HandBackToPrevious => {
+                        HAND_BACK_TARGET
+                            .store(previous as usize, std::sync::atomic::Ordering::Relaxed);
+                        PostMessageW(hwnd, WM_AGENTMUX_HAND_BACK_ACTIVATION, 0, 0);
+                        tracing::info!(
+                            "[focus-restore] invisible {:p} activated, took it from {:p}; handing back",
+                            hwnd, previous,
+                        );
+                    }
+                    InvisibleActivation::HandBackToRemembered => {
+                        PostMessageW(hwnd, WM_AGENTMUX_HAND_BACK_ACTIVATION, 0, 0);
+                    }
+                    InvisibleActivation::Nothing => {}
+                }
                 // The activating window is `hwnd`, which IS its own
                 // top-level root — the map is keyed by root HWND.
                 let child = crate::browser_pane::hwnd::LAST_FOCUSED_BY_ROOT
@@ -1160,5 +1294,33 @@ pub(crate) unsafe fn install_session_end_hook(
     }
     if let Ok(mut m) = SESSION_END_WNDPROCS.lock() {
         m.insert(hwnd as usize, original);
+    }
+}
+
+#[cfg(test)]
+mod invisible_activation_tests {
+    use super::{invisible_activation, InvisibleActivation};
+
+    #[test]
+    fn a_window_the_user_can_see_keeps_activation_and_clears_any_target() {
+        assert_eq!(invisible_activation(true, true, true), InvisibleActivation::Forget);
+        assert_eq!(invisible_activation(true, false, false), InvisibleActivation::Forget);
+    }
+
+    #[test]
+    fn an_invisible_pool_window_hands_activation_back_to_the_window_it_took_it_from() {
+        assert_eq!(invisible_activation(false, true, false), InvisibleActivation::HandBackToPrevious);
+        // A newer visible previous window wins over an older remembered one.
+        assert_eq!(invisible_activation(false, true, true), InvisibleActivation::HandBackToPrevious);
+    }
+
+    #[test]
+    fn a_chain_of_pool_windows_hands_back_to_the_first_window_remembered() {
+        assert_eq!(invisible_activation(false, false, true), InvisibleActivation::HandBackToRemembered);
+    }
+
+    #[test]
+    fn nothing_to_hand_back_to_when_activation_came_from_another_app() {
+        assert_eq!(invisible_activation(false, false, false), InvisibleActivation::Nothing);
     }
 }
