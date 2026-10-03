@@ -347,7 +347,7 @@ mod tests {
         assert_eq!(
             r,
             PathBuf::from("/tmp/test-home/shared/store.db"),
-            "AGENTMUX_ISOLATED_AUTH=0 must override the non-stable-channel default"
+            "AGENTMUX_ISOLATED_AUTH=0 keeps the global store on a non-stable channel"
         );
         clear();
     }
@@ -389,9 +389,9 @@ mod tests {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear();
         std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
-        // The whole point: unlike resolve_shared_store_path, a non-stable
-        // (local/dev/portable — i.e. every version bump) channel must NOT
-        // redirect this path anywhere per-channel.
+        // The identity store is global whatever the channel or the isolation
+        // flag: a non-stable (local/dev/portable — i.e. every version bump)
+        // channel must NOT redirect this path anywhere per-channel.
         std::env::set_var("AGENTMUX_CHANNEL", "local-somebranch-abcd1234-ef56789a");
         std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/channels/local-somebranch-abcd1234-ef56789a");
         let r = resolve_identity_store_path().unwrap();
