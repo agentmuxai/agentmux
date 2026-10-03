@@ -10,6 +10,7 @@
 //! on it; nothing here spawns a remote shell yet.
 
 pub mod conn;
+pub mod ssh;
 pub mod status;
 pub mod wsl;
 pub mod wsl_fs;

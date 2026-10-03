@@ -143,9 +143,10 @@ use std::sync::Arc;
             None,
             String::new(),
         );
-        let mut cases = vec![("area54", "not available yet"), ("-oProxyCommand=calc", "cannot start with '-'")];
-        // On Windows a WSL pane is a real terminal now (P1), which this test
-        // must not spawn; elsewhere WSL is refused.
+        // An SSH pane is a real terminal wherever `ssh` is (P2), which this test
+        // must not spawn; `remote::ssh` tests its launch plan. On Windows a WSL
+        // pane is one too (P1); elsewhere WSL is refused.
+        let mut cases = vec![("-oProxyCommand=calc", "cannot start with '-'")];
         if !cfg!(windows) {
             cases.push(("wsl://Ubuntu", "not available yet"));
         }

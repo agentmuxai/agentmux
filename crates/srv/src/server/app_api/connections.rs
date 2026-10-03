@@ -5,10 +5,10 @@
 //! (`conntypeahead.tsx`, `blockframe.tsx`'s `ConnStatusOverlay`), which had no
 //! handler until now (P0 of SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md).
 //!
-//! P0 is honest rather than capable: `local` works as it always has, and a WSL
-//! or SSH connection is refused with a status the pane shows, instead of the
-//! pane silently starting a local shell under a remote name. P1 (WSL) and P2
-//! (SSH) replace the refusals.
+//! A connection AgentMux cannot run is refused with a status the pane shows,
+//! instead of the pane silently starting a local shell under a remote name:
+//! WSL off Windows or for a distro that is not installed (P1), and SSH where
+//! there is no `ssh` (P2).
 
 use super::*;
 use crate::backend::mps::Broker;
@@ -92,24 +92,27 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// What `connensure` and `connconnect` do: accept `local`; accept a WSL distro
-/// that is installed (Windows only); refuse a bad name with the reason; refuse
-/// SSH as not available yet (P2). Every WSL or SSH outcome is recorded as the
+/// that is installed (Windows only); accept an SSH destination where the
+/// system `ssh` is (its own prompts then happen in the pane's terminal); refuse
+/// a bad name with the reason. Every WSL or SSH outcome is recorded as the
 /// status the pane's overlay shows.
 pub(crate) async fn ensure(broker: &Broker, name: &str) -> Result<(), String> {
-    let installed = match ConnTarget::parse(name)? {
-        ConnTarget::Wsl(_) => crate::backend::remote::wsl::list().await,
-        _ => Vec::new(),
+    let (installed, ssh_found) = match ConnTarget::parse(name)? {
+        ConnTarget::Wsl(_) => (crate::backend::remote::wsl::list().await, false),
+        ConnTarget::Ssh(_) => (Vec::new(), crate::backend::remote::ssh::binary().is_some()),
+        ConnTarget::Local => (Vec::new(), false),
     };
-    ensure_with(broker, name, &installed, cfg!(windows))
+    ensure_with(broker, name, &installed, cfg!(windows), ssh_found)
 }
 
-/// [`ensure`] with the installed distros and the platform given, so it is
-/// testable anywhere.
+/// [`ensure`] with the installed distros, the platform and whether `ssh` was
+/// found given, so it is testable anywhere.
 pub(crate) fn ensure_with(
     broker: &Broker,
     name: &str,
     wsl_installed: &[String],
     on_windows: bool,
+    ssh_found: bool,
 ) -> Result<(), String> {
     let target = ConnTarget::parse(name)?;
     let message = match &target {
@@ -122,9 +125,11 @@ pub(crate) fn ensure_with(
         ConnTarget::Wsl(distro) => {
             format!("WSL distribution '{distro}' is not installed (wsl.exe --list shows what is)")
         }
-        ConnTarget::Ssh(_) => {
-            "SSH terminals are not available in this version of AgentMux yet".to_string()
+        ConnTarget::Ssh(_) if ssh_found => {
+            status::set(Some(broker), name, state::CONNECTED, None);
+            return Ok(());
         }
+        ConnTarget::Ssh(_) => crate::backend::remote::ssh::missing_binary_message(),
     };
     // Keyed by the name exactly as the pane's meta holds it, not the canonical
     // form: the pane's overlay looks its status up by `meta.connection`, so
@@ -136,11 +141,23 @@ pub(crate) fn ensure_with(
 /// The connection an agent's `Shell` or `PtyShell` call asked for, checked the
 /// same way a pane's is ([`ensure`]): `Ok(None)` for this machine, `Ok(Some(distro))`
 /// for an installed WSL distro, `Err` with the reason otherwise.
+///
+/// SSH is refused for agents before anything else: an agent on another
+/// machine uses the user's SSH identity, which needs the user's per-host
+/// consent (spec §8.2), and it cannot answer ssh's prompts, which needs the
+/// askpass bridge (§5.3). Both come later in P2. Refused here, never handed
+/// on, so an SSH name can never run as a local command.
 pub(crate) async fn for_agent(
     broker: &Broker,
     name: Option<&str>,
 ) -> Result<Option<String>, String> {
     let name = name.unwrap_or_default();
+    if let ConnTarget::Ssh(_) = ConnTarget::parse(name)? {
+        return Err(format!(
+            "an agent cannot run on SSH connections yet ('{}'): that needs the user's consent for the host, which a later version adds; a terminal pane on it works",
+            name.trim()
+        ));
+    }
     ensure(broker, name).await?;
     Ok(match ConnTarget::parse(name)? {
         ConnTarget::Wsl(distro) => Some(distro),
@@ -221,12 +238,20 @@ mod tests {
     fn local_is_accepted_and_remote_is_refused_with_a_status() {
         let broker = Broker::new();
         let none: &[String] = &[];
-        let ensure = |name: &str| ensure_with(&broker, name, none, true);
+        let ensure = |name: &str| ensure_with(&broker, name, none, true, false);
         assert_eq!(ensure("local"), Ok(()));
         assert_eq!(ensure(""), Ok(()));
 
         let err = ensure("test-ensure-host").unwrap_err();
-        assert!(err.contains("SSH terminals are not available"), "{err}");
+        assert!(err.contains("need the ssh command"), "{err}");
+        // With ssh: connected, so the overlay leaves the terminal to ssh's own prompts.
+        assert_eq!(
+            ensure_with(&broker, "test-ensure-ssh-ok", none, true, true),
+            Ok(())
+        );
+        assert!(status::all()
+            .iter()
+            .any(|s| s.connection == "test-ensure-ssh-ok" && s.connected));
         let st = status::all()
             .into_iter()
             .find(|s| s.connection == "test-ensure-host")
@@ -248,7 +273,7 @@ mod tests {
         let broker = Broker::new();
         let installed = vec!["Ubuntu".to_string(), "Debian".to_string()];
         assert_eq!(
-            ensure_with(&broker, "wsl://ubuntu", &installed, true),
+            ensure_with(&broker, "wsl://ubuntu", &installed, true, false),
             Ok(())
         );
         let st = status::all()
@@ -257,10 +282,10 @@ mod tests {
             .unwrap();
         assert!(st.connected);
 
-        let err = ensure_with(&broker, "wsl://Arch", &installed, true).unwrap_err();
+        let err = ensure_with(&broker, "wsl://Arch", &installed, true, false).unwrap_err();
         assert!(err.contains("'Arch' is not installed"), "{err}");
 
-        let err = ensure_with(&broker, "wsl://Ubuntu", &installed, false).unwrap_err();
+        let err = ensure_with(&broker, "wsl://Ubuntu", &installed, false, false).unwrap_err();
         assert!(err.contains("only available on Windows"), "{err}");
     }
 
@@ -269,7 +294,7 @@ mod tests {
         let broker = Broker::new();
         let none: &[String] = &[];
         for raw in ["test-raw-host:022", " test-raw-spaced "] {
-            let _ = ensure_with(&broker, raw, none, true);
+            let _ = ensure_with(&broker, raw, none, true, false);
             assert!(status::all().iter().any(|s| s.connection == raw), "{raw:?}");
         }
     }
@@ -283,7 +308,16 @@ mod tests {
         let err = for_agent(&broker, Some("test-agent-host"))
             .await
             .unwrap_err();
-        assert!(err.contains("SSH terminals are not available"), "{err}");
+        assert!(
+            err.contains("an agent cannot run on SSH connections yet"),
+            "{err}"
+        );
+        assert!(
+            !status::all()
+                .iter()
+                .any(|s| s.connection == "test-agent-host"),
+            "refused before ensure, so nothing is recorded or connected"
+        );
         assert!(for_agent(&broker, Some("-oProxyCommand=calc"))
             .await
             .is_err());
