@@ -365,6 +365,16 @@ pub struct FsOpStartReq {
     pub dest_dir: String,
     /// Scopes the `files:op` events to `block:<block_id>`.
     pub block_id: String,
+    /// The SSH connection `sources` are on; absent, local or WSL: this
+    /// machine (`fs_ops::host_jobs`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_connection: Option<String>,
+    /// The SSH connection `dest_dir` is on; absent, local or WSL: this
+    /// machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub connection: Option<String>,
 }
 
 /// Response for `fs.op.start`. Events for the op may arrive before it.

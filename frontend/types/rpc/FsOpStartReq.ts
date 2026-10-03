@@ -12,4 +12,14 @@ export type FsOpStartReq = { kind: FsOpKind, sources: Array<string>, dest_dir: s
 /**
  * Scopes the `files:op` events to `block:<block_id>`.
  */
-block_id: string, };
+block_id: string, 
+/**
+ * The SSH connection `sources` are on; absent, local or WSL: this
+ * machine (`fs_ops::host_jobs`).
+ */
+source_connection?: string, 
+/**
+ * The SSH connection `dest_dir` is on; absent, local or WSL: this
+ * machine.
+ */
+connection?: string, };

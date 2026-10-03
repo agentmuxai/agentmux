@@ -13,9 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::UNIX_EPOCH;
 
-use crate::fsproto::{
-    self, Entry, ErrKind, Kind, Reply, Request, Splitter, MAX_READ, MAX_WRITE,
-};
+use crate::fsproto::{self, Entry, ErrKind, Kind, Reply, Request, Splitter, MAX_READ, MAX_WRITE};
 
 /// Serve requests from `input`, answering on `output`, until `input` ends.
 /// `home` is the user's home directory ([`home_dir`]).
@@ -109,6 +107,26 @@ pub fn handle(home: &Path, req: Request) -> Reply {
             }
             write_atomic(&resolve(home, &path), &data).map(|()| Reply::Done)
         }
+        Request::Append { path, data } => {
+            if data.len() > MAX_WRITE {
+                return Reply::Err {
+                    kind: ErrKind::TooLarge,
+                    message: format!("over the {} MB a write may be", MAX_WRITE >> 20),
+                };
+            }
+            let p = resolve(home, &path);
+            // Only a file already there: never makes one, never follows a
+            // link somewhere else.
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.is_file() => fs::OpenOptions::new()
+                    .append(true)
+                    .open(&p)
+                    .and_then(|mut f| f.write_all(&data))
+                    .map(|()| Reply::Done),
+                Ok(_) => return invalid("only a regular file can be appended to"),
+                Err(e) => Err(e),
+            }
+        }
         Request::Mkdir { path, parents } => {
             let p = resolve(home, &path);
             if parents {
@@ -134,6 +152,48 @@ pub fn handle(home: &Path, req: Request) -> Reply {
                 };
             }
             fs::rename(&from, &to).map(|()| Reply::Done)
+        }
+        Request::Replace { from, to } => {
+            let (from, to) = (resolve(home, &from), resolve(home, &to));
+            // Files only: `rename` over a file is atomic, and a folder is
+            // never replaced this way.
+            for p in [&from, &to] {
+                match fs::symlink_metadata(p) {
+                    Ok(m) if m.is_dir() => return invalid("only a file is replaced in one step"),
+                    Ok(_) => {}
+                    Err(e) => return err(e),
+                }
+            }
+            fs::rename(&from, &to).map(|()| Reply::Done)
+        }
+        Request::Sync { path } => {
+            let p = resolve(home, &path);
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.is_file() => fs::OpenOptions::new()
+                    // Read-only on Unix (fsync needs no write access, and a read-only file
+                    // must sync too); Windows flushes only a handle it can write.
+                    .read(cfg!(unix))
+                    .write(!cfg!(unix))
+                    .open(&p)
+                    .and_then(|f| f.sync_all())
+                    .map(|()| Reply::Done),
+                Ok(_) => return invalid("only a file is synced"),
+                Err(e) => Err(e),
+            }
+        }
+        Request::Realpath { path } => fs::canonicalize(resolve(home, &path))
+            .map(|p| Reply::Path(p.to_string_lossy().into_owned())),
+        Request::SetMeta {
+            path,
+            mode,
+            mtime_ms,
+        } => {
+            let p = resolve(home, &path);
+            match fs::symlink_metadata(&p) {
+                Ok(m) if m.is_file() => set_meta(&p, mode, mtime_ms).map(|()| Reply::Done),
+                Ok(_) => return invalid("only a file's metadata is set"),
+                Err(e) => Err(e),
+            }
         }
         Request::Delete { path, recursive } => {
             let p = resolve(home, &path);
@@ -180,6 +240,26 @@ pub fn handle(home: &Path, req: Request) -> Reply {
         }
     };
     result.unwrap_or_else(err)
+}
+
+/// A file's permission bits (`mode`, when not 0, on Unix) and modification
+/// time (`mtime_ms`, when not 0).
+fn set_meta(p: &Path, mode: u32, mtime_ms: i64) -> io::Result<()> {
+    if mtime_ms > 0 {
+        let t = UNIX_EPOCH + std::time::Duration::from_millis(mtime_ms as u64);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(p)?
+            .set_modified(t)?;
+    }
+    #[cfg(unix)]
+    if mode != 0 {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(p, fs::Permissions::from_mode(mode & 0o7777))?;
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    Ok(())
 }
 
 fn entry_of(p: &Path) -> io::Result<Entry> {
@@ -271,8 +351,27 @@ fn list(dir: &Path, offset: u32, limit: u32) -> io::Result<Reply> {
 
 fn read(p: &Path, offset: u64, len: u32) -> io::Result<Reply> {
     use std::io::{Seek, SeekFrom};
+    // Never stuck opening a pipe: whatever this opened must be a regular
+    // file. A link is read through, as the editor opens a linked dotfile
+    // (a transfer skips links before it reads).
+    #[cfg(unix)]
+    let mut f = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(p)?
+    };
+    #[cfg(not(unix))]
     let mut f = fs::File::open(p)?;
-    if f.metadata()?.is_dir() {
+    let opened = f.metadata()?;
+    if !opened.is_dir() && !opened.is_file() {
+        return Ok(Reply::Err {
+            kind: ErrKind::Invalid,
+            message: format!("{} isn't a regular file", p.display()),
+        });
+    }
+    if opened.is_dir() {
         return Ok(Reply::Err {
             kind: ErrKind::IsADirectory,
             message: format!("{} is a directory", p.display()),
@@ -568,6 +667,187 @@ mod tests {
         assert_eq!(resolve(h, "/srv/data//"), Path::new("/srv/data"));
         assert_eq!(resolve(h, "rel/"), Path::new("/home/u/rel"));
         assert_eq!(resolve(h, "~"), h);
+    }
+
+    #[test]
+    fn append_adds_to_an_existing_file_only() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        let r = exchange(
+            h,
+            &[
+                Request::Write {
+                    path: "~/up".into(),
+                    data: b"ab".to_vec(),
+                },
+                Request::Append {
+                    path: "~/up".into(),
+                    data: b"cd".to_vec(),
+                },
+                Request::Append {
+                    path: "~/missing".into(),
+                    data: b"x".to_vec(),
+                },
+                Request::Append {
+                    path: "~".into(),
+                    data: b"x".to_vec(),
+                },
+            ],
+        );
+        assert_eq!((&r[0], &r[1]), (&Reply::Done, &Reply::Done));
+        assert!(
+            matches!(
+                r[2],
+                Reply::Err {
+                    kind: ErrKind::NotFound,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[2]
+        );
+        assert!(
+            matches!(
+                r[3],
+                Reply::Err {
+                    kind: ErrKind::Invalid,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[3]
+        );
+        assert_eq!(fs::read(h.join("up")).unwrap(), b"abcd");
+        assert!(!h.join("missing").exists());
+    }
+
+    #[test]
+    fn replace_realpath_and_set_meta() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        fs::write(h.join("new"), b"new").unwrap();
+        fs::write(h.join("old"), b"old").unwrap();
+        fs::create_dir(h.join("d")).unwrap();
+        let r = exchange(
+            h,
+            &[
+                Request::Replace {
+                    from: "~/new".into(),
+                    to: "~/old".into(),
+                },
+                Request::Replace {
+                    from: "~/old".into(),
+                    to: "~/d".into(),
+                },
+                Request::Realpath {
+                    path: "~/d/../old".into(),
+                },
+                Request::SetMeta {
+                    path: "~/old".into(),
+                    mode: 0o751,
+                    mtime_ms: 1_600_000_000_000,
+                },
+                Request::SetMeta {
+                    path: "~/d".into(),
+                    mode: 0o700,
+                    mtime_ms: 0,
+                },
+            ],
+        );
+        assert_eq!(r[0], Reply::Done);
+        assert_eq!(fs::read(h.join("old")).unwrap(), b"new");
+        assert!(!h.join("new").exists());
+        assert!(
+            matches!(
+                r[1],
+                Reply::Err {
+                    kind: ErrKind::Invalid,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[1]
+        );
+        match &r[2] {
+            Reply::Path(p) => assert_eq!(Path::new(p), fs::canonicalize(h.join("old")).unwrap()),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(r[3], Reply::Done);
+        let e = entry_of(&h.join("old")).unwrap();
+        assert_eq!(e.mtime_ms, 1_600_000_000_000);
+        #[cfg(unix)]
+        assert_eq!(e.mode, 0o751);
+        assert!(matches!(
+            r[4],
+            Reply::Err {
+                kind: ErrKind::Invalid,
+                ..
+            }
+        ));
+    }
+
+    /// A pipe is refused at once (never a read that waits for a writer); a
+    /// link is read through.
+    #[cfg(unix)]
+    #[test]
+    fn a_read_takes_only_a_regular_file() {
+        let home = tempfile::tempdir().unwrap();
+        let h = home.path();
+        assert!(std::process::Command::new("mkfifo")
+            .arg(h.join("pipe"))
+            .status()
+            .unwrap()
+            .success());
+        fs::write(h.join("real"), b"r").unwrap();
+        std::os::unix::fs::symlink(h.join("real"), h.join("link")).unwrap();
+        let r = exchange(
+            h,
+            &[
+                Request::Read {
+                    path: "~/pipe".into(),
+                    offset: 0,
+                    len: 10,
+                },
+                Request::Read {
+                    path: "~/link".into(),
+                    offset: 0,
+                    len: 10,
+                },
+                Request::Sync {
+                    path: "~/real".into(),
+                },
+            ],
+        );
+        assert!(
+            matches!(
+                r[0],
+                Reply::Err {
+                    kind: ErrKind::Invalid,
+                    ..
+                }
+            ),
+            "{:?}",
+            r[0]
+        );
+        assert_eq!(
+            r[1],
+            Reply::Read {
+                data: b"r".to_vec(),
+                eof: true
+            },
+            "a link is read through"
+        );
+        assert_eq!(r[2], Reply::Done);
+        // A read-only file syncs too.
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(h.join("real"), fs::Permissions::from_mode(0o444)).unwrap();
+        let r = exchange(
+            h,
+            &[Request::Sync {
+                path: "~/real".into(),
+            }],
+        );
+        assert_eq!(r[0], Reply::Done);
     }
 
     #[test]

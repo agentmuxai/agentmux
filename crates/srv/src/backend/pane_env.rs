@@ -288,6 +288,8 @@ mod spawn_site_coverage {
          "test: children for the survivor check and the forced tree kill"),
         ("src/backend/remote/helper_install.rs", "\"sh\"", 1,
          "test: runs the install scripts in a real sh against a temp home"),
+        ("src/backend/fs_ops/host_jobs.rs", "\"mkfifo\"", 1,
+         "test: makes a FIFO for the host transfer tests (Linux only)"),
         ("src/backend/remote/wsl.rs", "\"wsl.exe\"", 1,
          "probe: `wsl.exe --list --quiet`, output parsed then discarded"),
         ("src/backend/shell_node.rs", "\"cmd\"", 1,
