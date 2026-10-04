@@ -972,10 +972,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 </Show>
 
                 <div
-                    ref={(el) => {
-                        listEl = el;
-                        model.focusTargetRef.current = el;
-                    }}
+                    ref={listEl}
                     class="files-list"
                     role="grid"
                     aria-label="Files"
