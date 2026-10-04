@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.59.8 — 2026-10-03
+
+- Every build now shares your logins: a new build, a rebuilt branch and task dev no longer start logged out. Your Claude, GitHub and other accounts, the cloud sign-in, Global Memory and native memory carry over, and the first shared start also brings across the Global Memory and native memory that earlier per-build channels kept to themselves. Set AGENTMUX_ISOLATED_AUTH=1 to test login from an empty store
+- My Agents tiles are twice as large with a three-line summary, and the account line now says No auth or shows the bound account: the '(missing account)', '(ambient creds)' and '(unknown account)' labels are gone
+- feat(agents): My Agents previews come from each agent's global transcript, so every tile shows what it was last asked
+- fix(agents): drop the last ambient-credential paths: the spawn gate no longer reads use_ambient_login, no RPC sets it, and the create modal says No auth
+- The window no longer shifts sideways in a narrow window: the status bar's left group wraps instead of overflowing, and the page can't be scrolled sideways
+- feat(remote): SSH terminals: open a terminal pane on an SSH host, with your ssh config hosts listed in the connection picker and in ConnList (#4264, #4265)
+- feat(remote): agents can run on SSH hosts, with your consent and every ssh prompt shown to you (#4266)
+- feat(remote): durable SSH panes through the agentmux-remote helper, on by default on hosts that have it; reattach to a host's sessions from the pane menu's "Sessions on <host>..." (#4269, #4280, #4287, #4292)
+- feat(remote): files on SSH hosts: Hangar lists, creates, renames and deletes on SSH connections, the editor opens host files, copy and move work between a host and this computer or within a host, and agents can open a host folder or file for you (#4291, #4293, #4294, #4295, #4296)
+- feat(agent): memory is re-injected once per compaction, at the CLI's real compaction boundary (#4303)
+- feat(agent): compaction time is estimated from the current model's own history (#4301)
+- feat(srv): phones can follow a host's agents live: a names-only LAN fleet feed (/agentmux/fleet and an event stream), UDP discovery replies list the host's other LAN-enabled channels, and another channel takes over the discovery port when its holder stops (#4297)
+- fix(cef): a pool refill no longer steals keyboard focus (#4306)
+- fix(srv): the CLI last-used marker now refreshes on Windows (#4300)
+- fix(agent-pane): the peek panel's time and estimate stay while the pointer is on it, and panels are at least 600px wide (#4267)
+- chore(providers): Claude Code 2.1.288 and OpenClaw 2026.9.8 (#4268)
+
 ## 0.59.7 — 2026-10-03
 
 - SendMessage warns when a message sent through the cloud relay is for a name that is not one of your agents (a likely typo), instead of only saying it was queued
