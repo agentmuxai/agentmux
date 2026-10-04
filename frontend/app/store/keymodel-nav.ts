@@ -5,7 +5,6 @@ import { atoms, refocusNode, setActiveTab, MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
 import { triggerTabCloseRequest } from "@/app/tab/tab-close-request";
-import { debugLog } from "./keymodel-debuglog";
 
 export function getFocusedBlockInStaticTab() {
     const layoutModel = getLayoutModelForStaticTab();
@@ -22,7 +21,6 @@ function getStaticTabBlockCount(): number {
 }
 
 export function simpleCloseStaticTab() {
-    debugLog("simpleCloseStaticTab called");
     // Route through TabBar's requestClose so the close-confirmation modal
     // (and the tab:skipcloseconfirm setting) is honoured on keyboard close
     // the same way it is on the X-button path. The last-tab guard and the
@@ -32,15 +30,11 @@ export function simpleCloseStaticTab() {
 }
 
 export function genericClose() {
-    debugLog("genericClose called");
     const blockCount = getStaticTabBlockCount();
-    debugLog("genericClose blockCount", blockCount);
     if (blockCount === 0) {
-        debugLog("genericClose calling simpleCloseStaticTab because blockCount is 0");
         simpleCloseStaticTab();
         return;
     }
-    debugLog("genericClose calling closeFocusedNode");
     const layoutModel = getLayoutModelForStaticTab();
     fireAndForget(layoutModel.closeFocusedNode.bind(layoutModel));
 }

@@ -47,9 +47,9 @@ export const TERMINAL_SETTINGS = {
     shiftEnterNewline: {
         id: "terminal.shift_enter_newline",
         label: "Shift+Enter → new line",
-        description: "In agent composer: Shift+Enter inserts a newline instead of submitting",
+        description: "In a terminal: Shift+Enter sends a newline instead of running the line",
         section: "terminal",
-        keywords: ["newline", "multiline input", "composer keybinding", "term:shiftenternewline"],
+        keywords: ["newline", "multiline input", "terminal keybinding", "term:shiftenternewline"],
     },
     durableSsh: {
         id: "terminal.durable_ssh",

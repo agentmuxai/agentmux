@@ -495,7 +495,7 @@ export const terminalPaneTab: PaneTabManifest = {
         // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1
         // §5): remounting loses the scrollback and the running shell's view.
         lifecycle: "keepAlive",
-        headerMic: { title: "Speak into this terminal (Ctrl+Shift+V)" },
+        headerMic: { title: "Speak into this terminal" },
         statsBadgeSetting: "term:showstatsbadge",
         hueBorder: true,
         paneZoom: {},

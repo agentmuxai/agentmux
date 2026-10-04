@@ -17,6 +17,7 @@ import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "./keymodel-bindings";
 import { type KeyHandler, globalChordMap, globalKeyMap } from "./keymodel-dispatch";
@@ -119,20 +120,31 @@ function registerGlobalKeys() {
         cyclePaneFocus("backward");
         return true;
     });
-    globalKeyMap.set("Ctrl:Shift:k", () => {
+    globalKeyMap.set("Ctrl:Shift:k", (e) => {
         const blockId = getFocusedBlockId();
         if (blockId == null) {
             return true;
         }
-        replaceBlock(
-            blockId,
-            {
-                meta: {
-                    view: "launcher",
-                },
-            },
-            true
-        );
+        if (getBlockComponentModel(blockId)?.viewModel?.viewType === "launcher") {
+            return true;
+        }
+        // One confirmation at a time: a held key repeats, and the global map
+        // still runs while a modal is open.
+        if (e.repeat || modalsModel.isModalOpen(ReplacePaneConfirm)) {
+            return true;
+        }
+        modalsModel.openModal(ReplacePaneConfirm, {
+            onConfirm: () =>
+                replaceBlock(
+                    blockId,
+                    {
+                        meta: {
+                            view: "launcher",
+                        },
+                    },
+                    true
+                ),
+        });
         return true;
     });
     globalKeyMap.set("Cmd:g", () => {

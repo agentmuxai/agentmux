@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const writeTextMock = vi.fn();
 vi.mock("@/util/clipboard", () => ({ writeText: (text: string) => writeTextMock(text) }));
+const platform = vi.hoisted(() => ({ mac: false }));
+vi.mock("@/util/platformutil", () => ({ isMacOS: () => platform.mac }));
 
 import { CopyErrorButton } from "./CopyErrorButton";
 
@@ -75,7 +77,11 @@ describe("CopyErrorButton — IPC failure falls back to execCommand", () => {
 });
 
 describe("CopyErrorButton — total failure", () => {
-    it("leaves the text selected with a Ctrl+C hint when both transports fail", async () => {
+    it.each([
+        { mac: false, hint: "Press Ctrl+C" },
+        { mac: true, hint: "Press ⌘C" },
+    ])("leaves the text selected with a $hint hint when both transports fail", async ({ mac, hint }) => {
+        platform.mac = mac;
         writeTextMock.mockRejectedValue(new Error("no bridge"));
         const execSpy = vi.fn().mockReturnValue(false);
         document.execCommand = execSpy;
@@ -86,7 +92,7 @@ describe("CopyErrorButton — total failure", () => {
         const fallback = container.querySelector<HTMLTextAreaElement>(".copy-error-button-fallback-text");
         expect(fallback).not.toBeNull();
         expect(fallback!.value).toBe("never copied");
-        expect(container.textContent).toContain("Press Ctrl+C");
+        expect(container.textContent).toContain(hint);
         delete document.execCommand;
     });
 
