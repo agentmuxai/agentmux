@@ -205,7 +205,11 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
                     HAND_BACK_TARGET.load(std::sync::atomic::Ordering::Relaxed) != 0;
                 match invisible_activation(
                     user_can_see(hwnd) || is_promoting(hwnd),
-                    previous != hwnd && user_can_see(previous) && is_own_window(previous),
+                    // Any window the user can see, ours or another app's: a
+                    // refill that took focus from another app should give it
+                    // back too. Safe because the target is used once and
+                    // hand_back_activation re-checks the foreground first.
+                    previous != hwnd && user_can_see(previous),
                     remembered,
                 ) {
                     InvisibleActivation::Forget => {
