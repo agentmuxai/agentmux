@@ -420,15 +420,15 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 | 2 | #4321 | §5's dead code. The numbered pane overlay is rebuilt on DOM key events. `app:globalhotkey` removed. |
 | 3 | #4323 | The shortcut table (`frontend/app/keybindings/`), the §12 key map, the dispatcher and the terminal on the table, and every UI hint generated from it (§7.1). Covers the help pane, the hamburger and pane menus, the command palette and tooltips, plus a test that fails on a hand-written hint. The dev perf HUD and diagnostics panel are table rows (dev-only) on Ctrl+Alt+Shift+P and Ctrl+Alt+Shift+F12. |
 
-**Deferred from §9 and §12.** These need new actions, not just keys:
-- reopen a closed window tab;
-- move a tab left or right;
-- swap or resize panes from the keyboard;
-- F2 to rename a window tab;
-- reset zoom on all panes;
-- focus the agent composer.
+**Added after phase 3** (the new-actions PR):
+- move a tab: ⇧⌘PgUp / PgDn, Ctrl+Alt+Shift+PgUp / PgDn;
+- rename the window tab: F2, when nothing focused takes it first;
+- swap the focused pane with a neighbour: ⌃⌥⇧arrows / Ctrl+Alt+Shift+arrows;
+- resize panes: ⌃⌥⌘arrows / Alt+Shift+arrows. These move the nearest border in the arrow's direction, as Windows Terminal does;
+- reset zoom on all panes: ⇧⌘0 / Ctrl+Shift+0;
+- focus the agent message box: ⌘L / Ctrl+L in an agent pane.
 
-None of them is bound, so the help pane and menus don't show them.
+**Still deferred:** reopening a closed window tab. Closing a tab deletes its panes on the server, so reopen needs a backend "recently closed tabs" store before a key can bind to it. It isn't bound or shown anywhere.
 
 **Still to do:**
 - Phase 4: the editor, document tabs, the Files pane and the composer read the table instead of matching keys themselves. They already stop the global shortcuts by handling a key first (phase 0).

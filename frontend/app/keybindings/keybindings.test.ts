@@ -108,6 +108,20 @@ describe("resolveKey", () => {
         expect(resolveKey(ev("ArrowUp", "ArrowUp"), NONE, "other", "ctrl+shift+s")?.row.command).toBe("split:up");
     });
 
+    it("resolves the pane swap / resize, tab move and rename keys", () => {
+        expect(resolveKey(ev("ArrowLeft", "ArrowLeft", { ctrlKey: true, altKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("pane:swap:left");
+        expect(resolveKey(ev("ArrowUp", "ArrowUp", { altKey: true, shiftKey: true }), TERM, "other")?.row.command).toBe("pane:resize:up");
+        expect(resolveKey(ev("ArrowUp", "ArrowUp", { altKey: true, shiftKey: true }), TYPING, "other")).toBeNull();
+        expect(resolveKey(ev("PageUp", "PageUp", { ctrlKey: true, altKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("tab:moveLeft");
+        expect(resolveKey(ev("F2", "F2"), NONE, "other")?.row.command).toBe("tab:rename");
+        expect(resolveKey(ev("F2", "F2"), TERM, "other")).toBeNull();
+    });
+
+    it("Ctrl+L focuses the message box only in an agent pane", () => {
+        expect(resolveKey(ev("l", "KeyL", { ctrlKey: true }), { ...TYPING, viewType: "agent" }, "other")?.row.command).toBe("agent:focusComposer");
+        expect(resolveKey(ev("l", "KeyL", { ctrlKey: true }), { ...NONE, viewType: "files" }, "other")).toBeNull();
+    });
+
     it("labels commands for menus", () => {
         expect(formatCommand("tab:new", "other")).toBe("Ctrl+Shift+T");
         expect(formatCommand("tab:new", "mac")).toBe("⌘T");

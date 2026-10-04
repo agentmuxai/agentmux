@@ -5,6 +5,7 @@ import { atoms, refocusNode, setActiveTab, MOS } from "@/app/store/global";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
 import { triggerTabCloseRequest } from "@/app/tab/tab-close-request";
+import { WorkspaceService } from "./services";
 
 export function getFocusedBlockInStaticTab() {
     const layoutModel = getLayoutModelForStaticTab();
@@ -91,6 +92,16 @@ export function switchTabAbs(index: number) {
     }
     const newActiveTabId = tabids[newTabIdx];
     setActiveTab(newActiveTabId);
+}
+
+/** Moves the active tab one place left (-1) or right (+1) in the strip. */
+export function moveActiveTab(offset: -1 | 1) {
+    const ws = atoms.workspace();
+    const tabids = getAllTabs(ws);
+    const idx = tabids.indexOf(atoms.activeTabId());
+    const to = idx + offset;
+    if (idx < 0 || to < 0 || to >= tabids.length) return;
+    fireAndForget(() => WorkspaceService.ReorderTab(ws.oid, tabids[idx], to));
 }
 
 /** The last tab: Chrome's "9 means last" rule for the go-to-tab keys. */
