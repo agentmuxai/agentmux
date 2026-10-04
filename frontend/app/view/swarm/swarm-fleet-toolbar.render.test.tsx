@@ -27,6 +27,7 @@ function modelStub(initialSelected: string[] = []) {
 
     const model = {
         selectedBlockIdsAtom: selected,
+        otherInstancesAtom: () => null,
         fleetGroupsAtom: groups,
         fleetActionInFlightAtom: inFlight,
         selectAll: vi.fn((ids: string[]) => setSelected(new Set(ids))),

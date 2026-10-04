@@ -5,12 +5,14 @@
 // See docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md.
 
 import { autoUpdate } from "@floating-ui/dom";
-import { createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { assertMenuInPaintableArea, computeMenuPosition } from "@/app/util/menu-position";
+import { remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
+import { remoteSections } from "./swarm-remote";
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -19,6 +21,10 @@ import type { SwarmViewModel } from "./swarm-model";
 const STAGING_ELIGIBLE_AT = 5;
 const DEFAULT_BATCH_SIZE = 3;
 const DEFAULT_MAX_FAIL_PERCENTAGE = 50;
+
+/** Shown when every selected agent is on another machine, where nothing can
+ *  act on it yet. */
+const NOTHING_REACHABLE = "Agents on other machines can't be acted on yet: nothing there can verify the request is yours";
 
 export function FleetToolbar({
     model,
@@ -37,6 +43,30 @@ export function FleetToolbar({
         const ids = allBlockIds();
         return ids.length > 0 && ids.every((id) => selected().has(id));
     };
+    // Agents on other instances in the selection, and how many of the selected
+    // an action can reach. Cheap: only the other instances' list is read, not
+    // this instance's tree (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §5).
+    const remoteMap = createMemo(() => remoteFleetTargets(remoteSections(model.otherInstancesAtom())));
+    const remoteN = () => {
+        let n = 0;
+        for (const key of selected()) if (remoteMap().get(key)) n++;
+        return n;
+    };
+    // The count's "on other machines" leaves out this machine's other channels.
+    const otherMachineN = () => {
+        let n = 0;
+        for (const key of selected()) if (remoteMap().get(key)?.otherMachine) n++;
+        return n;
+    };
+    const reachable = (action: FleetAction) => {
+        let n = 0;
+        for (const key of selected()) {
+            const t = remoteMap().get(key);
+            if (!t || !unavailableReason(t, action)) n++;
+        }
+        return n;
+    };
+    const plural = (n: number) => `agent${n === 1 ? "" : "s"}`;
 
     const [broadcastOpen, setBroadcastOpen] = createSignal(false);
     const [broadcastText, setBroadcastText] = createSignal("");
@@ -108,7 +138,10 @@ export function FleetToolbar({
                     count() > 0 individually — only the group picker (and this
                     bar's own visibility) doesn't require a selection. */}
                 <Show when={count() > 0}>
-                    <span class="swarm-fleet-toolbar-count">{count()} selected</span>
+                    <span class="swarm-fleet-toolbar-count">
+                        {count()} selected
+                        <Show when={otherMachineN() > 0}> · {otherMachineN()} on other machines</Show>
+                    </span>
 
                     <Show
                         when={!broadcastOpen()}
@@ -117,7 +150,7 @@ export function FleetToolbar({
                                 <input
                                     type="text"
                                     class="swarm-fleet-broadcast-input"
-                                    placeholder={`Message to send to ${count()} agents…`}
+                                    placeholder={`Message to send to ${reachable("broadcast")} ${plural(reachable("broadcast"))}…`}
                                     value={broadcastText()}
                                     onInput={(e) => setBroadcastText(e.currentTarget.value)}
                                     onKeyDown={(e) => {
@@ -140,7 +173,13 @@ export function FleetToolbar({
                             </div>
                         }
                     >
-                        <button type="button" class="swarm-fleet-btn" onClick={() => setBroadcastOpen(true)}>
+                        <button
+                            type="button"
+                            class="swarm-fleet-btn"
+                            disabled={reachable("broadcast") === 0}
+                            title={reachable("broadcast") === 0 ? NOTHING_REACHABLE : undefined}
+                            onClick={() => setBroadcastOpen(true)}
+                        >
                             <i class="fa-solid fa-tower-broadcast" /> Broadcast
                         </button>
                     </Show>
@@ -154,10 +193,11 @@ export function FleetToolbar({
                         <button
                             type="button"
                             class="swarm-fleet-btn swarm-fleet-btn--destructive"
-                            disabled={model.fleetActionInFlightAtom()}
+                            disabled={model.fleetActionInFlightAtom() || reachable("stop") === 0}
+                            title={reachable("stop") === 0 ? NOTHING_REACHABLE : undefined}
                             onClick={() => setStopConfirmOpen(true)}
                         >
-                            <i class="fa-solid fa-stop" /> Stop {count()}
+                            <i class="fa-solid fa-stop" /> Stop {reachable("stop")}
                         </button>
                     </Show>
                 </Show>
@@ -185,6 +225,7 @@ export function FleetToolbar({
                             triggerEl={groupPickerButtonRef!}
                             model={model}
                             hasSelection={count() > 0}
+                            remoteSelected={remoteN() > 0}
                             savingGroupName={savingGroupName}
                             setSavingGroupName={setSavingGroupName}
                             submitSaveGroup={submitSaveGroup}
@@ -202,17 +243,19 @@ export function FleetToolbar({
 
             <ConfirmModal
                 open={stopConfirmOpen()}
-                title={`Stop ${count()} agent${count() === 1 ? "" : "s"}?`}
+                title={`Stop ${reachable("stop")} ${plural(reachable("stop"))}?`}
                 description="This stops the selected agent panes. Each pane's own stop outcome is reported individually — a partial failure never shows as a single pass/fail."
                 destructive
-                confirmLabel={`Stop ${count()}`}
+                confirmLabel={`Stop ${reachable("stop")}`}
                 onConfirm={confirmStop}
                 onCancel={() => setStopConfirmOpen(false)}
             >
                 <div class="swarm-fleet-confirm-target-list">
-                    <For each={Array.from(selected())}>{(blockId) => <div class="swarm-fleet-confirm-target-row">{blockId}</div>}</For>
+                    <Show when={stopConfirmOpen()}>
+                        <StopTargetRows model={model} />
+                    </Show>
                 </div>
-                <Show when={count() >= STAGING_ELIGIBLE_AT}>
+                <Show when={reachable("stop") >= STAGING_ELIGIBLE_AT}>
                     <label class="swarm-fleet-staging-toggle">
                         <input type="checkbox" checked={useStaging()} onChange={(e) => setUseStaging(e.currentTarget.checked)} />
                         Staged rollout — cap blast radius on a bad selection
@@ -267,6 +310,9 @@ function GroupsDropdown(props: {
     triggerEl: HTMLButtonElement;
     model: SwarmViewModel;
     hasSelection: boolean;
+    /** The selection includes agents on other instances. A group holds this
+     *  instance's agents only (their block ids). */
+    remoteSelected: boolean;
     savingGroupName: () => string | null;
     setSavingGroupName: (v: string | null) => void;
     submitSaveGroup: () => Promise<void>;
@@ -343,6 +389,8 @@ function GroupsDropdown(props: {
                             <button
                                 type="button"
                                 class="swarm-fleet-group-dropdown-item swarm-fleet-group-dropdown-item--action"
+                                disabled={props.remoteSelected}
+                                title={props.remoteSelected ? "A group holds this instance's agents only" : undefined}
                                 onClick={() => props.setSavingGroupName("")}
                             >
                                 Save selection as group…
@@ -396,6 +444,50 @@ function GroupsDropdown(props: {
     );
 }
 
+/**
+ * The stop confirmation's list: every selected agent by name, with the machine
+ * and platform it is on, and for an agent the action can't reach, why. It is
+ * built when the dialog opens, from the live lists, so it never shows a stale
+ * agent or a block id.
+ */
+export function StopTargetRows(props: { model: SwarmViewModel }): JSX.Element {
+    const rows = createMemo(() => {
+        const known = props.model.fleetTargets();
+        return Array.from(props.model.selectedBlockIdsAtom()).map((key) => {
+            const t = known.get(key);
+            return {
+                key,
+                name: t?.name ?? key,
+                where: t?.where ?? null,
+                platform: t?.platform ?? null,
+                badge: t?.badge ?? null,
+                reason: t ? unavailableReason(t, "stop") : null,
+            };
+        });
+    });
+    return (
+        <For each={rows()}>
+            {(row) => (
+                <div classList={{ "swarm-fleet-confirm-target-row": true, "swarm-fleet-confirm-target-row--unavailable": !!row.reason }}>
+                    <span class="swarm-fleet-target-name">{row.name}</span>
+                    <Show when={row.where}>
+                        <span class="swarm-fleet-target-where">{row.where}</span>
+                    </Show>
+                    <Show when={row.platform}>
+                        <span class="swarm-fleet-tag">{row.platform}</span>
+                    </Show>
+                    <Show when={row.badge}>
+                        <span class="swarm-fleet-tag">{row.badge}</span>
+                    </Show>
+                    <Show when={row.reason}>
+                        <span class="swarm-fleet-target-reason">{row.reason}</span>
+                    </Show>
+                </div>
+            )}
+        </For>
+    );
+}
+
 export function FleetResultPanel({ model }: { model: SwarmViewModel }): JSX.Element {
     const entry = () => model.lastFleetResultAtom();
 
@@ -419,14 +511,14 @@ export function FleetResultPanel({ model }: { model: SwarmViewModel }): JSX.Elem
                         <For each={e().result.succeeded}>
                             {(id) => (
                                 <div class="swarm-fleet-result-row swarm-fleet-result-row--ok">
-                                    <i class="fa-solid fa-check" /> {id}
+                                    <i class="fa-solid fa-check" /> {e().labels[id] ?? id}
                                 </div>
                             )}
                         </For>
                         <For each={e().result.failed}>
                             {(f) => (
                                 <div class="swarm-fleet-result-row swarm-fleet-result-row--fail">
-                                    <i class="fa-solid fa-triangle-exclamation" /> {f.id} — {f.error}
+                                    <i class="fa-solid fa-triangle-exclamation" /> {e().labels[f.id] ?? f.id} — {f.error}
                                 </div>
                             )}
                         </For>

@@ -50,6 +50,10 @@ pub struct RemoteChannel {
     pub seen_at_ms: u64,
     /// No entry of this channel rewritten within [`STALE_AFTER_MS`].
     pub stale: bool,
+    /// The instance's operating system (`windows`, `macos`, `linux`), for the
+    /// platform tag. Empty when unknown: a peer from before it was advertised.
+    /// Self-reported and display only (`host_os`).
+    pub os: String,
     /// Sorted by name, case-insensitively.
     pub agents: Vec<RemoteAgent>,
 }
@@ -114,6 +118,8 @@ pub fn other_channels(
             channel,
             seen_at_ms,
             stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,
+            // Every channel on this machine runs on its operating system.
+            os: crate::backend::host_os::local_os(),
             agents: agents.into_values().collect(),
         })
         .collect()
@@ -210,6 +216,7 @@ pub fn lan_hosts(
                     channel,
                     seen_at_ms,
                     stale: now_ms.saturating_sub(seen_at_ms) > STALE_AFTER_MS,
+                    os: p.os.clone(),
                     agents,
                 },
             );
@@ -405,6 +412,7 @@ mod tests {
             hostname: host.to_string(),
             version: "0.59.5".to_string(),
             channel: channel.to_string(),
+            os: String::new(),
             address: addr.to_string(),
             port,
             auth_key: "lan-secret".to_string(),
@@ -419,16 +427,16 @@ mod tests {
     #[test]
     fn lan_peers_group_into_hosts_with_a_channel_each() {
         let peers = [
-            peer("Area54", "stable", "192.168.1.26", 29700, &["Manoz"], 5),
+            peer("Area54", "stable", "10.0.0.26", 29700, &["Manoz"], 5),
             peer(
                 "starpower",
                 "stable",
-                "192.168.1.195",
+                "10.0.0.195",
                 29700,
                 &["Opaz", "korp"],
                 5,
             ),
-            peer("starpower", "dev", "192.168.1.195", 29702, &["Loap"], 5),
+            peer("starpower", "dev", "10.0.0.195", 29702, &["Loap"], 5),
         ];
         let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
         let shape: Vec<(&str, &str, usize)> = hosts
@@ -454,8 +462,8 @@ mod tests {
     #[test]
     fn two_machines_with_the_same_hostname_stay_apart() {
         let peers = [
-            peer("ubuntu", "stable", "192.168.1.40", 29700, &["A"], 5),
-            peer("ubuntu", "stable", "192.168.1.41", 29700, &["B"], 5),
+            peer("ubuntu", "stable", "10.0.0.40", 29700, &["A"], 5),
+            peer("ubuntu", "stable", "10.0.0.41", 29700, &["B"], 5),
         ];
         let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
         assert_eq!(hosts.len(), 2, "neither hides the other");
@@ -463,7 +471,7 @@ mod tests {
         assert_eq!(names, ["ubuntu (1)", "ubuntu (2)"]);
         // And still no address anywhere in the answer (Codex P2 on #4241).
         let json = serde_json::to_string(&hosts).unwrap();
-        assert!(!json.contains("192.168.1.4"), "{json}");
+        assert!(!json.contains("10.0.0.4"), "{json}");
         assert_ne!(hosts[0].host_id, hosts[1].host_id);
         let agents: Vec<&str> = hosts
             .iter()
@@ -474,16 +482,16 @@ mod tests {
 
     #[test]
     fn a_lan_peer_at_one_of_our_own_addresses_is_left_to_the_registry() {
-        let own: HashSet<IpAddr> = ["192.168.1.230".parse().unwrap()].into_iter().collect();
-        let peers = [peer("narko", "dev", "192.168.1.230", 29702, &["Loap"], 5)];
+        let own: HashSet<IpAddr> = ["10.0.0.230".parse().unwrap()].into_iter().collect();
+        let peers = [peer("narko", "dev", "10.0.0.230", 29702, &["Loap"], 5)];
         assert!(lan_hosts(&peers, &own, NOW).is_empty());
     }
 
     #[test]
     fn a_peer_without_a_channel_is_labelled_by_its_port() {
         let peers = [
-            peer("old", "", "192.168.1.9", 29700, &["A"], 5),
-            peer("old", "", "192.168.1.9", 29701, &["B"], 5),
+            peer("old", "", "10.0.0.9", 29700, &["A"], 5),
+            peer("old", "", "10.0.0.9", 29701, &["B"], 5),
         ];
         let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
         let chans: Vec<&str> = hosts[0]
@@ -499,7 +507,7 @@ mod tests {
         let quiet = [peer(
             "Area54",
             "stable",
-            "192.168.1.26",
+            "10.0.0.26",
             29700,
             &["Manoz"],
             90,
@@ -508,7 +516,7 @@ mod tests {
         let fresh = [peer(
             "Area54",
             "stable",
-            "192.168.1.26",
+            "10.0.0.26",
             29700,
             &["Manoz"],
             5,
@@ -516,7 +524,7 @@ mod tests {
         let snap = snapshot(&[], &fresh, &HashSet::new(), "narko", "stable", "", NOW);
         let json = serde_json::to_string(&snap).unwrap();
         assert!(
-            !json.contains("lan-secret") && !json.contains("192.168.1.26"),
+            !json.contains("lan-secret") && !json.contains("10.0.0.26"),
             "{json}"
         );
     }
@@ -525,7 +533,7 @@ mod tests {
     /// so a peer that answers the agent-name poll is live, whatever `last_seen` says.
     #[test]
     fn a_peer_that_answers_polls_is_not_stale() {
-        let mut p = peer("Area54", "stable", "192.168.1.26", 29700, &["Manoz"], 1800);
+        let mut p = peer("Area54", "stable", "10.0.0.26", 29700, &["Manoz"], 1800);
         assert!(lan_hosts(std::slice::from_ref(&p), &HashSet::new(), NOW)[0].channels[0].stale);
         p.last_polled_ok = NOW / 1000 - 10;
         assert!(!lan_hosts(&[p], &HashSet::new(), NOW)[0].channels[0].stale);
@@ -534,7 +542,7 @@ mod tests {
     #[test]
     fn a_host_with_no_name_is_not_labelled_by_its_address() {
         let hosts = lan_hosts(
-            &[peer("", "stable", "192.168.1.77", 29700, &["A"], 5)],
+            &[peer("", "stable", "10.0.0.77", 29700, &["A"], 5)],
             &HashSet::new(),
             NOW,
         );
@@ -546,8 +554,8 @@ mod tests {
     #[test]
     fn two_instances_on_one_channel_both_stay() {
         let peers = [
-            peer("narko2", "stable", "192.168.1.50", 29700, &["A"], 5),
-            peer("narko2", "stable", "192.168.1.50", 29702, &["B"], 5),
+            peer("narko2", "stable", "10.0.0.50", 29700, &["A"], 5),
+            peer("narko2", "stable", "10.0.0.50", 29702, &["B"], 5),
         ];
         let hosts = lan_hosts(&peers, &HashSet::new(), NOW);
         assert_eq!(hosts.len(), 1);
@@ -561,11 +569,50 @@ mod tests {
 
     #[test]
     fn the_same_instance_seen_twice_is_listed_once() {
-        let older = peer("Area54", "stable", "192.168.1.26", 29700, &["Old"], 50);
-        let newer = peer("Area54", "stable", "192.168.1.26", 29700, &["New"], 5);
+        let older = peer("Area54", "stable", "10.0.0.26", 29700, &["Old"], 50);
+        let newer = peer("Area54", "stable", "10.0.0.26", 29700, &["New"], 5);
         let hosts = lan_hosts(&[older, newer], &HashSet::new(), NOW);
         assert_eq!(hosts[0].channels.len(), 1);
         assert_eq!(hosts[0].channels[0].channel, "stable");
         assert_eq!(hosts[0].channels[0].agents[0].name, "New");
+    }
+
+    // The platform tag (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
+    #[test]
+    fn this_machines_other_channels_carry_this_machines_platform() {
+        let chans = other_channels(&[entry("Loap", "dev-fix", 0)], "stable", "", NOW);
+        assert_eq!(chans[0].os, crate::backend::host_os::local_os());
+    }
+
+    #[test]
+    fn a_lan_peer_carries_the_platform_it_advertised_and_none_when_it_did_not() {
+        let mut mac = peer("Area54", "stable", "10.0.0.26", 29700, &["Manoz"], 5);
+        mac.os = "macos".to_string();
+        let old = peer("starpower", "stable", "10.0.0.27", 29700, &["Opaz"], 5);
+        let hosts = lan_hosts(&[mac, old], &HashSet::new(), NOW);
+        let os_of = |name: &str| {
+            hosts
+                .iter()
+                .find(|h| h.display_name == name)
+                .unwrap()
+                .channels[0]
+                .os
+                .clone()
+        };
+        assert_eq!(os_of("Area54"), "macos");
+        assert_eq!(os_of("starpower"), "");
+    }
+
+    #[test]
+    fn two_instances_on_one_host_keep_their_own_platform() {
+        // A Windows machine that also runs an instance inside WSL.
+        let mut win = peer("narko2", "stable", "10.0.0.30", 29700, &["A"], 5);
+        win.os = "windows".to_string();
+        let mut wsl = peer("narko2", "stable", "10.0.0.30", 29702, &["B"], 5);
+        wsl.os = "linux".to_string();
+        let hosts = lan_hosts(&[win, wsl], &HashSet::new(), NOW);
+        let mut oses: Vec<String> = hosts[0].channels.iter().map(|c| c.os.clone()).collect();
+        oses.sort();
+        assert_eq!(oses, vec!["linux".to_string(), "windows".to_string()]);
     }
 }
