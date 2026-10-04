@@ -112,10 +112,10 @@ pub(super) async fn handle_pty_shell_create(
         json!(crate::backend::gh_guard::guard_dir_for(&agent_env)),
     );
     // And the publish guard's git hooks, so a push typed here is scanned too.
-    if let Some(hooks) = crate::backend::publish_guard::host_hooks_dir() {
+    if let Some(hooks) = crate::backend::publish_guard::hooks_dir_for(&agent_env, |k| std::env::var(k).ok()) {
         meta.insert(
             crate::backend::publish_guard::META_KEY_PTYSHELL_GIT_HOOKS_PATH.to_string(),
-            json!(hooks),
+            json!(hooks.to_string_lossy()),
         );
     }
     meta.insert("view".to_string(), json!("term"));

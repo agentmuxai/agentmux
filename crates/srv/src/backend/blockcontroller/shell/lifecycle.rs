@@ -916,7 +916,14 @@ impl Controller for ShellController {
             "",
         );
         if !hooks.is_empty() {
-            for (key, value) in crate::backend::publish_guard::hooks_path_env(&hooks) {
+            // On top of the GIT_CONFIG_* entries this shell already has (the
+            // process env plus cmd:env), so none of them is overwritten.
+            let entries = crate::backend::publish_guard::git_config_entries(
+                |k| cmd.get_env(k).and_then(|v| v.to_str()).map(str::to_string),
+                "core.hooksPath",
+                &hooks,
+            );
+            for (key, value) in entries {
                 cmd.env(key, value);
             }
         }
