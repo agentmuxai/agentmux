@@ -9,7 +9,7 @@
  * Spec: docs/specs/SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.1
  */
 
-import { tokenizeShell, type TokenKind } from "./tokenize";
+import { MAX_TOKENIZE_CHARS, tokenizeShell, type TokenKind } from "./tokenize";
 
 export type ShellFlavor = "posix" | "powershell" | "cmd";
 
@@ -46,7 +46,10 @@ function maskQuoted(command: string): string {
     return out + command.slice(pos);
 }
 
-export function detectShellFlavor(command: string): ShellFlavor {
+export function detectShellFlavor(full: string): ShellFlavor {
+    // Judge only what the tokenizer covers: past its cap nothing is masked, so
+    // a long heredoc's tail could otherwise pass for PowerShell or cmd code.
+    const command = full.length > MAX_TOKENIZE_CHARS ? full.slice(0, MAX_TOKENIZE_CHARS) : full;
     if (POWERSHELL_LAUNCH_RE.test(command)) return "powershell";
     if (CMDLET_RE.test(command) || POWERSHELL_VAR_RE.test(command)) {
         // A cheap hit; confirm it is not text inside a string or heredoc.

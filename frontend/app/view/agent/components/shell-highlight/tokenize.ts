@@ -55,7 +55,7 @@ export interface Tokenized {
 export const MAX_TOKENIZE_CHARS = 20_000;
 
 /** Words after which the next word is a command again. */
-const KEYWORDS_THEN_COMMAND = new Set(["if", "then", "else", "elif", "while", "until", "do", "{", "!", "time"]);
+const KEYWORDS_THEN_COMMAND = new Set(["if", "then", "else", "elif", "while", "until", "do", "{", "!"]);
 /** Keywords after which the next word is an ordinary argument. */
 const KEYWORDS_THEN_ARGS = new Set(["for", "case", "select", "function", "in", "fi", "done", "esac", "}"]);
 
@@ -222,6 +222,11 @@ class Scanner {
         let program = "";
         let wordIdx = 0;
         let subIdx = 0;
+        // `case WORD in`: pattern words until `)`, then the arm's commands
+        // until `;;`, `;&` or `;;&`, then patterns again, until `esac`.
+        let casePending = false;
+        let caseLevel = 0;
+        let inCasePattern = false;
 
         const open = (at: number): void => {
             if (top && depth === 0) this.openSegment(at);
@@ -260,6 +265,17 @@ class Scanner {
                 continue;
             }
             if (stop === "`" && c === "`") return;
+            if (inCasePattern && (c === ")" || c === "(" || c === "|")) {
+                // `(` opens a pattern list, `|` separates patterns, `)` ends
+                // them and starts the arm's command.
+                this.emit(this.i, this.i + 1, c === "|" ? "operator" : "punct");
+                this.i++;
+                if (c === ")") {
+                    inCasePattern = false;
+                    resetCommand();
+                }
+                continue;
+            }
             if (c === ")") {
                 if (stop === ")" && depth === 0) return;
                 this.emit(this.i, this.i + 1, "punct");
@@ -326,9 +342,12 @@ class Scanner {
             if (c === "|" || c === "&" || c === ";") {
                 let len = 1;
                 const two = s.slice(this.i, this.i + 2);
-                if (two === "&&" || two === "||" || two === "|&" || two === ";;") len = 2;
+                if (s.startsWith(";;&", this.i)) len = 3;
+                else if (two === "&&" || two === "||" || two === "|&" || two === ";;" || two === ";&") len = 2;
                 this.emit(this.i, this.i + len, "operator");
                 if (top && depth === 0) this.closeSegment(this.i);
+                // The end of a case arm: patterns come next.
+                if (caseLevel > 0 && c === ";" && len > 1) inCasePattern = true;
                 this.i += len;
                 resetCommand();
                 continue;
@@ -337,8 +356,11 @@ class Scanner {
             // A word.
             open(this.i);
             const wordStart = this.i;
-            let role: "program" | "arg" | "flag" | "env-value" | "keyword" | "wrapper-value" = cmdPos ? "program" : "arg";
+            let role: "program" | "arg" | "flag" | "env-value" | "keyword" | "wrapper-value" | "pattern" = cmdPos
+                ? "program"
+                : "arg";
             if (role === "program" && wrapperValuePending) role = "wrapper-value";
+            if (inCasePattern) role = "pattern";
             wrapperValuePending = false;
             let firstRun = true;
             let sawEquals = false;
@@ -387,6 +409,27 @@ class Scanner {
                 const run = s.slice(runStart, this.i);
                 const atWordStart = firstRun && runStart === wordStart;
                 firstRun = false;
+                const wholeWord = atWordStart && (this.i >= n || isWordBreak(s[this.i]));
+
+                if (role === "pattern") {
+                    if (wholeWord && run === "esac") {
+                        this.emit(runStart, this.i, "keyword");
+                        caseLevel = Math.max(0, caseLevel - 1);
+                        inCasePattern = false;
+                        role = "keyword";
+                        keywordThenCommand = false;
+                    }
+                    continue;
+                }
+                if (wholeWord && role === "arg" && casePending && run === "in") {
+                    this.emit(runStart, this.i, "keyword");
+                    casePending = false;
+                    caseLevel++;
+                    inCasePattern = true;
+                    role = "keyword";
+                    keywordThenCommand = false;
+                    continue;
+                }
 
                 if (atWordStart && role === "program") {
                     if (ENV_ASSIGN_RE.test(run)) {
@@ -399,6 +442,11 @@ class Scanner {
                     if (atEnd && (KEYWORDS_THEN_COMMAND.has(run) || KEYWORDS_THEN_ARGS.has(run))) {
                         this.emit(runStart, this.i, "keyword");
                         keywordThenCommand = KEYWORDS_THEN_COMMAND.has(run);
+                        if (run === "case") casePending = true;
+                        if (run === "esac") {
+                            caseLevel = Math.max(0, caseLevel - 1);
+                            inCasePattern = false;
+                        }
                         role = "keyword";
                         continue;
                     }
@@ -475,6 +523,7 @@ class Scanner {
             }
             if (role === "env-value" || role === "wrapper-value") cmdPos = true;
             else if (role === "keyword") cmdPos = keywordThenCommand;
+            else if (role === "pattern") cmdPos = false;
             else if (role === "program") {
                 if (!programEmitted) {
                     program = "";

@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { detectShellFlavor } from "./flavor";
+import { MAX_TOKENIZE_CHARS } from "./tokenize";
 
 describe("detectShellFlavor", () => {
     it.each([
@@ -58,6 +59,12 @@ describe("detectShellFlavor", () => {
         "ls # Get-ChildItem",
     ])("does not read cmdlet-looking text inside strings, heredocs or comments as PowerShell: %s", (cmd) => {
         expect(detectShellFlavor(cmd)).toBe("posix");
+    });
+
+    it("does not judge text past the tokenizer cap, where nothing is masked", () => {
+        const pad = "x".repeat(MAX_TOKENIZE_CHARS);
+        expect(detectShellFlavor(`cat > a.txt <<'EOF'\n${pad}\nWrite-Host hi\nEOF`)).toBe("posix");
+        expect(detectShellFlavor(`python -c "${pad} %PATH% "`)).toBe("posix");
     });
 
     it("still reads a multi-line PowerShell script as PowerShell", () => {

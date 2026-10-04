@@ -128,6 +128,31 @@ describe("tokenizeShell kinds", () => {
         expect(marks("nice -n 5 make")).toContainEqual(["5", "number"]);
     });
 
+    it("treats time as a wrapper with options", () => {
+        const programs = (cmd: string) =>
+            marks(cmd)
+                .filter(([, k]) => k === "program")
+                .map(([t]) => t);
+        expect(programs("time -p sleep 1")).toEqual(["time", "sleep"]);
+        expect(programs("time -f '%e' make")).toEqual(["time", "make"]);
+        expect(programs("time cargo build")).toEqual(["time", "cargo"]);
+    });
+
+    it("reads case patterns as patterns and the arm as a command", () => {
+        const cmd = 'case "$x" in a|b) echo yes;; c) ls -l;& *) rm f;;& esac; pwd';
+        const m = marks(cmd);
+        expect(m.filter(([, k]) => k === "program").map(([t]) => t)).toEqual(["echo", "ls", "rm", "pwd"]);
+        expect(m.filter(([, k]) => k === "keyword").map(([t]) => t)).toEqual(["case", "in", "esac"]);
+        expect(roundTrip(cmd)).toBe(cmd);
+    });
+
+    it("handles a multi-line case with a last arm without ;; and a case inside $( )", () => {
+        const cmd = 'case $1 in\n  (start) run --x\n    ;;\n  stop) halt\nesac\nv=$(case $y in a) echo 1;; esac)\nls';
+        const m = marks(cmd);
+        expect(m.filter(([, k]) => k === "program").map(([t]) => t)).toEqual(["run", "halt", "echo", "ls"]);
+        expect(roundTrip(cmd)).toBe(cmd);
+    });
+
     it("marks keywords and the command after them", () => {
         expect(marks("if [ -f x ]; then echo y; fi")).toEqual([
             ["if", "keyword"],
