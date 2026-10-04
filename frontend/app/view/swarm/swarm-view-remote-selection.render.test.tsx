@@ -13,7 +13,7 @@ import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
+vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { AmbientOutcomesCommand: () => Promise.resolve({}) } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: () => {} }));
 vi.mock("@/app/store/pane-content-holds", () => ({

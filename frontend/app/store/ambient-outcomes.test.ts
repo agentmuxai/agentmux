@@ -2,30 +2,45 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { summarizeTitleOutcomes } from "./ambient-outcomes";
+import { summarizeAmbientOutcomes } from "./ambient-outcomes";
 
-describe("summarizeTitleOutcomes", () => {
-    it("adds up the pane's requests and the backend recovery", () => {
-        const s = summarizeTitleOutcomes({
-            activity_summary: { accepted: 10, kept: 30, "rejected:absence_pattern": 1, superseded: 4 },
-            activity_summary_pushed: { accepted: 2, "rejected:refusal": 1, timeout: 1, empty_digest: 3 },
+describe("summarizeAmbientOutcomes", () => {
+    it("gives every purpose its own row, named, in a fixed order", () => {
+        const s = summarizeAmbientOutcomes({
             next_prompt_suggestion: { accepted: 99 },
+            activity_summary_pushed: { accepted: 2, "rejected:refusal": 1, timeout: 1, empty_digest: 3 },
+            activity_summary: { accepted: 10, kept: 30, "rejected:absence_pattern": 1, superseded: 4 },
         })!;
-        expect(s.text).toBe("12 accepted · 30 kept · 2 refused · 1 failed");
-        expect(s.detail).toContain("activity_summary_pushed rejected:refusal: 1");
-        expect(s.detail).not.toContain("next_prompt_suggestion");
-        expect(s.unhealthy).toBe(false);
+        expect(s.rows.map((r) => r.name)).toEqual(["Session titles", "Session titles (recovery)", "Prompt suggestions"]);
+        expect(s.rows[0].text).toBe("10 accepted · 30 kept · 1 refused · 4 skipped");
+        expect(s.rows[1].text).toBe("2 accepted · 0 kept · 1 refused · 3 skipped · 1 failed");
+        expect(s.rows[1].detail).toContain("rejected:refusal: 1");
+        expect(s.total).toBe(45 + 7 + 99);
+        expect(s.unhealthyCount).toBe(0);
     });
 
-    it("flags a pipeline that refuses or fails more than it produces", () => {
-        const s = summarizeTitleOutcomes({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 2, not_run: 1 } })!;
-        expect(s.text).toBe("1 accepted · 0 kept · 2 refused · 3 failed");
-        expect(s.unhealthy).toBe(true);
+    it("flags a purpose that refuses or fails more than it answers", () => {
+        const s = summarizeAmbientOutcomes({ activity_summary: { accepted: 1, "rejected:shape": 2, cli_failed: 2, not_run: 1 } })!;
+        expect(s.rows[0].text).toBe("1 accepted · 0 kept · 2 refused · 3 failed");
+        expect(s.rows[0].unhealthy).toBe(true);
+        expect(s.unhealthyCount).toBe(1);
     });
 
-    it("has nothing to say before any title call has ended", () => {
-        expect(summarizeTitleOutcomes(null)).toBeNull();
-        expect(summarizeTitleOutcomes({})).toBeNull();
-        expect(summarizeTitleOutcomes({ next_prompt_suggestion: { accepted: 3 } })).toBeNull();
+    it("counts a kept title as a good answer, not a failure", () => {
+        const s = summarizeAmbientOutcomes({ activity_summary: { kept: 30, timeout: 1 } })!;
+        expect(s.rows[0].unhealthy).toBe(false);
+    });
+
+    it("still shows a purpose or outcome label this build doesn't know", () => {
+        const s = summarizeAmbientOutcomes({ brand_new_purpose: { accepted: 1, some_new_label: 2 } })!;
+        expect(s.rows[0].name).toBe("brand_new_purpose");
+        expect(s.rows[0].total).toBe(3);
+        expect(s.rows[0].detail).toContain("some_new_label: 2");
+    });
+
+    it("has nothing to say before any call has ended", () => {
+        expect(summarizeAmbientOutcomes(null)).toBeNull();
+        expect(summarizeAmbientOutcomes({})).toBeNull();
+        expect(summarizeAmbientOutcomes({ activity_summary: {} })).toBeNull();
     });
 });

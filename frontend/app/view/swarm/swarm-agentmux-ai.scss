@@ -1,0 +1,49 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The header reuses .swarm-remote-header / -title / -badge (swarm-view.scss),
+// so it reads as one more section at the foot of the Swarm.
+.swarm-agentmux-ai {
+    margin-top: 10px;
+    border-top: 1px solid var(--border-color);
+    padding: 6px 0 4px 10px;
+}
+
+.swarm-agentmux-ai-warn {
+    font-size: 10px;
+    color: var(--warning-text-color, var(--warning-color));
+}
+
+.swarm-agentmux-ai-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 2px 10px 2px 22px;
+    font-size: 12px;
+}
+
+.swarm-agentmux-ai-name {
+    flex: 0 0 auto;
+    min-width: 11em;
+    color: var(--main-text-color);
+}
+
+.swarm-agentmux-ai-counts {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono, "Hack", monospace);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+
+    &.swarm-agentmux-ai-counts--warn {
+        color: var(--warning-text-color, var(--warning-color));
+    }
+}
+
+.swarm-agentmux-ai-note {
+    padding: 2px 10px 0 22px;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+}

@@ -31,6 +31,7 @@ import { questionCountdown } from "@/app/store/question-timer";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSections, seenAgo } from "./swarm-remote";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
+import { AgentMuxAiSection } from "./swarm-agentmux-ai";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
 
@@ -163,6 +164,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 </Show>
                 {/* Below this instance's own tree, whether or not it has agents. */}
                 <OtherInstanceSections model={model} />
+                <AgentMuxAiSection />
             </Show>
         </div>
     );
