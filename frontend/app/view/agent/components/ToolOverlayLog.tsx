@@ -21,6 +21,7 @@ import type { ToolNode } from "../types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contract";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { BashCommandView } from "./shell-highlight/ShellCommand";
 import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";
 import { attachScrollHandoff } from "./scroll-handoff";
@@ -119,6 +120,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     const hasChunks = () => dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length > 0;
     const hasResult = () => props.node.result != null;
     const chunks = () => props.node.log?.chunks ?? [];
+    // The streaming log has output only; a Bash call also shows its command, as
+    // the finished viewer does, so it is visible from the first frame.
+    const bashCommand = (): string | undefined =>
+        props.node.tool === "Bash" ? (props.node.params as { command?: string }).command : undefined;
 
     // Mirrors the `<Switch>` branches below exactly — used only to detect
     // when the RENDERED branch changes (for the height-FLIP effect further
@@ -450,16 +455,16 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
             <div class="agent-tool-overlay-log-content" ref={contentRef}>
             <Switch>
                 <Match when={isStreaming() && hasChunks()}>
-                    <ChunkList chunks={chunks()} />
+                    <ChunkList chunks={chunks()} command={bashCommand()} />
                 </Match>
                 <Match when={!isStreaming() && hasResult()}>
                     <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
                 </Match>
                 <Match when={!isStreaming() && !hasResult() && hasChunks()}>
-                    <ChunkList chunks={chunks()} />
+                    <ChunkList chunks={chunks()} command={bashCommand()} />
                 </Match>
                 <Match when={!hasChunks() && !hasResult()}>
-                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
+                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} command={bashCommand()} />
                 </Match>
             </Switch>
             </div>
@@ -471,6 +476,8 @@ type LogChunk = { kind: string; content: string; timestamp: number };
 
 interface ChunkListProps {
     chunks: ReadonlyArray<LogChunk>;
+    /** Bash calls: the command, shown above the output. */
+    command?: string;
 }
 function ChunkList(props: ChunkListProps): JSX.Element {
     // Collapse first (raw, incremental — see PersistentShellBlock.tsx for
@@ -494,6 +501,11 @@ function ChunkList(props: ChunkListProps): JSX.Element {
 
     return (
         <>
+            <Show when={props.command}>
+                <div class="agent-bash">
+                    <BashCommandView command={props.command!} />
+                </div>
+            </Show>
             <Show when={view().hiddenLines > 0}>
                 <OutputHiddenMarker hidden={view().hiddenLines} noun="line" from="tail" />
             </Show>
@@ -520,7 +532,12 @@ ToolOverlayLog.displayName = "ToolOverlayLog";
  * rendered. Used when there are no streaming chunks yet (or the tool
  * doesn't stream).
  */
-function ToolOverlayResult(props: { node: ToolNode; dispatchMatch?: AgentDispatch }): JSX.Element {
+function ToolOverlayResult(props: {
+    node: ToolNode;
+    dispatchMatch?: AgentDispatch;
+    /** Bash calls still waiting for output: the command, shown above the spinner. */
+    command?: string;
+}): JSX.Element {
     // NEVER destructure `const node = props.node`. The streaming
     // buffer keeps this component mounted across reducer updates;
     // the reducer's ToolChunkAppend replaces the ToolNode reference
@@ -534,9 +551,16 @@ function ToolOverlayResult(props: { node: ToolNode; dispatchMatch?: AgentDispatc
         <Show
             when={props.node.status !== "running"}
             fallback={
-                <div class="agent-tool-loading">
-                    <span class="agent-tool-spinner">⏳</span> Thinking...
-                </div>
+                <>
+                    <Show when={props.command}>
+                        <div class="agent-bash">
+                            <BashCommandView command={props.command!} />
+                        </div>
+                    </Show>
+                    <div class="agent-tool-loading">
+                        <span class="agent-tool-spinner">⏳</span> Thinking...
+                    </div>
+                </>
             }
         >
             {renderToolResultBody(props.node, { dispatchMatch: props.dispatchMatch })}

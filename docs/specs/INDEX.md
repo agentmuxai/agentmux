@@ -19,6 +19,7 @@ See also:
 | [SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21](SPEC_TAB_SWITCH_PER_PANE_PROGRESSIVE_REVEAL_2026_09_21.md) | Per-pane progressive tab-switch reveal — replaces the global long-task-quiet signal (breaks down with several busy panes) with a per-pane structural readiness milestone |
 | [SPEC_CONTEXT_DELIVERY_2026_09_30](SPEC_CONTEXT_DELIVERY_2026_09_30.md) | Context deliveries: everything the agent is given without the user typing it (memory, the compaction summary, the continuation packet) shown as one card with an expandable row per item; "ambient" kept for model calls only |
 | [SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30](SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md) | Host agents are told to clone and work in their own workspace (a host-only Operator Config entry, `AGENTMUX_AGENT_WORKDIR`); the "Given to the agent" card lists every startup file the provider reads, with owner and size; duplicated Global Memory and skills removed; the pane shows when an agent's CLI is installed or comes back on a different version |
+| [SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04](SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md) | Bash tool panels: tokenized, theme-aware command highlighting (heredoc and inline-script languages, PowerShell, cmd), ANSI and structured output, danger markers, command shown while streaming |
 | [SPEC_AGENT_ARCHITECTURE_2026_05_27](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | Overall agent-pane component + state machine |
 | [SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | ACP wire protocol (initialize / session_create / tool_result) |
 | [SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23](SPEC_AGENT_PANE_STATE_MACHINE_2026_05_23.md) | Pane lifecycle states and transitions |
@@ -498,6 +499,7 @@ partial list.
 | [`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23`](SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md) | SPEC: agent identity is carried, never derived |
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
 | [`SPEC_AGENT_INSTALL_STAGE_2026_05_17`](SPEC_AGENT_INSTALL_STAGE_2026_05_17.md) | SPEC: Agent Install Stage |
+| [`SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04`](SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md) | SPEC: Robust highlighting for Bash tool panels in the agent pane |
 | [`SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23`](SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md) | SPEC: Agent pane bounded live window — migration plan |
 | [`SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18`](SPEC_AGENT_PANE_CLOSE_GRACEFUL_SHUTDOWN_2026_09_18.md) | SPEC: Closing a pane shuts down every agent in it — gracefully, in order |
 | [`SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26`](SPEC_AGENT_PANE_FILE_ATTACHMENTS_2026_09_26.md) | SPEC: Attach any file in the agent composer (PDF, Office, text, code, …) |

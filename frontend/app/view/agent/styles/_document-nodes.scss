@@ -947,7 +947,6 @@ $transcript-preview-max-height: calc(50vh / 3);
                 border: none;
                 overflow: visible;
                 white-space: pre-wrap;
-                color: var(--accent-color);
                 // Force breaks inside long tokens (long paths, base64, etc.)
                 // so commands never overflow the portal width — but only as a
                 // LAST resort. `word-break: break-all` (what this was) breaks
@@ -962,6 +961,49 @@ $transcript-preview-max-height: calc(50vh / 3);
                     display: inline;
                     padding: 0;
                 }
+            }
+        }
+
+        // Command tokens (shell-highlight/tokenize.ts). Colours come from each
+        // theme's terminal palette, so light and dark themes both stay legible.
+        .agent-shell-command {
+            .sh-program {
+                color: var(--accent-color);
+            }
+            .sh-subcommand {
+                color: var(--term-cyan, var(--accent-color));
+            }
+            .sh-keyword,
+            .sh-heredoc-marker {
+                color: var(--term-magenta, var(--accent-color));
+            }
+            .sh-flag {
+                color: var(--term-blue, var(--info-color));
+            }
+            .sh-flag-value,
+            .sh-string,
+            .sh-heredoc-body {
+                color: var(--term-green, var(--success-color));
+            }
+            .sh-variable,
+            .sh-env-assign,
+            .sh-number {
+                color: var(--term-yellow, var(--warning-color, var(--accent-color)));
+            }
+            .sh-substitution {
+                color: var(--term-magenta, var(--accent-color));
+            }
+            .sh-operator,
+            .sh-redirect,
+            .sh-punct {
+                color: var(--secondary-text-color);
+            }
+            .sh-url {
+                color: var(--link-color);
+            }
+            .sh-comment {
+                color: var(--grey-text-color, var(--secondary-text-color));
+                font-style: italic;
             }
         }
 

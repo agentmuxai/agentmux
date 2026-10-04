@@ -8,10 +8,10 @@
 import clsx from "clsx";
 import { Show, createMemo, type JSX } from "solid-js";
 import type { BashParams, BashResult } from "../types";
-import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { parseExitPrefix } from "../tool-meta/bash-exit";
+import { BashCommandView } from "./shell-highlight/ShellCommand";
 
 interface BashOutputViewerProps {
     params: BashParams;
@@ -58,14 +58,7 @@ export const BashOutputViewer = (props: BashOutputViewerProps): JSX.Element => {
 
     return (
         <div class="agent-bash">
-            <div class="agent-bash-cmd">
-                <span class="agent-bash-dollar">$</span>
-                <HighlightedCode
-                    code={props.params.command}
-                    lang="bash"
-                    class="agent-bash-cmd-code"
-                />
-            </div>
+            <BashCommandView command={props.params.command} />
             <Show when={view().hasOutput}>
                 <Show when={view().stdoutCap.hiddenLines > 0}>
                     <OutputHiddenMarker hidden={view().stdoutCap.hiddenLines} noun="line" from="tail" />
