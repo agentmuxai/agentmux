@@ -1,6 +1,6 @@
 # SPEC — Armory Accounts: Delete in the right-click menu, account details in an inline panel
 
-**Status:** draft — spec only, no code written yet.
+**Status:** implemented (#4317) — phases 1 and 2; see §6 for where the build differs from the design.
 **Trigger:** owner request, 2026-10-04: "add a delete entry to the right click menu on the Armory → Accounts's Connected Accounts. We want to be able to delete the auth entries. Think of edge cases and graceful solutions." Then: "we don't want account details in a modal. Instead, it should slip out as a panel from underneath the account."
 **Scope:** the Connected accounts list in Armory → Accounts (`AccountsManager` → `AccountsTab`, `AccountRow`, `AccountDetail`), the account row's right-click menu, and the `deleteidentityaccount` handler and the secret cleanup it runs. More Armory Accounts changes are expected; add them as further sections here.
 **Relation to other specs:**
