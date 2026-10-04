@@ -1,0 +1,65 @@
+name: Changeset
+
+# Every PR adds one changeset: a new .changesets/<ts>-<slug>-<rand>.md made with
+# `scripts/changeset.sh <patch|minor|major> "<summary>"` (see .changesets/README.md).
+# A PR that genuinely needs no entry carries the `no-changeset` label instead.
+# Checked on every push and on label changes, so adding the label re-runs it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changeset:
+    name: changeset
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a changeset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          RELEASE_FILE: "VERSION_HISTORY.md"
+        run: |
+          set -euo pipefail
+          if printf '%s' "$LABELS" | grep -q '"no-changeset"'; then
+            echo "Skipped: the PR has the no-changeset label."; exit 0
+          fi
+          case "$AUTHOR" in
+            "dependabot[bot]"|"renovate[bot]") echo "Skipped: dependency update by $AUTHOR."; exit 0 ;;
+          esac
+
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | "\(.status) \(.filename)"')
+
+          # A release PR consumes changesets instead of adding one.
+          if [ -n "$RELEASE_FILE" ] && printf '%s\n' "$files" | grep -q -E "^modified ${RELEASE_FILE}$"; then
+            echo "Release PR ($RELEASE_FILE updated): no new changeset needed."; exit 0
+          fi
+
+          added=$(printf '%s\n' "$files" | awk '$1=="added" {print $2}' | grep -E '^\.changesets/[^/]+\.md$' | grep -v -x '.changesets/README.md' || true)
+          if [ -z "$added" ]; then
+            echo "::error::This PR adds no changeset. Run: scripts/changeset.sh <patch|minor|major> \"<one-line summary>\" and commit the file it writes to .changesets/. If the PR truly needs no entry, add the no-changeset label."
+            exit 1
+          fi
+
+          bad=0
+          for f in $added; do
+            body=$(gh api "repos/$REPO/contents/$f?ref=$HEAD_SHA" --jq .content | base64 -d)
+            if ! printf '%s\n' "$body" | grep -q -E '^type: (patch|minor|major)[[:space:]]*$'; then
+              echo "::error file=$f::Missing or invalid 'type:' (patch, minor or major) in the front matter."; bad=1
+            fi
+            text=$(printf '%s\n' "$body" | awk 'BEGIN{n=0} /^---[[:space:]]*$/ {n++; next} n>=2' | tr -d '[:space:]')
+            if [ -z "$text" ]; then
+              echo "::error file=$f::The changeset has no description after the front matter."; bad=1
+            fi
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "Changeset(s) found:"; printf '  %s\n' $added
