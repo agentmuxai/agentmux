@@ -17,7 +17,7 @@
  * The audit ring already has the data structured; this panel just
  * renders it.
  *
- * Toggle with **Ctrl+Shift+D**. Hidden in release builds via the
+ * Toggle with Ctrl+Alt+Shift+F12 (the `dev:diagnostics` row in keybindings/defaults.ts). Hidden in release builds via the
  * `isDev()` gate at the mount site; the toggle hook is no-opped in
  * release.
  *
@@ -43,6 +43,8 @@ import {
     __resetDispatchLog,
 } from "@/store/command-source";
 import { AgentPanePerfSection } from "./agent-pane-perf-section";
+import { shortcutFor } from "@/app/keybindings";
+import { keyCommands } from "@/app/store/keymodel-dispatch";
 
 const DEFAULT_DISPLAY_LIMIT = 80;
 
@@ -98,21 +100,15 @@ export function DiagPanel(): JSX.Element {
     const [sliceFilter, setSliceFilter] = createSignal<string>("");
     const [keyFilter, setKeyFilter] = createSignal<string>("");
 
-    const onKey = (e: KeyboardEvent) => {
-        // Ctrl+Shift+D (or Meta+Shift+D on macOS where Ctrl is rare).
-        if (e.shiftKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
-            e.preventDefault();
-            setVisible((v) => !v);
-        }
-    };
-
+    // Its key is a shortcut-table row (`dev:diagnostics`), so it can't collide
+    // with another binding and also works from a terminal.
     onMount(() => {
-        window.addEventListener("keydown", onKey);
+        keyCommands.set("dev:diagnostics", () => {
+            setVisible((v) => !v);
+            return true;
+        });
     });
-
-    onCleanup(() => {
-        window.removeEventListener("keydown", onKey);
-    });
+    onCleanup(() => keyCommands.delete("dev:diagnostics"));
 
     // Available slices for the filter dropdown — derived from the
     // current records. Recomputed reactively so a new slice that
@@ -190,7 +186,7 @@ export function DiagPanel(): JSX.Element {
                         🔬 Reducer Dispatch Ring
                     </div>
                     <span style={{ color: "#777" }}>
-                        ({totalDispatches()} total — Ctrl+Shift+D)
+                        ({totalDispatches()} total — {shortcutFor("dev:diagnostics")})
                     </span>
                 </div>
                 <div

@@ -20,6 +20,7 @@ import { createSignal, onMount, type JSX } from "solid-js";
 import { PaneTabStrip } from "@/app/element/PaneTabStrip";
 import type { EditorViewModel } from "./editor-model";
 import type { EditorTab } from "@/app/store/editor-pane-state-store";
+import { keyLabel } from "@/app/keybindings";
 
 interface Props {
     model: EditorViewModel;
@@ -96,7 +97,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
             }
             // No scratch buffers in an editor on a host (they're local files).
             onAdd={props.model.connection() ? undefined : () => void props.model.openScratch(false)}
-            addTitle="New scratch buffer (Ctrl+T)"
+            addTitle={`New scratch buffer (${keyLabel("ctrl+t")})`}
         />
     );
 }

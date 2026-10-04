@@ -1,24 +1,27 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The dispatcher leaves a key alone when something closer to the user
-// already handled it, and keeps text-editing keys for the field being typed
-// in (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §3).
+// The dispatcher runs the shortcut table (keybindings/defaults.ts) against
+// where focus is: a key something closer already handled is left alone, a
+// text field keeps its editing keys, and a terminal keeps every key that
+// isn't on the skip-list (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §3, §11.3).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/app/store/global", () => ({
     atoms: { modalOpen: () => false },
-    getApi: () => ({ setKeyboardChordMode: vi.fn(), onControlShiftStateUpdate: vi.fn() }),
+    getApi: () => ({}),
     getBlockComponentModel: () => null,
     setControlShiftDelayAtom: vi.fn(),
 }));
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ focusedNode: () => null }),
 }));
+vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
-import { appHandleKeyDown, globalKeyMap, isTypingFocus } from "./keymodel-dispatch";
+import { appHandleKeyDown, isTypingFocus, keyCommands } from "./keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
+import { setPlatform } from "@/util/platformutil";
 
 function press(init: KeyboardEventInit, prevent = false): boolean {
     const ev = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
@@ -26,24 +29,35 @@ function press(init: KeyboardEventInit, prevent = false): boolean {
     return appHandleKeyDown(adaptFromReactOrNativeKeyEvent(ev));
 }
 
+const CTRL_SHIFT_LEFT = { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true };
+const CTRL_SHIFT_T = { key: "T", code: "KeyT", ctrlKey: true, shiftKey: true };
+
 describe("appHandleKeyDown", () => {
-    const paneFocus = vi.fn(() => true);
-    const newTab = vi.fn(() => true);
+    const handlers = {
+        "pane:focus:left": vi.fn(() => true),
+        "tab:new": vi.fn(() => true),
+        "pane:close": vi.fn(() => true),
+        "view:command-palette": vi.fn(() => true),
+        "split:up": vi.fn(() => true),
+    };
     let field: HTMLElement | null = null;
 
     beforeEach(() => {
         setKeyUtilPlatform("win32");
-        globalKeyMap.clear();
-        globalKeyMap.set("Ctrl:Shift:ArrowLeft", paneFocus);
-        globalKeyMap.set("Cmd:t", newTab);
-        paneFocus.mockClear();
-        newTab.mockClear();
+        setPlatform("win32");
+        keyCommands.clear();
+        for (const [command, fn] of Object.entries(handlers)) {
+            fn.mockClear();
+            keyCommands.set(command, fn);
+        }
     });
 
     afterEach(() => {
         field?.remove();
         field = null;
-        globalKeyMap.clear();
+        keyCommands.clear();
+        setPlatform("darwin");
+        setKeyUtilPlatform("darwin");
     });
 
     function focus(el: HTMLElement): void {
@@ -52,33 +66,52 @@ describe("appHandleKeyDown", () => {
         el.focus();
     }
 
-    it("runs a global shortcut normally", () => {
-        expect(press({ key: "ArrowLeft", ctrlKey: true, shiftKey: true })).toBe(true);
-        expect(paneFocus).toHaveBeenCalledTimes(1);
+    function focusTerminal(): void {
+        const ta = document.createElement("textarea");
+        ta.className = "xterm-helper-textarea";
+        focus(ta);
+    }
+
+    it("runs a shortcut from the table", () => {
+        expect(press(CTRL_SHIFT_LEFT)).toBe(true);
+        expect(handlers["pane:focus:left"]).toHaveBeenCalledTimes(1);
     });
 
     it("skips a key a pane or the editor already handled", () => {
-        expect(press({ key: "t", altKey: true }, true)).toBe(false);
-        expect(newTab).not.toHaveBeenCalled();
+        expect(press(CTRL_SHIFT_T, true)).toBe(false);
+        expect(handlers["tab:new"]).not.toHaveBeenCalled();
     });
 
     it("leaves word selection to a focused text field", () => {
         focus(document.createElement("textarea"));
-        expect(press({ key: "ArrowLeft", ctrlKey: true, shiftKey: true })).toBe(false);
-        expect(paneFocus).not.toHaveBeenCalled();
+        expect(press(CTRL_SHIFT_LEFT)).toBe(false);
+        expect(handlers["pane:focus:left"]).not.toHaveBeenCalled();
     });
 
-    it("still runs other global shortcuts while typing", () => {
+    it("still runs other shortcuts while typing", () => {
         focus(document.createElement("textarea"));
-        expect(press({ key: "t", altKey: true })).toBe(true);
-        expect(newTab).toHaveBeenCalledTimes(1);
+        expect(press(CTRL_SHIFT_T)).toBe(true);
+        expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
     });
 
     it("doesn't treat the terminal's hidden textarea as typing", () => {
-        const ta = document.createElement("textarea");
-        ta.className = "xterm-helper-textarea";
-        focus(ta);
+        focusTerminal();
         expect(isTypingFocus()).toBe(false);
-        expect(press({ key: "ArrowLeft", ctrlKey: true, shiftKey: true })).toBe(true);
+        expect(press(CTRL_SHIFT_LEFT)).toBe(true);
+    });
+
+    it("leaves the shell's keys to a focused terminal", () => {
+        focusTerminal();
+        expect(press({ key: "w", code: "KeyW", altKey: true })).toBe(false);
+        expect(press({ key: "p", code: "KeyP", ctrlKey: true })).toBe(false);
+        expect(handlers["view:command-palette"]).not.toHaveBeenCalled();
+        expect(press({ key: "W", code: "KeyW", ctrlKey: true, shiftKey: true })).toBe(true);
+        expect(handlers["pane:close"]).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs the split chord's second key", () => {
+        expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
+        expect(press({ key: "ArrowUp", code: "ArrowUp" })).toBe(true);
+        expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
     });
 });

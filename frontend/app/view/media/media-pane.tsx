@@ -18,6 +18,7 @@ import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
 import { createEffect, on, Show, untrack, type JSX } from "solid-js";
 import { MediaView } from "./media-view";
+import { keyLabel } from "@/app/keybindings";
 
 /** The file the pane shows (the tab in front's): the pane's title, layout
  *  export, and what an older build restores. */
@@ -216,7 +217,7 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
 
     return (
         <div class="media-pane flex flex-col w-full h-full" tabIndex={-1} onKeyDown={onKeyDown}>
-            <DocTabStrip ctl={tabs} tooltipOf={(t) => t.payload.path || "No file yet"} addTitle="New tab (Ctrl+T)" />
+            <DocTabStrip ctl={tabs} tooltipOf={(t) => t.payload.path || "No file yet"} addTitle={`New tab (${keyLabel("ctrl+t")})`} />
             <div class="media-pane-doc flex-1" style={{ position: "relative", "min-height": 0 }}>
                 {/* Keyed by tab: switching tabs mounts that tab's file. */}
                 <Show

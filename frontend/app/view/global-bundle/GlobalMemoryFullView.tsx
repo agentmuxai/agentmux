@@ -22,6 +22,7 @@ import { MemoryHistory } from "@/app/view/memory-editor/MemoryHistory";
 import { MemoryHistoryModel } from "@/app/view/memory-editor/memory-history-model";
 import { PinnedEditorLayout } from "@/app/view/memory-editor/PinnedEditorLayout";
 import { globalMemoryHistorySource, type GlobalBundleViewModel, type GlobalMemoryDraft } from "./global-bundle-model";
+import { keyLabel } from "@/app/keybindings";
 
 const SURFACE = "armory-global";
 
@@ -39,7 +40,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
                     class="memory-editor-btn is-primary"
                     disabled={draft.savingAtom() || !value().name.trim()}
                     onClick={() => void props.model.save()}
-                    title="Save (Ctrl/Cmd+S)"
+                    title={`Save (${keyLabel("mod+s")})`}
                 >
                     {draft.savingAtom() ? "Saving…" : props.isNew ? "Add memory" : "Save"}
                 </button>

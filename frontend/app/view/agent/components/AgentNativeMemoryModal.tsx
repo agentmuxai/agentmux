@@ -33,6 +33,7 @@ import { AgentNativeMemoryModel, normalizeMemoryFilename, validateMemoryFilename
 import { NativeMemoryHistoryModel } from "../native-memory-history-model";
 import "./AgentNativeMemoryModal.scss";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
+import { keyLabel } from "@/app/keybindings";
 
 interface AgentNativeMemoryModalProps {
     agentId: string;
@@ -256,7 +257,7 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                                     class="memory-editor-btn is-primary"
                                     disabled={model.savingAtom()}
                                     onClick={() => void model.saveEdit()}
-                                    title="Save (Ctrl/Cmd+S)"
+                                    title={`Save (${keyLabel("mod+s")})`}
                                 >
                                     {model.savingAtom() ? "Saving…" : "Save"}
                                 </button>

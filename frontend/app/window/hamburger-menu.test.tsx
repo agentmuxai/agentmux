@@ -53,6 +53,7 @@ vi.mock("@/app/store/modalmodel", () => ({
 vi.mock("@/app/modals/command-palette", () => ({ CommandPaletteModal: h.CommandPaletteModal }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
 vi.mock("@/app/store/zoom", () => ({ zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
 vi.mock("@/layout/index", () => ({
@@ -86,61 +87,74 @@ vi.mock("@/app/element/flyoutmenu", () => ({
     },
 }));
 
+import { formatCommand } from "@/app/keybindings/registry";
 import { registerGlobalKeys } from "@/app/store/keymodel";
-import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "@/app/store/keymodel-bindings";
-import { appHandleKeyDown, globalChordMap, globalKeyMap } from "@/app/store/keymodel-dispatch";
-import { adaptFromReactOrNativeKeyEvent, formatKeyDescription, setKeyUtilPlatform } from "@/util/keyutil";
+import { appHandleKeyDown, keyCommands } from "@/app/store/keymodel-dispatch";
+import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
+import { setPlatform } from "@/util/platformutil";
 import { HamburgerMenu } from "./hamburger-menu";
 
 type Platform = "darwin" | "win32" | "linux";
-type Keys = { key: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean };
+type Keys = { key: string; code: string; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean; metaKey?: boolean };
 
 const ITEMS: {
     label: string;
-    binding: string;
+    command: string;
     shown: Record<Platform, string>;
     // The physical keys a user presses after reading the label.
     press: Record<Platform, Keys>;
     // The action both the menu item and the key binding must perform.
     action: () => ReturnType<typeof vi.fn>;
-    // A label this item used to show, which does NOT fire the binding.
+    // A label this item used to show, which no longer fires the binding.
     oldLabel?: { platforms: Platform[]; keys: Keys };
 }[] = [
     {
         label: "New Tab",
-        binding: NEW_TAB_KEY,
-        shown: { darwin: "⌘T", win32: "Alt+T", linux: "Alt+T" },
+        command: "tab:new",
+        shown: { darwin: "⌘T", win32: "Ctrl+Shift+T", linux: "Ctrl+Shift+T" },
         press: {
-            darwin: { key: "t", metaKey: true },
-            win32: { key: "t", altKey: true },
-            linux: { key: "t", altKey: true },
+            darwin: { key: "t", code: "KeyT", metaKey: true },
+            win32: { key: "T", code: "KeyT", ctrlKey: true, shiftKey: true },
+            linux: { key: "T", code: "KeyT", ctrlKey: true, shiftKey: true },
         },
         action: () => h.createTab,
-        oldLabel: { platforms: ["win32", "linux"], keys: { key: "t", ctrlKey: true } },
+        // Alt+T is the shell's transpose-words (report §11.2).
+        oldLabel: { platforms: ["win32", "linux"], keys: { key: "t", code: "KeyT", altKey: true } },
     },
     {
         label: "New Window",
-        binding: NEW_WINDOW_KEY,
-        shown: { darwin: "⌃⇧N", win32: "Ctrl+Shift+N", linux: "Ctrl+Shift+N" },
+        command: "window:new",
+        shown: { darwin: "⇧⌘N", win32: "Ctrl+Shift+N", linux: "Ctrl+Shift+N" },
         press: {
-            darwin: { key: "N", ctrlKey: true, shiftKey: true },
-            win32: { key: "N", ctrlKey: true, shiftKey: true },
-            linux: { key: "N", ctrlKey: true, shiftKey: true },
+            darwin: { key: "N", code: "KeyN", metaKey: true, shiftKey: true },
+            win32: { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true },
+            linux: { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true },
         },
         action: () => h.openNewWindow,
-        oldLabel: { platforms: ["darwin"], keys: { key: "N", metaKey: true, shiftKey: true } },
+        oldLabel: { platforms: ["darwin"], keys: { key: "N", code: "KeyN", ctrlKey: true, shiftKey: true } },
     },
     {
         label: "Command Palette",
-        binding: COMMAND_PALETTE_KEY,
-        shown: { darwin: "⌃P", win32: "Ctrl+P", linux: "Ctrl+P" },
+        command: "view:command-palette",
+        shown: { darwin: "⇧⌘P", win32: "Ctrl+Shift+P", linux: "Ctrl+Shift+P" },
         press: {
-            darwin: { key: "p", ctrlKey: true },
-            win32: { key: "p", ctrlKey: true },
-            linux: { key: "p", ctrlKey: true },
+            darwin: { key: "P", code: "KeyP", metaKey: true, shiftKey: true },
+            win32: { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true },
+            linux: { key: "P", code: "KeyP", ctrlKey: true, shiftKey: true },
         },
         action: () => h.openModal,
-        oldLabel: { platforms: ["darwin"], keys: { key: "p", metaKey: true } },
+        oldLabel: { platforms: ["darwin"], keys: { key: "p", code: "KeyP", ctrlKey: true } },
+    },
+    {
+        label: "Settings",
+        command: "app:settings",
+        shown: { darwin: "⌘,", win32: "Ctrl+,", linux: "Ctrl+," },
+        press: {
+            darwin: { key: ",", code: "Comma", metaKey: true },
+            win32: { key: ",", code: "Comma", ctrlKey: true },
+            linux: { key: ",", code: "Comma", ctrlKey: true },
+        },
+        action: () => h.store.openOrFocusPaneByView,
     },
 ];
 
@@ -157,8 +171,8 @@ function pressKeys(keys: Keys): boolean {
 describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortcut labels on %s", (platform) => {
     beforeEach(() => {
         setKeyUtilPlatform(platform);
-        globalKeyMap.clear();
-        globalChordMap.clear();
+        setPlatform(platform);
+        keyCommands.clear();
         registerGlobalKeys();
         h.menu.items = [];
         render(() => <HamburgerMenu />);
@@ -168,12 +182,14 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
     afterEach(() => {
         cleanup();
         setKeyUtilPlatform("darwin");
+        setPlatform("darwin");
     });
 
     describe.each(ITEMS)("$label", (spec) => {
-        it("shows the formatted binding that keymodel registers", () => {
-            expect(globalKeyMap.has(spec.binding), `keymodel registers ${spec.binding}`).toBe(true);
-            expect(menuItem(spec.label).shortcut).toBe(formatKeyDescription(spec.binding, platform));
+        it("shows the command's shortcut from the shortcut table", () => {
+            const mac = platform === "darwin" ? "mac" : "other";
+            expect(keyCommands.has(spec.command), `keymodel handles ${spec.command}`).toBe(true);
+            expect(menuItem(spec.label).shortcut).toBe(formatCommand(spec.command, mac));
             expect(menuItem(spec.label).shortcut).toBe(spec.shown[platform]);
         });
 
@@ -195,13 +211,9 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
         }
     });
 
-    it("every shortcut the menu shows is the label of a registered binding", () => {
-        const registeredLabels = new Set([...globalKeyMap.keys()].map((key) => formatKeyDescription(key, platform)));
+    it("shows a shortcut on exactly the items that have one", () => {
         const shown = h.menu.items.filter((item) => item.shortcut);
-        expect(shown.map((item) => item.label)).toEqual(["New Tab", "New Window", "Command Palette"]);
-        for (const item of shown) {
-            expect(registeredLabels.has(item.shortcut), `"${item.label}" shows ${item.shortcut}`).toBe(true);
-        }
+        expect(shown.map((item) => item.label)).toEqual(["New Tab", "New Window", "Settings", "Command Palette"]);
     });
 });
 

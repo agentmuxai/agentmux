@@ -113,6 +113,15 @@
     text-overflow: ellipsis;
 }
 
+// The command's shortcut, from the shortcut table (keybindings/defaults.ts).
+.command-palette-item-shortcut {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 .command-palette-item-category {
     font-size: 11px;
     color: var(--secondary-text-color);

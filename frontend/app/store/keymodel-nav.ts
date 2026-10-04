@@ -93,6 +93,14 @@ export function switchTabAbs(index: number) {
     setActiveTab(newActiveTabId);
 }
 
+/** The last tab: Chrome's "9 means last" rule for the go-to-tab keys. */
+export function switchTabLast() {
+    const tabids = getAllTabs(atoms.workspace());
+    if (tabids.length > 0) {
+        setActiveTab(tabids[tabids.length - 1]);
+    }
+}
+
 export function switchTab(offset: number) {
     const ws = atoms.workspace();
     const curTabId = atoms.activeTabId();

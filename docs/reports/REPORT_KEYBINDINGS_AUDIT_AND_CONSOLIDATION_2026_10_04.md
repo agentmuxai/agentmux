@@ -1,6 +1,6 @@
 # REPORT — Keyboard shortcuts: what works, what the help pane and docs promise, and one framework for all of it
 
-**Status:** analysis — no code changed. Owner decisions recorded in §10 (2026-10-04); best practices researched in §11.
+**Status:** analysis — owner decisions in §10 (2026-10-04), best practices in §11. Implementation progress in §13.
 **Trigger:** owner request, 2026-10-04: make sure every shortcut in the help pane works as described; propose new shortcuts; align help pane, code and docs; consolidate every keybinding system into one framework and remove legacy ones.
 **Verified against:** agentmux `main` @ `7a2d019ae`, agentmux-docs `main` @ `2d6758d`, 2026-10-04.
 **How verified:** by reading code. The double-firing mechanism (§3.1) and the terminal routing (§3.2) were confirmed in the source by hand; the rest comes from a full code trace. **Nothing here was run in the app**, so every "probable bug" in §3 needs a live check before it is fixed.
@@ -409,3 +409,28 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 2. Ctrl+Shift+` on non-US layouts.
 3. Ctrl+Shift+Alt+letter on German and Polish layouts.
 4. F6 inside CodeMirror.
+
+---
+
+## 13. Implementation progress
+
+| Phase | PR | What landed |
+|---|---|---|
+| 0 | #4320 | The destructive conflicts in §3.3, with no key changes. Terminal clear on Windows/Linux moved from Alt+K to Ctrl+Shift+L so Alt+K reaches the shell. |
+| 2 | #4321 | §5's dead code. The numbered pane overlay is rebuilt on DOM key events. `app:globalhotkey` removed. |
+| 3 | #4323 | The shortcut table (`frontend/app/keybindings/`), the §12 key map, the dispatcher and the terminal on the table, and every UI hint generated from it (§7.1). Covers the help pane, the hamburger and pane menus, the command palette and tooltips, plus a test that fails on a hand-written hint. The dev perf HUD and diagnostics panel are table rows (dev-only) on Ctrl+Alt+Shift+P and Ctrl+Alt+Shift+F12. |
+
+**Deferred from §9 and §12.** These need new actions, not just keys:
+- reopen a closed window tab;
+- move a tab left or right;
+- swap or resize panes from the keyboard;
+- F2 to rename a window tab;
+- reset zoom on all panes;
+- focus the agent composer.
+
+None of them is bound, so the help pane and menus don't show them.
+
+**Still to do:**
+- Phase 4: the editor, document tabs, the Files pane and the composer read the table instead of matching keys themselves. They already stop the global shortcuts by handling a key first (phase 0).
+- Phase 5: the host's `OnPreKeyEvent` list and the macOS menu accelerators are generated from the table, and browser panes forward app shortcuts.
+- Phase 6: a `keybindings` setting for user overrides, and the docs site's `keybindings.md` generated from the table.

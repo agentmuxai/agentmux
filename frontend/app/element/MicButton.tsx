@@ -6,6 +6,7 @@ import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput"
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { Show, type JSX } from "solid-js";
 import "./MicButton.scss";
+import { shortcutFor } from "@/app/keybindings";
 
 interface MicButtonProps {
     blockId: string;
@@ -81,7 +82,7 @@ export function MicButton(props: MicButtonProps): JSX.Element {
                         icon: isBlocked() ? "regular@microphone-slash" : "regular@microphone",
                         title: isBlocked()
                             ? blockedTitle()
-                            : (props.paneTitle ?? "Voice input (Ctrl+Shift+V)"),
+                            : (props.paneTitle ?? `Voice input (${shortcutFor("pane:voice")})`),
                         active: activeAtom,
                     }}
                 />

@@ -1,9 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { PLATFORM, PlatformMacOS } from "@/util/platformutil";
+import { shortcutFor, shortcutHelp } from "@/app/keybindings";
 import { cn } from "@/util/util";
-import { For, JSX } from "solid-js";
+import { For, JSX, Show } from "solid-js";
 
 const KeyCap = (props: { children?: JSX.Element }): JSX.Element => {
     return (
@@ -32,68 +32,14 @@ const IconBox = (props: { children?: JSX.Element; variant?: "accent" | "secondar
     );
 };
 
-const KeyBinding = (props: { keyDecl: string }): JSX.Element => {
-    const chordParts = props.keyDecl.split("+");
-
-    const renderChord = (chordPart: string, chordIdx: number): JSX.Element => {
-        const parts = chordPart.trim().split(":");
-        const elems: JSX.Element[] = [];
-
-        for (const part of parts) {
-            if (part === "Cmd") {
-                if (PLATFORM === PlatformMacOS) {
-                    elems.push(<KeyCap>⌘ Cmd</KeyCap>);
-                } else {
-                    elems.push(<KeyCap>Alt</KeyCap>);
-                }
-                continue;
-            }
-            if (part === "Ctrl") {
-                elems.push(<KeyCap>^ Ctrl</KeyCap>);
-                continue;
-            }
-            if (part === "Shift") {
-                elems.push(<KeyCap>⇧ Shift</KeyCap>);
-                continue;
-            }
-            if (part === "Arrows") {
-                elems.push(<KeyCap>←</KeyCap>);
-                elems.push(<KeyCap>→</KeyCap>);
-                elems.push(<KeyCap>↑</KeyCap>);
-                elems.push(<KeyCap>↓</KeyCap>);
-                continue;
-            }
-            if (part === "Digit") {
-                elems.push(<KeyCap>Number (1-9)</KeyCap>);
-                continue;
-            }
-            if (part === "[" || part === "]") {
-                elems.push(<KeyCap>{part}</KeyCap>);
-                continue;
-            }
-            elems.push(<KeyCap>{part.toUpperCase()}</KeyCap>);
-        }
-
-        return (
-            <div class="flex flex-row items-center gap-1">
-                {elems}
-            </div>
-        );
-    };
-
-    return (
+/** One shortcut label ("Ctrl+Shift+T", "⇧⌘W") as a key cap. */
+const Shortcut = (props: { label: string }): JSX.Element => (
+    <Show when={props.label}>
         <div class="flex flex-row items-center">
-            {chordParts.map((chordPart, chordIdx) => (
-                <>
-                    {renderChord(chordPart, chordIdx)}
-                    {chordIdx < chordParts.length - 1 && (
-                        <span class="text-secondary mx-1">+</span>
-                    )}
-                </>
-            ))}
+            <KeyCap>{props.label}</KeyCap>
         </div>
-    );
-};
+    </Show>
+);
 
 const QuickTips = (): JSX.Element => {
     return (
@@ -109,8 +55,8 @@ const QuickTips = (): JSX.Element => {
                             <i class="fa-solid fa-sharp fa-window-maximize fa-fw" />
                         </IconBox>
                         <div class="flex flex-col gap-0.5 flex-1">
-                            <span class="text-[15px]">Maximize a Pane</span>
-                            <KeyBinding keyDecl="Cmd:m" />
+                            <span class="text-[15px]">Maximize a pane</span>
+                            <Shortcut label={shortcutFor("pane:magnify")} />
                         </div>
                     </div>
                     <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
@@ -118,8 +64,8 @@ const QuickTips = (): JSX.Element => {
                             <i class="fa-solid fa-sharp fa-laptop fa-fw" />
                         </IconBox>
                         <div class="flex flex-col gap-0.5 flex-1">
-                            <span class="text-[15px]">Connect to a remote server</span>
-                            <KeyBinding keyDecl="Cmd:g" />
+                            <span class="text-[15px]">Change connection</span>
+                            <Shortcut label={shortcutFor("pane:changeConnection")} />
                         </div>
                     </div>
                     <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
@@ -133,8 +79,8 @@ const QuickTips = (): JSX.Element => {
                             <i class="fa-solid fa-sharp fa-xmark-large fa-fw" />
                         </IconBox>
                         <div class="flex flex-col gap-0.5 flex-1">
-                            <span class="text-[15px]">Close Pane</span>
-                            <KeyBinding keyDecl="Cmd:w" />
+                            <span class="text-[15px]">Close pane</span>
+                            <Shortcut label={shortcutFor("pane:close")} />
                         </div>
                     </div>
                 </div>
@@ -143,75 +89,36 @@ const QuickTips = (): JSX.Element => {
             <div class="flex flex-col gap-4 p-5 bg-gradient-to-br from-highlightbg/30 to-transparent hover:from-accent-400/5 rounded-lg border border-border hover:border-accent-400/20 transition-colors duration-300">
                 <div class="flex items-center gap-2 text-xl font-bold">
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
-                    <span class="text-foreground">Important Keybindings</span>
+                    <span class="text-foreground">Keyboard Shortcuts</span>
                 </div>
 
+                {/* Generated from the shortcut table (frontend/app/keybindings/defaults.ts),
+                    so this list can't disagree with what the keys do. */}
                 <div class="grid grid-cols-1 @lg:grid-cols-2 gap-x-5 gap-y-6">
+                    <For each={shortcutHelp()}>
+                        {(section) => (
+                            <div class="flex flex-col gap-1.5">
+                                <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
+                                    {section.category}
+                                </div>
+                                <For each={section.entries}>
+                                    {(entry) => (
+                                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
+                                            <span class="text-[15px]">{entry.label}</span>
+                                            <div class="flex flex-row flex-wrap items-center gap-1">
+                                                <For each={entry.keys}>{(k) => <KeyCap>{k}</KeyCap>}</For>
+                                            </div>
+                                        </div>
+                                    )}
+                                </For>
+                            </div>
+                        )}
+                    </For>
                     <div class="flex flex-col gap-1.5">
-                        <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
-                            Main Keybindings
-                        </div>
+                        <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">Mouse</div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">New Tab</span>
-                            <KeyBinding keyDecl="Cmd:t" />
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">New Terminal Pane</span>
-                            <KeyBinding keyDecl="Cmd:n" />
-                        </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1.5">
-                        <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
-                            Tab Switching ({PLATFORM === PlatformMacOS ? "Cmd" : "Alt"})
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Switch To Nth Tab</span>
-                            <KeyBinding keyDecl="Cmd:Digit" />
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Previous Tab</span>
-                            <KeyBinding keyDecl="Cmd:[" />
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Next Tab</span>
-                            <KeyBinding keyDecl="Cmd:]" />
-                        </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1.5">
-                        <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
-                            Pane Navigation (Ctrl-Shift)
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Navigate Between Panes</span>
-                            <KeyBinding keyDecl="Ctrl:Shift:Arrows" />
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Focus Nth Pane</span>
-                            <KeyBinding keyDecl="Ctrl:Shift:Digit" />
-                        </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1.5">
-                        <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
-                            Split Panes
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Split Right</span>
-                            <KeyBinding keyDecl="Cmd:d" />
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Split Below</span>
-                            <KeyBinding keyDecl="Shift:Cmd:d" />
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Split in Direction</span>
-                            <KeyBinding keyDecl="Ctrl:Shift:s + Arrows" />
-                        </div>
-                        <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
-                            <span class="text-[15px]">Resize Single Border</span>
-                            <KeyBinding keyDecl="Shift + Drag" />
+                            <span class="text-[15px]">Resize a single border</span>
+                            <KeyCap>Shift + drag</KeyCap>
                         </div>
                     </div>
                 </div>

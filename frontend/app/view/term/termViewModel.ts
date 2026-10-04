@@ -4,6 +4,7 @@
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { appHandleKeyDown } from "@/app/store/keymodel";
+import { isChordActive, resolveKeyEvent } from "@/app/store/keymodel-dispatch";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -22,7 +23,6 @@ import {
 } from "@/store/global";
 import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
-import { isMacOS } from "@/util/platformutil";
 import { boundNumber, createSignalAtom, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -36,7 +36,6 @@ import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { computeTheme, DefaultTermTheme, termViewName } from "./termutil";
 import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
-import { terminalKeyGoesToShell } from "./term-shell-keys";
 import { basicTermModels, termModels } from "./term-models";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -403,49 +402,44 @@ class TermViewModel {
                 return false;
             }
         }
-        if (keyutil.checkKeyPressed(muxEvent, "Ctrl:Shift:v")) {
-            clipboardReadText()
-                .then((text) => {
-                    this.termRef.current?.terminal.paste(text);
-                })
-                .catch((e) => console.log("clipboard read failed", e));
-            event.preventDefault();
-            event.stopPropagation();
-            return false;
-        } else if (keyutil.checkKeyPressed(muxEvent, "Ctrl:Shift:c")) {
-            const sel = this.termRef.current?.terminal.getSelection();
-            clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
-            event.preventDefault();
-            event.stopPropagation();
-            return false;
-        } else if (
-            // Clear: ⌘K on macOS. Elsewhere `Cmd:` is Alt and Alt+K belongs to
-            // the shell (term-shell-keys.ts), so it's Ctrl+Shift+L.
-            isMacOS() ? keyutil.checkKeyPressed(muxEvent, "Cmd:k") : keyutil.checkKeyPressed(muxEvent, "Ctrl:Shift:l")
-        ) {
-            event.preventDefault();
-            event.stopPropagation();
-            this.termRef.current?.terminal?.clear();
-            return false;
-        }
         const shellProcStatus = this.shellProcStatus();
         if (shellProcStatus == "done" && keyutil.checkKeyPressed(muxEvent, "Enter")) {
             this.forceRestartController();
             return false;
         }
-        // Shell and editor keys reach the shell, not an app shortcut. xterm
-        // still handles the key (return true); stopPropagation keeps the
-        // app's document-level listener from acting on it as well.
-        if (terminalKeyGoesToShell(event, isMacOS())) {
-            event.stopPropagation();
-            return true;
-        }
-        const appHandled = appHandleKeyDown(muxEvent);
-        if (appHandled) {
+        // The shortcut table decides (keybindings/defaults.ts): a terminal
+        // takes only its skip-list bindings and its own copy / paste / clear;
+        // every other key goes to the shell. A pending chord's second key
+        // goes to the dispatcher.
+        const resolved = resolveKeyEvent(muxEvent, { terminalFocus: true, textInputFocus: false, viewType: "term" });
+        const consume = () => {
             event.preventDefault();
             event.stopPropagation();
             return false;
+        };
+        switch (resolved?.row.command) {
+            case "term:copy": {
+                const sel = this.termRef.current?.terminal.getSelection();
+                clipboardWriteText(sel).catch((e) => console.log("clipboard write failed", e));
+                return consume();
+            }
+            case "term:paste":
+                clipboardReadText()
+                    .then((text) => {
+                        this.termRef.current?.terminal.paste(text);
+                    })
+                    .catch((e) => console.log("clipboard read failed", e));
+                return consume();
+            case "term:clear":
+                this.termRef.current?.terminal?.clear();
+                return consume();
         }
+        if ((resolved != null || isChordActive()) && appHandleKeyDown(muxEvent)) {
+            return consume();
+        }
+        // The shell's key. xterm still handles it (return true);
+        // stopPropagation keeps the app's document listener off it.
+        event.stopPropagation();
         return true;
     }
 

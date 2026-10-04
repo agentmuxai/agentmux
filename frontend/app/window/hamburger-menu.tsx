@@ -20,8 +20,7 @@ import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
-import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "@/app/store/keymodel-bindings";
-import { formatKeyDescription } from "@/util/keyutil";
+import { shortcutFor } from "@/app/keybindings";
 import { saveCurrentLayout } from "./save-layout";
 import { openLayoutFromFile } from "./open-layout";
 import { createMemo, type JSX } from "solid-js";
@@ -83,14 +82,14 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 icon: "plus",
                 // Shortcut labels render the binding keymodel.ts registers,
                 // never a hand-written string: "Cmd" is Alt on Windows/Linux.
-                shortcut: formatKeyDescription(NEW_TAB_KEY),
+                shortcut: shortcutFor("tab:new"),
                 onClick: () => createTab(),
             },
             { label: "", divider: true },
             {
                 label: "New Window",
                 icon: "window-restore",
-                shortcut: formatKeyDescription(NEW_WINDOW_KEY),
+                shortcut: shortcutFor("window:new"),
                 onClick: () => getApi().openNewWindow().catch(console.error),
             },
             { label: "", divider: true },
@@ -126,12 +125,13 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             {
                 label: "Settings",
                 icon: "cog",
+                shortcut: shortcutFor("app:settings"),
                 onClick: () => fireAndForget(() => openOrFocusPaneByView("settings")),
             },
             {
                 label: "Command Palette",
                 icon: "magnifying-glass",
-                shortcut: formatKeyDescription(COMMAND_PALETTE_KEY),
+                shortcut: shortcutFor("view:command-palette"),
                 onClick: () => openModal(CommandPaletteModal),
             },
             {
