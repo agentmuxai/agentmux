@@ -1,0 +1,716 @@
+# SPEC: WAN jekt verification — same-account agent jekts verified end to end over the cloud relay
+
+**Date:** 2026-09-24
+**Status:** active — the pure primitives (identifiers, certificate,
+revocation, envelope and freshness checks; §2.7) shipped in PR #3727; C1
+shipped in the cloud repo (merged, not yet deployed); D1a (`wan.db`,
+instance key, agent keys, purge) shipped in PR #3734; D1b (certify, publish,
+carry gate) shipped in PR #3771; D2 (verifier, marker, tier rules, audit, `wan`
+grants off; `muxbus/wan_verify.rs`) ships in the PR that changes this line —
+see §2.8 for what it does not include. Remaining: the host-gated approval
+window, instance retirement, the agent
+CLAUDE.md jekt section, the C1 deploy, and the §5 end-to-end run. Verified
+2026-09-25. Measured against `agentmux`
+`main` @ `d01833859` and `agentmux-cloud` `main`, both read on 2026-09-24.
+**Tracking:** `TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md` — step status,
+what is live, and what still needs the operator.
+**Revision history:** three adversarial reviews on 2026-09-24; every finding
+was verified against code and accepted. What each one changed:
+- **Review 1:** an account-authenticated key directory was not enough to
+  bind a key to the install that published it. Other fixes: hostname labels collide, a re-minted key was carried
+  before being published, transient lookups raised false alarms, the cloud
+  would leak the sender's account id, and the HTTP verifier site had no
+  legitimate caller.
+- **Review 2:** label-keyed directory slots could be claimed first by another
+  machine; deleting and recreating an agent locked it out; data dirs are per
+  *version*; deferring via `/reactive/release` could lose messages. This
+  produced **self-certifying instances** (§2.2).
+- **Review 3:**
+  - Instance approval needed a boundary agents can't reach.
+  - The target binding must use the polled agent, not a message field.
+  - Receiver state must live in the channel-wide store, which needs
+    concurrency rules.
+  - The agent-delete purge must reach that store.
+  - Display labels are sender-chosen.
+  - An instance needs a way to be retired.
+**Trigger:** Repo owner, after a WAN jekt from their own trusted agent
+(`camper`) arrived `TRUST=network-claimed` with `ESCALATE=required`: *"figure
+out why it wasn't verified … write the WAN verification design spec covering
+both sides."*
+**Scope:** agent-to-agent jekts carried by the muxbus cloud relay (delivery
+tier 4, `DELIVERY=wan`) **between agents of the same AgentMux account**, and
+the WAN signature path only. Both sides: the desktop (`agentmux-mcp`,
+`agentmux-srv`) and the cloud relay. The relay side is designed in the
+private cloud repo; this spec states only the contract the desktop relies
+on.
+Other verification paths on the WAN tier (ReAgent's `SIG=`) are unchanged by
+this spec, and this spec's guarantees are about `TRUST=wan-verified` only.
+**Relationship to the 2026-09-17 WAN-tier signing spec (no longer in this repo):** that spec
+remains the design of record for WAN signing in general and for the
+cross-account phases W0–W2. This spec:
+1. **Re-measures it:** the signing half (W3a) shipped after it was written
+   (§1.4).
+2. **Adds phase W3-S**, same-account verification, not gated on W2.
+3. **Replaces its trust anchor for W3-S.** 09-17 anchors keys in the cloud's
+   account boundary and adds a continuity chain (W4) to detect cloud-side
+   substitution. Self-certifying instances (§2.2) detect substitution from
+   the first message.
+
+**Related:**
+- `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.10 — M4d-1's
+  purge of an agent's keys on delete (§2.2 extends it), and M4d-6's signed
+  `source_uid` (unrelated material; W3-S is not gated on M4d).
+- `SPEC_VERSION_ISOLATION_2026_06_01.md` §5 — the per-version data dir and
+  concurrent versions of one channel.
+- `SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md`,
+  `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` — the tier rules a
+  new verified marker joins.
+
+---
+
+## 0. TL;DR
+
+- **Why `camper`'s jekt wasn't verified.** Its MCP *did* sign it, but:
+  - the signature never left the sending machine;
+  - no receiver can fetch the public key it would need;
+  - no receiver-side verifier is wired in.
+
+  None of these three gaps is blocked on the agent-ID migration.
+- **The fix, both sides:**
+  - carry the signed tuple through the relay as signed (§2.1);
+  - give each AgentMux install a long-lived **instance key**, and publish
+    each agent's key to a per-account directory **certified by it** (§2.2);
+  - verify on the receiving desktop — instance id ↔ instance key ↔
+    certificate ↔ agent signature — only when sender and receiver share an
+    account (§2.3);
+  - render `TRUST=wan-verified` with the instance, and relax escalation only
+    for instances a human approved through a surface agents can't reach
+    (§2.6).
+- **What it proves:** "agent `camper` on AgentMux install
+  `narko~b3kq7zfe…` signed this, recently, for this recipient, once — and
+  you approved that install". Neither the cloud nor an agent elsewhere in the
+  account can forge an existing instance (§4).
+- **Rollout needs no flag day:** every new field is optional on every hop,
+  old peers ignore it, and every missing or transient piece degrades to
+  today's `TRUST=network-claimed`, never to a false forgery alarm (§3).
+
+---
+
+## 1. What happens today (measured)
+
+### 1.1 Send side
+
+- **MCP signs every outgoing jekt, whatever tier it will take.**
+  `sign_outgoing_jekt` (`agentmux-mcp/src/main.rs:565-643`) computes
+  `wan_sig` with `AGENTMUX_WAN_KEY` over
+  `amx-jekt-wan-v1 ␁ msgid ␁ source_agent ␁ source_host ␁ source_channel ␁
+  target_agent ␁ ts_secs ␁ message`
+  (`agentmux-common/src/jekt_sign.rs:416-456`; `␁` is `U+0001`). It sends
+  `wan_sig`, `wan_source_host` and `source_channel` to the local srv, with
+  `request_id` = the msgid and `ts_secs` as signed
+  (`agentmux-common/src/api_types.rs:276-353`).
+  - `source_agent` is `AGENTMUX_AGENT_ID` (the stable slug, lowercased by
+    `derive_slug`, `storage/agents.rs:231`); `target_agent` is the `to`
+    string as typed (`agentmux-mcp/src/main.rs:1335`, `:1343`). Agent ids
+    are ASCII letters, digits, `_` and `-` only (`sanitize.rs:124-131`).
+  - `AGENTMUX_HOST_LABEL` is `registry::local_host_label()`: the lowercased
+    hostname, read live on every call, or `"unknown"`
+    (`registry.rs:545-550`). It is used only for WAN signing
+    (`agent_config.rs:1371`; tests at `:1985`, `editor_handlers.rs:1369`);
+    LAN takes its hostname separately (`bootstrap.rs:1545`).
+  - Keys: `db_agent_wan_keys` (`backend/storage/agent_wan_keys.rs`,
+    migration v36) in `objects.db`, one Ed25519 keypair per agent slug,
+    minted by `agent_wan_key_ensure` (`INSERT OR IGNORE` + re-read) and
+    injected at spawn (`agent_config.rs:1312-1379`). `key_version` is always
+    1 and unread. M4d-1 deletes an agent's keys on delete and on name reuse
+    (`storage/agents.rs:2738-2910`).
+  - **`objects.db` is per version** for installed builds:
+    `channels/<ch>/versions/<v>/data/` (`agentmux-common/src/data_paths.rs:186-203`),
+    and two versions of one channel may run at once (`:176-179`). Only
+    `channels/<ch>/config/` and `channels/<ch>/agents/` are channel-wide.
+    Each new version starts with an empty data dir; the launcher copies only
+    the old unversioned layout (`agentmux-launcher/src/data_dir.rs:131-170`).
+    So today every upgrade re-mints every agent's WAN key. Dev builds use
+    `dev/<branch>/[<clone_id>/]` (`data_paths.rs:1022-1030`); local builds get
+    a channel per build.
+- **The srv drops the signature at the relay.** `try_cloud_relay`
+  (`server/reactive.rs:1466-1550`) passes only `source`, `target_agent`,
+  `message` and `priority` to `relay_inject` (`muxbus/relay.rs:88-149`),
+  whose body is exactly `{target_agent, message, priority}`, pinned by a
+  test (`relay.rs:283-311`). The relay also runs when the host-tier check
+  failed. `sig_verified` is computed before the relay runs
+  (`server/reactive.rs:1026` vs `:1294`).
+- **The host-gated surface.** The srv surface gated by
+  `AGENTMUX_HOST_REG_SECRET`, held by the CEF host and removed from the
+  srv's env at start (`config.rs:136-140`; `server/service/credential.rs`,
+  `host_ipc.rs`), is the one agents cannot reach. §2.6 builds approval on
+  it. Since #3881 (2026-09-26) no agent env carries the account's cloud
+  token (`backend/account_login_guard.rs`, on every spawn path).
+
+### 1.2 Cloud
+
+The relay side is designed in the private cloud repo. What the desktop
+relies on today:
+- **`POST /reactive/inject`** accepts a fixed set of fields; a field the
+  relay doesn't know never reaches the receiver. `source_agent` (from
+  `X-Agent-ID`) and `target_agent` arrive trimmed and lowercased, except
+  sources starting `github`.
+- A queued message carries a cloud-minted `id` and expires 1800 s after it
+  was sent by default (the desktop relay never sets `ttl_seconds`).
+- **Delivery:**
+  - A WebSocket wake, then `GET /reactive/pending/:agent_id`. The response
+    does not include `target_agent`.
+  - `POST /reactive/ack` takes delivery; `POST /reactive/release` hands a
+    message back on local failure. The desktop syncs only on a wake
+    (`cloud_subscriber.rs:556-575`, `:673-674`), so a released message waits
+    for the next one.
+- **No key directory, and no cloud signature on agent traffic.** ReAgent's
+  `reagent_*` fields already reach the desktop alongside the message, as
+  opaque values — the precedent for the carry.
+
+### 1.3 Receive side
+
+- `cloud_subscriber::sync_agent_reactive`
+  (`muxbus/cloud_subscriber.rs:690-987`) deserialises `PendingInj` (not
+  `deny_unknown_fields`) and builds an `InjectionRequest` for the *polled*
+  `agent_id` (`:945`), with `delivery_tier: "wan"`, `request_id` set to the
+  cloud `id`, and `ts_secs` unset. It then runs ReAgent verification
+  (`:916-942`) and `resolve_transcript_request_tier_fields`, and calls
+  `handler.inject_message` directly, bypassing `deliver()`. The sync runs
+  from the WebSocket loop (`:498`, `join_all` at `:570`). Several seats of
+  one agent can pull the same queue (`:795-806`).
+- `sanitize.rs:358-370` renders WAN as `TRUST=network-claimed`; there is no
+  `wan_verified` field or `wan-verified` label.
+- `handler.rs:1264-1284`: `requires_stop = is_sensitive && (!verified ||
+  transcript_forced)`. **An unsigned WAN jekt is not forced sensitive by
+  absence alone** (the 08-15 narrowing). `camper`'s message was sensitive by
+  content (keyword, declared tier, or transcript request), and it escalated
+  because nothing could verify it.
+- **Trusted-peer grants:**
+  - `conversation_trust_grant_check(target, requester, tier)`
+    (`server/reactive.rs:742`) matches the peer by bare name and ignores
+    verification.
+  - `conversation_trust_grant_add` has no production caller (tests only).
+  - The table's primary key is `(agent_id, granted_peer_agent_id, tier)`,
+    written with `INSERT OR REPLACE` (`migrations.rs:1189-1195`,
+    `conversation_trust_grants.rs:59-75`).
+
+### 1.4 The WAN signing half today
+
+- Shipped: `wan_sig`, `wan_source_host`, `db_agent_wan_keys`,
+  `sign_wan_jekt`/`verify_wan_jekt`. WAN signed material is
+  domain-separated (`amx-jekt-wan-v1`).
+- An instance can't be `(hostname, channel)`: hostnames collide and fall
+  back to `"unknown"`, and the data dir is per version. An instance needs
+  its own key, stored channel-wide, and directory entries are
+  self-certifying (§2.2).
+- The carry includes the as-signed source and target, because the cloud
+  normalises both (§2.1).
+- The freshness window covers the 1800 s the relay holds a delivery
+  (§2.4).
+- The HTTP entry point is not a verification site; its callers
+  self-assert every field (§2.3).
+
+---
+
+## 2. Design (W3-S)
+
+### 2.1 Carry: the signed tuple survives every hop as signed
+
+**Signed material does not change.** The verifier reconstructs it from
+fields carried **as signed**, the ReAgent way:
+
+| Field | Set by | Notes |
+|---|---|---|
+| `wan_sig` | MCP | base64 Ed25519 |
+| `wan_msg_id` | MCP (`request_id`) | independent of the cloud message `id` |
+| `wan_ts_secs` | MCP (`ts_secs`) | |
+| `wan_source_agent` | MCP (`AGENTMUX_AGENT_ID`) | as signed |
+| `wan_target_agent` | MCP (`to`) | as signed |
+| `wan_source_host` | MCP (`AGENTMUX_HOST_LABEL`) | the **instance id** (§2.2) — signed, so it binds the instance |
+| `wan_source_channel` | MCP (`AGENTMUX_CHANNEL`) | local field `source_channel` |
+| `wan_key_fp` | srv | fingerprint of the agent public key; an **unsigned lookup hint** — a wrong value finds a key the signature won't verify under |
+| `sender_same_account` | **cloud**, in the `GET /reactive/pending` response | `true` only when the sender and the polling caller are on the same account. Never client-supplied. |
+
+The desktop never receives the sender's account id itself, only this
+flag. When the relay can't tell, the value is `false`, and the desktop logs
+that at debug level so a misconfigured login can be diagnosed.
+
+**Envelope binding** — the carried identifiers must be the ones actually
+delivered, compared ASCII case-insensitively after trimming (ids are
+ASCII-only, §1.1; this also covers `github*` sources left unnormalised):
+- `wan_source_agent` equals the delivered message's `source_agent`;
+- `wan_target_agent` equals **the polled `agent_id`** that
+  `sync_agent_reactive` is delivering to — not a field of the message,
+  which the cloud controls. This is ReAgent's rule
+  (`cloud_subscriber.rs:920-927`); it stops a cloud from moving a message
+  signed for `alice` into `bob`'s queue.
+
+A mismatch is a failed verification.
+
+**Desktop send (`try_cloud_relay` → `relay_inject`).** Carry the tuple only
+when **all** of these hold. Otherwise relay exactly as today, with no tuple,
+so every gap degrades to `None`, never to a false alarm:
+1. **The sender proved itself locally:** host-tier `sig_verified ==
+   Some(true)`. This stops a local process holding the auth key from
+   laundering a captured `wan_sig` through the relay.
+   - `AGENTMUX_JEKT_KEY` and `AGENTMUX_WAN_KEY` are provisioned
+     independently (`agent_config.rs:1322-1375`), and host keys stay
+     per-version. After an upgrade, agents still running with an
+     old-version `.mcp.json` fail this gate and send unsigned until
+     relaunched.
+   - Do not "fix" this by dropping the gate.
+2. **The carried instance and channel are this install's:**
+   `wan_source_host` equals the local instance id and `wan_source_channel`
+   equals `local_channel_id()`. An agent spawned before D1 still signs a
+   hostname, so its messages go unsigned until it is respawned.
+3. **The signature verifies locally** against the agent's stored public key.
+   A key purged by an agent delete (§2.2) fails here, so the message goes
+   unsigned.
+4. **The directory is confirmed to hold this key's certificate**, per
+   §2.2's published marker for this fingerprint.
+5. **Both ids pass `validate_agent_id`**, and sizes are within the cloud's
+   caps.
+
+**Cloud (C1).** The relay accepts the eight client-side fields as
+optional and returns them, plus `sender_same_account`, from
+`GET /reactive/pending/:agent_id`. The desktop keeps within these caps:
+signature ≤ 128 chars; identifiers ≤ 256; fingerprint exactly 43 base64url
+chars; `wan_ts_secs` a positive integer. An invalid set reaches the
+receiver as an unsigned message, not a rejected request, because
+`relay_inject` treats a 400 as a failed delivery. A retried relay of the
+same `wan_msg_id` from the same account is not delivered twice. The cloud
+never verifies messages. How the relay validates, stores and deduplicates
+them is designed in the private cloud repo.
+
+**Desktop receive.** `PendingInj` gains the nine fields as `Option`s.
+`request_id` stays the cloud `id`, which ack and release depend on. The
+as-signed values live in their own `InjectionRequest` fields, read only by
+the verifier.
+
+### 2.2 Publish: self-certifying instances
+
+**The channel-wide identity store.** A new SQLite file,
+`<channel instance dir>/wan-identity/wan.db`, sits beside `config/` and
+`agents/`. For installed and portable builds that is `channels/<ch>/`; for
+dev builds it is the branch (or clone) dir. It is deliberately not named
+`identity/`, which would sit next to the unrelated `identities/`. It holds
+everything WAN verification needs to survive an upgrade, **on both sides**:
+- the instance keypair;
+- agent WAN keys and their published fingerprints;
+- the receiver's peer-record cache, replay table, and known-instance
+  approvals (§2.3, §2.5, §2.6).
+
+Concurrency rules, because two versions of one channel may run at once
+(`data_paths.rs:176-179`) and `SPEC_VERSION_ISOLATION` names a shared DB as a
+hazard:
+- WAL mode, `busy_timeout` of 5 s, file mode 0600.
+- Every mint is `INSERT OR IGNORE` then re-read, as `agent_wan_key_ensure`
+  already does. Two processes minting at once converge on one row.
+- The schema is **additive only**. It carries a `schema_version`, and an
+  older binary opening a newer file ignores unknown tables and columns. A
+  binary that cannot open or migrate the file does WAN signing and
+  verification **not at all** (every message `None`) and never mints into a
+  fallback location.
+
+**Instance key.**
+- The first boot of D1 mints an Ed25519 instance keypair.
+- The **instance id** is the first 128 bits of `SHA-256(instance public
+  key)`, as lowercase, unpadded base32 (26 chars, `[a-z2-7]`). The id isn't
+  secret: nobody can produce signatures that verify under it without the
+  private key.
+- The hostname at mint time is persisted as a **host hint** and never re-read
+  from the live hostname.
+- `AGENTMUX_HOST_LABEL` carries the instance id. The signed material's
+  format is unchanged.
+
+**Agent keys move into `wan.db`.**
+- On the first boot of D1, agent keys are imported from that version's
+  `db_agent_wan_keys`, or minted fresh if it is empty.
+- From then on they live only in `wan.db`, and upgrades keep them.
+- A new channel, a new dev branch, a local build channel, or a wiped channel
+  dir is a new instance by design, since each has its own store.
+
+**Agent delete (extends M4d-1).**
+- The purge that deletes an agent's keys on delete or name reuse
+  (`storage/agents.rs:2738-2910`) also deletes its row from `wan.db`, so a
+  new agent of the same name never inherits the key.
+- The "name still in use" check reads the channel-wide agent definitions,
+  not only this version's `db_agents`.
+- An agent still running under another version keeps its key in its env,
+  but it fails carry-gate condition 3 and sends unsigned. That is not a
+  false alarm.
+- `storage/agents.rs` and the M4d-1 tests (`agent_tokens.rs:358-395`) are in
+  D1's scope.
+
+**Agent-key certificate.** For each agent key, the srv signs with the
+instance key:
+`amx-wan-agent-cert-v1 ␁ instance_id ␁ lowercase(agent_id) ␁ channel ␁
+agent_pubkey ␁ host_hint ␁ issued_at`.
+
+**Instance revocation.** The owner can **retire** an instance:
+1. the srv mints a new instance, re-certifies its agent keys, and publishes
+   them;
+2. it then publishes a revocation record signed by the **old** instance key:
+   `amx-wan-instance-revoke-v1 ␁ old_id ␁ new_id ␁ revoked_at`.
+
+Revocation is sticky: nothing un-revokes an id. It is started from the same
+host-gated surface as approval (§2.6).
+
+**Cloud key directory (C1).** The desktop publishes each agent's certified
+record to a per-account directory on the relay, publishes revocations
+signed by the old instance key, and looks up records by `(agent, instance,
+channel, fingerprint)` along with an instance's revocation status. Lookups
+answer for the caller's own account only (404 otherwise). The relay checks
+the chain on publish to keep garbage out, but it is not the trust anchor:
+receivers check the chain again (§2.3). Records are self-certifying, so a
+directory can withhold a record but not forge one, and a recreated agent
+has a new key and so a new record. Retirement goes through revocation, not
+deletion. The relay side (routes, storage, limits) is designed in the
+private cloud repo.
+
+**Desktop publishing.**
+- The srv publishes from the spawn path, where
+  `inject_jekt_signing_keys_into_mcp_json` knows the slug, the instance id,
+  and the channel it writes into the agent's env.
+- A retry loop re-publishes keys whose certificate isn't confirmed
+  published. It uses backoff, and a 404 from an older cloud is retried at
+  most hourly.
+- The store records the published fingerprint per agent; §2.1 condition 4
+  reads it.
+- Publishing uses the shared user token (`load_valid_token`), not the
+  per-agent M2M token, which may lack an account.
+
+### 2.3 Verify: same account, cloud subscriber path only
+
+`verify_wan_signature(identity_store, polled_agent_id, row) -> WanVerdict`
+runs in `cloud_subscriber::sync_agent_reactive`. It runs **before**
+`resolve_transcript_request_tier_fields`, and not inline in the WebSocket
+`select!`: the per-agent sync is spawned, and directory fetches time out
+after 2 s.
+
+**The HTTP entry point is out of W3-S.** `handle_reactive_inject` with a
+client-claimed `delivery_tier: "wan"` always gets `wan_verified = None`: its
+only working callers are local full-key agents, and every field they send is
+self-asserted.
+
+Checks, in order:
+
+| Condition | Result |
+|---|---|
+| no `wan_sig` or no `wan_key_fp` | `None` |
+| `sender_same_account` absent or false | `None` — cross-account, legacy, or an older cloud |
+| envelope binding fails (§2.1) | `Some(false)` |
+| `wan_ts_secs` outside the window (§2.4) | `None`, audit reason `wan_sig_stale` |
+| directory 404 for `(agent, instance, channel, fp)` | `None` |
+| directory unreachable, rate-limited or timed out, and no cached record | one immediate retry, then deliver with `None`, audit reason `wan_key_unavailable`. **Never** `/reactive/release`: a released message waits for the next wake, so it could expire undelivered (§1.2) |
+| record's chain fails: `instance_id ≠ hash(instance_pubkey)`, bad `cert_sig`, or `fp ≠ fingerprint(agent_pubkey)` | `Some(false)`, audit reason `wan_cert_invalid` — only a tampering cloud or a bug produces this |
+| record's instance, channel or agent (ASCII case-insensitive) ≠ the carried ones | `Some(false)` |
+| message signature fails under `agent_pubkey` | `Some(false)` |
+| `(instance, agent, wan_msg_id)` already seen (§2.5) | `Some(false)`, audit reason `wan_sig_replay` |
+| all pass | `Some(true)`, with the instance id and host hint |
+
+**Why an unavailable directory gives `None`, not `Some(false)`.** The LAN
+tier maps a rate-limited lookup to `Some(false)`, so an attacker can't
+exhaust a bucket to downgrade a bad signature. Here the downgrade would be to
+`None`, which dropping the signature already gives. Meanwhile `Some(false)`
+on a cloud blip would force legitimate traffic to STOP.
+
+**Peer-record cache** (in `wan.db`):
+- Records are content-addressed and self-certifying, so a cached record
+  never expires and needs no refetch on mismatch.
+- **Instance revocation status is not cached forever.** It is refreshed
+  hourly for every approved instance, and on first sight of any instance.
+- The cache is cleared on logout or account switch.
+- A global token bucket bounds fetches.
+
+### 2.4 Freshness
+
+The window must cover the relay's own delivery TTL:
+- `now - wan_ts_secs ≤ WAN_SIG_MAX_AGE_SECS = 1800 + 300`;
+- `wan_ts_secs - now ≤ 300`, allowing for desktop clock skew.
+
+A message outside the window is `None` (stale), not `Some(false)`. A stale
+signature gives an attacker nothing that dropping it wouldn't, while a long
+`ttl_seconds` or a skewed clock is not forgery.
+
+### 2.5 Replay
+
+Replay is stopped at two layers.
+- **Cloud (C1, required):** a second message with the same
+  `(sender account, wan_msg_id)` is not delivered (§2.1). So a same-account
+  agent can't re-inject a captured tuple as a new message, including
+  towards a *different* receiving install of the same agent name.
+- **Receiver:** the table `wan_seen_sigs(instance_id, agent_id, msg_id,
+  expires_at)` lives in `wan.db`, so it is shared by concurrent versions and
+  survives upgrades.
+  - A row is written **after successful local delivery**, so the relay's
+    own release-and-redeliver after a failed delivery is not a replay.
+  - `expires_at = wan_ts_secs + WAN_SIG_MAX_AGE_SECS`, so a row is pruned
+    only once its message can no longer pass freshness.
+  - A hit on an otherwise-valid signature is `Some(false)`. A fleet
+    broadcast signs each target with its own msgid
+    (`agentmux-mcp/src/main.rs:1585`), so no legitimate message repeats.
+
+### 2.6 Marker, approval, tier rules, trust grants
+
+**Approved instances.** A verified message proves which instance sent it,
+not that the receiver's owner recognises that instance. So `wan.db` keeps `wan_known_instances(instance_id, host_hint,
+first_seen_at, approved_at, revoked_at)`:
+- Every verified instance is recorded on first sight.
+- The receiver's own instance is approved implicitly.
+- A revoked instance is un-approved permanently.
+- **Approval is made where agents can't reach it** (§1.1). Approval and
+  revocation follow the `credential_broker` pattern
+  (`server/service/credential.rs`, `host_ipc.rs`):
+  - a CEF-host window shows the request;
+  - the srv command that records it accepts only the
+    `AGENTMUX_HOST_REG_SECRET`-authenticated host channel;
+  - a caller holding only `X-AuthKey` is rejected.
+- **Amended 2026-09-24** (review 3): instance approval ships disabled, so every instance stays `new`, and
+  gets no relaxation.
+- **Amended 2026-09-26 (operator decision): a verified `new` instance is
+  trusted too.** The operator wants same-account agents on different
+  machines to act on each other's verified jekts without an operator stop.
+  #3881 first stopped injecting `MUXBUS_TOKEN` into agent environments, so
+  minting an instance needs the srv's stored login. Approval still exists for the label (`INSTANCE_STATUS=approved`) and
+  revocation still forces sensitive, but neither gates the relaxation now.
+
+**The approval UI and the marker never show a sender-chosen label alone.**
+- The receiver renders `<host_hint>~<first 8 chars of the verified id>`.
+  The suffix is derived from the id the chain proved, not taken from the
+  record.
+- `host_hint` is validated on receipt against `[a-z0-9.-]{1,48}`; anything
+  else renders as `?`.
+- The approval UI shows the full 26-character id, and warns when a new
+  instance's host hint matches an approved instance's.
+
+**Marker.**
+- `InjectionRequest` gains `wan_verified: Option<bool>`,
+  `wan_instance: Option<String>` and `wan_instance_status`, all
+  `#[serde(skip_deserializing)]`.
+- For `Some(true)`, `sanitize.rs` renders
+  `TRUST=wan-verified INSTANCE=<host_hint>~<id8>` and
+  `INSTANCE_STATUS=approved|new|revoked`.
+
+**Tier rules (`handler.rs`):**
+- `Some(true)` from an **approved** instance joins
+  `is_cryptographically_verified` and the `ESCALATE=none` verified-sender
+  set.
+- `Some(true)` from a **new** instance joins it too (amended 2026-09-26,
+  above). Before the amendment it was treated as unverified for escalation.
+  The `new` label stays in the marker, so the human still sees which install
+  is speaking.
+- `Some(true)` from a **revoked** instance is treated like `Some(false)`.
+  The key is known to be out of its owner's control.
+- `Some(false)` joins the forced-sensitive set.
+- Transcript-request rules are unchanged.
+
+**Trust grants.** `trusted_peers` grants at tier `wan` are **not honoured**
+in W3-S: `conversation_trust_grant_check` returns false for tier `wan`.
+- Nothing is lost, because no production path creates grants today (§1.3).
+- Honouring them later needs two things, both 09-17 §3.5.1's work:
+  - a grant key that includes the instance. That means a table-rebuild
+    migration, because the current key plus `INSERT OR REPLACE` would allow
+    only one instance per peer and silently rebind.
+  - a way to create grants.
+
+**Audit and docs.**
+- The audit record gains `wan_verified`, the instance id, its status, and
+  any stale, replay, unavailable or cert reason.
+- CLAUDE.md's jekt section gains the new marker fields and tier rules **in
+  the PR that ships the verifier, not before**.
+
+### 2.7 Wire formats (as built, 2026-09-24)
+
+§2.2 names the certificate's fields but not their encodings. The pure half
+of W3-S (`agentmux-common/src/jekt_sign.rs`, "W3-S" section) fixes them, and
+the relay's chain check must match them byte for byte. Fixed vectors, computed by
+an independent Node implementation, are asserted in that file's tests
+(`w3s_identifiers_and_certificate_match_the_cross_language_vectors`).
+- **Public keys** (`instance_pubkey`, `agent_pubkey`, `old_instance_pubkey`):
+  standard base64 of the raw 32 bytes, padded (44 chars). The certificate
+  material contains `agent_pubkey` in exactly this form.
+- **Signatures** (`cert_sig`, revocation `sig`, `wan_sig`): standard base64
+  of the raw 64-byte Ed25519 signature (88 chars).
+- **`key_fp`:** unpadded base64url of `SHA-256(raw agent public key)`
+  (43 chars).
+- **Instance id:** RFC 4648 base32 alphabet, lowercased, unpadded, over the
+  first 16 bytes of `SHA-256(raw instance public key)` (26 chars).
+- **`issued_at`, `revoked_at`:** Unix seconds, decimal, in the material.
+- **Record `agent_id`** must already be lowercase. The certificate signs the
+  lowercased id, so an uppercase record id would verify while naming a
+  different string; the chain check rejects it instead.
+- **Record shape** (`WanKeyRecord`): `instance_id`, `agent_id`, `channel`,
+  `key_fp`, `instance_pubkey`, `agent_pubkey`, `host_hint`, `issued_at`,
+  `cert_sig`. Revocation (`WanRevocation`): `old_instance_id`,
+  `old_instance_pubkey`, `new_instance_id`, `revoked_at`, `sig`.
+
+The §2.3 checks are split in two so the srv can run the cheap ones before
+any directory fetch: `check_wan_envelope` (envelope binding, then freshness)
+and `verify_wan_against_record` (chain, record matches the carried
+instance/channel/agent/fingerprint, then the message signature). The
+same-account check, directory lookup and replay table are stateful and stay
+in the srv (D2). `WanCheckFailure::verdict()` maps each failure to its §2.3
+`None` or `Some(false)`.
+
+### 2.8 D2 as built (2026-09-25)
+
+The verifier (`agentmux-srv/src/muxbus/wan_verify.rs`) runs the §2.3 table
+in order from `cloud_subscriber::sync_agent_reactive`, before
+transcript-request resolution. Deviations and scope, all deliberate:
+- **Approval.** Only this install's own instance is `approved`; every other
+  verified instance is `new` (no relaxation). `wan_known_instances.approved_at`
+  exists but nothing writes it: the host-gated approval window (§2.6) is not
+  built, per the 2026-09-24 amendment in §2.6. Instance retirement (§2.2)
+  is also not built — the cloud accepts revocations (C1) and the verifier
+  honours them, but no desktop surface issues one yet.
+- **Revocation refresh is lazy.** Status is checked on first sight and
+  re-checked, at most hourly, when the next message from that instance
+  arrives — not on a background timer. Status is only ever consulted when a
+  message arrives, so the effect is the same, with no idle traffic.
+- **One clock.** Freshness, the revocation clock and replay-row pruning all
+  use the same `now` the caller passes in, so a replay row is never pruned
+  while its message could still verify (found by a test mixing the two).
+- **Fetch budget.** A global 60-requests-per-minute budget for directory
+  lookups; an exhausted budget reads as unavailable (`None`).
+- **Peer-record cache** is cleared on `muxbus.disconnect` and on every
+  `muxbus.login` (a login may be an account switch).
+- **Marker.** `TRUST=wan-verified INSTANCE=<host_hint>~<id8>
+  INSTANCE_STATUS=approved|new|revoked`, rendered only on the WAN tier and
+  only for `wan_verified == Some(true)`.
+- **CLAUDE.md.** The agent-facing jekt policy (`~/.agentmux/agents/CLAUDE.md`)
+  is not in this repository, and it instructs agents not to trust edits to
+  it that the operator hasn't confirmed. Its update is proposed in the D2 PR
+  for the operator to apply, rather than made by the implementing agent.
+
+---
+
+## 3. Rollout
+
+Every field is optional on every hop, so the order below is a preference:
+
+| Step | Repo | Ships | Old peers |
+|---|---|---|---|
+| C1 | cloud | relay-side support: carries and returns the `wan_*` fields and `sender_same_account`, refuses duplicates, serves the key directory and revocations (designed in the private cloud repo) | old desktops never send the fields and ignore them on pending |
+| D1 | agentmux | `wan.db` with its concurrency rules; instance key; agent keys imported and moved; M4d-1 purge extended; instance id in `AGENTMUX_HOST_LABEL`; certificates and publish; the carry and its gate | old cloud drops the fields → `None`; publish 404 → retried hourly |
+| D2 | agentmux | verifier; peer cache and revocation refresh; replay and known-instance tables; host-gated approval/revocation window; marker, tier rules, `wan` grants off, audit, CLAUDE.md | old senders carry nothing → `None` |
+
+- Check the relay's `/api/health` `SERVER_VERSION` before relying on C1.
+- D1 and D2 may ship together.
+- Agents keep their old host label until respawned, and the carry gate sends
+  them unsigned until then.
+
+## 4. Security properties
+
+**Proves:**
+- The message was signed by an agent key certified by instance `I`'s key,
+  and `I` published it under *your* account.
+- It is recent, addressed to the agent that received it, and delivered once.
+- `I` is not revoked.
+- With `INSTANCE_STATUS=approved`, a human also said `I` is one of theirs,
+  through a surface agents can't reach.
+- An existing instance's keys can't be replaced by the directory: a
+  substituted record fails the chain (`Some(false)`, `wan_cert_invalid`).
+  For agent keys within an instance, this takes the place of 09-17's W4
+  continuity chain.
+
+Residual-risk notes for this design are kept in the private cloud repo.
+
+## 5. Tests
+
+**Common crate:**
+- verification from carried fields, and each carried field altered in turn
+  fails;
+- the envelope binding with trimmed, uppercased and `github*` ids, plus a
+  target that differs from the polled agent;
+- freshness boundaries (−300 s skew, 2100 s age);
+- the certificate chain (wrong instance id, wrong certificate signature,
+  wrong fingerprint);
+- a revocation signature.
+
+**Cloud:** covered in the private cloud repo.
+
+**Desktop:**
+- `wan.db`:
+  - two processes mint at once and converge on one instance key;
+  - a binary with an older schema opens a newer file;
+  - a store that won't open gives `None` everywhere and never mints
+    elsewhere;
+  - agent keys are imported once;
+  - the instance survives a version change;
+  - the host hint doesn't follow a hostname change.
+- **Purge:** deleting an agent removes its `wan.db` row, and a new agent of
+  the same name gets a new key.
+- **`relay.rs`:** the body-shape test gains the optional fields, and each
+  carry-gate condition (§2.1 1–5) failing in turn sends the old shape.
+- **Publish:**
+  - publish happens from spawn;
+  - a failure is retried;
+  - a 404 is not retried hot;
+  - retirement publishes a new instance, then the revocation.
+- **Verifier** — the §2.3 table row by row, including:
+  - a tampered directory record gives `Some(false)`;
+  - a directory timeout gives `None` without a release;
+  - a replay gives `Some(false)`;
+  - a stale message gives `None`;
+  - a foreign account gives `None`;
+  - the HTTP entry point always gives `None`.
+- **Handler:**
+  - approved instance with a keyword → `ESCALATE=none`;
+  - new instance with a keyword → `ESCALATE=none` (amended 2026-09-26);
+  - revoked instance → forced sensitive;
+  - a transcript request under `ask` still escalates;
+  - `Some(false)` forces sensitive;
+  - a `wan` grant does not match.
+- **Approval boundary:** approval and revocation reject a caller holding
+  only `X-AuthKey`.
+
+**End to end (manual, after the C1 deploy).** Run this machine and
+`camper`'s under one account:
+- Jekts both ways show `TRUST=wan-verified INSTANCE_STATUS=new`, and
+  `approved` after approval in the host window.
+- After an upgrade, it is still the same instance.
+- After retiring an instance, the old id shows `revoked` within an hour.
+- From a second account, jekts show `TRUST=network-claimed`.
+- A tampered relay body or directory record (debug build) gives
+  `Some(false)` and forces `TIER=sensitive`.
+
+## 6. Open questions
+
+1. **Stale → `None` or `Some(false)`?** Recommended: `None` (§2.4).
+2. **Revocation refresh interval.** Hourly bounds how long a retired
+   instance keeps verifying; shorter costs more directory calls.
+3. **Stop injecting `MUXBUS_TOKEN` into agent environments?** Done in #3881
+   (2026-09-26). The audit found no reader that agents use.
+4. **Does the per-version `objects.db` also re-mint host and LAN keys on
+   every upgrade**, breaking LAN peers' pins? Out of scope here, but §1.1's
+   measurement suggests so; worth checking separately.
+
+## 7. Key files
+
+**agentmux**
+- new: `agentmux-srv/src/backend/storage/wan_identity.rs` — the `wan.db`
+  store: instance key, agent keys, published fingerprints, certificates,
+  peer cache, replay table, known instances
+- `agentmux-common/src/data_paths.rs` — the channel-wide `wan-identity/` dir
+- `agentmux-common/src/jekt_sign.rs` — certificate and revocation
+  sign/verify, verification from carried fields, `WAN_SIG_MAX_AGE_SECS`
+- `agentmux-srv/src/backend/storage/agents.rs` — M4d-1 purge reaches
+  `wan.db`; `agent_wan_keys.rs` retired after import
+- `agentmux-srv/src/backend/agent_config.rs` — instance id in the env,
+  publish at spawn
+- `agentmux-srv/src/server/reactive.rs` — `try_cloud_relay` (carry gate); the
+  HTTP path's `wan_verified = None`
+- `agentmux-srv/src/muxbus/relay.rs` — relay body
+- `agentmux-srv/src/muxbus/cloud_subscriber.rs` — `PendingInj`, the verifier
+  before transcript-request resolution, binding to the polled agent
+- `agentmux-srv/src/server/service/host_ipc.rs`, `credential.rs` — the
+  host-gated approval/revocation command
+- `conversation_trust_grants.rs` — tier `wan` off
+- `agentmux-srv/src/backend/reactive/types.rs`, `handler.rs`, `sanitize.rs`
+- CEF host + frontend: the approval/revocation window
+- `CLAUDE.md` (with D2)
+
+**agentmux-cloud**
+- the C1 relay-side support (private repo)

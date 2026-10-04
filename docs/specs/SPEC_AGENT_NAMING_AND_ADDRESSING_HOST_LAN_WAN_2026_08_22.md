@@ -1,0 +1,282 @@
+# SPEC: Agent display naming & addressing across host, LAN, and WAN
+
+**Date:** 2026-08-22
+**Status:** Draft — architecture proposal, no code landed. Shared substrate spec:
+consumed by, not superseding, its two sibling specs below.
+**Scope:** Agent **display naming** only (the human-facing label shown in tabs,
+pickers, presence indicators). Does **not** touch `AGENTMUX_AGENT_ID`, jekt
+signing identity, or any routing/security identity — those are already solved
+and orthogonal to this layer (see §7).
+**Related:** `SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md` (needs a naming
+pattern for forked agents), `SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_21.md`
+(needs a shared "which peer owns this" concept for discovery/presence),
+`SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (established the host-global
+agent registry this spec's host tier builds on), `SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md`
+(the existing but under-specified "#2" auto-naming rule), `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`
+(the LAN peer-identification this spec's LAN tier reuses). The relay side of the WAN
+tier is designed in the private cloud repo.
+
+> **Naming.** "Qualified" vs. "unqualified" name, borrowed deliberately from git
+> (`main` vs. `origin/main`) and email (`user` vs. `user@host`) — both are
+> well-understood precedents for "a short name works until it might collide, at
+> which point prefix/suffix the origin, don't invent a new namespace." The
+> per-peer/per-host identifier used for qualification is a **`HostLabel`** (§4.2)
+> — deliberately not called a "channel" (already a different, data-isolation
+> concept in this codebase, see `SPEC_DATA_CHANNELS_2026_05_24.md`) or an
+> "identity" (already the credential/Armory concept).
+
+---
+
+## 1. Problem / TL;DR
+
+Two sibling specs each independently need a notion of "which machine/peer is
+this agent actually on": the fork spec, to decide whether a forked agent's
+"#N" counter can collide with a fork of the same lineage happening elsewhere;
+the mirror spec, to discover and label the peer a pane is being mirrored
+to/from. Solving this once, as a shared naming/addressing layer both specs
+consume, avoids two independently-invented, subtly-incompatible notions of
+"host" appearing in the codebase. This spec also directly answers a concrete
+question raised while drafting the fork spec: **if "AgentX #3" exists on one
+channel and "AgentX #4" gets minted on a different channel on the same host at
+roughly the same time, does the counter still work?** — and extends that
+answer outward to what happens once agents/panes are addressed across LAN and
+eventually WAN, which both sibling specs anticipate as a "fluid across all
+three tiers" end state.
+
+## 2. Current architecture (code-verified)
+
+**Host tier: the registry is already global per-host, not per-channel.**
+`SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (implemented, load-bearing
+per this repo's `CLAUDE.md`) re-rooted agent definitions and instances to
+`~/.agentmux/shared/agents/{registry,definitions}/` — one shared store per
+**machine**, read/written by every channel and version running on it. So a
+fork minted on `stable` and a fork minted on a `local-<branch>-<hash>` dev
+channel, on the *same* host, already see and write the *same* underlying
+store — this part of "does the count still work" is already true by
+construction, not something this spec needs to build.
+
+**But the write primitive is overwrite-safe, not allocation-safe.**
+`agentmux-srv/src/registry/atomic.rs`'s `write_atomic` (temp file → `fsync` →
+rename-over-target) guarantees no reader ever observes a half-written file. It
+does **not** provide exclusive-create or compare-and-swap — nothing prevents
+two processes from independently computing "current max is 3" and both
+writing a *different* new record (different UUID, different file) both
+displaying "AgentX #4". This is a real, code-confirmed gap, not a hypothetical
+one: `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE` §11.5 landmine #2 flags exactly
+this class of concern ("verify \[atomic rename\] holds under simultaneous
+startup migrations") without fully resolving it for the counter-allocation
+case specifically.
+
+**LAN tier already has an implicit host-identification concept, just not
+surfaced as a naming primitive.** `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`'s
+per-agent Ed25519 verification fetches "the claimed sender's own public key...
+from whichever LAN peer hosts that agent" — meaning the system already has to
+resolve, for every LAN-addressable agent, which physical peer hosts it. This
+resolution is currently internal to the signing/verification path; nothing
+today exposes it as a user-facing label.
+
+**WAN tier's identity anchor.** `MUXBUS_AGENT_ID` mirrors
+`AGENTMUX_AGENT_ID` at spawn so the cloud relay can route to an agent by
+identity across the WAN. This spec relies only on what the desktop sees;
+how the relay works inside is designed in the private cloud repo.
+
+- **The WAN qualifier fixes display only.** **Correction (Codex's review
+  of PR #2721):** it ensures a human *looking at two accounts' same-named
+  agents* can tell them apart. How the relay keys its own traffic is not
+  scoped here (§8 non-goals).
+- **Decision: the WAN qualifier is `<account>/<host-label>`** (shown in a
+  resolved display form, e.g. the account's email), where the account half
+  is the AgentMux account the desktop is signed in to.
+- **Do not call this a "binding"** — the cloud side already uses that word
+  for a narrower, different thing.
+- **The host label is asserted client-side.** The desktop pulls
+  `GET /reactive/pending/:agent_id` for the agents it hosts, so the
+  host-label half of a WAN-qualified name comes from the sidecar itself,
+  which knows what machine/channel it's running on. This is consistent
+  with, not a workaround for, this spec's own G4 ("a qualifier is a label,
+  never a trust claim") — a self-asserted host-label is exactly as
+  trustworthy as `TRUST=network-claimed` already is for WAN jekt, no more.
+
+**The existing fork auto-naming rule doesn't specify its own scope.**
+`SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md`'s "Senior Dev" → "Senior Dev #2"
+rule predates the host-global registry work and never states whether the
+counter is meant to be unique per-channel, per-host, or wider — this spec
+closes that gap explicitly (§4.3).
+
+## 3. Design goals
+
+| # | Goal |
+|---|---|
+| G1 | A short, unqualified name ("AgentX #4") is sufficient for the overwhelming common case — most agents never leave their host |
+| G2 | The short name never has to *change* when a boundary is later crossed — a qualifier is appended, non-destructively, never a rename |
+| G3 | The fork spec and the mirror spec share exactly **one** host/peer-identification primitive, not two independently-invented ones |
+| G4 | A naming qualifier is a **label**, never a trust claim — matches the jekt trust model's own posture that crossing a network boundary never proves identity by itself |
+| G5 | Mirroring a pane never mints a new name (§4.5) |
+
+## 4. Proposed design
+
+### 4.1 Three tiers, matching jekt's existing DELIVERY split
+
+Deliberately reuse the exact host/lan/wan three-way split jekt's `DELIVERY`
+field already establishes, rather than inventing a fourth taxonomy for naming:
+
+| Tier | Unqualified name valid when | Qualified form |
+|---|---|---|
+| **Host** | Always, within one host's global registry (§2) | `AgentX #4` (no qualifier shown) |
+| **LAN** | Never, once a name is visible to a second machine | `AgentX #4@<host-label>` |
+| **WAN** | Never | `AgentX #4@<account-display>/<host-label>` — account half from the signed-in account, host-label half self-asserted (§2) |
+
+The qualifier is appended only once a name actually becomes visible outside
+its host of origin (a mirror connects, a fork lands on a remote peer) — a
+purely host-local agent never shows one (G2).
+
+### 4.2 `HostLabel` — one shared primitive for both sibling specs
+
+```
+HostLabel {
+  display: string,     // human-facing — default: OS hostname; user-overridable (§6, open Q1)
+  scope: "lan" | "wan", // host tier needs no HostLabel at all — see §4.1
+  stable_id: string,    // the actual anchor: LAN peer id (from the discovery already
+                         // backing SPEC_JEKT_LAN_TIER_SIGNING's pubkey fetch) for "lan";
+                         // self-asserted by the sidecar (§2) for "wan" -- paired
+                         // with, but distinct from, the account half
+}
+```
+
+For WAN specifically, the full qualifier is **two independently-sourced
+halves**, not one opaque id: the account and the `host-label`
+(client-asserted, §2). Never collapse these into a single "WAN
+HostLabel" value that looks server-verified end to end — it isn't, and
+presenting it as if it were would violate G4.
+
+Both sibling specs resolve to this one type instead of each defining their
+own notion of "which machine":
+- **Fork spec** (`SPEC_AGENT_QUICK_FORK_NEW_TAB`): if/when a fork lands on a
+  remote peer rather than the local host (explicitly a non-goal there today,
+  called out here as the reason this spec exists ahead of that capability),
+  the new instance's qualifier is that peer's `HostLabel`.
+- **Mirror spec** (`SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC`): its Phase
+  B/C discovery sections should resolve peers to `HostLabel` values directly,
+  replacing their current ad hoc "LAN peer"/"WAN peer" prose (see §4.5 and the
+  patch applied to that spec alongside this one).
+
+### 4.3 Counter allocation, tier by tier (resolves the race question)
+
+- **Host tier:** best-effort scan-and-increment (as `SPEC_MULTI_SESSION_AGENT_FORK`
+  already does), explicitly **not** treated as atomic/collision-proof, because
+  §2 confirms the underlying write primitive can't provide that. Mitigation:
+  pair the number with a short, inherently-collision-resistant suffix — reuse
+  the same disambiguator the workspace-folder naming convention already uses
+  (a short date+letter tag, or a few hex characters of the instance UUID) —
+  so a rare simultaneous double-fork produces `AgentX #4-0822k` vs.
+  `AgentX #4-0822p`: momentarily the same *number*, never actually ambiguous
+  as *strings*. No new atomic-sequencer infrastructure required.
+- **LAN/WAN tiers: do not attempt to synchronize the counter across hosts at
+  all.** This is the resolution to "does the count still work across
+  channels/hosts": **it doesn't need to** once a name is qualified. `AgentX #4@hostA`
+  and `AgentX #4@hostB` are simply different strings the moment they're
+  qualified — there is no ambiguity to resolve, so there is no need for, and
+  no cheap way to build, a cross-machine sequencer. Treat this as a
+  deliberate non-goal (§8), not a gap.
+
+### 4.4 Forking across tiers
+
+`SPEC_AGENT_QUICK_FORK_NEW_TAB`'s v1 only ever lands a fork on the same host
+(its own §8 non-goals). Under this scheme, that means v1 quick-forks **never
+need a qualifier** — only the host-tier counter+suffix from §4.3. The
+qualifier machinery in this spec exists specifically so that *when* (not if,
+per the "fluid across all three tiers" framing) a future capability forks
+directly onto a LAN/WAN peer, the new instance is unambiguous on arrival —
+qualified immediately by its landing peer's `HostLabel`, no retrofit needed.
+
+### 4.5 Mirroring never mints a name
+
+This is the key correction to the mirror spec: **a mirror connection is a new
+*viewer* of an existing name, never a new registry entry, never a name
+variant.** The mirrored pane's chrome renders the existing (possibly already
+host/LAN/WAN-qualified) name plus a **presence list** of active viewers, each
+one itself labeled with *its own* `HostLabel` — e.g. "AgentX #4 — also open
+from: korp-laptop (LAN)". This reuses `HostLabel` in the opposite direction
+from §4.4 (labeling a *viewer*, not an *owner*) but it's the same primitive,
+which is exactly the point of extracting it once.
+
+### 4.6 Relationship to WAN jekt signing
+
+Raised by the human while this spec was being written: the WAN qualifier's
+account half and jekt's WAN signing both need an identity anchor tied to
+the AgentMux account. Same-account WAN signing has since been designed and
+built separately (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`); this spec
+neither depends on it nor changes it. Naming only needs to *display* the
+account/agent pairing, not to prove it (G4).
+
+## 5. Decision tables
+
+### 5.1 Why not one global (UUID-based) namespace for every agent, always?
+
+| | **Tiered qualification (this spec)** | Always-global unique names |
+|---|---|---|
+| Common case (host-only agent) | Clean, short, unqualified (G1/G2) | Every agent always shows a long/opaque qualifier, even when never leaving the host |
+| New infrastructure needed | None beyond `HostLabel` (already implicit in LAN signing) | A real global naming authority |
+| Matches existing codebase bias | Yes — mirrors the registry's own "cheap, eventually-consistent" design philosophy | No |
+
+**Decision: tiered qualification.** Only pay the naming-complexity cost once a
+name actually needs to travel.
+
+### 5.2 Why not build a cross-host atomic counter/sequencer?
+
+| | **No cross-host sequencer (this spec)** | Hosted/distributed sequencer |
+|---|---|---|
+| New dependency | None | A new always-on service (or LAN consensus protocol) — a new single point of failure for a purely cosmetic concern |
+| Solves the actual problem? | Yes — qualification already removes the ambiguity a sequencer would exist to prevent | Also yes, but at much higher cost for no additional benefit |
+
+**Decision: no sequencer, ever.** Qualification is strictly cheaper and
+already sufficient (§4.3).
+
+## 6. Phasing
+
+| Phase | Deliverable | Gated by |
+|---|---|---|
+| **1** | Host-tier fix: pair the existing "#N" auto-naming rule with a collision-safe suffix (§4.3) | Independent — can ship alongside `SPEC_AGENT_QUICK_FORK_NEW_TAB` Phase 1-2 |
+| **2** | Formalize `HostLabel` for LAN scope, surfaced from existing LAN peer discovery (no new discovery mechanism, just exposing what `SPEC_JEKT_LAN_TIER_SIGNING` already resolves internally) | Needed once either sibling spec's LAN phase ships |
+| **3** | `HostLabel` for WAN scope (`muxbus-account/host-id`) | Needed once the mirror spec's WAN phase (Phase C) ships |
+
+## 7. Relationship to routing/security identity (non-overlap, stated explicitly)
+
+This spec is strictly the **display** layer. It changes nothing about:
+- `AGENTMUX_AGENT_ID` (routing identity, tied to the `AgentDefinition` slug).
+- Jekt's HMAC (host)/Ed25519 (LAN)/reagent-pinned-key (WAN) signing — a
+  `HostLabel` is never presented as, or treated as, proof of anything; it is a
+  label a human reads, not a credential a system trusts (G4). A LAN mirror's
+  `HostLabel` says "this claims to be korp-laptop" with exactly the same
+  epistemic weight `TRUST=network-claimed` already carries for jekt — labeling
+  and trust are deliberately kept separate.
+
+## 8. Non-goals
+
+- A global (cross-host) uniqueness *guarantee* for unqualified short names —
+  never the goal; qualification is the tool, not elimination of the
+  possibility that two hosts both have an "AgentX."
+- Any cross-host atomic counter/sequencer (§5.2, explicitly rejected).
+- Changing how `AGENTMUX_AGENT_ID` or any jekt signing key is minted or
+  scoped — orthogonal (§7).
+- User-facing UI for renaming/customizing a `HostLabel` beyond the basic
+  override noted in §9 Q1 — a full "manage my host labels" surface is a later
+  polish pass, not required for either sibling spec's v1.
+- **Building agent-to-agent WAN jekt signing.** That is specified
+  separately (§4.6, issue #2586), not here.
+- **How the relay keys WAN traffic** (raised by Codex's review of PR
+  #2721, addressed in §2). This spec's `HostLabel` qualifier fixes how
+  same-named agents are *displayed*; anything on the relay side is
+  designed in the private cloud repo.
+- **Cloud-side per-agent authorization** — out of scope here; designed in
+  the private cloud repo.
+
+## 9. Open questions
+
+| # | Question | Default/Recommendation |
+|---|---|---|
+| 1 | Can a user customize their own host's label (vanity name), or is it always the OS hostname? | Default to OS hostname; allow an override in Settings (this is a **Preference**-tier value per `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE`'s own three-tier data model — channel-scoped, not identity-scoped) |
+| 2 | Should the qualified form ever be shown by default, even at host tier, for consistency? | No — only show a qualifier once a name is actually visible beyond its host of origin; an always-qualified UI would violate G1/G2 for the common case |
+| 3 | Where does `HostLabel` get persisted/surfaced in the API surface? | Not fully specified here — likely piggybacks on whatever peer-list structure LAN discovery already maintains for `SPEC_JEKT_LAN_TIER_SIGNING`'s pubkey lookups, plus a small new muxbus-account lookup for WAN. Flagged as an implementation detail for whichever sibling spec's LAN/WAN phase ships first. |
+| 4 | How is the WAN qualifier's account half actually *displayed* (raw account id, or a resolved email/display name)? | Resolve to a display name (email is the obvious candidate) — a raw account id is meaningless to a human reading a presence indicator |
+| 5 | Does resolving the WAN account display name require a new muxbus endpoint, or does the dashboard's existing account-lookup path (`SPEC_CLOUD_SERVICES_DASHBOARD_2026_08_18.md`) already expose it? | Check the dashboard spec's account API before building a new one — likely already covered by its "my agents" view |
