@@ -348,16 +348,14 @@ pub struct InjectRequest {
     /// Base64 Ed25519 signature for the general agent-to-agent WAN tier,
     /// produced with the sender's own `AGENTMUX_WAN_KEY` — a *different* key
     /// from `AGENTMUX_LAN_KEY` — over a domain-separated payload
-    /// (`agentmux_common::jekt_sign::sign_wan_jekt`,
-    /// SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1/§3.3). Sent
+    /// (`agentmux_common::jekt_sign::sign_wan_jekt`). Sent
     /// unconditionally for the same reason `lan_sig` and `channel_sig` are:
     /// the sending process cannot know which tier srv will route the message
     /// over.
     ///
     /// **Nothing verifies this yet.** Verification requires resolving
     /// `(sender_account, source_agent)` to exactly one published key, which is
-    /// ambiguous until muxbus's injection storage is tenant-scoped (that
-    /// spec's §2.1, phase W2). The field is carried now so that keys are
+    /// ambiguous until muxbus's injection storage is tenant-scoped. The field is carried now so that keys are
     /// minted and propagating by the time a verifier exists — an agent only
     /// gets a key when it is spawned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -367,8 +365,7 @@ pub struct InjectRequest {
     /// under the sending account owns the keypair `wan_sig` was made with —
     /// one account can run the same agent name on several machines, and on
     /// several build channels of one machine, each with its own database and
-    /// therefore its own key (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md
-    /// §2.1.2). Bound into the signed material, so a wrong value selects a key
+    /// therefore its own key. Bound into the signed material, so a wrong value selects a key
     /// the signature cannot verify under rather than granting anything.
     /// Absent whenever `wan_sig` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]

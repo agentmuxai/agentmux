@@ -1534,8 +1534,7 @@ pub(super) async fn handle_reactive_agents(
 ///
 /// This route is reachable with the broadcast `lan_key`
 /// (`lan_or_full_auth_middleware`), so treat its output as public to anyone
-/// on the local network: `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md`
-/// (LAN P0-1) deliberately shrank what a captured `lan_key` is worth, and
+/// on the local network: the LAN trust work deliberately shrank what a captured `lan_key` is worth, and
 /// this widens it by exactly one thing — enumerating agent names. That was
 /// an explicit, repo-owner-confirmed decision (2026-09-08): a `lan_key`
 /// holder could already confirm any *specific* name via

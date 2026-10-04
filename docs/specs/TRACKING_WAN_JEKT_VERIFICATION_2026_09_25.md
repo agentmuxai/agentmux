@@ -6,7 +6,7 @@ each step stands, what is live, what still needs a person, and what is
 deliberately not built. Not a design spec.
 **Status:** living — updated with every W3-S PR and after the C1 deploy.
 **Tracks:** issue #2586 (WAN half). Design of record for the cross-account
-phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
+phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 
 ---
 

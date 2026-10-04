@@ -45,8 +45,7 @@ anything that can receive a multicast packet on the LAN can read it. Before it
 existed, that broadcast carried the full `auth_key` — meaning a passive LAN
 listener gained standing access to the entire `/agentmux/service` surface. The
 scoped key shrinks a captured value's blast radius to "can forward jekts to this
-instance, and can ask which agents live here." See
-`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §2.1/§3 LAN P0-1.
+instance, and can ask which agents live here."
 
 The two-route set is deliberately kept **out** of `authed_routes` and merged at
 the top level with its own middleware, rather than nested — nesting would put
@@ -111,7 +110,7 @@ only says what each signature *is*.
 | `wan_sig` | WAN | Ed25519, per-agent keypair (`db_agent_wan_keys`), **bound to the sending instance** (`source_host` + `source_channel`) | *Nothing yet — see below.* Intended: the claimed `source_agent`, on the claimed instance, under the account the cloud resolved → `TRUST=wan-verified` |
 
 **General agent-to-agent WAN signing is half-built as of 2026-09-17** (issue
-#2586's other half, `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`). Read that row
+#2586's other half). Read that row
 carefully, because the honest status is narrower than its existence suggests:
 
 - **Signing is live** (PR #3304, #3306). Agents mint a WAN keypair at spawn

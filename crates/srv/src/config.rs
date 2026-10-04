@@ -102,9 +102,7 @@ pub struct Config {
     /// routes LAN peer forwarding actually needs
     /// (`lan_or_full_auth_middleware` in `server/mod.rs`), so a captured
     /// value's blast radius shrinks to "can forward jekts to this
-    /// instance and query which agents live here." See
-    /// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §2.1/§3
-    /// LAN P0-1.
+    /// instance and query which agents live here."
     pub lan_key: String,
     /// Shared secret proving a `host_ipc.Register` caller is really the
     /// paired CEF host, not an agent process (agents share `auth_key` too

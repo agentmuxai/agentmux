@@ -14,8 +14,7 @@ still cannot rotate.
 **Tracks:** GitHub issue #2586 ("jekt: extend cryptographic signing to LAN tier
 and general agent-to-agent WAN traffic"), scoped to the LAN half only per the
 issue's own suggested split — general agent-to-agent WAN signing is a separate
-future item blocked on the account-scoped Cognito M2M prerequisite
-(`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §5.1).
+future item blocked on the account-scoped Cognito M2M prerequisite.
 **Builds on:** `docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`
 (host-tier HMAC — the pattern this mirrors, asymmetrically),
 `SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md` (Ed25519 verification —
@@ -167,7 +166,7 @@ treated as a failure. A request with no signature at all is unaffected —
 nothing was claimed, so there is nothing to fail.
 
 Corrected after this stale text was inherited verbatim into the first draft
-of `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.4 and caught in review there
+of the WAN-tier signing spec and caught in review there
 (PR #3298). Trust `reactive.rs` over this paragraph if they ever disagree
 again.
 

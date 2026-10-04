@@ -403,8 +403,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        `source: "human"` with nothing to contradict it (codex P2, PR
 ///        #3237, caught before this table ever shipped).
 ///   v36 — db_agent_wan_keys: per-agent Ed25519 keypair for general
-///        agent-to-agent WAN-tier jekt signing (issue #2586's second half,
-///        `docs/specs/SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.1).
+///        agent-to-agent WAN-tier jekt signing (issue #2586's second half).
 ///        Mirrors v20's shape; a SEPARATE keypair from db_agent_lan_keys by
 ///        design, not a reuse — LAN public keys are permanently TOFU-pinned
 ///        by peers (v21), which is why they cannot rotate
@@ -1025,7 +1024,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         );
 
         -- v36: per-agent Ed25519 keypair for general agent-to-agent WAN-tier
-        -- jekt signing (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1).
+        -- jekt signing.
         -- Same local-to-this-instance guarantee as db_agent_jekt_keys and
         -- db_agent_lan_keys: the private half leaves only by being injected
         -- into that ONE agent's own MCP process env (AGENTMUX_WAN_KEY) at

@@ -7,7 +7,6 @@
 `docs/specs/SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md`,
 issue #1916 / PR #2350 (Tier 2b same-host cross-channel delivery — see §2 row
 below), `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`,
-`docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`,
 `agentmux-srv/src/backend/lan_discovery.rs`,
 `agentmux-srv/src/muxbus/cloud_subscriber.rs`.
 
@@ -187,9 +186,7 @@ posture), but gains a **separate, explicit directory endpoint** an
 instance can query for "what other instances/agents does *my own
 account* currently have connected" — deliberately narrower than a
 platform-wide directory (matches the existing per-account credential
-scoping direction from PR #2342, and avoids reopening the cross-account
-enumeration/impersonation risk `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`
-already flagged as unresolved). This is new server-side scope in
+scoping direction from PR #2342). This is new server-side scope in
 `agentmux-cloud`, not just the `amx` sidecar — flagging that explicitly
 since it's a bigger lift than the other items here and probably needs
 its own dedicated spec once this direction is agreed on, not a
@@ -224,8 +221,7 @@ gap-filling. Recommend, in order of what research most strongly supports:
   into a conversation).
 
 This item is the biggest, least like "finish what's already spec'd," and
-genuinely security-sensitive (per `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`'s
-already-flagged, still-open cross-account authorization gap at Tier 4) —
+genuinely security-sensitive —
 recommend it lands *after* Tier 4's per-agent authorization is actually
 enforced server-side (not just landed client-side), not in parallel with
 it. Adding a remote-invocation surface before authorization enforcement
@@ -268,4 +264,3 @@ exists would make an already-flagged gap materially worse.
 | `agentmux-srv/src/muxbus/cloud_subscriber.rs`, `agentmux-srv/src/muxbus/agent_credentials.rs` | §3, §4 gating — coordination role, per-agent auth enforcement |
 | `agentmux-mcp/src/main.rs` | §4 — candidate source for (or explicit non-source for, per Open Question #2) the RPC method allowlist |
 | issue #1916, PR #2350 | §1 — the design this doc called for, implemented directly against code rather than through a separate design doc (see the §2 audit row above for why) |
-| `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` | §4 gating dependency — Tier-4 auth enforcement status |

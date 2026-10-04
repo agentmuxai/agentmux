@@ -5,7 +5,7 @@
 **Author:** AgentX (narko), at the owner's request
 **Affects:** a new remote-access plane in `crates/srv/` (new routes and a transport, separate from the jekt routes in `server/routes.rs`), `crates/mcp/src/tool_schemas.rs` (an optional `host` target), a per-OS elevation helper, an approval window in `crates/cef/`, an audit store, the status bar.
 **Builds on:** `docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md` (this spec is the concrete design for its "remote invocation" part), `docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, `docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md`.
-**Related:** `docs/specs/SPEC_AGENT_HOST_CONTEXT_2026_04_14.md` (defers remote tool execution as "a separate, larger feature"; this is that feature), `docs/reports/REPORT_AGENT_FILE_ACCESS_2026_09_29.md`, `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`, `docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md`, `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`, `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`.
+**Related:** `docs/specs/SPEC_AGENT_HOST_CONTEXT_2026_04_14.md` (defers remote tool execution as "a separate, larger feature"; this is that feature), `docs/reports/REPORT_AGENT_FILE_ACCESS_2026_09_29.md`, `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`, `docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md`, `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`.
 
 ## 1. Goal
 

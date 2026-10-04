@@ -11,7 +11,7 @@
 
 > "why do I see 'nobile-percolating-ritchie ab9384' in the conversation pane? it appears to be an agent from somewhere else...pull in latest from github, figure out whats causing that"
 
-The concern was reasonable: an unfamiliar-looking agent name appearing unprompted looks like it could be a cross-tenant/security leak (this repo has a documented, real gap along those lines — see `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`). It is not that. The actual name (log-verified, not "nobile") is `noble-percolating-ritchie` — a real subagent slug, misattributed to five unrelated, already-closed local agent panes.
+The concern was reasonable: an unfamiliar-looking agent name appearing unprompted looks like it could be a cross-tenant/security leak. It is not that. The actual name (log-verified, not "nobile") is `noble-percolating-ritchie` — a real subagent slug, misattributed to five unrelated, already-closed local agent panes.
 
 ---
 
@@ -89,7 +89,7 @@ The code's own doc comment on `prune_block()` (line ~686) already acknowledges t
 
 ## 4. Why this isn't the muxbus/cross-tenant issue it initially resembled
 
-Ruled out early and worth stating plainly: every `parent` name involved (`Agent1`, `Agent2`, `Agent3`, `AgentX`, `AgentY`, `Camper`) is a local agent identity on this same machine, in this same srv process's own `db_block`/log history — not an external account, not a WAN/muxbus-delivered identity. `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`'s documented `agent_id` authorization gap is real but unrelated to this symptom.
+Ruled out early and worth stating plainly: every `parent` name involved (`Agent1`, `Agent2`, `Agent3`, `AgentX`, `AgentY`, `Camper`) is a local agent identity on this same machine, in this same srv process's own `db_block`/log history — not an external account, not a WAN/muxbus-delivered identity.
 
 ---
 

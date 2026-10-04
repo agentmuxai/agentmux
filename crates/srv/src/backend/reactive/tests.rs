@@ -828,9 +828,8 @@ async fn test_handler_inject_proceeds_when_confirmer_matches_case_insensitively(
 
 // SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md §1 — a WAN jekt verified
 // against reagent's pinned Ed25519 key is no longer forced to SENSITIVE by
-// delivery tier alone (superseding the original SPEC_JEKT_LAN_WAN_TRUST_
-// HARDENING_2026_08_13.md §6.2 "never touches TIER" design — see that
-// spec's addendum). TRUST still renders network-claimed regardless:
+// delivery tier alone (superseding the original "never touches TIER"
+// design). TRUST still renders network-claimed regardless:
 // verification changes whether a human must confirm before acting, not
 // whether the message crossed a network boundary.
 #[tokio::test]

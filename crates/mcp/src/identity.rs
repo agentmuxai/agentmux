@@ -208,8 +208,7 @@ pub(crate) fn build_block_to_agent_map(discovery: &Value) -> std::collections::H
 /// Returned as a named struct rather than a tuple: the three signatures are
 /// consecutive `Option<String>`s and a transposition at any of the call
 /// sites would compile clean and silently mislabel trust on the receiver.
-/// The WAN signature (`wan_sig`,
-/// `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.3) rides along on exactly the
+/// The WAN signature (`wan_sig`) rides along on exactly the
 /// same terms as `lan_sig`, for the same reason: this process cannot know
 /// which tier a send will take — it posts every send to the local reactive
 /// endpoint and srv decides among local, cross-channel, LAN and cloud
@@ -280,7 +279,7 @@ pub(crate) fn sign_outgoing_jekt(
         let channel = source_channel.as_deref().unwrap_or("stable");
         agentmux_common::jekt_sign::sign_channel_jekt(key, &msgid, src, channel, target_agent, ts_secs, message)
     })();
-    // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1/§3.3 — its own key, not
+    // The WAN signature uses its own key, not
     // AGENTMUX_LAN_KEY. An agent whose `.mcp.json` predates this feature has
     // no AGENTMUX_WAN_KEY and simply sends unsigned, exactly as it does today
     // for every other tier.

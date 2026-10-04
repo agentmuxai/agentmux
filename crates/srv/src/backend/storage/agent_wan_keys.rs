@@ -3,7 +3,7 @@
 
 //! Per-agent Ed25519 keypair for general agent-to-agent WAN-tier jekt
 //! signing. See `db_agent_wan_keys` in migrations.rs (OBJECT_SCHEMA_VERSION
-//! v36) and docs/specs/SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1.
+//! v36).
 //!
 //! Mirrors `agent_lan_keys.rs`: one row per locally-registered agent_id,
 //! minted once (first call to `agent_wan_key_ensure`), with the PRIVATE half

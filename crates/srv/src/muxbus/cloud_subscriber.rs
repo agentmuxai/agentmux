@@ -886,8 +886,7 @@ enum AgentSyncOutcome {
 /// Does `status` mean "this credential is not accepted for this request,"
 /// regardless of the specific reason? 401 = expired/invalid token. 403 =
 /// `checkAgentBinding` rejected it (this credential is bound to a
-/// different agent_id than the one it's being used for — see
-/// `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2). Both mean the
+/// different agent_id than the one it's being used for). Both mean the
 /// SAME thing operationally for a poller CURRENTLY USING A PER-AGENT
 /// CREDENTIAL: that credential can't be used for this agent, so
 /// invalidate-and-retry-with-the-shared-token applies identically to either
@@ -944,11 +943,9 @@ fn shared_token_rejection_outcome(status: reqwest::StatusCode, agent_id: &str) -
 /// invalidating the credential alone left this agent's pending injection
 /// undelivered until an unrelated InjectAvailable broadcast happened to
 /// fire again (no periodic resync exists). reagentx P1 (round 4) on
-/// PR #2342; 403 coverage added per
-/// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 (a prerequisite
-/// this spec identified before `ENFORCE_AGENT_BINDING` is safe to flip —
-/// without it, a genuine binding mismatch degrades to a silent stall
-/// instead of falling back the same way an expired token already does).
+/// PR #2342; 403 coverage added later (without it, a genuine binding
+/// mismatch degrades to a silent stall instead of falling back the same
+/// way an expired token already does).
 ///
 /// `base` is the relay's REST base URL ([`super::relay::rest_base_url`]); a
 /// parameter so a test can point one sync at a fake relay.
@@ -1776,8 +1773,7 @@ mod tests {
         assert_eq!(token, "connection-token");
     }
 
-    // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 — a
-    // checkAgentBinding rejection (403) must trigger the exact same
+    // A checkAgentBinding rejection (403) must trigger the exact same
     // invalidate-and-retry-with-shared-token recovery as an expired token
     // (401), not silently fall through to a stalled, unretried delivery.
     #[test]
@@ -1829,8 +1825,7 @@ mod tests {
         }
     }
 
-    // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum —
-    // anti-replay for reagent-signed WAN jekts (reagentx P1 on PR #2570).
+    // Anti-replay for reagent-signed WAN jekts.
     #[test]
     fn reagent_sig_exactly_now_is_fresh() {
         assert!(reagent_sig_is_fresh(1_000, 1_000));

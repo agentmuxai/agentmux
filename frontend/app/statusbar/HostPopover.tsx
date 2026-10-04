@@ -80,8 +80,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     // this comment used to justify handing out the full key by saying it's
     // "the SAME value the backend already broadcasts in plaintext in its
     // mDNS TXT record" — true when this shipped (PR #2243, 2026-07-20), and
-    // false since PR #2572 (2026-08-14, SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md
-    // LAN P0-1) narrowed the mDNS/UDP-broadcast credential to a separate,
+    // false since PR #2572 (2026-08-14) narrowed the mDNS/UDP-broadcast credential to a separate,
     // scoped `lan_key` (`Config::lan_key`, `crates/srv/src/config.rs`) —
     // see that field's own doc comment for what it's now limited to. QR
     // pairing was never updated to match, so it grants strictly more than

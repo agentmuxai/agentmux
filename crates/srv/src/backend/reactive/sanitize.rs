@@ -259,8 +259,7 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 /// of this signal, by design (see the "what does NOT change" note in the
 /// spec above).
 ///
-/// `reagent_verified` (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2
-/// addendum) answers an orthogonal question, additively: not "how was this
+/// `reagent_verified` answers an orthogonal question, additively: not "how was this
 /// delivered" (that's `TRUST`, unconditionally `network-claimed` for any
 /// non-host tier, unaffected by this parameter) but "is this specific
 /// message cryptographically proven to come from an AgentMux-operated WAN

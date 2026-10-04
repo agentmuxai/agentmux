@@ -522,7 +522,7 @@ pub fn local_channel_id() -> String {
 }
 
 /// This machine's host label — the `hostname` half of an agent's WAN instance
-/// identity (`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §2.1.2), paired with
+/// identity, paired with
 /// [`local_channel_id`] to identify *which* AgentMux instance under an account
 /// owns a given agent's WAN keypair.
 ///

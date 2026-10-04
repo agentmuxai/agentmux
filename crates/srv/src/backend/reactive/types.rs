@@ -247,17 +247,16 @@ pub struct InjectionRequest {
     /// produced by the claimed `source_agent`'s own **WAN** keypair
     /// (`db_agent_wan_keys` — a different key from the LAN one) over a
     /// domain-separated payload
-    /// (`agentmux_common::jekt_sign::sign_wan_jekt`,
-    /// `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §3.1/§3.3).
+    /// (`agentmux_common::jekt_sign::sign_wan_jekt`).
     ///
     /// **Carried but NOT yet verified — there is deliberately no
     /// `wan_verified` companion field yet.** Verification has two
     /// prerequisites that do not exist: resolving `(sender_account,
     /// source_agent)` to exactly one published key needs muxbus's injection
-    /// storage to be tenant-scoped (that spec's §2.1, phase W2), and the
+    /// storage to be tenant-scoped, and the
     /// signed `msgid`/`ts_secs` must survive the cloud round trip, which
     /// today they do not — `cloud_subscriber` replaces `request_id` with the
-    /// cloud's own injection id and leaves `ts_secs` unset (§3.4.1). Adding a
+    /// cloud's own injection id and leaves `ts_secs` unset. Adding a
     /// verification-outcome field before either exists would read as wired
     /// when it is not, so it lands with the verifier instead.
     ///
@@ -268,8 +267,7 @@ pub struct InjectionRequest {
     pub wan_sig: Option<String>,
     /// The sending machine's host label. With `source_channel`, identifies
     /// which AgentMux instance under the sending account owns the keypair
-    /// `wan_sig` was produced with (`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`
-    /// §2.1.2) — the same account can legitimately run one agent name on
+    /// `wan_sig` was produced with — the same account can legitimately run one agent name on
     /// several machines and several channels, each with its own database and
     /// so its own key. Client-supplied like `source_channel` and bound into
     /// the signed material, so a wrong value fails verification rather than

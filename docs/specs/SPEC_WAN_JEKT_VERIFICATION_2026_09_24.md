@@ -46,7 +46,7 @@ the WAN signature path only. Both sides: the desktop (`agentmux-mcp`,
 `agentmux-srv`) and the cloud relay (`agentmux-cloud/muxbus/server`).
 Other verification paths on the WAN tier (ReAgent's `SIG=`) are unchanged by
 this spec, and this spec's guarantees are about `TRUST=wan-verified` only.
-**Relationship to `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`:** that spec
+**Relationship to the 2026-09-17 WAN-tier signing spec (no longer in this repo):** that spec
 remains the design of record for WAN signing in general and for the
 cross-account phases W0–W2. This spec:
 1. **Re-measures it:** the signing half (W3a) shipped after it was written,
@@ -218,7 +218,7 @@ cross-account phases W0–W2. This spec:
     written with `INSERT OR REPLACE` (`migrations.rs:1189-1195`,
     `conversation_trust_grants.rs:59-75`).
 
-### 1.4 Corrections to `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`
+### 1.4 Corrections to the 09-17 WAN-tier signing spec
 
 | 09-17 says | Today |
 |---|---|
