@@ -60,7 +60,6 @@
     // Start at login (off by default). Same switch as the tray menu's
     // "Start at login".
     // "app:startatlogin":         false,
-    // "app:globalhotkey":         "",
     // "app:defaultnewblock":      "",
     // "app:showoverlayblocknums": false,
 

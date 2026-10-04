@@ -25,7 +25,7 @@ pub fn handle_stub(cmd: &str, args: &serde_json::Value) -> serde_json::Value {
 ///   set_window_transparency
 ///
 /// Existing stubs (already unimplemented in Tauri):
-///   download_file, quicklook, update_wco, set_keyboard_chord_mode,
+///   download_file, quicklook, update_wco,
 ///   create_workspace, switch_workspace, delete_workspace,
 ///   set_active_tab, create_tab, close_tab
 ///
@@ -37,7 +37,6 @@ pub fn is_stub_command(cmd: &str) -> bool {
         "download_file"
             | "quicklook"
             | "update_wco"
-            | "set_keyboard_chord_mode"
             | "create_workspace"
             | "switch_workspace"
             | "delete_workspace"

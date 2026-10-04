@@ -16,7 +16,6 @@ import {
     setBackendStatusAtom,
 } from "./backendStatus";
 import { openModal } from "./modalmodel";
-import { AboutModal } from "@/app/modals/about";
 import { UserInputModal } from "@/app/modals/userinputmodal";
 import * as MOS from "./mos";
 import { getFileSubject, muxEventSubscribe } from "./mps";
@@ -214,10 +213,6 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
 
     try {
         getApi().onFullScreenChange((isFS) => setIsFullScreen(isFS));
-    } catch (_) {}
-
-    try {
-        getApi().onMenuItemAbout(() => openModal(AboutModal));
     } catch (_) {}
 
     try {

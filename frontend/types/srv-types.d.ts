@@ -1075,7 +1075,6 @@ declare global {
     // wconfig.SettingsType
     type SettingsType = {
         "app:*"?: boolean;
-        "app:globalhotkey"?: string;
         "app:dismissarchitecturewarning"?: boolean;
         "app:defaultnewblock"?: string;
         "app:showoverlayblocknums"?: boolean;
