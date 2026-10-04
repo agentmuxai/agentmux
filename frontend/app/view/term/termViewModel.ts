@@ -427,7 +427,11 @@ class TermViewModel {
             event.preventDefault();
             event.stopPropagation();
             return false;
-        } else if (keyutil.checkKeyPressed(muxEvent, "Cmd:k")) {
+        } else if (
+            // Clear: ⌘K on macOS. Elsewhere `Cmd:` is Alt and Alt+K belongs to
+            // the shell (term-shell-keys.ts), so it's Ctrl+Shift+L.
+            isMacOS() ? keyutil.checkKeyPressed(muxEvent, "Cmd:k") : keyutil.checkKeyPressed(muxEvent, "Ctrl:Shift:l")
+        ) {
             event.preventDefault();
             event.stopPropagation();
             this.termRef.current?.terminal?.clear();
