@@ -190,6 +190,17 @@ function stepAllPanes(step: number, direction: 1 | -1): void {
     showZoomIndicator(label);
 }
 
+/** Every zoomable pane in the window back to 100%, with one summary toast. */
+export function zoomAllPanesReset(): void {
+    let any = false;
+    for (const [blockId] of getAllBlockComponentModelEntries()) {
+        if (getBlockZoom(blockId) == null) continue;
+        setBlockZoom(blockId, DEFAULT_ZOOM, false);
+        any = true;
+    }
+    if (any) showZoomIndicator("All panes: 100%");
+}
+
 export function zoomAllPanesIn(step: number = WHEEL_STEP): void {
     stepAllPanes(step, 1);
 }

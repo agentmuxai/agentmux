@@ -46,6 +46,11 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
         (n): KeyBindingRow => ({ command: `tab:goto:${n}`, label: `Go to tab ${n}`, helpGroup: "Go to tab 1–8", category: "Tabs & windows", mac: [`meta+${n}`], other: [`ctrl+${n}`], skipShell: true })
     ),
     { command: "tab:goto:last", label: "Go to last tab", category: "Tabs & windows", mac: ["meta+9"], other: ["ctrl+9"], skipShell: true },
+    { command: "tab:moveLeft", label: "Move tab left", category: "Tabs & windows", mac: ["meta+shift+PageUp"], other: ["ctrl+alt+shift+PageUp"], skipShell: true },
+    { command: "tab:moveRight", label: "Move tab right", category: "Tabs & windows", mac: ["meta+shift+PageDown"], other: ["ctrl+alt+shift+PageDown"], skipShell: true },
+    // F2 renames whatever has focus (a file in the Files pane or editor tree
+    // handles it first), so the tab only takes it when nothing else does.
+    { command: "tab:rename", label: "Rename tab", category: "Tabs & windows", mac: ["F2"], other: ["F2"], when: "!textInputFocus" },
 
     // ── Panes ──
     { command: "pane:new", label: "New pane", category: "Panes", mac: ["meta+n"], other: ["ctrl+shift+code:Backquote"], skipShell: true },
@@ -75,7 +80,16 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
             skipShell: true,
         })
     ),
+    { command: "pane:swap:up", label: "Swap with pane above", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowUp"], other: ["ctrl+alt+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:down", label: "Swap with pane below", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowDown"], other: ["ctrl+alt+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:left", label: "Swap with pane left", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowLeft"], other: ["ctrl+alt+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:swap:right", label: "Swap with pane right", helpGroup: "Swap pane with neighbour", category: "Panes", mac: ["ctrl+alt+shift+ArrowRight"], other: ["ctrl+alt+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:resize:up", label: "Move pane border up", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowUp"], other: ["alt+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:resize:down", label: "Move pane border down", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowDown"], other: ["alt+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:resize:left", label: "Move pane border left", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowLeft"], other: ["alt+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:resize:right", label: "Move pane border right", helpGroup: "Resize pane", category: "Panes", mac: ["ctrl+alt+meta+ArrowRight"], other: ["alt+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
     { command: "pane:refocus", label: "Refocus pane", category: "Panes", mac: ["meta+i"] },
+    { command: "agent:focusComposer", label: "Focus the message box", category: "Panes", mac: ["meta+l"], other: ["ctrl+l"], when: "viewType == agent" },
     { command: "pane:replaceWithLauncher", label: "Replace pane with launcher", category: "Panes", mac: ["ctrl+shift+k"], other: ["ctrl+shift+k"], when: "!textInputFocus", skipShell: true },
     { command: "pane:changeConnection", label: "Change connection", category: "Panes", mac: ["meta+shift+g"], other: ["ctrl+shift+g"], skipShell: true },
     { command: "term:multiInput", label: "Type into all terminals", category: "Terminal", mac: ["meta+shift+m"], other: ["ctrl+shift+alt+m"], skipShell: true },
@@ -90,6 +104,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "view:zoom:in", label: "Zoom in", category: "Find & zoom", mac: ["meta+=", "meta+shift+=", "meta+code:NumpadAdd"], other: ["ctrl+=", "ctrl+shift+=", "ctrl+code:NumpadAdd"], skipShell: true },
     { command: "view:zoom:out", label: "Zoom out", category: "Find & zoom", mac: ["meta+-", "meta+code:NumpadSubtract"], other: ["ctrl+-", "ctrl+code:NumpadSubtract"], skipShell: true },
     { command: "view:zoom:reset", label: "Reset zoom", category: "Find & zoom", mac: ["meta+0", "meta+code:Numpad0"], other: ["ctrl+0", "ctrl+code:Numpad0"], skipShell: true },
+    { command: "view:zoom:resetAll", label: "Reset zoom on all panes", category: "Find & zoom", mac: ["meta+shift+0"], other: ["ctrl+shift+0"], skipShell: true },
 
     // ── Dev builds ──
     { command: "dev:perfHud", label: "Performance HUD", category: "General", mac: ["meta+alt+shift+p"], other: ["ctrl+alt+shift+p"], skipShell: true, devOnly: true },

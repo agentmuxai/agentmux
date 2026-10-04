@@ -63,6 +63,25 @@ export function switchNodeFocusInDirection(
         return { success: true };
     }
 
+    const found = findNodeInDirection(model, curNodeId, direction);
+    if (found.nodeId != null) {
+        focusNode(model, found.nodeId);
+        return { success: true };
+    }
+    return found.result;
+}
+
+/**
+ * The pane next to `fromNodeId` in `direction`, by walking from its centre
+ * across the laid-out pane rectangles. When none is found, `result` says
+ * which window edge was hit. Shared by focus navigation and pane swap.
+ */
+export function findNodeInDirection(
+    model: LayoutModel,
+    fromNodeId: string,
+    direction: NavigateDirection
+): { nodeId?: string; result: NavigationResult } {
+    const curNodeId = fromNodeId;
     const offset = navigateDirectionToOffset(direction);
     const nodePositions: Map<string, Dimensions> = new Map();
     const leafs = model.getter(model.leafs);
@@ -75,12 +94,12 @@ export function switchNodeFocusInDirection(
     }
     const curNodePos = nodePositions.get(curNodeId);
     if (!curNodePos) {
-        return { success: false };
+        return { result: { success: false } };
     }
     nodePositions.delete(curNodeId);
     const boundingRect = model.displayContainerRef?.current.getBoundingClientRect();
     if (!boundingRect) {
-        return { success: false };
+        return { result: { success: false } };
     }
     const maxX = boundingRect.left + boundingRect.width;
     const maxY = boundingRect.top + boundingRect.height;
@@ -119,12 +138,11 @@ export function switchNodeFocusInDirection(
             if (curPoint.y > maxY) {
                 result.atBottom = true;
             }
-            return result;
+            return { result };
         }
         const nodeId = findNodeAtPoint(nodePositions, curPoint);
         if (nodeId != null) {
-            focusNode(model, nodeId);
-            return { success: true };
+            return { nodeId, result: { success: true } };
         }
     }
 }

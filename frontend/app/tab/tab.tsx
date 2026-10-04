@@ -7,7 +7,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
 import { fireAndForget } from "@/util/util";
 import clsx from "clsx";
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount, Show, on } from "solid-js";
 import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
@@ -16,6 +16,7 @@ import { ObjectService } from "../store/services";
 import { makeORef, useMuxObjectValue } from "../store/mos";
 import { measureTabWidth } from "./tab-measure";
 import "./tab.scss";
+import { renameRequest } from "./tab-rename-request";
 
 // 14 colors — same hues as the agent-pane border palette
 // (agent-color.ts's AGENT_COLOR_PALETTE), desaturated to roughly halfway
@@ -167,6 +168,13 @@ function Tab(props: TabProps): JSX.Element {
             selectEditableText();
         }, 0);
     };
+
+    // A shortcut asked this tab to start renaming (tab-rename-request.ts).
+    createEffect(
+        on(renameRequest, (req) => {
+            if (req?.tabId === props.id) handleRenameTab();
+        }, { defer: true })
+    );
 
     const handleBlur = () => {
         let newText = editableRef.innerText.trim();

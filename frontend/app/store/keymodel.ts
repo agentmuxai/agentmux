@@ -13,7 +13,10 @@ import {
     replaceBlock,
     setIsTermMultiInput,
 } from "@/app/store/global";
-import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
+import { zoomAllPanesReset, zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
+import { requestTabRename } from "@/app/tab/tab-rename-request";
+import { requestComposerFocus } from "@/app/view/agent/composer-focus";
+import { resizeFocusedInDirection, swapFocusedInDirection } from "@/layout/lib/layoutKeyboard";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
@@ -31,6 +34,7 @@ import {
     switchTab,
     switchTabAbs,
     switchTabLast,
+    moveActiveTab,
 } from "./keymodel-nav";
 
 function countTermBlocks(): number {
@@ -77,6 +81,9 @@ function registerGlobalKeys() {
         on(`tab:goto:${idx}`, run(() => switchTabAbs(idx)));
     }
     on("tab:goto:last", run(() => switchTabLast()));
+    on("tab:moveLeft", run(() => moveActiveTab(-1)));
+    on("tab:moveRight", run(() => moveActiveTab(1)));
+    on("tab:rename", run(() => requestTabRename(atoms.activeTabId())));
 
     // ── Panes ──
     on("pane:new", run(() => handleCmdN()));
@@ -102,7 +109,18 @@ function registerGlobalKeys() {
     for (let idx = 1; idx <= 9; idx++) {
         on(`pane:focus:${idx}`, run(() => switchBlockByBlockNum(idx)));
     }
+    const directions = { up: NavigateDirection.Up, down: NavigateDirection.Down, left: NavigateDirection.Left, right: NavigateDirection.Right };
+    for (const [name, dir] of Object.entries(directions)) {
+        on(`pane:swap:${name}`, () => swapFocusedInDirection(getLayoutModelForStaticTab(), dir));
+        on(`pane:resize:${name}`, () => resizeFocusedInDirection(getLayoutModelForStaticTab(), dir));
+    }
     on("pane:refocus", run(() => handleCmdI()));
+    on("agent:focusComposer", () => {
+        const blockId = getFocusedBlockId();
+        if (blockId == null || getBlockComponentModel(blockId)?.viewModel?.viewType !== "agent") return false;
+        requestComposerFocus(blockId);
+        return true;
+    });
     on("pane:replaceWithLauncher", (e) => {
         const blockId = getFocusedBlockId();
         if (blockId == null) {
@@ -178,6 +196,7 @@ function registerGlobalKeys() {
     on("view:zoom:in", run(() => zoomIn()));
     on("view:zoom:out", run(() => zoomOut()));
     on("view:zoom:reset", run(() => zoomReset()));
+    on("view:zoom:resetAll", run(() => zoomAllPanesReset()));
 
     // The terminal runs its own copy / paste / clear (termViewModel.ts).
     on("term:copy", () => false);
