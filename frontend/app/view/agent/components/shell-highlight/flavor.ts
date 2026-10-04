@@ -50,8 +50,9 @@ export function detectShellFlavor(command: string): ShellFlavor {
         const code = maskQuoted(command);
         if (CMDLET_RE.test(code) || POWERSHELL_VAR_RE.test(code)) return "powershell";
     }
-    if (CMD_LAUNCH_RE.test(command) || CMD_BUILTIN_RE.test(command) || CMD_PERCENT_VAR_RE.test(command)) {
-        return "cmd";
-    }
+    if (CMD_LAUNCH_RE.test(command) || CMD_BUILTIN_RE.test(command)) return "cmd";
+    // Only unquoted `%NAME%`: inside quotes it is as likely a printf format or
+    // literal text in a POSIX command, and POSIX is the safe fallback.
+    if (CMD_PERCENT_VAR_RE.test(command) && CMD_PERCENT_VAR_RE.test(maskQuoted(command))) return "cmd";
     return "posix";
 }

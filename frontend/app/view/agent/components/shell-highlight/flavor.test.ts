@@ -19,7 +19,7 @@ describe("detectShellFlavor", () => {
     it.each([
         "cmd /c dir",
         "echo %USERPROFILE%",
-        'copy a.txt "%TEMP%\\a.txt"',
+        'copy a.txt %TEMP%\\a.txt',
         "if exist build rmdir /s /q build",
         "@echo off",
     ])(
@@ -40,6 +40,8 @@ describe("detectShellFlavor", () => {
         "git log --pretty=format:%h%x09%s",
         "git log --format=%h%x09%an%x09%s -5",
         `python -c "print('100%abc%')"`,
+        "printf '%FOO%'",
+        'echo "literal %PATH% text"',
         "",
     ])("falls back to POSIX for %s", (cmd) => {
         expect(detectShellFlavor(cmd)).toBe("posix");

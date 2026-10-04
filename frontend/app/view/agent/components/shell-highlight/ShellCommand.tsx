@@ -15,7 +15,7 @@
 import { For, Match, Switch, createMemo, type JSX } from "solid-js";
 import { HighlightedCode } from "../HighlightedCode";
 import { detectShellFlavor } from "./flavor";
-import { tokenizeShell, type Token } from "./tokenize";
+import { MAX_TOKENIZE_CHARS, tokenizeShell, type Token } from "./tokenize";
 
 const CACHE_LIMIT = 200;
 const tokenCache = new Map<string, Token[]>();
@@ -29,6 +29,9 @@ function tokensFor(command: string): Token[] {
         return hit;
     }
     const { tokens } = tokenizeShell(command);
+    // The key is the whole command: caching a huge one (a big heredoc, a base64
+    // payload) would keep it alive after its panel is gone.
+    if (command.length > MAX_TOKENIZE_CHARS) return tokens;
     tokenCache.set(command, tokens);
     if (tokenCache.size > CACHE_LIMIT) {
         const oldest = tokenCache.keys().next().value;
