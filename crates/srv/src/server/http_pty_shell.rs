@@ -111,6 +111,16 @@ pub(super) async fn handle_pty_shell_create(
         crate::backend::gh_guard::META_KEY_PTYSHELL_GH_CONFIG_DIR.to_string(),
         json!(crate::backend::gh_guard::guard_dir_for(&agent_env)),
     );
+    // And the publish guard's git hooks, so a push typed here is scanned too.
+    // Local shells only: the hooks directory is a host path, which a WSL distro
+    // or an SSH host can't run (pushes from there aren't guarded).
+    let local = matches!(target, AgentTarget::Local);
+    if let Some(hooks) = local.then(|| crate::backend::publish_guard::hooks_dir_for(&agent_env, |k| std::env::var(k).ok())).flatten() {
+        meta.insert(
+            crate::backend::publish_guard::META_KEY_PTYSHELL_GIT_HOOKS_PATH.to_string(),
+            json!(hooks.to_string_lossy()),
+        );
+    }
     meta.insert("view".to_string(), json!("term"));
     meta.insert(
         blockcontroller::META_KEY_CONTROLLER.to_string(),

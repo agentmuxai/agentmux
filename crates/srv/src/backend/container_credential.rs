@@ -138,6 +138,9 @@ pub fn route_needs_identity(path: &str) -> bool {
 /// the instance key replaced by this block's container token.
 pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) -> Vec<(String, String)> {
     let agent_token = env_vars.get("AGENTMUX_AGENT_TOKEN").map(String::as_str);
+    // The publish guard's hooks directory is a host path; the agent's other
+    // GIT_CONFIG_* settings still apply inside the container.
+    let env_vars = crate::backend::publish_guard::without_hooks_path(env_vars);
     env_vars
         .iter()
         .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
