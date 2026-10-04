@@ -17,6 +17,7 @@ import { Show, type JSX } from "solid-js";
 import type { DocTab } from "./doc-tabs";
 import type { DocTabsController } from "./doc-tabs-controller";
 import "./doc-tabs.scss";
+import { keyLabel } from "@/app/keybindings";
 
 export function DocTabStrip<P>(props: {
     ctl: DocTabsController<P>;
@@ -47,7 +48,7 @@ export function DocTabStrip<P>(props: {
                         if (t.preview) ctl.promote(t.id);
                     }}
                     onAdd={ctl.spec.newDocument ? () => void ctl.newDocument() : undefined}
-                    addTitle={props.addTitle ?? "New tab (Ctrl+T)"}
+                    addTitle={props.addTitle ?? `New tab (${keyLabel("ctrl+t")})`}
                 />
             </div>
         </Show>

@@ -46,6 +46,7 @@ import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
+import { keyLabel } from "@/app/keybindings";
 
 export const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -521,7 +522,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
         const items: ContextMenuItem[] = [{ type: "action", label: "Open", shortcut: "Enter", onSelect: () => openEntry(entry) }];
         if (entry.is_dir) {
-            items.push({ type: "action", label: "Open in new tab", shortcut: isMacOS() ? "⌘Enter" : "Ctrl+Enter", onSelect: () => openInNewTab(path) });
+            items.push({ type: "action", label: "Open in new tab", shortcut: keyLabel("mod+Enter"), onSelect: () => openInNewTab(path) });
         }
         if (!entry.is_dir) {
             items.push(
@@ -537,7 +538,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             {
                 type: "action",
                 label: "Mention in agent",
-                shortcut: isMacOS() ? "⌥K" : "Alt+K",
+                shortcut: keyLabel("alt+k"),
                 disabled: agentTargets().length === 0,
                 onSelect: () => mentionIn(many ? list : [entry]),
             },
@@ -547,8 +548,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 onSelect: () => attachTo(t, many ? list : [entry]),
             })),
             { type: "separator" },
-            { type: "action", label: "Cut", shortcut: isMacOS() ? "⌘X" : "Ctrl+X", onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
-            { type: "action", label: "Copy", shortcut: isMacOS() ? "⌘C" : "Ctrl+C", onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
+            { type: "action", label: "Cut", shortcut: keyLabel("mod+x"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
+            { type: "action", label: "Copy", shortcut: keyLabel("mod+c"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
             { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", onSelect: () => copyPaths(many ? list : [entry]) },
             { type: "separator" },
             { type: "action", label: "Rename", shortcut: "F2", disabled: many, onSelect: () => model.setRenaming(entry.name) },
@@ -589,7 +590,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         if (!target) {
             model.setStatus(
                 {
-                    text: agents.length === 0 ? "No agent pane is open to mention these in." : "Click into the agent you mean first, then Alt+K here.",
+                    text: agents.length === 0 ? "No agent pane is open to mention these in." : `Click into the agent you mean first, then ${keyLabel("alt+k")} here.`,
                     tone: "info",
                 },
                 4000
@@ -640,13 +641,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const folderMenu = (): ContextMenuItem[] => {
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
         return forHost([
-            { type: "action", label: "New folder", shortcut: isMacOS() ? "⌘⇧N" : "Ctrl+Shift+N", onSelect: () => void model.createNew("dir") },
+            { type: "action", label: "New folder", shortcut: keyLabel("mod+shift+n"), onSelect: () => void model.createNew("dir") },
             { type: "action", label: "New file", onSelect: () => void model.createNew("file") },
-            { type: "action", label: "New tab here", shortcut: isMacOS() ? "⌘T" : "Ctrl+T", onSelect: () => openInNewTab(model.path()) },
+            { type: "action", label: "New tab here", shortcut: keyLabel("mod+t"), onSelect: () => openInNewTab(model.path()) },
             {
                 type: "action",
                 label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
-                shortcut: isMacOS() ? "⌘V" : "Ctrl+V",
+                shortcut: keyLabel("mod+v"),
                 disabled: !clipboard(),
                 onSelect: () => void model.paste(),
             },
@@ -657,7 +658,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             { type: "separator" },
             { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", onSelect: () => model.toggleHidden() },
             { type: "action", label: "Refresh", shortcut: "F5", onSelect: () => model.refresh() },
-            { type: "action", label: "Undo", shortcut: isMacOS() ? "⌘Z" : "Ctrl+Z", onSelect: () => void model.undo() },
+            { type: "action", label: "Undo", shortcut: keyLabel("mod+z"), onSelect: () => void model.undo() },
         ]);
     };
 
@@ -715,13 +716,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     return (
         <div class="files-view" onContextMenu={(e) => e.preventDefault()}>
             <div class="files-toolbar">
-                <button type="button" class="files-tool" title="Back (Alt+←)" disabled={!model.canBack()} onClick={() => model.goBack()}>
+                <button type="button" class="files-tool" title={`Back (${keyLabel("alt+ArrowLeft")})`} disabled={!model.canBack()} onClick={() => model.goBack()}>
                     <i class="fa fa-arrow-left" />
                 </button>
-                <button type="button" class="files-tool" title="Forward (Alt+→)" disabled={!model.canForward()} onClick={() => model.goForward()}>
+                <button type="button" class="files-tool" title={`Forward (${keyLabel("alt+ArrowRight")})`} disabled={!model.canForward()} onClick={() => model.goForward()}>
                     <i class="fa fa-arrow-right" />
                 </button>
-                <button type="button" class="files-tool" title="Up (Alt+↑)" disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()}>
+                <button type="button" class="files-tool" title={`Up (${keyLabel("alt+ArrowUp")})`} disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()}>
                     <i class="fa fa-arrow-up" />
                 </button>
                 <Show
@@ -745,7 +746,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         />
                     }
                 >
-                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title="Double-click or Ctrl+L to type a path">
+                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title={`Double-click or ${keyLabel("mod+l")} to type a path`}>
                         <Show when={model.connection()}>
                             <span class="files-crumb-host" title={`On ${model.connection()}, over SSH`}>
                                 <i class="fa fa-server" aria-hidden="true" />
@@ -787,7 +788,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         }}
                     />
                 </Show>
-                <button type="button" class="files-tool" title={isMacOS() ? "Filter (⌘F)" : "Filter (Ctrl+F)"} onClick={openFilter}>
+                <button type="button" class="files-tool" title={`Filter (${keyLabel("mod+f")})`} onClick={openFilter}>
                     <i class="fa fa-filter" />
                 </button>
                 <button type="button" class="files-tool" title="New folder" onClick={() => void model.createNew("dir")}>

@@ -3,7 +3,7 @@
 
 /**
  * Dev-mode perf HUD. Floating panel in the bottom-right corner that
- * shows aggregated stats from `perfStore`. Toggle with Ctrl+Shift+P.
+ * shows aggregated stats from `perfStore`. Toggle with Ctrl+Alt+Shift+P.
  *
  * Polls `perfStore.snapshot()` once per second when visible. Hidden in
  * release builds via the `import.meta.env.DEV` gate; the toggle hook
@@ -16,6 +16,7 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX, For } from "solid-js";
 import { perfStore } from "./store";
+import { keyLabel } from "@/app/keybindings";
 
 interface HudSnapshot {
     longTasks: { count: number; p50: number; p75: number; p95: number; max: number };
@@ -54,8 +55,8 @@ export function PerfHud(): JSX.Element {
     let pollInterval: ReturnType<typeof setInterval> | null = null;
 
     const onKey = (e: KeyboardEvent) => {
-        // Ctrl+Shift+P (or Meta+Shift+P on macOS where Ctrl is rare).
-        if (e.shiftKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        // Ctrl+Alt+Shift+P (⌘ for Ctrl on macOS). Without Alt it's the command palette.
+        if (e.shiftKey && e.altKey && (e.ctrlKey || e.metaKey) && e.code === "KeyP") {
             e.preventDefault();
             setVisible((v) => !v);
         }
@@ -113,7 +114,7 @@ export function PerfHud(): JSX.Element {
                 <div style={{ "font-weight": "bold", color: "#7af", "margin-bottom": "4px" }}>
                     ⏱ Perf HUD &nbsp;
                     <span style={{ color: "#777", "font-weight": "normal" }}>
-                        (Ctrl+Shift+P)
+                        ({keyLabel("mod+alt+shift+p")})
                     </span>
                 </div>
                 <div style={{ "margin-top": "4px" }}>

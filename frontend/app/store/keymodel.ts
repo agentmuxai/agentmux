@@ -9,6 +9,7 @@ import {
     getApi,
     getBlockComponentModel,
     getFocusedBlockId,
+    openOrFocusPaneByView,
     replaceBlock,
     setIsTermMultiInput,
 } from "@/app/store/global";
@@ -18,8 +19,7 @@ import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
-import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "./keymodel-bindings";
-import { type KeyHandler, globalChordMap, globalKeyMap } from "./keymodel-dispatch";
+import { type KeyHandler, keyCommands } from "./keymodel-dispatch";
 import {
     cyclePaneFocus,
     genericClose,
@@ -30,64 +30,62 @@ import {
     switchBlockInDirection,
     switchTab,
     switchTabAbs,
+    switchTabLast,
 } from "./keymodel-nav";
 
 function countTermBlocks(): number {
     return basicTermModels().length;
 }
 
+/** What each command in the shortcut table does (keybindings/defaults.ts).
+ *  The keys themselves live in the table, so the help pane, the menus and
+ *  the docs show what actually runs. A handler returns false when it didn't
+ *  apply, which leaves the key to whatever else wants it. */
 function registerGlobalKeys() {
-    globalKeyMap.set("Cmd:]", () => {
-        switchTab(1);
+    const on = (command: string, handler: KeyHandler) => keyCommands.set(command, handler);
+    const run = (fn: () => void): KeyHandler => () => {
+        fn();
         return true;
+    };
+
+    // ── General ──
+    on("view:command-palette", run(() => openModal(CommandPaletteModal)));
+    on("app:settings", run(() => void openOrFocusPaneByView("settings")));
+    on("help:shortcuts", run(() => void openOrFocusPaneByView("help")));
+    on("app:escape", () => {
+        if (modalsModel.hasOpenModals()) {
+            modalsModel.closeTopModal();
+            return true;
+        }
+        return deactivateSearch();
     });
-    globalKeyMap.set("Shift:Cmd:]", () => {
-        switchTab(1);
-        return true;
-    });
-    globalKeyMap.set("Cmd:[", () => {
-        switchTab(-1);
-        return true;
-    });
-    globalKeyMap.set("Shift:Cmd:[", () => {
-        switchTab(-1);
-        return true;
-    });
-    globalKeyMap.set("Cmd:n", () => {
-        handleCmdN();
-        return true;
-    });
-    globalKeyMap.set(NEW_WINDOW_KEY, () => {
-        getApi().openNewWindow().catch((e: unknown) => {
-            console.error("[keymodel] Failed to open new window:", e);
-        });
-        return true;
-    });
-    globalKeyMap.set("Cmd:d", () => {
-        handleSplitHorizontal("after");
-        return true;
-    });
-    globalKeyMap.set("Shift:Cmd:d", () => {
-        handleSplitVertical("after");
-        return true;
-    });
-    globalKeyMap.set("Cmd:i", () => {
-        handleCmdI();
-        return true;
-    });
-    globalKeyMap.set(NEW_TAB_KEY, () => {
-        createTab();
-        return true;
-    });
-    globalKeyMap.set("Cmd:w", () => {
-        genericClose();
-        return true;
-    });
-    globalKeyMap.set("Cmd:Shift:w", () => {
-        simpleCloseStaticTab();
-        return true;
-    });
-    globalKeyMap.set("Cmd:m", () => {
+
+    // ── Tabs & windows ──
+    on(
+        "window:new",
+        run(() =>
+            getApi()
+                .openNewWindow()
+                .catch((e: unknown) => console.error("[keymodel] Failed to open new window:", e))
+        )
+    );
+    on("tab:new", run(() => createTab()));
+    on("tab:close", run(() => simpleCloseStaticTab()));
+    on("tab:next", run(() => switchTab(1)));
+    on("tab:prev", run(() => switchTab(-1)));
+    for (let idx = 1; idx <= 8; idx++) {
+        on(`tab:goto:${idx}`, run(() => switchTabAbs(idx)));
+    }
+    on("tab:goto:last", run(() => switchTabLast()));
+
+    // ── Panes ──
+    on("pane:new", run(() => handleCmdN()));
+    on("split:right", run(() => handleSplitHorizontal("after")));
+    on("split:left", run(() => handleSplitHorizontal("before")));
+    on("split:down", run(() => handleSplitVertical("after")));
+    on("split:up", run(() => handleSplitVertical("before")));
+    on("pane:close", run(() => genericClose()));
+    on("pane:magnify", () => {
         const layoutModel = getLayoutModelForStaticTab();
         const focusedNode = layoutModel.focusedNode?.();
         if (focusedNode != null) {
@@ -95,31 +93,17 @@ function registerGlobalKeys() {
         }
         return true;
     });
-    globalKeyMap.set("Ctrl:Shift:ArrowUp", () => {
-        switchBlockInDirection(NavigateDirection.Up);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:ArrowDown", () => {
-        switchBlockInDirection(NavigateDirection.Down);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:ArrowLeft", () => {
-        switchBlockInDirection(NavigateDirection.Left);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:ArrowRight", () => {
-        switchBlockInDirection(NavigateDirection.Right);
-        return true;
-    });
-    globalKeyMap.set("Ctrl:]", () => {
-        cyclePaneFocus("forward");
-        return true;
-    });
-    globalKeyMap.set("Ctrl:[", () => {
-        cyclePaneFocus("backward");
-        return true;
-    });
-    globalKeyMap.set("Ctrl:Shift:k", (e) => {
+    on("pane:focus:up", run(() => switchBlockInDirection(NavigateDirection.Up)));
+    on("pane:focus:down", run(() => switchBlockInDirection(NavigateDirection.Down)));
+    on("pane:focus:left", run(() => switchBlockInDirection(NavigateDirection.Left)));
+    on("pane:focus:right", run(() => switchBlockInDirection(NavigateDirection.Right)));
+    on("pane:focus:next", run(() => cyclePaneFocus("forward")));
+    on("pane:focus:prev", run(() => cyclePaneFocus("backward")));
+    for (let idx = 1; idx <= 9; idx++) {
+        on(`pane:focus:${idx}`, run(() => switchBlockByBlockNum(idx)));
+    }
+    on("pane:refocus", run(() => handleCmdI()));
+    on("pane:replaceWithLauncher", (e) => {
         const blockId = getFocusedBlockId();
         if (blockId == null) {
             return true;
@@ -127,8 +111,8 @@ function registerGlobalKeys() {
         if (getBlockComponentModel(blockId)?.viewModel?.viewType === "launcher") {
             return true;
         }
-        // One confirmation at a time: a held key repeats, and the global map
-        // still runs while a modal is open.
+        // One confirmation at a time: a held key repeats, and global
+        // shortcuts still run while a modal is open.
         if (e.repeat || modalsModel.isModalOpen(ReplacePaneConfirm)) {
             return true;
         }
@@ -146,14 +130,15 @@ function registerGlobalKeys() {
         });
         return true;
     });
-    globalKeyMap.set("Cmd:g", () => {
+    on("pane:changeConnection", () => {
         const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
         if (bcm?.openSwitchConnection != null) {
             bcm.openSwitchConnection();
             return true;
         }
+        return false;
     });
-    globalKeyMap.set("Ctrl:Shift:m", () => {
+    on("term:multiInput", () => {
         const curMI = atoms.isTermMultiInput();
         if (!curMI && countTermBlocks() <= 1) {
             // don't turn on multi-input unless there are 2 or more basic term blocks
@@ -162,18 +147,16 @@ function registerGlobalKeys() {
         setIsTermMultiInput(!curMI);
         return true;
     });
-    // Ctrl+Shift+V — toggle voice input on the currently focused pane.
-    // Mirrors MicButton click semantics: bind target first, then start
-    // OR stop OR retarget. No-op on panes whose ViewModel doesn't
-    // expose voiceHandle (e.g. browser, editor). Spec:
+    // Voice input on the focused pane. Mirrors MicButton click semantics:
+    // bind target first, then start OR stop OR retarget. No-op on panes whose
+    // ViewModel doesn't expose voiceHandle (e.g. browser, editor). Spec:
     // docs/specs/SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md §6.
-    globalKeyMap.set("Ctrl:Shift:v", () => {
+    on("pane:voice", () => {
         const blockId = getFocusedBlockInStaticTab();
         if (!blockId) return true;
         const bcm = getBlockComponentModel(blockId);
         const vm: any = bcm?.viewModel;
         if (!vm?.voiceHandle) {
-            // No-op on non-supporting panes. (Could surface a toast in Phase 3.)
             return true;
         }
         const voice = getVoiceSession();
@@ -189,108 +172,37 @@ function registerGlobalKeys() {
         // else: retarget without toggle (same logic as MicButton click)
         return true;
     });
-    for (let idx = 1; idx <= 9; idx++) {
-        globalKeyMap.set(`Cmd:${idx}`, () => {
-            switchTabAbs(idx);
-            return true;
-        });
-        globalKeyMap.set(`Ctrl:Shift:c{Digit${idx}}`, () => {
-            switchBlockByBlockNum(idx);
-            return true;
-        });
-        globalKeyMap.set(`Ctrl:Shift:c{Numpad${idx}}`, () => {
-            switchBlockByBlockNum(idx);
-            return true;
-        });
-    }
-    function activateSearch(event: MuxKeyboardEvent): boolean {
-        const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
-        if (bcm == null) return false;
-        if (bcm.viewModel.searchAtoms) {
-            bcm.viewModel.searchAtoms.isOpen._set(true);
-            return true;
-        }
-        return false;
-    }
-    function deactivateSearch(): boolean {
-        const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
-        if (bcm == null) return false;
-        if (bcm.viewModel.searchAtoms && bcm.viewModel.searchAtoms.isOpen()) {
-            bcm.viewModel.searchAtoms.isOpen._set(false);
-            return true;
-        }
-        return false;
-    }
-    globalKeyMap.set("Cmd:f", activateSearch);
-    globalKeyMap.set("Escape", () => {
-        if (modalsModel.hasOpenModals()) {
-            modalsModel.closeTopModal();
-            return true;
-        }
-        if (deactivateSearch()) {
-            return true;
-        }
-        return false;
-    });
-    // Zoom controls - macOS
-    globalKeyMap.set("Cmd:=", () => {
-        zoomIn();
-        return true;
-    });
-    globalKeyMap.set("Cmd:+", () => {
-        zoomIn();
-        return true;
-    });
-    globalKeyMap.set("Cmd:-", () => {
-        zoomOut();
-        return true;
-    });
-    globalKeyMap.set("Cmd:0", () => {
-        zoomReset();
-        return true;
-    });
 
-    // Zoom controls - Linux/Windows
-    globalKeyMap.set("Ctrl:=", () => {
-        zoomIn();
-        return true;
-    });
-    globalKeyMap.set("Ctrl:+", () => {
-        zoomIn();
-        return true;
-    });
-    globalKeyMap.set("Ctrl:-", () => {
-        zoomOut();
-        return true;
-    });
-    globalKeyMap.set("Ctrl:0", () => {
-        zoomReset();
-        return true;
-    });
+    // ── Find & zoom ──
+    on("pane:find", () => activateSearch());
+    on("view:zoom:in", run(() => zoomIn()));
+    on("view:zoom:out", run(() => zoomOut()));
+    on("view:zoom:reset", run(() => zoomReset()));
 
-    const splitBlockKeys = new Map<string, KeyHandler>();
-    splitBlockKeys.set("ArrowUp", () => {
-        handleSplitVertical("before");
-        return true;
-    });
-    splitBlockKeys.set("ArrowDown", () => {
-        handleSplitVertical("after");
-        return true;
-    });
-    splitBlockKeys.set("ArrowLeft", () => {
-        handleSplitHorizontal("before");
-        return true;
-    });
-    splitBlockKeys.set("ArrowRight", () => {
-        handleSplitHorizontal("after");
-        return true;
-    });
-    globalChordMap.set("Ctrl:Shift:s", splitBlockKeys);
+    // The terminal runs its own copy / paste / clear (termViewModel.ts).
+    on("term:copy", () => false);
+    on("term:paste", () => false);
+    on("term:clear", () => false);
+}
 
-    globalKeyMap.set(COMMAND_PALETTE_KEY, () => {
-        openModal(CommandPaletteModal);
+function activateSearch(): boolean {
+    const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
+    if (bcm == null) return false;
+    if (bcm.viewModel.searchAtoms) {
+        bcm.viewModel.searchAtoms.isOpen._set(true);
         return true;
-    });
+    }
+    return false;
+}
+
+function deactivateSearch(): boolean {
+    const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
+    if (bcm == null) return false;
+    if (bcm.viewModel.searchAtoms && bcm.viewModel.searchAtoms.isOpen()) {
+        bcm.viewModel.searchAtoms.isOpen._set(false);
+        return true;
+    }
+    return false;
 }
 
 export { registerGlobalKeys };

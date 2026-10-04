@@ -1,6 +1,10 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { keyPlatform } from "@/app/keybindings";
+import type { KeyEventLike } from "@/app/keybindings/keys";
+import { chordLeaderOf, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
+import { commandRegistry } from "@/app/store/command-registry";
 import { atoms, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { isEditableTarget } from "@/util/focusutil";
@@ -11,8 +15,10 @@ import { createSignal } from "solid-js";
 export type KeyHandler = (event: MuxKeyboardEvent) => boolean;
 
 const [simpleControlShift, setSimpleControlShift] = createSignal(false);
-export const globalKeyMap = new Map<string, (muxEvent: MuxKeyboardEvent) => boolean>();
-export const globalChordMap = new Map<string, Map<string, KeyHandler>>();
+/** What each command in the shortcut table (keybindings/defaults.ts) does
+ *  when its key is pressed. Filled by registerGlobalKeys (keymodel.ts); a
+ *  command without an entry runs from the command registry. */
+export const keyCommands = new Map<string, KeyHandler>();
 let globalKeybindingsDisabled = false;
 
 // track current chord state and timeout (for resetting)
@@ -33,6 +39,11 @@ function setActiveChord(activeChordArg: string) {
     }
     activeChord = activeChordArg;
     chordTimeout = setTimeout(() => resetChord(), CHORD_TIMEOUT);
+}
+
+/** A chord's first key was pressed and its second is awaited. */
+export function isChordActive(): boolean {
+    return activeChord != null;
 }
 
 export function keyboardMouseDownHandler(e: MouseEvent) {
@@ -84,24 +95,8 @@ function shouldDispatchToBlock(e: MuxKeyboardEvent): boolean {
 
 let lastHandledEvent: KeyboardEvent | null = null;
 
-// Global shortcuts that are also text-editing keys. While the user types in
-// a text field, the composer or the code editor, these keep their editing
-// meaning (word/line selection, indent, CodeMirror's delete-line) instead
-// of moving focus or replacing the pane
-// (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §3.3).
-const TEXT_EDITING_KEYS = [
-    "Ctrl:Shift:ArrowLeft",
-    "Ctrl:Shift:ArrowRight",
-    "Ctrl:Shift:ArrowUp",
-    "Ctrl:Shift:ArrowDown",
-    "Ctrl:[",
-    "Ctrl:]",
-    "Ctrl:Shift:k",
-];
-
 /** Focus is somewhere the user types. Not the terminal: its hidden textarea
- *  is focus plumbing, and the terminal decides which keys go to the shell
- *  itself (term-shell-keys.ts). */
+ *  is focus plumbing, and the terminal has its own context (terminalFocus). */
 export function isTypingFocus(el: Element | null = document.activeElement): boolean {
     if (!(el instanceof HTMLElement)) return false;
     if (el.classList.contains("xterm-helper-textarea")) return false;
@@ -109,15 +104,45 @@ export function isTypingFocus(el: Element | null = document.activeElement): bool
     return isEditableTarget(el);
 }
 
-// returns [keymatch, T]
-function checkKeyMap<T>(muxEvent: MuxKeyboardEvent, keyMap: Map<string, T>): [string, T] {
-    for (const key of keyMap.keys()) {
-        if (keyutil.checkKeyPressed(muxEvent, key)) {
-            const val = keyMap.get(key);
-            return [key, val];
-        }
-    }
-    return [null, null];
+/** Focus is in a terminal (its hidden textarea, or anywhere inside xterm). */
+export function isTerminalFocus(el: Element | null = document.activeElement): boolean {
+    return el instanceof HTMLElement && (el.classList.contains("xterm-helper-textarea") || el.closest(".xterm") != null);
+}
+
+function focusedViewType(): string {
+    const blockId = getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId;
+    return (blockId && getBlockComponentModel(blockId)?.viewModel?.viewType) || "";
+}
+
+/** Where focus is, for the shortcut table's `when` clauses. */
+export function currentKeyContext(): KeyContext {
+    const el = document.activeElement;
+    return { textInputFocus: isTypingFocus(el), terminalFocus: isTerminalFocus(el), viewType: focusedViewType() };
+}
+
+function keyEventLike(muxEvent: MuxKeyboardEvent): KeyEventLike {
+    const native = (muxEvent as { nativeEvent?: KeyboardEvent }).nativeEvent;
+    return {
+        key: muxEvent.key,
+        code: muxEvent.code,
+        ctrlKey: !!muxEvent.control,
+        shiftKey: !!muxEvent.shift,
+        altKey: !!muxEvent.alt,
+        metaKey: !!muxEvent.meta,
+        getModifierState: native?.getModifierState?.bind(native),
+    };
+}
+
+/** The table binding a key press resolves to in `ctx`, without running it. */
+export function resolveKeyEvent(muxEvent: MuxKeyboardEvent, ctx: KeyContext): ResolvedBinding | null {
+    return resolveKey(keyEventLike(muxEvent), ctx, keyPlatform());
+}
+
+/** Runs a command's key handler; false when it didn't apply. */
+export function runKeyCommand(command: string, muxEvent: MuxKeyboardEvent): boolean {
+    const handler = keyCommands.get(command);
+    if (handler) return handler(muxEvent) === true;
+    return commandRegistry.run(command);
 }
 
 export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
@@ -136,34 +161,24 @@ export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
         return false;
     }
     lastHandledEvent = nativeEvent;
+    const ctx = currentKeyContext();
+    const platform = keyPlatform();
+    const ev = keyEventLike(muxEvent);
     if (activeChord) {
-        // If we're in chord mode, look for the second key.
-        const chordBindings = globalChordMap.get(activeChord);
-        const [, handler] = checkKeyMap(muxEvent, chordBindings);
-        if (handler) {
-            resetChord();
-            return handler(muxEvent);
-        } else {
-            // invalid chord; reset state and consume key
-            resetChord();
-            return true;
-        }
-    }
-    if (isTypingFocus() && TEXT_EDITING_KEYS.some((k) => keyutil.checkKeyPressed(muxEvent, k))) {
-        return false;
-    }
-    const [chordKeyMatch] = checkKeyMap(muxEvent, globalChordMap);
-    if (chordKeyMatch) {
-        setActiveChord(chordKeyMatch);
+        // The second key of a chord: run its binding, or consume the key.
+        const leader = activeChord;
+        resetChord();
+        const second = resolveKey(ev, ctx, platform, leader);
+        if (second) runKeyCommand(second.row.command, muxEvent);
         return true;
     }
-
-    const [, globalHandler] = checkKeyMap(muxEvent, globalKeyMap);
-    if (globalHandler) {
-        const handled = globalHandler(muxEvent);
-        if (handled) {
-            return true;
-        }
+    const resolved = resolveKey(ev, ctx, platform);
+    if (resolved?.chordStart) {
+        setActiveChord(chordLeaderOf(ev, platform));
+        return true;
+    }
+    if (resolved && runKeyCommand(resolved.row.command, muxEvent)) {
+        return true;
     }
     const layoutModel = getLayoutModelForStaticTab();
     const focusedNode = layoutModel.focusedNode?.();

@@ -17,7 +17,7 @@
  * The audit ring already has the data structured; this panel just
  * renders it.
  *
- * Toggle with **Ctrl+Shift+D**. Hidden in release builds via the
+ * Toggle with **Ctrl+Alt+Shift+D**. Hidden in release builds via the
  * `isDev()` gate at the mount site; the toggle hook is no-opped in
  * release.
  *
@@ -43,6 +43,7 @@ import {
     __resetDispatchLog,
 } from "@/store/command-source";
 import { AgentPanePerfSection } from "./agent-pane-perf-section";
+import { keyLabel } from "@/app/keybindings";
 
 const DEFAULT_DISPLAY_LIMIT = 80;
 
@@ -99,8 +100,8 @@ export function DiagPanel(): JSX.Element {
     const [keyFilter, setKeyFilter] = createSignal<string>("");
 
     const onKey = (e: KeyboardEvent) => {
-        // Ctrl+Shift+D (or Meta+Shift+D on macOS where Ctrl is rare).
-        if (e.shiftKey && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") {
+        // Ctrl+Alt+Shift+D (⌘ for Ctrl on macOS). Without Alt it splits the pane.
+        if (e.shiftKey && e.altKey && (e.ctrlKey || e.metaKey) && e.code === "KeyD") {
             e.preventDefault();
             setVisible((v) => !v);
         }
@@ -190,7 +191,7 @@ export function DiagPanel(): JSX.Element {
                         🔬 Reducer Dispatch Ring
                     </div>
                     <span style={{ color: "#777" }}>
-                        ({totalDispatches()} total — Ctrl+Shift+D)
+                        ({totalDispatches()} total — {keyLabel("mod+alt+shift+d")})
                     </span>
                 </div>
                 <div

@@ -4,9 +4,9 @@
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import clsx from "clsx";
 import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { isMacOS } from "@/util/platformutil";
 import { redactSecrets } from "./redact";
 import "./CopyErrorButton.scss";
+import { keyLabel } from "@/app/keybindings";
 
 export type CopyErrorButtonVariant = "action" | "icon";
 export type CopyErrorButtonTransport = "auto" | "dom";
@@ -169,7 +169,7 @@ export function CopyErrorButton(props: CopyErrorButtonProps): JSX.Element {
                         value={fallbackText() ?? ""}
                         class="copy-error-button-fallback-text"
                     />
-                    <span class="copy-error-button-fallback-hint">Press {isMacOS() ? "⌘C" : "Ctrl+C"}</span>
+                    <span class="copy-error-button-fallback-hint">Press {keyLabel("mod+c")}</span>
                 </span>
             </Show>
         </span>

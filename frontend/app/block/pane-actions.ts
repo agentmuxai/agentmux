@@ -11,6 +11,10 @@ import { FLOATING_ONTOP_META_KEY } from "./floating-ontop-meta";
 import { splitBlockDefFor } from "./split-block-def";
 import { createBlockSplitHorizontally, createBlockSplitVertically, getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
+import { shortcutFor } from "@/app/keybindings";
+
+/** A menu item's shortcut, from the shortcut table; undefined when it has none. */
+const hint = (command: string): string | undefined => shortcutFor(command) || undefined;
 
 type SplitDirection = "up" | "down" | "left" | "right";
 
@@ -190,18 +194,18 @@ export function buildPaneContextMenu(
 
     const split: ContextMenuItem[] = has("split")
         ? [
-              { label: "Split Up", click: () => void handleSplitPane(blockData, "up") },
-              { label: "Split Down", click: () => void handleSplitPane(blockData, "down") },
-              { label: "Split Left", click: () => void handleSplitPane(blockData, "left") },
-              { label: "Split Right", click: () => void handleSplitPane(blockData, "right") },
+              { label: "Split Up", sublabel: hint("split:up"), click: () => void handleSplitPane(blockData, "up") },
+              { label: "Split Down", sublabel: hint("split:down"), click: () => void handleSplitPane(blockData, "down") },
+              { label: "Split Left", sublabel: hint("split:left"), click: () => void handleSplitPane(blockData, "left") },
+              { label: "Split Right", sublabel: hint("split:right"), click: () => void handleSplitPane(blockData, "right") },
           ]
         : [];
 
     const paneActions: ContextMenuItem[] = [
         ...(has("magnify")
-            ? [{ label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane", click: opts.onMagnifyToggle }]
+            ? [{ label: opts.magnified ? "Un-Magnify Pane" : "Magnify Pane", sublabel: hint("pane:magnify"), click: opts.onMagnifyToggle }]
             : []),
-        ...(has("close") ? [{ label: "Close Pane", click: opts.onClose }] : []),
+        ...(has("close") ? [{ label: "Close Pane", sublabel: hint("pane:close"), click: opts.onClose }] : []),
     ];
 
     // Inspect Element — opens CEF DevTools focused on whatever was

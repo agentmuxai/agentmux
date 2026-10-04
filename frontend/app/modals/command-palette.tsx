@@ -10,8 +10,9 @@ import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
 import { Modal } from "@/element/modal";
 import { fuzzySearch } from "@/app/util/fuzzysearch";
-import { createMemo, createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./command-palette.scss";
+import { shortcutFor } from "@/app/keybindings";
 
 const CATEGORY_ORDER: string[] = ["Open", "Split", "Window", "Tab", "Pane", "Dev"];
 
@@ -149,6 +150,9 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
                                 )}
                                 <span class="command-palette-item-label">{cmd.label}</span>
                                 <span class="command-palette-item-category">{cmd.category}</span>
+                                <Show when={shortcutFor(cmd.id)}>
+                                    {(k) => <kbd class="command-palette-item-shortcut">{k()}</kbd>}
+                                </Show>
                             </div>
                         )}
                     </For>

@@ -32,6 +32,7 @@ import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { keyLabel } from "@/app/keybindings";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -91,15 +92,12 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     let rootRef: HTMLDivElement | undefined;
     let cmView: EditorView | null = null;
 
-    // Platform-aware modifier glyph for the empty-state shortcut hints.
-    const isMac = /mac/i.test(navigator.platform || navigator.userAgent || "");
-    const MOD = isMac ? "⌘" : "Ctrl";
-    // The handful of shortcuts worth surfacing on the empty editor.
+    // The handful of shortcuts worth surfacing on the empty editor, in this
+    // platform's notation. Not Save: there is nothing to save until a file is open.
     const emptyShortcuts: { keys: string[]; label: string }[] = [
-        { keys: [MOD, "S"], label: "Save" },
-        { keys: [MOD, "F"], label: "Find" },
-        { keys: [MOD, "⇧", "V"], label: "Toggle .md preview" },
-        { keys: [MOD, "+ / −"], label: "Zoom" },
+        { keys: [keyLabel("mod+f")], label: "Find" },
+        { keys: [keyLabel("mod+shift+v")], label: "Toggle .md preview" },
+        { keys: [keyLabel("mod+="), keyLabel("mod+-")], label: "Zoom" },
     ];
 
     // ── Markdown rendered/source view ────────────────────────────────────────
@@ -915,7 +913,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                             class="editor-mode-btn"
                             classList={{ active: model.editorMode() === "preview" }}
                             onClick={() => model.setEditorMode("preview")}
-                            title="Rendered preview (Mod+Shift+V)"
+                            title={`Rendered preview (${keyLabel("mod+shift+v")})`}
                         >Preview</button>
                         <button
                             type="button"

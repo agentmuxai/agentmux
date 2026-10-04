@@ -1,19 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// The default shortcut table: the one place a global shortcut is defined.
-// The dispatcher, the terminal, the help pane, the menus and the docs all
-// read it (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6, §12).
-//
-// `mac` / `other` are the keys on macOS and on Windows/Linux. Window, tab and
-// pane actions use ⌘ on macOS and Ctrl+Shift elsewhere, so Alt+letter stays
-// free for the shell (§11.2). A chord is two keys separated by a space.
-//
-// `when` uses the context keys in context.ts, joined with `&&`, each
-// optionally negated with `!`.
-//
-// `skipShell`: the binding also fires while a terminal has focus. Every
-// other binding leaves the key to the shell there (§11.3).
+// The default shortcut table: the one place a global shortcut is defined. The
+// dispatcher, the terminal, the help pane, the menus and the docs all read it
+// (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6, §12).
 
 export type KeyCategory = "Tabs & windows" | "Panes" | "Find & zoom" | "Terminal" | "General";
 
@@ -21,10 +11,18 @@ export interface KeyBindingRow {
     command: string;
     label: string;
     category: KeyCategory;
+    /** Keys on macOS (keys.ts syntax). A chord is two keys separated by a space. */
     mac?: string[];
+    /** Keys on Windows/Linux. Window, tab and pane actions use Ctrl+Shift so
+     *  Alt+letter stays free for the shell (report §11.2). */
     other?: string[];
+    /** `KeyContext` flags (registry.ts) joined with `&&`, each optionally `!`. */
     when?: string;
+    /** Also fires while a terminal has focus; every other binding leaves the
+     *  key to the shell there (report §11.3). */
     skipShell?: boolean;
+    /** Rows sharing a group show as one help line ("Go to tab 1–8"). */
+    helpGroup?: string;
 }
 
 export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
@@ -42,7 +40,7 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "tab:next", label: "Next tab", category: "Tabs & windows", mac: ["meta+]", "meta+shift+]", "ctrl+Tab"], other: ["ctrl+shift+]", "ctrl+Tab"], skipShell: true },
     { command: "tab:prev", label: "Previous tab", category: "Tabs & windows", mac: ["meta+[", "meta+shift+[", "ctrl+shift+Tab"], other: ["ctrl+shift+[", "ctrl+shift+Tab"], skipShell: true },
     ...[1, 2, 3, 4, 5, 6, 7, 8].map(
-        (n): KeyBindingRow => ({ command: `tab:goto:${n}`, label: `Go to tab ${n}`, category: "Tabs & windows", mac: [`meta+${n}`], other: [`ctrl+${n}`], skipShell: true })
+        (n): KeyBindingRow => ({ command: `tab:goto:${n}`, label: `Go to tab ${n}`, helpGroup: "Go to tab 1–8", category: "Tabs & windows", mac: [`meta+${n}`], other: [`ctrl+${n}`], skipShell: true })
     ),
     { command: "tab:goto:last", label: "Go to last tab", category: "Tabs & windows", mac: ["meta+9"], other: ["ctrl+9"], skipShell: true },
 
@@ -51,22 +49,23 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "open:agent", label: "New agent pane", category: "Panes", mac: ["meta+shift+a"], other: ["ctrl+shift+a"], skipShell: true },
     { command: "split:right", label: "Split right", category: "Panes", mac: ["meta+d"], other: ["ctrl+shift+d"], skipShell: true },
     { command: "split:down", label: "Split below", category: "Panes", mac: ["meta+shift+d"], other: ["ctrl+shift+alt+d"], skipShell: true },
-    { command: "split:up", label: "Split above", category: "Panes", mac: ["ctrl+shift+s ArrowUp"], other: ["ctrl+shift+s ArrowUp"], skipShell: true },
-    { command: "split:down", label: "Split below", category: "Panes", mac: ["ctrl+shift+s ArrowDown"], other: ["ctrl+shift+s ArrowDown"], skipShell: true },
-    { command: "split:left", label: "Split left", category: "Panes", mac: ["ctrl+shift+s ArrowLeft"], other: ["ctrl+shift+s ArrowLeft"], skipShell: true },
-    { command: "split:right", label: "Split right", category: "Panes", mac: ["ctrl+shift+s ArrowRight"], other: ["ctrl+shift+s ArrowRight"], skipShell: true },
+    { command: "split:up", label: "Split above", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowUp"], other: ["ctrl+shift+s ArrowUp"], skipShell: true },
+    { command: "split:down", label: "Split below", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowDown"], other: ["ctrl+shift+s ArrowDown"], skipShell: true },
+    { command: "split:left", label: "Split left", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowLeft"], other: ["ctrl+shift+s ArrowLeft"], skipShell: true },
+    { command: "split:right", label: "Split right", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowRight"], other: ["ctrl+shift+s ArrowRight"], skipShell: true },
     { command: "pane:close", label: "Close pane", category: "Panes", mac: ["meta+w"], other: ["ctrl+shift+w"], skipShell: true },
     { command: "pane:magnify", label: "Maximize pane", category: "Panes", mac: ["meta+m"], other: ["ctrl+shift+m"], skipShell: true },
-    { command: "pane:focus:up", label: "Focus pane above", category: "Panes", mac: ["ctrl+shift+ArrowUp"], other: ["ctrl+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:focus:down", label: "Focus pane below", category: "Panes", mac: ["ctrl+shift+ArrowDown"], other: ["ctrl+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:focus:left", label: "Focus pane left", category: "Panes", mac: ["ctrl+shift+ArrowLeft"], other: ["ctrl+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
-    { command: "pane:focus:right", label: "Focus pane right", category: "Panes", mac: ["ctrl+shift+ArrowRight"], other: ["ctrl+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:focus:up", label: "Focus pane above", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowUp"], other: ["ctrl+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:focus:down", label: "Focus pane below", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowDown"], other: ["ctrl+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:focus:left", label: "Focus pane left", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowLeft"], other: ["ctrl+shift+ArrowLeft"], when: "!textInputFocus", skipShell: true },
+    { command: "pane:focus:right", label: "Focus pane right", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowRight"], other: ["ctrl+shift+ArrowRight"], when: "!textInputFocus", skipShell: true },
     { command: "pane:focus:next", label: "Next pane", category: "Panes", mac: ["F6"], other: ["F6"], skipShell: true },
     { command: "pane:focus:prev", label: "Previous pane", category: "Panes", mac: ["shift+F6"], other: ["shift+F6"], skipShell: true },
     ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(
         (n): KeyBindingRow => ({
             command: `pane:focus:${n}`,
             label: `Focus pane ${n}`,
+            helpGroup: "Focus pane 1–9",
             category: "Panes",
             mac: [`ctrl+shift+code:Digit${n}`, `ctrl+shift+code:Numpad${n}`],
             other: [`ctrl+shift+code:Digit${n}`, `ctrl+shift+code:Numpad${n}`],

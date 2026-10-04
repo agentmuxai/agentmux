@@ -34,6 +34,7 @@ import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
 import { MemoryHistory } from "@/app/view/memory-editor/MemoryHistory";
 import { PinnedEditorLayout } from "@/app/view/memory-editor/PinnedEditorLayout";
 import { sha256Hex } from "@/util/sha256";
+import { keyLabel } from "@/app/keybindings";
 
 interface NativeMemoryFileViewProps {
     agentId: string;
@@ -150,7 +151,7 @@ export function NativeMemoryFileView(props: NativeMemoryFileViewProps): JSX.Elem
                         class="memory-editor-btn is-primary"
                         disabled={draft.savingAtom()}
                         onClick={() => void save()}
-                        title="Save (Ctrl/Cmd+S)"
+                        title={`Save (${keyLabel("mod+s")})`}
                     >
                         {draft.savingAtom() ? "Saving…" : "Save"}
                     </button>

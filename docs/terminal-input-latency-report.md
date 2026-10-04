@@ -143,7 +143,7 @@ private scheduleRafWrite(data: Uint8Array) {
 
 Three perf marks are now emitted on every keypress + echo cycle. They appear in:
 - **CEF DevTools → Performance tab** (record a trace, look for `term-*` measures)
-- **AgentMux Perf HUD** (Ctrl+Shift+P) → Interactions panel
+- **AgentMux Perf HUD** (Ctrl+Alt+Shift+P) → Interactions panel
 - **Console** (marks > 100ms trigger a `[perf]` warning)
 
 ### `term-keypress`

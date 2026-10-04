@@ -3,14 +3,6 @@
 
 // One key syntax for every binding, its matcher and its label
 // (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6.2, §11.4).
-//
-//   "ctrl+shift+t"  "meta+["  "mod+f"  "F6"  "shift+F6"  "ctrl+shift+code:Digit1"
-//
-// Modifiers: ctrl, shift, alt, meta, and `mod` (⌘ on macOS, Ctrl elsewhere).
-// Letters match the typed character, falling back to the physical key when a
-// layout or AltGr changes it. Digits and punctuation match the physical key
-// (`event.code`), so they work on AZERTY and German layouts. `code:X` names a
-// physical key directly (Numpad keys, Backquote).
 
 export type KeyPlatform = "mac" | "other";
 
@@ -68,6 +60,12 @@ const NAMED_LABEL: Record<string, string> = {
     " ": "Space",
 };
 
+/**
+ * Parses `"ctrl+shift+t"`, `"meta+["`, `"mod+f"`, `"shift+F6"`, `"ctrl+code:Digit1"`.
+ * `mod` is ⌘ on macOS and Ctrl elsewhere. Letters match the typed character,
+ * falling back to the physical key; digits and punctuation match `event.code`,
+ * so they work on AZERTY and German layouts. `code:X` names a physical key.
+ */
 export function parseKey(spec: string, platform: KeyPlatform): KeySpec {
     const parts = spec.split("+");
     // "ctrl++" can't be written; the key itself is never "+" (use "shift+=").

@@ -31,6 +31,7 @@ import { attachmentNoun, fileKind } from "../attachments/file-kind";
 import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAttach";
 import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
+import { shortcutFor } from "@/app/keybindings";
 
 function pickThinkingPhrase(_exclude?: string): string {
     return "Working";
@@ -1347,7 +1348,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
                         <MicButton
                             blockId={props.viewModel!.blockId}
                             handle={props.viewModel!.voiceHandle!()}
-                            paneTitle="Speak into this agent (Ctrl+Shift+V)"
+                            paneTitle={`Speak into this agent (${shortcutFor("pane:voice")})`}
                         />
                     </div>
                 </Show>
