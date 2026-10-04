@@ -21,7 +21,7 @@ own running agent (`agentx-0623n`, identity `60a8fde6…`), not inferred:
 
 | Piece | State |
 |---|---|
-| The account's login email, recorded by Claude itself | **Yes** — the CLI writes `oauthAccount.emailAddress` to `.claude.json` inside its own config dir on every login (confirmed live: `poppercornell@gmail.com`) |
+| The account's login email, recorded by Claude itself | **Yes** — the CLI writes `oauthAccount.emailAddress` to `.claude.json` inside its own config dir on every login (confirmed live against a real account) |
 | A pointer to that config dir, in every Claude Code agent's own environment | **Yes** — `CLAUDE_CONFIG_DIR`, set at spawn for every agent (confirmed live) |
 | The current session id, in-process | **Yes** — `CLAUDE_CODE_SESSION_ID` (confirmed live, matches `db_agents.session_id` for this agent exactly) |
 | The transcript path for that session | **Yes** — `<CLAUDE_CONFIG_DIR>/projects/<slug>/<session_id>.jsonl`, where `<slug>` is `claude_layout::project_dir_name(cwd)` (`agentmux-srv/src/backend/claude_layout.rs:35`, byte-for-byte CLI-compatible since #3690) |
@@ -40,7 +40,7 @@ see §3.1's precision note on what "no tool call" actually means here.
 This session burned real effort rediscovering all of the above the hard
 way, because nothing states it:
 
-1. Asked "your core anthropic is poppercornell@gmail.com, right?" — the
+1. Asked "your core anthropic is user@example.com, right?" — the
    agent (in this same conversation) reached for `IdentityAccounts`, which
    returned an account named `"claude-oauth"` with no email at all
    (`masked_tail` blank; the MCP tool's documented return shape is
@@ -52,7 +52,7 @@ way, because nothing states it:
    storage`) — informative about the credential, useless for the email
    question, and cost a full round trip to learn that.
 3. Landed on circumstantial evidence instead — a different email
-   (`asafebgi@gmail.com`) quoted from a day-old session transcript — which
+   (`other@example.com`) quoted from a day-old session transcript — which
    was real, but was the *previous* identity binding, not the current one
    (this workspace's Claude identity has churned at least 10 times since
    August; `agentmux#3667`, filed 2026-09-24, is the open bug for the churn

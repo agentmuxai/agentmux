@@ -101,9 +101,8 @@ pub fn verify_jekt(
 // verified by *every* AgentMux instance on the network, not just its own
 // account — an HMAC key distributed that widely is no longer meaningfully
 // secret. Asymmetric signing lets the private key stay in exactly one
-// place (agentmux-cloud's Secrets Manager) while every client ships only
-// the public key, openly. See
-// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum.
+// place (the signing key held in AgentMux's private secret store) while
+// every client ships only the public key, openly.
 //
 // Reuses the exact same `signed_material` construction as host-tier HMAC —
 // same replay/reattribution-resistance properties (msgid+source+target+ts
@@ -113,25 +112,22 @@ pub fn verify_jekt(
 /// Keyed by `key_id` (carried alongside the signature in the wire format)
 /// so a future key rotation can add a new entry without invalidating
 /// verification of messages already in flight when signed under the old
-/// key. The matching private key is never present in this repo — it lives
-/// only in agentmux-cloud's Secrets Manager, held by the signing service.
+/// key. The matching private key is never present in this repo — it is
+/// the signing key held in AgentMux's private secret store, used only by
+/// the signing service.
 ///
 /// `reagent-v1-dev` was a placeholder minted during initial implementation
 /// (its private half was generated in a local shell for wiring/testing
 /// purposes and was treated as already-exposed from the moment it was
-/// generated) — kept registered here, but agentmux-cloud's signer
-/// (`muxbus/consumers/github/handler.ts`'s `REAGENT_KEY_ID`) no longer signs
-/// under it, so no genuine production traffic uses it. Left in place only
+/// generated) — kept registered here, but the signing service no longer
+/// signs under it, so no genuine production traffic uses it. Left in place only
 /// so any message that happened to be signed under it before the rotation
 /// still verifies, matching this map's whole "add, don't replace" design.
 ///
-/// `reagent-v1` (2026-08-14) is the real production key: generated via
-/// `crypto.generateKeyPairSync('ed25519', ...)` in a one-off Node script
-/// whose output was piped directly into `aws secretsmanager put-secret-value`
-/// without the private key ever being printed, logged, or otherwise
-/// appearing in any transcript — the private half lives only in
-/// agentmux-cloud's Secrets Manager (`services/infra`'s
-/// `reagent-jekt-signing-key` field), consistent with the exposure lesson
+/// `reagent-v1` (2026-08-14) is the real production key: generated so that
+/// the private key was never printed, logged, or otherwise appeared in any
+/// transcript — the private half is the signing key held in AgentMux's
+/// private secret store, consistent with the exposure lesson
 /// `reagent-v1-dev` was kept around specifically to document.
 fn reagent_public_key(key_id: &str) -> Option<[u8; 32]> {
     match key_id {
@@ -379,7 +375,7 @@ pub fn verify_channel_jekt(
     verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
-// ── General agent-to-agent WAN signing (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1) ──
+// ── General agent-to-agent WAN signing ──
 //
 // Issue #2586's second half. Asymmetric for the same reason LAN and
 // cross-channel are — the receiving instance must verify without being able to
@@ -413,8 +409,7 @@ const WAN_DOMAIN: &str = "amx-jekt-wan-v1";
 ///
 /// Binds the sending **instance** (`source_host` + `source_channel`) as well
 /// as the agent, for the same reason [`channel_signed_material`] binds
-/// `source_channel`: after
-/// `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` §2.1.2, one agent name can
+/// `source_channel`: one agent name can
 /// legitimately be live on several instances under one account — a different
 /// machine, or a different build channel on the same machine — and **each
 /// mints its own keypair**, because each srv instance has its own database.
@@ -542,7 +537,7 @@ pub fn verify_wan_jekt(
 // certificate, the revocation record, and the checks a receiver runs on the
 // fields the cloud relay carried. Storage, publishing, directory lookup and
 // replay tracking live in agentmux-srv; the cloud re-implements the chain
-// check in TypeScript (`muxbus/server/src/wan-keys.ts`) and must match the
+// check in TypeScript and must match the
 // byte formats here exactly — the fixed vectors in the tests below are the
 // contract between the two.
 
@@ -1451,7 +1446,7 @@ mod tests {
         assert!(!verify_channel_jekt(&public_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", &sig));
     }
 
-    // ── WAN tier (SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §3.1) ──
+    // ── WAN tier ──
 
     #[test]
     fn a_correctly_signed_wan_message_verifies() {
@@ -1491,7 +1486,7 @@ mod tests {
 
     #[test]
     fn a_wan_signature_is_bound_to_the_sending_instance() {
-        // SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md §2.1.2. One account can run
+        // One account can run
         // the same agent name on several instances — another machine, or
         // another build channel on the same machine — and each mints its own
         // keypair. The instance selects which key a signature is checked
@@ -1548,7 +1543,7 @@ mod tests {
     // The vectors below were computed by an independent implementation
     // (Node's `crypto`: raw Ed25519 from a PKCS#8-wrapped seed, SHA-256,
     // hand-rolled base32) and pasted in. The cloud's TypeScript chain check
-    // (`muxbus/server/src/wan-keys.ts`) asserts the same values, so a byte
+    // asserts the same values, so a byte
     // drift on either side fails a test instead of every verification.
     // Instance seed [1; 32], agent seed [2; 32], successor instance [3; 32].
 

@@ -2,10 +2,8 @@
 
 **Status:** proposed — research/design only, nothing implemented.
 **Date:** 2026-09-20
-**Verified against:** `agentmux` at `e25bbedc6` (origin/main, fetched today),
-`agentmux-cloud` at `ec77c7c6` (sibling checkout, 2026-09-18 — a couple days
-stale but architecture-relevant paths don't churn that fast; re-verify exact
-line numbers before implementation).
+**Verified against:** `agentmux` at `e25bbedc6` (origin/main, fetched today);
+re-verify exact line numbers before implementation.
 **Related:** `SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md` (the
 agent-facing write path this spec extends across machines — its own Phase 3
 gating question and its unbuilt `GlobalMemoryHistory`/`Diff`/`Revert` read
@@ -17,9 +15,7 @@ depends on its findings), `SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md` (the
 per-channel data-zone model this spec's scope decision (§2.1) has to sit on
 top of), `SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md` (the
 per-provider delivery step downstream of sync that this spec does not
-change), `agentmux-cloud/docs/REPORT_AGENTMUX_CLOUD_MONETIZATION_2026_05_30.
-md` (the only prior mention of "settings sync" anywhere in either repo — a
-one-line aspiration, not a design, see §1).
+change).
 
 ## 0. The ask
 
@@ -55,39 +51,29 @@ at all. Sync does not need to touch this step; it only needs to land rows in
 **MuxBus is the only existing outbound cloud channel, and it is a
 message bus, not a data-sync channel.** Locally,
 `agentmux-srv/src/muxbus/cloud_subscriber.rs:4-23` holds a persistent,
-authenticated (Cognito OAuth/PKCE, OS keychain) WebSocket to
-`wss://muxbus-ws.agentmux.ai` with reconnect/backoff already built. On the
-cloud side, `agentmux-cloud/muxbus/server/src/broadcast.ts:39-91` sends a
-single zero-metadata `{type:"inject_available"}` wake event to **every open
-connection globally** — the backing DynamoDB connections table has no
-ownership column (`muxbus/infrastructure/lib/constructs/muxbus-tables.ts:
-77-91`). Actual content delivery is a separate authenticated REST poll,
+authenticated (OAuth/PKCE, OS keychain) WebSocket to the MuxBus endpoint
+with reconnect/backoff already built. The cloud side sends only a
+zero-metadata `{type:"inject_available"}` wake event over that socket;
+actual content delivery is a separate authenticated REST poll,
 `GET /reactive/pending/:agent_id`. `SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_
 REMOTE_INVOCATION_2026_07_29.md` already self-audited this: cross-instance
 enumeration and RPC are explicitly non-goals of MuxBus as it exists today.
 
 **The cross-instance identity that already exists is `account_user_id`**
-(the Cognito `sub`). `agentmux-cloud/muxbus/server/src/agent-ownership.rs
-[ownership.ts]:1-19` models one account owning many `agent_id`s, and
-`auth.ts:44-59` resolves it per request. This is the natural sync scope key
-— there is no separate org/team concept yet (README.md:21 lists
-Team/Enterprise as future).
+(the account's stable user id). The cloud service already models one
+account owning many `agent_id`s and resolves the account per request. This
+is the natural sync scope key — there is no separate org/team concept yet.
 
-**No document/blob store with versioning exists in agentmux-cloud today.**
-The DynamoDB tables (`muxbus-messages`, `-agents`, `-injections`, `-quota`,
-`-connections`, `-processed-github-events`, `-login-relay`) are all
-message/metering tables, not a config-doc store.
+**No document/blob store with versioning exists in the cloud service
+today.** Its existing storage is message/metering state, not a config-doc
+store.
 
-**The only prior mention of this feature anywhere is aspirational.**
-`agentmux-cloud/docs/REPORT_AGENTMUX_CLOUD_MONETIZATION_2026_05_30.md:187`
-floats "yjs CRDT over WebSocket... settings sync is a trivial sub-case" as
-one bullet in a monetization pitch. There is no `yjs` dependency anywhere in
-either repo, no design detail beyond that sentence, and it's bundled
-alongside a distinct "WAN pairing relay" feature (direct live-instance-to-
-live-instance relay, see `PLAN_AWS_SERVERLESS_AND_WEBHOOK_DECOMMISSION_2026_
-05_30.md:144,175,234-235`) that this spec deliberately does **not** depend
-on — WAN pairing requires two devices online simultaneously; MuxBus's
-always-on cloud relay does not.
+**No prior design for this feature exists.** Settings sync has only ever
+been mentioned in passing, with no design detail and no `yjs` (or other
+CRDT) dependency anywhere. Earlier ideas bundled it with a distinct "WAN
+pairing relay" (direct live-instance-to-live-instance relay) that this
+spec deliberately does **not** depend on — WAN pairing requires two devices
+online simultaneously; MuxBus's always-on cloud relay does not.
 
 ## 2. Design
 
@@ -114,7 +100,7 @@ Each Global Memory entry (one `db_bundles` row, keyed by its existing id/
 name) syncs independently. This — not CRDT machinery — is what actually
 avoids most conflicts in practice: two instances writing about different
 topics touch different entries and never collide. Recommend against
-building the yjs-CRDT pipeline from the monetization report as a first cut;
+building a CRDT (e.g. yjs) pipeline as a first cut;
 it solves concurrent keystroke-level co-editing of a single document, which
 isn't this feature's shape (agent writes are atomic, not live-typed), and it
 would be new infrastructure with no existing precedent in either repo.
@@ -153,10 +139,9 @@ MuxBus WebSocket (`cloud_subscriber.rs`) rather than the separate WAN-
 pairing plan (§1). Add one new wake message type, `memory_updated`,
 parallel to the existing `inject_available`.
 
-**Blocking prerequisite, not optional polish**: `broadcast.ts` must stop
-fanning out globally and instead scope delivery to `account_user_id`
-(`muxbus-tables.ts`'s connections table needs an ownership column it
-currently lacks, §1). Shipping account-scoped memory sync on top of a
+**Blocking prerequisite, not optional polish**: the cloud wake broadcast
+must be scoped to `account_user_id`, not delivered to every connection.
+Shipping account-scoped memory sync on top of a
 literally-global wake broadcast would leak "an account somewhere just wrote
 memory" metadata to every connected instance on the service, and more
 importantly means the fix can't be deferred past this feature — get it right
@@ -174,18 +159,16 @@ New cloud REST endpoints, mirroring the existing `/reactive/pending/
 
 ### 2.4 Cloud storage
 
-New DynamoDB table (e.g. `muxbus-global-memory`), `PAY_PER_REQUEST` with
-PITR enabled — matching every existing table's convention in `muxbus-
-tables.ts`. PK `account_user_id`, SK `entry_id`, storing latest content plus
-the version chain (either inline or a companion `-versions` table using the
-same append-only shape as `muxbus-messages`).
+A new cloud-side store keyed by `account_user_id` and `entry_id`, with
+point-in-time recovery, storing latest content plus the append-only version
+chain.
 
 ### 2.5 Local flow
 
 `GlobalMemoryWrite` (existing REST route, `app_api/mod.rs`) is unchanged at
 the write step. Add: after the local `bundle_upsert_with_version` commit, a
 background task pushes the new version to `PUT /memory/.../entries/...`
-using the same Cognito token already held for MuxBus — no new credential
+using the same account token already held for MuxBus — no new credential
 type. On success, record the cloud-assigned cursor (new column, or a new
 `db_bundles_sync_state` table — don't overload `bundle_versions.rs`'s
 existing shape, which has no concept of "cloud cursor" today).
@@ -208,7 +191,7 @@ reconnect/backoff logic as the trigger point.
 
 ### 2.6 Security prerequisites
 
-- The `broadcast.ts` account-scoping fix (§2.3) is required, not deferred.
+- The wake-broadcast account-scoping fix (§2.3) is required, not deferred.
 - `SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md`
   flagged `ENFORCE_AGENT_BINDING` as unset — cloud-side authorization that
   an instance can only push/pull its own `account_user_id`'s entries needs
@@ -220,27 +203,24 @@ reconnect/backoff logic as the trigger point.
 ### 2.7 UX / opt-in
 
 Default **off**. Unlike MuxBus's existing text-injection relay, this ships
-Global Memory content off the local machine to `agentmux-cloud` — an
+Global Memory content off the local machine to the cloud service — an
 explicit per-instance toggle (Armory settings) is warranted, plus a manual
 "sync now" affordance for users who don't want always-on background sync.
-Note the monetization report frames "settings sync" as a paid-tier feature
-(§1) — whether this ships free or gated is a product decision this spec
-doesn't make.
+Whether this ships free or gated is a product decision this spec doesn't
+make.
 
 ## 3. Non-goals
 
 - Real-time collaborative co-editing of a single entry (this is atomic
   agent writes, not live multi-cursor typing — no CRDT needed for that
   reason, see §2.2).
-- Team/org-wide sharing across different Cognito accounts — no org concept
+- Team/org-wide sharing across different accounts — no org concept
   exists yet (§1); scope is one account's own instances only.
 - Syncing system-tier Global Memory (§2.1).
-- The WAN-pairing P2P relay described in `PLAN_AWS_SERVERLESS_AND_WEBHOOK_
-  DECOMMISSION_2026_05_30.md` — a separate, already-planned feature this
-  spec doesn't depend on or block.
+- A WAN-pairing P2P relay — a separate idea this spec doesn't depend on or
+  block.
 - Hot-reloading a running agent's already-written startup file mid-session.
-- Building the yjs-CRDT pipeline from the monetization report as a first
-  cut (§2.2) — revisit only if entry-level merge + conflict-copy proves
+- Building a CRDT pipeline as a first cut (§2.2) — revisit only if entry-level merge + conflict-copy proves
   insufficient in real use.
 
 ## 4. Open questions — not decided here
@@ -277,14 +257,14 @@ doesn't make.
 - Security (regression for §2.6): an instance authenticated as account X
   cannot push or pull account Y's entries; a `memory_updated` wake for
   account X is never delivered to a connection authenticated as account Y
-  (this is the account-scoping fix to `broadcast.ts` itself, testable
+  (this is the wake-broadcast account-scoping fix itself, testable
   independently of the rest of this feature).
 - Offline/reconnect: instance offline during a remote write; on reconnect,
   cursor-based pull catches it up fully with no manual intervention.
 
 ## 6. LAN transport (no-MuxBus path) — design sketch, not sequenced ahead of §2
 
-For users who don't want Global Memory content touching `agentmux-cloud` at
+For users who don't want Global Memory content touching the cloud service at
 all, Tier 3 (`agentmux-srv/src/backend/lan_discovery.rs` — mDNS/DNS-SD
 `_agentmux._tcp.local.` + UDP broadcast fallback on port 47891, opt-in via
 `network:lan_discovery`, default off) is the only existing alternative to
@@ -298,7 +278,7 @@ just swapping the transport under the same protocol.
 ### 6.1 What's different from the cloud path
 
 - **No durable relay.** The cloud path gets store-and-forward for free from
-  DynamoDB (§2.4) — an offline instance catches up via a cursor pull on
+  the cloud store (§2.4) — an offline instance catches up via a cursor pull on
   reconnect (§2.5). LAN has no server: if instance A writes while B is
   offline, nothing holds that delta until both are on the same LAN and
   online simultaneously. Either (a) accept that LAN sync only converges
@@ -308,7 +288,7 @@ just swapping the transport under the same protocol.
   a transient store-and-forward relay for its LAN peers — not a small
   addition, and is explicitly not proposed as part of a first cut (§6.3).
 - **No `account_user_id`-equivalent scope key.** §2.1's sync group ("every
-  channel under one Cognito login") doesn't exist on LAN — mDNS/UDP finds
+  channel under one account login") doesn't exist on LAN — mDNS/UDP finds
   *candidates* on a subnet, not "my other instances." LAN sync needs its
   own pairing step to establish which discovered peers are actually
   trusted to exchange memory content, not just which ones happen to
