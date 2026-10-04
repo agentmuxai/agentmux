@@ -648,15 +648,10 @@ before minting a new id.
 
 The unit of sync is **a record version**: a log event plus its blob.
 
-**Who may turn it on.** Every agent holds the account's user token
-(`muxbus_handlers.rs:338-340`), and a user token carries no agent or
-instance identity. So every step that widens
+**Who may turn it on.** Every step that widens
 access — turning sync on, creating a memory group, adding a UID to a
-group, approving a new instance's versions — goes through the
-integrations spec's **human-only consent flow** (§2.2 there): a pending
-request made by the desktop, a confidential consent client, and a
-relay-hosted confirm page. The relay commits nothing a user token alone
-asks for.
+group, approving a new instance's versions — needs a person to confirm it
+in the browser; an agent cannot do it alone.
 
 **Who sent a version.** Versions are signed by the sending instance's
 **instance key**, from the WAN spec's self-certifying instances
@@ -725,7 +720,7 @@ line.
   - the relay's wake gains a payload; today it is always
     `inject_available`;
   - the relay records the account for user tokens too — the
-    integrations spec's I1 change;
+    the relay's connection change (private cloud repo);
   - the desktop's `ServerMsg` enum (`cloud_subscriber.rs:112-128`) gains
     `MemoryUpdated`.
 
@@ -738,10 +733,8 @@ projected on the linked machines. This is inherent and accepted: it is
 the same logical agent's memory reaching its own counterpart, exactly as
 if it had written its MEMORY.md there itself.
 
-**Global Memory.** An agent's `GlobalMemoryWrite` would reach **every
-agent on every machine** of the account. That is why agent-authored
-Global Memory is quarantined by default on receipt (above). An operator
-who turns that off accepts the reach.
+**Global Memory.** Agent-authored Global Memory is quarantined by default
+on receipt (above); an operator can turn that off.
 
 **Source labels.** Receivers treat `source` as advisory for now (WAN
 spec open question 5); later work may extend this.
@@ -830,7 +823,7 @@ draft is dirty).
 | **M2** (UI) | Global Memory tiles and full view; history and content split; editors pinned to the bottom; dirty-draft protection; Personal Memory editing through the existing RPC; Global Memory history RPCs | — |
 | **M3** (record) | the filestore conditional append and database-read sizes; the `agent-uid:<uid>:memory` record (log, blobs, heads); the veto index and claim zones with release; the per-agent history import and baseline at first M3 spawn; time-bounded reconcile before spawn; drift into the record with claim re-checks; server-listed, host-confirmed adoption for other accounts' directories, with index union; opt-out | M1 |
 | **M4** (Global Memory record) | `global-memory:<scope>` with entry ids, order events and the import step; legacy-build capture; the bundle sidecar | M3 |
-| **M5** (cloud sync) | the integrations spec's I1 `ws-connect` change and consent flow; the WAN spec's instance keys, with instances enrolled at the relay; relay routes, transactional sequence cursor, presigned S3 bodies, broadcast payload, `MemoryUpdated`; the pending set for quarantine; Global Memory first, then memory groups | M3, M4; integrations I1; WAN instance keys |
+| **M5** (cloud sync) | the relay's connection change and consent flow (private cloud repo); the WAN spec's instance keys, with instances enrolled at the relay; relay routes, transactional sequence cursor, presigned S3 bodies, broadcast payload, `MemoryUpdated`; the pending set for quarantine; Global Memory first, then memory groups | M3, M4; integrations I1; WAN instance keys |
 | **M6** (other providers) | project the record into Gemini's memory file | M3 |
 
 **Compatibility:**
