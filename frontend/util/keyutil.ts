@@ -295,7 +295,6 @@ function adaptFromReactOrNativeKeyEvent(event: KeyboardEvent): MuxKeyboardEvent 
     return rtn;
 }
 
-
 export {
     adaptFromReactOrNativeKeyEvent,
     checkKeyPressed,

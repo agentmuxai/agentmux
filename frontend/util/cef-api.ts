@@ -603,14 +603,10 @@ export function buildCefApi(): AppApi {
             invokeCommand("install_update").catch(console.error);
         },
 
-        // --- Menu ---
-
         // --- Window controls ---
         updateWindowControlsOverlay: (rect: Dimensions) => {
             invokeCommand("update_wco", { rect }).catch(console.error);
         },
-
-        // --- Keyboard ---
 
         // --- Window Management ---
         openNewWindow: async () => {

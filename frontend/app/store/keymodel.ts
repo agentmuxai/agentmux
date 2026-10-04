@@ -1,7 +1,6 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { paneTabCapability } from "@/app/block/pane-tab-registry";
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
 import { basicTermModels } from "@/app/view/term/term-models";
 import {
@@ -281,7 +280,6 @@ function registerGlobalKeys() {
         return true;
     });
 }
-
 
 export { registerGlobalKeys };
 
