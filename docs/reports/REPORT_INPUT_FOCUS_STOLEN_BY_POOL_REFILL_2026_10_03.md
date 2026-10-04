@@ -1,6 +1,7 @@
 # Report: typing stops mid-sentence because a pool refill steals focus
 
 **Date:** 2026-10-03
+**Status:** analysis
 **Platform:** Windows
 **Symptom (user report):** "Sometimes I am typing in the agent pane and, without any reason, the focus leaves the input box and typing no longer produces text. I then need to manually select the input to continue typing." The user suspected it coincided with a sound.
 
