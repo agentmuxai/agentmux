@@ -20,6 +20,10 @@ export interface RemoteChannel {
     channel: string;
     seen_at_ms: number;
     stale: boolean;
+    /** The instance's operating system as it advertised it (`windows`,
+     *  `macos`, `linux`). Absent or empty for a peer from before it was
+     *  advertised. Display only. */
+    os?: string;
     agents: RemoteAgent[];
 }
 
@@ -43,9 +47,21 @@ export interface RemoteSection {
     title: string;
     /** How it was found, shown as a badge: trust and freshness differ. */
     badge: string;
+    tier: RemoteHost["tier"];
+    /** "Windows", "macOS" or "Linux"; null when unknown (never guessed). */
+    platform: string | null;
     stale: boolean;
     seenAtMs: number;
     agents: RemoteAgent[];
+}
+
+const PLATFORM_LABELS: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+
+/** The tag for an advertised platform. Only the three known values get one:
+ *  the value is self-reported by a peer, so anything else shows no tag
+ *  (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3). */
+export function platformLabel(os: string | null | undefined): string | null {
+    return os && Object.hasOwn(PLATFORM_LABELS, os) ? PLATFORM_LABELS[os] : null;
 }
 
 const BADGES: Record<RemoteHost["tier"], string> = { host: "this machine", lan: "LAN", cloud: "cloud" };
@@ -71,6 +87,8 @@ export function remoteSections(data: SwarmOtherInstances | null | undefined): Re
                 key: `${host.host_id}/${ch.channel}`,
                 title: channelsOnHost > 1 ? `${host.display_name} · ${ch.channel}` : host.display_name,
                 badge: BADGES[host.tier] ?? host.tier,
+                tier: host.tier,
+                platform: platformLabel(ch.os),
                 stale: ch.stale,
                 seenAtMs: ch.seen_at_ms,
                 agents: [...ch.agents].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),

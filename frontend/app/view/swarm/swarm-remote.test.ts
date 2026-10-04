@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { remoteSections, seenAgo, type RemoteHost, type SwarmOtherInstances } from "./swarm-remote";
+import { platformLabel, remoteSections, seenAgo, type RemoteHost, type SwarmOtherInstances } from "./swarm-remote";
 
 const agent = (name: string) => ({ name, block_id: `blk-${name}` });
 const channel = (name: string, agents: string[], stale = false) => ({
@@ -70,5 +70,53 @@ describe("seenAgo", () => {
         expect(seenAgo(0, 45_000)).toBe("seen 45s ago");
         expect(seenAgo(0, 5 * 60_000)).toBe("seen 5m ago");
         expect(seenAgo(0, 3 * 3600_000)).toBe("seen 3h ago");
+    });
+});
+
+// SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md section 3.
+describe("platformLabel", () => {
+    it("names the three platforms an instance advertises", () => {
+        expect(platformLabel("windows")).toBe("Windows");
+        expect(platformLabel("macos")).toBe("macOS");
+        expect(platformLabel("linux")).toBe("Linux");
+    });
+
+    it("gives no tag for anything else: unknown, missing, or text a peer made up", () => {
+        for (const v of [undefined, null, "", "freebsd", "Windows", "<b>linux</b>", "constructor", "__proto__", "toString"]) {
+            expect(platformLabel(v as string | null | undefined)).toBeNull();
+        }
+    });
+});
+
+describe("remoteSections: platform", () => {
+    const withOs = (os: string | undefined) => ({ ...channel("stable", ["Manoz"]), os });
+
+    it("carries each section's own platform, so two instances on one host keep theirs", () => {
+        const s = remoteSections(
+            data([
+                {
+                    host_id: "lan:narko",
+                    display_name: "narko",
+                    tier: "lan",
+                    channels: [{ ...withOs("windows"), channel: "stable" }, { ...withOs("linux"), channel: "wsl" }],
+                },
+                { host_id: "lan:a", display_name: "Area54", tier: "lan", channels: [withOs("macos")] },
+            ])
+        );
+        expect(s.map((x) => [x.title, x.platform])).toEqual([
+            ["Area54", "macOS"],
+            ["narko · stable", "Windows"],
+            ["narko · wsl", "Linux"],
+        ]);
+    });
+
+    it("has no platform for a peer that did not advertise one", () => {
+        const s = remoteSections(data([{ host_id: "lan:old", display_name: "old", tier: "lan", channels: [withOs(undefined)] }]));
+        expect(s[0].platform).toBeNull();
+    });
+
+    it("carries how the section was found", () => {
+        const s = remoteSections(data([{ host_id: "cloud:x", display_name: "home", tier: "cloud", channels: [withOs("linux")] }]));
+        expect([s[0].tier, s[0].badge]).toEqual(["cloud", "cloud"]);
     });
 });

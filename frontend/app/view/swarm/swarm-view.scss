@@ -1045,8 +1045,32 @@
 }
 
 .swarm-fleet-confirm-target-row {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px;
     padding: 1px 0;
     color: var(--secondary-text-color);
+
+    // An agent the action can't reach is listed but left out of the count.
+    &--unavailable {
+        opacity: 0.7;
+    }
+}
+
+.swarm-fleet-target-name {
+    color: var(--main-text-color);
+}
+
+.swarm-fleet-tag {
+    padding: 0 5px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 10px;
+}
+
+.swarm-fleet-target-reason {
+    color: var(--warning-color);
 }
 
 .swarm-fleet-staging-toggle {
@@ -1189,12 +1213,21 @@
     }
 }
 
+// The header's checkbox sits beside the collapse button, not inside it (a
+// checkbox in a button is invalid markup and would collapse the section too).
+.swarm-remote-header-row {
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+}
+
 .swarm-remote-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    width: 100%;
-    padding: 4px 10px;
+    flex: 1;
+    min-width: 0;
+    padding: 4px 10px 4px 6px;
     border: none;
     background: transparent;
     color: var(--main-text-color);
@@ -1217,7 +1250,8 @@
     white-space: nowrap;
 }
 
-.swarm-remote-badge {
+.swarm-remote-badge,
+.swarm-remote-platform {
     padding: 0 6px;
     border-radius: 8px;
     border: 1px solid var(--border-color);
@@ -1232,9 +1266,15 @@
 }
 
 .swarm-remote-agent {
-    padding: 2px 10px 2px 30px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
     font-size: 12px;
     color: var(--secondary-text-color);
+}
+
+.swarm-remote-agent-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
