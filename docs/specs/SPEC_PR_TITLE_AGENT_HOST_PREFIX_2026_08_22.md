@@ -31,8 +31,8 @@ each other in the PR list by author alone.
 ## 2. Change
 
 Any agent operating under a **shared, non-dedicated** GitHub identity (in
-practice: `scripts/gh-agent.sh` resolved the `gh-token-genericagentx`
-fallback key, not a `gh-token-<your-id>` dedicated one) must prepend its PR
+practice: `scripts/gh-agent.sh` resolved the shared fallback
+token, not a dedicated per-agent one) must prepend its PR
 **title** with:
 
 ```

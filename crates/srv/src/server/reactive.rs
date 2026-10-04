@@ -400,7 +400,7 @@ const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 /// Takes `now` explicitly (rather than calling `now_unix_secs()` itself),
 /// same reasoning as `cloud_subscriber::reagent_sig_is_fresh`: the pinned
 /// Ed25519 key's matching private half isn't in this repo (it lives only in
-/// agentmux-cloud's Secrets Manager), so tests can't mint a fresh signature
+/// the cloud service), so tests can't mint a fresh signature
 /// on demand the way the host-tier HMAC tests below do — only a fixed
 /// offline-signed fixture at a fixed `ts_secs`. Injecting `now` lets a test
 /// hold that fixture inside the freshness window without mocking the clock.
@@ -1457,8 +1457,7 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                 signed = carried.is_some(),
                 unsigned_reason,
                 // The cloud gives a row it stored WITH a valid carried tuple
-                // a deterministic `inj-w-` id (agentmux-cloud `wan-keys.ts`
-                // `wanIdempotentInjectionId`); anything else was stored
+                // a deterministic `inj-w-` id; anything else was stored
                 // unsigned, including a tuple it dropped as invalid.
                 cloud_kept_signature = request_id.starts_with("inj-w-"),
                 "cloud relay: queued for WAN delivery"

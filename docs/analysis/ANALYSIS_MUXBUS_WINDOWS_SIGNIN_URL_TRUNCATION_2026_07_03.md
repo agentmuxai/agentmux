@@ -43,7 +43,7 @@ byte-for-byte (confirmed by hitting the live endpoint directly — see §2).
   hit the identical failure the moment a provider is activated.
 
 This is **not** a deploy-timing issue. The branded `auth.muxbus.agentmux.ai` Cognito
-domain (agentmux-cloud PR #21) is live and correctly configured — confirmed directly
+domain (set up in the cloud repo) is live and correctly configured — confirmed directly
 against the endpoint (§2). The desktop-side flip to that domain (agentmux PR #1882,
 shipped in v0.49.12) is unrelated to this bug; the same truncation would happen
 against the legacy `muxbus-auth.auth.us-east-1.amazoncognito.com` prefix domain too,

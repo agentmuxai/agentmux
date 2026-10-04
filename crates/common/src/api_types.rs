@@ -354,8 +354,9 @@ pub struct InjectRequest {
     /// over.
     ///
     /// **Nothing verifies this yet.** Verification requires resolving
-    /// `(sender_account, source_agent)` to exactly one published key, which is
-    /// ambiguous until muxbus's injection storage is tenant-scoped. The field is carried now so that keys are
+    /// `(sender_account, source_agent)` to exactly one published key, which
+    /// waits on relay-side work tracked in the private cloud repo. The field
+    /// is carried now so that keys are
     /// minted and propagating by the time a verifier exists — an agent only
     /// gets a key when it is spawned.
     #[serde(default, skip_serializing_if = "Option::is_none")]

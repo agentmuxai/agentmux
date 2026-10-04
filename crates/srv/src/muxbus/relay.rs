@@ -29,8 +29,7 @@ use std::sync::Arc;
 
 use crate::backend::storage::store::Store;
 
-/// The cloud rejects anything larger (`index.ts`: "message exceeds maximum
-/// length of 10KB"). Checked locally so an oversized message fails with a
+/// The cloud rejects anything larger (10 KB maximum). Checked locally so an oversized message fails with a
 /// useful error instead of a bare 400 after a round trip.
 const MAX_RELAY_MESSAGE_BYTES: usize = 10240;
 
@@ -55,8 +54,8 @@ pub(crate) fn rest_base_url() -> String {
 
 /// The W3-S carried tuple (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md` §2.1):
 /// the sender's WAN signature and the exact values it signed, so a receiver
-/// can re-check it. Field names are the cloud's (`wan-keys.ts`
-/// `WAN_CARRIED_FIELDS`); an old cloud silently drops them.
+/// can re-check it. Field names are the cloud's; an old cloud silently
+/// drops them.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct WanCarried {
     pub wan_sig: String,
@@ -69,7 +68,7 @@ pub(crate) struct WanCarried {
     pub wan_key_fp: String,
 }
 
-/// The cloud's caps (`wan-keys.ts`): signature ≤ 128 chars, identifiers ≤ 256.
+/// The cloud's caps: signature ≤ 128 chars, identifiers ≤ 256.
 const MAX_CARRIED_SIG_CHARS: usize = 128;
 const MAX_CARRIED_ID_CHARS: usize = 256;
 
@@ -175,7 +174,7 @@ pub(crate) enum RelayOutcome {
     Queued {
         injection_id: Option<String>,
         /// Whether the target is one of the sender's own account's agents,
-        /// when the relay says (agentmux-cloud#138). `Some(false)` is a likely
+        /// when the relay says. `Some(false)` is a likely
         /// typo: the relay accepts any name.
         target_in_account: Option<bool>,
     },
@@ -190,7 +189,7 @@ pub(crate) enum RelayOutcome {
 /// so the tests can point it at a stub relay without mutating process-wide env
 /// (which would race the rest of the test binary).
 ///
-/// ## Contract (verified against `agentmux-cloud/muxbus/server/src/index.ts`)
+/// ## Contract (verified against the cloud relay, agentmuxai/agentmux-cloud)
 ///
 /// - `source_agent` travels in the **`X-Agent-ID` header, not the body** — the
 ///   route 400s without it and derives the sender from it alone.
@@ -499,7 +498,7 @@ mod tests {
         }
     }
 
-    /// agentmux-cloud#138: the relay says whether the target is one of the
+    /// The relay says whether the target is one of the
     /// sender's own account's agents; `false` reaches `SendMessage` as a
     /// likely-typo hint.
     #[tokio::test]

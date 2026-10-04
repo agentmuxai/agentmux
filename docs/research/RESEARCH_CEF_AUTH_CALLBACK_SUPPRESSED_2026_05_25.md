@@ -2,7 +2,7 @@
 
 **Date:** 2026-05-25
 **Author:** AgentA (Claude Opus 4.7)
-**Symptom:** Browser pane navigating to a 401-protected URL (e.g. `https://pulse.asaf.cc` returning `WWW-Authenticate: Basic realm="Secure Area"`) shows `ERR_INVALID_AUTH_CREDENTIALS (-338)` and falls back to the AgentMux error page. **No** HTTP Basic auth modal appears. PR #906 + four follow-ups shipped the modal end-to-end, so the code path is wired.
+**Symptom:** Browser pane navigating to a 401-protected URL (e.g. `https://protected.example.com` returning `WWW-Authenticate: Basic realm="Secure Area"`) shows `ERR_INVALID_AUTH_CREDENTIALS (-338)` and falls back to the AgentMux error page. **No** HTTP Basic auth modal appears. PR #906 + four follow-ups shipped the modal end-to-end, so the code path is wired.
 **Bug:** `RequestHandler::on_auth_credentials` is **never invoked** by CEF for this request — confirmed via the instrumentation merged in PR #1035 (`[browser-pane-auth][ENTRY]` absent from the host log; `[load-error][ENTRY]` for the same URL fires).
 
 ---
@@ -28,11 +28,11 @@ Added unconditional `tracing::info!` calls at the entry of `on_auth_credentials`
 ### 1.2 Reproduction
 
 1. `task dev` with the instrumented binary.
-2. Browser pane navigates to `https://pulse.asaf.cc`.
+2. Browser pane navigates to `https://protected.example.com`.
 3. Result in host log (`~/.agentmux/dev/main/logs/agentmux-host-v0.38.3.log.2026-05-25`):
    ```json
    {"timestamp":"2026-05-25T13:53:12.865493Z","level":"INFO",
-    "fields":{"message":"[load-error][ENTRY] url=\"https://pulse.asaf.cc/\" 
+    "fields":{"message":"[load-error][ENTRY] url=\"https://protected.example.com/\" 
       error=\"ERR_INVALID_AUTH_CREDENTIALS\" (-338) is_main_frame=true aborted=false"}}
    ```
    **No `[browser-pane-auth][ENTRY]`** anywhere in the file.
@@ -116,7 +116,7 @@ One line, zero risk. The switch is a CEF-supported flag.
 
 After the fix lands and `task dev` rebuilds:
 
-1. Navigate browser pane → `https://pulse.asaf.cc`.
+1. Navigate browser pane → `https://protected.example.com`.
 2. Tail `~/.agentmux/dev/main/logs/agentmux-host-v0.38.3.log.2026-05-25` for `[browser-pane-auth][ENTRY]`.
 3. **Expected**: the entry log fires, then the standard `[browser-pane-auth][...]` "auth-required origin=…" line fires, then the renderer surfaces the auth modal.
 4. Enter creds → the auth completes via the `browser_pane_auth_submit` IPC path that PR #906 wired.
@@ -127,7 +127,7 @@ The instrumentation merged in PR #1035 remains valuable as a permanent diagnosti
 
 ## 5. Related — `on_load_error` shows the wrong page for browser panes
 
-Separate bug observed during this investigation: `agentmux-cef/src/client/mod.rs:1120` `on_load_error` renders the AgentMux "Failed to load AgentMux frontend / Make sure the Vite dev server is running" data-URL fallback page for **any** main-frame load error, including browser pane navigation failures (this is what the user saw on pulse.asaf.cc).
+Separate bug observed during this investigation: `agentmux-cef/src/client/mod.rs:1120` `on_load_error` renders the AgentMux "Failed to load AgentMux frontend / Make sure the Vite dev server is running" data-URL fallback page for **any** main-frame load error, including browser pane navigation failures (this is what the user saw on protected.example.com).
 
 That message is intended only for the host-frontend's failure to reach `http://localhost:5173`. Browser panes should show either:
 - CEF's default chrome error page (NET::ERR_*), or

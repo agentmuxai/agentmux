@@ -5,7 +5,7 @@
 **Date:** 2026-08-22
 **Owner:** AgentY
 **Area:** local git config (this machine) / `agentmux-cloud`'s github-consumer
-"notify the committer" feature (`muxbus/consumers/github/handler.ts`)
+"notify the committer" feature
 
 ---
 
@@ -67,7 +67,7 @@ This is a **two-layer identity system that only half-works**:
 
 | Layer | Mechanism | Per-agent? |
 |---|---|---|
-| GitHub push/PR-open identity | `gh-agent.sh` resolves `gh-token-<agent>` from Secrets Manager, passed as `GH_TOKEN` scoped to one invocation | **Yes** — correctly isolated |
+| GitHub push/PR-open identity | `gh-agent.sh` resolves a per-agent token from the secret store, passed as `GH_TOKEN` scoped to one invocation | **Yes** — correctly isolated |
 | Git commit author identity | `git commit` reads `user.name`/`user.email` from config (local → global) | **No** — falls through to one shared global config |
 
 `gh-agent.sh` was built specifically to solve the first layer (its own
@@ -106,7 +106,7 @@ work I can't see from here. Recommending, not doing, until confirmed:
   `user.name`/`user.email` override in every repo clone it commits from.
   Correct but has to be repeated per clone per agent — the env-var fix
   above is a single spawn-time change that covers every repo automatically.
-- **Out of scope for this retro:** whether `handler.ts`'s committer-
+- **Out of scope for this retro:** whether the consumer's committer-
   notification feature should also cross-check the resolved committer
   identity against something else before firing. Worth a second look once
   the identity source itself is trustworthy, but fixing correct code to

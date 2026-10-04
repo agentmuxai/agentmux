@@ -113,7 +113,7 @@ pub struct InjectionRequest {
     /// (request_id, source_agent, target_agent, ts_secs, message), produced
     /// by an AgentMux-operated WAN-tier service sender (currently only the
     /// GitHub review-notification consumer, "reagent") using a private key
-    /// held exclusively in agentmux-cloud's Secrets Manager. Distinct from
+    /// held only by the cloud service. Distinct from
     /// `jekt_sig` (host-tier HMAC, symmetric, one key per local instance) —
     /// see `agentmux_common::jekt_sign`'s module doc for why WAN needs an
     /// asymmetric scheme instead. `None` for any non-reagent WAN sender or
@@ -252,8 +252,8 @@ pub struct InjectionRequest {
     /// **Carried but NOT yet verified — there is deliberately no
     /// `wan_verified` companion field yet.** Verification has two
     /// prerequisites that do not exist: resolving `(sender_account,
-    /// source_agent)` to exactly one published key needs muxbus's injection
-    /// storage to be tenant-scoped, and the
+    /// source_agent)` to exactly one published key waits on relay-side work
+    /// tracked in the private cloud repo, and the
     /// signed `msgid`/`ts_secs` must survive the cloud round trip, which
     /// today they do not — `cloud_subscriber` replaces `request_id` with the
     /// cloud's own injection id and leaves `ts_secs` unset. Adding a

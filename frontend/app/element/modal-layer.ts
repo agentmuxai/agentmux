@@ -271,7 +271,7 @@ export interface BrowserAuthRequest {
     /** Opaque id correlating this prompt with the parked CEF callback
      *  on the host side. The submit/cancel IPC echoes it back. */
     requestId: string;
-    /** Origin of the challenge (e.g. `https://pulse.asaf.cc`). Shown
+    /** Origin of the challenge (e.g. `https://protected.example.com`). Shown
      *  to the user so they know who's asking. */
     origin: string;
     /** Realm header value (e.g. `Restricted area`). Shown as the

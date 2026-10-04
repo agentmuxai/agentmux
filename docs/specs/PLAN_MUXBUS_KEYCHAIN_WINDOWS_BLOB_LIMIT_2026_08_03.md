@@ -5,8 +5,8 @@
 on the chunking design fixed (§8). — #2397
 **Context:** live-debugged on channel `local-main-b28b7a-9172ff88` (this
 machine, Windows) while checking whether GitHub PR-review jekt notifications
-were reaching that instance via the muxbus GitHub consumer
-(`agentmux-cloud/muxbus/consumers/github/handler.ts`).
+were reaching that instance via the muxbus GitHub consumer (in
+agentmuxai/agentmux-cloud).
 
 ## 1. Symptom
 
@@ -125,7 +125,7 @@ live test.
 
 ## 5. Out of scope
 
-- The GitHub-consumer Lambda side (`agentmux-cloud/muxbus/consumers/github`)
+- The GitHub-consumer side (in agentmux-cloud)
   — already correct; this was purely a local token-persistence bug.
 - Any change to `CREDENTIAL_ID` itself or the broker scheduler.
 - General "keychain write failure has no fallback" hardening beyond this one

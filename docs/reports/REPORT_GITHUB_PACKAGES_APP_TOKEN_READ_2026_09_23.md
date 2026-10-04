@@ -99,15 +99,7 @@ list too).
 
 ### 2.6 How the package is published
 
-`a5af/dev-tools/.github/workflows/publish.yml`:
-
-```yaml
-registry-url: 'https://npm.pkg.github.com'      # :114
-NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}    # :157
-npm publish --access restricted                 # :180
-```
-
-Publishing uses the **Actions `GITHUB_TOKEN`** — an installation token bound to
+The publishing workflow lives in a private repo. Publishing uses the **Actions `GITHUB_TOKEN`** — an installation token bound to
 the publishing repository — not a PAT. So writes work from inside Actions for
 the repo that owns the package. Nothing in that arrangement grants read access
 to a *different* App's installation token from outside Actions.
@@ -141,7 +133,7 @@ until that is done this remains the best explanation rather than a fact.
 
 Ranked by robustness, not by effort.
 
-**A. Classic PAT with `read:packages`, stored in `services/infra`.**
+**A. Classic PAT with `read:packages`, kept in the secret store.**
 Mirrors `gh-agent.sh`'s existing tier-3 PAT fallback, so the shape is already
 familiar here. Cost: a long-lived credential, which is exactly what
 the GitHub App identity migration (now in the private shared-infrastructure

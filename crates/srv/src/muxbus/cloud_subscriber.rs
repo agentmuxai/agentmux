@@ -762,9 +762,8 @@ async fn connect_and_run(
 }
 
 /// How often the subscriber pulls for every registered agent whether or not a
-/// wake signal arrived. The relay's wake is a best-effort broadcast
-/// (`muxbus/server/src/broadcast.ts`: a lost one "just means that sidecar
-/// catches the injection on its own poll interval"), but this client had no
+/// wake signal arrived. The relay's wake is best-effort (a lost one is
+/// meant to be caught by the client's own poll), but this client had no
 /// poll interval, so a jekt that reached the relay before its agent was
 /// subscribed waited for the next unrelated wake: 8m46s on 2026-09-30. The
 /// lease is already renewed every [`super::wan_lease::RENEW_EVERY`], so a
@@ -885,7 +884,7 @@ enum AgentSyncOutcome {
 
 /// Does `status` mean "this credential is not accepted for this request,"
 /// regardless of the specific reason? 401 = expired/invalid token. 403 =
-/// `checkAgentBinding` rejected it (this credential is bound to a
+/// the cloud's agent-binding check rejected it (this credential is bound to a
 /// different agent_id than the one it's being used for). Both mean the
 /// SAME thing operationally for a poller CURRENTLY USING A PER-AGENT
 /// CREDENTIAL: that credential can't be used for this agent, so
@@ -909,7 +908,7 @@ fn is_credential_rejected(status: reqwest::StatusCode) -> bool {
 ///   productive: the outer loop's `load_valid_token` calls
 ///   `RefreshScheduler::ensure_fresh` first, which can mint a genuinely new,
 ///   accepted access token from the refresh_token before retrying.
-/// - 403 (checkAgentBinding rejected this account for `agent_id`) →
+/// - 403 (the agent-binding check rejected this account for `agent_id`) →
 ///   `AgentSyncOutcome::Ok` (skip this agent this cycle, log a warning).
 ///   `MuxBusCredentials::is_valid()` is purely expiry-based, so the still
 ///   time-valid access token survives `load_valid_token` unchanged after a
@@ -1773,7 +1772,7 @@ mod tests {
         assert_eq!(token, "connection-token");
     }
 
-    // A checkAgentBinding rejection (403) must trigger the exact same
+    // An agent-binding rejection (403) must trigger the exact same
     // invalidate-and-retry-with-shared-token recovery as an expired token
     // (401), not silently fall through to a stalled, unretried delivery.
     #[test]

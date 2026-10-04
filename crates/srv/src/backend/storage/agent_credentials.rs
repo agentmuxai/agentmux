@@ -26,8 +26,8 @@ pub struct AgentCredential {
 }
 
 impl AgentCredential {
-    /// client_credentials tokens carry no refresh token (per the design in
-    /// agentmux-cloud#2) — "valid" just means "not expired yet," with the
+    /// client_credentials tokens carry no refresh token (per the cloud-side
+    /// design) — "valid" just means "not expired yet," with the
     /// same 300s early-refresh margin used by MuxBusCredentials.
     pub fn is_valid(&self) -> bool {
         !self.access_token.is_empty() && self.expires_at - agentmux_common::time::now_secs() > 300

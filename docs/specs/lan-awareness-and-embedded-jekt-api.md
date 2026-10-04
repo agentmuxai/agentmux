@@ -8,7 +8,7 @@
 
 ## Context
 
-AgentMux instances currently operate in isolation unless connected through AgentBus (a separate cloud-backed service at `agentbus.asaf.cc`). Two related goals:
+AgentMux instances currently operate in isolation unless connected through AgentBus (a separate cloud-backed service at `<relay-host>`). Two related goals:
 
 1. **LAN awareness** — AgentMux instances should discover and be aware of each other on the local network without any external service
 2. **Remove AgentBus dependency for local/LAN jekt** — The `inject_terminal` (jekt) capability should work through an API embedded directly in AgentMux for intra-instance and LAN scenarios. AgentBus is **not eliminated** — it remains as the cloud layer for cross-network (WAN) delivery only
@@ -32,7 +32,7 @@ Agent (e.g., Claude Code)
   │       ├─ Try 2: CROSS-INSTANCE — File registry lookup → HTTP forward
   │       │   └─ {data_dir}/agents/{agent_id}.json → POST remote:PORT/agentmux/reactive/inject
   │       │
-  │       └─ Try 3: CLOUD — POST https://agentbus.asaf.cc/reactive/inject
+  │       └─ Try 3: CLOUD — POST https://<relay-host>/reactive/inject
   │           └─ Lambda + DynamoDB, 15s polling timeout
   │           └─ Remote agent's MCP client polls /reactive/pending/{agent_id}
   │
@@ -54,7 +54,7 @@ The Rust backend (`agentmuxsrv-rs`) already has **all the primitives** for local
 
 ### AgentBus Cloud: Scoped Role
 
-AgentBus (`agentbus.asaf.cc`) is **not being removed**. Its role is being **scoped down** to cloud/WAN-only delivery — the third and final layer. It is not needed for:
+AgentBus (`<relay-host>`) is **not being removed**. Its role is being **scoped down** to cloud/WAN-only delivery — the third and final layer. It is not needed for:
 - **Intra-instance** jekt (same AgentMux process) — handled by ReactiveHandler + MessageBus
 - **LAN** jekt (same network, different machines) — handled by mDNS discovery + HTTP forwarding
 
@@ -166,7 +166,7 @@ Jekt delivery priority:
   1. LOCAL PTY     — agent on this instance → direct PTY write (sub-ms)
   2. LOCAL MSGBUS  — agent has WS connection → push via MessageBus (ms)
   3. LAN FORWARD   — agent on LAN peer → HTTP POST to peer's /agentmux/reactive/inject (low ms)
-  4. CLOUD RELAY   — agent unreachable locally/LAN → AgentBus cloud (agentbus.asaf.cc)
+  4. CLOUD RELAY   — agent unreachable locally/LAN → AgentBus cloud (<relay-host>)
 ```
 
 **Tiers 1-3** are handled entirely by AgentMux (embedded). No external dependencies.
@@ -178,7 +178,7 @@ Jekt delivery priority:
 |-------|-----------|---------|-------------|
 | Intra-instance | AgentMux (ReactiveHandler + MessageBus) | < 1ms | None |
 | LAN | AgentMux (mDNS + HTTP forward) | 1-10ms | None |
-| Cloud/WAN | AgentBus (`agentbus.asaf.cc`) | 100ms-15s | Lambda, DynamoDB, auth token |
+| Cloud/WAN | AgentBus (`<relay-host>`) | 100ms-15s | Lambda, DynamoDB, auth token |
 
 For most users (single machine or local network), AgentBus cloud is never needed. It becomes an opt-in capability for distributed/remote teams.
 
@@ -265,7 +265,7 @@ pub struct LanInstance {
          ▼                         ▼              ▼
 ┌──────────────────┐     ┌──────────────────┐   ┌─────────────────────────┐
 │ AgentMux Peer A  │     │ AgentMux Peer B  │   │ AgentBus Cloud (opt-in) │
-│ (LAN machine)    │     │ (LAN machine)    │   │ agentbus.asaf.cc        │
+│ (LAN machine)    │     │ (LAN machine)    │   │ <relay-host>            │
 │ Tier 3: LAN      │     │ Tier 3: LAN      │   │ Lambda + DynamoDB       │
 └──────────────────┘     └──────────────────┘   │ WAN/cross-network only  │
                                                  └─────────────────────────┘
@@ -282,7 +282,7 @@ pub struct LanInstance {
 - Cloud Lambda round-trip
 
 **What's preserved (Tier 4: AgentBus cloud):**
-- `agentbus.asaf.cc` remains as opt-in cloud relay for WAN delivery
+- `<relay-host>` remains as opt-in cloud relay for WAN delivery
 - DynamoDB-backed message persistence for cross-network scenarios
 - `@a5af/agentbus-client` can still be configured alongside for cloud features
 - All current jekt semantics (PTY injection, timing, audit, rate limiting)
@@ -315,7 +315,7 @@ pub struct LanInstance {
 
 ### Phase 4: Cloud Fallback Integration (AgentBus as Tier 4)
 - Embedded MCP server's `inject_terminal` adds cloud fallback as final tier
-- If local (tier 1-2) and LAN (tier 3) both fail → relay via `agentbus.asaf.cc`
+- If local (tier 1-2) and LAN (tier 3) both fail → relay via `<relay-host>`
 - Cloud config is **opt-in**: only activated if `AGENTBUS_URL` + `AGENTBUS_TOKEN` are set
 - No cloud config = tiers 1-3 only (fully self-contained)
 

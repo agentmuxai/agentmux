@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-20
 **Author:** Oozp (agent), investigating at the operator's request
-**Status:** root cause NOT conclusively confirmed, but see **§0 — live update**:
+**Status:** retro — root cause NOT conclusively confirmed, but see **§0 — live update**:
 delivery demonstrably works again as of ~08:29 PDT, which reshapes the
 ranking in §3. Treat §0 and §4 as the actionable parts.
 
@@ -71,17 +71,15 @@ ever arrived.
   artifact or a phantom event.
 - **The routing/mapping logic, as it exists in a local read-only mirror of
   `agentmux-cloud`, looks correct for this exact case.**
-  `agent-mapping.ts`'s `getAgentId()` is *documented and tested* to return
-  `undefined` for `genericagentx-workflow[bot]` on purpose (it's the shared
-  fallback identity — ambiguous by username alone), which correctly falls
-  through to `extractAgentIdFromBody()` in `events/review.ts`
+  By design the consumer maps `genericagentx-workflow[bot]` to no agent
+  (it's the shared fallback identity — ambiguous by username alone), so it
+  falls through to the PR-body tag
   (`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md`'s username-first/
   tag-fallback priority). My PR body carries
   `<!-- agentmux:agent_id=oozp -->` (verified via the GitHub API that this
-  landed correctly in the PR body after I fixed the PR metadata), which
-  matches `AGENT_ID_TAG_RE` and `SAFE_AGENT_ID_RE` cleanly. The head repo
-  (`agentmuxai`) is in `TRUSTED_REPO_OWNERS`. On paper, this should resolve
-  to `targetAgentIds: ["oozp"]` and fire a jekt.
+  landed correctly in the PR body after I fixed the PR metadata), and the
+  head repo (`agentmuxai`) is a trusted owner. On paper, this should resolve
+  to `oozp` and fire a jekt.
   - **Caveat, load-bearing:** this is a *read-only checkout belonging to a
     different agent* (`manoz-0803a`'s `agentmux-cloud`), last updated
     2026-09-18. I have no way to confirm it matches what's actually
@@ -153,8 +151,8 @@ Ranked by likelihood given the above, none confirmed:
   Accounts → AgentMux tile and check the connection status directly, or
   trigger `muxbus.status` from the frontend's own RPC channel — this
   single check would directly confirm or rule out hypothesis #1.
-- Check `agentmux-cloud`'s actual deployed Lambda version/logs for the
-  `consumers/github` function around 2026-09-20T15:09:56Z — confirms or
+- Check `agentmux-cloud`'s actual deployed version/logs for the
+  GitHub consumer around 2026-09-20T15:09:56Z — confirms or
   rules out #2 and #3 in one step, and is the only way to see whether the
   webhook fired at all. I have no access to do this myself.
 - If/when someone with repo-admin GitHub access is available, confirm the

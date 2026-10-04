@@ -8,7 +8,7 @@
 
 ## Problem
 
-AgentBus currently routes all inter-agent communication through a cloud Lambda (agentbus.asaf.cc) backed by DynamoDB. Agents sitting in panes on the same machine round-trip to AWS for every message. This creates:
+AgentBus currently routes all inter-agent communication through a cloud Lambda (<relay-host>) backed by DynamoDB. Agents sitting in panes on the same machine round-trip to AWS for every message. This creates:
 
 - **High latency** for `inject_terminal` (jekt) — HTTP polling instead of push
 - **Cloud dependency** for core local functionality — agents can't communicate offline
@@ -185,11 +185,11 @@ These use the same auth key as the rest of the backend API.
 `agentbus-client` switches transport:
 
 ```
-Before: HTTP → Lambda (agentbus.asaf.cc) → DynamoDB
+Before: HTTP → Lambda (<relay-host>) → DynamoDB
 After:  HTTP → localhost:PORT/api/bus/*   (or WebSocket)
 ```
 
-The MCP tool interface stays identical. Agents don't need to change their tool calls. The client just reads `AGENTBUS_URL` — point it to `http://localhost:{port}` instead of `https://agentbus.asaf.cc`.
+The MCP tool interface stays identical. Agents don't need to change their tool calls. The client just reads `AGENTBUS_URL` — point it to `http://localhost:{port}` instead of `https://<relay-host>`.
 
 ## Container Agent Connectivity
 

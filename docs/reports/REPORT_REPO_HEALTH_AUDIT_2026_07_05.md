@@ -241,7 +241,7 @@ The muxbus rename took in docs: only **1 post-June violation** (`SPEC_MESSAGING_
 
 ### 6.2 Jekt trust rules — three diverging copies
 
-| Aspect | main `CLAUDE.md` | main `sanitize.rs` (host tier) | cloud `muxbus/server/src/index.ts` (WAN) |
+| Aspect | main `CLAUDE.md` | main `sanitize.rs` (host tier) | cloud relay (WAN) |
 |---|---|---|---|
 | Marker fields | abbreviated | full incl. `TS=` | **missing `TS=`** |
 | Keyword list | 16 (missing `webhook secret`, `auth key`) | 19, careful | same 19 + `apiKey` |
@@ -314,8 +314,8 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 |---|---|
 | 20 | **Decide the relay story** (open-source self-hosted vs cloud.agentmux.ai paid) and fix `interagent-comms.md` + cloud README accordingly |
 | 21 | Sweep Trust Center→Armory + Bundle semantics + 17-widget list through agentmux-docs; document jekt trust markers in `security/trust-model.md`; then **redeploy the docs site** (prod pinned at 0.1.4/06-23) |
-| 22 | Unify jekt keyword list + matcher: declare main-repo spec canonical, port whole-word matching to cloud `index.ts`, add `armory` keyword everywhere, add `webhook secret`/`auth key` to CLAUDE.md |
-| 23 | Rewrite `agentmux-cloud/README.md` ("no code yet" → actual contents); adopt the "where knowledge lives" rule in both repos' CLAUDE.md |
+| 22 | Unify jekt keyword list + matcher: declare main-repo spec canonical, port whole-word matching to the cloud relay, add `armory` keyword everywhere, add `webhook secret`/`auth key` to CLAUDE.md |
+| 23 | Rewrite the cloud repo's README ("no code yet" → actual contents); adopt the "where knowledge lives" rule in both repos' CLAUDE.md |
 
 ### Tier 4 — Structural (planned engineering work, in dependency order)
 

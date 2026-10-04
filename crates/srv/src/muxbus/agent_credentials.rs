@@ -235,7 +235,7 @@ pub fn invalidate_cached_token(agent_id: &str, mstore: &Arc<Store>) {
 /// happily mints ANOTHER token from it (Cognito issues tokens for a
 /// syntactically valid client/secret regardless of binding correctness —
 /// the mismatch is caught downstream by the muxbus server's
-/// `checkAgentBinding`, not at token-issuance time), and the very next
+/// agent-binding check, not at token-issuance time), and the very next
 /// `/reactive/pending` or `/reactive/ack` call 403s again — repeating the
 /// exact same failed round trip on every subsequent `InjectAvailable`
 /// broadcast instead of falling back to the shared token (reagentx P2 on

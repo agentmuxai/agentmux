@@ -34,8 +34,8 @@ artifact distribution channel. That assumption was never verified and is **false
   - `aws s3 ls s3://dl.agentmux.ai/` → `NoSuchBucket`
   - `aws cloudfront list-distributions` → aliases are `agentmux.ai`, `www.agentmux.ai`,
     `docs.agentmux.ai`, `muxbus.agentmux.ai` only. No `dl.*`.
-- The only release-artifact bucket that exists is **`agentmux-releases`** (legacy,
-  last populated 2026-03 with `agentmux-0.31.x` portables).
+- The only release-artifact bucket that exists is a **legacy** one,
+  last populated 2026-03 with `agentmux-0.31.x` portables.
 
 **Source of the error:** carried forward from OQ2 in the prior spec ("`dl.agentmux.ai`
 S3 bucket — is it under shared-infrastructure CDK or separate?") as if it were a
@@ -45,7 +45,7 @@ settled fact rather than an open question. It then hard-coded itself into the me
 **Ground truth (decided 2026-06-30):** **GitHub Releases is the single source of
 truth** for distribution. The landing page already mirrors assets into its **own**
 bucket — `fetch-release.mjs` reads the GitHub Release via `gh`, downloads each asset,
-re-uploads to `agentmux-landing-prod` (prod) / `agentmux-landing-qa`, and writes
+re-uploads to the landing site's own prod / QA buckets, and writes
 `public/release.json` with `agentmux.ai` URLs. No separate release CDN is needed.
 
 ---
@@ -79,10 +79,10 @@ git tag v0.50.0 → push
                                                        ▼
                               landing-deploy.yml (agentmuxai/agentmux-landing)
                                 1. fetch-release.mjs → reads GH Release,
-                                   mirrors assets to agentmux-landing-prod,
+                                   mirrors assets to the landing bucket,
                                    writes public/release.json
                                 2. vite build (build:prod calls fetch-release.mjs)
-                                3. cdk deploy (agentmux-landing-prod)
+                                3. cdk deploy (landing stack)
                                 4. CloudFront invalidation
 ```
 
@@ -117,7 +117,7 @@ Secrets the corrected `release.yml` requires (agentmuxai/agentmux):
 
 ## 4. Changes to `landing-deploy.yml` (agentmuxai/agentmux-landing)
 
-The landing deploy **does** need AWS — it runs `cdk deploy` for `agentmux-landing-prod`,
+The landing deploy **does** need AWS — it runs `cdk deploy` for the landing stack,
 uploads mirrored assets to that bucket via `fetch-release.mjs`, and invalidates
 CloudFront. Per the "no new IAM roles" decision (2026-06-30), it uses **static access
 keys**, not OIDC.
@@ -153,7 +153,7 @@ Secrets the corrected `landing-deploy.yml` requires (agentmuxai/agentmux-landing
 - `extract-changelog.sh` — correct as merged.
 - Build jobs (Windows/Linux/macOS) — unchanged by this correction (macOS CEF patch
   gate is a separate workstream).
-- `shared-infrastructure` weekly-analysts fix — already merged (#375) and deployed;
+- The private infrastructure stack fix — already merged and deployed;
   out of scope here.
 
 ---

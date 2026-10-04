@@ -78,7 +78,7 @@ and, in a follow-up:
   discovery.
 - `SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md` (#3451): the
   cloud-shared Global Memory design. It is **proposed only; nothing is
-  built.** agentmux-cloud #87 built its account-scoped wake, which has no
+  built.** A cloud-side change built an account-scoped wake, which has no
   callers yet.
 - `SPEC_IDENTITY_STORE_SPLIT`, step 1b (open): moving memory and bundles
   into the global identity store.
@@ -216,10 +216,10 @@ means writing the projection somewhere new.
   - last-writer-wins and CRDTs are explicitly rejected;
   - a `memory_updated` wake on the MuxBus WebSocket;
   - `PUT /memory/:account/entries/:id` and `GET …?since=`;
-  - a DynamoDB table `muxbus-global-memory`;
+  - a new cloud-side store;
   - opt-in, off by default.
-- **Built groundwork:** agentmux-cloud #87 added account-scoped wakes
-  (`broadcast.ts:57-90`, `ws-connect.ts:81`). There are no callers.
+- **Built groundwork:** a cloud-side change added account-scoped wakes.
+  There are no callers.
 - **Local groundwork that already exists:**
   - both version tables have the same shape (`content_hash`,
     `parent_version_id`, `source`), and there is `line_diff`;
@@ -234,8 +234,8 @@ means writing the projection somewhere new.
     collide;
   - the Armory save path (`agent_handlers/bundle.rs:102`) has no push
     hook and no size cap;
-  - DynamoDB items max out at 400 KB, while entries can be 1 MB and
-    Personal files 10 MB;
+  - the cloud store's item size limit is below the 1 MB entries and
+    10 MB Personal files;
   - "remove" only clears `is_global`, so sync needs delete markers.
 - An older "settings sync" (yjs CRDTs,
   `PLAN_AWS_SERVERLESS_AND_WEBHOOK_DECOMMISSION:236`) is an aspiration
@@ -651,7 +651,7 @@ The unit of sync is **a record version**: a log event plus its blob.
 
 **Who may turn it on.** Every agent holds the account's user token
 (`muxbus_handlers.rs:338-340`), and a user token carries no agent or
-instance identity (`auth.ts:175-180`). So every step that widens
+instance identity. So every step that widens
 access — turning sync on, creating a memory group, adding a UID to a
 group, approving a new instance's versions — goes through the
 integrations spec's **human-only consent flow** (§2.2 there): a pending
@@ -712,22 +712,21 @@ line.
   - the consent-gated group and opt-in routes.
 - **Cursor:** a **server-assigned sequence number** per `(account,
   scope)`.
-  - The number and the item are written in one `TransactWriteItems`, so
+  - The number and the item are written in one transaction, so
     number N+1 never becomes visible before N.
   - Receivers dedupe by version id.
   - Desktop clocks are never trusted for ordering.
-- **Storage:** DynamoDB holds the event metadata. **Bodies go to S3** at
-  `s3://…/<account>/<sha256>`, prefixed by account.
-  - Uploads use **presigned S3 PUTs** with a sha256 checksum, because the
-    relay Lambda's roughly 6 MB body limit is below the 10 MB per-file
-    cap.
+- **Storage:** the cloud store holds the event metadata. **Bodies go to
+  object storage**, keyed by account and sha256.
+  - Uploads use **presigned PUTs** with a sha256 checksum, because the
+    relay's request body limit is below the 10 MB per-file cap.
   - Downloads are presigned GETs, issued only after the account check.
 - **What never syncs:** `projected` events and `dir_id` values, which are
   local paths.
 - **Wake** (dependencies listed in §3):
-  - `broadcast.ts` gains a payload parameter; today it is hard-coded to
-    `inject_available` (`:65`);
-  - `ws-connect.ts:74-81` stores the account for user tokens too — the
+  - the relay's wake gains a payload; today it is always
+    `inject_available`;
+  - the relay records the account for user tokens too — the
     integrations spec's I1 change;
   - the desktop's `ServerMsg` enum (`cloud_subscriber.rs:112-128`) gains
     `MemoryUpdated`.

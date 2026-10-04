@@ -14,7 +14,7 @@ Three delivery surfaces exist but are not connected into a single release flow:
 | **agentmuxai/agentmux** builds | Nightly artifacts CI passes (Linux/macOS); Windows fixed by PR #1845; no release workflow |
 | **Microsoft Store** | Spec'd in PR #1843 (not yet wired); requires Partner Center setup first |
 | **agentmux.ai landing page** | CDK + `fetch-release.mjs` deployed manually; no CI/CD workflow |
-| **gh-reporter nightly email** | Lambda healthy; `infrastructure-weekly-analysts` stack in `UPDATE_ROLLBACK_COMPLETE` |
+| **gh-reporter nightly email** | Healthy; one private infrastructure stack stuck in `UPDATE_ROLLBACK_COMPLETE` |
 
 Today a release requires manual execution of at least five independent steps across four repos/systems. Gaps: artifacts not published to GitHub Releases, landing page not auto-updated, MS Store submission manual.
 
@@ -94,16 +94,16 @@ git tag v0.50.0 → push
 
 ## 4. Implementation Plan
 
-### 4.1 Fix: `infrastructure-weekly-analysts` stuck stack
+### 4.1 Fix: stuck private infrastructure stack
 
-**Root cause:** CDK renamed two SSM Documents (`weekly-security-researcher`, `weekly-architecture-analyst`) with explicit `documentName` properties. CloudFormation cannot replace a custom-named resource in-place — it requires create-new + delete-old, which it won't do if the old name is still in use.
+**Root cause:** CDK renamed two custom-named resources. CloudFormation cannot replace a custom-named resource in-place — it requires create-new + delete-old, which it won't do if the old name is still in use.
 
-**Fix** (in `a5af/shared-infrastructure`):
-1. Remove `documentName` props from both SSM Document constructs in `weekly-analysts` CDK stack (let CDK generate unique names).
-2. `cdk deploy infrastructure-weekly-analysts` — without custom names, CloudFormation can replace by creating new names first.
+**Fix** (in the private infrastructure repo):
+1. Drop the explicit names (let CDK generate unique names).
+2. Redeploy the stack — without custom names, CloudFormation can replace by creating new names first.
 3. Verify stack reaches `UPDATE_COMPLETE`.
 
-No user-visible impact: these are internal SSM automation documents, not exposed externally.
+No user-visible impact: these are internal automation resources, not exposed externally.
 
 ---
 
@@ -206,7 +206,7 @@ The `publish` job needs the changelog entry for the current version from `VERSIO
 
 ```
 Week 1
-  ├── Fix infrastructure-weekly-analysts CFN stack (a5af/shared-infrastructure)
+  ├── Fix the stuck private infrastructure stack
   ├── Add landing-deploy.yml to agentmuxai/agentmux-landing
   └── Add extract-changelog.sh to agentmuxai/agentmux
 
@@ -246,8 +246,7 @@ Week 3 (after Partner Center setup)
 | `.github/workflows/release.yml` | agentmuxai/agentmux | **Create** |
 | `scripts/extract-changelog.sh` | agentmuxai/agentmux | **Create** |
 | `.github/workflows/landing-deploy.yml` | agentmuxai/agentmux-landing | **Create** |
-| `weekly-analysts/lib/weekly-analysts-stack.ts` | a5af/shared-infrastructure | **Edit** — remove custom `documentName` props |
-| `gh-reporter/` | a5af/shared-infrastructure | No change needed (stack healthy) |
+| private infrastructure stack | private repo | **Edit** — remove custom resource names |
 
 ---
 

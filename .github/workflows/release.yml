@@ -359,7 +359,7 @@ jobs:
   # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
   # GitHub Releases is the single source of truth for distribution. The landing
   # page (agentmux-landing/scripts/fetch-release.mjs) reads this release, mirrors
-  # the assets into its OWN bucket (agentmux-landing-prod), and serves them from
+  # the assets into its OWN bucket, and serves them from
   # agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
   # GitHub Release plus a repository_dispatch to redeploy the landing page.
   #

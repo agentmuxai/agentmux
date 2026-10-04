@@ -119,7 +119,7 @@ fn send_message_outcome_names_the_state_and_the_id() {
     assert!(t.contains("DiscoverAgents") && t.ends_with(" id=inj-42"), "{t}");
     assert!(!t.contains("signed in from your account"), "no hint unless the relay says so: {t}");
     // The relay says the target is not one of the sender's agents
-    // (agentmux-cloud#138): a likely typo, still queued.
+    // (a cloud relay change): a likely typo, still queued.
     let t = ok(json!({ "success": true, "request_id": "inj-43", "target_in_account": false }));
     assert!(t.starts_with("QUEUED for Camper via the cloud relay"), "{t}");
     assert!(t.contains("No agent of that name has signed in from your account yet, so check the spelling"), "{t}");

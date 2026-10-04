@@ -180,8 +180,8 @@ same thing.
 
 **What exists:** same-account WAN signing (W3-S, issue #2586's WAN half) is on `main`: #3734 (D1a),
 #3771 (D1b, publish + carry gate), #3775 (D2, verifier, `TRUST=wan-verified`). Tracking:
-`docs/specs/TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md`. That doc says C1 (agentmux-cloud#91) is
-"merged, **not deployed**", which is stale. `deploy.yml` ran successfully at 2026-09-25 21:00 UTC,
+`docs/specs/TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md`. That doc says C1 (the cloud-side change) is
+"merged, **not deployed**", which is stale. The cloud deploy ran successfully at 2026-09-25 21:00 UTC,
 and `https://muxbus.agentmux.ai/api/health` now reports `1.10.0` (the doc's bar is `1.9.0`).
 Cross-account verification (W0–W2) is deliberately not built.
 
@@ -207,7 +207,7 @@ published at 04:37:08, after PKCE login. Both installs are logged in to muxbus a
 - *Key rotated under a running agent:* on narko, the public key derived from AgentY's
   `AGENTMUX_WAN_KEY` equals `wan.db`'s published `agenty` key.
 - *Not carried:* every jekt between the two has an `inj-w-<hash>` id. The cloud assigns that
-  (`wan-keys.ts` `wanIdempotentInjectionId`) only to a row stored with a *valid* carried tuple
+  only to a row stored with a *valid* carried tuple
   from an account-bound sender. So both sides signed, and the relay carried and stored the
   signatures.
 

@@ -33,7 +33,7 @@ Non-goals: a general VPN, a replacement for configuration management, or access 
 | Approval precedent | The CEF `credential_broker` and memory-adoption windows open a host-process window whose result srv accepts only on a host channel secured by `AGENTMUX_HOST_REG_SECRET`. They are deliberately not an in-page modal, because agents can drive modals through `UIClick` | This is the pattern for human approval here |
 | Elevation precedent | `pkexec` with a fixed command catalog in `server/system_install_handlers.rs`; a Windows UAC helper is designed but not built (`SPEC_LAN_FIREWALL_SETUP`) | The elevation helper is a new, small component per OS |
 | Audit | A jekt audit log and an event log exist; **nothing records command execution** | An audit store is a prerequisite, not an add-on |
-| Server-side authorization | Cloud per-agent binding (`ENFORCE_AGENT_BINDING`) was log-only as of 2026-07; `conversation_trust_grant_check` is always false for tier `wan` | The multi-tier spec sequences remote invocation last, gated on enforced per-agent authorization. Section 9 keeps that gate |
+| Server-side authorization | Cloud-side per-agent authorization is tracked in the private cloud repo; `conversation_trust_grant_check` is always false for tier `wan` | The multi-tier spec sequences remote invocation last, gated on enforced per-agent authorization. Section 9 keeps that gate |
 | MCP tools | `Shell`, `PtyShell*` take `cmd`, `cwd`, `env`, `rows`, `cols` and **no host parameter**; `FleetBroadcast` is a loop of `SendMessage` | An optional target is a compatible addition |
 
 ## 4. What the research says
@@ -230,7 +230,7 @@ Phases ship separately, each usable and reviewable alone. The gates before phase
 
 | Phase | Scope | Gated on |
 |---|---|---|
-| **0 Prerequisites** | LAN reachable on a fresh install (`SPEC_LAN_FIREWALL_SETUP`, in progress); cloud per-agent binding **enforced**, not log-only; the audit store; a design decision on the encrypted channel | those landing |
+| **0 Prerequisites** | LAN reachable on a fresh install (`SPEC_LAN_FIREWALL_SETUP`, in progress); cloud-side per-agent authorization confirmed; the audit store; a design decision on the encrypted channel | those landing |
 | **1 Read-only (L0), LAN, same account** | Signed requests, the encrypted channel, grants, policy `deny`/`ask`/`auto`, the host `host.*`/`fs.read`/`log.tail` set, audit, kill switch | phase 0 |
 | **2 Act as user (L1), LAN** | `exec`, `pty`, `fs.write`, the approval window, provenance, recordings | phase 1 |
 | **3 WAN** | Outbound dial-out tunnel through the relay, end-to-end encrypted, with the same grants | phase 2 |

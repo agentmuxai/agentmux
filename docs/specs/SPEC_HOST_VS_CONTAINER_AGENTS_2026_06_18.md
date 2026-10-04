@@ -394,4 +394,4 @@ reset on every re-seed (version bump) — that's the correct mechanism.
 - `scripts/gen-seed.js:142` — current `agent_type: "host"` in seed
 - `docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md` — container architecture spec
 - `docker/Dockerfile.agent-agentmux` — container image definition
-- a5af/dev-tools: `docker/AGENT_COLORS.md` — color conventions (green=container, amber/red=host)
+- agent color conventions (green=container, amber/red=host), kept in a private tools repo

@@ -390,12 +390,8 @@ OpenClaw maintains persistent memory across sessions (vector search + compaction
 
 Like all agents, AgentClaw receives jekts from cloud services (reagent reviews, CI failures, etc.). The `agent_bus_id: "agentclaw"` wires it into the existing agentbus-github-consumer mapping.
 
-**Add to `agent-mapping.ts` in `a5af/agentbus`:**
-
-```typescript
-{ pattern: /^agentclaw-workflow\[bot\]$/, agentId: "agentclaw" },
-{ pattern: /^AgentClaw-asaf$/,            agentId: "agentclaw" },
-```
+**Add AgentClaw's GitHub usernames to the consumer's agent mapping** (in
+the private relay repo).
 
 ---
 
@@ -429,7 +425,7 @@ These two specs are **complementary, not conflicting**:
 - [ ] Bump version to `3`
 - [ ] Add `"openclaw"` to Forge UI provider dropdown
 - [ ] Add OpenClaw provider badge color/label
-- [ ] Add `agentclaw` to `agent-mapping.ts` in agentbus
+- [ ] Add `agentclaw` to the GitHub consumer's agent mapping
 
 **Result:** AgentClaw appears in Forge. Opening it launches a pwsh terminal. User runs `openclaw tui` manually until the startup sequence is refined.
 

@@ -1270,7 +1270,7 @@
 
 ## 0.55.12 — 2026-08-17
 
-- docs: add CI completion notifications spec (agentmux-cloud PR #48)
+- docs: CI completion notifications spec (kept in the private cloud repo)
 - fix(layout): shift-drag group resize no longer moves borders opposite the drag direction
 - feat(agent): filter/search bar atop MyAgentsList — quickly narrow to an existing agent by name
 - fix(agent): My Agents runtime badge matches composer-strip HOST/SANDBOX tag styling
@@ -1306,7 +1306,7 @@
 - fix(agent): pane tab-strip no longer overlaps the new-agent picker's top content
 - feat(agent): harness-then-model creation flow — pick a model when creating from a template, explanatory copy for harness vs model
 - fix(agent): create-from-template model picker reads through getProvider, not the raw static catalog
-- docs: add muxbus free-account abuse hardening spec (agentmux-cloud PR #50)
+- docs: relay spec (kept in the private cloud repo)
 - fix(agent): resolve harness+model picker through bound bundle, gate model picker on --model launch support
 
 ## 0.55.10 — 2026-08-16
@@ -4443,7 +4443,7 @@ Auto-appended by `scripts/package-cef-portable.sh`. Newest first.
 
 ## Version Bumps
 
-Always use [`@a5af/bump-cli`](https://github.com/a5af/bump-cli) — never edit version numbers manually.
+Always use `@a5af/bump-cli` — never edit version numbers manually.
 
 ```bash
 bump patch -m "Description" --commit

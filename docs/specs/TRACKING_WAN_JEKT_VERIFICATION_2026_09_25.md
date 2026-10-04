@@ -16,13 +16,13 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 |---|---|---|---|
 | — | Spec (three adversarial reviews) | #3649 | merged |
 | — | Pure primitives: instance id, key fingerprint, instance-signed certificate, revocation, envelope + freshness checks, cross-language vectors (spec §2.7) | #3727 | merged |
-| C1 | Cloud: carry the eight `wan_*` fields, store the sender account (never returned), `sender_same_account`, idempotent `(account, wan_msg_id)`, key directory + revocation routes with chain checks, `muxbus-agent-wan-keys-<env>` table | agentmux-cloud#91 | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
+| C1 | Cloud: carry the eight `wan_*` fields, store the sender account (never returned), `sender_same_account`, idempotent `(account, wan_msg_id)`, key directory + revocation routes with chain checks | cloud repo | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
 | D1a | Channel-wide `wan.db`, instance key, agent WAN keys moved into it (survive upgrades), instance id as `AGENTMUX_HOST_LABEL`, agent-delete purge reaches `wan.db` | #3734 | merged |
 | D1b | Certify + publish each agent key (`muxbus/wan_publish.rs`), relay carry gate (`relay::wan_carry_gate`) | #3771 | merged |
 | D2 | Verifier (`muxbus/wan_verify.rs`), peer cache, known instances, replay table, `TRUST=wan-verified` marker, tier rules, audit, `wan` grants off | #3775 | merged |
 | — | Agent jekt policy (`~/.agentmux/agents/CLAUDE.md`) gains `TRUST=wan-verified` | — | **needs the operator** (§3) |
 | — | Trust a verified `new` same-account instance (`ESCALATE=none`), after agents stop holding the account login (#3881) — operator decision 2026-09-26, spec §2.6 amendment | this PR | open |
-| — | Host-gated instance approval window | — | **held** for GHSA-6726-q276-g6f6 (§4); since 2026-09-26 approval only sets the label, it no longer gates the stop |
+| — | Host-gated instance approval window | — | **held** (§4); since 2026-09-26 approval only sets the label, it no longer gates the stop |
 | — | Instance retirement from the desktop | — | not started (§4) |
 | — | End-to-end run across two machines (spec §5) | — | **blocked on the C1 deploy** |
 
@@ -70,7 +70,7 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 
 | Item | Why | Unblocks when |
 |---|---|---|
-| Approval window (another install → `approved`) | Must be reachable only from the CEF host, not by agents holding `X-AuthKey`; the spec's §2.6 amendment holds it until GHSA-6726-q276-g6f6 is fixed. Until then no other install relaxes a stop. | the advisory is fixed |
+| Approval window (another install → `approved`) | Must be reachable only from the CEF host, not by agents holding `X-AuthKey`; the spec's §2.6 amendment holds it until a related host-side fix ships. | that fix ships |
 | Instance retirement | Needs the same host-gated surface as approval. The cloud already accepts revocations (C1) and the verifier honours them. | with the approval window |
 | Honouring `wan` trusted-peer grants | Grants are keyed by bare name; on WAN one name can be several instances. Needs an instance-keyed grant (table rebuild) and a way to create grants. | spec 09-17 §3.5.1 |
 | Cross-account verification (W0–W2) | Out of W3-S's scope by construction. | spec 09-17 |

@@ -139,14 +139,10 @@ MuxBus WebSocket (`cloud_subscriber.rs`) rather than the separate WAN-
 pairing plan (§1). Add one new wake message type, `memory_updated`,
 parallel to the existing `inject_available`.
 
-**Blocking prerequisite, not optional polish**: the cloud wake broadcast
-must be scoped to `account_user_id`, not delivered to every connection.
-Shipping account-scoped memory sync on top of a
-literally-global wake broadcast would leak "an account somewhere just wrote
-memory" metadata to every connected instance on the service, and more
-importantly means the fix can't be deferred past this feature — get it right
-here since it's needed for correctness anyway, not just as a hardening
-pass.
+**Blocking prerequisite, not optional polish**: the `memory_updated` wake
+must be scoped to `account_user_id`, delivered only to that account's
+connections. Get it right here since it's needed for correctness anyway,
+not just as a hardening pass.
 
 New cloud REST endpoints, mirroring the existing `/reactive/pending/
 :agent_id` poll pattern:
@@ -191,14 +187,11 @@ reconnect/backoff logic as the trigger point.
 
 ### 2.6 Security prerequisites
 
-- The wake-broadcast account-scoping fix (§2.3) is required, not deferred.
-- `SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md`
-  flagged `ENFORCE_AGENT_BINDING` as unset — cloud-side authorization that
-  an instance can only push/pull its own `account_user_id`'s entries needs
-  to be real (not just "the token happens to carry the right claim and
-  nothing double-checks it") before memory content — which may include
-  anything an agent chose to write, potentially sensitive — is stored
-  cloud-side at all.
+- The account-scoped wake (§2.3) is required, not deferred.
+- Cloud-side authorization that an instance can only push/pull its own
+  `account_user_id`'s entries must be enforced server-side before memory
+  content — which may include anything an agent chose to write, potentially
+  sensitive — is stored cloud-side at all.
 
 ### 2.7 UX / opt-in
 
@@ -257,7 +250,7 @@ make.
 - Security (regression for §2.6): an instance authenticated as account X
   cannot push or pull account Y's entries; a `memory_updated` wake for
   account X is never delivered to a connection authenticated as account Y
-  (this is the wake-broadcast account-scoping fix itself, testable
+  (this is the account-scoped wake itself, testable
   independently of the rest of this feature).
 - Offline/reconnect: instance offline during a remote write; on reconnect,
   cursor-based pull catches it up fully with no manual intervention.
@@ -341,7 +334,7 @@ from a LAN HTTP handler on the existing Tier-3 connection instead of from
 Gated on the LAN pinned-identity trust upgrade (§2 of `SPEC_MUXBUS_MULTI_
 TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md`) landing first — treat
 that as this section's own hard prerequisite, the same way §2.6 treats the
-MuxBus broadcast-scoping fix as blocking for the cloud path. Recommend
+account-scoped wake as blocking for the cloud path. Recommend
 building the cloud/MuxBus path (§1–§5) first: it's simpler, already has
 durable persistence, and validates the entry-level merge protocol before a
 second, harder-to-get-right transport is added on top of it. LAN sync is

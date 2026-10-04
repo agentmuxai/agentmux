@@ -40,17 +40,14 @@ channels.
    connection.
 2. A jekt arrives for `agentx`. The server broadcasts a zero-metadata
    `{type:"inject_available"}` wake to **every** connected socket on the
-   account — there is no per-agent or per-connection routing
-   (`index.ts:70-72`: *"routing is broadcast, not per-agent"*).
-3. Both A and B poll `GET /reactive/pending/agentx`. This is a plain DynamoDB
-   `Query` with no claim/lock (`store.ts:213-225`) — both get the same pending
-   injection.
+   account — there is no per-agent or per-connection routing.
+3. Both A and B poll `GET /reactive/pending/agentx`. The poll takes no
+   claim or lock — both get the same pending injection.
 4. Both locally deliver it (`cloud_subscriber.rs:443-466`,
    `handler.inject_message`).
-5. Both call `POST /reactive/ack`. `acknowledgeInjections` (`store.ts:232-252`)
-   does an **unconditional** `PutCommand` setting `status: "delivered"` — no
+5. Both call `POST /reactive/ack`. The ack is **unconditional** — no
    already-delivered guard, so the second ack just silently overwrites the
-   same field. Neither side sees an error.
+   first. Neither side sees an error.
 
 Net effect: the sender's one message reaches two panes, with no signal to
 either side that this happened.
@@ -58,9 +55,8 @@ either side that this happened.
 ### Severity / how urgent is this
 
 - **Not a billing problem** — `GET /reactive/pending` and `POST /reactive/ack`
-  have no `consumeQuota` call anywhere (confirmed via full grep of
-  `quota.ts`/`index.ts`); only `jekt_messages` (send) and `drone_runs`
-  (inject) are metered.
+  are not metered (confirmed in the cloud repo); only sends and
+  injects are.
 - **Not triggered by ordinary channel sprawl.** Issue #1916's own worked
   example ("15+ per-channel `agents/` registries") is explicitly *stale disk
   residue* — a collided entry's `pid` was dead and `updated_at` was ~6 weeks
@@ -108,17 +104,12 @@ deliver.
 Fix: make the **claim atomic and come first**, so only one sidecar ever
 proceeds to local delivery.
 
-### Server-side (`agentmux-cloud`, `muxbus/server/src/store.ts` + `index.ts`)
+### Server-side (`agentmux-cloud`)
 
-- Change `acknowledgeInjections` (or add a new endpoint, TBD during design) to
-  perform a **conditional** DynamoDB update:
-  ```
-  ConditionExpression: "status = :pending"
-  ExpressionAttributeValues: { ":pending": "pending" }
-  ```
-  on the existing `status` field, atomically flipping it to `"delivered"`
-  only if it was still `"pending"`.
-- On `ConditionalCheckFailedException`, return a clear "already claimed"
+- Make the ack (or a new endpoint, TBD during design) a **conditional**
+  update that atomically flips the injection to delivered only if it was
+  still pending.
+- When the condition fails, return a clear "already claimed"
   signal (e.g. `409 Conflict` or `{claimed: false}` in the response body) —
   today's ack has no failure mode to signal at all.
 - This must happen **before** the sidecar delivers locally, not after — i.e.

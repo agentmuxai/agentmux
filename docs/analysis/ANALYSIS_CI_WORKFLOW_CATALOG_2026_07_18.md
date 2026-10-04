@@ -245,7 +245,7 @@ What actually shipped from this catalog, 2026-07-18:
 | Nightly macOS CEF wiring fix (the bug that started this whole investigation) | `agentmuxai/agentmux#2223` | **Merged** |
 | Delete `input-bench-report.yml` + merge input-handler guardrails + archive stale `WORKFLOW_AUDIT_2026_06_28.md` (reagent P2 findings, addressed during review) | `agentmuxai/agentmux#2225` | **Merged** |
 | De-duplicate CEF-provisioning logic (`build-linux.yml`/`build-macos.yml` as reusable workflows called from `release.yml`) | `agentmuxai/agentmux#2227` | **Merged**, reagent-approved. Smoke-tested `build-linux.yml`'s own `workflow_dispatch` path standalone before opening; the new `workflow_call` path from `release.yml` itself was **not** end-to-end validated with a real run before merge (would require touching production signing credentials and an existing release's assets) — worth a dry-run validation before the next real release, as a heads-up rather than a blocker |
-| `gh-reporter` monitoring fix (watch both nightly workflows independently) + version bump + timeout-comment fix (reagent P1/P2 findings, addressed during review) | `a5af/shared-infrastructure#382` | **Merged** |
+| `gh-reporter` monitoring fix (watch both nightly workflows independently) + version bump + timeout-comment fix (reagent P1/P2 findings, addressed during review) | private infrastructure repo | **Merged** |
 | Delete abandoned `agenty/kimi-community-reviewer` branch | — | Done directly (branch deleted) |
 | Delete `agentmuxai/agentmux-builder` | — | Done by Asaf directly on GitHub (my token lacked the `delete_repo` scope) |
 

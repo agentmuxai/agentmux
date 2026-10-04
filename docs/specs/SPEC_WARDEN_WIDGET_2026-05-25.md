@@ -59,7 +59,7 @@ operators learn one mental model.
 |------|------|-----------|----------|--------------|------|
 | **L1 — Host** | Trusted | This `agentmuxsrv-rs` process: PTYs, ReactiveHandler, MessageBus | Tiers 1–2 | < 1 ms, same process | `X-AuthKey` (existing) |
 | **L2 — LAN** | Semi-trusted | mDNS-discovered peers on `_agentmux._tcp.local` | Tier 3 | 1–10 ms over LAN HTTP | Shared LAN key (proposed) |
-| **L3 — Internet** | Untrusted | AgentBus cloud relay (`agentbus.asaf.cc`) | Tier 4 | 100 ms – 15 s | `AGENTBUS_TOKEN` |
+| **L3 — Internet** | Untrusted | AgentBus cloud relay (`<relay-host>`) | Tier 4 | 100 ms – 15 s | `AGENTBUS_TOKEN` |
 
 The trust gradient is deliberate: defaults tighten as you move outward. A host-local
 jekt is allowed by default; a LAN jekt requires the LAN to be enrolled; an
@@ -173,7 +173,7 @@ section has identical structure so the operator learns one row:
 │
 │ ▼ INTERNET                           ☁ AgentBus · disabled  [enable…]
 │   AgentBus relay is not configured. Enable to allow cross-network
-│   jekt/send via agentbus.asaf.cc. Closed by default.
+│   jekt/send via <relay-host>. Closed by default.
 │   [Set AGENTBUS_TOKEN] [Configure allowlist]
 │
 └──────────────────────────────────────────────────────────────────────

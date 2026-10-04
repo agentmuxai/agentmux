@@ -34,7 +34,7 @@ deployable either way.
 **`environment`** (windows/linux) — Derived from the platform at seed time,
 not a fixed property of the agent identity.
 
-Similarly, the AWS secrets store (`services/infra → agent-configs`) also
+Similarly, the AWS agent-config secret also
 hardcodes `template_type: "host"|"container"` per agent — redundant with
 the Forge `agent_type` field.
 
@@ -45,7 +45,7 @@ the Forge `agent_type` field.
 1. Seed manifest defines **identity only**: id, slug, name, icon, description
 2. Provider, agent_type, and environment are set **at runtime** via the Forge
    UI or auto-detected from the platform
-3. AWS agent-configs store only **credentials and infrastructure refs** — no
+3. The AWS agent-config secret stores only **credentials and infrastructure refs** — no
    deployment topology
 
 ---
@@ -97,7 +97,7 @@ still work. New manifests can omit these fields.
 
 ### 3. AWS Agent-Configs Cleanup
 
-Remove `template_type` from `services/infra → agent-configs`. The remaining
+Remove `template_type` from the agent-config secret. The remaining
 fields are pure infrastructure refs:
 
 **Before:**
@@ -157,7 +157,7 @@ as "changed" — so no forced overwrites occur. This is the correct behavior.
 
 ### PR 2: AWS secrets cleanup
 
-1. Remove `template_type` from all agent entries in `services/infra → agent-configs`
+1. Remove `template_type` from all agent entries in the agent-config secret
 2. Update any code that reads `template_type` from the secret (if any)
 
 ---

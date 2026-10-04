@@ -135,7 +135,7 @@ Downstream consumers (MCP servers, claw, memory routing) migrate to
 read `AGENTMUX_AGENT_ID` as the stable slug. The display name is
 available for prompt templates via `AGENTMUX_AGENT_DISPLAY`.
 
-The claw host template (`a5af/claw:templates/host/CLAUDE.md`) already
+The claw host template (in the private claw repo) already
 uses `{{AGENT_DISPLAY}}` — this spec doesn't touch that, but once the
 AgentMux seed → claw bridge lands (see the sibling report
 `docs/analysis/agentx-git-identity-2026-04-14.md`), claw can source
@@ -343,7 +343,7 @@ changes; step 4 is the external-identity coupling.
 
 ### Step 5 — Polish + docs
 
-- Update the `CLAUDE.md` in `a5af/claw:templates/host/` to read
+- Update claw's host `CLAUDE.md` template to read
   from `AGENTMUX_AGENT_DISPLAY` instead of hardcoding the agent name.
   (Separate PR on the claw side — out of scope for AgentMux but
   tracked in the migration notes.)

@@ -3,16 +3,15 @@
 **Date:** 2026-09-24
 **Status:** active — the pure primitives (identifiers, certificate,
 revocation, envelope and freshness checks; §2.7) shipped in PR #3727; C1
-shipped in agentmux-cloud#91 (merged, not yet deployed); D1a (`wan.db`,
+shipped in the cloud repo (merged, not yet deployed); D1a (`wan.db`,
 instance key, agent keys, purge) shipped in PR #3734; D1b (certify, publish,
 carry gate) shipped in PR #3771; D2 (verifier, marker, tier rules, audit, `wan`
 grants off; `muxbus/wan_verify.rs`) ships in the PR that changes this line —
 see §2.8 for what it does not include. Remaining: the host-gated approval
-window (held for GHSA-6726-q276-g6f6), instance retirement, the agent
+window, instance retirement, the agent
 CLAUDE.md jekt section, the C1 deploy, and the §5 end-to-end run. Verified
 2026-09-25. Measured against `agentmux`
-`main` @ `d01833859` and `agentmux-cloud` `main` (server `1.8.3`, GitHub
-consumer `1.4.12`), both read on 2026-09-24.
+`main` @ `d01833859` and `agentmux-cloud` `main`, both read on 2026-09-24.
 **Tracking:** `TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md` — step status,
 what is live, and what still needs the operator.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
@@ -43,7 +42,7 @@ both sides."*
 **Scope:** agent-to-agent jekts carried by the muxbus cloud relay (delivery
 tier 4, `DELIVERY=wan`) **between agents of the same AgentMux account**, and
 the WAN signature path only. Both sides: the desktop (`agentmux-mcp`,
-`agentmux-srv`) and the cloud relay (`agentmux-cloud/muxbus/server`).
+`agentmux-srv`) and the cloud relay (agentmuxai/agentmux-cloud).
 Other verification paths on the WAN tier (ReAgent's `SIG=`) are unchanged by
 this spec, and this spec's guarantees are about `TRUST=wan-verified` only.
 **Relationship to the 2026-09-17 WAN-tier signing spec (no longer in this repo):** that spec
@@ -164,28 +163,20 @@ cross-account phases W0–W2. This spec:
 
 ### 1.2 Cloud
 
-- **`POST /reactive/inject`** (`muxbus/server/src/index.ts:379-485`):
-  Fastify, no JSON schema; the body is destructured into a fixed field list
-  (`:388`), and **any other field is silently discarded**. `source_agent`
-  (from `X-Agent-ID`) and `target_agent` are trimmed and lowercased
-  (`normalizeAgentId`, `:114-116`; `:384-386`, `:400`) — except sources
-  starting `github`, stored raw.
-- **Auth** (`auth.ts:131-203`): a PKCE user token yields `{userId: sub}`; an
-  M2M token yields `{clientId, accountUserId}` — the owning human's `sub`,
-  undefined only for unowned clients; the legacy shared secret yields
-  `{mode: 'legacy'}`. `checkAgentBinding` checks only M2M tokens, and only
-  logs (`agent-binding.ts:30-58`). The sender's account is never stored.
-- **Storage** (`store.ts:296-316`): `muxbus-injections-<env>`, cloud-minted
-  `id`, GSI on bare `target_agent`, `expires_at` 1800 s after creation by
-  default (`store.ts:154-165`; the desktop relay never sets `ttl_seconds`).
+The relay's internals live in the private agentmuxai/agentmux-cloud repo.
+What the desktop side depends on:
+- **`POST /reactive/inject`** keeps only a fixed field list, and **any other
+  field is silently discarded**. `source_agent` (from `X-Agent-ID`) and
+  `target_agent` are trimmed and lowercased — except sources starting
+  `github`, stored raw.
+- **Storage:** each row gets a cloud-minted `id` and expires 1800 s after
+  creation by default (the desktop relay never sets `ttl_seconds`).
 - **Delivery:**
   - A WebSocket wake broadcast, then `GET /reactive/pending/:agent_id`. The
-    only check is `X-Agent-ID == :agent_id`, so any account can read any
-    name's queue (09-17's W2 problem). The response does not include
-    `target_agent` (`index.ts:507-525`).
+    response does not include `target_agent`.
   - `POST /reactive/ack` claims the row atomically; `POST
     /reactive/release` hands it back on local failure. Release sends no wake
-    and doesn't extend `expires_at` (`store.ts:396-419`), and the desktop
+    and doesn't extend `expires_at`, and the desktop
     syncs only on a wake (`cloud_subscriber.rs:556-575`, `:673-674`).
 - **No key directory, and no cloud signature on agent traffic.** The GitHub
   consumer's `reagent_*` fields ride the row as opaque values — the
@@ -230,7 +221,7 @@ cross-account phases W0–W2. This spec:
 | §3.4.1 "reuse `reagent_sig_is_fresh`'s shape" | A 600 s window rejects deliveries the relay still holds for 1800 s (§2.4). |
 | §3.4.2 verify on both entry points | The HTTP entry point's named caller (`muxbus-client`'s fallback) sends no `X-AuthKey` and gets 401 (`server/mod.rs:3055-3068`); its other callers self-assert every field (§2.3). |
 | §3.5.1 migrate existing grants | No production path creates grants yet (§1.3). |
-| §4 W0 "closes cross-account impersonation at the cloud API" | `checkAgentBinding` never checks PKCE user or legacy tokens, and the desktop falls back to the user token when per-agent provisioning fails. W0 must also bind user tokens. |
+| §4 W0 "closes cross-account impersonation at the cloud API" | W0's scope is tracked in the private cloud repo. |
 
 ---
 
@@ -253,10 +244,8 @@ fields carried **as signed**, the ReAgent way:
 | `wan_key_fp` | srv | fingerprint of the agent public key; an **unsigned lookup hint** — a wrong value finds a key the signature won't verify under |
 | `sender_same_account` | **cloud, at `GET /reactive/pending` time** | `true` iff the row's stored sender account equals the polling caller's. Never client-supplied. |
 
-The cloud stores the sender's account (`userId ?? accountUserId`; absent for
-legacy or unowned clients) on the row but **never returns it**: the pending
-queue is readable by any account that claims the name (§1.2), and the raw
-`sub` identifies a person. If either side has no account the value is
+The cloud stores the sender's account (absent for legacy or unowned clients)
+on the row but **never returns it**: the raw account id identifies a person. If either side has no account the value is
 `false`, and the desktop logs that at debug level so a misconfigured login
 can be diagnosed.
 
@@ -296,7 +285,7 @@ so every gap degrades to `None`, never to a false alarm:
 5. **Both ids pass `validate_agent_id`**, and sizes are within the cloud's
    caps.
 
-**Cloud (`index.ts`, `store.ts`).**
+**Cloud.**
 - Accept the eight client-side fields as optional, within caps:
   - signature ≤ 128 chars;
   - identifiers ≤ 256;
@@ -535,10 +524,9 @@ first_seen_at, approved_at, revoked_at)`:
 - A local agent can still write `wan.db` directly, as the same OS user. That
   is machine compromise (§4).
 - **Amended 2026-09-24** (`SPEC_GENERIC_INTEGRATIONS_2026_09_24.md`, review
-  3): until GHSA-6726-q276-g6f6 is fixed, the host-gated window and host
-  channel protect against MCP tools, not against a same-user process. So
-  instance approval should ship enabled only in builds that include that
-  fix. Until then every instance stays `new`, and gets no relaxation.
+  3): instance approval should ship enabled only in builds that include a
+  related host-side fix. Until then every instance stays `new`, and gets no
+  relaxation.
 - **Amended 2026-09-26 (operator decision): a verified `new` instance is
   trusted too.** The operator wants same-account agents on different
   machines to act on each other's verified jekts without an operator stop.
@@ -636,7 +624,7 @@ transcript-request resolution. Deviations and scope, all deliberate:
 - **Approval.** Only this install's own instance is `approved`; every other
   verified instance is `new` (no relaxation). `wan_known_instances.approved_at`
   exists but nothing writes it: the host-gated approval window (§2.6) is not
-  built, per the GHSA-6726-q276-g6f6 amendment. Instance retirement (§2.2)
+  built, per the 2026-09-24 amendment in §2.6. Instance retirement (§2.2)
   is also not built — the cloud accepts revocations (C1) and the verifier
   honours them, but no desktop surface issues one yet.
 - **Revocation refresh is lazy.** Status is checked on first sight and
@@ -670,7 +658,7 @@ Every field is optional on every hop, so the order below is a preference:
 | D1 | agentmux | `wan.db` with its concurrency rules; instance key; agent keys imported and moved; M4d-1 purge extended; instance id in `AGENTMUX_HOST_LABEL`; certificates and publish; the carry and its gate | old cloud drops the fields → `None`; publish 404 → retried hourly |
 | D2 | agentmux | verifier; peer cache and revocation refresh; replay and known-instance tables; host-gated approval/revocation window; marker, tier rules, `wan` grants off, audit, CLAUDE.md | old senders carry nothing → `None` |
 
-- C1 is deployed by hand (`deploy.yml`, `workflow_dispatch`). Check
+- C1 is deployed by hand. Check
   `/api/health` `SERVER_VERSION` before relying on it.
 - D1 and D2 may ship together.
 - Agents keep their old host label until respawned, and the carry gate sends
@@ -704,8 +692,7 @@ Every field is optional on every hop, so the order below is a preference:
     or a separate user) is open question 5.
 - **Cross-account identity.** Out of scope by construction (§2.3).
 - **Unsigned impersonation** is unchanged: an unsigned jekt still renders
-  `TRUST=network-claimed`. Binding user tokens in W0 (§1.4) closes that at
-  the API.
+  `TRUST=network-claimed`. W0 (§1.4) addresses that at the API.
 
 **No longer a residual: a compromised cloud replacing an existing
 instance's keys.** It can't produce a certificate under the instance key, so
@@ -830,8 +817,6 @@ revocations (`None`, or delayed revocation). It cannot forge them.
 - `CLAUDE.md` (with D2)
 
 **agentmux-cloud**
-- `muxbus/server/src/index.ts` — inject/pending fields, key and revocation
-  routes
-- `muxbus/server/src/store.ts` — row fields, sender account, idempotency
-- new: `muxbus/server/src/wan-keys.ts` — record and revocation chain checks
-- `muxbus/infrastructure/lib/constructs/muxbus-tables.ts` — key table
+- inject/pending fields, key and revocation routes; row fields, sender
+  account, idempotency; record and revocation chain checks; the key table
+  (paths are in the private repo)
