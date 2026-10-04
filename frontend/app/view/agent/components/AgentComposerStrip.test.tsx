@@ -940,9 +940,9 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
 
     it("an email that fits is shown whole", () => {
         const { container } = render(() => (
-            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="owner@example.com" />
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" authEmail="alice@example.com" />
         ));
-        expect(chip(container)).toHaveTextContent("owner@example.com");
+        expect(chip(container)).toHaveTextContent("alice@example.com");
     });
 
     it("keeps 'Logged in' when no email is known", () => {
@@ -953,7 +953,7 @@ describe("AgentComposerStrip — sign-in chip shows the account email", () => {
 
     it("never shows an email while signed out", () => {
         const { container } = render(() => (
-            <AgentComposerStrip {...baseProps} authStatus="unauthenticated" authEmail="owner@example.com" />
+            <AgentComposerStrip {...baseProps} authStatus="unauthenticated" authEmail="alice@example.com" />
         ));
         expect(chip(container)).toHaveTextContent("Not logged in");
         expect(chip(container)).not.toHaveTextContent("@");
@@ -975,16 +975,16 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="authenticated"
-                authEmail="owner@example.com"
+                authEmail="alice@example.com"
                 canSwitchAccount={true}
                 onSwitchAccount={onSwitchAccount}
             />
         ));
         const btn = link(container)!;
         expect(btn).not.toBeNull();
-        expect(btn).toHaveTextContent("owner@example.com");
+        expect(btn).toHaveTextContent("alice@example.com");
         expect(btn.getAttribute("aria-haspopup")).toBe("menu");
-        expect(chip(container).getAttribute("title")).toBe("Signed in as owner@example.com. Click to switch account.");
+        expect(chip(container).getAttribute("title")).toBe("Signed in as alice@example.com. Click to switch account.");
         expect(chip(container).querySelector(".agent-composer-strip-auth-dot")).not.toBeNull();
         expect(chip(container).classList.contains("agent-composer-strip-auth--ok")).toBe(true);
 
@@ -1010,14 +1010,14 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="authenticated"
-                authEmail="owner@example.com"
+                authEmail="alice@example.com"
                 canSwitchAccount={false}
                 onSwitchAccount={() => {}}
             />
         ));
         expect(link(container)).toBeNull();
-        expect(chip(container)).toHaveTextContent("owner@example.com");
-        expect(chip(container).getAttribute("title")).toBe("Signed in as owner@example.com");
+        expect(chip(container)).toHaveTextContent("alice@example.com");
+        expect(chip(container).getAttribute("title")).toBe("Signed in as alice@example.com");
     });
 
     it("stays plain text when it could switch but has no handler", () => {
@@ -1025,7 +1025,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
             <AgentComposerStrip
                 {...baseProps}
                 authStatus="authenticated"
-                authEmail="owner@example.com"
+                authEmail="alice@example.com"
                 canSwitchAccount={true}
             />
         ));
@@ -1038,15 +1038,15 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 {...baseProps}
                 loading={true}
                 authStatus="authenticated"
-                authEmail="owner@example.com"
+                authEmail="alice@example.com"
                 canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />
         ));
         expect(link(container)).toBeNull();
-        expect(chip(container)).toHaveTextContent("owner@example.com");
+        expect(chip(container)).toHaveTextContent("alice@example.com");
         expect(chip(container).getAttribute("title")).toBe(
-            "Signed in as owner@example.com. Switching accounts restarts the agent — wait for the current turn to finish."
+            "Signed in as alice@example.com. Switching accounts restarts the agent — wait for the current turn to finish."
         );
     });
 
@@ -1056,7 +1056,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 {...baseProps}
                 compacting={{ startedAt: 1 } as never}
                 authStatus="authenticated"
-                authEmail="owner@example.com"
+                authEmail="alice@example.com"
                 canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />
@@ -1071,7 +1071,7 @@ describe("AgentComposerStrip — sign-in chip switches account", () => {
                 {...baseProps}
                 loading={loading()}
                 authStatus="authenticated"
-                authEmail="owner@example.com"
+                authEmail="alice@example.com"
                 canSwitchAccount={true}
                 onSwitchAccount={() => {}}
             />

@@ -29,8 +29,7 @@ base64 = "0.22"
 # WAN-tier jekt sender signing (jekt_sign.rs's reagent_* functions) — verify
 # only, on the agentmux-srv side. Asymmetric (not HMAC like host-tier)
 # because the verifying population is every AgentMux instance on WAN, not a
-# single srv that minted its own key — see
-# docs/specs/<removed-spec>.md §6.2 addendum.
+# single srv that minted its own key.
 ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 
 # `process::kill_pid` / `kill_process_group` — SIGTERM/SIGKILL by pid and

@@ -4,10 +4,9 @@ name: No Co-Authored-By trailers
 # `agentmuxai`, and the canonical copy lives in `a5af/shared-infrastructure`
 # (a private repo under a different, non-enterprise-linked account) —
 # GitHub's reusable-workflow access control has no cross-owner allowlist for
-# a private repo short of making it public. See
-# https://github.com/a5af/shared-infrastructure/blob/main/docs/specs/SPEC_COAUTHOR_TRAILER_SERVER_SIDE_CHECK_2026_09_20.md
-# for the source of truth; keep this file in sync with that repo's
-# reusable-no-coauthor-trailers.yml by hand.
+# a private repo short of making it public. The source of truth is the
+# co-author trailer check spec in that repo; keep this file in sync with
+# its reusable workflow by hand.
 
 on:
   pull_request:

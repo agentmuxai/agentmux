@@ -3,7 +3,7 @@
 
 //! Per-agent Ed25519 keypair for general agent-to-agent WAN-tier jekt
 //! signing. See `db_agent_wan_keys` in migrations.rs (OBJECT_SCHEMA_VERSION
-//! v36) and docs/specs/<removed-spec>.md §3.1.
+//! v36).
 //!
 //! Mirrors `agent_lan_keys.rs`: one row per locally-registered agent_id,
 //! minted once (first call to `agent_wan_key_ensure`), with the PRIVATE half
@@ -31,8 +31,8 @@
 //!
 //! **Scope note:** minting and signing ship ahead of verification on purpose.
 //! Verifying a WAN signature requires resolving `(sender_account,
-//! source_agent)` to exactly one key, which is ambiguous until muxbus's
-//! injection storage is tenant-scoped (that spec's §2.1, phase W2). An agent
+//! source_agent)` to exactly one key, which waits on relay-side work tracked
+//! in the private cloud repo. An agent
 //! only receives a key when it is spawned, so minting now is what makes
 //! verification meaningful later instead of applying to almost nobody.
 

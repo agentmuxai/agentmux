@@ -418,7 +418,7 @@ describe("ReAgent quota skip marker", () => {
         expect(evaluateCodexGate({ headSha: OLD, comments: [edited] }).state).toBe("pending");
     });
 
-    // a5af/reagent#282: ReAgent writes the note before reading Codex's
+    // ReAgent writes the note before reading Codex's
     // answers, so a skip can name, and post-date, a head Codex answered.
     it("never overrides Codex findings on the head, even when the skip is newer", () => {
         const r = evaluateCodexGate({

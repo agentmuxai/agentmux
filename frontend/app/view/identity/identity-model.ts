@@ -402,7 +402,7 @@ function ellipsizeMiddle(s: string, head: number, tail: number): string {
  * character + last two (the tail is what tells `…one@` from `…two@`). Only
  * when that minimum still doesn't fit does the domain shorten the same way,
  * keeping its TLD. E.g. at the default 22, `jonathan.ross@anthropic.com` →
- * `jonat…ss@anthropic.com`; at 12, `owner@example.com` → `a…gi@g…l.com`.
+ * `jonat…ss@anthropic.com`; at 12, `alice@example.com` → `a…ce@e…e.com`.
  * A part already at or below its minimum is never shortened, so a
  * pathological address can still exceed `max` rather than lose its shape.
  */

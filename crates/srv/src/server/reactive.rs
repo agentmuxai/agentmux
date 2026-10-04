@@ -371,9 +371,8 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
 /// `JEKT_SIG_MAX_AGE_SECS` above but WAN-scoped: wider than host-tier's
 /// 300s because this covers real network delivery latency, not a
 /// same-machine call — matches `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`
-/// (the WS delivery path's own constant of the same value) and the
-/// github-consumer Lambda's own REVIEW_NOTIFICATION_TTL_SECONDS delivery
-/// window in the agentmux-cloud repo.
+/// (the WS delivery path's own constant of the same value) and the review
+/// notifications' own delivery window.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
 /// WAN-tier reagent-signature verification for the HTTP
@@ -400,7 +399,7 @@ const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 /// Takes `now` explicitly (rather than calling `now_unix_secs()` itself),
 /// same reasoning as `cloud_subscriber::reagent_sig_is_fresh`: the pinned
 /// Ed25519 key's matching private half isn't in this repo (it lives only in
-/// agentmux-cloud's Secrets Manager), so tests can't mint a fresh signature
+/// the cloud service), so tests can't mint a fresh signature
 /// on demand the way the host-tier HMAC tests below do — only a fixed
 /// offline-signed fixture at a fixed `ts_secs`. Injecting `now` lets a test
 /// hold that fixture inside the freshness window without mocking the clock.
@@ -1456,10 +1455,9 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                 injection_id = %request_id,
                 signed = carried.is_some(),
                 unsigned_reason,
-                // The cloud gives a row it stored WITH a valid carried tuple
-                // a deterministic `inj-w-` id (agentmux-cloud `wan-keys.ts`
-                // `wanIdempotentInjectionId`); anything else was stored
-                // unsigned, including a tuple it dropped as invalid.
+                // The relay answers with an `inj-w-` id when it kept a valid
+                // carried tuple; any other id means the message travels
+                // unsigned, including when it dropped a tuple as invalid.
                 cloud_kept_signature = request_id.starts_with("inj-w-"),
                 "cloud relay: queued for WAN delivery"
             );
@@ -1534,8 +1532,7 @@ pub(super) async fn handle_reactive_agents(
 ///
 /// This route is reachable with the broadcast `lan_key`
 /// (`lan_or_full_auth_middleware`), so treat its output as public to anyone
-/// on the local network: `<removed-spec>.md`
-/// (LAN P0-1) deliberately shrank what a captured `lan_key` is worth, and
+/// on the local network: the LAN trust work deliberately shrank what a captured `lan_key` is worth, and
 /// this widens it by exactly one thing — enumerating agent names. That was
 /// an explicit, repo-owner-confirmed decision (2026-09-08): a `lan_key`
 /// holder could already confirm any *specific* name via

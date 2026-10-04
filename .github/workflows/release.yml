@@ -4,7 +4,7 @@ name: Release
 # emergency reruns. Verifies version consistency, builds all three platform
 # artifacts, publishes a GitHub Release (the single source of truth for
 # distribution), and triggers the landing page deploy. Asset mirroring to
-# agentmux.ai is done by the landing page itself (fetch-release.mjs) — this
+# agentmux.ai is done by the landing page itself — this
 # workflow never touches S3/AWS.
 #
 # WinGet/Microsoft Store submission jobs are disabled (see "Phase 4" below,
@@ -358,9 +358,8 @@ jobs:
 
   # ── Phase 3: Publish GitHub Release ───────────────────────────────────────
   # GitHub Releases is the single source of truth for distribution. The landing
-  # page (agentmux-landing/scripts/fetch-release.mjs) reads this release, mirrors
-  # the assets into its OWN bucket (agentmux-landing-prod), and serves them from
-  # agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
+  # page reads this release, mirrors the assets into its own storage, and
+  # serves them from agentmux.ai — so this job must NOT touch S3 or AWS. Its only handoff is the
   # GitHub Release plus a repository_dispatch to redeploy the landing page.
   #
   # `if: !failure() && !cancelled()` rather than plain `success()` is

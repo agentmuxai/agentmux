@@ -214,7 +214,7 @@ async fn fetch_revoked(dir: &Directory<'_>, instance_id: &str) -> Option<bool> {
 
 /// The instance's status (§2.6). This install is approved implicitly. Any
 /// other instance is approved only through the host-gated window, which
-/// ships disabled until <advisory> is fixed, so it stays `new`.
+/// ships disabled, so it stays `new`.
 /// Revocation is checked on first sight and at most hourly after.
 async fn instance_status(
     wan: &WanIdentityStore,

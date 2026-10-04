@@ -28,7 +28,7 @@ describe("accountLabel", () => {
 describe("shortenEmail", () => {
     describe("default budget (22)", () => {
         it("returns an email that fits unchanged", () => {
-            expect(shortenEmail("owner@example.com")).toBe("owner@example.com");
+            expect(shortenEmail("alice@example.com")).toBe("alice@example.com");
             expect(shortenEmail("someone@anthropic.com")).toBe("someone@anthropic.com");
         });
 
@@ -38,8 +38,8 @@ describe("shortenEmail", () => {
         });
 
         it("keeps the last two characters before @ so similar names stay distinguishable", () => {
-            expect(shortenEmail("asafe.bgi.dev.one@gmail.com")).toBe("asafe.bgi…ne@gmail.com");
-            expect(shortenEmail("asafe.bgi.dev.two@gmail.com")).toBe("asafe.bgi…wo@gmail.com");
+            expect(shortenEmail("alice.dev.one@example.com")).toBe("alice.d…ne@example.com");
+            expect(shortenEmail("alice.dev.two@example.com")).toBe("alice.d…wo@example.com");
         });
 
         it("then shortens a long domain the same way, keeping its TLD", () => {
@@ -68,9 +68,9 @@ describe("shortenEmail", () => {
         });
 
         it("then shortens the domain the same way, keeping its TLD", () => {
-            expect(shortenEmail("owner@example.com", 12)).toBe("a…gi@g…l.com");
+            expect(shortenEmail("alice@example.com", 12)).toBe("a…ce@e…e.com");
             expect(shortenEmail("someone@anthropic.com", 12)).toBe("s…ne@a…c.com");
-            fits(shortenEmail("owner@example.com", 12));
+            fits(shortenEmail("alice@example.com", 12));
         });
 
         it("never shortens a part that is already at or below its minimum", () => {
@@ -87,12 +87,12 @@ describe("shortenEmail", () => {
 
 describe("boundAccountEmail", () => {
     const accounts = [
-        { id: "a1", name: "claude-oauth", context: { email: "owner@example.com" } },
+        { id: "a1", name: "claude-oauth", context: { email: "alice@example.com" } },
         { id: "a2", name: "claude-oauth", context: {} },
     ];
 
     it("is the email of the account the agent is bound to", () => {
-        expect(boundAccountEmail(accounts, "a1")).toBe("owner@example.com");
+        expect(boundAccountEmail(accounts, "a1")).toBe("alice@example.com");
     });
 
     it("is undefined when unbound, unknown, or the account recorded no email", () => {

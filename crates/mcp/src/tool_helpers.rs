@@ -230,7 +230,7 @@ pub(crate) fn send_message_outcome(to: &str, result: &Value) -> Result<String> {
             return Ok(format!("Delivered to {to} — injected into their running conversation.{id}"));
         }
         // The relay accepts any name; it says when the target is not one of
-        // the sender's own account's agents (agentmux-cloud#138). An agent
+        // the sender's own account's agents. An agent
         // counts once it has run while signed in, so one of the sender's own
         // that hasn't yet still gets `false` and can still receive it (Codex
         // P2 on #4249): a hint, never "only another account".

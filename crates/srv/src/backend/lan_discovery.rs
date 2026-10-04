@@ -1489,7 +1489,7 @@ impl LanDiscoveryController {
     /// `LAN_AGENT_CACHE_TTL_SECS` seconds to avoid a blocking peer fan-out on
     /// every inject for cloud-only agents.
     ///
-    /// Security (<removed-spec>.md LAN P0-1):
+    /// Security:
     /// the value broadcast in the mDNS TXT record / UDP probe response
     /// (`self.auth_key` field name kept for wire back-compat with older
     /// peer versions — see `Config::lan_key`'s doc comment) is now a

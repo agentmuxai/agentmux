@@ -1625,7 +1625,7 @@ pub fn inject_jekt_signing_keys_into_mcp_json(
         );
         patched = true;
     }
-    // <removed-spec>.md §3.1/§3.3 (issue #2586's WAN
+    // WAN-tier signing (issue #2586's WAN
     // half): a SEPARATE keypair from the LAN one above — see
     // storage/agent_wan_keys.rs for why the two tiers' key lifecycles cannot
     // be shared. Injected on the same terms and with the same guarantee:
@@ -2567,7 +2567,7 @@ mod tests {
         assert_eq!(env["AGENTMUX_AGENT_ID"], "aria", "existing fields must survive the patch");
         assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
         assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
-        // <removed-spec>.md §3.1: a separate keypair
+        // WAN-tier signing: a separate keypair
         // from the LAN one, injected on the same terms.
         assert!(env["AGENTMUX_WAN_KEY"].is_string() && !env["AGENTMUX_WAN_KEY"].as_str().unwrap().is_empty());
         assert_ne!(
