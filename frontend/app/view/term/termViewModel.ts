@@ -22,6 +22,7 @@ import {
 } from "@/store/global";
 import * as services from "@/store/services";
 import * as keyutil from "@/util/keyutil";
+import { isMacOS } from "@/util/platformutil";
 import { boundNumber, createSignalAtom, stringToBase64 } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -35,6 +36,7 @@ import { resolveTermScrollSensitivity } from "./termscrollsensitivity";
 import { computeTheme, DefaultTermTheme, termViewName } from "./termutil";
 import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
+import { terminalKeyGoesToShell } from "./term-shell-keys";
 import { basicTermModels, termModels } from "./term-models";
 import { buildSettingsMenuItems } from "./termSettingsMenu";
 import { readZoom } from "@/app/store/zoom-factor";
@@ -435,6 +437,13 @@ class TermViewModel {
         if (shellProcStatus == "done" && keyutil.checkKeyPressed(muxEvent, "Enter")) {
             this.forceRestartController();
             return false;
+        }
+        // Shell and editor keys reach the shell, not an app shortcut. xterm
+        // still handles the key (return true); stopPropagation keeps the
+        // app's document-level listener from acting on it as well.
+        if (terminalKeyGoesToShell(event, isMacOS())) {
+            event.stopPropagation();
+            return true;
         }
         const appHandled = appHandleKeyDown(muxEvent);
         if (appHandled) {

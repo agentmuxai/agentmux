@@ -17,6 +17,7 @@ import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
+import { ReplacePaneConfirm } from "@/app/modals/replace-pane-confirm";
 import { handleCmdN, handleSplitHorizontal, handleSplitVertical } from "./keymodel-blockcreate";
 import { COMMAND_PALETTE_KEY, NEW_TAB_KEY, NEW_WINDOW_KEY } from "./keymodel-bindings";
 import { type KeyHandler, globalChordMap, globalKeyMap } from "./keymodel-dispatch";
@@ -124,15 +125,21 @@ function registerGlobalKeys() {
         if (blockId == null) {
             return true;
         }
-        replaceBlock(
-            blockId,
-            {
-                meta: {
-                    view: "launcher",
-                },
-            },
-            true
-        );
+        if (getBlockComponentModel(blockId)?.viewModel?.viewType === "launcher") {
+            return true;
+        }
+        modalsModel.openModal(ReplacePaneConfirm, {
+            onConfirm: () =>
+                replaceBlock(
+                    blockId,
+                    {
+                        meta: {
+                            view: "launcher",
+                        },
+                    },
+                    true
+                ),
+        });
         return true;
     });
     globalKeyMap.set("Cmd:g", () => {
