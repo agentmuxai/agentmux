@@ -8,9 +8,6 @@
         "app:*": {
           "type": "boolean"
         },
-        "app:globalhotkey": {
-          "type": "string"
-        },
         "app:dismissarchitecturewarning": {
           "type": "boolean"
         },

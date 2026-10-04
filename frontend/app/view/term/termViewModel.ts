@@ -390,18 +390,9 @@ class TermViewModel {
         return false;
     }
 
-    keyDownHandler(muxEvent: MuxKeyboardEvent): boolean {
-        return false;
-    }
-
     handleTerminalKeydown(event: KeyboardEvent): boolean {
         const muxEvent = keyutil.adaptFromReactOrNativeKeyEvent(event);
         if (muxEvent.type != "keydown") return true;
-        if (this.keyDownHandler(muxEvent)) {
-            event.preventDefault();
-            event.stopPropagation();
-            return false;
-        }
         if (keyutil.checkKeyPressed(muxEvent, "Shift:Enter")) {
             const shiftEnterNewlineAtom = getOverrideConfigAtom(this.blockId, "term:shiftenternewline");
             const shiftEnterNewlineEnabled = shiftEnterNewlineAtom() ?? false;

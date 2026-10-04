@@ -311,10 +311,7 @@ declare global {
         getUpdaterVersion: () => string | null;
         getUpdaterChannel: () => string;
         installAppUpdate: () => void;
-        onMenuItemAbout: (callback: () => void) => void;
         updateWindowControlsOverlay: (rect: Dimensions) => void;
-        onReinjectKey: (callback: (muxEvent: MuxKeyboardEvent) => void) => void;
-        onControlShiftStateUpdate: (callback: (state: boolean) => void) => void;
         openNewWindow: () => Promise<string>;
         openNewWindowWithView: (view: string, meta?: Record<string, unknown>) => Promise<string>;
         /** Open a new window showing an existing workspace, not a fresh one. */
@@ -381,7 +378,6 @@ declare global {
          *  docs/specs/SPEC_LAYOUT_FILES_2026_09_25.md §3.5. */
         showOpenLayoutDialog(): Promise<string | null>;
         captureScreenshot(rect: { x: number; y: number; width: number; height: number }): Promise<string>;
-        setKeyboardChordMode: () => void;
         openAgent: (agentId: string) => Promise<void>;
         setProviderAuth: (provider: string, token: string) => Promise<void>;
         runCliLogin: (

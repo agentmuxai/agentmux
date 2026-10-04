@@ -603,29 +603,9 @@ export function buildCefApi(): AppApi {
             invokeCommand("install_update").catch(console.error);
         },
 
-        // --- Menu ---
-        onMenuItemAbout: (callback: () => void) => {
-            listenEvent("menu-item-about", () => callback());
-        },
-
         // --- Window controls ---
         updateWindowControlsOverlay: (rect: Dimensions) => {
             invokeCommand("update_wco", { rect }).catch(console.error);
-        },
-
-        // --- Keyboard ---
-        onReinjectKey: (callback: (muxEvent: MuxKeyboardEvent) => void) => {
-            listenEvent<MuxKeyboardEvent>("reinject-key", (payload) => {
-                callback(payload);
-            });
-        },
-        setKeyboardChordMode: () => {
-            invokeCommand("set_keyboard_chord_mode").catch(console.error);
-        },
-        onControlShiftStateUpdate: (callback: (state: boolean) => void) => {
-            listenEvent<boolean>("control-shift-state-update", (payload) => {
-                callback(payload);
-            });
         },
 
         // --- Window Management ---
