@@ -46,7 +46,7 @@ import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
-import { keyLabel } from "@/app/keybindings";
+import { paneCommandFor, shortcutFor } from "@/app/keybindings";
 
 export const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -432,68 +432,111 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             model.setSelection(moveFocus(sel, order(), m, { extend: e.shiftKey, focusOnly: isMod(e) && !e.shiftKey }));
             reveal(order().indexOf(model.selection().focus ?? ""));
         };
+        const listKey = (): boolean => {
+            if (e.key === "ArrowDown") move({ delta: step });
+            else if (e.key === "ArrowUp") move({ delta: -step });
+            else if (grid() && e.key === "ArrowRight" && !e.altKey) move({ delta: 1 });
+            else if (grid() && e.key === "ArrowLeft" && !e.altKey) move({ delta: -1 });
+            else if (e.key === "PageDown") move({ delta: page });
+            else if (e.key === "PageUp") move({ delta: -page });
+            else if (e.key === "Home") move({ to: 0 });
+            else if (e.key === "End") move({ to: order().length - 1 });
+            else if (e.key === "Enter") {
+                const list = model.selectedEntries();
+                if (list.length === 1) openEntry(list[0]);
+                else list.filter((x) => !x.is_dir).forEach(openEntry);
+            } else if (e.key === "Backspace") model.goBack();
+            else if (e.key === "/" && !typeahead.active()) openFilter();
+            else if (e.key === "Escape" && model.filter()) closeFilter();
+            // Ctrl+Space toggles the focused row (as in Explorer); Space alone is
+            // quick look, the preview panel (spec §5.3.1).
+            else if (e.key === " " && isMod(e)) model.setSelection(toggleFocused(sel));
+            else if (e.key === " " && !typeahead.active()) model.togglePreview();
+            else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                const hit = typeahead.next(e.key, order(), sel.focus);
+                if (hit) {
+                    model.setSelection({ names: new Set([hit]), focus: hit, anchor: hit });
+                    reveal(order().indexOf(hit));
+                }
+            } else return false;
+            return true;
+        };
         let handled = true;
-        if (e.altKey && e.key === "ArrowLeft") model.goBack();
-        else if (e.altKey && e.key === "ArrowRight") model.goForward();
-        else if (e.altKey && e.key === "ArrowUp") model.goUp();
-        else if (e.key === "ArrowDown") move({ delta: step });
-        else if (e.key === "ArrowUp") move({ delta: -step });
-        else if (grid() && e.key === "ArrowRight" && !e.altKey) move({ delta: 1 });
-        else if (grid() && e.key === "ArrowLeft" && !e.altKey) move({ delta: -1 });
-        else if (e.key === "PageDown") move({ delta: page });
-        else if (e.key === "PageUp") move({ delta: -page });
-        else if (e.key === "Home") move({ to: 0 });
-        else if (e.key === "End") move({ to: order().length - 1 });
-        else if (e.key === "Enter" && isMod(e)) {
-            // Folders in new tabs; files open as usual.
-            for (const entry of model.selectedEntries()) {
-                if (entry.is_dir) openInNewTab(model.pathOf(entry.name));
-                else openEntry(entry);
-            }
-        } else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "t") openInNewTab(model.path());
-        else if (isMod(e) && !e.shiftKey && e.key.toLowerCase() === "w") {
-            void closeOwnTab(model.blockId).then(
-                (closed) => {
-                    if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
-                },
-                (err) => model.setStatus({ text: `Couldn't close this tab: ${errorText(err)}`, tone: "error" })
-            );
-        } else if (e.key === "Enter") {
-            const list = model.selectedEntries();
-            if (list.length === 1) openEntry(list[0]);
-            else list.filter((x) => !x.is_dir).forEach(openEntry);
-        } else if (e.key === "Backspace") model.goBack();
-        else if (e.key === "F2") {
-            if (sel.focus && sel.names.size === 1 && sel.names.has(sel.focus)) model.setRenaming(sel.focus);
-        } else if (e.key === "F5") model.refresh();
-        else if (e.key === "Delete" && e.shiftKey) askDeletePermanently(model.selectedEntries());
-        else if (e.key === "Delete") void model.trash(model.selectedEntries());
-        else if (isMod(e) && e.key.toLowerCase() === "a") model.setSelection(selectAll(sel, order()));
-        else if (isMod(e) && e.key.toLowerCase() === "z") void model.undo();
-        else if (isMod(e) && e.key.toLowerCase() === "c" && !e.shiftKey) {
-            // Both: the files for a paste in Hangar, the paths for anywhere else.
-            model.copyToClipboard("copy", model.selectedEntries());
-            copyPaths(model.selectedEntries(), true);
-        } else if (isMod(e) && e.key.toLowerCase() === "x") model.copyToClipboard("cut", model.selectedEntries());
-        else if (isMod(e) && e.key.toLowerCase() === "v") void model.paste();
-        else if (isMod(e) && e.key.toLowerCase() === "l") startEditingPath();
-        // By key code: on macOS Option+K types a character instead.
-        else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyK") mentionIn(model.selectedEntries());
-        else if (isMod(e) && e.shiftKey && e.key.toLowerCase() === "n") void model.createNew("dir");
-        else if (isMod(e) && e.key.toLowerCase() === "f") openFilter();
-        else if (e.key === "/" && !typeahead.active()) openFilter();
-        else if (e.key === "Escape" && model.filter()) closeFilter();
-        // Ctrl+Space toggles the focused row (as in Explorer); Space alone is
-        // quick look, the preview panel (spec §5.3.1).
-        else if (e.key === " " && isMod(e)) model.setSelection(toggleFocused(sel));
-        else if (e.key === " " && !typeahead.active()) model.togglePreview();
-        else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-            const hit = typeahead.next(e.key, order(), sel.focus);
-            if (hit) {
-                model.setSelection({ names: new Set([hit]), focus: hit, anchor: hit });
-                reveal(order().indexOf(hit));
-            }
-        } else handled = false;
+        // Command keys are the `files:*` rows of the shortcut table, so they
+        // show in the help pane and can't collide with a global shortcut. The
+        // list's own keys (arrows, paging, Enter, type-ahead) stay here.
+        switch (paneCommandFor(e, "files")) {
+            case "files:back":
+                model.goBack();
+                break;
+            case "files:forward":
+                model.goForward();
+                break;
+            case "files:up":
+                model.goUp();
+                break;
+            case "files:openInNewTab":
+                // Folders in new tabs; files open as usual.
+                for (const entry of model.selectedEntries()) {
+                    if (entry.is_dir) openInNewTab(model.pathOf(entry.name));
+                    else openEntry(entry);
+                }
+                break;
+            case "files:newTabHere":
+                openInNewTab(model.path());
+                break;
+            case "files:closeTab":
+                void closeOwnTab(model.blockId).then(
+                    (closed) => {
+                        if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
+                    },
+                    (err) => model.setStatus({ text: `Couldn't close this tab: ${errorText(err)}`, tone: "error" })
+                );
+                break;
+            case "files:rename":
+                if (sel.focus && sel.names.size === 1 && sel.names.has(sel.focus)) model.setRenaming(sel.focus);
+                break;
+            case "files:refresh":
+                model.refresh();
+                break;
+            case "files:trash":
+                void model.trash(model.selectedEntries());
+                break;
+            case "files:deletePermanently":
+                askDeletePermanently(model.selectedEntries());
+                break;
+            case "files:selectAll":
+                model.setSelection(selectAll(sel, order()));
+                break;
+            case "files:undo":
+                void model.undo();
+                break;
+            case "files:copy":
+                // Both: the files for a paste in Hangar, the paths for anywhere else.
+                model.copyToClipboard("copy", model.selectedEntries());
+                copyPaths(model.selectedEntries(), true);
+                break;
+            case "files:cut":
+                model.copyToClipboard("cut", model.selectedEntries());
+                break;
+            case "files:paste":
+                void model.paste();
+                break;
+            case "files:editPath":
+                startEditingPath();
+                break;
+            case "files:mention":
+                mentionIn(model.selectedEntries());
+                break;
+            case "files:newFolder":
+                void model.createNew("dir");
+                break;
+            case "files:filter":
+                openFilter();
+                break;
+            default:
+                handled = listKey();
+        }
         if (handled) {
             e.preventDefault();
             e.stopPropagation();
@@ -522,7 +565,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
         const items: ContextMenuItem[] = [{ type: "action", label: "Open", shortcut: "Enter", onSelect: () => openEntry(entry) }];
         if (entry.is_dir) {
-            items.push({ type: "action", label: "Open in new tab", shortcut: keyLabel("mod+Enter"), onSelect: () => openInNewTab(path) });
+            items.push({ type: "action", label: "Open in new tab", shortcut: shortcutFor("files:openInNewTab"), onSelect: () => openInNewTab(path) });
         }
         if (!entry.is_dir) {
             items.push(
@@ -538,7 +581,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             {
                 type: "action",
                 label: "Mention in agent",
-                shortcut: keyLabel("alt+k"),
+                shortcut: shortcutFor("files:mention"),
                 disabled: agentTargets().length === 0,
                 onSelect: () => mentionIn(many ? list : [entry]),
             },
@@ -548,16 +591,16 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                 onSelect: () => attachTo(t, many ? list : [entry]),
             })),
             { type: "separator" },
-            { type: "action", label: "Cut", shortcut: keyLabel("mod+x"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
-            { type: "action", label: "Copy", shortcut: keyLabel("mod+c"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
+            { type: "action", label: "Cut", shortcut: shortcutFor("files:cut"), onSelect: () => model.copyToClipboard("cut", many ? list : [entry]) },
+            { type: "action", label: "Copy", shortcut: shortcutFor("files:copy"), onSelect: () => model.copyToClipboard("copy", many ? list : [entry]) },
             { type: "action", label: many ? `Copy ${list.length} paths` : "Copy path", onSelect: () => copyPaths(many ? list : [entry]) },
             { type: "separator" },
-            { type: "action", label: "Rename", shortcut: "F2", disabled: many, onSelect: () => model.setRenaming(entry.name) },
-            { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", shortcut: "Delete", onSelect: () => void model.trash(many ? list : [entry]) },
+            { type: "action", label: "Rename", shortcut: shortcutFor("files:rename"), disabled: many, onSelect: () => model.setRenaming(entry.name) },
+            { type: "action", label: many ? `Move ${list.length} items to Trash` : "Move to Trash", shortcut: shortcutFor("files:trash"), onSelect: () => void model.trash(many ? list : [entry]) },
             {
                 type: "action",
                 label: "Delete permanently…",
-                shortcut: "Shift+Delete",
+                shortcut: shortcutFor("files:deletePermanently"),
                 danger: true,
                 onSelect: () => askDeletePermanently(many ? list : [entry]),
             }
@@ -590,7 +633,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         if (!target) {
             model.setStatus(
                 {
-                    text: agents.length === 0 ? "No agent pane is open to mention these in." : `Click into the agent you mean first, then ${keyLabel("alt+k")} here.`,
+                    text: agents.length === 0 ? "No agent pane is open to mention these in." : `Click into the agent you mean first, then ${shortcutFor("files:mention")} here.`,
                     tone: "info",
                 },
                 4000
@@ -641,13 +684,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const folderMenu = (): ContextMenuItem[] => {
         const fail = (err: unknown) => model.setStatus({ text: errorText(err), tone: "error" });
         return forHost([
-            { type: "action", label: "New folder", shortcut: keyLabel("mod+shift+n"), onSelect: () => void model.createNew("dir") },
+            { type: "action", label: "New folder", shortcut: shortcutFor("files:newFolder"), onSelect: () => void model.createNew("dir") },
             { type: "action", label: "New file", onSelect: () => void model.createNew("file") },
-            { type: "action", label: "New tab here", shortcut: keyLabel("mod+t"), onSelect: () => openInNewTab(model.path()) },
+            { type: "action", label: "New tab here", shortcut: shortcutFor("files:newTabHere"), onSelect: () => openInNewTab(model.path()) },
             {
                 type: "action",
                 label: clipboard()?.kind === "cut" ? `Paste (move ${clipboard()!.paths.length})` : clipboard() ? `Paste (copy ${clipboard()!.paths.length})` : "Paste",
-                shortcut: keyLabel("mod+v"),
+                shortcut: shortcutFor("files:paste"),
                 disabled: !clipboard(),
                 onSelect: () => void model.paste(),
             },
@@ -657,8 +700,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
             { type: "action", label: "Copy folder path", onSelect: () => void navigator.clipboard?.writeText(model.path()) },
             { type: "separator" },
             { type: "action", label: model.showHidden() ? "Hide hidden files" : "Show hidden files", onSelect: () => model.toggleHidden() },
-            { type: "action", label: "Refresh", shortcut: "F5", onSelect: () => model.refresh() },
-            { type: "action", label: "Undo", shortcut: keyLabel("mod+z"), onSelect: () => void model.undo() },
+            { type: "action", label: "Refresh", shortcut: shortcutFor("files:refresh"), onSelect: () => model.refresh() },
+            { type: "action", label: "Undo", shortcut: shortcutFor("files:undo"), onSelect: () => void model.undo() },
         ]);
     };
 
@@ -716,13 +759,13 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     return (
         <div class="files-view" onContextMenu={(e) => e.preventDefault()}>
             <div class="files-toolbar">
-                <button type="button" class="files-tool" title={`Back (${keyLabel("alt+ArrowLeft")})`} disabled={!model.canBack()} onClick={() => model.goBack()}>
+                <button type="button" class="files-tool" title={`Back (${shortcutFor("files:back")})`} disabled={!model.canBack()} onClick={() => model.goBack()}>
                     <i class="fa fa-arrow-left" />
                 </button>
-                <button type="button" class="files-tool" title={`Forward (${keyLabel("alt+ArrowRight")})`} disabled={!model.canForward()} onClick={() => model.goForward()}>
+                <button type="button" class="files-tool" title={`Forward (${shortcutFor("files:forward")})`} disabled={!model.canForward()} onClick={() => model.goForward()}>
                     <i class="fa fa-arrow-right" />
                 </button>
-                <button type="button" class="files-tool" title={`Up (${keyLabel("alt+ArrowUp")})`} disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()}>
+                <button type="button" class="files-tool" title={`Up (${shortcutFor("files:up")})`} disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()}>
                     <i class="fa fa-arrow-up" />
                 </button>
                 <Show
@@ -746,7 +789,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         />
                     }
                 >
-                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title={`Double-click or ${keyLabel("mod+l")} to type a path`}>
+                    <nav ref={crumbsEl} class="files-breadcrumb" aria-label="Folder path" onDblClick={startEditingPath} title={`Double-click or ${shortcutFor("files:editPath")} to type a path`}>
                         <Show when={model.connection()}>
                             <span class="files-crumb-host" title={`On ${model.connection()}, over SSH`}>
                                 <i class="fa fa-server" aria-hidden="true" />
@@ -788,7 +831,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         }}
                     />
                 </Show>
-                <button type="button" class="files-tool" title={`Filter (${keyLabel("mod+f")})`} onClick={openFilter}>
+                <button type="button" class="files-tool" title={`Filter (${shortcutFor("files:filter")})`} onClick={openFilter}>
                     <i class="fa fa-filter" />
                 </button>
                 <button type="button" class="files-tool" title="New folder" onClick={() => void model.createNew("dir")}>

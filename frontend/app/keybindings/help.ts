@@ -17,7 +17,7 @@ export interface HelpSection {
     entries: HelpEntry[];
 }
 
-const CATEGORY_ORDER: KeyCategory[] = ["General", "Tabs & windows", "Panes", "Find & zoom", "Terminal"];
+const CATEGORY_ORDER: KeyCategory[] = ["General", "Tabs & windows", "Panes", "Find & zoom", "Terminal", "Documents", "Editor", "Files"];
 
 /** "Ctrl+1"…"Ctrl+8" → "Ctrl+1–8"; "Ctrl+Shift+↑"… → "Ctrl+Shift+↑/↓/←/→". */
 export function compactKeys(labels: string[]): string {

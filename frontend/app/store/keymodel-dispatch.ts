@@ -3,7 +3,7 @@
 
 import { keyPlatform } from "@/app/keybindings";
 import type { KeyEventLike } from "@/app/keybindings/keys";
-import { chordLeaderOf, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
+import { chordLeaderOf, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
 import { commandRegistry } from "@/app/store/command-registry";
 import { atoms, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
@@ -117,7 +117,13 @@ function focusedViewType(): string {
 /** Where focus is, for the shortcut table's `when` clauses. */
 export function currentKeyContext(): KeyContext {
     const el = document.activeElement;
-    return { textInputFocus: isTypingFocus(el), terminalFocus: isTerminalFocus(el), viewType: focusedViewType() };
+    const viewType = focusedViewType();
+    return {
+        textInputFocus: isTypingFocus(el),
+        terminalFocus: isTerminalFocus(el),
+        viewType,
+        docTabsHost: DOC_TAB_HOSTS.includes(viewType),
+    };
 }
 
 function keyEventLike(muxEvent: MuxKeyboardEvent): KeyEventLike {

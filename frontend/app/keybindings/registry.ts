@@ -4,7 +4,7 @@
 // Resolves a key press to a command from the default table (defaults.ts),
 // given where focus is. Pure: the dispatcher supplies the context.
 
-import { DEFAULT_KEYBINDINGS, type KeyBindingRow } from "./defaults";
+import { DEFAULT_KEYBINDINGS, type KeyBindingRow, type KeyPane } from "./defaults";
 import { formatKey, matchKey, parseKey, sameKey, type KeyEventLike, type KeyPlatform, type KeySpec } from "./keys";
 
 /** Where focus is when a key is pressed. */
@@ -15,7 +15,19 @@ export interface KeyContext {
     terminalFocus: boolean;
     /** The focused pane's view type ("term", "agent", "editor", …). */
     viewType: string;
+    /** The focused pane has document tabs (editor, media). */
+    docTabsHost: boolean;
 }
+
+/** View types whose panes have document tabs. */
+export const DOC_TAB_HOSTS = ["editor", "media"];
+
+/** The `when` a pane row implicitly has: its keys only reach it there. */
+const PANE_WHEN: Record<KeyPane, string> = {
+    doctabs: "docTabsHost",
+    editor: "viewType == editor",
+    files: "viewType == files",
+};
 
 export interface ResolvedBinding {
     row: KeyBindingRow;
@@ -73,6 +85,8 @@ export function resolveKey(
     chordLeader?: string
 ): ResolvedBinding | null {
     for (const c of rowsFor(platform)) {
+        // A pane row is matched by its pane (matchPaneKey), never globally.
+        if (c.row.pane) continue;
         if (ctx.terminalFocus && !c.row.skipShell) continue;
         if (!evalWhen(c.row.when, ctx)) continue;
         if (chordLeader != null) {
@@ -84,6 +98,18 @@ export function resolveKey(
         if (matchKey(e, c.steps[0])) {
             return { row: c.row, chordStart: c.steps.length === 2 };
         }
+    }
+    return null;
+}
+
+/**
+ * The command a pane's own key handler should run for this key, from that
+ * pane's rows (`pane: "files"` …), or null. The pane is its own context, so
+ * `when` isn't consulted.
+ */
+export function matchPaneKey(e: KeyEventLike, pane: KeyPane, platform: KeyPlatform): string | null {
+    for (const c of rowsFor(platform)) {
+        if (c.row.pane === pane && c.steps.length === 1 && matchKey(e, c.steps[0])) return c.row.command;
     }
     return null;
 }
@@ -113,30 +139,57 @@ export function formatCommand(command: string, platform: KeyPlatform): string {
 export function findConflicts(platform: KeyPlatform): string[] {
     const rows = rowsFor(platform);
     const out: string[] = [];
-    const disjoint = (a?: string, b?: string) => {
-        const ta = new Set((a ?? "").split("&&").map((s) => s.trim()).filter(Boolean));
-        for (const t of (b ?? "").split("&&").map((s) => s.trim()).filter(Boolean)) {
-            if (ta.has(t.startsWith("!") ? t.slice(1) : `!${t}`)) return true;
-        }
-        return false;
-    };
+    const whenOf = (r: KeyBindingRow) => [r.when, r.pane && PANE_WHEN[r.pane]].filter(Boolean).join(" && ");
     for (let i = 0; i < rows.length; i++) {
         for (let j = i + 1; j < rows.length; j++) {
             const a = rows[i];
             const b = rows[j];
             if (a.row.command === b.row.command) continue;
+            if (whenDisjoint(whenOf(a.row), whenOf(b.row))) continue;
             if (a.steps.length !== b.steps.length) {
                 // A chord leader must not also be a single-key binding.
                 const [single, chord] = a.steps.length === 1 ? [a, b] : [b, a];
                 if (sameKey(single.steps[0], chord.steps[0])) out.push(`${single.source} (${single.row.command}) shadows chord ${chord.source}`);
                 continue;
             }
-            if (a.steps.every((s, k) => sameKey(s, b.steps[k])) && !disjoint(a.row.when, b.row.when)) {
+            if (a.steps.every((s, k) => sameKey(s, b.steps[k]))) {
                 out.push(`${a.source}: ${a.row.command} vs ${b.row.command}`);
             }
         }
     }
     return out;
+}
+
+type WhenTerm = { flag: string; neg: boolean } | { view: string; eq: boolean };
+
+function parseTerms(when: string): WhenTerm[] {
+    return when
+        .split("&&")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((t) => {
+            const cmp = t.match(/^viewType\s*(==|!=)\s*(\S+)$/);
+            if (cmp) return { view: cmp[2], eq: cmp[1] === "==" };
+            return t.startsWith("!") ? { flag: t.slice(1), neg: true } : { flag: t, neg: false };
+        });
+}
+
+/** True when no context can satisfy both `when` clauses. */
+export function whenDisjoint(a: string, b: string): boolean {
+    const ta = parseTerms(a);
+    const tb = parseTerms(b);
+    const contradicts = (x: WhenTerm, y: WhenTerm): boolean => {
+        if ("flag" in x && "flag" in y) return x.flag === y.flag && x.neg !== y.neg;
+        if ("view" in x && "view" in y) {
+            if (x.eq && y.eq) return x.view !== y.view;
+            return x.view === y.view && x.eq !== y.eq;
+        }
+        // docTabsHost holds exactly when viewType is a doc-tab host.
+        const [f, v] = "flag" in x ? [x, y as { view: string; eq: boolean }] : [y as { flag: string; neg: boolean }, x];
+        if (f.flag !== "docTabsHost" || !v.eq) return false;
+        return DOC_TAB_HOSTS.includes(v.view) ? f.neg : !f.neg;
+    };
+    return ta.some((x) => tb.some((y) => contradicts(x, y)));
 }
 
 export const _rowsForTests = rowsFor;

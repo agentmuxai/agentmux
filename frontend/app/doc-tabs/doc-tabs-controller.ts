@@ -30,6 +30,8 @@ import {
     type DocTabsState,
     type OpenArgs,
 } from "./doc-tabs";
+import { keyPlatform } from "@/app/keybindings";
+import { matchPaneKey } from "@/app/keybindings/registry";
 
 /** What a pane type says about its documents (§5.6). */
 export interface DocTabsSpec<P> {
@@ -211,16 +213,25 @@ export type DocTabKeyAction =
     | { kind: "reopen" }
     | { kind: "move"; delta: 1 | -1 };
 
-export function docTabKeyAction(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey">): DocTabKeyAction | null {
-    // Literal Ctrl on every platform; Cmd and Alt chords belong to the app.
-    if (!e.ctrlKey || e.altKey || e.metaKey) return null;
-    const k = e.key.toLowerCase();
-    if (k === "tab") return { kind: "cycle", delta: e.shiftKey ? -1 : 1 };
-    if (e.key === "PageDown") return e.shiftKey ? { kind: "move", delta: 1 } : { kind: "cycle", delta: 1 };
-    if (e.key === "PageUp") return e.shiftKey ? { kind: "move", delta: -1 } : { kind: "cycle", delta: -1 };
-    if (k === "t") return e.shiftKey ? { kind: "reopen" } : { kind: "new" };
-    if (k === "w" && !e.shiftKey) return { kind: "close" };
-    return null;
+const DOC_TAB_ACTIONS: Record<string, DocTabKeyAction> = {
+    "doctab:new": { kind: "new" },
+    "doctab:close": { kind: "close" },
+    "doctab:reopen": { kind: "reopen" },
+    "doctab:next": { kind: "cycle", delta: 1 },
+    "doctab:prev": { kind: "cycle", delta: -1 },
+    "doctab:moveRight": { kind: "move", delta: 1 },
+    "doctab:moveLeft": { kind: "move", delta: -1 },
+};
+
+/** The keys are the `doctab:*` rows of the shortcut table (keybindings/defaults.ts). */
+export function docTabKeyAction(
+    e: Pick<KeyboardEvent, "key" | "ctrlKey" | "shiftKey" | "altKey" | "metaKey"> & { code?: string }
+): DocTabKeyAction | null {
+    // Field by field: a KeyboardEvent's fields are prototype getters, which a
+    // spread would drop.
+    const ev = { key: e.key, code: e.code ?? "", ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey };
+    const command = matchPaneKey(ev, "doctabs", keyPlatform());
+    return command ? (DOC_TAB_ACTIONS[command] ?? null) : null;
 }
 
 /**

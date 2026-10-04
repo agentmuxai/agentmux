@@ -4,15 +4,15 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_KEYBINDINGS } from "./defaults";
 import { formatKey, matchKey, parseKey, type KeyEventLike } from "./keys";
-import { _rowsForTests, findConflicts, formatCommand, resolveKey, type KeyContext } from "./registry";
+import { _rowsForTests, findConflicts, formatCommand, matchPaneKey, resolveKey, whenDisjoint, type KeyContext } from "./registry";
 
 function ev(key: string, code: string, mods: Partial<KeyEventLike> = {}): KeyEventLike {
     return { key, code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods };
 }
 
-const NONE: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "term" };
-const TERM: KeyContext = { textInputFocus: false, terminalFocus: true, viewType: "term" };
-const TYPING: KeyContext = { textInputFocus: true, terminalFocus: false, viewType: "agent" };
+const NONE: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "term", docTabsHost: false };
+const TERM: KeyContext = { textInputFocus: false, terminalFocus: true, viewType: "term", docTabsHost: false };
+const TYPING: KeyContext = { textInputFocus: true, terminalFocus: false, viewType: "agent", docTabsHost: false };
 
 describe("key syntax", () => {
     it("formats per platform", () => {
@@ -53,7 +53,9 @@ describe("default table", () => {
     });
 
     it("never binds Alt+letter without Ctrl on Windows/Linux (the shell's Meta keys)", () => {
+        // Pane rows are exempt: their keys only reach a non-terminal pane.
         const bad = _rowsForTests("other").filter((c) => {
+            if (c.row.pane) return false;
             const k = c.steps[0];
             return k.alt && !k.ctrl && !k.meta && k.letter;
         });
@@ -127,5 +129,33 @@ describe("resolveKey", () => {
         expect(formatCommand("tab:new", "mac")).toBe("⌘T");
         expect(formatCommand("view:command-palette", "other")).toBe("Ctrl+Shift+P");
         expect(formatCommand("pane:refocus", "other")).toBe("");
+    });
+});
+
+describe("pane rows", () => {
+    const FILES: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "files", docTabsHost: false };
+    const EDITOR: KeyContext = { textInputFocus: true, terminalFocus: false, viewType: "editor", docTabsHost: true };
+
+    it("a pane matches only its own rows", () => {
+        expect(matchPaneKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), "files", "other")).toBe("files:newFolder");
+        expect(matchPaneKey(ev("t", "KeyT", { ctrlKey: true }), "doctabs", "mac")).toBe("doctab:new");
+        expect(matchPaneKey(ev("F", "KeyF", { ctrlKey: true, shiftKey: true }), "files", "other")).toBeNull();
+    });
+
+    it("the global dispatcher never runs a pane row, and yields that key in the pane", () => {
+        expect(resolveKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), FILES, "other")).toBeNull();
+        expect(resolveKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("window:new");
+        expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), EDITOR, "other")).toBeNull();
+        expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), NONE, "other")?.row.command).toBe("tab:next");
+    });
+
+    it("whenDisjoint understands flags, view types and docTabsHost", () => {
+        expect(whenDisjoint("terminalFocus", "!terminalFocus")).toBe(true);
+        expect(whenDisjoint("viewType == files", "viewType != files")).toBe(true);
+        expect(whenDisjoint("viewType == files", "viewType == editor")).toBe(true);
+        expect(whenDisjoint("docTabsHost", "viewType == files")).toBe(true);
+        expect(whenDisjoint("!docTabsHost", "viewType == editor")).toBe(true);
+        expect(whenDisjoint("docTabsHost", "viewType == editor")).toBe(false);
+        expect(whenDisjoint("terminalFocus", "viewType == term")).toBe(false);
     });
 });

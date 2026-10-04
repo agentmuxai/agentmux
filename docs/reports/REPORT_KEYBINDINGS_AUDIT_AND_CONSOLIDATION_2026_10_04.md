@@ -431,6 +431,6 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 **Still deferred:** reopening a closed window tab. Closing a tab deletes its panes on the server, so reopen needs a backend "recently closed tabs" store before a key can bind to it. It isn't bound or shown anywhere.
 
 **Still to do:**
-- Phase 4: the editor, document tabs, the Files pane and the composer read the table instead of matching keys themselves. They already stop the global shortcuts by handling a key first (phase 0).
+- Phase 4 (the pane-keys PR): **done** for document tabs, the editor and the Files pane. They are `pane` rows in the table, matched by `matchPaneKey`. CodeMirror's Save keys are generated from it, and the help pane has Documents, Editor and Files sections. Global rows sharing a key are scoped away from that pane, and the conflict check proves it. The composer's keys (Enter, Esc, history arrows) are widget-internal and stay local.
 - Phase 5: the host's `OnPreKeyEvent` list and the macOS menu accelerators are generated from the table, and browser panes forward app shortcuts.
 - Phase 6: a `keybindings` setting for user overrides, and the docs site's `keybindings.md` generated from the table.

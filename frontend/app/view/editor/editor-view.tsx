@@ -32,7 +32,7 @@ import { redactSecrets } from "@/app/errors/redact";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
-import { keyLabel } from "@/app/keybindings";
+import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -165,19 +165,21 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 }
                 return;
             }
-            // Ctrl/Cmd+F → CodeMirror's native find panel (find/replace, regex,
+            // The editor's keys are the `editor:*` rows of the shortcut table.
+            const command = paneCommandFor(ev, "editor");
+            // Find → CodeMirror's native find panel (find/replace, regex,
             // case, whole-word). Only in source view — in rendered markdown
             // there's nothing editable to search. See
             // docs/specs/SPEC_EDITOR_AND_APP_FIND_2026_06_17.md.
-            if (!ev.shiftKey && (ev.key === "f" || ev.key === "F")) {
+            if (command === "editor:find") {
                 if (!cmView || model.editorMode() === "preview") return;
                 ev.preventDefault();
                 ev.stopPropagation();
                 openSearchPanel(cmView);
                 return;
             }
-            // Mod-Shift-V: toggle between preview and source modes.
-            if (ev.shiftKey && (ev.key === "v" || ev.key === "V")) {
+            // Toggle between preview and source modes.
+            if (command === "editor:togglePreview") {
                 if (!isMarkdown()) return;
                 ev.preventDefault();
                 ev.stopPropagation();
@@ -393,9 +395,10 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             }),
             // Ctrl+S → save; on scratch tabs triggers Save As instead.
             // Ctrl+Shift+S → Save As for scratch tabs only (Phase 1; non-scratch Save As is Phase 2).
+            // Keys from the shortcut table (`editor:save`, `editor:saveAs`).
             keymap.of([
-                {
-                    key: "Mod-s",
+                ...codeMirrorKeys("editor:save").map((key) => ({
+                    key,
                     run: () => {
                         if (model.activeTabAtom()?.isScratch) {
                             triggerSaveAs();
@@ -404,9 +407,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         }
                         return true;
                     },
-                },
-                {
-                    key: "Mod-Shift-s",
+                })),
+                ...codeMirrorKeys("editor:saveAs").map((key) => ({
+                    key,
                     run: () => {
                         // Phase 1: Save As is only implemented for scratch tabs.
                         // Don't swallow the key for non-scratch tabs so the OS
@@ -415,7 +418,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         triggerSaveAs();
                         return true;
                     },
-                },
+                })),
             ]),
         ];
 
