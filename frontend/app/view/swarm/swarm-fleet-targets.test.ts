@@ -63,9 +63,10 @@ describe("remoteFleetTargets", () => {
             badge: "this machine",
             platform: "Windows",
             remote: true,
+            otherMachine: false,
             stale: false,
         });
-        expect(remote.get(MANOZ)).toMatchObject({ where: "Area54", badge: "LAN", platform: "macOS" });
+        expect(remote.get(MANOZ)).toMatchObject({ where: "Area54", badge: "LAN", platform: "macOS", otherMachine: true });
     });
 
     it("can act on another channel on this machine, and on nothing found over the LAN or cloud", () => {

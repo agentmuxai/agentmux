@@ -73,11 +73,16 @@ function modelStub(selectedKeys: string[]) {
 const toolbar = (model: SwarmViewModel) => render(() => <FleetToolbar model={model} allBlockIds={() => ["blk-korp"]} />);
 
 describe("FleetToolbar with agents of other instances selected", () => {
-    it("says how many of the selected are on other machines", () => {
+    it("says how many of the selected are on other machines, not counting this machine's other channels", () => {
         toolbar(modelStub(["blk-korp", LOAP, MANOZ]));
         expect(document.querySelector(".swarm-fleet-toolbar-count")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
-            "3 selected · 2 on other machines"
+            "3 selected · 1 on other machines"
         );
+    });
+
+    it("shows a bare count when the others selected are on this machine", () => {
+        toolbar(modelStub(["blk-korp", LOAP]));
+        expect(document.querySelector(".swarm-fleet-toolbar-count")!.textContent!.trim()).toBe("2 selected");
     });
 
     it("shows a bare count when everything selected is here", () => {

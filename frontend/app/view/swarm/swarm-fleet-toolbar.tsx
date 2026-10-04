@@ -52,6 +52,12 @@ export function FleetToolbar({
         for (const key of selected()) if (remoteMap().get(key)) n++;
         return n;
     };
+    // The count's "on other machines" leaves out this machine's other channels.
+    const otherMachineN = () => {
+        let n = 0;
+        for (const key of selected()) if (remoteMap().get(key)?.otherMachine) n++;
+        return n;
+    };
     const reachable = (action: FleetAction) => {
         let n = 0;
         for (const key of selected()) {
@@ -134,7 +140,7 @@ export function FleetToolbar({
                 <Show when={count() > 0}>
                     <span class="swarm-fleet-toolbar-count">
                         {count()} selected
-                        <Show when={remoteN() > 0}> · {remoteN()} on other machines</Show>
+                        <Show when={otherMachineN() > 0}> · {otherMachineN()} on other machines</Show>
                     </span>
 
                     <Show

@@ -29,6 +29,12 @@
 //! (`deliver_forwarded_broadcast`). Agents on other machines are not reachable
 //! this way: nothing on the LAN proves who is asking
 //! (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §6).
+//! This RPC can't tell the Swarm UI from an agent holding the same instance key,
+//! and the forward adds no reach an agent lacks: each channel's key is in the
+//! host-global shared registry, so an agent can already call a sibling channel's
+//! own `fleet.broadcast`. Telling the UI apart needs a credential agents don't
+//! inherit, for every channel at once; until then the header carries no authority
+//! beyond `BROADCAST_TURN_ORIGIN`.
 //! An AGENT-initiated broadcast instead loops the EXISTING signed single-target
 //! `SendMessage` MCP tool path client-side (see `agentmux-mcp`'s `FleetBroadcast`
 //! tool) — only the calling agent's own process holds its `AGENTMUX_JEKT_KEY`, so

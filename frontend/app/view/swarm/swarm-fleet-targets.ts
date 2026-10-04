@@ -27,6 +27,8 @@ export interface FleetTargetInfo {
     badge: string | null;
     platform: string | null;
     remote: boolean;
+    /** Runs on another machine (LAN or cloud), not another channel of this one. */
+    otherMachine: boolean;
     stale: boolean;
     /** Whether the target has a block id an action can name. */
     actionable: boolean;
@@ -60,6 +62,7 @@ export function remoteFleetTargets(sections: RemoteSection[]): Map<string, Fleet
                 badge: section.badge,
                 platform: section.platform,
                 remote: true,
+                otherMachine: section.tier !== "host",
                 stale: section.stale,
                 // Another channel on this machine is reached over loopback. Anything
                 // else has no verified path (spec §6).
@@ -82,6 +85,7 @@ export function localFleetTargets(nodes: { blockId?: string | null; agentName: s
             badge: null,
             platform: null,
             remote: false,
+            otherMachine: false,
             stale: false,
             actionable: true,
         });
