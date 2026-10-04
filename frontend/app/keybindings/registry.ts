@@ -115,7 +115,9 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
             .map((u) => ({ command: u.command.slice(1), steps: u.key ? stepsOf(u.key) : null }));
         const unbound = (command: string, steps: KeySpec[]) =>
             unbinds.some((u) => u.command === command && (u.steps == null || sameSteps(u.steps, steps)));
-        const byCommand = new Map(DEFAULT_KEYBINDINGS.map((r) => [r.command, r] as const));
+        // A command's first row is its main one (later rows add chords or scoped keys).
+        const byCommand = new Map<string, KeyBindingRow>();
+        for (const r of DEFAULT_KEYBINDINGS) if (!byCommand.has(r.command)) byCommand.set(r.command, r);
         for (const u of mine) {
             if (u.command.startsWith("-") || !u.key) continue;
             const base = byCommand.get(u.command);
@@ -126,6 +128,7 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
                 when: u.when,
                 skipShell: base?.skipShell,
                 pane: base?.pane,
+                helpGroup: base?.helpGroup,
             };
             rows.push({ row, source: u.key.trim(), steps: stepsOf(u.key) });
         }
@@ -207,6 +210,20 @@ export function matchPaneKey(e: KeyEventLike, pane: KeyPane, platform: KeyPlatfo
 export function chordLeaderOf(e: KeyEventLike, platform: KeyPlatform): string | null {
     for (const c of rowsFor(platform)) {
         if (c.steps.length === 2 && matchKey(e, c.steps[0])) return c.source.split(" ")[0];
+    }
+    return null;
+}
+
+/**
+ * The global command a single key runs in the effective table (user keys
+ * first), ignoring `when`, or null. For keys the host forwards from a
+ * browser pane, where the page's focus state is unknown.
+ */
+export function commandForKey(source: string, platform: KeyPlatform): string | null {
+    const steps = source.trim().split(/\s+/).map((s) => parseKey(s, platform));
+    if (steps.length !== 1) return null;
+    for (const c of rowsFor(platform)) {
+        if (!c.row.pane && c.steps.length === 1 && sameKey(c.steps[0], steps[0])) return c.row.command;
     }
     return null;
 }

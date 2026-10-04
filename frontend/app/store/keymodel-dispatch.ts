@@ -3,7 +3,7 @@
 
 import { keyPlatform } from "@/app/keybindings";
 import type { KeyEventLike } from "@/app/keybindings/keys";
-import { chordLeaderOf, DOC_TAB_HOSTS, keysFor, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
+import { chordLeaderOf, commandForKey, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
 import { commandRegistry } from "@/app/store/command-registry";
 import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
@@ -210,9 +210,10 @@ export function registerHostShortcuts() {
         // Same rule as a key pressed in the app (the command palette turns
         // global shortcuts off while it's open).
         if (globalKeybindingsDisabled) return;
-        // The host knows only the default keys. If the user's keybindings
-        // unbound or remapped this one, it no longer runs this command.
-        if (payload.key && !keysFor(payload.command, keyPlatform()).includes(payload.key)) return;
+        // The host knows only the default keys: run what this key does in the
+        // effective table, so the user's unbinds and remaps apply here too.
+        const command = payload.key ? commandForKey(payload.key, keyPlatform()) : payload.command;
+        if (!command) return;
         // The browser pane holds OS keyboard focus; take it back first, or a
         // command that opens something to type in (the palette) shows while
         // the keys still go to the page. DOM focus alone doesn't move it.
@@ -220,7 +221,7 @@ export function registerHostShortcuts() {
         void getApi()
             .reclaimWindowFocus(label)
             .catch(() => {})
-            .finally(() => runKeyCommand(payload.command, { repeat: false } as MuxKeyboardEvent));
+            .finally(() => runKeyCommand(command, { repeat: false } as MuxKeyboardEvent));
     });
 }
 

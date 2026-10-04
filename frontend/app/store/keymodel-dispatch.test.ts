@@ -144,4 +144,13 @@ describe("appHandleKeyDown", () => {
         listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new", key: "ctrl+shift+t" });
         await vi.waitFor(() => expect(handlers["tab:new"]).toHaveBeenCalledTimes(1));
     });
+
+    it("runs what a forwarded key is remapped to", async () => {
+        registerHostShortcuts();
+        setUserKeybindings([{ key: "ctrl+shift+t", command: "pane:close" }]);
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new", key: "ctrl+shift+t" });
+        await vi.waitFor(() => expect(handlers["pane:close"]).toHaveBeenCalledTimes(1));
+        expect(handlers["tab:new"]).not.toHaveBeenCalled();
+        setUserKeybindings([]);
+    });
 });

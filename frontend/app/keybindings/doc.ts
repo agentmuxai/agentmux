@@ -50,7 +50,7 @@ export function keybindingsDoc(): string {
         "",
         "An entry that can't be used is skipped and the rest still apply.",
         "",
-        "While a Browser pane's page has focus, AgentMux forwards only the default window, tab and pane keys. Unbinding or remapping one of those is respected there; a key you add yourself works everywhere except inside a web page.",
+        "While a Browser pane's page has focus, AgentMux forwards only the default window, tab and pane keys. Unbinding one of those, or remapping it to another command, is respected there; a key you add yourself works everywhere except inside a web page.",
         ""
     );
     return out.join("\n");
