@@ -62,6 +62,16 @@ const KEYWORDS_THEN_ARGS = new Set(["for", "case", "select", "function", "in", "
 /** Programs whose next non-flag word is itself a program. */
 const WRAPPERS = new Set(["sudo", "doas", "env", "nohup", "exec", "command", "nice", "builtin", "time"]);
 
+/** Wrapper options whose value is the next word (`sudo -u root rm`), so that word is not the program. */
+const WRAPPER_VALUE_OPTIONS: Record<string, ReadonlySet<string>> = {
+    sudo: new Set(["-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T", "--user", "--group", "--host", "--prompt", "--close-from", "--chdir", "--role", "--type", "--other-user", "--command-timeout"]),
+    doas: new Set(["-u", "-C"]),
+    env: new Set(["-u", "-C", "-S", "--unset", "--chdir", "--split-string"]),
+    nice: new Set(["-n", "--adjustment"]),
+    time: new Set(["-f", "-o", "--format", "--output"]),
+    exec: new Set(["-a"]),
+};
+
 /** Programs with subcommands, and how many consecutive subcommand words they take. */
 const SUBCOMMAND_DEPTH: Record<string, number> = {
     git: 1,
@@ -207,6 +217,8 @@ class Scanner {
         let depth = 0;
         let cmdPos = true;
         let wrapper = false;
+        // The previous word was a wrapper option that takes a value.
+        let wrapperValuePending = false;
         let program = "";
         let wordIdx = 0;
         let subIdx = 0;
@@ -217,6 +229,7 @@ class Scanner {
         const resetCommand = (): void => {
             cmdPos = true;
             wrapper = false;
+            wrapperValuePending = false;
             program = "";
             wordIdx = 0;
             subIdx = 0;
@@ -324,7 +337,9 @@ class Scanner {
             // A word.
             open(this.i);
             const wordStart = this.i;
-            let role: "program" | "arg" | "flag" | "env-value" | "keyword" = cmdPos ? "program" : "arg";
+            let role: "program" | "arg" | "flag" | "env-value" | "keyword" | "wrapper-value" = cmdPos ? "program" : "arg";
+            if (role === "program" && wrapperValuePending) role = "wrapper-value";
+            wrapperValuePending = false;
             let firstRun = true;
             let sawEquals = false;
             let programEmitted = false;
@@ -390,6 +405,8 @@ class Scanner {
                     if (wrapper && run.startsWith("-")) {
                         this.emit(runStart, this.i, "flag");
                         role = "flag";
+                        const atWordEnd = this.i >= n || isWordBreak(s[this.i]);
+                        wrapperValuePending = atWordEnd && (WRAPPER_VALUE_OPTIONS[program]?.has(run) ?? false);
                         continue;
                     }
                     this.emit(runStart, this.i, "program");
@@ -409,6 +426,11 @@ class Scanner {
                     continue;
                 }
                 if (role === "keyword" || role === "env-value") {
+                    continue;
+                }
+                if (role === "wrapper-value") {
+                    const kind = classifyArg(run);
+                    if (kind !== "plain") this.emit(runStart, this.i, kind);
                     continue;
                 }
                 if (atWordStart && role === "arg" && run.length > 1 && run.startsWith("-")) {
@@ -451,7 +473,7 @@ class Scanner {
                 this.i++;
                 continue;
             }
-            if (role === "env-value") cmdPos = true;
+            if (role === "env-value" || role === "wrapper-value") cmdPos = true;
             else if (role === "keyword") cmdPos = keywordThenCommand;
             else if (role === "program") {
                 if (!programEmitted) {

@@ -12,6 +12,9 @@ describe("detectShellFlavor", () => {
         "cd x; Remove-Item -Recurse -Force dist",
         "echo $env:PATH",
         "& pwsh -c ls",
+        `"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Write-Output x'`,
+        "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -c x",
+        "/usr/bin/pwsh -c x",
     ])("reads %s as PowerShell", (cmd) => {
         expect(detectShellFlavor(cmd)).toBe("powershell");
     });
@@ -37,6 +40,7 @@ describe("detectShellFlavor", () => {
         'curl -H "Set-Cookie: a=b" https://example.com',
         "echo $PATH",
         "cd x && cargo test",
+        "pwshell-tool --help",
         "git log --pretty=format:%h%x09%s",
         "git log --format=%h%x09%an%x09%s -5",
         `python -c "print('100%abc%')"`,

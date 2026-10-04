@@ -13,7 +13,10 @@ import { tokenizeShell, type TokenKind } from "./tokenize";
 
 export type ShellFlavor = "posix" | "powershell" | "cmd";
 
-const POWERSHELL_LAUNCH_RE = /^\s*(?:&\s*)?(?:powershell|pwsh)(?:\.exe)?\b/i;
+// `pwsh`, `powershell.exe`, or either by path, quoted or not
+// (`"C:\Program Files\PowerShell\7\pwsh.exe" -Command …`).
+const POWERSHELL_LAUNCH_RE =
+    /^\s*(?:&\s*)?(?:"(?:[^"\n]*[\\/])?|'(?:[^'\n]*[\\/])?|(?:[^\s"']*[\\/])?)(?:powershell|pwsh)(?:\.exe)?["']?(?=\s|$)/i;
 // A cmdlet (`Verb-Noun`, capitalised) where a command can start: not a header
 // value inside a string such as `-H "Set-Cookie: x"`.
 const CMDLET_RE =

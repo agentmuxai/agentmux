@@ -113,6 +113,21 @@ describe("tokenizeShell kinds", () => {
         ]);
     });
 
+    it("skips the value of a wrapper option before the wrapped program", () => {
+        const programs = (cmd: string) =>
+            marks(cmd)
+                .filter(([, k]) => k === "program")
+                .map(([t]) => t);
+        expect(programs("sudo -u root rm file")).toEqual(["sudo", "rm"]);
+        expect(programs("sudo -u root -E make")).toEqual(["sudo", "make"]);
+        expect(programs('sudo --user "root" ls')).toEqual(["sudo", "ls"]);
+        expect(programs("sudo --user=root ls")).toEqual(["sudo", "ls"]);
+        expect(programs("sudo -uroot ls")).toEqual(["sudo", "ls"]);
+        expect(programs("env -u NAME node x.js")).toEqual(["env", "node"]);
+        expect(programs("nice -n 5 make")).toEqual(["nice", "make"]);
+        expect(marks("nice -n 5 make")).toContainEqual(["5", "number"]);
+    });
+
     it("marks keywords and the command after them", () => {
         expect(marks("if [ -f x ]; then echo y; fi")).toEqual([
             ["if", "keyword"],
