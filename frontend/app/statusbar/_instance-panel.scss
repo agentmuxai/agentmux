@@ -67,7 +67,9 @@
     margin-right: var(--space-1);
 }
 
-.instance-panel-muxbus-signin {
+// Two classes, so this beats `.muxbus-login-chip`'s `height: 100%` and padding
+// (StatusBar.scss, emitted after this partial) whatever the source order.
+.muxbus-login-chip.instance-panel-muxbus-signin {
     height: auto;
     padding: 1px 8px;
 }
