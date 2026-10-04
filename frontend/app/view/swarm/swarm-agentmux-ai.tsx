@@ -58,21 +58,28 @@ export function AgentMuxAiSection(): JSX.Element {
                         </Show>
                     </button>
                     <Show when={!collapsed()}>
-                        <For each={s().rows}>
-                            {(row) => (
-                                <div class="swarm-agentmux-ai-row" title={row.detail}>
-                                    <span class="swarm-agentmux-ai-name">{row.name}</span>
-                                    <span
-                                        classList={{
-                                            "swarm-agentmux-ai-counts": true,
-                                            "swarm-agentmux-ai-counts--warn": row.unhealthy,
-                                        }}
-                                    >
-                                        {row.text}
-                                    </span>
-                                </div>
-                            )}
-                        </For>
+                        {/* One grid for all rows so the counts line up; each row is
+                            `display: contents`, so the hover sits on both cells. */}
+                        <div class="swarm-agentmux-ai-rows">
+                            <For each={s().rows}>
+                                {(row) => (
+                                    <div class="swarm-agentmux-ai-row">
+                                        <span class="swarm-agentmux-ai-name" title={row.detail}>
+                                            {row.name}
+                                        </span>
+                                        <span
+                                            classList={{
+                                                "swarm-agentmux-ai-counts": true,
+                                                "swarm-agentmux-ai-counts--warn": row.unhealthy,
+                                            }}
+                                            title={row.detail}
+                                        >
+                                            {row.text}
+                                        </span>
+                                    </div>
+                                )}
+                            </For>
+                        </div>
                         <div class="swarm-agentmux-ai-note">Since AgentMux's server started</div>
                     </Show>
                 </div>

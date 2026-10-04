@@ -14,18 +14,23 @@
     color: var(--warning-text-color, var(--warning-color));
 }
 
-.swarm-agentmux-ai-row {
-    display: flex;
+.swarm-agentmux-ai-rows {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 2px;
     align-items: baseline;
-    gap: 8px;
-    padding: 2px 10px 2px 22px;
+    padding: 2px 10px 0 22px;
     font-size: 12px;
 }
 
+.swarm-agentmux-ai-row {
+    display: contents;
+}
+
 .swarm-agentmux-ai-name {
-    flex: 0 0 auto;
-    min-width: 11em;
     color: var(--main-text-color);
+    white-space: nowrap;
 }
 
 .swarm-agentmux-ai-counts {
