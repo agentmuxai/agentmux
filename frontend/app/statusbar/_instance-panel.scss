@@ -74,6 +74,12 @@
     padding: 1px 8px;
 }
 
+.instance-panel-muxbus-error {
+    font-size: 11px;
+    color: var(--warning-text-color, var(--warning-color));
+    white-space: normal;
+}
+
 .instance-panel-copy {
     flex: 0 0 auto;
     background: transparent;

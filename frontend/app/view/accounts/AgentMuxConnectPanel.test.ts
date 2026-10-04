@@ -81,3 +81,30 @@ describe("useMuxBusStatus isConfigured", () => {
         expect(rpc.MuxBusLoginCommand).not.toHaveBeenCalled();
     });
 });
+
+describe("useMuxBusStatus across controllers", () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        vi.clearAllMocks();
+    });
+
+    // The status bar's MuxBus dot and the version panel each own a controller;
+    // a sign-in through one must update the other at once.
+    it("a successful sign-in through one controller refreshes the others", async () => {
+        const SIGNED_IN = { ...SIGNED_OUT, connected: true, valid: true, email: "a@example.test", expiresAt: 9e9 };
+        vi.stubEnv("VITE_MUXBUS_CLIENT_ID", "compiled-id");
+        vi.stubEnv("VITE_MUXBUS_COGNITO_DOMAIN", "https://auth.compiled.test");
+        vi.resetModules();
+        const { useMuxBusStatus } = await import("./AgentMuxConnectPanel");
+        rpc.MuxBusStatusCommand.mockResolvedValue(SIGNED_OUT);
+        const panel = useMuxBusStatus();
+        const dot = useMuxBusStatus();
+        await dot.refresh();
+        expect(dot.status()?.connected).toBe(false);
+
+        rpc.MuxBusStatusCommand.mockResolvedValue(SIGNED_IN);
+        rpc.MuxBusLoginCommand.mockResolvedValue({ success: true, email: "a@example.test" });
+        await panel.connect();
+        await vi.waitFor(() => expect(dot.status()?.connected).toBe(true));
+    });
+});

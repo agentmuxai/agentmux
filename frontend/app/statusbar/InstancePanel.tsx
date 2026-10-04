@@ -538,6 +538,13 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                             </button>
                         </span>
                     </div>
+                    {/* Why a sign-in didn't take (no client id, RPC error, a
+                        rejected OAuth response), as the network panel shows it. */}
+                    <Show when={muxbus.error()}>
+                        <div class="instance-panel-row instance-panel-row-meta instance-panel-muxbus-error" role="alert">
+                            ⚠ {muxbus.error()}
+                        </div>
+                    </Show>
                 </Show>
             </div>
             <div class="instance-panel-divider" />
