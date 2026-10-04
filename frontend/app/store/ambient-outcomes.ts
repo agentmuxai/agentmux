@@ -43,7 +43,7 @@ export interface AmbientPurposeRow {
     name: string;
     /** e.g. "12 accepted · 30 kept · 2 refused · 1 failed". "Accepted" is a
      *  candidate the validator took, not a change: the pane may still keep the
-     *  old title as a rewording, and recovery may lose a race (Codex P2 on #4243). */
+     *  old title as a rewording, and recovery may lose a race (#4243). */
     text: string;
     /** Every outcome label and its count, one per line, for the hover. */
     detail: string;
