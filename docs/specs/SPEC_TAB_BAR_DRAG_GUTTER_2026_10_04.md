@@ -1,6 +1,6 @@
 # SPEC — Tab bar: a blank drag square between the last tab and the widgets
 
-**Status:** implemented — `tabbar.scss` (`--tab-bar-drag-gutter`, `.tab-bar-fill` min-width), `tab-strip-scroll.ts` and its effect in `tabbar.tsx`.
+**Status:** implemented (#4313) — `tabbar.scss` (`--tab-bar-drag-gutter`, `.tab-bar-fill` min-width), `tab-strip-scroll.ts` and its effect in `tabbar.tsx`.
 **Trigger:** owner request, 2026-10-04: "at the top, in the window tabs, we need a blank space between the last right-most tab and the left-most widget. Just a small piece, the width of a widget, but blank, needed for dragging the whole window when it is full. It can be hidden when the tabs are scrolled to the left, but when scrolling the tabs …" (the message was cut off there), then: "the width of the drag area should be the same as an unlabeled widget. Just a small square area."
 **Supersedes:** `SPEC_WINDOW_DRAG_HANDLE_2026_06_06.md` (draft, never built), which proposed a grip icon on the *left*, between the hamburger and the first tab. The owner wants a blank square on the *right*, before the widgets. Mark that spec `superseded` with a pointer here when this lands.
 **Scope:** `frontend/app/tab/tabbar.tsx`, `tabbar.scss` (the `.tab-bar-fill` element) and a new `tab-strip-scroll.ts`. No backend or host change: the window drag itself already works on `.tab-bar-fill`.
