@@ -6,6 +6,7 @@ import { registerDefaultCommands } from "@/app/store/command-registry";
 import {
     globalRefocus,
     registerControlShiftTracking,
+    registerHostShortcuts,
     registerGlobalKeys,
 } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
@@ -988,6 +989,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerGlobalKeys();
     registerDefaultCommands();
     registerControlShiftTracking();
+    registerHostShortcuts();
     tlog("registerKeys", t);
 
     t = performance.now();

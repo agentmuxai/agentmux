@@ -5,7 +5,7 @@ import { keyPlatform } from "@/app/keybindings";
 import type { KeyEventLike } from "@/app/keybindings/keys";
 import { chordLeaderOf, DOC_TAB_HOSTS, resolveKey, type KeyContext, type ResolvedBinding } from "@/app/keybindings/registry";
 import { commandRegistry } from "@/app/store/command-registry";
-import { atoms, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
+import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { isEditableTarget } from "@/util/focusutil";
 import * as keyutil from "@/util/keyutil";
@@ -200,6 +200,15 @@ export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
         }
     }
     return false;
+}
+
+/** Runs the app shortcuts the host forwards out of a focused browser pane,
+ *  whose keys never reach this document (crates/cef `forward_app_shortcut`,
+ *  keys from keybindings/host-keys.json). */
+export function registerHostShortcuts() {
+    void getApi().listen<{ block_id: string; command: string }>("app-shortcut", (payload) => {
+        runKeyCommand(payload.command, { repeat: false } as MuxKeyboardEvent);
+    });
 }
 
 /** Shows the numbered pane overlay while Ctrl+Shift is held (after a short
