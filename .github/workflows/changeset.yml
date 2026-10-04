@@ -65,12 +65,15 @@ jobs:
           bad=0
           while read -r f sha; do
             body=$(gh api "repos/$REPO/git/blobs/$sha" --jq .content | base64 -d)
-            # Front matter: the lines between the first two '---' lines, as the release step reads them.
-            front=$(printf '%s\n' "$body" | awk 'NR==1 && !/^---[[:space:]]*$/ {exit} /^---[[:space:]]*$/ {n++; next} n==1 {print}')
-            if ! printf '%s\n' "$front" | grep -q -E '^type:[[:space:]]*(patch|minor|major)[[:space:]]*$'; then
-              echo "::error file=$f::The front matter (between the first two --- lines) needs 'type: patch', 'type: minor' or 'type: major'."; bad=1
-            fi
-            text=$(printf '%s\n' "$body" | awk '/^---[[:space:]]*$/ {n++; next} n>=2' | tr -d '[:space:]')
+            # The same expression scripts/release.sh uses: delimiters are exactly '---',
+            # the first 'type:' line in the front matter counts, and its value is the
+            # second whitespace-separated field (so 'type:minor' without a space is invalid).
+            type=$(printf '%s\n' "$body" | awk '/^---$/{n++;next} n==1 && /^type:/{print $2; exit}' | tr -d '[:space:]')
+            case "$type" in
+              patch|minor|major) ;;
+              *) echo "::error file=$f::Front matter needs a first 'type: patch', 'type: minor' or 'type: major' line between two exact '---' lines (found: '${type}')."; bad=1 ;;
+            esac
+            text=$(printf '%s\n' "$body" | awk '$0=="---" {n++; next} n>=2' | tr -d '[:space:]')
             if [ -z "$text" ]; then
               echo "::error file=$f::The changeset has no description after the front matter."; bad=1
             fi
