@@ -420,7 +420,7 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 | 2 | #4321 | §5's dead code. The numbered pane overlay is rebuilt on DOM key events. `app:globalhotkey` removed. |
 | 3 | #4323 | The shortcut table (`frontend/app/keybindings/`), the §12 key map, the dispatcher and the terminal on the table, and every UI hint generated from it (§7.1). Covers the help pane, the hamburger and pane menus, the command palette and tooltips, plus a test that fails on a hand-written hint. The dev perf HUD and diagnostics panel are table rows (dev-only) on Ctrl+Alt+Shift+P and Ctrl+Alt+Shift+F12. |
 
-**Added after phase 3** (the new-actions PR):
+**Added after phase 3** (#4324):
 - move a tab: ⇧⌘PgUp / PgDn, Ctrl+Alt+Shift+PgUp / PgDn;
 - rename the window tab: F2, when nothing focused takes it first;
 - swap the focused pane with a neighbour: ⌃⌥⇧arrows / Ctrl+Alt+Shift+arrows;
@@ -431,6 +431,6 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 **Still deferred:** reopening a closed window tab. Closing a tab deletes its panes on the server, so reopen needs a backend "recently closed tabs" store before a key can bind to it. It isn't bound or shown anywhere.
 
 **Still to do:**
-- Phase 4 (the pane-keys PR): **done** for document tabs, the editor and the Files pane. They are `pane` rows in the table, matched by `matchPaneKey`. CodeMirror's Save keys are generated from it, and the help pane has Documents, Editor and Files sections. Global rows sharing a key are scoped away from that pane, and the conflict check proves it. The composer's keys (Enter, Esc, history arrows) are widget-internal and stay local.
+- Phase 4 (#4325): **done** for document tabs, the editor and the Files pane. They are `pane` rows in the table, matched by `matchPaneKey`. CodeMirror's Save keys are generated from it, and the help pane has Documents, Editor and Files sections. Global rows sharing a key are scoped away from that pane, and the conflict check proves it. The composer's keys (Enter, Esc, history arrows) are widget-internal and stay local.
 - Phase 5: the host's `OnPreKeyEvent` list and the macOS menu accelerators are generated from the table, and browser panes forward app shortcuts.
 - Phase 6: a `keybindings` setting for user overrides, and the docs site's `keybindings.md` generated from the table.
