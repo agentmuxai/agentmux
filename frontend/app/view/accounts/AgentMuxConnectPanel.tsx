@@ -21,7 +21,7 @@
  * See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md and muxbus/pkce.rs.
  */
 
-import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
+import { createSignal, getOwner, onCleanup, onMount, Show, type Accessor, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ProviderLogo } from "@/element/ProviderLogo";
@@ -95,22 +95,40 @@ export interface MuxBusController {
     isConfigured: () => boolean;
 }
 
+// Every live controller's refresh. Several surfaces own a controller (the
+// status bar's MuxBus dot, the version panel, Accounts); a sign-in or sign-out
+// through one refreshes the rest at once, not on their own timers.
+const liveRefreshers = new Set<() => Promise<void>>();
+
+function refreshOthers(self: () => Promise<void>): void {
+    for (const refresh of liveRefreshers) if (refresh !== self) void refresh();
+}
+
 export function useMuxBusStatus(): MuxBusController {
     const [status, setStatus] = createSignal<MuxBusStatus | null>(null);
     const [loading, setLoading] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
 
+    // Only the latest refresh may set the status: an older one still in flight
+    // (the status bar's 60 s poll, say) would otherwise land after a sign-in's
+    // refresh and put back the state from before it.
+    let refreshSeq = 0;
     const refresh = async () => {
+        const seq = ++refreshSeq;
         // Not awaited: the status never waits on the cloud settings. A no-op
         // once a client id is known, which a production build always has.
         void cloudConfig.load();
+        let next: MuxBusStatus;
         try {
-            setStatus(await RpcApi.MuxBusStatusCommand(TabRpcClient));
+            next = await RpcApi.MuxBusStatusCommand(TabRpcClient);
         } catch {
             // no credentials or server not reachable — treat as disconnected
-            setStatus({ ...DISCONNECTED });
+            next = { ...DISCONNECTED };
         }
+        if (seq === refreshSeq) setStatus(next);
     };
+    liveRefreshers.add(refresh);
+    if (getOwner()) onCleanup(() => liveRefreshers.delete(refresh));
 
     const connect = async () => {
         await cloudConfig.load();
@@ -125,6 +143,7 @@ export function useMuxBusStatus(): MuxBusController {
             const result = await RpcApi.MuxBusLoginCommand(TabRpcClient, signIn);
             if (result.success) {
                 await refresh();
+                refreshOthers(refresh);
             } else if (result.error !== "sign-in cancelled") {
                 // A user-initiated Cancel is not a failure — don't surface
                 // it as a scary error banner, just quietly go back to
@@ -155,6 +174,7 @@ export function useMuxBusStatus(): MuxBusController {
         try {
             await RpcApi.MuxBusDisconnectCommand(TabRpcClient);
             await refresh();
+            refreshOthers(refresh);
         } catch (e) {
             setError(String(e));
         } finally {

@@ -17,7 +17,7 @@
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
-import { isMuxBusSessionOk } from "@/app/view/accounts/muxbus-session";
+import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/muxbus-session";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
@@ -518,14 +518,33 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         <span class="instance-panel-label">MuxBus</span>
                         <span class="instance-panel-value">
                             <span class="instance-panel-muxbus-icon">◈</span>
-                            <span
-                                class="instance-panel-muxbus-pill"
-                                title="This instance has no valid MuxBus session — cloud/WAN jekt delivery will not work until you sign in again."
+                            <button
+                                type="button"
+                                class="muxbus-login-chip muxbus-login-chip-signin instance-panel-muxbus-signin"
+                                title={
+                                    muxbus.loading()
+                                        ? "Cancel sign-in"
+                                        : "This instance has no valid MuxBus session — cloud/WAN jekt delivery will not work until you sign in."
+                                }
+                                onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
                             >
-                                Not connected
-                            </span>
+                                {muxbus.loading()
+                                    ? "Cancel"
+                                    : muxbusNeedsSignInAgain(muxbus.status())
+                                      ? "Sign in again"
+                                      : muxbus.status()?.connected
+                                        ? "Expired — re-login"
+                                        : "Sign in"}
+                            </button>
                         </span>
                     </div>
+                    {/* Why a sign-in didn't take (no client id, RPC error, a
+                        rejected OAuth response), as the network panel shows it. */}
+                    <Show when={muxbus.error()}>
+                        <div class="instance-panel-row instance-panel-row-meta instance-panel-muxbus-error" role="alert">
+                            ⚠ {muxbus.error()}
+                        </div>
+                    </Show>
                 </Show>
             </div>
             <div class="instance-panel-divider" />
