@@ -145,6 +145,13 @@ A CEF app's process tree needs two passes sometimes (parent exits, orphaned
 children take a moment to follow) — re-check and re-run once if any of your
 own PIDs remain.
 
+**Stop the launcher first.** A `task dev` instance also runs
+`agentmux-launcher.exe` from the same `dist/cef-dev-<stamp>/` folder, and it
+starts the app again within seconds of the app's processes being killed
+(seen 2026-10-04: every PID came back with a new start time). Stop the
+launcher, then the rest, then check a few seconds later that nothing under
+that folder has restarted.
+
 ## 5. Backgrounding: use `run_in_background`, don't try to fully detach
 
 A `run_in_background: true` Bash tool call survives many subsequent,
