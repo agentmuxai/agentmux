@@ -235,6 +235,7 @@ export {
     enableGlobalKeybindings,
     keyboardMouseDownHandler,
     registerControlShiftTracking,
+    registerHostShortcuts,
 } from "./keymodel-dispatch";
 
 export { globalRefocus, globalRefocusWithTimeout } from "./keymodel-nav";

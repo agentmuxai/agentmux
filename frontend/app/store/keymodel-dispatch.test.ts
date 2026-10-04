@@ -8,9 +8,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const listeners = vi.hoisted(() => new Map<string, (payload: unknown) => void>());
 vi.mock("@/app/store/global", () => ({
     atoms: { modalOpen: () => false },
-    getApi: () => ({}),
+    getApi: () => ({
+        listen: (event: string, cb: (payload: unknown) => void) => {
+            listeners.set(event, cb);
+            return Promise.resolve(() => {});
+        },
+        reclaimWindowFocus: () => Promise.resolve(),
+    }),
     getBlockComponentModel: () => null,
     setControlShiftDelayAtom: vi.fn(),
 }));
@@ -19,7 +26,7 @@ vi.mock("@/layout/index", () => ({
 }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
-import { appHandleKeyDown, isTypingFocus, keyCommands } from "./keymodel-dispatch";
+import { appHandleKeyDown, disableGlobalKeybindings, enableGlobalKeybindings, isTypingFocus, keyCommands, registerHostShortcuts } from "./keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
 
@@ -113,5 +120,16 @@ describe("appHandleKeyDown", () => {
         expect(press({ key: "S", code: "KeyS", ctrlKey: true, shiftKey: true })).toBe(true);
         expect(press({ key: "ArrowUp", code: "ArrowUp" })).toBe(true);
         expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs a shortcut the host forwards out of a browser pane, after taking focus back", async () => {
+        registerHostShortcuts();
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new" });
+        await vi.waitFor(() => expect(handlers["tab:new"]).toHaveBeenCalledTimes(1));
+        disableGlobalKeybindings();
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new" });
+        enableGlobalKeybindings();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
     });
 });

@@ -1,0 +1,822 @@
+{
+  "mac": [
+    {
+      "command": "view:command-palette",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 80
+    },
+    {
+      "command": "view:command-palette",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 80
+    },
+    {
+      "command": "app:settings",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 188
+    },
+    {
+      "command": "help:shortcuts",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 191
+    },
+    {
+      "command": "help:shortcuts",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 112
+    },
+    {
+      "command": "window:new",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 78
+    },
+    {
+      "command": "tab:new",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 84
+    },
+    {
+      "command": "tab:close",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 87
+    },
+    {
+      "command": "tab:next",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 221
+    },
+    {
+      "command": "tab:next",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 221
+    },
+    {
+      "command": "tab:prev",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 219
+    },
+    {
+      "command": "tab:prev",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 219
+    },
+    {
+      "command": "tab:next",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 9
+    },
+    {
+      "command": "tab:prev",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 9
+    },
+    {
+      "command": "tab:goto:1",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 49
+    },
+    {
+      "command": "tab:goto:2",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 50
+    },
+    {
+      "command": "tab:goto:3",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 51
+    },
+    {
+      "command": "tab:goto:4",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 52
+    },
+    {
+      "command": "tab:goto:5",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 53
+    },
+    {
+      "command": "tab:goto:6",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 54
+    },
+    {
+      "command": "tab:goto:7",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 55
+    },
+    {
+      "command": "tab:goto:8",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 56
+    },
+    {
+      "command": "tab:goto:last",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 57
+    },
+    {
+      "command": "tab:moveLeft",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 33
+    },
+    {
+      "command": "tab:moveRight",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 34
+    },
+    {
+      "command": "pane:new",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 78
+    },
+    {
+      "command": "open:agent",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 65
+    },
+    {
+      "command": "split:right",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 68
+    },
+    {
+      "command": "split:down",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 68
+    },
+    {
+      "command": "pane:close",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 87
+    },
+    {
+      "command": "pane:magnify",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 77
+    },
+    {
+      "command": "pane:focus:next",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 117
+    },
+    {
+      "command": "pane:focus:prev",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 117
+    },
+    {
+      "command": "pane:focus:1",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 49
+    },
+    {
+      "command": "pane:focus:1",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 97
+    },
+    {
+      "command": "pane:focus:2",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 50
+    },
+    {
+      "command": "pane:focus:2",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 98
+    },
+    {
+      "command": "pane:focus:3",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 51
+    },
+    {
+      "command": "pane:focus:3",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 99
+    },
+    {
+      "command": "pane:focus:4",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 52
+    },
+    {
+      "command": "pane:focus:4",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 100
+    },
+    {
+      "command": "pane:focus:5",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 53
+    },
+    {
+      "command": "pane:focus:5",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 101
+    },
+    {
+      "command": "pane:focus:6",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 54
+    },
+    {
+      "command": "pane:focus:6",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 102
+    },
+    {
+      "command": "pane:focus:7",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 55
+    },
+    {
+      "command": "pane:focus:7",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 103
+    },
+    {
+      "command": "pane:focus:8",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 56
+    },
+    {
+      "command": "pane:focus:8",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 104
+    },
+    {
+      "command": "pane:focus:9",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 57
+    },
+    {
+      "command": "pane:focus:9",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 105
+    },
+    {
+      "command": "pane:changeConnection",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": true,
+      "vk": 71
+    }
+  ],
+  "other": [
+    {
+      "command": "view:command-palette",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 80
+    },
+    {
+      "command": "app:settings",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 188
+    },
+    {
+      "command": "help:shortcuts",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 191
+    },
+    {
+      "command": "help:shortcuts",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 112
+    },
+    {
+      "command": "window:new",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 78
+    },
+    {
+      "command": "tab:new",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 84
+    },
+    {
+      "command": "tab:close",
+      "ctrl": true,
+      "shift": true,
+      "alt": true,
+      "meta": false,
+      "vk": 87
+    },
+    {
+      "command": "tab:close",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 115
+    },
+    {
+      "command": "tab:next",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 221
+    },
+    {
+      "command": "tab:prev",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 219
+    },
+    {
+      "command": "tab:next",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 9
+    },
+    {
+      "command": "tab:prev",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 9
+    },
+    {
+      "command": "tab:goto:1",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 49
+    },
+    {
+      "command": "tab:goto:2",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 50
+    },
+    {
+      "command": "tab:goto:3",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 51
+    },
+    {
+      "command": "tab:goto:4",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 52
+    },
+    {
+      "command": "tab:goto:5",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 53
+    },
+    {
+      "command": "tab:goto:6",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 54
+    },
+    {
+      "command": "tab:goto:7",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 55
+    },
+    {
+      "command": "tab:goto:8",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 56
+    },
+    {
+      "command": "tab:goto:last",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 57
+    },
+    {
+      "command": "tab:moveLeft",
+      "ctrl": true,
+      "shift": true,
+      "alt": true,
+      "meta": false,
+      "vk": 33
+    },
+    {
+      "command": "tab:moveRight",
+      "ctrl": true,
+      "shift": true,
+      "alt": true,
+      "meta": false,
+      "vk": 34
+    },
+    {
+      "command": "pane:new",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 192
+    },
+    {
+      "command": "open:agent",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 65
+    },
+    {
+      "command": "split:right",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 68
+    },
+    {
+      "command": "split:down",
+      "ctrl": true,
+      "shift": true,
+      "alt": true,
+      "meta": false,
+      "vk": 68
+    },
+    {
+      "command": "pane:close",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 87
+    },
+    {
+      "command": "pane:magnify",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 77
+    },
+    {
+      "command": "pane:focus:next",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": false,
+      "vk": 117
+    },
+    {
+      "command": "pane:focus:prev",
+      "ctrl": false,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 117
+    },
+    {
+      "command": "pane:focus:1",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 49
+    },
+    {
+      "command": "pane:focus:1",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 97
+    },
+    {
+      "command": "pane:focus:2",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 50
+    },
+    {
+      "command": "pane:focus:2",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 98
+    },
+    {
+      "command": "pane:focus:3",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 51
+    },
+    {
+      "command": "pane:focus:3",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 99
+    },
+    {
+      "command": "pane:focus:4",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 52
+    },
+    {
+      "command": "pane:focus:4",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 100
+    },
+    {
+      "command": "pane:focus:5",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 53
+    },
+    {
+      "command": "pane:focus:5",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 101
+    },
+    {
+      "command": "pane:focus:6",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 54
+    },
+    {
+      "command": "pane:focus:6",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 102
+    },
+    {
+      "command": "pane:focus:7",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 55
+    },
+    {
+      "command": "pane:focus:7",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 103
+    },
+    {
+      "command": "pane:focus:8",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 56
+    },
+    {
+      "command": "pane:focus:8",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 104
+    },
+    {
+      "command": "pane:focus:9",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 57
+    },
+    {
+      "command": "pane:focus:9",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 105
+    },
+    {
+      "command": "pane:changeConnection",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "meta": false,
+      "vk": 71
+    }
+  ]
+}
