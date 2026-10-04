@@ -43,7 +43,7 @@ export function helpSections(platform: KeyPlatform): HelpSection[] {
     const entries = new Map<string, { category: KeyCategory; entry: HelpEntry; groupKeys: string[] }>();
     for (const row of DEFAULT_KEYBINDINGS) {
         const keys = rowKeys(row, platform);
-        if (keys.length === 0) continue;
+        if (keys.length === 0 || row.devOnly) continue;
         const id = row.helpGroup ?? row.command;
         let e = entries.get(id);
         if (!e) {

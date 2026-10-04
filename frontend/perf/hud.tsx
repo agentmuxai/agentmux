@@ -16,7 +16,8 @@
 
 import { createEffect, createSignal, onCleanup, onMount, Show, type JSX, For } from "solid-js";
 import { perfStore } from "./store";
-import { keyLabel } from "@/app/keybindings";
+import { shortcutFor } from "@/app/keybindings";
+import { keyCommands } from "@/app/store/keymodel-dispatch";
 
 interface HudSnapshot {
     longTasks: { count: number; p50: number; p75: number; p95: number; max: number };
@@ -54,17 +55,15 @@ export function PerfHud(): JSX.Element {
     const [snap, setSnap] = createSignal<HudSnapshot>(flatten(perfStore.snapshot()));
     let pollInterval: ReturnType<typeof setInterval> | null = null;
 
-    const onKey = (e: KeyboardEvent) => {
-        // Ctrl+Alt+Shift+P (⌘ for Ctrl on macOS). Without Alt it's the command palette.
-        if (e.shiftKey && e.altKey && (e.ctrlKey || e.metaKey) && e.code === "KeyP") {
-            e.preventDefault();
-            setVisible((v) => !v);
-        }
-    };
-
+    // Its key is a shortcut-table row (`dev:perfHud`), so it can't collide
+    // with another binding and also works from a terminal.
     onMount(() => {
-        window.addEventListener("keydown", onKey);
+        keyCommands.set("dev:perfHud", () => {
+            setVisible((v) => !v);
+            return true;
+        });
     });
+    onCleanup(() => keyCommands.delete("dev:perfHud"));
 
     // Only run the 1 Hz poll when the HUD is visible. Otherwise the
     // timer fires every second forever for a panel nobody can see —
@@ -87,7 +86,6 @@ export function PerfHud(): JSX.Element {
     });
 
     onCleanup(() => {
-        window.removeEventListener("keydown", onKey);
         if (pollInterval != null) clearInterval(pollInterval);
     });
 
@@ -114,7 +112,7 @@ export function PerfHud(): JSX.Element {
                 <div style={{ "font-weight": "bold", color: "#7af", "margin-bottom": "4px" }}>
                     ⏱ Perf HUD &nbsp;
                     <span style={{ color: "#777", "font-weight": "normal" }}>
-                        ({keyLabel("mod+alt+shift+p")})
+                        ({shortcutFor("dev:perfHud")})
                     </span>
                 </div>
                 <div style={{ "margin-top": "4px" }}>

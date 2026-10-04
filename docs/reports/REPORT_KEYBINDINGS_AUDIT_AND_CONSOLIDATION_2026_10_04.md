@@ -418,7 +418,7 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 |---|---|---|
 | 0 | #4320 | The destructive conflicts in §3.3, with no key changes. Terminal clear on Windows/Linux moved from Alt+K to Ctrl+Shift+L so Alt+K reaches the shell. |
 | 2 | #4321 | §5's dead code. The numbered pane overlay is rebuilt on DOM key events. `app:globalhotkey` removed. |
-| 3 | #4323 | The shortcut table (`frontend/app/keybindings/`), the §12 key map, the dispatcher and the terminal on the table, and every UI hint generated from it (§7.1). Covers the help pane, the hamburger and pane menus, the command palette and tooltips, plus a test that fails on a hand-written hint. The dev perf HUD and diagnostics panel moved to Ctrl+Alt+Shift+P / D. |
+| 3 | #4323 | The shortcut table (`frontend/app/keybindings/`), the §12 key map, the dispatcher and the terminal on the table, and every UI hint generated from it (§7.1). Covers the help pane, the hamburger and pane menus, the command palette and tooltips, plus a test that fails on a hand-written hint. The dev perf HUD and diagnostics panel are table rows (dev-only) on Ctrl+Alt+Shift+P and Ctrl+Alt+Shift+F12. |
 
 **Deferred from §9 and §12.** These need new actions, not just keys:
 - reopen a closed window tab;

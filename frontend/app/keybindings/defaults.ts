@@ -23,6 +23,9 @@ export interface KeyBindingRow {
     skipShell?: boolean;
     /** Rows sharing a group show as one help line ("Go to tab 1–8"). */
     helpGroup?: string;
+    /** Dev builds only: left out of the help pane. Its handler is registered
+     *  by the dev panel itself, so in a release build the key does nothing. */
+    devOnly?: boolean;
 }
 
 export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
@@ -87,6 +90,10 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "view:zoom:in", label: "Zoom in", category: "Find & zoom", mac: ["meta+=", "meta+shift+=", "meta+code:NumpadAdd"], other: ["ctrl+=", "ctrl+shift+=", "ctrl+code:NumpadAdd"], skipShell: true },
     { command: "view:zoom:out", label: "Zoom out", category: "Find & zoom", mac: ["meta+-", "meta+code:NumpadSubtract"], other: ["ctrl+-", "ctrl+code:NumpadSubtract"], skipShell: true },
     { command: "view:zoom:reset", label: "Reset zoom", category: "Find & zoom", mac: ["meta+0", "meta+code:Numpad0"], other: ["ctrl+0", "ctrl+code:Numpad0"], skipShell: true },
+
+    // ── Dev builds ──
+    { command: "dev:perfHud", label: "Performance HUD", category: "General", mac: ["meta+alt+shift+p"], other: ["ctrl+alt+shift+p"], skipShell: true, devOnly: true },
+    { command: "dev:diagnostics", label: "Diagnostics panel", category: "General", mac: ["meta+alt+shift+F12"], other: ["ctrl+alt+shift+F12"], skipShell: true, devOnly: true },
 
     // ── Terminal (run by the terminal itself) ──
     // macOS: ⌘C / ⌘V already copy and paste natively in the terminal.

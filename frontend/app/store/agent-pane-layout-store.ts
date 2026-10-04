@@ -7,7 +7,7 @@
  * Mirrors the slot lifecycle of slice #9 (browser-pane) / #10 (editor-pane):
  * per-blockId `Map<string, Slot>`, synchronous `registerPane`, `dispatch`
  * that throws on an unregistered pane, projection-on-change, and the global
- * `recordDispatch` audit hook (surfaces in the Ctrl+Alt+Shift+D diag panel).
+ * `recordDispatch` audit hook (surfaces in the diagnostics panel, Ctrl+Alt+Shift+F12).
  *
  * The reducer is pure; this layer holds the only mutable cell and projects
  * the derived layout view into the caller's SolidJS signals. It deliberately
