@@ -908,6 +908,18 @@ impl Controller for ShellController {
         if !gh_guard.is_empty() {
             cmd.env(crate::backend::gh_guard::GH_CONFIG_DIR, &gh_guard);
         }
+        // Its publish-guard hooks too (`backend::publish_guard`). A host path,
+        // so a WSL shell, whose WSLENV doesn't list these, is unaffected.
+        let hooks = obj::meta_get_string(
+            &block_meta,
+            crate::backend::publish_guard::META_KEY_PTYSHELL_GIT_HOOKS_PATH,
+            "",
+        );
+        if !hooks.is_empty() {
+            for (key, value) in crate::backend::publish_guard::hooks_path_env(&hooks) {
+                cmd.env(key, value);
+            }
+        }
         // Identity M4a: a terminal pane never carries a token. No counter —
         // most panes are not agents — but an agent CLI that registers from
         // this block shows in the live gauge.

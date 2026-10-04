@@ -24,6 +24,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 const COUNT: &str = "GIT_CONFIG_COUNT";
+/// Larger counts already in the env are not trusted (and not looped over).
+const MAX_ENTRIES: usize = 256;
+/// Block meta on an agent's PtyShell: the hooks directory, which the PTY spawn
+/// sets through `GIT_CONFIG_*` (`blockcontroller::shell::lifecycle`). A PTY
+/// shell's env is built from its own block, not from the agent's, so the
+/// setting travels on that block, as `gh_guard`'s directory does.
+pub const META_KEY_PTYSHELL_GIT_HOOKS_PATH: &str = "ptyshell:githookspath";
 const HOOKS_PATH_KEY: &str = "core.hooksPath";
 /// The line `gh-agent` writes into every hook it generates.
 const MARKER: &str = "gh-agent publish guard";
@@ -64,6 +71,7 @@ pub fn set_git_config_env(env: &mut HashMap<String, String>, inherited: Option<S
         .cloned()
         .or(inherited)
         .and_then(|c| c.trim().parse().ok())
+        .filter(|c: &usize| *c <= MAX_ENTRIES)
         .unwrap_or(0);
     for i in 0..count {
         if env.get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)) {
@@ -85,6 +93,22 @@ pub fn apply_publish_guard_in(env: &mut HashMap<String, String>, hooks_dir: &Pat
     }
     set_git_config_env(env, inherited_count, HOOKS_PATH_KEY, &hooks_dir.to_string_lossy());
     true
+}
+
+/// This host's `gh-agent` hooks directory, if `gh-agent` has written it.
+pub fn host_hooks_dir() -> Option<String> {
+    let dir = gh_agent_hooks_dir(|k| std::env::var(k).ok(), &dirs::home_dir().unwrap_or_default(), cfg!(windows));
+    is_guard_hooks_dir(&dir).then(|| dir.to_string_lossy().into_owned())
+}
+
+/// The `GIT_CONFIG_*` variables that point `core.hooksPath` at `hooks_dir` on
+/// top of the process env, for a spawn that sets variables one by one.
+pub fn hooks_path_env(hooks_dir: &str) -> Vec<(String, String)> {
+    let mut env = HashMap::new();
+    set_git_config_env(&mut env, std::env::var(COUNT).ok(), HOOKS_PATH_KEY, hooks_dir);
+    let mut pairs: Vec<_> = env.into_iter().collect();
+    pairs.sort();
+    pairs
 }
 
 /// [`apply_publish_guard_in`] with this host's `gh-agent` hooks directory.
@@ -178,6 +202,23 @@ mod tests {
         apply_publish_guard_in(&mut e, dir.path(), Some("2".into()));
         assert_eq!(e[COUNT], "3");
         assert_eq!(e["GIT_CONFIG_KEY_2"], HOOKS_PATH_KEY);
+    }
+
+    #[test]
+    fn an_absurd_count_is_not_trusted_or_looped_over() {
+        let dir = guard_dir();
+        let mut e = env(&[(COUNT, "999999999999")]);
+        apply_publish_guard_in(&mut e, dir.path(), None);
+        assert_eq!(e[COUNT], "1");
+        assert_eq!(e["GIT_CONFIG_KEY_0"], HOOKS_PATH_KEY);
+    }
+
+    #[test]
+    fn hooks_path_env_lists_the_variables_for_a_pty_spawn() {
+        let pairs = hooks_path_env("/h");
+        assert!(pairs.iter().any(|(k, v)| k.starts_with("GIT_CONFIG_KEY_") && v == HOOKS_PATH_KEY));
+        assert!(pairs.iter().any(|(k, v)| k.starts_with("GIT_CONFIG_VALUE_") && v == "/h"));
+        assert!(pairs.iter().any(|(k, _)| k == COUNT));
     }
 
     #[test]
