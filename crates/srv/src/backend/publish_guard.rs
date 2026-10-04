@@ -115,10 +115,17 @@ pub fn without_hooks_path(env: &HashMap<String, String>) -> HashMap<String, Stri
     out
 }
 
+/// `key` from `env`; on Windows, where variable names ignore case, in any casing.
+fn env_var(env: &HashMap<String, String>, key: &str, windows: bool) -> Option<String> {
+    env.get(key)
+        .or_else(|| windows.then(|| env.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)).flatten())
+        .cloned()
+}
+
 /// The hooks directory for a spawn whose own env is `env` (falling back to
 /// `process` for anything it doesn't set), if `gh-agent` has written it.
 pub fn hooks_dir_for(env: &HashMap<String, String>, process: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let get = |k: &str| env.get(k).cloned().or_else(|| process(k));
+    let get = |k: &str| env_var(env, k, cfg!(windows)).or_else(|| process(k));
     let home = get(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .filter(|h| !h.is_empty())
         .map(PathBuf::from)
@@ -206,6 +213,13 @@ mod tests {
         assert_eq!(hooks_dir_for(&agent, no_process), None);
         std::fs::write(empty.path().join("pre-push"), "#!/bin/sh\n# someone else's hook\n").unwrap();
         assert_eq!(hooks_dir_for(&agent, no_process), None);
+    }
+
+    #[test]
+    fn windows_variable_names_match_in_any_casing() {
+        let e = env(&[("Gh_Agent_Hooks_Dir", "/h")]);
+        assert_eq!(env_var(&e, "GH_AGENT_HOOKS_DIR", true).as_deref(), Some("/h"));
+        assert_eq!(env_var(&e, "GH_AGENT_HOOKS_DIR", false), None);
     }
 
     #[test]
