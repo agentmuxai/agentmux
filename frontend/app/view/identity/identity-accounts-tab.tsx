@@ -202,8 +202,8 @@ function AccountRow(props: {
  * Names of the agents that use `account`: its link rows
  * (db_agent_identity_links, what the launch flow writes and what the
  * backend's affected-agents disclosure reads) plus the legacy
- * `agent.accounts` index for agents that predate direct links (reagent P1,
- * PR #2161 round 1). Best-effort: a failed link lookup leaves the legacy
+ * `agent.accounts` index for agents that predate direct links (#2161).
+ * Best-effort: a failed link lookup leaves the legacy
  * part, and the post-delete disclosure (backend-sourced) stays accurate.
  */
 function useAccountAgentNames(account: Account): Accessor<string[]> {
