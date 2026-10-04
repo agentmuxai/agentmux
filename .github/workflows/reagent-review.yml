@@ -47,7 +47,8 @@ jobs:
     #
     # Gate before the pull: a superset of the reviewer's own filter, so it
     # never skips an event the reviewer would act on, but it drops the ones
-    # it would certainly drop: PR body/title edits, closed PRs, ReAgent's own
+    # it would certainly drop: edits that change neither the base, title nor
+    # body, closed PRs, ReAgent's own
     # comments, and comments from humans with no @-mention. Codex's comments
     # are NOT dropped: the reviewer reads them. ReAgent's tests read THIS
     # expression from main; keep the `pull_request.state == 'open'` clause
