@@ -120,12 +120,17 @@ function registerGlobalKeys() {
         cyclePaneFocus("backward");
         return true;
     });
-    globalKeyMap.set("Ctrl:Shift:k", () => {
+    globalKeyMap.set("Ctrl:Shift:k", (e) => {
         const blockId = getFocusedBlockId();
         if (blockId == null) {
             return true;
         }
         if (getBlockComponentModel(blockId)?.viewModel?.viewType === "launcher") {
+            return true;
+        }
+        // One confirmation at a time: a held key repeats, and the global map
+        // still runs while a modal is open.
+        if (e.repeat || modalsModel.isModalOpen(ReplacePaneConfirm)) {
             return true;
         }
         modalsModel.openModal(ReplacePaneConfirm, {
