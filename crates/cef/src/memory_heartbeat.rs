@@ -189,7 +189,12 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                 // The refill waits until Normal has held for POOL_REFILL_SETTLE
                 // (see PoolRefillGate): each refill creates windows, which on
                 // Windows took keyboard focus, and pressure flaps while builds run.
-                if pool_refill.tick(transition, level_now, std::time::Instant::now()) {
+                if pool_refill.tick(
+                    transition,
+                    level_now,
+                    std::time::Instant::now(),
+                    state.any_browser_pane_closing(),
+                ) {
                     tracing::info!(target: "mem_pressure", "refilling warm pools after pressure settled");
                     crate::commands::window_pool::spawn_pane_pool_window(&state);
                     crate::commands::window_pool::spawn_pool_window(&state);
