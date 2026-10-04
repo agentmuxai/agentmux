@@ -14,7 +14,7 @@ export function keybindingsDoc(): string {
         "",
         "<!-- Generated from frontend/app/keybindings/defaults.ts by keybindings/doc.test.ts. Do not edit by hand: run `UPDATE_KEYBINDINGS_DOC=1 npx vitest run frontend/app/keybindings/doc.test.ts`. -->",
         "",
-        "The same list is in the app: press F1, or open the Help pane. A terminal keeps every key for the shell except the window, tab and pane shortcuts below; Alt+letter is never an app shortcut on Windows or Linux.",
+        "The same list is in the app: press F1, or open the Help pane. A terminal keeps every key for the shell except the window, tab and pane shortcuts below, and on Windows and Linux no global shortcut uses Alt+letter, so in a terminal those always reach the shell.",
         "",
     ];
     const categories = [...new Set([...mac, ...other].map((s) => s.category))];
