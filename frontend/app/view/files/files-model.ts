@@ -146,6 +146,17 @@ async function loadAgentColor(definitionId: string): Promise<string | undefined>
 }
 
 export class FilesModel {
+    /** The file list; set by the view. giveFocus moves focus there, so a
+     *  focused Files pane has its keys (not the block's hidden focus input). */
+    focusTargetRef: { current: HTMLElement | null } = { current: null };
+
+    giveFocus(): boolean {
+        const el = this.focusTargetRef.current;
+        if (!el) return false;
+        el.focus();
+        return document.activeElement === el;
+    }
+
     readonly blockId: string;
     private readonly ctx: PaneTabHostContext;
 

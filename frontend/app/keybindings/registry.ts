@@ -145,6 +145,9 @@ export function findConflicts(platform: KeyPlatform): string[] {
             const a = rows[i];
             const b = rows[j];
             if (a.row.command === b.row.command) continue;
+            // A pane row over a global row is precedence by design (see
+            // `KeyBindingRow.pane`); two pane rows or two global rows must not clash.
+            if (!a.row.pane !== !b.row.pane) continue;
             if (whenDisjoint(whenOf(a.row), whenOf(b.row))) continue;
             if (a.steps.length !== b.steps.length) {
                 // A chord leader must not also be a single-key binding.

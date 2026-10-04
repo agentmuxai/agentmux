@@ -142,11 +142,15 @@ describe("pane rows", () => {
         expect(matchPaneKey(ev("F", "KeyF", { ctrlKey: true, shiftKey: true }), "files", "other")).toBeNull();
     });
 
-    it("the global dispatcher never runs a pane row, and yields that key in the pane", () => {
-        expect(resolveKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), FILES, "other")).toBeNull();
-        expect(resolveKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("window:new");
-        expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), EDITOR, "other")).toBeNull();
-        expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), NONE, "other")?.row.command).toBe("tab:next");
+    it("the global dispatcher never runs a pane row; the global row is the fallback", () => {
+        // In Files, the pane's own handler takes Ctrl+Shift+N first (new
+        // folder) and marks it handled. When it doesn't (focus in its filter
+        // box, say), the global row still applies.
+        expect(resolveKey(ev("N", "KeyN", { ctrlKey: true, shiftKey: true }), FILES, "other")?.row.command).toBe("window:new");
+        expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), EDITOR, "other")?.row.command).toBe("tab:next");
+        for (const c of _rowsForTests("other")) {
+            if (c.row.pane) expect(resolveKey(ev("x", "KeyX"), NONE, "other")?.row.command).not.toBe(c.row.command);
+        }
     });
 
     it("whenDisjoint understands flags, view types and docTabsHost", () => {
