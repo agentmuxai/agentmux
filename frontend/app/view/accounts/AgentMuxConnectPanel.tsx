@@ -109,16 +109,23 @@ export function useMuxBusStatus(): MuxBusController {
     const [loading, setLoading] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
 
+    // Only the latest refresh may set the status: an older one still in flight
+    // (the status bar's 60 s poll, say) would otherwise land after a sign-in's
+    // refresh and put back the state from before it.
+    let refreshSeq = 0;
     const refresh = async () => {
+        const seq = ++refreshSeq;
         // Not awaited: the status never waits on the cloud settings. A no-op
         // once a client id is known, which a production build always has.
         void cloudConfig.load();
+        let next: MuxBusStatus;
         try {
-            setStatus(await RpcApi.MuxBusStatusCommand(TabRpcClient));
+            next = await RpcApi.MuxBusStatusCommand(TabRpcClient);
         } catch {
             // no credentials or server not reachable — treat as disconnected
-            setStatus({ ...DISCONNECTED });
+            next = { ...DISCONNECTED };
         }
+        if (seq === refreshSeq) setStatus(next);
     };
     liveRefreshers.add(refresh);
     if (getOwner()) onCleanup(() => liveRefreshers.delete(refresh));

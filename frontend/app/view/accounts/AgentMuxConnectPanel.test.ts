@@ -108,3 +108,24 @@ describe("useMuxBusStatus across controllers", () => {
         await vi.waitFor(() => expect(dot.status()?.connected).toBe(true));
     });
 });
+
+describe("useMuxBusStatus refresh ordering", () => {
+    afterEach(() => {
+        vi.unstubAllEnvs();
+        vi.clearAllMocks();
+    });
+
+    it("an older refresh that finishes last does not overwrite a newer one", async () => {
+        const SIGNED_IN = { ...SIGNED_OUT, connected: true, valid: true, email: "a@example.test", expiresAt: 9e9 };
+        const muxbus = await controller("compiled-id");
+        let releaseOld!: (v: typeof SIGNED_OUT) => void;
+        rpc.MuxBusStatusCommand.mockImplementationOnce(() => new Promise((r) => (releaseOld = r)));
+        const older = muxbus.refresh();
+        rpc.MuxBusStatusCommand.mockResolvedValueOnce(SIGNED_IN);
+        await muxbus.refresh();
+        expect(muxbus.status()?.connected).toBe(true);
+        releaseOld(SIGNED_OUT);
+        await older;
+        expect(muxbus.status()?.connected).toBe(true);
+    });
+});
