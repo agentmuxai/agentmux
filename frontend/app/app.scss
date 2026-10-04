@@ -5,8 +5,13 @@
 @use "theme.scss";
 @use "themes/index";
 
+// `clip`, not `hidden`: clipped the same, but not a scroll container. With
+// `hidden`, anything wider than the window (the status bar's left group in a
+// narrow window did it) could be scrolled into view by a focus or
+// scrollIntoView, shifting the whole app sideways with nothing to scroll it
+// back. docs/reports/REPORT_LAN_UNDISCOVERABLE_AND_PAGE_SHIFT_2026_10_04.md §3.
 html {
-    overflow: hidden;
+    overflow: clip;
 }
 
 body {
@@ -16,7 +21,9 @@ body {
     height: 100vh;
     color: var(--main-text-color);
     font: var(--base-font);
-    overflow: hidden;
+    // `clip`, not `hidden`: see `html` above. `body` matters most, because its
+    // transform (below) makes it the containing block of every fixed popover.
+    overflow: clip;
     // Was a hardcoded rgba(34, 34, 34, var(--window-opacity)) literal —
     // the same value as --main-bg-color's :root default, but frozen in
     // place rather than reading the token, so every named theme's

@@ -32,10 +32,19 @@
     z-index: calc(var(--zindex-modal-wrapper) - 1);
     padding: 0 var(--space-1-5);
     gap: 0;
+    // Never wider than the window: a single item still too wide is cut at the
+    // edge instead of widening the page (which let the app be scrolled
+    // sideways). `clip` keeps the bar from becoming a scroll container itself.
+    overflow: clip;
 
     .status-bar-left {
         display: flex;
         flex-direction: row;
+        // In a narrow window (or at a large chrome zoom) the left group wraps
+        // its items onto another row instead of pushing past the edge;
+        // `min-width: 0` lets it shrink below its content so it can.
+        flex-wrap: wrap;
+        min-width: 0;
         align-items: center;
         gap: var(--space-1);
         flex: 0 1 auto;
