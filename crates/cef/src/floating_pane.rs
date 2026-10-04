@@ -881,6 +881,18 @@ wrap_task! {
             // 2026-05-06); the cache is the only reliable source at promote time.
             crate::commands::window_pool::cache_pane_pool_hwnd(&self.label, outer_hwnd as usize);
 
+            // The outer WS_POPUP is the top-level window that is activated
+            // (during browser creation, and while hidden during a promote), so
+            // it needs the WM_ACTIVATE observer that hands activation back from
+            // an invisible window. `on_after_created` hooks the browser's own
+            // HWND, which for a `set_as_child` browser may be the child.
+            // Installing is idempotent, so a window hooked both ways is fine.
+            unsafe {
+                crate::client::wndproc::install_top_level_focus_restore_hook(
+                    outer_hwnd as *mut std::ffi::c_void,
+                );
+            }
+
             // Register in window_hwnds so promote_pane_pool_window can reach
             // the outer HWND via state.window_hwnds if needed.
             self.state

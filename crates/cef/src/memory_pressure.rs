@@ -198,6 +198,66 @@ impl PressureTracker {
     }
 }
 
+/// How long commit pressure must stay `Normal` before the warm pools are
+/// refilled. Refilling creates windows, and on Windows a new pool window
+/// activates during creation and takes keyboard focus from the window the user
+/// is typing in. Commit pressure flaps while builds run (151 transitions in a
+/// day on one machine), so refilling on every return to `Normal` stole
+/// focus dozens of times a day, and built windows that were destroyed again
+/// minutes later.
+/// docs/reports/REPORT_INPUT_FOCUS_STOLEN_BY_POOL_REFILL_2026_10_03.md
+pub const POOL_REFILL_SETTLE: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Decides when to refill the warm pools after commit pressure returns to
+/// `Normal`: only once it has stayed there for `POOL_REFILL_SETTLE`, and then
+/// on every heartbeat tick until both pools are full again. The spawn
+/// functions are single-flight and do nothing when their pool is full or a
+/// browser pane is mid-close, so retrying each tick is cheap, and it is the
+/// only race-free way to make sure a refill that coincided with a pane close
+/// still happens: whether a pane is closing can change between any check here
+/// and the spawn's own check.
+#[derive(Debug, Default)]
+pub struct PoolRefillGate {
+    normal_since: Option<std::time::Instant>,
+}
+
+impl PoolRefillGate {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `transition` is the tracker's return for this tick (`Some` on a level
+    /// change); `pools_full` is whether both warm pools are at their target
+    /// size. Returns true when the pool spawns should be called this tick.
+    pub fn tick(
+        &mut self,
+        transition: Option<PressureLevel>,
+        level: PressureLevel,
+        now: std::time::Instant,
+        pools_full: bool,
+    ) -> bool {
+        if level != PressureLevel::Normal {
+            self.normal_since = None;
+            return false;
+        }
+        if transition == Some(PressureLevel::Normal) {
+            self.normal_since = Some(now);
+            return false;
+        }
+        match self.normal_since {
+            Some(since) if now.duration_since(since) >= POOL_REFILL_SETTLE => {
+                if pools_full {
+                    self.normal_since = None; // refilled: done until the next episode
+                    false
+                } else {
+                    true
+                }
+            }
+            _ => false,
+        }
+    }
+}
+
 /// Pure classifier with hysteresis: the *enter* thresholds are strict, but
 /// *leaving* a band requires recovering `hysteresis_ratio` past the enter
 /// threshold, so a reading parked at a boundary doesn't oscillate.
@@ -394,5 +454,48 @@ mod tests {
         // not a side effect that broke publishing generally.
         assert_eq!(commit.observe(100, TOTAL), Some(PressureLevel::Critical));
         assert_eq!(current_level(), PressureLevel::Critical);
+    }
+
+    #[test]
+    fn pool_refill_waits_until_normal_has_held_for_the_settle_time() {
+        let t0 = std::time::Instant::now();
+        let mut gate = PoolRefillGate::new();
+        assert!(!gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false));
+        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE / 2, false));
+        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, false));
+    }
+
+    #[test]
+    fn pool_refill_keeps_trying_each_tick_until_the_pools_are_full() {
+        let t0 = std::time::Instant::now();
+        let mut gate = PoolRefillGate::new();
+        gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false);
+        // Due; the spawns may have refused (a pane was closing): try again.
+        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, false));
+        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 2, false));
+        // Full: stop, and stay stopped.
+        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 3, true));
+        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 4, false));
+    }
+
+    #[test]
+    fn pool_refill_is_cancelled_by_pressure_returning_before_the_settle_time() {
+        let t0 = std::time::Instant::now();
+        let mut gate = PoolRefillGate::new();
+        gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false);
+        assert!(!gate.tick(Some(PressureLevel::Warn), PressureLevel::Warn, t0 + POOL_REFILL_SETTLE / 2, false));
+        // Back to Normal restarts the clock.
+        let t1 = t0 + POOL_REFILL_SETTLE;
+        assert!(!gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t1, false));
+        assert!(!gate.tick(None, PressureLevel::Normal, t1 + POOL_REFILL_SETTLE / 2, false));
+        assert!(gate.tick(None, PressureLevel::Normal, t1 + POOL_REFILL_SETTLE, false));
+    }
+
+    #[test]
+    fn pool_refill_never_fires_without_a_return_to_normal() {
+        let t0 = std::time::Instant::now();
+        let mut gate = PoolRefillGate::new();
+        // Steady Normal from startup: the pools were filled at startup, not here.
+        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 10, false));
     }
 }
