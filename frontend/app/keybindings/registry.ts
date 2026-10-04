@@ -152,11 +152,15 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
                 label: base?.label ?? u.command,
                 category: base?.category ?? "General",
                 when: u.when,
-                skipShell: base?.skipShell,
+                // In a terminal: as its command's own rows do; always for a
+                // command the table doesn't have (you bound it on purpose) or
+                // when your `when` asks for the terminal.
+                skipShell: base ? base.skipShell || /(^|&&)\s*terminalFocus\s*($|&&)/.test(u.when ?? "") : true,
                 pane: base?.pane,
                 helpGroup: base?.helpGroup,
             };
-            userRows.push({ row, source: u.key.trim(), steps: stepsOf(u.key) });
+            // One space between chord steps, whatever was typed: labels split on " ".
+            userRows.push({ row, source: u.key.trim().split(/\s+/).join(" "), steps: stepsOf(u.key) });
         }
         rows.push(...userRows);
         for (const row of DEFAULT_KEYBINDINGS) {

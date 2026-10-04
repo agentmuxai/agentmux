@@ -261,6 +261,26 @@ describe("the keybindings setting", () => {
         expect(keybindingsVersion()).toBe(before + 1);
     });
 
+    it("normalizes the space between chord steps", () => {
+        setUserKeybindings([{ key: "ctrl+shift+e   ArrowUp", command: "split:up" }]);
+        expect(() => helpSections("other")).not.toThrow();
+        expect(formatCommand("split:up", "other")).toBe("Ctrl+Shift+E then ↑");
+    });
+
+    it("in a terminal: table commands keep their rule; others and terminalFocus keys apply", () => {
+        setUserKeybindings(
+            [
+                { key: "ctrl+shift+e", command: "open:files" },
+                { key: "ctrl+shift+o", command: "pane:voice", when: "terminalFocus" },
+                { key: "ctrl+shift+u", command: "pane:voice" },
+            ],
+            (id) => id === "open:files"
+        );
+        expect(resolveKey(CSE, TERM, "other")?.row.command).toBe("open:files");
+        expect(resolveKey(ev("O", "KeyO", { ctrlKey: true, shiftKey: true }), TERM, "other")?.row.command).toBe("pane:voice");
+        expect(resolveKey(ev("U", "KeyU", { ctrlKey: true, shiftKey: true }), TERM, "other")).toBeNull();
+    });
+
     it("shows in the help pane", () => {
         setUserKeybindings([{ key: "ctrl+shift+e", command: "split:right" }]);
         const panes = helpSections("other").find((s) => s.category === "Panes");

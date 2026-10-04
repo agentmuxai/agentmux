@@ -50,7 +50,9 @@ export function keybindingsDoc(): string {
         "",
         "An entry that can't be used (an unknown command, a bad key or `when`) is skipped and the rest still apply.",
         "",
-        "While a Browser pane's page has focus, AgentMux forwards only the default window, tab and pane keys. Remapping one of those to another command is respected there. Unbinding one stops it running, but the page still doesn't get the key; a key you add yourself works everywhere except inside a web page.",
+        "In a terminal, a key you add applies when its command is one of the terminal's shortcuts above, when the command isn't in the tables above, or when its `when` includes `terminalFocus`; otherwise the terminal keeps the key for the shell.",
+        "",
+        "While a Browser pane's page has focus, AgentMux forwards only the default window, tab and pane keys. Remapping one of those to another command is respected there. Unbinding one stops it running, but the page still doesn't get the key; a key you add yourself isn't forwarded from a web page.",
         ""
     );
     return out.join("\n");
