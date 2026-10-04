@@ -1034,7 +1034,6 @@ fn nearest_existing_ancestor_finds_first_existing_parent() {
     // dir exists; dir/a/b/c does not.
     let missing = dir.join("a").join("b").join("c");
     assert_eq!(nearest_existing_ancestor(&missing), Some(dir.clone()));
-
 }
 
 #[test]
@@ -1144,7 +1143,6 @@ async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_
     // bailing out — the old behavior returned early on the failed
     // notify::watch() call, before ever reaching this point.
     assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
-
 }
 
 // ── recheck_config_dir / recheck_all_watched_agents (2026-09-04) ──
@@ -1181,7 +1179,6 @@ async fn recheck_config_dir_is_a_noop_when_the_directory_is_unchanged() {
     let watched = watcher.watched_agents.lock().unwrap();
     assert_eq!(watched.len(), 1);
     assert_eq!(watched[0].config_dir, root);
-
 }
 
 #[tokio::test]
@@ -1202,7 +1199,6 @@ async fn recheck_config_dir_repoints_the_watch_to_the_new_directory() {
     assert_eq!(watched.len(), 1, "repoint must replace, not add to, the entry");
     assert_eq!(watched[0].config_dir, new_dir, "must now watch the corrected directory");
     assert!(watched[0].parent_block_ids.contains("block-1"));
-
 }
 
 #[tokio::test]
@@ -1232,7 +1228,6 @@ async fn recheck_config_dir_preserves_all_dependent_blocks_across_a_repoint() {
         "repointing must not drop any of the agent's other dependent blocks: {:?}",
         watched[0].parent_block_ids,
     );
-
 }
 
 // Codex P3 on PR #2980: `primary_block_id` (the block whose id the live
@@ -1268,7 +1263,6 @@ async fn recheck_config_dir_preserves_the_exact_primary_block_id_not_an_arbitrar
         "the ORIGINAL primary block must survive a repoint unchanged, not be re-picked from the dependent set"
     );
     assert_eq!(watched[0].parent_block_ids.len(), 6, "every dependent block must still be tracked");
-
 }
 
 // Codex P2 on PR #2980: if the replacement watch fails to build (a
@@ -1334,7 +1328,6 @@ async fn recheck_all_watched_agents_skips_the_legacy_empty_block_id_entry_point(
         watched[0].config_dir, explicit_dir,
         "an empty-block_id entry must never be repointed by a blanket recheck"
     );
-
 }
 
 #[tokio::test]
@@ -1355,7 +1348,6 @@ async fn recheck_all_watched_agents_skips_an_agent_whose_block_no_longer_exists(
         watched[0].config_dir, explicit_dir,
         "an agent whose block no longer exists must never be repointed by a blanket recheck"
     );
-
 }
 
 #[tokio::test]
@@ -1394,7 +1386,6 @@ async fn recheck_config_dir_backfills_subagents_missed_while_watching_the_wrong_
     assert_eq!(active.len(), 1, "repoint must backfill this block's own persisted session, same as a fresh reactive-register would");
     assert_eq!(active[0].agent_id, "missed");
     assert_eq!(active[0].session_id, session_id);
-
 }
 
 #[tokio::test]
@@ -1423,7 +1414,6 @@ async fn prune_block_also_tears_down_that_blocks_filesystem_watcher() {
         "a different, still-open block's watcher must be untouched"
     );
     drop(watched);
-
 }
 
 #[tokio::test]
@@ -1458,7 +1448,6 @@ async fn prune_block_does_not_kill_a_watcher_still_depended_on_by_another_block(
         0,
         "once the last dependent block is pruned, the watcher must be torn down"
     );
-
 }
 
 #[tokio::test]
@@ -1495,7 +1484,6 @@ async fn unwatch_agent_does_not_kill_a_watcher_still_depended_on_by_another_bloc
         0,
         "once the last dependent block is unwatched, the watcher must be torn down"
     );
-
 }
 
 #[tokio::test]
@@ -1564,7 +1552,6 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
         active[0].parent_block_id, "block-owner",
         "must be attributed to the block that actually owns the session, never the other block sharing its watched directory"
     );
-
 }
 
 #[tokio::test]
@@ -1593,7 +1580,6 @@ async fn live_fs_event_with_empty_block_id_bypasses_the_ownership_check() {
     let active = watcher.list_active();
     assert_eq!(active.len(), 1, "an empty block_id must not cause every live event to be dropped");
     assert_eq!(active[0].parent_block_id, "");
-
 }
 
 /// Regression test for the observed flood: reopening a pane for an
