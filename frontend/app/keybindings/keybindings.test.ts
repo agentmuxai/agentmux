@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_KEYBINDINGS } from "./defaults";
 import { formatKey, matchKey, parseKey, type KeyEventLike } from "./keys";
 import { helpSections } from "./help";
-import { _rowsForTests, findConflicts, formatCommand, matchPaneKey, resolveKey, setUserKeybindings, whenDisjoint, type KeyContext } from "./registry";
+import { _rowsForTests, commandForKey, findConflicts, formatCommand, matchPaneKey, resolveKey, setUserKeybindings, whenDisjoint, type KeyContext } from "./registry";
 
 function ev(key: string, code: string, mods: Partial<KeyEventLike> = {}): KeyEventLike {
     return { key, code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods };
@@ -218,11 +218,23 @@ describe("the keybindings setting", () => {
         expect(resolveKey(CST, NONE, "other")?.row.command).toBe("tab:new");
     });
 
+    it("rejects an unknown flag anywhere in when, not only before the first false term", () => {
+        expect(setUserKeybindings([{ key: "ctrl+shift+e", command: "pane:new", when: "terminalFocus && nosuchflag" }])).toHaveLength(1);
+        expect(() => resolveKey(CSE, TERM, "other")).not.toThrow();
+    });
+
     it("unbinds by key, whatever the spelling", () => {
         setUserKeybindings([{ command: "-tab:next", key: "Ctrl+Tab" }]);
         expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), NONE, "other")).toBeNull();
         setUserKeybindings([{ command: "-tab:new", key: "mod+t" }]);
         expect(resolveKey(ev("t", "KeyT", { metaKey: true }), NONE, "mac")).toBeNull();
+    });
+
+    it("a forwarded browser-pane key ignores a user row that can't apply there", () => {
+        setUserKeybindings([{ key: "ctrl+shift+t", command: "term:clear", when: "terminalFocus" }]);
+        expect(commandForKey("ctrl+shift+t", "other")).toBe("tab:new");
+        setUserKeybindings([{ key: "ctrl+shift+t", command: "pane:close" }]);
+        expect(commandForKey("ctrl+shift+t", "other")).toBe("pane:close");
     });
 
     it("shows in the help pane", () => {

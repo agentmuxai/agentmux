@@ -63,7 +63,6 @@ let userBindings: UserKeybinding[] = [];
 export function setUserKeybindings(entries: unknown): string[] {
     const warnings: string[] = [];
     const ok: UserKeybinding[] = [];
-    const ctx: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "", docTabsHost: false };
     for (const [i, raw] of (Array.isArray(entries) ? entries : []).entries()) {
         const e = raw as UserKeybinding;
         const where = `keybindings[${i}]`;
@@ -90,7 +89,7 @@ export function setUserKeybindings(entries: unknown): string[] {
         }
         try {
             if (e.key) for (const p of ["mac", "other"] as const) e.key.trim().split(/\s+/).forEach((k) => parseKey(k, p));
-            evalWhen(e.when, ctx);
+            validateWhen(e.when);
         } catch (err) {
             warnings.push(`${where}: ${(err as Error).message}`);
             continue;
@@ -147,6 +146,20 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
 /** Every row as resolved for `platform`, user keys first (for the help pane). */
 export function effectiveRows(platform: KeyPlatform): { row: KeyBindingRow; source: string }[] {
     return rowsFor(platform).map(({ row, source }) => ({ row, source }));
+}
+
+const WHEN_FLAGS = new Set(["textInputFocus", "terminalFocus", "docTabsHost"]);
+
+/** Throws on any term that isn't a known flag or a viewType comparison.
+ *  Checks every term: evalWhen stops at the first false one, so a bad flag
+ *  later in the clause would otherwise slip through and throw on a key press. */
+export function validateWhen(when: string | undefined): void {
+    if (!when) return;
+    for (const raw of when.split("&&")) {
+        const t = raw.trim();
+        if (/^viewType\s*(==|!=)\s*\S+$/.test(t)) continue;
+        if (!WHEN_FLAGS.has(t.replace(/^!/, ""))) throw new Error(`keybinding when: unknown context key "${t}"`);
+    }
 }
 
 /** `when` is `flag`, `!flag`, `viewType == x` or `viewType != x`, joined with `&&`. */
@@ -214,16 +227,20 @@ export function chordLeaderOf(e: KeyEventLike, platform: KeyPlatform): string | 
     return null;
 }
 
+/** Where focus is when the host forwards a key from a browser pane. */
+const BROWSER_PANE_CONTEXT: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "browser", docTabsHost: false };
+
 /**
- * The global command a single key runs in the effective table (user keys
- * first), ignoring `when`, or null. For keys the host forwards from a
- * browser pane, where the page's focus state is unknown.
+ * The global command a single key forwarded from a browser pane runs in the
+ * effective table (user keys first), or null.
  */
 export function commandForKey(source: string, platform: KeyPlatform): string | null {
     const steps = source.trim().split(/\s+/).map((s) => parseKey(s, platform));
     if (steps.length !== 1) return null;
     for (const c of rowsFor(platform)) {
-        if (!c.row.pane && c.steps.length === 1 && sameKey(c.steps[0], steps[0])) return c.row.command;
+        if (c.row.pane || c.steps.length !== 1 || !sameKey(c.steps[0], steps[0])) continue;
+        if (!evalWhen(c.row.when, BROWSER_PANE_CONTEXT)) continue;
+        return c.row.command;
     }
     return null;
 }
