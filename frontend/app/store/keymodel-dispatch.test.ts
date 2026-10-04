@@ -16,6 +16,7 @@ vi.mock("@/app/store/global", () => ({
             listeners.set(event, cb);
             return Promise.resolve(() => {});
         },
+        reclaimWindowFocus: () => Promise.resolve(),
     }),
     getBlockComponentModel: () => null,
     setControlShiftDelayAtom: vi.fn(),
@@ -121,13 +122,14 @@ describe("appHandleKeyDown", () => {
         expect(handlers["split:up"]).toHaveBeenCalledTimes(1);
     });
 
-    it("runs a shortcut the host forwards out of a browser pane", () => {
+    it("runs a shortcut the host forwards out of a browser pane, after taking focus back", async () => {
         registerHostShortcuts();
         listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new" });
-        expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
+        await vi.waitFor(() => expect(handlers["tab:new"]).toHaveBeenCalledTimes(1));
         disableGlobalKeybindings();
         listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new" });
         enableGlobalKeybindings();
+        await new Promise((r) => setTimeout(r, 0));
         expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
     });
 });

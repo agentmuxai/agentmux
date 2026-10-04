@@ -210,7 +210,14 @@ export function registerHostShortcuts() {
         // Same rule as a key pressed in the app (the command palette turns
         // global shortcuts off while it's open).
         if (globalKeybindingsDisabled) return;
-        runKeyCommand(payload.command, { repeat: false } as MuxKeyboardEvent);
+        // The browser pane holds OS keyboard focus; take it back first, or a
+        // command that opens something to type in (the palette) shows while
+        // the keys still go to the page. DOM focus alone doesn't move it.
+        const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
+        void getApi()
+            .reclaimWindowFocus(label)
+            .catch(() => {})
+            .finally(() => runKeyCommand(payload.command, { repeat: false } as MuxKeyboardEvent));
     });
 }
 
