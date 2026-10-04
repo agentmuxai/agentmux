@@ -195,10 +195,6 @@ function registerGlobalKeys() {
     function activateSearch(event: MuxKeyboardEvent): boolean {
         const bcm = getBlockComponentModel(getFocusedBlockInStaticTab());
         if (bcm == null) return false;
-        // Ctrl+f is reserved in most shells (`shellKeys`)
-        if (event.control && paneTabCapability(bcm.viewModel.viewType, "shellKeys")) {
-            return false;
-        }
         if (bcm.viewModel.searchAtoms) {
             bcm.viewModel.searchAtoms.isOpen._set(true);
             return true;
@@ -286,10 +282,6 @@ function registerGlobalKeys() {
     });
 }
 
-function getAllGlobalKeyBindings(): string[] {
-    const allKeys = Array.from(globalKeyMap.keys());
-    return allKeys;
-}
 
 export { registerGlobalKeys };
 
@@ -298,7 +290,7 @@ export {
     disableGlobalKeybindings,
     enableGlobalKeybindings,
     keyboardMouseDownHandler,
-    registerControlShiftStateUpdateHandler,
+    registerControlShiftTracking,
 } from "./keymodel-dispatch";
 
 export { globalRefocus, globalRefocusWithTimeout } from "./keymodel-nav";

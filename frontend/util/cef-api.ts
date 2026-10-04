@@ -604,9 +604,6 @@ export function buildCefApi(): AppApi {
         },
 
         // --- Menu ---
-        onMenuItemAbout: (callback: () => void) => {
-            listenEvent("menu-item-about", () => callback());
-        },
 
         // --- Window controls ---
         updateWindowControlsOverlay: (rect: Dimensions) => {
@@ -614,19 +611,6 @@ export function buildCefApi(): AppApi {
         },
 
         // --- Keyboard ---
-        onReinjectKey: (callback: (muxEvent: MuxKeyboardEvent) => void) => {
-            listenEvent<MuxKeyboardEvent>("reinject-key", (payload) => {
-                callback(payload);
-            });
-        },
-        setKeyboardChordMode: () => {
-            invokeCommand("set_keyboard_chord_mode").catch(console.error);
-        },
-        onControlShiftStateUpdate: (callback: (state: boolean) => void) => {
-            listenEvent<boolean>("control-shift-state-update", (payload) => {
-                callback(payload);
-            });
-        },
 
         // --- Window Management ---
         openNewWindow: async () => {

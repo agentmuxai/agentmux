@@ -89,7 +89,6 @@ function getAllTabs(ws: Workspace): string[] {
 }
 
 export function switchTabAbs(index: number) {
-    console.log("switchTabAbs", index);
     const ws = atoms.workspace();
     const newTabIdx = index - 1;
     const tabids = getAllTabs(ws);
@@ -101,7 +100,6 @@ export function switchTabAbs(index: number) {
 }
 
 export function switchTab(offset: number) {
-    console.log("switchTab", offset);
     const ws = atoms.workspace();
     const curTabId = atoms.activeTabId();
     let tabIdx = -1;

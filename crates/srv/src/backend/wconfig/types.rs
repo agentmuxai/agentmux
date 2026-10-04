@@ -39,9 +39,6 @@ pub struct SettingsType {
     #[serde(rename = "app:*", default, skip_serializing_if = "is_false")]
     pub app_clear: bool,
 
-    #[serde(rename = "app:globalhotkey", default, skip_serializing_if = "String::is_empty")]
-    pub app_global_hotkey: String,
-
     #[serde(rename = "app:dismissarchitecturewarning", default, skip_serializing_if = "is_false")]
     pub app_dismiss_architecture_warning: bool,
 

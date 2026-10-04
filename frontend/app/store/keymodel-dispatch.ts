@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, getApi, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
+import { atoms, getBlockComponentModel, setControlShiftDelayAtom } from "@/app/store/global";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
 import { CHORD_TIMEOUT } from "@/util/sharedconst";
@@ -27,7 +27,6 @@ function resetChord() {
 }
 
 function setActiveChord(activeChordArg: string) {
-    getApi().setKeyboardChordMode();
     if (chordTimeout) {
         clearTimeout(chordTimeout);
     }
@@ -101,12 +100,10 @@ export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
     }
     const nativeEvent = (muxEvent as any).nativeEvent;
     if (lastHandledEvent != null && nativeEvent != null && lastHandledEvent === nativeEvent) {
-        console.log("lastHandledEvent return false");
         return false;
     }
     lastHandledEvent = nativeEvent;
     if (activeChord) {
-        console.log("handle activeChord", activeChord);
         // If we're in chord mode, look for the second key.
         const chordBindings = globalChordMap.get(activeChord);
         const [, handler] = checkKeyMap(muxEvent, chordBindings);
@@ -148,13 +145,20 @@ export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
     return false;
 }
 
-export function registerControlShiftStateUpdateHandler() {
-    getApi().onControlShiftStateUpdate((state: boolean) => {
-        if (state) {
-            setControlShift();
-        } else {
+/** Shows the numbered pane overlay while Ctrl+Shift is held (after a short
+ *  delay, so a quick Ctrl+Shift+key chord doesn't flash it). It used to wait
+ *  for a `control-shift-state-update` event from the host that nothing ever
+ *  sent, so the overlay never appeared. */
+export function registerControlShiftTracking() {
+    const update = (e: KeyboardEvent) => {
+        if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey) {
+            if (!simpleControlShift()) setControlShift();
+        } else if (simpleControlShift()) {
             unsetControlShift();
         }
-    });
+    };
+    document.addEventListener("keydown", update, true);
+    document.addEventListener("keyup", update, true);
+    window.addEventListener("blur", () => unsetControlShift());
 }
 
