@@ -40,11 +40,10 @@
     .status-bar-left {
         display: flex;
         flex-direction: row;
-        // In a narrow window (or at a large chrome zoom) the left group wraps
-        // its items onto another row instead of pushing past the edge;
-        // `min-width: 0` lets it shrink below its content so it can.
-        flex-wrap: wrap;
-        min-width: 0;
+        // Keep every item on one line. Squeezed in a narrow window, a flex
+        // item shrinks to its min-content width, which broke multi-word
+        // items like "GFX HW" onto two lines; past the edge they are clipped.
+        white-space: nowrap;
         align-items: center;
         gap: var(--space-1);
         flex: 0 1 auto;

@@ -439,6 +439,7 @@ partial list.
 | [`SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15`](SPEC_SYSTEM_TIER_GLOBAL_MEMORY_SEEDING_2026_09_15.md) | Spec: Operator Config seeding (AgentMux-shipped, system-tier Global Memory) |
 | [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) | SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux |
 | [`SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10`](SPEC_SYSTEM_TOOL_INSTALL_DETAILS_AUTOSCROLL_2026_09_10.md) | SPEC: Install-log "Details" panel — auto-scroll, provider-install parity, and brand icons |
+| [`SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04`](SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md) | SPEC — Tab bar: a blank drag square between the last tab and the widgets |
 | [`SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25`](SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md) | Tab close (X) button — spurious select flash |
 | [`SPEC_TAB_COLOR_DESATURATION_2026_08_13`](SPEC_TAB_COLOR_DESATURATION_2026_08_13.md) | Spec: Desaturate tab colors, keep agent pane border colors as-is |
 | [`SPEC_TAB_CONTENT_REVEAL_GATE`](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Tab content reveal gate |
@@ -1026,7 +1027,6 @@ partial list.
 | [`SPEC_WIDGET_OPEN_IN_NEW_WINDOW_2026_04_17`](SPEC_WIDGET_OPEN_IN_NEW_WINDOW_2026_04_17.md) | SPEC: Widget "Open in New Window" Context Menu |
 | [`SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03`](SPEC_WINDOWS_CEF_BUNDLE_VERSION_INTEGRITY_2026_06_03.md) | SPEC: Windows CEF Bundle Version Integrity & Loud Startup Failure |
 | [`SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13`](SPEC_WINDOW_DRAG_DPI_FIX_2026-05-13.md) | SPEC: Robust DPI Handling for Window-Header Drag |
-| [`SPEC_WINDOW_DRAG_HANDLE_2026_06_06`](SPEC_WINDOW_DRAG_HANDLE_2026_06_06.md) | SPEC: Always-visible window drag handle (grip) in the tab bar |
 | [`SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14`](SPEC_WINDOW_INSTANCE_NAMING_CLEANUP_2026-05-14.md) | SPEC: Window/Instance Naming Cleanup |
 | [`SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27`](SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md) | SPEC: AgentMux Window & Process State Machine |
 | [`SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23`](SPEC_WINDOW_REACTIVATE_FOCUS_RESTORE_2026_05_23.md) | SPEC: Restore keyboard focus to the active pane on window re-activation (Windows) |
@@ -1120,6 +1120,7 @@ partial list.
 | [`SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05`](SPEC_MEMORY_CARRYOVER_LOAD_AND_MANAGE_2026_09_05.md) | Memory carry-over: loading and management across the three agent-awareness cases |
 | [`SPEC_NO_MIDTURN_DELIVERY_2026_09_23`](SPEC_NO_MIDTURN_DELIVERY_2026_09_23.md) | SPEC: No mid-turn delivery — automated messages never cut an agent's train of thought |
 | [`SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27`](SPEC_PANE_FILE_DROP_TARGET_HIGHLIGHT_2026_09_27.md) | SPEC: Highlight the pane a dragged file will land in |
+| [`SPEC_WINDOW_DRAG_HANDLE_2026_06_06`](SPEC_WINDOW_DRAG_HANDLE_2026_06_06.md) | SPEC: Always-visible window drag handle (grip) in the tab bar |
 
 ### no status line
 

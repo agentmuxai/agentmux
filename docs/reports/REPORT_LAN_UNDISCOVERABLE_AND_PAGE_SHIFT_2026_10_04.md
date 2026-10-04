@@ -93,6 +93,9 @@ Measured in headless Chrome 154 (the app's Chromium), a 630 px window, a status 
 ### 3.3 Fix (this PR)
 
 1. `html` and `body`: `overflow: clip` instead of `hidden`. Clipped exactly as before, but no longer a scroll container, so nothing can scroll the app sideways.
-2. `.status-bar-left`: `min-width: 0` and `flex-wrap: wrap`, so in a narrow window its items wrap onto another row instead of pushing past the edge; `.status-bar`: `overflow: clip`, so a single item still too wide for the window is cut at the edge instead of widening the page.
+2. `.status-bar`: `overflow: clip`, so a status group still too wide for the window is cut at the edge
+   instead of widening the page. The left group does not wrap or shrink: an earlier version of this fix
+   gave it `flex-wrap: wrap` and `min-width: 0`, which stacked its items onto up to four rows, so that
+   was removed and the bar looks as it always did.
 
 Not changed: `body`'s `transform` (it exists for compositing; see its comment), and the status bar's existing two-row wrap.

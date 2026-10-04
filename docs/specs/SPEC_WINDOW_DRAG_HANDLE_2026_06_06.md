@@ -1,6 +1,7 @@
 # SPEC: Always-visible window drag handle (grip) in the tab bar
 
-**Status:** Draft
+**Status:** superseded — never built; the owner chose a blank drag square on the right, before the widgets, instead of a grip on the left.
+**Superseded-by:** docs/specs/SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04.md
 **Date:** 2026-06-06
 **Author:** AgentA
 

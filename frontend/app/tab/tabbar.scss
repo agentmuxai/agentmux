@@ -20,6 +20,9 @@
     // long labels from dominating the bar.
     --ws-tab-min: 60px;
     --ws-tab-max: 260px;
+    // Width of the blank drag square kept after the last tab: one icon-only
+    // action widget (px-2 either side + a text-sm icon). See .tab-bar-fill.
+    --tab-bar-drag-gutter: 32px;
 
     display: flex;
     flex-direction: row;
@@ -171,7 +174,11 @@
         // (a 4px-threshold mousedown → start_window_drag IPC). Right-click
         // reaches the renderer normally.
         flex: 1 1 auto;
-        min-width: 0;
+        // Never narrower than one icon-only widget: with a full strip the
+        // fill used to shrink to 0, leaving nowhere to grab the window. When
+        // the strip scrolls, the square is the last thing in it and shows
+        // once scrolled to the end (SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04).
+        min-width: var(--tab-bar-drag-gutter);
         height: 100%;
         align-self: stretch;
         // Folder boundary continuation (SPEC_TAB_CONTENT_FOLDER_SURFACE §10.6):
