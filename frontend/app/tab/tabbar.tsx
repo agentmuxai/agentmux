@@ -12,15 +12,17 @@ import { beginClosePromotion, cancelTabCreation, creatingTabId } from "@/store/t
 import { isMacOS } from "@/util/platformutil";
 import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 import { WorkspaceService } from "../store/services";
 import { driveTabSelection, resolveDisplayActiveTabId } from "./active-tab-display";
 import { DroppableTab } from "./droppable-tab";
 import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { useTabDragAndDrop } from "./tab-reorder";
+import { revealTabInStrip } from "./tab-strip-scroll";
 import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
+import { tabWrapperRefs } from "./tabbar-dnd";
 import "./tabbar.scss";
 
 interface TabBarProps {
@@ -302,6 +304,22 @@ function TabBar(props: TabBarProps): JSX.Element {
     if (!props.workspace) return null;
 
     const activeIndex = () => tabIds().indexOf(displayActiveTabId());
+
+    // Keep the active tab visible when the strip scrolls; the last tab also
+    // brings the drag square after it into view (SPEC_TAB_BAR_DRAG_GUTTER_2026_10_04
+    // §3). After a frame, so a just-created tab has mounted and been laid out.
+    createEffect(
+        on(displayActiveTabId, (tabId) => {
+            if (!tabId) return;
+            const frame = requestAnimationFrame(() => {
+                const el = tabWrapperRefs.get(tabId);
+                if (!el || !tabBarScrollRef) return;
+                const ids = tabIds();
+                revealTabInStrip(tabBarScrollRef, el, ids[ids.length - 1] === tabId);
+            });
+            onCleanup(() => cancelAnimationFrame(frame));
+        })
+    );
 
     return (
         <div ref={tabBarRef!} class="tab-bar" {...dragProps}>
