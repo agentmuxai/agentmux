@@ -569,3 +569,62 @@ describe("follow-state transition log (I4)", () => {
         expect(s.scrollRef.dataset.followState).toBe("detached");
     });
 });
+
+// The shrink hold writes min-height from inside the ResizeObserver that watches
+// the buffer. If that min-height is taller than the content, it grows the
+// observed element and re-fires the observer, and the release timer keeps the
+// cycle going forever (~367 ms per cycle at a fractional pane zoom). See
+// docs/reports/REPORT_AGENT_PANE_SCROLL_LAYOUT_ARCHITECTURE_2026_10_04.md §2.2.
+describe("shrink hold never makes the observed buffer taller", () => {
+    beforeEach(() => {
+        roInstances = [];
+        rafQueue = [];
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+        vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+            rafQueue.push(cb);
+            return rafQueue.length;
+        });
+        vi.stubGlobal("cancelAnimationFrame", () => {});
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        vi.restoreAllMocks();
+    });
+
+    /** The buffer as a browser lays it out: its height is max(content, min-height),
+     *  and offsetHeight rounds that to a whole pixel (up, for 202.98). */
+    function withBufferLayout(s: ReturnType<typeof setup>, contentPx: number) {
+        const used = (): number => Math.max(contentPx, parseFloat(s.buffer.style.minHeight) || 0);
+        const real = window.getComputedStyle.bind(window);
+        vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element, pseudo?: string | null) =>
+            el === s.buffer ? ({ height: `${used()}px` } as CSSStyleDeclaration) : real(el, pseudo),
+        );
+        Object.defineProperty(s.buffer, "offsetHeight", { configurable: true, get: () => Math.round(used()) });
+        return used;
+    }
+
+    it("holds at or below the content's real height", () => {
+        const s = setup();
+        const used = withBufferLayout(s, 202.98);
+        grow(s, 20);
+        expect(s.buffer.style.minHeight).toBe("202px");
+        expect(used()).toBe(202.98);
+    });
+
+    it("hold, release and re-pin never change the observed size, so the observer is not re-fired", () => {
+        const s = setup();
+        const used = withBufferLayout(s, 202.98);
+        grow(s, 20);
+        const sizes = new Set<number>([used()]);
+        for (let cycle = 0; cycle < 5; cycle++) {
+            vi.advanceTimersByTime(400); // the hold's release timer
+            sizes.add(used());
+            triggerResize(s.buffer); // re-pin, as if the release had resized it
+            sizes.add(used());
+        }
+        expect([...sizes]).toEqual([202.98]);
+    });
+});
