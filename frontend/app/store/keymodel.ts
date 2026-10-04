@@ -117,8 +117,11 @@ function registerGlobalKeys() {
     on("pane:refocus", run(() => handleCmdI()));
     on("agent:focusComposer", () => {
         const blockId = getFocusedBlockId();
-        if (blockId == null || getBlockComponentModel(blockId)?.viewModel?.viewType !== "agent") return false;
-        requestComposerFocus(blockId);
+        const vm = blockId != null ? getBlockComponentModel(blockId)?.viewModel : undefined;
+        if (blockId == null || vm?.viewType !== "agent") return false;
+        // The mounted composer takes focus directly; a request only queues it
+        // for a footer that hasn't mounted yet.
+        if (!vm.giveFocus?.()) requestComposerFocus(blockId);
         return true;
     });
     on("pane:replaceWithLauncher", (e) => {
