@@ -991,6 +991,36 @@ fn session_id_flat_layout() {
     assert_eq!(derive_session_id(&path), "proj-enc");
 }
 
+/// A scratch directory under the user's real home, removed when the returned guard drops, which
+/// includes a failed assertion unwinding out of the test. A `remove_dir_all` placed after the
+/// assertions never runs in that case, and left these directories behind in the home directory.
+/// Tests that use one need to be under home: `nearest_existing_ancestor` floors there, and
+/// `std::env::temp_dir()` is not reliably under it (plain /tmp on Linux CI runners).
+fn home_scratch(prefix: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let dir = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempdir_in(&home)
+        .expect("create a scratch dir under the home directory");
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+#[test]
+fn a_home_scratch_dir_is_removed_even_when_the_test_that_made_it_fails() {
+    let unwound = std::panic::catch_unwind(|| {
+        let (_scratch, path) = home_scratch("amx-scratch-guard-test-");
+        assert!(path.is_dir(), "the scratch dir exists while the test runs");
+        // A failed assertion unwinds out of the test; carry the path out of it.
+        std::panic::resume_unwind(Box::new(path));
+    });
+    let path = *unwound
+        .expect_err("the closure always unwinds")
+        .downcast::<std::path::PathBuf>()
+        .expect("the closure unwinds with its scratch path");
+    assert!(!path.exists(), "a failed test must not leave {} behind", path.display());
+}
+
 #[test]
 fn nearest_existing_ancestor_finds_first_existing_parent() {
     // Must live under the home dir — nearest_existing_ancestor's floor
@@ -998,15 +1028,12 @@ fn nearest_existing_ancestor_finds_first_existing_parent() {
     // ever reaching `dir`. std::env::temp_dir() is NOT reliably under
     // home (e.g. plain /tmp on Linux CI runners), so build the temp path
     // from home_dir() directly.
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let dir = home.join(format!("amx-ancestor-test-{}", now_millis()));
+    let (_dir_scratch, dir) = home_scratch("amx-ancestor-test-");
     std::fs::create_dir_all(&dir).unwrap();
 
     // dir exists; dir/a/b/c does not.
     let missing = dir.join("a").join("b").join("c");
     assert_eq!(nearest_existing_ancestor(&missing), Some(dir.clone()));
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -1104,8 +1131,7 @@ async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_
     // would otherwise reject this path outright on platforms where
     // std::env::temp_dir() isn't under home (e.g. plain /tmp on Linux
     // CI runners).
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-watch-fallback-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-watch-fallback-test-");
     std::fs::create_dir_all(&root).unwrap(); // ancestor exists...
     let config_dir = root.join("claude-testagent"); // ...but this does not.
     assert!(!config_dir.exists());
@@ -1117,8 +1143,6 @@ async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_
     // bailing out — the old behavior returned early on the failed
     // notify::watch() call, before ever reaching this point.
     assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 // ── recheck_config_dir / recheck_all_watched_agents (2026-09-04) ──
@@ -1141,8 +1165,7 @@ async fn recheck_config_dir_is_a_noop_when_agent_is_not_watched() {
 
 #[tokio::test]
 async fn recheck_config_dir_is_a_noop_when_the_directory_is_unchanged() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-recheck-noop-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-recheck-noop-test-");
     std::fs::create_dir_all(&root).unwrap();
 
     let watcher = Arc::new(fixture_watcher());
@@ -1156,14 +1179,11 @@ async fn recheck_config_dir_is_a_noop_when_the_directory_is_unchanged() {
     let watched = watcher.watched_agents.lock().unwrap();
     assert_eq!(watched.len(), 1);
     assert_eq!(watched[0].config_dir, root);
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 #[tokio::test]
 async fn recheck_config_dir_repoints_the_watch_to_the_new_directory() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-recheck-repoint-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-recheck-repoint-test-");
     let old_dir = root.join("ambient");
     let new_dir = root.join("identity-bound");
     std::fs::create_dir_all(&old_dir).unwrap();
@@ -1179,14 +1199,11 @@ async fn recheck_config_dir_repoints_the_watch_to_the_new_directory() {
     assert_eq!(watched.len(), 1, "repoint must replace, not add to, the entry");
     assert_eq!(watched[0].config_dir, new_dir, "must now watch the corrected directory");
     assert!(watched[0].parent_block_ids.contains("block-1"));
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 #[tokio::test]
 async fn recheck_config_dir_preserves_all_dependent_blocks_across_a_repoint() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-recheck-multiblock-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-recheck-multiblock-test-");
     let old_dir = root.join("ambient");
     let new_dir = root.join("identity-bound");
     std::fs::create_dir_all(&old_dir).unwrap();
@@ -1211,8 +1228,6 @@ async fn recheck_config_dir_preserves_all_dependent_blocks_across_a_repoint() {
         "repointing must not drop any of the agent's other dependent blocks: {:?}",
         watched[0].parent_block_ids,
     );
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 // Codex P3 on PR #2980: `primary_block_id` (the block whose id the live
@@ -1223,8 +1238,7 @@ async fn recheck_config_dir_preserves_all_dependent_blocks_across_a_repoint() {
 // subsequent filesystem events get checked against.
 #[tokio::test]
 async fn recheck_config_dir_preserves_the_exact_primary_block_id_not_an_arbitrary_set_member() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-recheck-primary-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-recheck-primary-test-");
     let old_dir = root.join("ambient");
     let new_dir = root.join("identity-bound");
     std::fs::create_dir_all(&old_dir).unwrap();
@@ -1249,8 +1263,6 @@ async fn recheck_config_dir_preserves_the_exact_primary_block_id_not_an_arbitrar
         "the ORIGINAL primary block must survive a repoint unchanged, not be re-picked from the dependent set"
     );
     assert_eq!(watched[0].parent_block_ids.len(), 6, "every dependent block must still be tracked");
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 // Codex P2 on PR #2980: if the replacement watch fails to build (a
@@ -1261,9 +1273,7 @@ async fn recheck_config_dir_preserves_the_exact_primary_block_id_not_an_arbitrar
 // nothing left in `watched_agents` to find and retry.
 #[tokio::test]
 async fn recheck_config_dir_keeps_the_old_watch_when_the_replacement_fails_to_build() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let old_dir = home.join(format!("amx-recheck-buildfail-test-{}", now_millis()));
-    std::fs::create_dir_all(&old_dir).unwrap();
+    let (_old_dir_scratch, old_dir) = home_scratch("amx-recheck-buildfail-test-");
 
     // `nearest_existing_ancestor` (this function's own doc comment) returns
     // `None` outright for any path that isn't under the home directory at
@@ -1288,8 +1298,6 @@ async fn recheck_config_dir_keeps_the_old_watch_when_the_replacement_fails_to_bu
     assert_eq!(watched.len(), 1, "a failed replacement must not remove the existing entry");
     assert_eq!(watched[0].config_dir, old_dir, "must still be watching the original (working) directory");
     assert!(watched[0].parent_block_ids.contains("block-1"));
-
-    std::fs::remove_dir_all(&old_dir).ok();
 }
 
 // ── recheck_all_watched_agents scoping (ReAgent P1, round 2, PR #2980) ──
@@ -1305,8 +1313,7 @@ async fn recheck_config_dir_keeps_the_old_watch_when_the_replacement_fails_to_bu
 
 #[tokio::test]
 async fn recheck_all_watched_agents_skips_the_legacy_empty_block_id_entry_point() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let explicit_dir = home.join(format!("amx-recheck-all-empty-block-test-{}", now_millis()));
+    let (_explicit_dir_scratch, explicit_dir) = home_scratch("amx-recheck-all-empty-block-test-");
     std::fs::create_dir_all(&explicit_dir).unwrap();
 
     let watcher = Arc::new(fixture_watcher());
@@ -1321,14 +1328,11 @@ async fn recheck_all_watched_agents_skips_the_legacy_empty_block_id_entry_point(
         watched[0].config_dir, explicit_dir,
         "an empty-block_id entry must never be repointed by a blanket recheck"
     );
-
-    std::fs::remove_dir_all(&explicit_dir).ok();
 }
 
 #[tokio::test]
 async fn recheck_all_watched_agents_skips_an_agent_whose_block_no_longer_exists() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let explicit_dir = home.join(format!("amx-recheck-all-no-block-test-{}", now_millis()));
+    let (_explicit_dir_scratch, explicit_dir) = home_scratch("amx-recheck-all-no-block-test-");
     std::fs::create_dir_all(&explicit_dir).unwrap();
 
     let watcher = Arc::new(fixture_watcher());
@@ -1344,14 +1348,11 @@ async fn recheck_all_watched_agents_skips_an_agent_whose_block_no_longer_exists(
         watched[0].config_dir, explicit_dir,
         "an agent whose block no longer exists must never be repointed by a blanket recheck"
     );
-
-    std::fs::remove_dir_all(&explicit_dir).ok();
 }
 
 #[tokio::test]
 async fn recheck_config_dir_backfills_subagents_missed_while_watching_the_wrong_directory() {
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-recheck-backfill-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-recheck-backfill-test-");
     let old_dir = root.join("ambient");
     let new_dir = root.join("identity-bound");
     std::fs::create_dir_all(&old_dir).unwrap();
@@ -1385,8 +1386,6 @@ async fn recheck_config_dir_backfills_subagents_missed_while_watching_the_wrong_
     assert_eq!(active.len(), 1, "repoint must backfill this block's own persisted session, same as a fresh reactive-register would");
     assert_eq!(active[0].agent_id, "missed");
     assert_eq!(active[0].session_id, session_id);
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 #[tokio::test]
@@ -1398,8 +1397,7 @@ async fn prune_block_also_tears_down_that_blocks_filesystem_watcher() {
     // forever for a closed block — which kept re-creating fresh
     // (mis-)attributed entries the next time another agent sharing its
     // watched directory wrote to its own subagent transcript.
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-prune-watch-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-prune-watch-test-");
     std::fs::create_dir_all(&root).unwrap();
 
     let watcher = Arc::new(fixture_watcher());
@@ -1416,8 +1414,6 @@ async fn prune_block_also_tears_down_that_blocks_filesystem_watcher() {
         "a different, still-open block's watcher must be untouched"
     );
     drop(watched);
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 #[tokio::test]
@@ -1428,8 +1424,7 @@ async fn prune_block_does_not_kill_a_watcher_still_depended_on_by_another_block(
     // block must not silently kill live tracking for the second, still-open
     // block sharing that agent identity — only pruning BOTH should tear
     // down the underlying watcher.
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-prune-shared-agent-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-prune-shared-agent-test-");
     std::fs::create_dir_all(&root).unwrap();
     let config_dir = root.join("claude-shared-agent");
 
@@ -1453,8 +1448,6 @@ async fn prune_block_does_not_kill_a_watcher_still_depended_on_by_another_block(
         0,
         "once the last dependent block is pruned, the watcher must be torn down"
     );
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 #[tokio::test]
@@ -1466,8 +1459,7 @@ async fn unwatch_agent_does_not_kill_a_watcher_still_depended_on_by_another_bloc
     // parent_block_ids dependency set prune_block/unwatch_block do, or two
     // blocks sharing one agent_id still kill each other's live tracking the
     // moment either one gracefully closes.
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let root = home.join(format!("amx-unwatch-agent-shared-test-{}", now_millis()));
+    let (_root_scratch, root) = home_scratch("amx-unwatch-agent-shared-test-");
     std::fs::create_dir_all(&root).unwrap();
     let config_dir = root.join("claude-shared-agent");
 
@@ -1492,8 +1484,6 @@ async fn unwatch_agent_does_not_kill_a_watcher_still_depended_on_by_another_bloc
         0,
         "once the last dependent block is unwatched, the watcher must be torn down"
     );
-
-    std::fs::remove_dir_all(&root).ok();
 }
 
 #[tokio::test]
@@ -1506,8 +1496,7 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
     // the block that actually owns the session (via its own persisted
     // agent:sessionid meta) may record the subagent; the other must
     // drop the event, not misattribute it to itself.
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let config_dir = home.join(format!("amx-shared-dir-fanout-test-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = home_scratch("amx-shared-dir-fanout-test-");
     let session_id = "owned-session";
     let subagents_dir = config_dir.join("projects").join("ws-enc").join(session_id).join("subagents");
     std::fs::create_dir_all(&subagents_dir).unwrap();
@@ -1563,8 +1552,6 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
         active[0].parent_block_id, "block-owner",
         "must be attributed to the block that actually owns the session, never the other block sharing its watched directory"
     );
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 #[tokio::test]
@@ -1575,8 +1562,7 @@ async fn live_fs_event_with_empty_block_id_bypasses_the_ownership_check() {
     // with no pane to scope events to. No block has oid "", so the new
     // session-ownership gate must not apply to it — otherwise every live
     // event from that path is silently dropped.
-    let home = dirs::home_dir().expect("test requires a resolvable home dir");
-    let config_dir = home.join(format!("amx-empty-block-id-test-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = home_scratch("amx-empty-block-id-test-");
     let subagents_dir = config_dir.join("projects").join("ws-enc").join("some-session").join("subagents");
     std::fs::create_dir_all(&subagents_dir).unwrap();
 
@@ -1594,8 +1580,6 @@ async fn live_fs_event_with_empty_block_id_bypasses_the_ownership_check() {
     let active = watcher.list_active();
     assert_eq!(active.len(), 1, "an empty block_id must not cause every live event to be dropped");
     assert_eq!(active[0].parent_block_id, "");
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 /// Regression test for the observed flood: reopening a pane for an
