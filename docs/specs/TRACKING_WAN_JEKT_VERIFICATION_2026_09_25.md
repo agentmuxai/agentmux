@@ -70,7 +70,7 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 
 | Item | Why | Unblocks when |
 |---|---|---|
-| Approval window (another install → `approved`) | Must be reachable only from the CEF host, not by agents holding `X-AuthKey`; the spec's §2.6 amendment holds it until a related host-side fix ships. | that fix ships |
+| Approval window (another install → `approved`) | Must be reachable only from the CEF host, not by agents holding `X-AuthKey`; the spec's §2.6 amendment ships it disabled. | later work enables it |
 | Instance retirement | Needs the same host-gated surface as approval. The cloud already accepts revocations (C1) and the verifier honours them. | with the approval window |
 | Honouring `wan` trusted-peer grants | Grants are keyed by bare name; on WAN one name can be several instances. Needs an instance-keyed grant (table rebuild) and a way to create grants. | spec 09-17 §3.5.1 |
 | Cross-account verification (W0–W2) | Out of W3-S's scope by construction. | spec 09-17 |

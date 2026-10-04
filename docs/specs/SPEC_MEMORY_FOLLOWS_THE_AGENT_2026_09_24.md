@@ -597,8 +597,7 @@ miss older accounts: `e562b87a` for this agent, and `b43cec34` and
 **Who can confirm.** Confirmation goes through the host-gated window,
 never a WebSocket RPC. Agents hold `AGENTMUX_AUTH_KEY`, and the
 WebSocket's "human" label is assumed, not proven
-(`agent_handlers/bundle.rs:95-101`). Further hardening of that window
-waits on a pending security fix. Adoption is limited to directories the
+(`agent_handlers/bundle.rs:95-101`). Adoption is limited to directories the
 server listed for **that** agent.
 
 #### 2.1.5 Unattributed callers
@@ -672,8 +671,7 @@ sending instance asserts.
 human confirms an instance in the system browser, with
 re-authentication, on a page showing its full 26-character id. The relay
 refuses uploads from instances that aren't enrolled. This does **not**
-depend on the host-gated window, so M5 doesn't wait for the pending
-security fix.
+depend on the host-gated window.
 
 **Quarantine.** Two kinds of version are quarantined:
 - versions from an instance **this receiver** hasn't accepted yet;
@@ -745,9 +743,8 @@ agent on every machine** of the account. That is why agent-authored
 Global Memory is quarantined by default on receipt (above). An operator
 who turns that off accepts the reach.
 
-**Source labels.** Until a pending security fix lands, and until the
-instance key is kept out of agents' reach (WAN spec open question 5),
-receivers must treat `source` as advisory.
+**Source labels.** Receivers treat `source` as advisory for now (WAN
+spec open question 5); later work may extend this.
 
 ### 2.3 Armory: Global Memory as tiles (Part 3)
 
@@ -843,7 +840,8 @@ draft is dirty).
 - Concurrent builds of one channel use the conditional append and
   database-read sizes (§2.1.1), so they never fork a head.
 - Everything that relies on the host-gated window (adoption confirmation,
-  and approving sync instances) waits on the pending security fix.
+  and approving sync instances) is intentionally limited for now; later
+  work may extend it.
 
 ---
 
@@ -852,10 +850,9 @@ draft is dirty).
 **Residuals:**
 - **Shared memory directories** don't get the record's benefits until the
   agents are given separate working directories (§2.1.2).
-- **Host-gated confirmation.** Further hardening of the host channel
-  waits on a pending security fix. Adoption is limited to directories
+- **Host-gated confirmation.** Adoption is limited to directories
   the server lists for that agent. Instance enrolment for sync uses the
-  relay's consent flow, so the fix doesn't block it.
+  relay's consent flow instead of the host channel.
 - **Any agent on an enrolled instance** can push its own Personal Memory
   to its linked counterparts, which is inherent. Agent-authored Global
   Memory is quarantined on receipt by default, and `source` labels are

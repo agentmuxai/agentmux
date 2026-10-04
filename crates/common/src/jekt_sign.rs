@@ -386,8 +386,8 @@ pub fn verify_channel_jekt(
 // **Only the signing primitives live here.** Publication, lookup, and
 // verification wiring are deliberately NOT part of this change: verifying a
 // WAN signature means resolving `(sender_account, source_agent)` to exactly
-// one key, which waits on relay-side work tracked in the private cloud repo
-// (that spec's phase W2). Minting and signing are safe
+// one key, which waits on relay-side work tracked in the private cloud repo.
+// Minting and signing are safe
 // and useful ahead of that — an agent only gets a key when it is spawned, so
 // starting now is what makes verification meaningful later instead of
 // silently applying to nobody.

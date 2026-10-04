@@ -14,9 +14,9 @@ pattern for forked agents), `SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_
 agent registry this spec's host tier builds on), `SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md`
 (the existing but under-specified "#2" auto-naming rule), `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`
 (the LAN peer-identification this spec's LAN tier reuses). **Cross-repo (agentmuxai/agentmux-cloud):** the
-cloud's `(account_user_id, agent_id)` ownership record this spec's WAN tier
-anchors to, and the abandoned per-agent-credential design whose open
-question is relevant to §4.6's proposal (both kept in that private repo)
+cloud relay's check that an agent belongs to the caller's account, which this
+spec's WAN tier anchors to, and the abandoned per-agent-credential design whose
+open question is relevant to §4.6's proposal (both kept in that private repo)
 
 > **Naming.** "Qualified" vs. "unqualified" name, borrowed deliberately from git
 > (`main` vs. `origin/main`) and email (`user` vs. `user@host`) — both are
@@ -89,26 +89,24 @@ identity mirror:
   *displayed*** — it ensures a human *looking at two same-named agents* can
   tell them apart. How muxbus keys its own traffic is cloud-side work
   tracked in the private cloud repo, not scoped here (§8 non-goals).
-- **A real ownership pairing already exists:** the cloud keeps an
-  `(account_user_id, agent_id)` ownership record.
+- **A real ownership check already exists:** the cloud relay checks that an
+  agent belongs to the caller's account; its design is kept in the private
+  cloud repo.
   **Decision: the WAN qualifier is `<account_user_id>/<host-label>`** (or a
-  resolved display form, e.g. the account's email), anchored to this
-  already-shipped record — not a vaguer "muxbus account" hand-wave.
+  resolved display form, e.g. the account's email), anchored to that
+  already-shipped account check — not a vaguer "muxbus account" hand-wave.
 - **Do not call this a "binding"** — the cloud
-  already uses that word for a narrower, different thing (does *this*
-  authenticated request's account match the ownership record for the
-  `agent_id` it's sending *as*). Reusing "binding" here would collide
-  semantically with already-shipped code.
+  already uses that word for a narrower, different thing. Reusing "binding"
+  here would collide semantically with already-shipped code.
 - **Critical constraint the original draft missed: muxbus cannot resolve
   "host" server-side, at all, today.** WAN delivery is mailbox/poll-based —
   every connected sidecar wakes on a broadcast ping and independently checks
-  `GET /reactive/pending/:agent_id` for whatever it locally hosts, and the
-  cloud records no host for a connection.
-  **There is no host concept in muxbus's data model at all.** Consequence:
+  `GET /reactive/pending/:agent_id` for whatever it locally hosts.
+  **The relay does not know which host an agent runs on.** Consequence:
   the `host-label` half of a WAN-qualified name must be **asserted
   client-side** (by the sidecar itself, which knows what machine/channel it's
-  running on) — muxbus can confirm *ownership* (`account_user_id` ↔
-  `agent_id`) but can never independently verify *which host*. This is
+  running on) — muxbus can confirm that an agent belongs to an account but
+  can never independently verify *which host*. This is
   consistent with, not a workaround for, this spec's own G4 ("a qualifier is
   a label, never a trust claim") — a self-asserted host-label was always
   going to be exactly as trustworthy as `TRUST=network-claimed` already is
@@ -141,7 +139,7 @@ field already establishes, rather than inventing a fourth taxonomy for naming:
 |---|---|---|
 | **Host** | Always, within one host's global registry (§2) | `AgentX #4` (no qualifier shown) |
 | **LAN** | Never, once a name is visible to a second machine | `AgentX #4@<host-label>` |
-| **WAN** | Never | `AgentX #4@<account_user_id-display>/<host-label>` — account half server-verifiable against `muxbus-agent-ownership-{env}`, host-label half self-asserted (§2) |
+| **WAN** | Never | `AgentX #4@<account_user_id-display>/<host-label>` — account half checked by the cloud relay, host-label half self-asserted (§2) |
 
 The qualifier is appended only once a name actually becomes visible outside
 its host of origin (a mirror connects, a fork lands on a remote peer) — a
@@ -162,8 +160,8 @@ HostLabel {
 ```
 
 For WAN specifically, the full qualifier is **two independently-sourced
-halves**, not one opaque id: `account_user_id` (server-verifiable against
-`muxbus-agent-ownership-{env}`) and `host-label` (client-asserted,
+halves**, not one opaque id: `account_user_id` (checked by the cloud
+relay) and `host-label` (client-asserted,
 unverifiable by muxbus, §2). Never collapse these into a single "WAN
 HostLabel" value that looks server-verified end to end — it isn't, and
 presenting it as if it were would violate G4.
@@ -245,12 +243,12 @@ infrastructure**, checked against `agentmux-cloud` rather than assumed:
   and this spec already needs an identity anchor to hang it on.** The
   abandoned per-agent-credential design (in the cloud repo) floated, but
   never built, a self-issued signed capability token per agent. **If the
-  already-shipped ownership record (`account_user_id`, `agent_id`) grows a public-key field** (or a new
-  table keyed identically), the same record this spec's WAN qualifier already
-  needs to look up for the *account* half of a display name could *also*
-  serve as the trust anchor jekt's WAN signing gap needs — one new field,
-  reused for two purposes, instead of two independent designs each inventing
-  their own identity record.
+  cloud relay's existing account check for an agent were extended to carry a
+  public key**, the same anchor this spec's WAN qualifier already relies on
+  for the *account* half of a display name could *also* serve as the trust
+  anchor jekt's WAN signing needs — reused for two purposes, instead of two
+  independent designs each inventing their own identity record. That design
+  is kept in the private cloud repo.
 - **This does not close the gap by itself** — naming only needs to *display*
   the account/agent pairing; it doesn't need the pairing to carry a
   verifiable signature. Actually closing jekt's WAN gap requires someone to
@@ -259,8 +257,8 @@ infrastructure**, checked against `agentmux-cloud` rather than assumed:
   real work, not a byproduct of this spec. What this spec's research
   establishes is narrower and still useful: **the two problems share a
   natural home for their identity anchor**, so whoever eventually builds
-  general WAN signing should extend the ownership record rather than invent a
-  parallel identity table this spec would then have to reconcile with.
+  general WAN signing should build on that same account anchor rather than
+  invent a parallel one this spec would then have to reconcile with.
 
 This is explicitly a **note for whoever picks up jekt's WAN-signing gap
 later**, not a phase this spec commits to delivering — see §8 non-goals.
@@ -326,8 +324,8 @@ This spec is strictly the **display** layer. It changes nothing about:
   PR #2721, addressed in §2). This spec's `HostLabel` qualifier fixes how
   same-named agents are *displayed*; the muxbus storage/routing key is
   separate, `agentmux-cloud`-side work this spec does not scope or deliver.
-- **Cloud-side per-agent authorization** — this spec's WAN qualifier reads
-  the same ownership record, but authorization policy is an independent,
+- **Cloud-side per-agent authorization** — this spec's WAN qualifier relies on
+  the same account check, but authorization policy is an independent,
   `agentmux-cloud`-side decision, out of scope here.
 
 ## 9. Open questions

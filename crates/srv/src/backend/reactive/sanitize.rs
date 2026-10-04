@@ -256,8 +256,7 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 ///     `TRUST=self-declared` — explicitly NOT the same as "verified."
 /// Ignored (always renders `TRUST=network-claimed`) for any non-host
 /// delivery tier — network delivery is never treated as verified regardless
-/// of this signal, by design (see the "what does NOT change" note in the
-/// spec above).
+/// of this signal, by design.
 ///
 /// `reagent_verified` answers an orthogonal question, additively: not "how was this
 /// delivered" (that's `TRUST`, unconditionally `network-claimed` for any

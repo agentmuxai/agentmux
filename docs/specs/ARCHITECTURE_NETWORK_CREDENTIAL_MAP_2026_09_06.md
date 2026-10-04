@@ -126,7 +126,7 @@ carefully, because the honest status is narrower than its existence suggests:
 Signing shipped first on purpose: an agent only receives its key when spawned,
 so a verifier landing before keys propagate would apply to almost no live
 agent. Verification waits on relay-side work tracked in the private cloud repo
-(that spec's W2) and on the signed msgid/timestamp surviving the cloud round trip
+and on the signed msgid/timestamp surviving the cloud round trip
 (§3.4.1) — `cloud_subscriber` currently replaces `request_id` with the cloud's
 own injection id and leaves `ts_secs` unset, so a verifier wired today would
 fail every legitimate signature.

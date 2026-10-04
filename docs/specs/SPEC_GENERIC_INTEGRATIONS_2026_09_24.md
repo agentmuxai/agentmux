@@ -28,8 +28,7 @@ was verified against code and accepted.
   - the relay rejects sender ids that aren't agent ids (§2.3);
   - residuals are listed (§4).
 - **Review 3** (1 P1, 4 P2, 3 P3):
-  - the trust toggle ships only in builds that include a pending
-    security fix (§2.1, §2.5, §2.8, §4);
+  - the trust toggle ships disabled (§2.1, §2.5, §2.8, §4);
   - the consent flow was made buildable: a confidential client,
     relay-side code exchange, relay-checked login time and subject, and
     the system browser only (§2.2);
@@ -93,7 +92,7 @@ was verified against code and accepted.
     stamp generically.
   - Whether an integration's messages count as trusted is a local
     decision, made in a host window that MCP tools can't reach. It ships
-    only once a pending security fix lands (§4).
+    disabled for now (§2.8, §4).
 - **Services own their logic.**
   - ReAgent notifies about its own reviews with its own credential.
   - Generic GitHub events (CI, merges, human reviews) come from a GitHub
@@ -216,8 +215,8 @@ involved.
      §2.8).
    - The routing decision — which agent receives a message — is made on
      the desktop (§2.4).
-   - **Limit:** anything whose misuse would relax a safety stop waits for
-     a pending security fix (§2.8, §4).
+   - **Limit:** anything whose misuse would relax a safety stop ships
+     disabled for now (§2.8, §4).
 4. **Accounts grant; integrations don't self-enroll.** In v1 the
    operator must also approve every account an integration may serve
    (§2.6).
@@ -565,8 +564,8 @@ a **desktop-local** setting, `trusted_integrations`:
   the CEF-host window (§2.5).
 - It is **off by default**.
 - The relay has no say in it.
-- **It ships enabled only in builds that include a pending security
-  fix** (§4). In earlier builds no integration is ever trusted.
+- **It ships disabled** (§4); later work may enable it. Until then no
+  integration is ever trusted.
 
 **Sender trust is not content trust.** A trusted integration's notice
 can quote attacker-written PR text. Trusting an integration relaxes the
@@ -694,7 +693,7 @@ release cycle after I2.
 - **Re-authentication strength.** The consent flow needs the human's own
   login, but for federated-only owners that login is silent if they are
   already signed in at their identity provider (§2.2).
-- **Pending security fix.** Until it lands, `trusted_integrations` stays
+- **Trust toggle ships disabled.** `trusted_integrations` stays
   disabled (§2.8), so no safety stop can be relaxed through this design.
 - **Revoke as suppression.** Any account token can revoke a grant, and so
   suppress an integration's notices. Revokes are audited and announced
@@ -776,7 +775,7 @@ release cycle after I2.
   - a forced transcript request escalates.
 - Held replay keeps the stamp and the stored tier (never `host`), and
   expires at the earlier of the row's expiry and the held TTL.
-- Before the pending security fix, `trusted_integrations` can't be
+- While the toggle ships disabled, `trusted_integrations` can't be
   enabled.
 - After I5, `git grep` finds no ReAgent identifiers in code, as a CI
   check.

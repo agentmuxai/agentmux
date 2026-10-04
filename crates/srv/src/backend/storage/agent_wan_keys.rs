@@ -32,7 +32,7 @@
 //! **Scope note:** minting and signing ship ahead of verification on purpose.
 //! Verifying a WAN signature requires resolving `(sender_account,
 //! source_agent)` to exactly one key, which waits on relay-side work tracked
-//! in the private cloud repo (that spec's phase W2). An agent
+//! in the private cloud repo. An agent
 //! only receives a key when it is spawned, so minting now is what makes
 //! verification meaningful later instead of applying to almost nobody.
 

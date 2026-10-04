@@ -13,8 +13,6 @@
 //! incident that established this). The choices themselves are only
 //! `(list_id, index, dir_hash)` from a list the server issued
 //! (`agent:memory:adoption_list`) — never a path.
-//!
-//! Further hardening of this path waits on a pending security fix.
 
 use serde::Deserialize;
 

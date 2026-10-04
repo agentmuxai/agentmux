@@ -524,9 +524,8 @@ first_seen_at, approved_at, revoked_at)`:
 - A local agent can still write `wan.db` directly, as the same OS user. That
   is machine compromise (§4).
 - **Amended 2026-09-24** (`SPEC_GENERIC_INTEGRATIONS_2026_09_24.md`, review
-  3): instance approval should ship enabled only in builds that include a
-  related host-side fix. Until then every instance stays `new`, and gets no
-  relaxation.
+  3): instance approval ships disabled, so every instance stays `new`, and
+  gets no relaxation.
 - **Amended 2026-09-26 (operator decision): a verified `new` instance is
   trusted too.** The operator wants same-account agents on different
   machines to act on each other's verified jekts without an operator stop.
