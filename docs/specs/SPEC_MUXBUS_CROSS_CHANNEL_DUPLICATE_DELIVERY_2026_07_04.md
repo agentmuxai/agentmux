@@ -1,7 +1,7 @@
 # Plan: muxbus cross-channel duplicate delivery
 
-**Status:** Draft — investigation complete, not yet implemented. Written for
-review before touching either repo.
+**Status:** Implemented — claim-before-deliver shipped in PR #1959. Kept as
+the design record.
 **Author:** AgentX
 **Date:** 2026-07-04
 **Related:** #1916 (MuxBus cross-channel *local* delivery — the mirror-image
@@ -38,16 +38,14 @@ channels.
    Both call `cloud_subscriber::add_agent("agentx")`
    (`server/agent_handlers/input.rs:411-412`) on their own independent WS
    connection.
-2. A jekt arrives for `agentx`. The server broadcasts a zero-metadata
-   `{type:"inject_available"}` wake to **every** connected socket on the
-   account — there is no per-agent or per-connection routing.
-3. Both A and B poll `GET /reactive/pending/agentx`. The poll takes no
-   claim or lock — both get the same pending injection.
+2. A jekt arrives for `agentx`. Both A and B receive the same
+   `{type:"inject_available"}` wake, which carries no agent id.
+3. Both A and B poll `GET /reactive/pending/agentx`, and both get the same
+   pending injection.
 4. Both locally deliver it (`cloud_subscriber.rs:443-466`,
    `handler.inject_message`).
-5. Both call `POST /reactive/ack`. The ack is **unconditional** — no
-   already-delivered guard, so the second ack just silently overwrites the
-   first. Neither side sees an error.
+5. Both call `POST /reactive/ack`, and both succeed. Neither side sees an
+   error.
 
 Net effect: the sender's one message reaches two panes, with no signal to
 either side that this happened.
@@ -55,8 +53,7 @@ either side that this happened.
 ### Severity / how urgent is this
 
 - **Not a billing problem** — `GET /reactive/pending` and `POST /reactive/ack`
-  are not metered (confirmed in the cloud repo); only sends and
-  injects are.
+  are not metered; only sends and injects are.
 - **Not triggered by ordinary channel sprawl.** Issue #1916's own worked
   example ("15+ per-channel `agents/` registries") is explicitly *stale disk
   residue* — a collided entry's `pid` was dead and `updated_at` was ~6 weeks
@@ -106,12 +103,10 @@ proceeds to local delivery.
 
 ### Server-side (`agentmux-cloud`)
 
-- Make the ack (or a new endpoint, TBD during design) a **conditional**
-  update that atomically flips the injection to delivered only if it was
-  still pending.
-- When the condition fails, return a clear "already claimed"
-  signal (e.g. `409 Conflict` or `{claimed: false}` in the response body) —
-  today's ack has no failure mode to signal at all.
+- The ack (or a new endpoint, TBD during design) succeeds for exactly one
+  caller per injection, and returns a clear "already claimed" signal to
+  the rest (e.g. `409 Conflict` or `{claimed: false}` in the response
+  body). The relay side is designed in the private cloud repo.
 - This must happen **before** the sidecar delivers locally, not after — i.e.
   the call sequence changes from "poll, deliver, ack" to "poll, claim
   (attempt), deliver only if claim succeeded."
@@ -149,10 +144,9 @@ proceeds to local delivery.
    existing ack semantics for callers that don't need claim ordering (e.g. the
    TS `muxbus-client` package's poll loop, which may have different
    correctness requirements).
-2. Does the GitHub PR-review consumer (`consumers/github/handler.ts`) ever
-   poll on behalf of an agent name that could collide across channels, or is
-   its delivery path exclusively `POST /reactive/inject` (write-only, not
-   subject to this race)? If write-only, no client-side change needed there.
-3. Worth a regression test that spins up two local `MessageStore` instances
-   (or two poll calls in quick succession) against the same injection to
-   confirm exactly-once claim semantics before shipping.
+2. Cloud-side senders that only call `POST /reactive/inject` are write-only
+   and not subject to this race; whether any other cloud-side caller polls
+   on an agent's behalf is a question for the private cloud repo.
+3. Worth a regression test that makes two claim calls in quick succession
+   against the same injection to confirm exactly-once claim semantics
+   before shipping.

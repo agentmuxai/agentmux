@@ -164,8 +164,8 @@ same processes under the running 0.57.2 portable (no #3834) are at `Normal`.
 **Status:** root cause found and fixed on `main` (#3865, #3866, Agent2); needs a two-machine re-check.
 
 **Root cause (#3865):** the receiver looked up the sender's key with the cloud connection's shared
-token, loaded once at connect. A desktop (PKCE) token lives 15 minutes and a connection up to 2
-hours, so from minute 15 every `GET /agents/<agent>/wan-key` was a 401, read as
+token, loaded once at connect. A desktop (PKCE) token lives 15 minutes and a connection can
+outlive it, so from minute 15 every `GET /agents/<agent>/wan-key` was a 401, read as
 `wan_key_unavailable`. It fits the data here: narko's connection opened at 06:11:29, and AgentA's
 jekt arrived at 06:28:52, 17 minutes in. #3866 fixes three more calls that used the same token.
 Retro: `docs/retro/retro-wan-verify-stale-directory-token-2026-09-26.md`. The analysis below,
@@ -206,10 +206,9 @@ published at 04:37:08, after PKCE login. Both installs are logged in to muxbus a
 - *Different accounts:* narko's srv log also shows `muxbus: PKCE login succeeded`, same email.
 - *Key rotated under a running agent:* on narko, the public key derived from AgentY's
   `AGENTMUX_WAN_KEY` equals `wan.db`'s published `agenty` key.
-- *Not carried:* every jekt between the two has an `inj-w-<hash>` id. The cloud assigns that
-  only to a row stored with a *valid* carried tuple
-  from an account-bound sender. So both sides signed, and the relay carried and stored the
-  signatures.
+- *Not carried:* every jekt between the two has an `inj-w-<hash>` id, which the relay gives only
+  to a message carried with a *valid* signature from an account-bound sender. So both sides
+  signed, and the relay carried the signatures.
 
 **Where it breaks — the receiver's directory fetch.** The injection audit
 (`GET /agentmux/reactive/audit`, in memory) records the verdict for every WAN jekt:
@@ -222,8 +221,7 @@ published at 04:37:08, after PKCE login. Both installs are logged in to muxbus a
 
 `wan_key_unavailable` comes after `sender_same_account == true` and the envelope check pass: the
 `GET /agents/<agent>/wan-key` lookup failed twice. That covers five different causes that the code
-didn't tell apart: a non-404 HTTP status (the route 403s a token with no account, 429s over 120/min,
-400s a malformed query), a transport error or the 2 s timeout, a 200 that doesn't parse as a
+didn't tell apart: a non-404 HTTP status (403, 429 or 400), a transport error or the 2 s timeout, a 200 that doesn't parse as a
 `WanKeyRecord`, or the local fetch budget running out. Unauthenticated, the route answers 401 in
 about 0.27 s, so it is deployed and reachable. Its response shape matches `WanKeyRecord`.
 

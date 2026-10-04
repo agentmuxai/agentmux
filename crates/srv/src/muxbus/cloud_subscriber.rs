@@ -36,14 +36,9 @@ use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 use crate::broker::RefreshErrorKind;
 
-// Dedicated custom domain on the API Gateway WebSocket API (apigatewayv2
-// DomainName + ApiMapping), not a path under muxbus.agentmux.ai's CloudFront
-// distribution. A CloudFront path behavior would have forwarded this
-// client's literal /ws request path prefixed by originPath, landing at
-// /{stage}/ws on the origin — but the WS handshake endpoint only exists at
-// exactly /{stage}. No path suffix here: the domain root maps directly to
-// the API's default stage. Full design/history in the agentmux-cloud repo's
-// muxbus/ directory (search for the WebSocket relay redesign writeup).
+// The relay's WebSocket endpoint has its own domain, and the handshake is at
+// the domain root: no path suffix. The relay side is designed in the private
+// cloud repo.
 /// Fallback when the cloud publishes no settings (`discovery::ws_url`).
 pub(crate) const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 pub(crate) const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
@@ -53,14 +48,13 @@ const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 // (no network beyond the cached discovery document) in case another channel
 // sharing the store signed in.
 const STALE_RECHECK_SECS: u64 = 60;
-// AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
-// server-initiated keepalive of their own — the connection is dropped on
-// silence in both directions. Ping well under that so a quiet connection
-// (no inject_available traffic) survives indefinitely. The ping is an
-// app-level ClientMsg::Ping frame, not a WS-protocol-level Message::Ping —
-// API Gateway does not reliably relay raw protocol ping/pong control frames,
-// so a normal data frame is what actually keeps the connection alive in
-// production (see ClientMsg::Ping's doc comment).
+// The relay drops a WebSocket that has been silent in both directions for
+// 10 minutes and sends no keepalive of its own. Ping well under that so a
+// quiet connection (no inject_available traffic) survives indefinitely. The
+// ping is an app-level ClientMsg::Ping frame, not a WS-protocol-level
+// Message::Ping — raw protocol ping/pong control frames are not reliably
+// relayed, so a normal data frame is what actually keeps the connection
+// alive in production (see ClientMsg::Ping's doc comment).
 const CLIENT_PING_INTERVAL_SECS: u64 = 240;
 // How often the broker's background sweep re-checks the stored MuxBus
 // credential and proactively refreshes it if it's nearing expiry — now the
@@ -75,8 +69,8 @@ const BROKER_SWEEP_INTERVAL_SECS: u64 = 60;
 // from "now" and still verify — anti-replay, same purpose as
 // server/reactive.rs's JEKT_SIG_MAX_AGE_SECS for host-tier (reagentx P1 on
 // PR #2570). Wider than host-tier's 300s because this covers real network
-// delivery latency, not a same-machine call — matches the github-consumer
-// Lambda's own REVIEW_NOTIFICATION_TTL_SECONDS delivery window.
+// delivery latency, not a same-machine call — matches the review
+// notifications' own delivery window.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
 use agentmux_common::time::now_secs as now_unix_secs;
@@ -102,10 +96,9 @@ enum ClientMsg {
     #[serde(rename = "subscribe:remove")]
     SubscribeRemove { agents: Vec<String> },
     // Ack removed — ACK is sent via REST POST /reactive/ack, not WS
-    // App-level keepalive — see CLIENT_PING_INTERVAL_SECS. AWS API Gateway
-    // WebSocket APIs (the production transport) do not reliably relay raw
-    // WS-protocol Ping/Pong control frames, so the keepalive must be a normal
-    // data frame the server's $default route can see and reply to.
+    // App-level keepalive — see CLIENT_PING_INTERVAL_SECS. Raw WS-protocol
+    // Ping/Pong control frames are not reliably relayed in production, so the
+    // keepalive must be a normal data frame the relay can see and reply to.
     Ping,
 }
 
@@ -1249,8 +1242,8 @@ async fn sync_agent_reactive(
         // class of gap host-tier's `verify_jekt_signature` closed with
         // `JEKT_SIG_MAX_AGE_SECS`. `REAGENT_SIG_MAX_AGE_SECS` is wider
         // (600s vs. 300s) because this is real network delivery, not a
-        // same-machine call — matches the github-consumer Lambda's own
-        // REVIEW_NOTIFICATION_TTL_SECONDS delivery window, so a message
+        // same-machine call — matches the review notifications' own
+        // delivery window, so a message
         // that's still legitimately within its own staleness budget never
         // spuriously fails signature freshness on top of that.
         let reagent_verified = match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {

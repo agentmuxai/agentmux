@@ -60,13 +60,12 @@ REMOTE_INVOCATION_2026_07_29.md` already self-audited this: cross-instance
 enumeration and RPC are explicitly non-goals of MuxBus as it exists today.
 
 **The cross-instance identity that already exists is `account_user_id`**
-(the account's stable user id). The cloud service already models one
-account owning many `agent_id`s and resolves the account per request. This
-is the natural sync scope key — there is no separate org/team concept yet.
+(the account's stable user id). One account already owns many `agent_id`s,
+and every MuxBus request is authenticated to an account. This is the
+natural sync scope key — there is no separate org/team concept yet.
 
-**No document/blob store with versioning exists in the cloud service
-today.** Its existing storage is message/metering state, not a config-doc
-store.
+**The cloud service offers no versioned document storage today.** The relay
+side of this feature would be designed in the private cloud repo.
 
 **No prior design for this feature exists.** Settings sync has only ever
 been mentioned in passing, with no design detail and no `yjs` (or other
@@ -140,9 +139,7 @@ pairing plan (§1). Add one new wake message type, `memory_updated`,
 parallel to the existing `inject_available`.
 
 **Blocking prerequisite, not optional polish**: the `memory_updated` wake
-must be scoped to `account_user_id`, delivered only to that account's
-connections. Get it right here since it's needed for correctness anyway,
-not just as a hardening pass.
+must reach only instances signed in to the same `account_user_id`.
 
 New cloud REST endpoints, mirroring the existing `/reactive/pending/
 :agent_id` poll pattern:
@@ -155,9 +152,9 @@ New cloud REST endpoints, mirroring the existing `/reactive/pending/
 
 ### 2.4 Cloud storage
 
-A new cloud-side store keyed by `account_user_id` and `entry_id`, with
-point-in-time recovery, storing latest content plus the append-only version
-chain.
+Designed in the private cloud repo. What the desktop relies on: the cloud
+keeps each entry's latest content and its version history per account, so
+the cursor pull in §2.5 can always catch an instance up.
 
 ### 2.5 Local flow
 
@@ -288,9 +285,9 @@ just swapping the transport under the same protocol.
   respond to a broadcast.
 - **The trust model needs the fix `SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_
   REMOTE_INVOCATION_2026_07_29.md` §2 already proposed, as a hard
-  prerequisite here.** Today's `auth_key` is broadcast in plaintext in the
-  mDNS TXT record (`lan_discovery.rs`) — an accepted tradeoff for that
-  spec's current text-injection use case, not an acceptable one for
+  prerequisite here.** The LAN key advertised in the mDNS TXT record
+  (`lan_discovery.rs`) is scoped to text injection, which suits that
+  use case but is not a basis for
   silently pulling and merging another instance's memory content. That
   spec's proposed replacement — a stable per-instance identity keypair,
   mDNS/UDP advertising only a public identity, with the actual auth

@@ -161,8 +161,7 @@ and `identity::oauth_client::*` test suites remain green (11/11).
 
 ## 4. Non-goals / out of scope
 
-- Did not touch the agentmux-cloud Cognito/CDK side — it's confirmed working correctly
-  (§2) and PR #21's deploy notes were followed correctly by whoever ran `cdk deploy`.
+- Did not touch the cloud sign-in side — it's confirmed working correctly (§2).
 - Did not change macOS/Linux `open_browser` — `open` (macOS) and `xdg-open` (Linux) are
   passed the URL as a single argv element via `Command::arg`, which does not go through
   a secondary shell re-parse, so they were never affected.

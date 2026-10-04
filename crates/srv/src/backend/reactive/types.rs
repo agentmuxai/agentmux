@@ -146,9 +146,8 @@ pub struct InjectionRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reagent_key_id: Option<String>,
     /// Message id that was part of `reagent_sig`'s signed material — the
-    /// same `id` field the cloud muxbus server assigns each pending
-    /// injection (see `PendingInj`/`Injection.reagent_msg_id` on the
-    /// agentmux-cloud side). Distinct from `request_id` above, which is
+    /// same `id` the cloud relay gives each pending injection it hands
+    /// this client. Distinct from `request_id` above, which is
     /// this request's own (possibly re-derived, e.g. across a cross-instance
     /// forward) identifier — `reagent_msg_id` must stay exactly what was
     /// signed for verification to succeed regardless of how `request_id`

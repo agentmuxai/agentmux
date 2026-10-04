@@ -13,10 +13,8 @@ pattern for forked agents), `SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_
 `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md` (established the host-global
 agent registry this spec's host tier builds on), `SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md`
 (the existing but under-specified "#2" auto-naming rule), `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`
-(the LAN peer-identification this spec's LAN tier reuses). **Cross-repo (agentmuxai/agentmux-cloud):** the
-cloud relay's check that an agent belongs to the caller's account, which this
-spec's WAN tier anchors to, and the abandoned per-agent-credential design whose
-open question is relevant to §4.6's proposal (both kept in that private repo)
+(the LAN peer-identification this spec's LAN tier reuses). The relay side of the WAN
+tier is designed in the private cloud repo.
 
 > **Naming.** "Qualified" vs. "unqualified" name, borrowed deliberately from git
 > (`main` vs. `origin/main`) and email (`user` vs. `user@host`) — both are
@@ -77,40 +75,27 @@ resolve, for every LAN-addressable agent, which physical peer hosts it. This
 resolution is currently internal to the signing/verification path; nothing
 today exposes it as a user-facing label.
 
-**WAN tier's identity anchor, checked against `agentmuxai/agentmux-cloud`
-— corrects and sharpens the original draft of this section.** `MUXBUS_AGENT_ID` mirrors `AGENTMUX_AGENT_ID` at spawn so muxbus
-can route to an agent by identity across the WAN (per this repo's `CLAUDE.md`)
-— but muxbus's own data model is more specific, and more useful, than a bare
-identity mirror:
+**WAN tier's identity anchor.** `MUXBUS_AGENT_ID` mirrors
+`AGENTMUX_AGENT_ID` at spawn so the cloud relay can route to an agent by
+identity across the WAN. This spec relies only on what the desktop sees;
+how the relay works inside is designed in the private cloud repo.
 
-- **`agent_id` is a flat, self-declared string with no per-account
-  namespace in muxbus.** **Correction (Codex's review of PR #2721): this
-  spec's WAN qualifier only fixes how two accounts' same-named agents are
-  *displayed*** — it ensures a human *looking at two same-named agents* can
-  tell them apart. How muxbus keys its own traffic is cloud-side work
-  tracked in the private cloud repo, not scoped here (§8 non-goals).
-- **A real ownership check already exists:** the cloud relay checks that an
-  agent belongs to the caller's account; its design is kept in the private
-  cloud repo.
-  **Decision: the WAN qualifier is `<account_user_id>/<host-label>`** (or a
-  resolved display form, e.g. the account's email), anchored to that
-  already-shipped account check — not a vaguer "muxbus account" hand-wave.
-- **Do not call this a "binding"** — the cloud
-  already uses that word for a narrower, different thing. Reusing "binding"
-  here would collide semantically with already-shipped code.
-- **Critical constraint the original draft missed: muxbus cannot resolve
-  "host" server-side, at all, today.** WAN delivery is mailbox/poll-based —
-  every connected sidecar wakes on a broadcast ping and independently checks
-  `GET /reactive/pending/:agent_id` for whatever it locally hosts.
-  **The relay does not know which host an agent runs on.** Consequence:
-  the `host-label` half of a WAN-qualified name must be **asserted
-  client-side** (by the sidecar itself, which knows what machine/channel it's
-  running on) — muxbus can confirm that an agent belongs to an account but
-  can never independently verify *which host*. This is
-  consistent with, not a workaround for, this spec's own G4 ("a qualifier is
-  a label, never a trust claim") — a self-asserted host-label was always
-  going to be exactly as trustworthy as `TRUST=network-claimed` already is
-  for WAN jekt, no more.
+- **The WAN qualifier fixes display only.** **Correction (Codex's review
+  of PR #2721):** it ensures a human *looking at two accounts' same-named
+  agents* can tell them apart. How the relay keys its own traffic is not
+  scoped here (§8 non-goals).
+- **Decision: the WAN qualifier is `<account>/<host-label>`** (shown in a
+  resolved display form, e.g. the account's email), where the account half
+  is the AgentMux account the desktop is signed in to.
+- **Do not call this a "binding"** — the cloud side already uses that word
+  for a narrower, different thing.
+- **The host label is asserted client-side.** The desktop pulls
+  `GET /reactive/pending/:agent_id` for the agents it hosts, so the
+  host-label half of a WAN-qualified name comes from the sidecar itself,
+  which knows what machine/channel it's running on. This is consistent
+  with, not a workaround for, this spec's own G4 ("a qualifier is a label,
+  never a trust claim") — a self-asserted host-label is exactly as
+  trustworthy as `TRUST=network-claimed` already is for WAN jekt, no more.
 
 **The existing fork auto-naming rule doesn't specify its own scope.**
 `SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md`'s "Senior Dev" → "Senior Dev #2"
@@ -139,7 +124,7 @@ field already establishes, rather than inventing a fourth taxonomy for naming:
 |---|---|---|
 | **Host** | Always, within one host's global registry (§2) | `AgentX #4` (no qualifier shown) |
 | **LAN** | Never, once a name is visible to a second machine | `AgentX #4@<host-label>` |
-| **WAN** | Never | `AgentX #4@<account_user_id-display>/<host-label>` — account half checked by the cloud relay, host-label half self-asserted (§2) |
+| **WAN** | Never | `AgentX #4@<account-display>/<host-label>` — account half from the signed-in account, host-label half self-asserted (§2) |
 
 The qualifier is appended only once a name actually becomes visible outside
 its host of origin (a mirror connects, a fork lands on a remote peer) — a
@@ -153,16 +138,14 @@ HostLabel {
   scope: "lan" | "wan", // host tier needs no HostLabel at all — see §4.1
   stable_id: string,    // the actual anchor: LAN peer id (from the discovery already
                          // backing SPEC_JEKT_LAN_TIER_SIGNING's pubkey fetch) for "lan";
-                         // self-asserted by the sidecar (muxbus has no host concept
-                         // to verify against, §2) for "wan" -- paired with, but
-                         // distinct from, the server-verifiable account_user_id half
+                         // self-asserted by the sidecar (§2) for "wan" -- paired
+                         // with, but distinct from, the account half
 }
 ```
 
 For WAN specifically, the full qualifier is **two independently-sourced
-halves**, not one opaque id: `account_user_id` (checked by the cloud
-relay) and `host-label` (client-asserted,
-unverifiable by muxbus, §2). Never collapse these into a single "WAN
+halves**, not one opaque id: the account and the `host-label`
+(client-asserted, §2). Never collapse these into a single "WAN
 HostLabel" value that looks server-verified end to end — it isn't, and
 presenting it as if it were would violate G4.
 
@@ -217,51 +200,14 @@ from: korp-laptop (LAN)". This reuses `HostLabel` in the opposite direction
 from §4.4 (labeling a *viewer*, not an *owner*) but it's the same primitive,
 which is exactly the point of extracting it once.
 
-### 4.6 Synergy: this spec's WAN anchor and jekt's unbuilt WAN signing gap
+### 4.6 Relationship to WAN jekt signing
 
-Raised directly by the human while this spec was being written, and worth
-making explicit rather than leaving as a coincidence: this spec's WAN
-qualifier work and jekt's own known gap — "general agent-to-agent WAN signing
-does not exist yet... an arbitrary WAN jekt's `source_agent` remains exactly
-as forgeable as before" (this repo's `CLAUDE.md`, issue
-#2586's unbuilt half) — **could plausibly be closed by the same piece of new
-infrastructure**, checked against `agentmux-cloud` rather than assumed:
-
-- **The wire format and storage path for a real per-sender WAN signature
-  already exist, end to end, proven for exactly one identity.**
-  The cloud's GitHub consumer signs every reagent-originated jekt
-  with a pinned Ed25519 key and attaches `reagent_sig`/`reagent_key_id`/
-  `reagent_msg_id`/`reagent_ts_secs` to the stored injection; the receiving agentmux-srv verifies it
-  client-side against a pinned public key (`agentmux_common::jekt_sign`).
-  Critically, **these fields are generic** — nothing about the stored
-  shape hardcodes "reagent"; only the one consumer that currently
-  populates them does. The proven, shipped part of "general WAN signing" is
-  exactly this: the fields exist, the storage is opaque pass-through (the
-  server never verifies them), and client-side verification
-  already works for one sender.
-- **What's missing is per-agent (or per-account) key issuance and pinning —
-  and this spec already needs an identity anchor to hang it on.** The
-  abandoned per-agent-credential design (in the cloud repo) floated, but
-  never built, a self-issued signed capability token per agent. **If the
-  cloud relay's existing account check for an agent were extended to carry a
-  public key**, the same anchor this spec's WAN qualifier already relies on
-  for the *account* half of a display name could *also* serve as the trust
-  anchor jekt's WAN signing needs — reused for two purposes, instead of two
-  independent designs each inventing their own identity record. That design
-  is kept in the private cloud repo.
-- **This does not close the gap by itself** — naming only needs to *display*
-  the account/agent pairing; it doesn't need the pairing to carry a
-  verifiable signature. Actually closing jekt's WAN gap requires someone to
-  build key issuance, rotation, and the injection-population logic
-  analogous to the GitHub consumer's reagent path, generalized to any owned agent —
-  real work, not a byproduct of this spec. What this spec's research
-  establishes is narrower and still useful: **the two problems share a
-  natural home for their identity anchor**, so whoever eventually builds
-  general WAN signing should build on that same account anchor rather than
-  invent a parallel one this spec would then have to reconcile with.
-
-This is explicitly a **note for whoever picks up jekt's WAN-signing gap
-later**, not a phase this spec commits to delivering — see §8 non-goals.
+Raised by the human while this spec was being written: the WAN qualifier's
+account half and jekt's WAN signing both need an identity anchor tied to
+the AgentMux account. Same-account WAN signing has since been designed and
+built separately (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`); this spec
+neither depends on it nor changes it. Naming only needs to *display* the
+account/agent pairing, not to prove it (G4).
 
 ## 5. Decision tables
 
@@ -316,17 +262,14 @@ This spec is strictly the **display** layer. It changes nothing about:
 - User-facing UI for renaming/customizing a `HostLabel` beyond the basic
   override noted in §9 Q1 — a full "manage my host labels" surface is a later
   polish pass, not required for either sibling spec's v1.
-- **Building general agent-to-agent WAN jekt signing.** §4.6 identifies a
-  shared identity anchor a future signing scheme *could* reuse; this spec
-  does not design or deliver that scheme itself — that's issue #2586's own
-  scope, not this one's.
-- **Namespacing muxbus's WAN routing key** (raised by Codex's review of
-  PR #2721, addressed in §2). This spec's `HostLabel` qualifier fixes how
-  same-named agents are *displayed*; the muxbus storage/routing key is
-  separate, `agentmux-cloud`-side work this spec does not scope or deliver.
-- **Cloud-side per-agent authorization** — this spec's WAN qualifier relies on
-  the same account check, but authorization policy is an independent,
-  `agentmux-cloud`-side decision, out of scope here.
+- **Building agent-to-agent WAN jekt signing.** That is specified
+  separately (§4.6, issue #2586), not here.
+- **How the relay keys WAN traffic** (raised by Codex's review of PR
+  #2721, addressed in §2). This spec's `HostLabel` qualifier fixes how
+  same-named agents are *displayed*; anything on the relay side is
+  designed in the private cloud repo.
+- **Cloud-side per-agent authorization** — out of scope here; designed in
+  the private cloud repo.
 
 ## 9. Open questions
 
@@ -335,5 +278,5 @@ This spec is strictly the **display** layer. It changes nothing about:
 | 1 | Can a user customize their own host's label (vanity name), or is it always the OS hostname? | Default to OS hostname; allow an override in Settings (this is a **Preference**-tier value per `SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE`'s own three-tier data model — channel-scoped, not identity-scoped) |
 | 2 | Should the qualified form ever be shown by default, even at host tier, for consistency? | No — only show a qualifier once a name is actually visible beyond its host of origin; an always-qualified UI would violate G1/G2 for the common case |
 | 3 | Where does `HostLabel` get persisted/surfaced in the API surface? | Not fully specified here — likely piggybacks on whatever peer-list structure LAN discovery already maintains for `SPEC_JEKT_LAN_TIER_SIGNING`'s pubkey lookups, plus a small new muxbus-account lookup for WAN. Flagged as an implementation detail for whichever sibling spec's LAN/WAN phase ships first. |
-| 4 | How is the WAN qualifier's account half actually *displayed* (raw `account_user_id`/Cognito `sub`, or a resolved email/display name)? | Resolve to a display name (email is the obvious candidate, muxbus already has it via Cognito) — a raw `sub` is meaningless to a human reading a presence indicator |
-| 5 | Does resolving the WAN account display name require a new muxbus endpoint, or does the dashboard's existing account-lookup path (`SPEC_CLOUD_SERVICES_DASHBOARD_2026_08_18.md`) already expose it? | Check the dashboard spec's account API before building a new one — likely already covered since "my agents" there is already keyed on `account_user_id` |
+| 4 | How is the WAN qualifier's account half actually *displayed* (raw account id, or a resolved email/display name)? | Resolve to a display name (email is the obvious candidate) — a raw account id is meaningless to a human reading a presence indicator |
+| 5 | Does resolving the WAN account display name require a new muxbus endpoint, or does the dashboard's existing account-lookup path (`SPEC_CLOUD_SERVICES_DASHBOARD_2026_08_18.md`) already expose it? | Check the dashboard spec's account API before building a new one — likely already covered by its "my agents" view |

@@ -32,7 +32,6 @@ use super::error::StoreError;
 ///   v4 — db_agent_credentials: per-agent M2M Cognito client_id/secret +
 ///        cached access token, one row per locally-registered agent_id.
 ///        Lets cloud_subscriber use a credential bound to a specific agent
-///        (see agentmux-cloud's PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md)
 ///        instead of the single shared per-account MUXBUS_TOKEN for every
 ///        /reactive/* call.
 ///   v5 — db_cron_jobs.max_age_secs: optional hard expiry bound (seconds since

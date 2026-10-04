@@ -164,16 +164,10 @@ doesn't rule this one out, and it didn't.
 ## 4. Why ReAgent's routing itself is not the bug
 
 Verified this is not a repeat of the `identity_links`-source-failure class
-of bug or a cloud consumer routing defect: ReAgent (the review bot) has no
-agent-routing logic of its own and no special configuration for this repo.
-The actual "who gets notified" decision, per
-`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md`, happens in the cloud relay's
-GitHub consumer by resolving the PR **author's own GitHub username**
-first. That logic did exactly its job:
-`<agenty-account>` is a real, standard, registered identity, so it correctly
-resolved to `agenty` and notified me — accurately reflecting what GitHub
-itself says about who opened the PR. The routing isn't wrong; the
-underlying fact it's routing on (who really opened this PR) is.
+of bug or a cloud-side routing defect: GitHub itself says
+`<agenty-account>` opened the PR, so notifying `agenty` accurately reflects
+what GitHub reports. The routing isn't wrong; the underlying fact it's
+routing on (who really opened this PR) is.
 
 ## 5. Fix
 

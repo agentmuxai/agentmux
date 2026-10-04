@@ -4,20 +4,18 @@
 **Status:** Implemented — #2743
 **Author:** Korp
 **Repos touched:** `agentmux` (this doc + `CLAUDE.md` agent-facing policy)
-**Related:** `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` (the existing
-`<!-- agentmux:agent_id=... -->` body-tag mechanism this change complements,
-does not replace)
+**Related:** the existing `<!-- agentmux:agent_id=... -->` PR-body tag
+convention, which this change complements and does not replace
 
 ## 1. Problem
 
-`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` already solves *automated*
-review-notification routing for an agent pushing under the shared
-`GenericAgentX-<host>` fallback account (`CLAUDE.md`'s "Which GitHub account
-am I acting as?" — the identity `scripts/gh-agent.sh` falls back to when an
-agent has no dedicated PAT registered): the PR-body tag tells the webhook
-consumer exactly which agent to notify, even though the GitHub *username* on
-the PR is the same shared account regardless of which agent actually opened
-it.
+The PR-body tag already solves *automated* review-notification routing
+for an agent pushing under the shared `GenericAgentX-<host>` fallback
+account (`CLAUDE.md`'s "Which GitHub account am I acting as?" — the
+identity `scripts/gh-agent.sh` falls back to when an agent has no
+dedicated PAT registered): the tag identifies which agent opened the PR,
+even though the GitHub *username* on the PR is the same shared account
+regardless of which agent actually opened it.
 
 That mechanism is invisible to a **human**, though. Someone scanning
 `github.com/agentmuxai/agentmux/pulls` sees a flat list of titles and author
@@ -57,8 +55,7 @@ Korp@claudius: fix(muxlog): srv logs honor AGENTMUX_LOG_DIR, fix channels/ glob 
 
 **Agents with a standard identity are exempt** — a dedicated numbered
 PAT/App account (`Agent3-<host>`) or a registered named peer account
-(`korp-asaf`), per `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md`'s exact
-terminology. Their GitHub username already disambiguates them at a glance in
+(`korp-asaf`). Their GitHub username already disambiguates them at a glance in
 the PR list — the same exception the body tag already carries, extended
 here to the title for the same reason.
 
@@ -84,9 +81,8 @@ Both are already-available environment values — no new plumbing:
 
 ## 5. Non-goals
 
-- Does not change `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md`'s routing
-  logic or the body-tag mechanism in any way — both still required,
-  unchanged.
+- Does not change review-notification routing or the body-tag convention
+  in any way — the tag is still required, unchanged.
 - Does not apply to standard-identity agents (own dedicated PAT/App account
   or registered named peer account).
 - Does not retroactively rename already-*merged* PRs (not worth the

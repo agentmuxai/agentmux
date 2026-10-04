@@ -105,7 +105,7 @@ already out of date when it was posted.
   - #1247: Codex permission modes are always full-bypass.
   - #1250: the Gemini auth check is inert.
   - #3894: deferred jekts ignore the sender's expiry. A cloud-side change reduced the flood; the srv fix remains.
-  - #3680: the `.mcp.json` overwrite is fixed (#3803), but signing keys are still written into it. Blocked on #3497 M4d/M5.
+  - #3680: the `.mcp.json` overwrite is fixed (#3803); the remaining key-handling follow-up is blocked on #3497 M4d/M5.
 - **Panes and UI:**
   - #2551: OAuth popup sizing.
   - #2908: Ctrl+Wheel zoom in floaters.

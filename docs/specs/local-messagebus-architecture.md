@@ -8,12 +8,12 @@
 
 ## Problem
 
-AgentBus currently routes all inter-agent communication through a cloud Lambda (<relay-host>) backed by DynamoDB. Agents sitting in panes on the same machine round-trip to AWS for every message. This creates:
+AgentBus currently routes all inter-agent communication through a cloud relay (<relay-host>). Agents sitting in panes on the same machine round-trip to the cloud for every message. This creates:
 
 - **High latency** for `inject_terminal` (jekt) — HTTP polling instead of push
 - **Cloud dependency** for core local functionality — agents can't communicate offline
 - **No pane-level routing** — AgentMux has a WebSocket event bus but doesn't expose it for agent messaging
-- **Fragile delivery** — polling means messages sit in DynamoDB until the recipient checks; no guaranteed delivery time
+- **Fragile delivery** — polling means messages sit in the cloud relay until the recipient checks; no guaranteed delivery time
 
 ## Proposed Architecture
 
@@ -25,7 +25,7 @@ Build a first-class `MessageBus` module inside agentmuxsrv-rs. All agents on the
 Local (agentmuxsrv-rs)                Cloud (optional)
 ┌───────────────────────────┐        ┌──────────────────┐
 │  AgentMux Backend         │        │  AgentBus        │
-│                           │  sync  │  Lambda/DynamoDB │
+│                           │  sync  │  cloud relay     │
 │  ┌─────────────────────┐  │◄──────►│  (cross-machine) │
 │  │  MessageBus Module  │  │        └──────────────────┘
 │  │                     │  │
@@ -98,7 +98,7 @@ Message {
 
 ### 3. Inject Engine
 
-The core of `inject_terminal` (jekt). Instead of storing a message in DynamoDB and waiting for the target to poll:
+The core of `inject_terminal` (jekt). Instead of storing a message in the cloud and waiting for the target to poll:
 
 1. Sender calls `inject_terminal(target: "agent1", message: "do the thing")`
 2. MessageBus looks up Agent1's WebSocket connection
@@ -124,7 +124,7 @@ OfflineQueue {
 
 AgentBus cloud becomes a sync layer:
 
-- **Outbound**: Messages marked `cloud: true` are forwarded to AgentBus Lambda
+- **Outbound**: Messages marked `cloud: true` are forwarded to the AgentBus cloud relay
 - **Inbound**: Cloud messages are pulled and injected into local bus
 - **Use cases**: Cross-machine agents, mobile notifications, audit log
 - **Disabled by default**: Local bus works without any cloud config
@@ -185,7 +185,7 @@ These use the same auth key as the rest of the backend API.
 `agentbus-client` switches transport:
 
 ```
-Before: HTTP → Lambda (<relay-host>) → DynamoDB
+Before: HTTP → cloud relay (<relay-host>)
 After:  HTTP → localhost:PORT/api/bus/*   (or WebSocket)
 ```
 
@@ -225,7 +225,7 @@ AGENTBUS_TOKEN={auth_key}
 - Agent status visible in UI (online/offline indicators)
 
 ### Phase 4: Cloud Bridge
-- Optional sync to AgentBus Lambda for cross-machine use
+- Optional sync to the AgentBus cloud relay for cross-machine use
 - Cloud becomes read-through cache / event forwarder
 - Local bus is always authoritative
 

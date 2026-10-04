@@ -189,7 +189,7 @@ pub(crate) enum RelayOutcome {
 /// so the tests can point it at a stub relay without mutating process-wide env
 /// (which would race the rest of the test binary).
 ///
-/// ## Contract (verified against the cloud relay, agentmuxai/agentmux-cloud)
+/// ## Contract (verified against the cloud relay)
 ///
 /// - `source_agent` travels in the **`X-Agent-ID` header, not the body** — the
 ///   route 400s without it and derives the sender from it alone.

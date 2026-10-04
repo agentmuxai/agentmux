@@ -2,9 +2,8 @@ name: Mirror ReAgent reviewer image to GHCR
 
 # Copies ReAgent's reviewer image from ECR to a PRIVATE GHCR package, once per
 # new image, so reagent-review.yml can pull it with GITHUB_TOKEN: free, and no
-# AWS egress. Pulling from ECR on every review run cost ~$14/day in AWS data
-# transfer (a5af/reagent docs/retro-actions-review-ecr-egress-2026-10-01.md).
-# Design: a5af/reagent specs/reviewer-image-on-ghcr-2026-10-01.md §1.
+# AWS egress. Pulling from ECR on every review run cost real AWS data
+# transfer. The design lives in ReAgent's private repo.
 #
 # The common run is a no-op: one ECR DescribeImages call (no image transfer)
 # and one GHCR manifest read. Only when ECR's :prod moved does it pull the
@@ -84,7 +83,7 @@ jobs:
           docker pull --quiet "$ECR_REPO@$ecr_digest"
           # A label-only layer on top: no new filesystem layers, so the push
           # re-uses the pulled layers. No provenance/SBOM attestations: one
-          # linux/amd64 manifest, no index or attestation children (§1 pruning).
+          # linux/amd64 manifest, no index or attestation children (keeps pruning simple).
           short=${ecr_digest#sha256:}; short=${short:0:12}
           printf 'FROM %s\nLABEL reagent.ecr-digest=%s org.opencontainers.image.source=https://github.com/%s\n' \
             "$ECR_REPO@$ecr_digest" "$ecr_digest" "${{ github.repository }}" \

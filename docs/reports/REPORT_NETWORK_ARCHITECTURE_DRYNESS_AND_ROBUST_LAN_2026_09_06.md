@@ -261,8 +261,8 @@ Three things worth recording from building it:
    relay↔subscriber ping-pong, because the cloud delivers each message as a
    *fresh* inbound request with the count reset. A message that arrived with
    `delivery_tier == "wan"` is therefore never re-relayed.
-3. **Queued is not delivered.** The relay persists and wakes subscribers; the
-   recipient's srv collects on its next sync, or never if it is offline. The
+3. **Queued is not delivered.** The relay only queues the message; the
+   recipient's srv collects it on its next sync, or never if it is offline. The
    outcome type is `Queued`, not `Delivered`, and the tool description now says
    so — the tier-3 path had exactly this conflation and it was a real bug.
 

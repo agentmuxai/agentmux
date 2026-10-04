@@ -112,7 +112,7 @@ or the failures.
 - **G6. A held row is dropped after 20 non-transient failures** and the sender is not told (`server/jekt_held.rs:19,181`). A spawn-gate refusal counts as one of the 20.
 - **G7. There is no mailbox to read.** No MCP tool or RPC lists held, deferred or relay-pending messages. An agent coming online cannot ask "what did I miss?".
 - **G8. Presence is only "registered".** `DiscoverAgents.addressable` means "in the handler's name map" (`handler.rs:616-623`); a CLI that is up but unauthenticated is `addressable: true`. No auth state, no queue depth.
-- **G9. The sender never learns the end of the story.** The relay's `status` endpoint exists (`GET /reactive/status/:id`) but nothing calls it; `expired` is declared and never set; after 30 min the row is simply filtered out.
+- **G9. The sender never learns the end of the story.** The relay's `status` endpoint exists (`GET /reactive/status/:id`) but nothing calls it, and it never reports `expired`: after 30 min the message just stops appearing.
 - **G11. A broken LAN tier is invisible to the sender.** `SPEC_LAN_FIREWALL_SETUP_2026_10_01.md` records two machines on one LAN where each saw a different peer list and no LAN jekt could be sent, with no warning in either log. A send to a LAN peer that never resolved looks the same as a send to a name that does not exist.
 - **G10. `SendMessage`'s description is stale** (omits `HELD` and the errors, still says an unknown name "also returns QUEUED" as the only caveat).
 
@@ -178,7 +178,7 @@ Generalise `db_jekt_held` (migration v40) into the mailbox; do not add a second 
 - Caps unchanged (64 per target, 1000 per channel); a full mailbox is a `failed(mailbox_full)` the sender is told about, never a silent drop.
 - A spawn-gate refusal is **not** an attempt against the 20-attempt budget; it is `needs_login` and waits for the gate to pass. The attempt budget applies only to genuine delivery errors, and exhausting it is a `failed` the sender hears about (G6).
 - **Drain triggers** (all idempotent, ordered by send time): agent registered; spawn succeeded; sign-in completed (the `CheckCliAuth` / in-app login success path); restart finished; a 30 s sweep as the backstop that already exists. This replaces "waits for an unrelated wake" (G1).
-- **Relay side (agentmux-cloud and srv).** On `SubscribeAdd` and on connect, srv runs `sync_agent_reactive` for the added agents immediately, and a 60 s periodic resync backs it up (cheap: one `GET /reactive/pending/:id` per subscribed agent). Relay messages set `expired` when they expire, and srv, as the sender's instance, tells the sender (§5.5).
+- **Relay side (srv; the cloud half is designed in the private cloud repo).** On `SubscribeAdd` and on connect, srv runs `sync_agent_reactive` for the added agents immediately, and a 60 s periodic resync backs it up (cheap: one `GET /reactive/pending/:id` per subscribed agent). Relay messages set `expired` when they expire, and srv, as the sender's instance, tells the sender (§5.5).
 
 ### 5.4 What the receiver gets, and can ask for
 
@@ -249,12 +249,12 @@ Phase 0 is independent of the rest. Its first item removed the unbounded wait; t
 - Tool strings keep their first word; the new parts are in parentheses after the name and at the end.
 - HTTP responses add fields only.
 - `db_jekt_held` gains nullable columns by migration; the old binary still reads the rows it writes.
-- A relay that has not learned `expired` behaves as today (rows filtered on read); srv then tells the sender from its own clock when the TTL it set elapses.
+- A relay that has not learned `expired` behaves as today (the message just stops appearing); srv then tells the sender from its own clock when the TTL it set elapses.
 
 ## 10. Open questions
 
 - **O1.** What the operator saw on pane open (§1). Reproduce with the pane transcript and a screenshot before Phase 1; it may be a second defect in how a not-yet-written message is displayed.
-- **O2.** Does the relay already wake a newly subscribed agent? Read in `agentmux-cloud`: wakes are sent on new injections only. If the relay can cheaply send one wake on `subscribe:add`, Phase 0.1 shrinks to a server change, but srv should not depend on it.
+- **O2.** Does the relay already wake a newly subscribed agent? From the client side, wakes arrive only for new messages. If the relay can cheaply send one wake on `subscribe:add`, Phase 0.1 shrinks to a server change, but srv should not depend on it.
 - **O3.** `read` needs a reliable signal that the model consumed the line. Candidate: the stream-json user-message echo in the next turn's `init`. Not needed until someone wants "read" shown.
 - **O4.** Should a sender be able to ask for `no_hold` (deliver now or fail) for time-critical messages (e.g. review requests that go stale, issue #3894)? Proposed: yes, a `ttl_seconds` and `no_hold` argument on `SendMessage`, honoured by held, deferred and relay alike, which also closes #3894.
 - **O6.** Should the read-only lease query also report *where* (host and instance) so the send result can say "live on Area54"? Useful for the sender; it discloses presence the relay already shows through `409 held_by`.

@@ -65,7 +65,7 @@ its own `Status:` field, per the hardening plan's own Phase 4 guardrail.
 
 | File | What superseded it |
 |---|---|
-| `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md` | Already self-annotated 2026-08-07 (this session's own earlier work) pointing to `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` |
+| `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md` | Already self-annotated 2026-08-07 (this session's own earlier work) noting that its agent-matching section is out of date |
 | `agent-pane-title-buttons.md` | References a "Forge" tab / `AgentCardSettingsPanel` no longer in code — superseded by the Identity/Armory consolidation |
 | `SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22.md` | Superseded by the generalized universal-zoom framework (`term:zoom` block-meta key) |
 | `termwrap-refactor-race-fix.md` | Terminal subsystem substantially reworked since (`SPEC_BULLETPROOF_TERMINALS_2026_05_21`, `SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`) — 5 months old |

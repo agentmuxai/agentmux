@@ -92,7 +92,7 @@ Host      ─── full access ─ identical to the OS user running AgentMux
 
 ## 4. Design: Color Scheme
 
-Adapted from a5af/dev-tools `AGENT_COLORS.md` conventions, mapped to AgentMux design tokens.
+Adapted from the agent color conventions kept in a private tools repo, mapped to AgentMux design tokens.
 
 | Runtime | Color | Value | Maps to existing token |
 |---------|-------|-------|------------------------|

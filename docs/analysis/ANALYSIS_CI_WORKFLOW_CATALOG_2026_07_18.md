@@ -40,9 +40,9 @@ them. That prompted a full inventory.
 
 `ci-nightly-build.yml` ("build + test") and `ci-nightly-artifacts.yml`
 ("artifacts") sound like variants of the same thing and are easy to conflate —
-which is exactly what happened: `gh-reporter` (the nightly health-report Lambda
-in `a5af/shared-infrastructure`) hardcodes `NIGHTLY_BUILD_WORKFLOW =
-"ci-nightly-build.yml"` and has never watched the artifacts workflow. Result:
+which is exactly what happened: `gh-reporter` (the nightly health report, kept
+in a private infrastructure repo) watched only `ci-nightly-build.yml` and has
+never watched the artifacts workflow. Result:
 the artifacts pipeline's macOS leg was broken for 19 consecutive days while the
 nightly email reported all-green, because the thing it checked (does the code
 compile and pass tests) was genuinely fine the whole time.
@@ -186,8 +186,7 @@ separate from `agentmux-builder`, is the *documented, intended* split — not
 architectural drift. `agentmux-builder` exists specifically to keep Apple/
 signing secrets out of the public repo's Action logs while still using free CI
 minutes for the platforms that don't need those secrets managed there. I also
-grepped `github-router/lambda/router.py` and did an org-wide code search in
-`a5af/shared-infrastructure` for `build-linux`/`build-macos`/
+searched the private infrastructure repo for `build-linux`/`build-macos`/
 `repository_dispatch` — zero hits, confirming nothing external triggers them
 either. Combined: real, deliberately-placed, rarely-needed break-glass tooling.
 Recommendation in §3.4 updated accordingly (keep, de-duplicate).
@@ -255,9 +254,9 @@ merged blind. Every reagent finding across all four PRs was investigated and
 fixed before merge, not dismissed:
 - #2225: a doc this PR's own commit referenced was never actually committed
   (fixed), plus a separately-discovered pre-existing stale audit doc archived.
-- #382: missing version bump (fixed, matching repo precedent) + a timeout
-  comment invalidated by the PR's own change (fixed, with the underlying
-  Lambda timeout bumped for safety margin too, not just the comment).
+- The `gh-reporter` PR: missing version bump (fixed, matching repo precedent)
+  + a timeout comment invalidated by the PR's own change (fixed, with the
+  underlying timeout bumped for safety margin too, not just the comment).
 
 Nothing from this catalog remains open. The one deliberately-deferred item —
 keeping `ci-nightly-build.yml`'s full 3-platform matrix rather than narrowing

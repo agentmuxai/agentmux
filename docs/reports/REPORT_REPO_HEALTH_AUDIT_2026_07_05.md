@@ -1,7 +1,7 @@
 # AgentMux Repo Health Audit — Code, Architecture, Tree-Shake, Docs, Cross-Repo
 
 **Date:** 2026-07-05
-**Baseline:** `agentmux` main @ `183aecc4` (v0.50.0) · `agentmux-cloud` origin/main @ `89e59a4` · `agentmux-docs` main @ latest (site v0.1.6, prod deploy pinned at 0.1.4 / 2026-06-23)
+**Baseline:** `agentmux` main @ `183aecc4` (v0.50.0) · the private cloud repo's main · `agentmux-docs` main @ latest (site v0.1.6, prod deploy pinned at 0.1.4 / 2026-06-23)
 **Method:** six parallel deep-analysis passes (architecture, Rust dead code, frontend dead code, code hygiene, docs audit, cross-repo triangulation), each verified against source with file:line evidence. Read-only — no changes made.
 **Excluded throughout:** the 11 modified + 2 untracked working-tree files from the in-flight floating-pane ghost-landing fix.
 
@@ -23,7 +23,7 @@ Beyond the migrations, the concrete cleanup surface is large and mostly low-risk
 - **~4,200 LOC of verified-dead frontend files**, 3 removable runtime npm deps, 26 phantom (unlisted) deps
 - **~2,000 LOC of near-pure duplication** in platform-variant triplets (`TileLayout.*` ~95–97% identical, `zoom.*` ~100% identical)
 - **Three top-level docs (BUILD.md worst) with outright-wrong claims** (Tauri-era WebView2, NSIS-vs-Inno, React-vs-SolidJS, 9-vs-17 widgets)
-- **One public-facing product contradiction**: the docs site says AgentMux runs no relay ("bring your own open-source muxbus-server") while agentmux-cloud ships a proprietary metered relay billing per jekt
+- **One public-facing product contradiction**: the docs site says AgentMux runs no relay ("bring your own open-source muxbus-server") while the hosted cloud relay is a proprietary, paid service
 
 ---
 
@@ -237,17 +237,19 @@ The muxbus rename took in docs: only **1 post-June violation** (`SPEC_MESSAGING_
 
 ### 6.1 The headline contradiction (public positioning)
 
-`agentmux-docs internals/interagent-comms.md:92`: *"AgentMux does not run a relay — you bring your own (the open-source `@agentmuxai/muxbus-server`)"* — while `agentmux-cloud` ships a **proprietary metered relay** (Fastify server billing `jekt_messages` per message, Stripe, free tier, `upgrade_url: cloud.agentmux.ai/billing`, `SPEC_FREE_TIER_PRICING_2026_06_21.md`). One of these is false. Decide the story, fix the docs.
+`agentmux-docs internals/interagent-comms.md:92`: *"AgentMux does not run a relay — you bring your own (the open-source `@agentmuxai/muxbus-server`)"* — while the hosted cloud relay is a **proprietary, paid service**. One of these is false. Decide the story, fix the docs.
 
 ### 6.2 Jekt trust rules — three diverging copies
 
-| Aspect | main `CLAUDE.md` | main `sanitize.rs` (host tier) | cloud relay (WAN) |
-|---|---|---|---|
-| Marker fields | abbreviated | full incl. `TS=` | **missing `TS=`** |
-| Keyword list | 16 (missing `webhook secret`, `auth key`) | 19, careful | same 19 + `apiKey` |
-| Matching | prose | **whole-word** for pat/token/secret/… | **naive substring** — `'pat'` matches "path", `'token'` matches "tokenizer" → WAN false-positive escalations |
+| Aspect | main `CLAUDE.md` | main `sanitize.rs` (host tier) |
+|---|---|---|
+| Marker fields | abbreviated | full incl. `TS=` |
+| Keyword list | 16 (missing `webhook secret`, `auth key`) | 19, careful |
+| Matching | prose | **whole-word** for pat/token/secret/… |
 
-All three lists still contain `trust center`; **none contain `armory`** (the feature's actual name since PR #1917). Canonical source should be the main-repo spec (`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`); cloud should port the whole-word matcher.
+The cloud relay (WAN) keeps the third copy, which had drifted from these as well; aligning it is tracked in the private cloud repo.
+
+All three lists still contain `trust center`; **none contain `armory`** (the feature's actual name since PR #1917). Canonical source should be the main-repo spec (`SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`); the cloud copy should follow it.
 
 ### 6.3 agentmux-docs currency
 
@@ -261,7 +263,7 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 
 ### 6.4 agentmux-cloud
 
-`README.md` on origin/main still says *"Status: exploratory. No code yet"* — while the repo contains a deployed Fastify server, CDK infra (Cognito/DynamoDB/WebSocket), GitHub webhook consumer, and a client package. Badly stale.
+`README.md` on origin/main still says *"Status: exploratory. No code yet"* — while the repo contains a deployed service. Badly stale.
 
 ### 6.5 Proposed "where knowledge lives" rule
 
@@ -314,7 +316,7 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 |---|---|
 | 20 | **Decide the relay story** (open-source self-hosted vs cloud.agentmux.ai paid) and fix `interagent-comms.md` + cloud README accordingly |
 | 21 | Sweep Trust Center→Armory + Bundle semantics + 17-widget list through agentmux-docs; document jekt trust markers in `security/trust-model.md`; then **redeploy the docs site** (prod pinned at 0.1.4/06-23) |
-| 22 | Unify jekt keyword list + matcher: declare main-repo spec canonical, port whole-word matching to the cloud relay, add `armory` keyword everywhere, add `webhook secret`/`auth key` to CLAUDE.md |
+| 22 | Unify jekt keyword list + matcher: declare main-repo spec canonical, align the cloud relay's copy, add `armory` keyword everywhere, add `webhook secret`/`auth key` to CLAUDE.md |
 | 23 | Rewrite the cloud repo's README ("no code yet" → actual contents); adopt the "where knowledge lives" rule in both repos' CLAUDE.md |
 
 ### Tier 4 — Structural (planned engineering work, in dependency order)

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Per-agent M2M Cognito credential for muxbus Tier-4 credential binding.
-//! See db_agent_credentials in migrations.rs (SHARED_STORE_SCHEMA_VERSION v4)
-//! and agentmux-cloud's PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md.
+//! See db_agent_credentials in migrations.rs (SHARED_STORE_SCHEMA_VERSION v4).
+//! The relay side is designed in the private cloud repo.
 //!
 //! One row per locally-registered agent_id — distinct from the single
 //! account-level db_muxbus_credentials singleton (muxbus.rs), which stores
@@ -136,8 +136,7 @@ impl Store {
     /// logout (muxbus_clear) must wipe this cache wholesale; otherwise a
     /// stale row keeps authenticating this agent_id's requests as the
     /// PREVIOUS account after the human has switched to a different one.
-    /// Re-provisioning is cheap and idempotent server-side (see
-    /// agent-provisioning.ts), so clearing on every account transition —
+    /// Re-provisioning is cheap and idempotent on the cloud side, so clearing on every account transition —
     /// not just the ones that turn out to matter — is the safe default.
     /// reagentx P0 on PR #2342.
     pub fn agent_credentials_clear_all(&self) -> Result<(), StoreError> {

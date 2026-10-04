@@ -57,14 +57,12 @@ within 60 s, then Retry in the new instance works.
 
 Take over must be able to move the relay lease itself, not only ask the holder to.
 
-- **agentmux-cloud:** `POST /agents/lease/take`. Same body as a claim. It grants the lease to the
-  caller even while another instance holds it live, **only when the live lease's recorded
-  `account_user_id` equals the caller's account** (non-empty). The write is conditional on the
-  row as read (a lost race is re-read once, as `claim` does) and bumps the epoch. Otherwise it's
-  refused like a claim (409 `held_by_other`).
-  - The old holder's next `renew` fails (`holder_instance` no longer matches). Its `claim` is
-    refused while the new holder renews. So it can't win the agent back: its pulls are fenced
-    and its CLI (if any) is stopped by its own lease tick.
+- **Relay:** `POST /agents/lease/take`. Same body as a claim. It moves a live lease to the caller
+  only when the holder is on the caller's own account; otherwise it's refused like a claim (409
+  `held_by_other`). The relay side is designed in the private cloud repo.
+  - The old holder's next `renew` then fails, and its `claim` is refused while the new holder
+    renews. So it can't win the agent back: its pulls are fenced and its CLI (if any) is stopped
+    by its own lease tick.
 - **Desktop Take over (`server/agent_takeover.rs`):** after the holder answers and the local
   lease is free, claim the relay lease now. If the relay still names an instance **on this
   computer**, call `take` once. Another computer keeps the existing refusal. A relay without the
@@ -76,9 +74,7 @@ user's explicit Take over resolve which one, instead of waiting for an old insta
 
 ## 6. Verification plan
 
-- Unit: the lease store's `take` (free, held by self, held by same account → moved with epoch+1,
-  other account → refused, empty account → refused, lost race), route tests, desktop `take`
-  outcome mapping.
+- Unit: desktop `take` outcome mapping.
 - Live on narko: 0.57.6 (this instance, old holder) keeps a relay lease on an agent whose pane is
   closed. A build with the desktop fix opens that agent and uses Take over. Expected: the pane
   runs and isn't fenced; the 0.57.6 log shows its renewals refused.

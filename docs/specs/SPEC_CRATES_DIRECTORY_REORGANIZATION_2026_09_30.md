@@ -117,9 +117,9 @@ Hits left in comments that describe history are fine; everything else must be go
 - **agentmux-docs:** `scripts/build-rust-docs.mjs` passes package names (`-p agentmux-srv`), which
   don't change. Its `src/agentmux` submodule is pinned to a commit, so nothing moves until it's
   bumped. After the bump, check `/api/rust/` still builds (that deploy now fails loudly, #137).
-- **shared-infrastructure drift reporter:** reads `scripts/cef-build/cef-runtime-pins.sh` and
+- **CEF drift reporter (private infrastructure repo):** reads `scripts/cef-build/cef-runtime-pins.sh` and
   `.github/workflows/release.yml`, neither of which moves. No change.
-- **a5af/reagent, dev-tools, agentmux-cloud:** grep each for `agentmux-(srv|cef|…)/` paths
+- **Private repos (ReAgent, dev tools, the cloud repo):** grep each for `agentmux-(srv|cef|…)/` paths
   (review prompts, scripts). Fix any hits in follow-up PRs in those repos.
 - **Agent instructions:** Global Memory, per-agent `CLAUDE.md`, Personal Memory and skills that
   cite `agentmux-srv/src/...`. They go stale, not wrong in a dangerous way. Grep and fix the

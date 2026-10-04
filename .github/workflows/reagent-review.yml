@@ -1,36 +1,28 @@
 name: ReAgent review (GitHub Actions)
 
 # Runs ReAgent's Claude reviewer directly on this repo's own free GitHub
-# Actions minutes instead of AWS Lambda, for the ~80% of claude-reviewer's
-# 30-day invocations this repo (public) accounted for. Design and
-# rationale: a5af/reagent's
-# specs/agentmux-pr-review-via-github-actions-2026-09-29.md.
+# Actions minutes. Design and rationale live in ReAgent's private repo.
 #
 # Security model (same established pattern as this repo's own
 # codex-review-gate.yml, see that workflow's header comment): pull_request_target
 # runs the WORKFLOW FILE from main, so a fork PR cannot alter what this job
 # does, and grants secrets/credentials even for a fork-originated PR. This
 # job never checks out the PR's own code at all -- the reviewer container
-# clones it itself, over HTTPS with a per-command token, inside a process
-# that (by ReAgent's own existing design, providers/base.py's cli_env())
-# never holds AWS or GitHub credentials while reading it. That is exactly
-# the same trust boundary ReAgent's Lambda-based webhook path already uses
-# for every repo it reviews, fork or not -- trust.py, not the transport,
-# decides whether to act.
+# clones it itself and, by ReAgent's own design, never holds AWS or GitHub
+# credentials while reading it. ReAgent, not the transport, decides whether
+# to act.
 #
 # HARD CONSTRAINT for any future edit to this file: never add a step that
 # runs actions/checkout against the PR's head ref or any fork-supplied ref.
 # If a future need arises to read the diff from a workflow step directly,
 # use the GitHub API (gh pr diff), not a checkout of untrusted code.
 #
-# Image: the same container image ReAgent's Lambda (claude-reviewer) runs --
-# one Dockerfile, one build, two invocation paths. It is pulled from a PRIVATE
-# GHCR package, ghcr.io/agentmuxai/reagent-reviewer, with this run's
-# GITHUB_TOKEN: free, and no AWS egress. mirror-reviewer-image.yml copies
-# ECR's `:prod` there after every ReAgent deploy. Do NOT point this at ECR:
-# that cost ~0.6 GiB of AWS egress per run (~$14/day; a5af/reagent
-# docs/retro-actions-review-ecr-egress-2026-10-01.md), and this workflow's AWS
-# role no longer has ECR access, so it would fail. The run logs the digest
+# Image: ReAgent's reviewer image, pulled from a PRIVATE GHCR package,
+# ghcr.io/agentmuxai/reagent-reviewer, with this run's GITHUB_TOKEN: free,
+# and no AWS egress. mirror-reviewer-image.yml copies ECR's `:prod` there
+# after every ReAgent deploy. Do NOT point this at ECR: that cost real AWS
+# egress per run, and this workflow's AWS role no longer has ECR access, so
+# it would fail. The run logs the digest
 # and the ECR digest it was mirrored from; to pin a build, set REVIEWER_IMAGE
 # to `ghcr.io/agentmuxai/reagent-reviewer:ecr-<first 12 hex of the ECR digest>`.
 
@@ -49,21 +41,17 @@ jobs:
   review:
     # reagentx caught this on PR #4009: without a gate, EVERY comment on
     # ANY issue in the repo (not just a PR) spun up AWS OIDC credential
-    # exchange, a registry login and a docker pull before build_task()'s own
+    # exchange, a registry login and a docker pull before the reviewer's own
     # "not a PR" filter ever ran downstream. Same gate shape as this repo's
     # own codex-review-gate.yml uses for the identical problem.
     #
-    # Gate before the pull (a5af/reagent specs/reviewer-image-on-ghcr-2026-10-01.md
-    # §3): a superset of the reviewer's own filter
-    # (sns_consumer.should_process_pull_request / _build_mention_task), so it
+    # Gate before the pull: a superset of the reviewer's own filter, so it
     # never skips an event the reviewer would act on, but it drops the ones
     # it would certainly drop: PR body/title edits, closed PRs, ReAgent's own
     # comments, and comments from humans with no @-mention. Codex's comments
-    # are NOT dropped: the reviewer reads them for its Codex quota breaker
-    # (reviewer_handler.handle_codex_comment). a5af/reagent's tests read THIS
-    # expression from main and check it against the reviewer's filter; keep
-    # the `pull_request.state == 'open'` clause (the test uses it as a marker
-    # of this gate).
+    # are NOT dropped: the reviewer reads them. ReAgent's tests read THIS
+    # expression from main; keep the `pull_request.state == 'open'` clause
+    # (the test uses it as a marker of this gate).
     if: >-
       (github.event_name == 'pull_request_target' &&
        github.event.pull_request.state == 'open' &&
@@ -80,9 +68,8 @@ jobs:
     # must not occupy this group, or it can cancel/block an actually-running
     # review a second earlier. cancel-in-progress is false: a synchronize
     # mid-review shouldn't cancel a review still in flight for the prior
-    # head -- reviewer_handler.py's stale-event short-circuit already
-    # handles "message head != current head" safely, and
-    # review_claims.py's DynamoDB claim prevents any duplicate post.
+    # head -- the reviewer already handles a stale head safely and does not
+    # post duplicates.
     concurrency:
       group: reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}
       cancel-in-progress: false
@@ -102,13 +89,11 @@ jobs:
           # See this file's header comment: `:prod` follows ReAgent's deploys.
           REVIEWER_IMAGE: "ghcr.io/agentmuxai/reagent-reviewer:prod"
         # --user: the image runs as root under plain `docker run`, and the
-        # Claude CLI refuses --dangerously-skip-permissions as root (Lambda
-        # runs it as a non-root sandbox user, so this never came up there).
+        # Claude CLI refuses --dangerously-skip-permissions as root.
         # HOME=/tmp in the image, which is world-writable, so a non-root user
         # can still write its credentials and clones.
-        # STATE_TABLE_NAME: CDK sets it on the Lambdas, not in the image.
-        # Without it review_claims.py fails open, so a push and the
-        # "please re-review" right after it get two independent reviews.
+        # STATE_TABLE_NAME is not baked into the image; the reviewer needs it
+        # to avoid reviewing the same head twice.
         run: |
           docker pull --quiet "$REVIEWER_IMAGE"
           echo "ReAgent reviewer image: $(docker image inspect --format '{{index .RepoDigests 0}}' "$REVIEWER_IMAGE") (mirrored from ECR $(docker image inspect --format '{{index .Config.Labels "reagent.ecr-digest"}}' "$REVIEWER_IMAGE"))"

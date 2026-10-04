@@ -16,7 +16,7 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 |---|---|---|---|
 | — | Spec (three adversarial reviews) | #3649 | merged |
 | — | Pure primitives: instance id, key fingerprint, instance-signed certificate, revocation, envelope + freshness checks, cross-language vectors (spec §2.7) | #3727 | merged |
-| C1 | Cloud: carry the eight `wan_*` fields, store the sender account (never returned), `sender_same_account`, idempotent `(account, wan_msg_id)`, key directory + revocation routes with chain checks | cloud repo | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
+| C1 | Cloud: carry the eight `wan_*` fields, return `sender_same_account`, key directory + revocation routes | cloud repo | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
 | D1a | Channel-wide `wan.db`, instance key, agent WAN keys moved into it (survive upgrades), instance id as `AGENTMUX_HOST_LABEL`, agent-delete purge reaches `wan.db` | #3734 | merged |
 | D1b | Certify + publish each agent key (`muxbus/wan_publish.rs`), relay carry gate (`relay::wan_carry_gate`) | #3771 | merged |
 | D2 | Verifier (`muxbus/wan_verify.rs`), peer cache, known instances, replay table, `TRUST=wan-verified` marker, tier rules, audit, `wan` grants off | #3775 | merged |
@@ -36,8 +36,7 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 - The relay carries a signature only when the sender is host-verified, signed
   as this instance and channel, verifies under its `wan.db` key, and that key
   is confirmed published. Carrying works: same-account jekts between narko
-  and Area54 get the cloud's `inj-w-` ids, which it gives only to rows stored
-  with a valid carried tuple.
+  and Area54 arrive with their signature carried.
 - The receiver verifies whatever arrives carried. Until #3865 it did so only
   in the first 15 minutes of each cloud connection: the key lookup used the
   connection's shared token, loaded once at connect, and a desktop (PKCE)
@@ -49,10 +48,7 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 
 ## 3. Needs a person
 
-1. **Deploy C1** — `agentmux-cloud` `deploy.yml` (`workflow_dispatch`, manual
-   approval). Before relying on it, check `/api/health` reports server
-   `1.9.0` or later, and that `cdk diff` shows exactly one new table, one env
-   var and one grant.
+1. **Deploy C1** — done 2026-09-25 (`/api/health` reports server `1.10.0`).
 2. **Apply the jekt-policy text** proposed in the #3775 description to
    `~/.agentmux/agents/CLAUDE.md`. That file is outside the repo and tells
    agents not to trust unconfirmed edits to it, so the implementing agent did
@@ -109,8 +105,8 @@ phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
   #3881**, step 1 of trusting same-account verified installs without an
   operator stop (operator decision, 2026-09-26).
 - §6.5 — keep the instance key out of agents' reach (OS keychain / separate
-  user); today a copied `wan.db` lets its holder speak as that instance until
-  it is retired.
+  user) as further hardening; reading `wan.db` off disk as the same OS user
+  is treated as machine compromise.
 - §6.6 — whether per-version `objects.db` also re-mints host and LAN keys on
   every upgrade.
 - Purge scope (#3734): the "name still in use" check reads this version's

@@ -388,10 +388,7 @@ OpenClaw maintains persistent memory across sessions (vector search + compaction
 
 ### 5e. AgentBus Jekt Delivery (Cloud → AgentClaw)
 
-Like all agents, AgentClaw receives jekts from cloud services (reagent reviews, CI failures, etc.). The `agent_bus_id: "agentclaw"` wires it into the existing agentbus-github-consumer mapping.
-
-**Add AgentClaw's GitHub usernames to the consumer's agent mapping** (in
-the private relay repo).
+Like all agents, AgentClaw receives jekts from cloud services (reagent reviews, CI failures, etc.), addressed to its `agent_bus_id: "agentclaw"`. Routing GitHub review notifications to it is handled on the relay side, which is designed in the private cloud repo.
 
 ---
 
@@ -425,7 +422,7 @@ These two specs are **complementary, not conflicting**:
 - [ ] Bump version to `3`
 - [ ] Add `"openclaw"` to Forge UI provider dropdown
 - [ ] Add OpenClaw provider badge color/label
-- [ ] Add `agentclaw` to the GitHub consumer's agent mapping
+- [ ] Register `agentclaw` for GitHub review notifications (relay side, private cloud repo)
 
 **Result:** AgentClaw appears in Forge. Opening it launches a pwsh terminal. User runs `openclaw tui` manually until the startup sequence is refined.
 
@@ -476,4 +473,3 @@ These two specs are **complementary, not conflicting**:
 | `agentmuxsrv-rs/forge-seed.json` | Add AgentClaw + Agent4, bump version to 3 |
 | `agentmuxsrv-rs/src/backend/shellexec.rs` | Add `"openclaw"` match arm → `openclaw tui --session main` (Phase 2) |
 | `frontend/app/view/forge/forge-view.tsx` | Add openclaw to provider dropdown + badge |
-| `a5af/agentbus` → `consumers/github/agent-mapping.ts` | Add agentclaw identity mappings |

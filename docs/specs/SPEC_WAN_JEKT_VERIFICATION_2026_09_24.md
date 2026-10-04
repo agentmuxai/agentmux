@@ -29,7 +29,7 @@ was verified against code and accepted. What each one changed:
 - **Review 3:**
   - Instance approval needed a real boundary: agents hold `X-AuthKey`, which
     reaches every `/ws` RPC.
-  - The target binding must use the polled agent, not a row field.
+  - The target binding must use the polled agent, not a message field.
   - Receiver state must live in the channel-wide store, which needs
     concurrency rules.
   - The agent-delete purge must reach that store.
@@ -42,7 +42,9 @@ both sides."*
 **Scope:** agent-to-agent jekts carried by the muxbus cloud relay (delivery
 tier 4, `DELIVERY=wan`) **between agents of the same AgentMux account**, and
 the WAN signature path only. Both sides: the desktop (`agentmux-mcp`,
-`agentmux-srv`) and the cloud relay (agentmuxai/agentmux-cloud).
+`agentmux-srv`) and the cloud relay. The relay side is designed in the
+private cloud repo; this spec states only the contract the desktop relies
+on.
 Other verification paths on the WAN tier (ReAgent's `SIG=`) are unchanged by
 this spec, and this spec's guarantees are about `TRUST=wan-verified` only.
 **Relationship to the 2026-09-17 WAN-tier signing spec (no longer in this repo):** that spec
@@ -77,8 +79,7 @@ cross-account phases W0–W2. This spec:
 
   None of these three gaps is blocked on the agent-ID migration.
 - **The fix, both sides:**
-  - carry the signed tuple through the relay and the cloud row as signed
-    (§2.1);
+  - carry the signed tuple through the relay as signed (§2.1);
   - give each AgentMux install a long-lived **instance key**, and publish
     each agent's key to a per-account directory **certified by it** (§2.2);
   - verify on the receiving desktop — instance id ↔ instance key ↔
@@ -163,24 +164,24 @@ cross-account phases W0–W2. This spec:
 
 ### 1.2 Cloud
 
-The relay's internals live in the private agentmuxai/agentmux-cloud repo.
-What the desktop side depends on:
-- **`POST /reactive/inject`** keeps only a fixed field list, and **any other
-  field is silently discarded**. `source_agent` (from `X-Agent-ID`) and
-  `target_agent` are trimmed and lowercased — except sources starting
-  `github`, stored raw.
-- **Storage:** each row gets a cloud-minted `id` and expires 1800 s after
-  creation by default (the desktop relay never sets `ttl_seconds`).
+The relay side is designed in the private cloud repo. What the desktop
+relies on today:
+- **`POST /reactive/inject`** accepts a fixed set of fields; a field the
+  relay doesn't know never reaches the receiver. `source_agent` (from
+  `X-Agent-ID`) and `target_agent` arrive trimmed and lowercased, except
+  sources starting `github`.
+- A queued message carries a cloud-minted `id` and expires 1800 s after it
+  was sent by default (the desktop relay never sets `ttl_seconds`).
 - **Delivery:**
-  - A WebSocket wake broadcast, then `GET /reactive/pending/:agent_id`. The
-    response does not include `target_agent`.
-  - `POST /reactive/ack` claims the row atomically; `POST
-    /reactive/release` hands it back on local failure. Release sends no wake
-    and doesn't extend `expires_at`, and the desktop
-    syncs only on a wake (`cloud_subscriber.rs:556-575`, `:673-674`).
-- **No key directory, and no cloud signature on agent traffic.** The GitHub
-  consumer's `reagent_*` fields ride the row as opaque values — the
-  precedent for the carry.
+  - A WebSocket wake, then `GET /reactive/pending/:agent_id`. The response
+    does not include `target_agent`.
+  - `POST /reactive/ack` takes delivery; `POST /reactive/release` hands a
+    message back on local failure. The desktop syncs only on a wake
+    (`cloud_subscriber.rs:556-575`, `:673-674`), so a released message waits
+    for the next one.
+- **No key directory, and no cloud signature on agent traffic.** ReAgent's
+  `reagent_*` fields already reach the desktop alongside the message, as
+  opaque values — the precedent for the carry.
 
 ### 1.3 Receive side
 
@@ -235,27 +236,26 @@ fields carried **as signed**, the ReAgent way:
 | Field | Set by | Notes |
 |---|---|---|
 | `wan_sig` | MCP | base64 Ed25519 |
-| `wan_msg_id` | MCP (`request_id`) | independent of the cloud row `id` |
+| `wan_msg_id` | MCP (`request_id`) | independent of the cloud message `id` |
 | `wan_ts_secs` | MCP (`ts_secs`) | |
 | `wan_source_agent` | MCP (`AGENTMUX_AGENT_ID`) | as signed |
 | `wan_target_agent` | MCP (`to`) | as signed |
 | `wan_source_host` | MCP (`AGENTMUX_HOST_LABEL`) | the **instance id** (§2.2) — signed, so it binds the instance |
 | `wan_source_channel` | MCP (`AGENTMUX_CHANNEL`) | local field `source_channel` |
 | `wan_key_fp` | srv | fingerprint of the agent public key; an **unsigned lookup hint** — a wrong value finds a key the signature won't verify under |
-| `sender_same_account` | **cloud, at `GET /reactive/pending` time** | `true` iff the row's stored sender account equals the polling caller's. Never client-supplied. |
+| `sender_same_account` | **cloud**, in the `GET /reactive/pending` response | `true` only when the sender and the polling caller are on the same account. Never client-supplied. |
 
-The cloud stores the sender's account (absent for legacy or unowned clients)
-on the row but **never returns it**: the raw account id identifies a person. If either side has no account the value is
-`false`, and the desktop logs that at debug level so a misconfigured login
-can be diagnosed.
+The desktop never receives the sender's account id itself, only this
+flag. When the relay can't tell, the value is `false`, and the desktop logs
+that at debug level so a misconfigured login can be diagnosed.
 
 **Envelope binding** — the carried identifiers must be the ones actually
 delivered, compared ASCII case-insensitively after trimming (ids are
-ASCII-only, §1.1; this also covers `github*` sources stored unnormalised):
-- `wan_source_agent` equals the row's `source_agent`;
+ASCII-only, §1.1; this also covers `github*` sources left unnormalised):
+- `wan_source_agent` equals the delivered message's `source_agent`;
 - `wan_target_agent` equals **the polled `agent_id`** that
-  `sync_agent_reactive` is delivering to — not a row field, which the cloud
-  controls and pending doesn't return. This is ReAgent's rule
+  `sync_agent_reactive` is delivering to — not a field of the message,
+  which the cloud controls. This is ReAgent's rule
   (`cloud_subscriber.rs:920-927`); it stops a cloud from moving a message
   signed for `alice` into `bob`'s queue.
 
@@ -285,21 +285,16 @@ so every gap degrades to `None`, never to a false alarm:
 5. **Both ids pass `validate_agent_id`**, and sizes are within the cloud's
    caps.
 
-**Cloud.**
-- Accept the eight client-side fields as optional, within caps:
-  - signature ≤ 128 chars;
-  - identifiers ≤ 256;
-  - fingerprint exactly 43 base64url chars;
-  - `wan_ts_secs` a positive integer.
-- An invalid set is **dropped with a warning and the message stored
-  unsigned**. Rejecting the request would lose the message, because
-  `relay_inject` treats a 400 as a failed delivery.
-- Return the eight plus `sender_same_account` from
-  `GET /reactive/pending/:agent_id`.
-- **Idempotency is required, not optional:** a conditional write refuses a
-  second row with the same `(sender account, wan_msg_id)`, answering 200 with
-  the existing id so a retried relay isn't treated as a failure.
-- The cloud never verifies messages.
+**Cloud (C1).** The relay accepts the eight client-side fields as
+optional and returns them, plus `sender_same_account`, from
+`GET /reactive/pending/:agent_id`. The desktop keeps within these caps:
+signature ≤ 128 chars; identifiers ≤ 256; fingerprint exactly 43 base64url
+chars; `wan_ts_secs` a positive integer. An invalid set reaches the
+receiver as an unsigned message, not a rejected request, because
+`relay_inject` treats a 400 as a failed delivery. A retried relay of the
+same `wan_msg_id` from the same account is not delivered twice. The cloud
+never verifies messages. How the relay validates, stores and deduplicates
+them is designed in the private cloud repo.
 
 **Desktop receive.** `PendingInj` gains the nine fields as `Option`s.
 `request_id` stays the cloud `id`, which ack and release depend on. The
@@ -376,40 +371,17 @@ any local agent (§4). The owner can **retire** an instance:
 Revocation is sticky: nothing un-revokes an id. It is started from the same
 host-gated surface as approval (§2.6).
 
-**Cloud.** A new table, `muxbus-agent-wan-keys-<env>`:
-- **PK** `account_user_id`.
-- **SK** `<instance_id>#<agent_id>#<channel>#<key_fp>`, content-addressed
-  by the agent key's fingerprint.
-- **Attributes:** `instance_pubkey`, `agent_pubkey`, `host_hint`,
-  `issued_at`, `cert_sig`.
-
-Instance revocations go in the same table under SK `<instance_id>#revoked`.
-
-**Cloud routes:**
-- **`PUT /agents/:agent_id/wan-key`** stores a record under the
-  authenticated caller's account. The cloud **checks the chain** and rejects
-  a record that fails it (400):
-  - `instance_id` is the hash of `instance_pubkey`;
-  - `cert_sig` verifies;
-  - `key_fp` is the fingerprint of `agent_pubkey`.
-
-  This keeps garbage out of the directory. It is hygiene, not the trust
-  anchor: receivers check the chain again (§2.3).
-  - The same record again returns 200 and changes nothing.
-  - A differing record under the same SK is accepted only with a valid
-    chain, which only that instance can produce.
-  - A recreated agent has a new key, so it gets a new SK. There is no
-    collision and no lockout.
-- **`PUT /wan-instances/:instance_id/revocation`** requires a valid
-  old-key signature.
-- **`GET /agents/:agent_id/wan-key?instance=&channel=&fp=`** and
-  **`GET /wan-instances/:instance_id`** (returns revocation status) serve
-  the caller's own account only and return 404 otherwise.
-- Quota and rate limits: none of these routes consumes `jekt_messages` quota
-  (09-17 §5.3), and all get an unbilled per-account rate limit.
-- There is **no delete route**. The cloud can't tell the srv from its agents
-  (§1.1), so a delete would be reachable by agents. A self-certifying record
-  can be denied but not forged; retirement goes through revocation.
+**Cloud key directory (C1).** The desktop publishes each agent's certified
+record to a per-account directory on the relay, publishes revocations
+signed by the old instance key, and looks up records by `(agent, instance,
+channel, fingerprint)` along with an instance's revocation status. Lookups
+answer for the caller's own account only (404 otherwise). The relay checks
+the chain on publish to keep garbage out, but it is not the trust anchor:
+receivers check the chain again (§2.3). Records are self-certifying, so a
+directory can withhold a record but not forge one, and a recreated agent
+has a new key and so a new record. Retirement goes through revocation, not
+deletion. The relay side (routes, storage, limits) is designed in the
+private cloud repo.
 
 **Desktop publishing.**
 - The srv publishes from the spawn path, where
@@ -445,7 +417,7 @@ Checks, in order:
 | envelope binding fails (§2.1) | `Some(false)` |
 | `wan_ts_secs` outside the window (§2.4) | `None`, audit reason `wan_sig_stale` |
 | directory 404 for `(agent, instance, channel, fp)` | `None` |
-| directory unreachable, rate-limited or timed out, and no cached record | one immediate retry, then deliver with `None`, audit reason `wan_key_unavailable`. **Never** `/reactive/release`: nothing re-wakes a released row, so it could expire undelivered (§1.2) |
+| directory unreachable, rate-limited or timed out, and no cached record | one immediate retry, then deliver with `None`, audit reason `wan_key_unavailable`. **Never** `/reactive/release`: a released message waits for the next wake, so it could expire undelivered (§1.2) |
 | record's chain fails: `instance_id ≠ hash(instance_pubkey)`, bad `cert_sig`, or `fp ≠ fingerprint(agent_pubkey)` | `Some(false)`, audit reason `wan_cert_invalid` — only a tampering cloud or a bug produces this |
 | record's instance, channel or agent (ASCII case-insensitive) ≠ the carried ones | `Some(false)` |
 | message signature fails under `agent_pubkey` | `Some(false)` |
@@ -479,10 +451,10 @@ signature gives an attacker nothing that dropping it wouldn't, while a long
 ### 2.5 Replay
 
 Replay is stopped at two layers.
-- **Cloud (C1, required):** the idempotency write (§2.1) refuses a second row
-  for the same `(sender account, wan_msg_id)`. So a same-account agent can't
-  re-inject a captured tuple as a new row, including towards a *different*
-  receiving install of the same agent name.
+- **Cloud (C1, required):** a second message with the same
+  `(sender account, wan_msg_id)` is not delivered (§2.1). So a same-account
+  agent can't re-inject a captured tuple as a new message, including
+  towards a *different* receiving install of the same agent name.
 - **Receiver:** the table `wan_seen_sigs(instance_id, agent_id, msg_id,
   expires_at)` lives in `wan.db`, so it is shared by concurrent versions and
   survives upgrades.
@@ -494,7 +466,7 @@ Replay is stopped at two layers.
     broadcast signs each target with its own msgid
     (`agentmux-mcp/src/main.rs:1585`), so no legitimate message repeats.
 
-**Residual:** a malicious cloud can bypass its own idempotency check. It
+**Residual:** a malicious cloud can skip that duplicate check. It
 could then replay one captured message, within the window, to a *different*
 install running the same agent name, since each install's table is local.
 Bounded by the window and by the envelope binding (§2.1): same target name,
@@ -584,10 +556,9 @@ in W3-S: `conversation_trust_grant_check` returns false for tier `wan`.
 
 §2.2 names the certificate's fields but not their encodings. The pure half
 of W3-S (`agentmux-common/src/jekt_sign.rs`, "W3-S" section) fixes them, and
-the cloud's chain check must match byte for byte. Fixed vectors, computed by
+the relay's chain check must match them byte for byte. Fixed vectors, computed by
 an independent Node implementation, are asserted in that file's tests
-(`w3s_identifiers_and_certificate_match_the_cross_language_vectors`); the
-cloud's tests assert the same values.
+(`w3s_identifiers_and_certificate_match_the_cross_language_vectors`).
 - **Public keys** (`instance_pubkey`, `agent_pubkey`, `old_instance_pubkey`):
   standard base64 of the raw 32 bytes, padded (44 chars). The certificate
   material contains `agent_pubkey` in exactly this form.
@@ -652,16 +623,14 @@ Every field is optional on every hop, so the order below is a preference:
 
 | Step | Repo | Ships | Old peers |
 |---|---|---|---|
-| C1 | cloud | stored and returned `wan_*` fields, stored sender account, `sender_same_account`, idempotency; key and revocation routes with chain checks | old desktops never send the fields and ignore them on pending |
+| C1 | cloud | relay-side support: carries and returns the `wan_*` fields and `sender_same_account`, refuses duplicates, serves the key directory and revocations (designed in the private cloud repo) | old desktops never send the fields and ignore them on pending |
 | D1 | agentmux | `wan.db` with its concurrency rules; instance key; agent keys imported and moved; M4d-1 purge extended; instance id in `AGENTMUX_HOST_LABEL`; certificates and publish; the carry and its gate | old cloud drops the fields → `None`; publish 404 → retried hourly |
 | D2 | agentmux | verifier; peer cache and revocation refresh; replay and known-instance tables; host-gated approval/revocation window; marker, tier rules, `wan` grants off, audit, CLAUDE.md | old senders carry nothing → `None` |
 
-- C1 is deployed by hand. Check
-  `/api/health` `SERVER_VERSION` before relying on it.
+- Check the relay's `/api/health` `SERVER_VERSION` before relying on C1.
 - D1 and D2 may ship together.
 - Agents keep their old host label until respawned, and the carry gate sends
   them unsigned until then.
-- No existing cloud row needs migrating.
 
 ## 4. Security properties and residuals
 
@@ -711,18 +680,7 @@ revocations (`None`, or delayed revocation). It cannot forge them.
   wrong fingerprint);
 - a revocation signature.
 
-**Cloud (vitest):**
-- pass-through of the eight fields;
-- the sender account is taken from the token, never from the body, and
-  never returned;
-- `sender_same_account` is true for the same account and false for another,
-  legacy or unowned account;
-- invalid fields are dropped and the message is still stored;
-- an idempotent duplicate returns the existing id;
-- `PUT` rejects a broken chain; the same record returns 200; a recreated
-  agent gets a new record;
-- a revocation needs an old-key signature;
-- a `GET` for another account's record returns 404.
+**Cloud:** covered in the private cloud repo.
 
 **Desktop:**
 - `wan.db`:
@@ -779,10 +737,9 @@ revocations (`None`, or delayed revocation). It cannot forge them.
    An account-level revocation would need step-up authentication that agents
    can't perform.
 4. **Stop injecting `MUXBUS_TOKEN` into agent environments?** Done in #3881
-   (2026-09-26). The audit found no reader in agentmux; in agentmux-cloud
-   only the standalone `@agentmuxai/muxbus-client` MCP client, which agents
-   don't use. Minting now needs the srv's stored login, which a same-user
-   process can still read from disk (question 5).
+   (2026-09-26). The audit found no reader that agents use. Minting now
+   needs the srv's stored login, which a same-user process can still read
+   from disk (question 5).
 5. **Keep the instance key out of agents' reach** (OS keychain, a separate
    user)? It would remove the §4 copied-key residual.
 6. **Does the per-version `objects.db` also re-mint host and LAN keys on
@@ -815,6 +772,4 @@ revocations (`None`, or delayed revocation). It cannot forge them.
 - `CLAUDE.md` (with D2)
 
 **agentmux-cloud**
-- inject/pending fields, key and revocation routes; row fields, sender
-  account, idempotency; record and revocation chain checks; the key table
-  (paths are in the private repo)
+- the C1 relay-side support (private repo)

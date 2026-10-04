@@ -4,13 +4,10 @@
 **Status:** proposed — Planned (superseded in part — see note below)
 **Author:** smike
 
-> **2026-08-07 note:** §3.2 and §5's "Priority: extracted ID > static
-> mapping > regex pattern" (tag checked before username) describes the
-> ORIGINAL implementation and is no longer accurate — the priority was
-> reversed (username-first, tag-fallback) and the consumer's numbered
-> pattern was made host-agnostic. See
-> `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md` for the current behavior.
-> The rest of this doc (delivery architecture, M1/M4/M5 gaps) still
+> **2026-08-07 note:** what this doc says about how the cloud consumer
+> matches a PR to an agent describes the original plan and is no longer
+> accurate; the consumer side is designed in the private cloud repo. The
+> PR-body tag convention (§5) still applies. The rest of this doc (delivery architecture, M1/M4/M5 gaps) still
 > reflects real historical planning context but has not been re-verified
 > against current code as of this note.
 
@@ -32,10 +29,9 @@ Claude session — no manual polling, no checking GitHub, no delay.
 |-----------|--------|
 | GitHub webhook consumer | ✅ deployed |
 | PR review handler | ✅ routes review→injection |
-| Agent-ID mapping | ⚠️ hardcoded — see §3.2 |
 | MuxBus injection API `/reactive/inject` | ✅ production |
 | Pending poll endpoint `/reactive/pending/:id` | ✅ production |
-| WebSocket wake signal `/ws` | ✅ zero-metadata broadcast |
+| WebSocket wake signal `/ws` | ✅ production |
 | Sign-in user pool | ✅ production |
 
 ### 2.2 Desktop app (agentmux)
@@ -56,7 +52,7 @@ Claude session — no manual polling, no checking GitHub, no delay.
 GitHub PR review
     ↓  (webhook)
 agentmux-cloud GitHub consumer
-    → maps pr.author → "smike"
+    → resolves the PR to an agent → "smike"
     → POST /reactive/inject { target_agent: "smike", message: "PR #123 approved" }
     → wakes connected WS clients
 
@@ -93,42 +89,17 @@ build. These should be baked in via `.env.production` or the Taskfile build
 step — not committed as secrets, but as **non-secret public OAuth client IDs**
 (Cognito PKCE client IDs are public by design; the PKCE verifier is the secret).
 
-### 3.2 Agent-mapping is hardcoded and incomplete  ← P0 blocker
+### 3.2 Routing a review to the right agent  ← P0 blocker
 
-The consumer's agent mapping only handles:
-- GitHub App bots: `agent{x|y|a-g|1-5}-workflow[bot]`
-- PAT usernames: `agent{x|y|a-g|1-5}-asaf`
-
-Any agent outside this naming scheme (e.g., `smike-06122`, `parko-workflow[bot]`,
-`a5af-asaf`) gets no match and the injection is silently
-dropped. The agent is never notified.
-
-**Fix options (in order of preference):**
-
-**Option A — Dynamic mapping via agent `block_id` in PR description (preferred)**
-
-When an agent opens a PR, embed its own `AGENTMUX_AGENT_BUS_ID` in the PR body
-as a hidden HTML comment:
+The consumer needs a reliable way to tell which agent opened a PR, for any
+agent name. The agent-side answer is to embed the agent's own id in the PR
+body as a hidden HTML comment (see §5):
 ```
-<!-- agentmux-agent-id: smike-06122 -->
+<!-- agentmux:agent_id=smike-06122 -->
 ```
 
-The webhook consumer reads this from the PR body and uses it directly as the
-`target_agent` — no static mapping needed, works for any agent name.
-
-**Option B — Cloud user-configurable mapping**
-
-Add a REST endpoint `POST /mapping` (authenticated) where a user can register
-`{ github_username: "smike-asaf", agent_id: "smike-06122" }`. The consumer
-consults this table before falling back to the static patterns.
-
-**Option C — Pattern-based extraction (stopgap)**
-
-Extend the regex to extract the agent prefix from any `{prefix}-workflow[bot]`
-or `{prefix}-{github_handle}` username. Less precise but covers the long tail.
-
-Recommendation: **Option A for new PRs** (zero cloud changes needed) +
-**Option B for the full solution** (user-configurable via Armory).
+How the consumer reads that tag and resolves a PR to an agent is designed
+in the private cloud repo.
 
 ### 3.3 Reactive auto-registration gap  ← P1
 
@@ -175,15 +146,14 @@ Minimal set of changes to make the use case work end-to-end:
 | # | Change | Where | Effort |
 |---|--------|--------|--------|
 | M1 | Set `VITE_MUXBUS_CLIENT_ID` + `VITE_MUXBUS_COGNITO_DOMAIN` in builds | `.env.production` / Taskfile | 30 min |
-| M2 | Embed agent ID in PR bodies (Option A) | Convention + agent prompt / git hook | 1 day |
-| M3 | Update the cloud consumer's mapping to extract from PR body | agentmux-cloud | 2h |
+| M2 | Embed agent ID in PR bodies (§3.2) | Convention + agent prompt / git hook | 1 day |
+| M3 | Cloud consumer reads the PR-body tag | agentmux-cloud | 2h |
 | M4 | Auto-register agents with cloud subscriber at startup | `agentmux-srv/src/server/agent_handlers.rs` | 2h |
 | M5 | Document GitHub webhook setup | `docs/` or Armory help text | 1h |
 
 P1 additions (post-MVP):
 | # | Change | Effort |
 |---|--------|--------|
-| P1a | User-configurable mapping API in cloud (Option B) | 1 day |
 | P1b | Armory webhook setup flow | 2 days |
 | P1c | Toast notification on injection delivery | 1 day |
 
@@ -202,10 +172,8 @@ This can be enforced via:
 - A git hook in `scripts/` that injects it into `gh pr create` calls
 - The `agentmux-mcp` `Shell` wrapper (future: intercept `gh pr create` and append)
 
-The cloud consumer reads the PR body from the webhook payload
-(`payload.pull_request.body`) and extracts the agent ID from that tag.
-
-Priority: extracted ID > static mapping > regex pattern.
+The cloud consumer reads the tag from the PR body; how it uses it is
+designed in the private cloud repo.
 
 ---
 
@@ -262,7 +230,6 @@ The Armory redesign (`docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_
 already exist and work correctly once `VITE_MUXBUS_CLIENT_ID` is set (M1).
 
 Armory work becomes relevant for:
-- User-configurable agent-to-GitHub mapping (P1a)
 - GitHub webhook setup UI (P1b)
 - Subscription management / tier display
 
@@ -272,8 +239,8 @@ Armory work becomes relevant for:
 
 ### agentmux-cloud (separate repo)
 
-- GitHub consumer: extract the agent ID from the PR body (M3); fall back to
-  static mapping.
+- GitHub consumer: read the agent ID from the PR body tag (M3). Designed
+  in the private cloud repo.
 
 ### agentmux (this repo)
 

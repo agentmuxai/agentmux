@@ -54,7 +54,7 @@ Symbolising this or any future dump: `cdb -z <dmp> -y <dir containing the matchi
 2. **srv-side stalled-frontend signal** — N consecutive seconds of `egress lane full` on a connection → event to the host over the srv pipe → same terminate-and-reload. Covers the no-click case Chromium's own detector cannot see. The launcher's `ui_liveness.rs` probe cannot help here by design (it proves the browser UI thread pumped, which was fine).
 3. **GN-args denylist** in `configure-cef-build-windows.ps1` / `configure-cef-build.sh` (and the macOS equivalent): refuse `gn gen` with `enable_backup_ref_ptr_instance_tracer`, `dcheck_always_on`, `is_debug`, `enable_backup_ref_ptr_slow_checks`, `is_asan` set to true.
 4. **Upstream reports**: CEF (test-only flag forced on in Windows release builds via `tools/gn_args.py`), Chromium (`InstanceTracer` storage allocation re-enters the tracer via GWP-ASan + `LockMetricsRecorder`). Dump + symbolised stacks ready.
-5. **Symbol store** (nice-to-have): `symstore.exe add` into the existing S3 artifacts bucket so `_NT_SYMBOL_PATH` resolves fork PDBs automatically instead of per-tag downloads.
+5. **Symbol store** (nice-to-have): `symstore.exe add` into the existing artifacts store so `_NT_SYMBOL_PATH` resolves fork PDBs automatically instead of per-tag downloads.
 6. Housekeeping: delete the dead `~/.agentmux/agents/agent3-0630k/.gh-env.sh`; fix/remove the fetch script's `gh auth status` precheck or make it token-aware; four orphan `wt-*` worktrees in AgentY's workspace (AgentY is on it).
 
 ## 6. Coordination state

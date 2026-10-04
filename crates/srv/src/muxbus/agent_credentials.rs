@@ -1,14 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Per-agent M2M Cognito credential fetch/cache — the client-side half of
-//! agentmux-cloud's PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md.
+//! Per-agent M2M Cognito credential fetch/cache — the client side of
+//! per-agent credential binding (the relay side is designed in the private
+//! cloud repo).
 //!
 //! Historically every agent under one AgentMux login shared the same
-//! account-level MUXBUS_TOKEN for every /reactive/* call, self-declaring its
-//! identity via an unverified X-Agent-ID header — any credential could claim
-//! any agent_id. This module gets each agent its own bound Cognito
-//! client_credentials identity instead:
+//! account-level MUXBUS_TOKEN for every /reactive/* call. This module gets
+//! each agent its own bound Cognito client_credentials identity instead:
 //!   1. provision_agent_client(): calls POST /agents/provision using the
 //!      human's own PKCE token, receiving a Cognito client_id/client_secret
 //!      scoped to exactly this (account, agent_id) pair. One-time per agent
@@ -21,8 +20,7 @@
 //!
 //! Callers (cloud_subscriber.rs) fall back to the shared MUXBUS_TOKEN
 //! whenever this returns None — provisioning failure must never block
-//! message delivery, only degrade the binding guarantee back to today's
-//! self-declared behavior for that agent.
+//! message delivery; that agent simply uses the account-level token.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -232,10 +230,9 @@ pub fn invalidate_cached_token(agent_id: &str, mstore: &Arc<Store>) {
 /// it. A 403 means the CREDENTIAL ITSELF (not just its cached token) is
 /// bound to the wrong agent_id — clearing only the token doesn't fix that:
 /// `ensure_agent_credential` still finds the same `client_id` on file,
-/// happily mints ANOTHER token from it (Cognito issues tokens for a
-/// syntactically valid client/secret regardless of binding correctness —
-/// the mismatch is caught downstream by the muxbus server's
-/// agent-binding check, not at token-issuance time), and the very next
+/// happily mints ANOTHER token from it (token issuance does not check the
+/// binding; the mismatch only surfaces as a 403 from the relay), and the
+/// very next
 /// `/reactive/pending` or `/reactive/ack` call 403s again — repeating the
 /// exact same failed round trip on every subsequent `InjectAvailable`
 /// broadcast instead of falling back to the shared token (reagentx P2 on

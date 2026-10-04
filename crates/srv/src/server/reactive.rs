@@ -371,9 +371,8 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
 /// `JEKT_SIG_MAX_AGE_SECS` above but WAN-scoped: wider than host-tier's
 /// 300s because this covers real network delivery latency, not a
 /// same-machine call — matches `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`
-/// (the WS delivery path's own constant of the same value) and the
-/// github-consumer Lambda's own REVIEW_NOTIFICATION_TTL_SECONDS delivery
-/// window in the agentmux-cloud repo.
+/// (the WS delivery path's own constant of the same value) and the review
+/// notifications' own delivery window.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
 /// WAN-tier reagent-signature verification for the HTTP
@@ -1456,9 +1455,9 @@ async fn try_cloud_relay(state: &AppState, req: &InjectionRequest) -> Option<ser
                 injection_id = %request_id,
                 signed = carried.is_some(),
                 unsigned_reason,
-                // The cloud gives a row it stored WITH a valid carried tuple
-                // a deterministic `inj-w-` id; anything else was stored
-                // unsigned, including a tuple it dropped as invalid.
+                // The relay answers with an `inj-w-` id when it kept a valid
+                // carried tuple; any other id means the message travels
+                // unsigned, including when it dropped a tuple as invalid.
                 cloud_kept_signature = request_id.starts_with("inj-w-"),
                 "cloud relay: queued for WAN delivery"
             );

@@ -98,28 +98,7 @@ still work. New manifests can omit these fields.
 ### 3. AWS Agent-Configs Cleanup
 
 Remove `template_type` from the agent-config secret. The remaining
-fields are pure infrastructure refs:
-
-**Before:**
-```json
-{
-    "agent_id": "agentx",
-    "template_type": "host",
-    "aws_profile": "AgentX",
-    "github_app_id": "2137233",
-    "github_app_installation_id": "90590829"
-}
-```
-
-**After:**
-```json
-{
-    "agent_id": "agentx",
-    "aws_profile": "AgentX",
-    "github_app_id": "2137233",
-    "github_app_installation_id": "90590829"
-}
-```
+fields are pure credential and infrastructure refs.
 
 ### 4. Forge UI Behavior
 

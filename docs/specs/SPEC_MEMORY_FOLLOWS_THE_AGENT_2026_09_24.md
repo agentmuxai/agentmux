@@ -2,8 +2,8 @@
 
 **Date:** 2026-09-24
 **Status:** proposed; nothing here is built. The research (§1) was
-measured on this machine and in code at `agentmux` `main` @ `82d39cb83`
-and `agentmux-cloud` `main` @ `fb93159`, on 2026-09-24.
+measured on this machine and in code at `agentmux` `main` @ `82d39cb83`,
+on 2026-09-24.
 **Revision history:** revised the same day after an adversarial review
 (4 P1, 12 P2, 4 P3). Every finding was verified against code or on-disk
 data, and all were accepted.
@@ -16,8 +16,8 @@ data, and all were accepted.
   conditional append that works across srv processes (§2.1.1).
 - **Adoption:** candidates are listed by the server and confirmed by a
   human, and the MEMORY.md indexes are unioned (§2.1.4).
-- **Sync:** every step that widens access goes through the integrations
-  spec's consent flow; versions are signed with the WAN spec's instance
+- **Sync:** every step that widens access goes through a human consent
+  flow; versions are signed with the WAN spec's instance
   keys; versions from new instances are quarantined (§2.2).
 - **Global Memory:** follows the existing channel isolation, with an
   import step (§2.1.6).
@@ -36,7 +36,7 @@ data, and all were accepted.
 - **Projection state:** keyed by directory, not by instance.
 - **Reads:** sized from the database inside a read transaction (§2.1.1).
 - **Quarantine:** quarantined versions never become heads.
-- **Instances:** enrolled at the relay through the consent flow (§2.2).
+- **Instances:** enrolled through the consent flow (§2.2).
 - **Residual:** stated plainly, and agent-written Global Memory is
   quarantined by default when it arrives by sync (§2.2).
 - **Imported history:** rows from unproven sources are imported only
@@ -78,8 +78,7 @@ and, in a follow-up:
   discovery.
 - `SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20.md` (#3451): the
   cloud-shared Global Memory design. It is **proposed only; nothing is
-  built.** A cloud-side change built an account-scoped wake, which has no
-  callers yet.
+  built.**
 - `SPEC_IDENTITY_STORE_SPLIT`, step 1b (open): moving memory and bundles
   into the global identity store.
 - `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`,
@@ -209,17 +208,15 @@ means writing the projection somewhere new.
 
 - **`SPEC_CROSS_INSTANCE_GLOBAL_MEMORY_SYNC_2026_09_20` (#3451) is design
   only.** Neither repo has any code for it. The design:
-  - agent-writable Global Memory entries sync per account (Cognito `sub`);
+  - agent-writable Global Memory entries sync per account;
   - each entry has a parent-version chain: a fast-forward is applied, a
     divergence gets a three-way merge, and a failed merge becomes a
     sibling entry "(synced conflict from X)";
   - last-writer-wins and CRDTs are explicitly rejected;
   - a `memory_updated` wake on the MuxBus WebSocket;
-  - `PUT /memory/:account/entries/:id` and `GET …?since=`;
-  - a new cloud-side store;
   - opt-in, off by default.
-- **Built groundwork:** a cloud-side change added account-scoped wakes.
-  There are no callers.
+
+  The relay side is designed in the private cloud repo.
 - **Local groundwork that already exists:**
   - both version tables have the same shape (`content_hash`,
     `parent_version_id`, `source`), and there is `line_diff`;
@@ -234,8 +231,7 @@ means writing the projection somewhere new.
     collide;
   - the Armory save path (`agent_handlers/bundle.rs:102`) has no push
     hook and no size cap;
-  - the cloud store's item size limit is below the 1 MB entries and
-    10 MB Personal files;
+  - it has no size policy for 1 MB entries and 10 MB Personal files;
   - "remove" only clears `is_global`, so sync needs delete markers.
 - An older "settings sync" (yjs CRDTs,
   `PLAN_AWS_SERVERLESS_AND_WEBHOOK_DECOMMISSION:236`) is an aspiration
@@ -595,10 +591,8 @@ miss older accounts: `e562b87a` for this agent, and `b43cec34` and
   older account.
 
 **Who can confirm.** Confirmation goes through the host-gated window,
-never a WebSocket RPC. Agents hold `AGENTMUX_AUTH_KEY`, and the
-WebSocket's "human" label is assumed, not proven
-(`agent_handlers/bundle.rs:95-101`). Adoption is limited to directories the
-server listed for **that** agent.
+never a WebSocket RPC. Adoption is limited to directories the server
+listed for **that** agent.
 
 #### 2.1.5 Unattributed callers
 
@@ -655,18 +649,16 @@ in the browser; an agent cannot do it alone.
 
 **Who sent a version.** Versions are signed by the sending instance's
 **instance key**, from the WAN spec's self-certifying instances
-(`SPEC_WAN_JEKT_VERIFICATION` §2.2). The relay checks the signature on
-upload, and every receiver checks it again.
+(`SPEC_WAN_JEKT_VERIFICATION` §2.2). Every receiver checks it.
 
-**The signature proves the instance, not the author.** Any agent on an
-instance can read its key (WAN spec §4), so `source` stays a label the
-sending instance asserts.
+**The signature proves the instance, not the author,** so `source` stays
+a label the sending instance asserts (WAN spec §4).
 
-**Instances are enrolled at the relay, through the consent flow.** The
-human confirms an instance in the system browser, with
-re-authentication, on a page showing its full 26-character id. The relay
-refuses uploads from instances that aren't enrolled. This does **not**
-depend on the host-gated window.
+**Instances are enrolled through the consent flow.** The human confirms
+an instance in the system browser, with re-authentication, on a page
+showing its full 26-character id. Versions from an instance that isn't
+enrolled are not accepted. This does **not** depend on the host-gated
+window.
 
 **Quarantine.** Two kinds of version are quarantined:
 - versions from an instance **this receiver** hasn't accepted yet;
@@ -687,8 +679,8 @@ folder, and never rendered into CLAUDE.md by `format_global_bundle_block`
 **Memory groups (Personal Memory across machines).** The identity spec
 (§8) says same-named agents on two machines are two agents, so a group is
 an explicit link:
-- The human starts or joins a group from the Armory. The relay records
-  `(account, group_id) → {uid@instance}` only after consent.
+- The human starts or joins a group from the Armory. The link takes
+  effect only after consent.
 - Unlinking stops sync, and both sides keep their copies.
 - Renames, working-dir changes and account switches don't affect the
   group.
@@ -698,31 +690,18 @@ divergence gets a three-way line merge; a failed merge becomes a
 conflict, handled as in §2.1.3, with a `__conflict_` file and an index
 line.
 
-**Cloud (agentmux-cloud):**
-- **Routes:**
-  - `PUT /account/v1/memory/versions` (signed events, bodies by hash);
-  - `GET /account/v1/memory/versions?after=<seq>&scope=…`;
-  - the consent-gated group and opt-in routes.
-- **Cursor:** a **server-assigned sequence number** per `(account,
-  scope)`.
-  - The number and the item are written in one transaction, so
-    number N+1 never becomes visible before N.
-  - Receivers dedupe by version id.
-  - Desktop clocks are never trusted for ordering.
-- **Storage:** the cloud store holds the event metadata. **Bodies go to
-  object storage**, keyed by account and sha256.
-  - Uploads use **presigned PUTs** with a sha256 checksum, because the
-    relay's request body limit is below the 10 MB per-file cap.
-  - Downloads are presigned GETs, issued only after the account check.
+**What the desktop sends and receives:**
+- It uploads signed versions, with bodies addressed by sha256, and
+  fetches the versions after a cursor for each scope.
+- The cursor is assigned by the relay, so desktop clocks are never
+  trusted for ordering. Receivers dedupe by version id.
 - **What never syncs:** `projected` events and `dir_id` values, which are
   local paths.
-- **Wake** (dependencies listed in §3):
-  - the relay's wake gains a payload; today it is always
-    `inject_available`;
-  - the relay records the account for user tokens too — the
-    the relay's connection change (private cloud repo);
-  - the desktop's `ServerMsg` enum (`cloud_subscriber.rs:112-128`) gains
-    `MemoryUpdated`.
+- **Wake** (dependencies listed in §3): the desktop's `ServerMsg` enum
+  (`cloud_subscriber.rs:112-128`) gains `MemoryUpdated`.
+
+The relay side (routes, storage, ordering, uploads and wakes) is designed
+in the private cloud repo.
 
 **Residual, stated plainly.** Memory is loaded as instructions: MEMORY.md
 into every Claude session, Global Memory into CLAUDE.md.
@@ -823,7 +802,7 @@ draft is dirty).
 | **M2** (UI) | Global Memory tiles and full view; history and content split; editors pinned to the bottom; dirty-draft protection; Personal Memory editing through the existing RPC; Global Memory history RPCs | — |
 | **M3** (record) | the filestore conditional append and database-read sizes; the `agent-uid:<uid>:memory` record (log, blobs, heads); the veto index and claim zones with release; the per-agent history import and baseline at first M3 spawn; time-bounded reconcile before spawn; drift into the record with claim re-checks; server-listed, host-confirmed adoption for other accounts' directories, with index union; opt-out | M1 |
 | **M4** (Global Memory record) | `global-memory:<scope>` with entry ids, order events and the import step; legacy-build capture; the bundle sidecar | M3 |
-| **M5** (cloud sync) | the relay's connection change and consent flow (private cloud repo); the WAN spec's instance keys, with instances enrolled at the relay; relay routes, transactional sequence cursor, presigned S3 bodies, broadcast payload, `MemoryUpdated`; the pending set for quarantine; Global Memory first, then memory groups | M3, M4; integrations I1; WAN instance keys |
+| **M5** (cloud sync) | the consent flow; the WAN spec's instance keys, with instance enrolment; the desktop sync client and `MemoryUpdated`; the pending set for quarantine; Global Memory first, then memory groups | M3, M4; relay-side support (private cloud repo); WAN instance keys |
 | **M6** (other providers) | project the record into Gemini's memory file | M3 |
 
 **Compatibility:**
@@ -845,7 +824,7 @@ draft is dirty).
   agents are given separate working directories (§2.1.2).
 - **Host-gated confirmation.** Adoption is limited to directories
   the server lists for that agent. Instance enrolment for sync uses the
-  relay's consent flow instead of the host channel.
+  browser consent flow instead of the host channel.
 - **Any agent on an enrolled instance** can push its own Personal Memory
   to its linked counterparts, which is inherent. Agent-authored Global
   Memory is quarantined on receipt by default, and `source` labels are
@@ -947,21 +926,19 @@ draft is dirty).
 - The bundle sidecar prevents re-minting.
 
 **Sync:**
-- A user token alone can't enable sync or join a group.
+- An agent alone can't enable sync or join a group.
 - An unsigned version is rejected; so is a version signed by another
   instance's key.
-- An instance that isn't enrolled is refused at the relay.
+- Versions from an instance that isn't enrolled are not accepted.
 - A new instance's versions, and agent-authored Global Memory, are
   quarantined.
 - A quarantined version never reaches `heads.json`, `db_bundles` or
   CLAUDE.md.
-- Sequence numbers are gap-free.
-- Presigned uploads are used for bodies up to 10 MB.
+- Bodies up to 10 MB sync.
 - `projected` events and `dir_id` never sync.
 - `is_system` is refused.
 - Stale tombstones are refused.
 - The cursor survives clock skew.
-- Bodies go through S3 under the account prefix.
 - The wake reaches desktops.
 
 **UI:**

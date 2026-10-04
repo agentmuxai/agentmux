@@ -85,8 +85,8 @@ Key properties:
 
 ## 5. Open questions
 
-1. Rate-limit/abuse posture for the unauthenticated relay endpoints (suggest:
-   per-IP token bucket + 512-byte body cap; records are opaque UUIDs).
+1. Rate-limit/abuse posture for the unauthenticated relay endpoints — a
+   relay-side decision, designed in the private cloud repo.
 2. Should the hosted page auto-close (`window.close()` works only for
    script-opened tabs — likely just show "return to AgentMux").
 3. Telemetry: count relay creates/completions to watch for the flow silently

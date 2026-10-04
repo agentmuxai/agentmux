@@ -77,7 +77,9 @@ For a message to `T` from a sender here:
 
 Also possible without relay change, as a narrowing of A: hold first only for T whose shared registry record (`registry/{uid}.json`) shows its last live instance on this computer. Not proposed: that record's last-writer semantics across computers are not verified.
 
-## 7. Relay changes (agentmux-cloud)
+## 7. Relay changes
+
+This section states the contract srv relies on; the relay side is designed in the private cloud repo.
 
 ### 7.1 Read-only lease holder query
 
@@ -92,9 +94,9 @@ Do not emulate it with claim-then-release: a transient claim by an install where
 - the relay can only say "some account owns this name", so refusing names no account owns would let anyone probe which agent names exist in other accounts;
 - messages between accounts are legitimate (the GitHub consumer), so it cannot refuse names outside the sender's own account either.
 
-Instead the relay still accepts every message and `POST /reactive/inject` answers `target_in_account`: whether the **sender's own account** owns the target (`agent-ownership`, `isOwnAgent`). It is left out when that can't be said (no table, a read error), never a confident `false`. srv passes it through, and `SendMessage` appends *"No agent of that name has signed in from your account yet, so check the spelling. It is still delivered if one of your agents with that name signs in within 30 minutes, or if another account has an agent with that name."* (Not "only another account": one of the sender's own agents that has never run while signed in also reads `false` and can still receive it; Codex P2 on #4249.) to the relay answer on `false`.
+Instead the relay still accepts every message and `POST /reactive/inject` answers `target_in_account`: whether the **sender's own account** owns the target. It is left out when the relay can't say, never a confident `false`. srv passes it through, and `SendMessage` appends *"No agent of that name has signed in from your account yet, so check the spelling. It is still delivered if one of your agents with that name signs in within 30 minutes, or if another account has an agent with that name."* (Not "only another account": one of the sender's own agents that has never run while signed in also reads `false` and can still receive it; Codex P2 on #4249.) to the relay answer on `false`.
 
-An agent counts as the account's once it has run while signed in: provisioning its per-agent credential records ownership (`agent-provisioning.ts`). That includes agents started before the user signs in, since srv subscribes and provisions every running agent at login (#4122 seeding, `cloud_subscriber`). Defined-but-closed agents are deliberately not provisioned at login: each new agent id consumes the account's `agent_provisions` quota. So the hint can be wrong for an agent that has never run while signed in, which is why it reads as a hint and the message is still sent.
+An agent counts as the account's once it has run while signed in (its per-agent credential has been provisioned). That includes agents started before the user signs in, since srv subscribes and provisions every running agent at login (#4122 seeding, `cloud_subscriber`). Defined-but-closed agents are deliberately not provisioned at login: each new agent id counts against the account's provisioning quota. So the hint can be wrong for an agent that has never run while signed in, which is why it reads as a hint and the message is still sent.
 
 ### 7.3 Metadata log
 

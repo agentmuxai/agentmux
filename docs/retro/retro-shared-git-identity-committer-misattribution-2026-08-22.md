@@ -4,8 +4,7 @@
 
 **Date:** 2026-08-22
 **Owner:** AgentY
-**Area:** local git config (this machine) / `agentmux-cloud`'s github-consumer
-"notify the committer" feature
+**Area:** local git config (this machine) / cloud GitHub notifications
 
 ---
 
@@ -25,18 +24,15 @@ legitimately common, expected setup.
 
 ## 2. False leads ruled out
 
-- **Not the well-known merge-commit misattribution** (PR #37/#57 in
-  `agentmux-cloud`, merged 2026-08-20, exact same *shape* of bug —
-  "Naki's reagent jekts go to AgentY's"). That fix skips attribution when the
-  head commit has 2+ parents. Checked commit history on 7 of the misfired PRs
+- **Not the earlier merge-commit misattribution** (fixed in the private
+  cloud repo on 2026-08-20, exact same *shape* of bug — "Naki's reagent
+  jekts go to AgentY's"). That one was about merge commits. Checked commit history on 7 of the misfired PRs
   (#2761–#2766, #2768) via `gh api repos/.../pulls/<n>/commits`: the vast
   majority are single-parent, genuine feature commits — not merges. The #57
   fix doesn't apply here and isn't regressed; this is a different bug.
-- **Not a bug in `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md`'s username-
-  first PR-author resolution.** That path is working correctly — it's *why*
-  the PRs correctly show up under korp/smike/agentx's own identity in the
-  first place (title prefix + presumably correct body tag). The bug is in
-  the separate, secondary "also notify the most recent committer" feature.
+- **Not a PR-author routing problem.** The PRs carry the right title
+  prefix and body tag, and their real authors were notified too (§7). The
+  extra notifications follow the git commit author, not the PR author.
 
 ## 3. Root cause
 
@@ -72,11 +68,10 @@ This is a **two-layer identity system that only half-works**:
 
 `gh-agent.sh` was built specifically to solve the first layer (its own
 header comment: *"Agent2's shell inheriting Agent-Y's login... silently
-wrong"*) but nothing did the equivalent for the second. The
-github-consumer's "notify the committer" feature isn't misbehaving — it
-correctly resolves `AgentY-asaf` → `agenty` (that mapping is right) and
-notifies exactly who the commit metadata says wrote it. The metadata itself
-is what's wrong.
+wrong"*) but nothing did the equivalent for the second. The cloud
+side isn't misbehaving — it notifies whoever the commit metadata says wrote
+the commit, and `AgentY-asaf` → `agenty` is the right mapping. The metadata
+itself is what's wrong.
 
 ## 4. Why this reads as "jekt misfires" rather than "git config bug"
 
@@ -106,11 +101,8 @@ work I can't see from here. Recommending, not doing, until confirmed:
   `user.name`/`user.email` override in every repo clone it commits from.
   Correct but has to be repeated per clone per agent — the env-var fix
   above is a single spawn-time change that covers every repo automatically.
-- **Out of scope for this retro:** whether the consumer's committer-
-  notification feature should also cross-check the resolved committer
-  identity against something else before firing. Worth a second look once
-  the identity source itself is trustworthy, but fixing correct code to
-  compensate for wrong input isn't the right order of operations here.
+- **Out of scope for this retro:** any change on the cloud side, which is
+  a question for the private cloud repo; fixing the input comes first.
 
 ## 6. Verification once fixed
 
@@ -128,12 +120,7 @@ rather than leaving it as a plausible theory. Pulled PR #2766 directly:
   fallback account, does not resolve to a standard identity.
 - PR body: `<!-- agentmux:agent_id=smike -->`.
 
-Per `SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md`, an unresolved username
-falls back to the body tag — so the **primary "PR author" notification
-correctly resolves to smike**. Smike receiving a jekt for this PR is not a
-counterexample to §3–§4 above; it's confirmation that the two notification
-paths are firing independently exactly as designed: author-path reads the
-tag (correct, → smike), committer-path reads raw git commit metadata
-(wrong, → agenty, because of the shared `.gitconfig`). Only the second
-path's *input* is bad — neither code path is misbehaving relative to what
-it was given.
+So the **PR-author notification correctly went to smike**, as the body
+tag says. Smike receiving a jekt for this PR is not a counterexample to
+§3–§4 above: agenty's copy follows the git commit metadata, which names
+AgentY because of the shared `.gitconfig`. Only that *input* is bad.
