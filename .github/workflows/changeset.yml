@@ -24,10 +24,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           AUTHOR: ${{ github.event.pull_request.user.login }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          RELEASE_FILE: "VERSION_HISTORY.md"
+          # A release PR (scripts/release.sh) updates these and deletes changesets.
+          RELEASE_FILES: "VERSION_HISTORY.md package.json"
         run: |
           set -euo pipefail
           if printf '%s' "$LABELS" | grep -q '"no-changeset"'; then
@@ -37,29 +37,43 @@ jobs:
             "dependabot[bot]"|"renovate[bot]") echo "Skipped: dependency update by $AUTHOR."; exit 0 ;;
           esac
 
-          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | "\(.status) \(.filename)"')
+          # "<status> <path> <blob sha>" per changed file. Blobs are read by sha from
+          # this repo, which also works for a PR from a fork.
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | "\(.status) \(.filename) \(.sha)"')
 
-          # A release PR consumes changesets instead of adding one.
-          if [ -n "$RELEASE_FILE" ] && printf '%s\n' "$files" | grep -q -E "^modified ${RELEASE_FILE}$"; then
-            echo "Release PR ($RELEASE_FILE updated): no new changeset needed."; exit 0
+          # A release PR consumes changesets instead of adding one: it updates the
+          # release history and the version file and deletes changesets. Any one of
+          # those alone is not enough.
+          if [ -n "${RELEASE_FILES:-}" ]; then
+            is_release=1
+            for f in $RELEASE_FILES; do
+              printf '%s\n' "$files" | awk -v f="$f" '$1=="modified" && $2==f {found=1} END {exit !found}' || is_release=0
+            done
+            printf '%s\n' "$files" | awk '$1=="removed" && $2 ~ /^\.changesets\/[0-9]+-[^\/]+\.md$/ {found=1} END {exit !found}' || is_release=0
+            if [ "$is_release" -eq 1 ]; then
+              echo "Release PR ($RELEASE_FILES updated, changesets consumed): no new changeset needed."; exit 0
+            fi
           fi
 
-          added=$(printf '%s\n' "$files" | awk '$1=="added" {print $2}' | grep -E '^\.changesets/[^/]+\.md$' | grep -v -x '.changesets/README.md' || true)
+          # Same name pattern the release step consumes: a leading timestamp.
+          added=$(printf '%s\n' "$files" | awk '$1=="added" && $2 ~ /^\.changesets\/[0-9]+-[^\/]+\.md$/ {print $2 " " $3}')
           if [ -z "$added" ]; then
             echo "::error::This PR adds no changeset. Run: scripts/changeset.sh <patch|minor|major> \"<one-line summary>\" and commit the file it writes to .changesets/. If the PR truly needs no entry, add the no-changeset label."
             exit 1
           fi
 
           bad=0
-          for f in $added; do
-            body=$(gh api "repos/$REPO/contents/$f?ref=$HEAD_SHA" --jq .content | base64 -d)
-            if ! printf '%s\n' "$body" | grep -q -E '^type: (patch|minor|major)[[:space:]]*$'; then
-              echo "::error file=$f::Missing or invalid 'type:' (patch, minor or major) in the front matter."; bad=1
+          while read -r f sha; do
+            body=$(gh api "repos/$REPO/git/blobs/$sha" --jq .content | base64 -d)
+            # Front matter: the lines between the first two '---' lines, as the release step reads them.
+            front=$(printf '%s\n' "$body" | awk 'NR==1 && !/^---[[:space:]]*$/ {exit} /^---[[:space:]]*$/ {n++; next} n==1 {print}')
+            if ! printf '%s\n' "$front" | grep -q -E '^type:[[:space:]]*(patch|minor|major)[[:space:]]*$'; then
+              echo "::error file=$f::The front matter (between the first two --- lines) needs 'type: patch', 'type: minor' or 'type: major'."; bad=1
             fi
-            text=$(printf '%s\n' "$body" | awk 'BEGIN{n=0} /^---[[:space:]]*$/ {n++; next} n>=2' | tr -d '[:space:]')
+            text=$(printf '%s\n' "$body" | awk '/^---[[:space:]]*$/ {n++; next} n>=2' | tr -d '[:space:]')
             if [ -z "$text" ]; then
               echo "::error file=$f::The changeset has no description after the front matter."; bad=1
             fi
-          done
+          done <<< "$added"
           [ "$bad" -eq 0 ] || exit 1
-          echo "Changeset(s) found:"; printf '  %s\n' $added
+          echo "Changeset(s) found:"; printf '%s\n' "$added" | awk '{print "  " $1}'
