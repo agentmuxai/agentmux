@@ -73,7 +73,7 @@ jobs:
               patch|minor|major) ;;
               *) echo "::error file=$f::Front matter needs a first 'type: patch', 'type: minor' or 'type: major' line between two exact '---' lines (found: '${type}')."; bad=1 ;;
             esac
-            text=$(printf '%s\n' "$body" | awk '$0=="---" {n++; next} n>=2' | tr -d '[:space:]')
+            text=$(printf '%s\n' "$body" | awk '$0=="---" {n++; next} n==2' | tr -d '[:space:]')
             if [ -z "$text" ]; then
               echo "::error file=$f::The changeset has no description after the front matter."; bad=1
             fi
