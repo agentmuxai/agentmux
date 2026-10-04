@@ -71,8 +71,17 @@ export function setUserKeybindings(entries: unknown): string[] {
             warnings.push(`${where}: needs a "command"`);
             continue;
         }
-        if (!e.command.startsWith("-") && typeof e.key !== "string") {
+        const unbind = e.command.startsWith("-");
+        if (e.key != null && (typeof e.key !== "string" || !e.key.trim())) {
+            warnings.push(`${where}: "key" is empty`);
+            continue;
+        }
+        if (!unbind && e.key == null) {
             warnings.push(`${where}: needs a "key" for ${e.command}`);
+            continue;
+        }
+        if (e.key && e.key.trim().split(/\s+/).length > 2) {
+            warnings.push(`${where}: "${e.key}": a chord is at most two keys`);
             continue;
         }
         if (e.platform != null && e.platform !== "mac" && e.platform !== "other") {
@@ -80,7 +89,7 @@ export function setUserKeybindings(entries: unknown): string[] {
             continue;
         }
         try {
-            if (e.key) for (const p of ["mac", "other"] as const) e.key.split(" ").forEach((k) => parseKey(k, p));
+            if (e.key) for (const p of ["mac", "other"] as const) e.key.trim().split(/\s+/).forEach((k) => parseKey(k, p));
             evalWhen(e.when, ctx);
         } catch (err) {
             warnings.push(`${where}: ${(err as Error).message}`);
@@ -98,8 +107,14 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
     if (!rows) {
         rows = [];
         const mine = userBindings.filter((u) => u.platform == null || u.platform === platform);
-        const unbound = (command: string, source: string) =>
-            mine.some((u) => u.command === `-${command}` && (u.key == null || u.key === source));
+        // By parsed key, not text: "Ctrl+Tab" and "mod+t" unbind ctrl+Tab and meta+t.
+        const stepsOf = (key: string) => key.trim().split(/\s+/).map((s) => parseKey(s, platform));
+        const sameSteps = (a: KeySpec[], b: KeySpec[]) => a.length === b.length && a.every((k, i) => sameKey(k, b[i]));
+        const unbinds = mine
+            .filter((u) => u.command.startsWith("-"))
+            .map((u) => ({ command: u.command.slice(1), steps: u.key ? stepsOf(u.key) : null }));
+        const unbound = (command: string, steps: KeySpec[]) =>
+            unbinds.some((u) => u.command === command && (u.steps == null || sameSteps(u.steps, steps)));
         const byCommand = new Map(DEFAULT_KEYBINDINGS.map((r) => [r.command, r] as const));
         for (const u of mine) {
             if (u.command.startsWith("-") || !u.key) continue;
@@ -112,12 +127,13 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
                 skipShell: base?.skipShell,
                 pane: base?.pane,
             };
-            rows.push({ row, source: u.key, steps: u.key.split(" ").map((s) => parseKey(s, platform)) });
+            rows.push({ row, source: u.key.trim(), steps: stepsOf(u.key) });
         }
         for (const row of DEFAULT_KEYBINDINGS) {
             for (const source of (platform === "mac" ? row.mac : row.other) ?? []) {
-                if (unbound(row.command, source)) continue;
-                rows.push({ row, source, steps: source.split(" ").map((s) => parseKey(s, platform)) });
+                const steps = source.split(" ").map((s) => parseKey(s, platform));
+                if (unbound(row.command, steps)) continue;
+                rows.push({ row, source, steps });
             }
         }
         compiled.set(platform, rows);

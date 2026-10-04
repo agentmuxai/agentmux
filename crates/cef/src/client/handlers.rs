@@ -245,6 +245,9 @@ const VK_G: i32 = 0x47; // Ctrl+G — (reserve for app use)
 #[derive(Debug, serde::Deserialize)]
 struct HostKey {
     command: String,
+    /// The table key ("ctrl+shift+t"), sent back so the app can check the
+    /// user's own keybindings still bind it.
+    source: String,
     ctrl: bool,
     shift: bool,
     alt: bool,
@@ -268,16 +271,19 @@ static HOST_KEYS: std::sync::LazyLock<HostKeys> = std::sync::LazyLock::new(|| {
 /// keys; without this, no window, tab or pane shortcut works while a page
 /// has focus (report §3.3, §6.5).
 fn app_shortcut_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<&'static str> {
+    host_key_for(ctrl, shift, alt, meta, vk, mac).map(|k| k.command.as_str())
+}
+
+fn host_key_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<&'static HostKey> {
     let keys = if mac { &HOST_KEYS.mac } else { &HOST_KEYS.other };
     keys.iter()
         .find(|k| k.ctrl == ctrl && k.shift == shift && k.alt == alt && k.meta == meta && k.vk == vk)
-        .map(|k| k.command.as_str())
 }
 
 /// Sends `command` to the window that owns the focused browser pane, which
 /// runs it as if the key had been pressed in the app. False when this isn't
 /// a browser pane (the app window handles its own keys).
-fn forward_app_shortcut(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mut Browser>, command: &str) -> bool {
+fn forward_app_shortcut(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mut Browser>, key: &HostKey) -> bool {
     let handler = inner.lock();
     if !handler.is_browser_pane {
         return false;
@@ -294,7 +300,7 @@ fn forward_app_shortcut(inner: &Arc<Mutex<AgentMuxHandler>>, browser: Option<&mu
                 &state,
                 &label,
                 "app-shortcut",
-                &serde_json::json!({ "block_id": block_id, "command": command }),
+                &serde_json::json!({ "block_id": block_id, "command": key.command, "key": key.source }),
             );
             true
         }
@@ -434,8 +440,8 @@ fn handle_pre_key_event(
         let (meta, mac) = ((ev.modifiers & EVENTFLAG_COMMAND_DOWN) != 0, true);
         #[cfg(not(target_os = "macos"))]
         let (meta, mac) = (false, false);
-        if let Some(command) = app_shortcut_for(ctrl, shift, alt, meta, ev.windows_key_code, mac) {
-            if forward_app_shortcut(inner, browser.as_deref_mut(), command) {
+        if let Some(key) = host_key_for(ctrl, shift, alt, meta, ev.windows_key_code, mac) {
+            if forward_app_shortcut(inner, browser.as_deref_mut(), key) {
                 return 1;
             }
         }

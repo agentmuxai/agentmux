@@ -2,6 +2,7 @@
   "mac": [
     {
       "command": "view:command-palette",
+      "source": "meta+shift+p",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -10,6 +11,7 @@
     },
     {
       "command": "view:command-palette",
+      "source": "meta+p",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -18,6 +20,7 @@
     },
     {
       "command": "app:settings",
+      "source": "meta+,",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -26,6 +29,7 @@
     },
     {
       "command": "help:shortcuts",
+      "source": "meta+/",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -34,6 +38,7 @@
     },
     {
       "command": "help:shortcuts",
+      "source": "F1",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -42,6 +47,7 @@
     },
     {
       "command": "window:new",
+      "source": "meta+shift+n",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -50,6 +56,7 @@
     },
     {
       "command": "tab:new",
+      "source": "meta+t",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -58,6 +65,7 @@
     },
     {
       "command": "tab:close",
+      "source": "meta+shift+w",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -66,6 +74,7 @@
     },
     {
       "command": "tab:next",
+      "source": "meta+]",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -74,6 +83,7 @@
     },
     {
       "command": "tab:next",
+      "source": "meta+shift+]",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -82,6 +92,7 @@
     },
     {
       "command": "tab:prev",
+      "source": "meta+[",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -90,6 +101,7 @@
     },
     {
       "command": "tab:prev",
+      "source": "meta+shift+[",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -98,6 +110,7 @@
     },
     {
       "command": "tab:next",
+      "source": "ctrl+Tab",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -106,6 +119,7 @@
     },
     {
       "command": "tab:prev",
+      "source": "ctrl+shift+Tab",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -114,6 +128,7 @@
     },
     {
       "command": "tab:goto:1",
+      "source": "meta+1",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -122,6 +137,7 @@
     },
     {
       "command": "tab:goto:2",
+      "source": "meta+2",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -130,6 +146,7 @@
     },
     {
       "command": "tab:goto:3",
+      "source": "meta+3",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -138,6 +155,7 @@
     },
     {
       "command": "tab:goto:4",
+      "source": "meta+4",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -146,6 +164,7 @@
     },
     {
       "command": "tab:goto:5",
+      "source": "meta+5",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -154,6 +173,7 @@
     },
     {
       "command": "tab:goto:6",
+      "source": "meta+6",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -162,6 +182,7 @@
     },
     {
       "command": "tab:goto:7",
+      "source": "meta+7",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -170,6 +191,7 @@
     },
     {
       "command": "tab:goto:8",
+      "source": "meta+8",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -178,6 +200,7 @@
     },
     {
       "command": "tab:goto:last",
+      "source": "meta+9",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -186,6 +209,7 @@
     },
     {
       "command": "tab:moveLeft",
+      "source": "meta+shift+PageUp",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -194,6 +218,7 @@
     },
     {
       "command": "tab:moveRight",
+      "source": "meta+shift+PageDown",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -202,6 +227,7 @@
     },
     {
       "command": "pane:new",
+      "source": "meta+n",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -210,6 +236,7 @@
     },
     {
       "command": "open:agent",
+      "source": "meta+shift+a",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -218,6 +245,7 @@
     },
     {
       "command": "split:right",
+      "source": "meta+d",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -226,6 +254,7 @@
     },
     {
       "command": "split:down",
+      "source": "meta+shift+d",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -234,6 +263,7 @@
     },
     {
       "command": "pane:close",
+      "source": "meta+w",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -242,6 +272,7 @@
     },
     {
       "command": "pane:magnify",
+      "source": "meta+m",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -250,6 +281,7 @@
     },
     {
       "command": "pane:focus:next",
+      "source": "F6",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -258,6 +290,7 @@
     },
     {
       "command": "pane:focus:prev",
+      "source": "shift+F6",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -266,6 +299,7 @@
     },
     {
       "command": "pane:focus:1",
+      "source": "ctrl+shift+code:Digit1",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -274,6 +308,7 @@
     },
     {
       "command": "pane:focus:1",
+      "source": "ctrl+shift+code:Numpad1",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -282,6 +317,7 @@
     },
     {
       "command": "pane:focus:2",
+      "source": "ctrl+shift+code:Digit2",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -290,6 +326,7 @@
     },
     {
       "command": "pane:focus:2",
+      "source": "ctrl+shift+code:Numpad2",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -298,6 +335,7 @@
     },
     {
       "command": "pane:focus:3",
+      "source": "ctrl+shift+code:Digit3",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -306,6 +344,7 @@
     },
     {
       "command": "pane:focus:3",
+      "source": "ctrl+shift+code:Numpad3",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -314,6 +353,7 @@
     },
     {
       "command": "pane:focus:4",
+      "source": "ctrl+shift+code:Digit4",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -322,6 +362,7 @@
     },
     {
       "command": "pane:focus:4",
+      "source": "ctrl+shift+code:Numpad4",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -330,6 +371,7 @@
     },
     {
       "command": "pane:focus:5",
+      "source": "ctrl+shift+code:Digit5",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -338,6 +380,7 @@
     },
     {
       "command": "pane:focus:5",
+      "source": "ctrl+shift+code:Numpad5",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -346,6 +389,7 @@
     },
     {
       "command": "pane:focus:6",
+      "source": "ctrl+shift+code:Digit6",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -354,6 +398,7 @@
     },
     {
       "command": "pane:focus:6",
+      "source": "ctrl+shift+code:Numpad6",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -362,6 +407,7 @@
     },
     {
       "command": "pane:focus:7",
+      "source": "ctrl+shift+code:Digit7",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -370,6 +416,7 @@
     },
     {
       "command": "pane:focus:7",
+      "source": "ctrl+shift+code:Numpad7",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -378,6 +425,7 @@
     },
     {
       "command": "pane:focus:8",
+      "source": "ctrl+shift+code:Digit8",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -386,6 +434,7 @@
     },
     {
       "command": "pane:focus:8",
+      "source": "ctrl+shift+code:Numpad8",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -394,6 +443,7 @@
     },
     {
       "command": "pane:focus:9",
+      "source": "ctrl+shift+code:Digit9",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -402,6 +452,7 @@
     },
     {
       "command": "pane:focus:9",
+      "source": "ctrl+shift+code:Numpad9",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -410,6 +461,7 @@
     },
     {
       "command": "pane:changeConnection",
+      "source": "meta+shift+g",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -420,6 +472,7 @@
   "other": [
     {
       "command": "view:command-palette",
+      "source": "ctrl+shift+p",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -428,6 +481,7 @@
     },
     {
       "command": "app:settings",
+      "source": "ctrl+,",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -436,6 +490,7 @@
     },
     {
       "command": "help:shortcuts",
+      "source": "ctrl+/",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -444,6 +499,7 @@
     },
     {
       "command": "help:shortcuts",
+      "source": "F1",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -452,6 +508,7 @@
     },
     {
       "command": "window:new",
+      "source": "ctrl+shift+n",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -460,6 +517,7 @@
     },
     {
       "command": "tab:new",
+      "source": "ctrl+shift+t",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -468,6 +526,7 @@
     },
     {
       "command": "tab:close",
+      "source": "ctrl+shift+alt+w",
       "ctrl": true,
       "shift": true,
       "alt": true,
@@ -476,6 +535,7 @@
     },
     {
       "command": "tab:close",
+      "source": "ctrl+F4",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -484,6 +544,7 @@
     },
     {
       "command": "tab:next",
+      "source": "ctrl+shift+]",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -492,6 +553,7 @@
     },
     {
       "command": "tab:prev",
+      "source": "ctrl+shift+[",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -500,6 +562,7 @@
     },
     {
       "command": "tab:next",
+      "source": "ctrl+Tab",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -508,6 +571,7 @@
     },
     {
       "command": "tab:prev",
+      "source": "ctrl+shift+Tab",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -516,6 +580,7 @@
     },
     {
       "command": "tab:goto:1",
+      "source": "ctrl+1",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -524,6 +589,7 @@
     },
     {
       "command": "tab:goto:2",
+      "source": "ctrl+2",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -532,6 +598,7 @@
     },
     {
       "command": "tab:goto:3",
+      "source": "ctrl+3",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -540,6 +607,7 @@
     },
     {
       "command": "tab:goto:4",
+      "source": "ctrl+4",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -548,6 +616,7 @@
     },
     {
       "command": "tab:goto:5",
+      "source": "ctrl+5",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -556,6 +625,7 @@
     },
     {
       "command": "tab:goto:6",
+      "source": "ctrl+6",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -564,6 +634,7 @@
     },
     {
       "command": "tab:goto:7",
+      "source": "ctrl+7",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -572,6 +643,7 @@
     },
     {
       "command": "tab:goto:8",
+      "source": "ctrl+8",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -580,6 +652,7 @@
     },
     {
       "command": "tab:goto:last",
+      "source": "ctrl+9",
       "ctrl": true,
       "shift": false,
       "alt": false,
@@ -588,6 +661,7 @@
     },
     {
       "command": "tab:moveLeft",
+      "source": "ctrl+alt+shift+PageUp",
       "ctrl": true,
       "shift": true,
       "alt": true,
@@ -596,6 +670,7 @@
     },
     {
       "command": "tab:moveRight",
+      "source": "ctrl+alt+shift+PageDown",
       "ctrl": true,
       "shift": true,
       "alt": true,
@@ -604,6 +679,7 @@
     },
     {
       "command": "pane:new",
+      "source": "ctrl+shift+code:Backquote",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -612,6 +688,7 @@
     },
     {
       "command": "open:agent",
+      "source": "ctrl+shift+a",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -620,6 +697,7 @@
     },
     {
       "command": "split:right",
+      "source": "ctrl+shift+d",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -628,6 +706,7 @@
     },
     {
       "command": "split:down",
+      "source": "ctrl+shift+alt+d",
       "ctrl": true,
       "shift": true,
       "alt": true,
@@ -636,6 +715,7 @@
     },
     {
       "command": "pane:close",
+      "source": "ctrl+shift+w",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -644,6 +724,7 @@
     },
     {
       "command": "pane:magnify",
+      "source": "ctrl+shift+m",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -652,6 +733,7 @@
     },
     {
       "command": "pane:focus:next",
+      "source": "F6",
       "ctrl": false,
       "shift": false,
       "alt": false,
@@ -660,6 +742,7 @@
     },
     {
       "command": "pane:focus:prev",
+      "source": "shift+F6",
       "ctrl": false,
       "shift": true,
       "alt": false,
@@ -668,6 +751,7 @@
     },
     {
       "command": "pane:focus:1",
+      "source": "ctrl+shift+code:Digit1",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -676,6 +760,7 @@
     },
     {
       "command": "pane:focus:1",
+      "source": "ctrl+shift+code:Numpad1",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -684,6 +769,7 @@
     },
     {
       "command": "pane:focus:2",
+      "source": "ctrl+shift+code:Digit2",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -692,6 +778,7 @@
     },
     {
       "command": "pane:focus:2",
+      "source": "ctrl+shift+code:Numpad2",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -700,6 +787,7 @@
     },
     {
       "command": "pane:focus:3",
+      "source": "ctrl+shift+code:Digit3",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -708,6 +796,7 @@
     },
     {
       "command": "pane:focus:3",
+      "source": "ctrl+shift+code:Numpad3",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -716,6 +805,7 @@
     },
     {
       "command": "pane:focus:4",
+      "source": "ctrl+shift+code:Digit4",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -724,6 +814,7 @@
     },
     {
       "command": "pane:focus:4",
+      "source": "ctrl+shift+code:Numpad4",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -732,6 +823,7 @@
     },
     {
       "command": "pane:focus:5",
+      "source": "ctrl+shift+code:Digit5",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -740,6 +832,7 @@
     },
     {
       "command": "pane:focus:5",
+      "source": "ctrl+shift+code:Numpad5",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -748,6 +841,7 @@
     },
     {
       "command": "pane:focus:6",
+      "source": "ctrl+shift+code:Digit6",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -756,6 +850,7 @@
     },
     {
       "command": "pane:focus:6",
+      "source": "ctrl+shift+code:Numpad6",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -764,6 +859,7 @@
     },
     {
       "command": "pane:focus:7",
+      "source": "ctrl+shift+code:Digit7",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -772,6 +868,7 @@
     },
     {
       "command": "pane:focus:7",
+      "source": "ctrl+shift+code:Numpad7",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -780,6 +877,7 @@
     },
     {
       "command": "pane:focus:8",
+      "source": "ctrl+shift+code:Digit8",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -788,6 +886,7 @@
     },
     {
       "command": "pane:focus:8",
+      "source": "ctrl+shift+code:Numpad8",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -796,6 +895,7 @@
     },
     {
       "command": "pane:focus:9",
+      "source": "ctrl+shift+code:Digit9",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -804,6 +904,7 @@
     },
     {
       "command": "pane:focus:9",
+      "source": "ctrl+shift+code:Numpad9",
       "ctrl": true,
       "shift": true,
       "alt": false,
@@ -812,6 +913,7 @@
     },
     {
       "command": "pane:changeConnection",
+      "source": "ctrl+shift+g",
       "ctrl": true,
       "shift": true,
       "alt": false,

@@ -207,6 +207,24 @@ describe("the keybindings setting", () => {
         expect(resolveKey(CSE, NONE, "other")?.row.command).toBe("pane:new");
     });
 
+    it("rejects a chord of more than two keys, and an empty key", () => {
+        const warnings = setUserKeybindings([
+            { key: "ctrl+k ctrl+s ctrl+d", command: "pane:new" },
+            { key: " ", command: "pane:new" },
+            { key: "", command: "-tab:new" },
+        ]);
+        expect(warnings).toHaveLength(3);
+        expect(resolveKey(ev("k", "KeyK", { ctrlKey: true }), NONE, "other")).toBeNull();
+        expect(resolveKey(CST, NONE, "other")?.row.command).toBe("tab:new");
+    });
+
+    it("unbinds by key, whatever the spelling", () => {
+        setUserKeybindings([{ command: "-tab:next", key: "Ctrl+Tab" }]);
+        expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), NONE, "other")).toBeNull();
+        setUserKeybindings([{ command: "-tab:new", key: "mod+t" }]);
+        expect(resolveKey(ev("t", "KeyT", { metaKey: true }), NONE, "mac")).toBeNull();
+    });
+
     it("shows in the help pane", () => {
         setUserKeybindings([{ key: "ctrl+shift+e", command: "split:right" }]);
         const panes = helpSections("other").find((s) => s.category === "Panes");

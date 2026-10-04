@@ -11,6 +11,9 @@ import { parseKey, type KeyPlatform, type KeySpec } from "./keys";
 
 export interface HostKey {
     command: string;
+    /** The table key, sent back with the command so the app can check it is
+     *  still bound after the user's own keybindings. */
+    source: string;
     ctrl: boolean;
     shift: boolean;
     alt: boolean;
@@ -82,7 +85,7 @@ export function hostKeys(platform: KeyPlatform): HostKey[] {
             const k = parseKey(source, platform);
             const vk = vkOf(k);
             if (vk == null) continue;
-            out.push({ command: row.command, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
+            out.push({ command: row.command, source, ctrl: k.ctrl, shift: k.shift, alt: k.alt, meta: k.meta, vk });
         }
     }
     return out;

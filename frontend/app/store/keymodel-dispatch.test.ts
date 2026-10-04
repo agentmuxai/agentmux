@@ -29,6 +29,7 @@ vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn((
 import { appHandleKeyDown, disableGlobalKeybindings, enableGlobalKeybindings, isTypingFocus, keyCommands, registerHostShortcuts } from "./keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
+import { setUserKeybindings } from "@/app/keybindings/registry";
 
 function press(init: KeyboardEventInit, prevent = false): boolean {
     const ev = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
@@ -131,5 +132,16 @@ describe("appHandleKeyDown", () => {
         enableGlobalKeybindings();
         await new Promise((r) => setTimeout(r, 0));
         expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
+    });
+
+    it("skips a forwarded key the user's keybindings unbound", async () => {
+        registerHostShortcuts();
+        setUserKeybindings([{ command: "-tab:new", key: "ctrl+shift+t" }]);
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new", key: "ctrl+shift+t" });
+        await new Promise((r) => setTimeout(r, 0));
+        expect(handlers["tab:new"]).not.toHaveBeenCalled();
+        setUserKeybindings([]);
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new", key: "ctrl+shift+t" });
+        await vi.waitFor(() => expect(handlers["tab:new"]).toHaveBeenCalledTimes(1));
     });
 });
