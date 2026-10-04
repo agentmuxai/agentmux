@@ -46,14 +46,14 @@ already out of date when it was posted.
 | #1814 long-running commands tracker | #2979 | Items 2 and 4 are done, and 1 and 5 can be dropped. The one real gap: shells started with `Shell()` aren't stopped when their pane closes (no saga touches `shell_sessions`). That's a sibling of #2979's teardown-on-close, so retitle #2979 to "block teardown on close". |
 | #2718 whole-window scrollHeight → 0 px | #2648 | The 251 px lead is closed by analysis. The 0 px collapse hasn't recurred, and since #3652 it's cosmetic. |
 | #3473 SearchHistory opaque error | close | Error reporting was fixed in #3693, with a "reopen the agent" hint. The premise is shaky: the repro sent no auth header, and a 401 can't produce reqwest's "error sending request". Accept "reopen the agent" as the design. |
-| #3061 muxbus calls a failed review "minor notes" | **transfer to agentmux-cloud** (not done: the auditing account has no access to that repo; commented instead, still open) | Valid bug, but the code is in the cloud repo: `muxbus/consumers/github/events/review.ts:249-276` maps any other state to "minor notes" and never reads `review.body`. |
+| #3061 muxbus calls a failed review "minor notes" | **transfer to agentmux-cloud** (not done: the auditing account has no access to that repo; commented instead, still open) | Valid bug, but the code is in the cloud repo. |
 | #3943 seeded Global Memory never reaches agents | keep, child of #3925 | Not a close. Listed here because it belongs under #3925. Keep it separate until the owner decides (§3). |
 
 ## 2. Rewrite to what's actually left
 
 | Issue | What's out of date | What's left |
 |---|---|---|
-| #2586 jekt WAN verification | Same-account signing shipped (#3727, #3734, #3771, #3775, cloud #91). Agents no longer hold the account's cloud login (#3881), and verified installs are trusted without an operator stop (#3885). `TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md` §1 still shows those two as open. | Cross-account W0–W2. The host-gated approval window (held for GHSA-6726-q276-g6f6). Instance retirement from the desktop. §6.5: the instance key is still a readable `wan.db`. A two-machine end-to-end run. |
+| #2586 jekt WAN verification | Same-account signing shipped (#3727, #3734, #3771, #3775, plus a cloud-side change). Agents no longer hold the account's cloud login (#3881), and verified installs are trusted without an operator stop (#3885). `TRACKING_WAN_JEKT_VERIFICATION_2026_09_25.md` §1 still shows those two as open. | Cross-account W0–W2. The host-gated approval window. Instance retirement from the desktop. §6.5 instance-key storage hardening. A two-machine end-to-end run. |
 | #3497 retire the slug | The body says "nothing implemented". Delivered: #3500, #3504, #3508, then M0–M4d-1 (#3543…#3633) and #3845. | M4d-2 to M4d-6 and M5. `db_agents.slug` still has no UNIQUE index. |
 | #3477 Global Memory per-instance | The banner and import shipped (#3811), and the tool description now names the scope (#3835). | Only cross-machine sync, which is M5 of `SPEC_MEMORY_FOLLOWS_THE_AGENT`. Retitle to that. |
 | #3667 bindings across instances | The session-continuity half is delivered (#3643, #3673, #3817, #3833, #3839, #3841, #3850, #3864). | A notice **before** the first message. "Bind account" exists only on the failure row. |
@@ -104,8 +104,8 @@ already out of date when it was posted.
 - **Agents and permissions:**
   - #1247: Codex permission modes are always full-bypass.
   - #1250: the Gemini auth check is inert.
-  - #3894: deferred jekts ignore the sender's expiry. Cloud #97 reduced the flood; the srv fix remains.
-  - #3680: the `.mcp.json` overwrite is fixed (#3803), but signing keys are still written into it. Blocked on #3497 M4d/M5.
+  - #3894: deferred jekts ignore the sender's expiry. A cloud-side change reduced the flood; the srv fix remains.
+  - #3680: the `.mcp.json` overwrite is fixed (#3803); the remaining key-handling follow-up is blocked on #3497 M4d/M5.
 - **Panes and UI:**
   - #2551: OAuth popup sizing.
   - #2908: Ctrl+Wheel zoom in floaters.

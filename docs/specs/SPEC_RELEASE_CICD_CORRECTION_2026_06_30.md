@@ -32,20 +32,19 @@ artifact distribution channel. That assumption was never verified and is **false
 - There is **no `dl.agentmux.ai` S3 bucket** and **no CloudFront distribution** with
   that alias. Verified 2026-06-30:
   - `aws s3 ls s3://dl.agentmux.ai/` → `NoSuchBucket`
-  - `aws cloudfront list-distributions` → aliases are `agentmux.ai`, `www.agentmux.ai`,
-    `docs.agentmux.ai`, `muxbus.agentmux.ai` only. No `dl.*`.
-- The only release-artifact bucket that exists is **`agentmux-releases`** (legacy,
-  last populated 2026-03 with `agentmux-0.31.x` portables).
+  - no CDN distribution carries a `dl.*` alias.
+- The only release-artifact bucket that exists is a **legacy** one,
+  last populated 2026-03 with `agentmux-0.31.x` portables.
 
 **Source of the error:** carried forward from OQ2 in the prior spec ("`dl.agentmux.ai`
-S3 bucket — is it under shared-infrastructure CDK or separate?") as if it were a
+bucket — who owns it?") as if it were a
 settled fact rather than an open question. It then hard-coded itself into the merged
 `release.yml` publish + winget steps.
 
 **Ground truth (decided 2026-06-30):** **GitHub Releases is the single source of
 truth** for distribution. The landing page already mirrors assets into its **own**
 bucket — `fetch-release.mjs` reads the GitHub Release via `gh`, downloads each asset,
-re-uploads to `agentmux-landing-prod` (prod) / `agentmux-landing-qa`, and writes
+re-uploads to the landing site's own prod / QA buckets, and writes
 `public/release.json` with `agentmux.ai` URLs. No separate release CDN is needed.
 
 ---
@@ -79,10 +78,10 @@ git tag v0.50.0 → push
                                                        ▼
                               landing-deploy.yml (agentmuxai/agentmux-landing)
                                 1. fetch-release.mjs → reads GH Release,
-                                   mirrors assets to agentmux-landing-prod,
+                                   mirrors assets to the landing bucket,
                                    writes public/release.json
                                 2. vite build (build:prod calls fetch-release.mjs)
-                                3. cdk deploy (agentmux-landing-prod)
+                                3. cdk deploy (landing stack)
                                 4. CloudFront invalidation
 ```
 
@@ -117,21 +116,21 @@ Secrets the corrected `release.yml` requires (agentmuxai/agentmux):
 
 ## 4. Changes to `landing-deploy.yml` (agentmuxai/agentmux-landing)
 
-The landing deploy **does** need AWS — it runs `cdk deploy` for `agentmux-landing-prod`,
-uploads mirrored assets to that bucket via `fetch-release.mjs`, and invalidates
-CloudFront. Per the "no new IAM roles" decision (2026-06-30), it uses **static access
-keys**, not OIDC.
+The landing deploy **does** need AWS credentials — it deploys the landing stack,
+uploads mirrored assets via `fetch-release.mjs`, and invalidates the CDN cache.
+Per the 2026-06-30 decision, it keeps the credential the manual deploy already
+used rather than introducing a new one; the details live in that repo.
 
 | # | Item | Action |
 |---|---|---|
-| L1 | OIDC change I pushed (`id-token: write` + `role-to-assume: ${{ secrets.AWS_ROLE_ARN }}`) | **Revert** to `aws-access-key-id` / `aws-secret-access-key` static keys |
-| L2 | `permissions: contents: read` | Keep (drop `id-token: write` added for OIDC) |
+| L1 | Credential-setup change I pushed | **Revert** to the existing credential approach |
+| L2 | `permissions: contents: read` | Keep (drop the extra permission added with L1) |
 | L3 | `.npmrc` deleted after `npm ci` | Keep (P1 fix already merged) |
 | L4 | CloudFront invalidation `exit 1` on empty DIST_ID | Keep (already merged) |
 | L5 | Redundant explicit `fetch-release.mjs` step removed | Keep (already merged) |
 
 Secrets the corrected `landing-deploy.yml` requires (agentmuxai/agentmux-landing):
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` — see Open Question OQ-A
+- The deploy's AWS credential — see Open Question OQ-A
 - `A5AF_PACKAGES_TOKEN` — for `@a5af` GitHub Packages during `npm ci`
 - `GITHUB_TOKEN` (auto) — `fetch-release.mjs` uses `gh` to read the public release
 
@@ -141,7 +140,7 @@ Secrets the corrected `landing-deploy.yml` requires (agentmuxai/agentmux-landing
 
 | # | Question | Status |
 |---|---|---|
-| OQ-A | **Which static AWS key does `landing-deploy.yml` use?** RESOLVED: the landing page deploy (`fetch-release.mjs` S3 mirror + `cdk deploy` + CloudFront invalidation) was already a **manual local process** before this workflow existed. The CI workflow reuses **the same pre-existing AWS credential** that was used to run those commands by hand — it is added to the repo as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets by the owner. No new IAM principal is minted. (The `ci-release` IAM user I had prematurely created was deleted.) | **RESOLVED** |
+| OQ-A | **Which AWS credential does `landing-deploy.yml` use?** RESOLVED: the landing page deploy was already a **manual local process** before this workflow existed. The CI workflow reuses **the same pre-existing credential** that was used to run those commands by hand, added to the repo's secrets by the owner. No new principal is created. | **RESOLVED** |
 | OQ-B | Does `fetch-release.mjs`'s `UNVERSIONED_NAMES` map still list `.deb`? The Linux build only produces AppImage. Harmless (no `.deb` asset to match) but stale. | Low priority — leave as-is |
 | OQ-C | Should landing also auto-deploy on `main` push (copy changes) in addition to release dispatch? | Deferred (prior OQ5) |
 
@@ -153,7 +152,7 @@ Secrets the corrected `landing-deploy.yml` requires (agentmuxai/agentmux-landing
 - `extract-changelog.sh` — correct as merged.
 - Build jobs (Windows/Linux/macOS) — unchanged by this correction (macOS CEF patch
   gate is a separate workstream).
-- `shared-infrastructure` weekly-analysts fix — already merged (#375) and deployed;
+- The private infrastructure stack fix — already merged and deployed;
   out of scope here.
 
 ---
@@ -161,7 +160,7 @@ Secrets the corrected `landing-deploy.yml` requires (agentmuxai/agentmux-landing
 ## 7. Sequencing once approved
 
 1. Open fix PR on agentmuxai/agentmux: apply R1–R5 to `release.yml`. Add changeset.
-2. Open fix PR on agentmuxai/agentmux-landing: apply L1 (revert OIDC).
+2. Open fix PR on agentmuxai/agentmux-landing: apply L1.
 3. Resolve OQ-A, then add secrets to both repos.
 4. Dry-run: `workflow_dispatch` a non-tag run, or tag a patch (`v0.49.9`) to exercise
    end-to-end with MS Store left non-blocking.

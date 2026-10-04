@@ -45,8 +45,7 @@ anything that can receive a multicast packet on the LAN can read it. Before it
 existed, that broadcast carried the full `auth_key` — meaning a passive LAN
 listener gained standing access to the entire `/agentmux/service` surface. The
 scoped key shrinks a captured value's blast radius to "can forward jekts to this
-instance, and can ask which agents live here." See
-`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §2.1/§3 LAN P0-1.
+instance, and can ask which agents live here."
 
 The two-route set is deliberately kept **out** of `authed_routes` and merged at
 the top level with its own middleware, rather than nested — nesting would put
@@ -108,31 +107,23 @@ only says what each signature *is*.
 | `jekt_sig` | host | HMAC-SHA256, per-agent key (`AGENTMUX_JEKT_KEY`, injected into that agent's MCP process env only) | The claimed `source_agent` really sent it → `TRUST=host-verified` |
 | `lan_sig` | LAN | Ed25519, per-agent keypair; the public half is fetched from whichever LAN peer hosts that agent | Same claim, across the machine boundary → `TRUST=lan-verified` |
 | `reagent_sig` | WAN | Ed25519 against a **pinned service** key | Only that the message came from AgentMux's own GitHub-review service — not per-agent identity → `SIG=verified` |
-| `wan_sig` | WAN | Ed25519, per-agent keypair (`db_agent_wan_keys`), **bound to the sending instance** (`source_host` + `source_channel`) | *Nothing yet — see below.* Intended: the claimed `source_agent`, on the claimed instance, under the account the cloud resolved → `TRUST=wan-verified` |
+| `wan_sig` | WAN | Ed25519, per-agent keypair (`db_agent_wan_keys`), **bound to the sending instance** (`source_host` + `source_channel`) | The claimed `source_agent`, on the claimed instance, of the same account → `TRUST=wan-verified` (see below) |
 
-**General agent-to-agent WAN signing is half-built as of 2026-09-17** (issue
-#2586's other half, `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`). Read that row
-carefully, because the honest status is narrower than its existence suggests:
+**General agent-to-agent WAN signing** (issue #2586's other half) shipped in
+two steps:
 
-- **Signing is live** (PR #3304, #3306). Agents mint a WAN keypair at spawn
-  and attach `wan_sig` to every outgoing jekt.
-- **Verification does not exist.** Nothing reads `wan_sig`; there is
-  deliberately no `wan_verified` field yet, and no `TRUST=wan-verified` value
-  is ever rendered.
-- **So an arbitrary non-reagent WAN jekt's `source_agent` remains exactly as
-  forgeable as it always was**, and tier 4's outbound relay (`muxbus::relay`)
-  still sets no verification fields on the echoed marker rather than claiming
-  any. Nothing about the trust a reader should place in a WAN jekt has changed.
+- **Signing** (PR #3304, #3306). Agents mint a WAN keypair at spawn and
+  attach `wan_sig` to every outgoing jekt.
+- **Verification** (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`). A
+  same-account signature that checks out renders `TRUST=wan-verified`; any
+  other WAN jekt, including one from another account, still reads
+  `TRUST=network-claimed`.
 
 Signing shipped first on purpose: an agent only receives its key when spawned,
 so a verifier landing before keys propagate would apply to almost no live
-agent. Verification is blocked on tenant-scoped injection storage (that spec's
-§2.1/W2) and on the signed msgid/timestamp surviving the cloud round trip
-(§3.4.1) — `cloud_subscriber` currently replaces `request_id` with the cloud's
-own injection id and leaves `ts_secs` unset, so a verifier wired today would
-fail every legitimate signature.
+agent.
 
-The key is per **instance**, not per agent name (§2.1.2): one account can run
+The key is per **instance**, not per agent name: one account can run
 one agent name on several machines, and on several build channels of one
 machine, each with its own database and therefore its own keypair.
 

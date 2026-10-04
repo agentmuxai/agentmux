@@ -6,8 +6,8 @@
 tag-and-push only — no email code lives here). Landing page
 (`agentmuxai/agentmux-landing`) is now **in scope as a consequence**, not as
 new work — see §6. Notification is delivered by extending the existing
-`gh-reporter` Lambda in **a5af/shared-infrastructure** (cross-repo,
-CDK-deployed) — see §5.5. No new email secret/provider anywhere.
+scheduled internal report (outside this repo) — see §5.5. No new email
+secret/provider anywhere.
 
 ---
 
@@ -58,21 +58,20 @@ The §0 revision still proposed **new** notification infrastructure: a
 self-contained sender in `nightly-release.yml` via Resend, gated behind new
 `NIGHTLY_EMAIL_API_KEY`/`NIGHTLY_EMAIL_TO`. The repo owner corrected this
 too: **fold the results into the existing "GitHub Nightly Report" email**
-(the one `gh-reporter` already sends nightly for CI health) — "that way
+(the scheduled internal report already sent nightly for CI health) — "that way
 it's in one email" — rather than standing up a second sender/provider for
 a second nightly email arriving in the same inbox.
 
 This is a materially better fit than it first appears, not just a
-preference: `gh-reporter` (confirmed by direct code inspection,
-`a5af/shared-infrastructure`) already has (a) standing GitHub App
-credentials scoped to `agentmuxai/agentmux` capable of querying *any* new
-workflow or the releases API with no new auth to wire up, (b) proven SES
-sending with a known-good sender identity, and (c) a section-based email
+preference: the existing report already has (a) standing read access to
+`agentmuxai/agentmux` capable of querying *any* new workflow or the
+releases API with no new auth to wire up, (b) proven email delivery, and
+(c) a section-based email
 template specifically designed for exactly this kind of addition (see
 §5.5). The result is that agentmux's own `nightly-release.yml` gets
 *simpler* than the §0 design, not more complex — it no longer needs an
 email step at all; its entire job shrinks to detect-tag-push (§4.3), full
-stop. `gh-reporter` discovers the outcome on its own next poll, entirely
+stop. The report discovers the outcome on its own next poll, entirely
 from data it can already fetch itself.
 
 The two clarifications that came with this request are already correctly
@@ -131,8 +130,8 @@ anyone. Nightly automation closes exactly that gap.
   changelog (sourced from the `VERSION_HISTORY.md` entry `task release`
   already wrote), contributors, and links to the GitHub Release and the
   now-updated landing page — delivered as a **new section inside the
-  existing "GitHub Nightly Report" email** (`gh-reporter`,
-  `a5af/shared-infrastructure`), not a second email (§5.5, per §0.1).
+  existing "GitHub Nightly Report" email** (the scheduled internal
+  report), not a second email (§5.5, per §0.1).
 - Reuse 100% of the existing `release.yml` → `container-image.yml` →
   landing-page pipeline, *and* 100% of the existing nightly-email
   infrastructure. Nightly's own new code in `agentmuxai/agentmux` is
@@ -154,7 +153,7 @@ anyone. Nightly automation closes exactly that gap.
 - **Not a new CI gate.** Same principle as the first draft: reuse
   `ci-nightly-build.yml`'s existing pass/fail bar, don't invent a stricter
   one (§5.6).
-- **Not a replacement for `gh-reporter`'s existing CI-health email.** Same
+- **Not a replacement for the existing CI-health report email.** Same
   reasoning as before (§5.5) — different audience, different content.
 
 ---
@@ -238,12 +237,10 @@ file, not from `.changesets/`.
 `grep -rliE "smtp|sendgrid|resend|nodemailer|aws-ses|mailgun|postmark"`
 across `agentmuxai/agentmux` returns nothing relevant — this repo has zero
 first-party email code, and per §0.1 it should stay that way.
-`a5af/shared-infrastructure`'s `gh-reporter` Lambda already sends a nightly
-CI-health email over SES (proven, zero-bounce per
-`SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md` OQ3), already holds standing
-GitHub App credentials scoped to `agentmuxai/agentmux`, and — confirmed by
-direct code inspection — has a section-based template built for exactly
-this kind of addition. §5.5 extends it directly rather than adding a
+The scheduled internal report already sends a nightly CI-health email
+(proven, per `SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md` OQ3), already has
+read access to `agentmuxai/agentmux`, and has a section-based template
+built for exactly this kind of addition. §5.5 extends it directly rather than adding a
 second sender anywhere.
 
 ### 3.5 `VERSION_HISTORY.md` structure (confirmed by direct inspection)
@@ -368,12 +365,12 @@ nightly-release.yml (NEW, agentmuxai/agentmux) — ONE job: detect-and-tag
                     (no further step in agentmuxai/agentmux —
                      agentmux's own workflow ends once the tag is pushed)
 
-gh-reporter (EXISTING Lambda, a5af/shared-infrastructure, cross-repo)
-  EventBridge cron, independently polls the GitHub API once nightly —
+Scheduled internal report (EXISTING, outside this repo)
+  runs nightly, independently polls the GitHub API —
   no signal is pushed to it from agentmux at all
   ┌─────────────────────────────────────────────────────────────┐
-  │  - poll nightly-release.yml's latest run (mirrors the         │
-  │    existing get_nightly_build_status() pattern)                │
+  │  - poll nightly-release.yml's latest run (same pattern as     │
+  │    its existing nightly-build check)                           │
   │  - poll GET /repos/agentmuxai/agentmux/releases/latest         │
   │    (was a new release published since yesterday's poll?)       │
   │  - render a new "Nightly Release" section into the SAME         │
@@ -384,7 +381,7 @@ gh-reporter (EXISTING Lambda, a5af/shared-infrastructure, cross-repo)
 Only **one** `workflow_run` chain link now (agentmux's own
 `nightly-release.yml` off `ci-nightly-build.yml`) — the second chain link
 from the §0 revision (a "job 2: notify" step waiting on `release.yml`) is
-gone entirely, per §0.1: `gh-reporter` discovers the outcome itself on its
+gone entirely, per §0.1: the report discovers the outcome itself on its
 own existing cron, agentmux never needs to wait around for or react to
 `release.yml`'s completion at all.
 
@@ -427,65 +424,36 @@ pushing the tag is sufficient for `release.yml` to do so, unmodified. The
 only new code in this entire spec is the "detect + tag + push" step (§4.3)
 and the notification email (§5.5).
 
-### 5.5 The nightly email — extend `gh-reporter`, per §0.1
+### 5.5 The nightly email — extend the scheduled internal report, per §0.1
 
 **Superseded:** the standalone-Resend-sender design from the first
-revision (§0). Confirmed by direct inspection of
-`a5af/shared-infrastructure`'s `gh-reporter` Lambda that extending it is
-both what the repo owner wants ("one email") and materially the easier
-path — no new provider, no new secret, no new code in `agentmuxai/agentmux`
-at all.
+revision (§0). Extending the existing scheduled internal report (which
+lives outside this repo) is both what the repo owner wants ("one email")
+and materially the easier path — no new provider, no new secret, no new
+code in `agentmuxai/agentmux` at all.
 
-**How `gh-reporter` works today (confirmed by code inspection):**
-- Python 3.12 Lambda, CDK-deployed. Source:
-  `gh-reporter/lambda/lambda_function.py` (orchestration),
-  `gh-reporter/lambda/github_client.py` (GitHub App API client),
-  `gh-reporter/lambda/email_report.py` (HTML rendering). Infra:
-  `gh-reporter/lib/gh-reporter-stack.ts`, `gh-reporter/bin/gh-reporter.ts`.
-- Triggered by an EventBridge Scheduler cron, `0 0 * * ? *` **Pacific time**
-  (`gh-reporter-stack.ts:249-259`, `bin/gh-reporter.ts:28`) — not a webhook.
-  On each invocation it **polls** the GitHub Actions API itself; nothing
-  needs to be pushed to it.
-- Nightly CI status specifically comes from
-  `GitHubClient.get_nightly_build_status()`
-  (`github_client.py:341-382`), which calls
-  `GET /repos/{repo}/actions/workflows/{workflow_filename}/runs?per_page=1`
-  against workflow filenames read from env vars `NIGHTLY_BUILD_WORKFLOW` /
-  `NIGHTLY_ARTIFACTS_WORKFLOW` (`lambda_function.py:56-58`, wired in
-  `gh-reporter-stack.ts:227-229`, `bin/gh-reporter.ts:40-51`). A third env
-  var, e.g. `NIGHTLY_RELEASE_WORKFLOW=nightly-release.yml`, slots into this
-  exact existing pattern.
-- Sends via SES (`lambda_function.py:151-158`, `Source=noreply@asaf.cc`,
-  recipient from `RECIPIENT_EMAIL` — both pulled from Secrets Manager
-  secret `services/infra`, no agentmux-side secret involved at all).
-- The email body is one concatenated HTML string
-  (`generate_html_email()`, `email_report.py:349-596`) built from a fixed
-  render order of independently-fetched sections
-  (`lambda_function.py:244-254`, `_ALL_SECTIONS` at line 47), each wrapped
-  in `_safe_fetch()` so one section's failure can't blank the whole email.
-  The existing `nightly_builds`/`nightly_artifacts` sections
-  (`_render_nightly_section`, `email_report.py:318-346`) are the exact
-  template to copy for a new section.
+**How the report works today, at the level this spec depends on:**
+- It runs on a fixed nightly schedule and, on each run, **polls** the
+  GitHub Actions API itself — nothing needs to be pushed to it.
+- It already reports nightly CI status by reading the latest run of
+  configured workflow files via
+  `GET /repos/{repo}/actions/workflows/{workflow_filename}/runs?per_page=1`.
+  Adding `nightly-release.yml` to that list fits the existing pattern.
+- It sends the email itself; no agentmux-side secret is involved.
+- The email body is built from independently-fetched sections, each
+  isolated so one section's failure can't blank the whole email. The
+  existing nightly-build section is the template for a new one.
 
-**What to add — a new `nightly_release` section, following that exact
-pattern:**
-1. `github_client.py`: a new method mirroring
-   `get_nightly_build_status()` that polls
-   `nightly-release.yml`'s latest run (via `NIGHTLY_RELEASE_WORKFLOW`), plus
-   a new call to `GET /repos/agentmuxai/agentmux/releases/latest` to check
-   whether a new (non-prerelease) release was published since the last
-   report — comparing `published_at` against "since yesterday's poll" is
-   enough to tell "new since last night" from "same one as last night."
-   Optionally also fetches `VERSION_HISTORY.md`'s top section via the
-   Contents API (`GET /repos/{owner}/{repo}/contents/VERSION_HISTORY.md?
-   ref=<tag>`, §3.5's structure) to embed the real changelog instead of
-   just a link.
-2. `lambda_function.py`: add `nightly_release` to `_ALL_SECTIONS` (line 47)
-   and a `_safe_fetch(...)` entry in the `sections` dict
-   (lines 244-254) — same shape as the existing two.
-3. `email_report.py`: a `_render_nightly_release_section()` mirroring
-   `_render_nightly_section()` (lines 318-346), inserted into the
-   concatenation order (lines 582-588), reporting one of three states:
+**What to add — a new `nightly_release` section, following that pattern:**
+1. Poll `nightly-release.yml`'s latest run, plus
+   `GET /repos/agentmuxai/agentmux/releases/latest` to check whether a new
+   (non-prerelease) release was published since the last report —
+   comparing `published_at` against "since yesterday's poll" is enough to
+   tell "new since last night" from "same one as last night." Optionally
+   also fetch `VERSION_HISTORY.md`'s top section via the Contents API
+   (`GET /repos/{owner}/{repo}/contents/VERSION_HISTORY.md?ref=<tag>`,
+   §3.5's structure) to embed the real changelog instead of just a link.
+2. Render the section in one of three states:
    - **Skipped** — "No pending version bump — nothing to publish" (§4.3's
      common case).
    - **Published** — version, the `VERSION_HISTORY.md` changelog, unique
@@ -497,33 +465,28 @@ pattern:**
      pushed a tag, but no matching GitHub Release shows up — inferred
      downstream `release.yml` failure (§5.7 case 3), surfaced with a link
      to investigate.
-4. CDK (`bin/gh-reporter.ts`, `gh-reporter-stack.ts`): add
-   `NIGHTLY_RELEASE_WORKFLOW` to the `ReportConfig` interface / `reports`
-   array and the Lambda's env, then `cdk deploy`.
 
 **Deploy coordination — call this out explicitly:** unlike everything else
-in this spec, this is a real cross-repo change requiring its own PR review
-and `cdk deploy` in `a5af/shared-infrastructure`, independent of
-`agentmuxai/agentmux`'s own release cadence. Sequencing matters: deploy the
-`gh-reporter` change first (it fails safe via `_safe_fetch()` if
-`nightly-release.yml` doesn't exist yet — worst case that section is empty,
-not a broken email), *then* merge/enable `nightly-release.yml` itself, not
-the other way around.
+in this spec, this is a separate change to the internal report with its
+own review and deploy, independent of `agentmuxai/agentmux`'s own release
+cadence. Sequencing matters: ship the report change first (it fails safe
+if `nightly-release.yml` doesn't exist yet — worst case that section is
+empty, not a broken email), *then* merge/enable `nightly-release.yml`
+itself, not the other way around.
 
-**A real timing risk worth flagging now, not discovering later:**
-`gh-reporter`'s cron fires at `0 0 * * ? *` **Pacific** — i.e. right around
-the same moment `ci-nightly-build.yml` (`0 7 * * *` UTC = 00:00 PDT) even
-*starts*. The full chain this spec adds
-(`ci-nightly-build.yml` finishes → `nightly-release.yml` tags → `release.yml`
-builds 3 platforms and publishes) took **roughly 30 minutes** end-to-end in
-this session's own manually-triggered `v0.55.21` run, and could run longer
-under load. If `gh-reporter` polls at exactly midnight PT, it will very
-likely see last night's data, not tonight's — the "Published" case would
-consistently read one day stale. This needs a fix before relying on it:
-either push `gh-reporter`'s cron later (e.g. 02:00 PT, comfortably after
-the full chain should be done) or accept the one-day lag as a known,
-documented tradeoff. Recommend the former — it's a one-line CDK change
-already being touched for the new env var anyway.
+**A real timing risk worth flagging now, not discovering later:** the
+report currently runs around midnight Pacific — right around the same
+moment `ci-nightly-build.yml` (`0 7 * * *` UTC = 00:00 PDT) even *starts*.
+The full chain this spec adds (`ci-nightly-build.yml` finishes →
+`nightly-release.yml` tags → `release.yml` builds 3 platforms and
+publishes) took **roughly 30 minutes** end-to-end in this session's own
+manually-triggered `v0.55.21` run, and could run longer under load. If the
+report polls at midnight PT, it will very likely see last night's data,
+not tonight's — the "Published" case would consistently read one day
+stale. This needs a fix before relying on it: either move the report's
+schedule later (e.g. 02:00 PT, comfortably after the full chain should be
+done) or accept the one-day lag as a known, documented tradeoff. Recommend
+the former.
 
 ### 5.6 Quality gate
 
@@ -543,10 +506,10 @@ report email (§5.5, per §0.1) rather than any agentmux-side notification —
 agentmux's own workflow has no email step to fail out of:
 
 1. **No pending untagged release commit (§4.3).** `nightly-release.yml`
-   exits cleanly with a summary-only note. `gh-reporter`'s new section
+   exits cleanly with a summary-only note. The report's new section
    reports "Skipped — no pending version bump."
 2. **`ci-nightly-build.yml` failed.** `nightly-release.yml`'s gate stops
-   before tagging anything. `gh-reporter`'s *existing* `nightly_builds`
+   before tagging anything. The report's *existing* `nightly_builds`
    section already reports the red CI run — no new handling needed, and
    the new `nightly_release` section can simply note "not attempted — CI
    was red" alongside it, in the same email, same read.
@@ -554,7 +517,7 @@ agentmux's own workflow has no email step to fail out of:
    platform build breaks, `gh release create` errors, etc.). This is a
    real risk unique to this design — nightly just autonomously pushed a
    real stable-release tag with nobody watching in real time the way a
-   human pushing it manually would be. Per §5.5, `gh-reporter` infers this
+   human pushing it manually would be. Per §5.5, the report infers this
    case itself (tag/run exists, no matching new release found) and reports
    it as "Tagged but not found published — investigate" in the same
    section. **Do not** auto-delete the pushed tag on this path from
@@ -565,7 +528,7 @@ agentmux's own workflow has no email step to fail out of:
 
 **Tradeoff worth being explicit about:** folding case 3 into the daily
 digest (rather than a first-draft-style immediate urgent email) means a
-mid-pipeline failure surfaces on `gh-reporter`'s next cron tick — up to
+mid-pipeline failure surfaces on the report's next scheduled run — up to
 ~24h later, not immediately. The repo owner's explicit ask was "one email,"
 so this spec accepts that latency tradeoff rather than reintroducing a
 second, faster channel. If same-night visibility into case 3 specifically
@@ -615,10 +578,7 @@ exactly the intended effect.
 | `.github/workflows/release.yml`, `container-image.yml` | agentmuxai/agentmux | **No change** — nightly pushes a tag matching their existing patterns exactly, by design |
 | `.github/workflows/build-windows.yml` / `build-linux.yml` / `build-macos.yml` | agentmuxai/agentmux | **No change** — never invoked directly by nightly at all (§5.4) |
 | `agentmux-landing` (any file) | agentmuxai/agentmux-landing | **No change** — §6 |
-| `gh-reporter/lambda/github_client.py` | a5af/shared-infrastructure | **Modify** — add `nightly-release.yml` run polling + `releases/latest` check (§5.5) |
-| `gh-reporter/lambda/lambda_function.py` | a5af/shared-infrastructure | **Modify** — register the new `nightly_release` section (§5.5) |
-| `gh-reporter/lambda/email_report.py` | a5af/shared-infrastructure | **Modify** — add `_render_nightly_release_section()` (§5.5) |
-| `gh-reporter/bin/gh-reporter.ts`, `gh-reporter/lib/gh-reporter-stack.ts` | a5af/shared-infrastructure | **Modify** — add `NIGHTLY_RELEASE_WORKFLOW` env var; consider moving the cron later (§5.5's timing risk) |
+| Scheduled internal report (outside this repo) | internal | **Modify** — add the `nightly_release` section: `nightly-release.yml` run polling + `releases/latest` check, and move its schedule later (§5.5) |
 
 ---
 
@@ -642,29 +602,26 @@ exactly the intended effect.
    `agentmux-landing` fires and the landing site actually updates — this
    flips from "confirm it does NOT fire" in the first draft to "confirm it
    DOES fire," worth a deliberate manual check the first time end-to-end.
-5. **Implement the `gh-reporter` side (§5.5) in `a5af/shared-infrastructure`**
-   as its own PR: `github_client.py` polling additions, the new
-   `nightly_release` section in `lambda_function.py`/`email_report.py`, the
-   CDK env-var wiring, and — while touching the CDK stack anyway — the
-   cron-timing fix (push `0 0 * * ? *` PT later, e.g. to `02:00` PT, per
-   §5.5's timing risk). Test locally against `agentmuxai/agentmux`'s
+5. **Implement the report side (§5.5)** as its own change: the new
+   `nightly_release` section and the schedule-timing fix (move it later,
+   e.g. to `02:00` PT, per §5.5's timing risk). Test locally against `agentmuxai/agentmux`'s
    *current* state first (today: `v0.55.21` already tagged, nothing
    pending) to confirm the "Skipped" rendering before any real tag exists
    to test the "Published" rendering against.
-6. **Deploy `gh-reporter` first** (`cdk deploy`), confirm the new section
+6. **Deploy the report change first**, confirm the new section
    renders (as "Skipped," since nothing's pending yet) in that night's real
    report before enabling anything on the `agentmuxai/agentmux` side — per
-   §5.5's sequencing note, `_safe_fetch()` makes this safe to deploy ahead
+   §5.5's sequencing note, per-section isolation makes this safe to deploy ahead
    of `nightly-release.yml` existing at all.
 7. **Wire `nightly-release.yml`'s real `workflow_run` trigger** off
    `ci-nightly-build.yml`, let it run unattended through a handful of real
    nights. Confirm: quiet nights stay silent, a real pending bump gets
-   tagged + published + landing-page-updated, and the *next* `gh-reporter`
+   tagged + published + landing-page-updated, and the *next* nightly
    report correctly shows "Published" with the right version/changelog/
    links — end-to-end across both repos, not just each half in isolation.
 8. **Exercise the §5.7 case-3 failure path deliberately** (e.g. a throwaway
    branch with a `release.yml` step forced to fail) and confirm
-   `gh-reporter` correctly renders "Tagged but not found published" rather
+   the report correctly renders "Tagged but not found published" rather
    than silently omitting the section or misreporting it as a normal skip.
 
 ---
@@ -692,9 +649,9 @@ exactly the intended effect.
 - **New self-contained Resend-based sender, gated behind a new agentmux
   repo secret** (the §0-revision design). Superseded per §0.1, not merely
   rejected — the repo owner explicitly asked for one email, not two, and
-  `gh-reporter` turned out to already have everything needed (standing
-  GitHub App auth, proven SES sending, a section-based template built for
-  exactly this) once actually inspected — extending it is now strictly
+  the existing report turned out to already have everything needed
+  (standing read access, proven email delivery, a section-based template
+  built for exactly this) — extending it is now strictly
   less new infrastructure than building a second sender would have been,
   not just a stylistic preference.
 
@@ -707,5 +664,5 @@ exactly the intended effect.
 | OQ1 | Should the auto-published release's GitHub Release notes carry any visible "published via nightly automation" marker, for anyone browsing the Releases page directly (independent of the email, §5.5)? | Low-cost, recommend yes — a one-line footer in the release body, e.g. appended by `release.yml`'s own `--notes-file` generation, but this would be the one (minimal) touch to `release.yml` this spec would introduce; needs a decision on whether that's worth it vs. leaving `release.yml` fully untouched. |
 | OQ2 | If a `chore: release` PR sits open/unreviewed for many days, should anything nag about it, or is silence fine (matches today's status quo)? | Recommend: out of scope, silence is fine — nightly only reacts to already-merged commits, never to open PRs. |
 | OQ3 | Should `nightly-release.yml` re-verify the five-location version-consistency invariant (`CLAUDE.md` "Release consistency invariant") on the release commit before tagging, as defense-in-depth beyond what `release-consistency.yml` already enforced at merge time? | Cheap to add, catches a hypothetical direct-push-to-main edge case; not blocking for Phase 1 since branch protection should already prevent this. |
-| OQ4 | Is `02:00 PT` the right new time for `gh-reporter`'s cron (§5.5), or should it be even later / made dynamic (e.g. triggered off `release.yml` completing via a cross-repo signal instead of a fixed offset)? | Recommend starting with the fixed later time — simplest fix, matches the existing polling-not-webhook architecture; revisit only if the fixed offset proves unreliable in practice (e.g. build times grow past the buffer). |
+| OQ4 | Is `02:00 PT` the right new time for the report's schedule (§5.5), or should it be even later / made dynamic (e.g. triggered off `release.yml` completing via a cross-repo signal instead of a fixed offset)? | Recommend starting with the fixed later time — simplest fix, matches the existing polling-not-webhook architecture; revisit only if the fixed offset proves unreliable in practice (e.g. build times grow past the buffer). |
 | OQ5 | Does the §5.7 case-3 failure (tag pushed, release build failed) ever need same-night visibility instead of waiting for the next daily digest? | Explicitly deferred per the repo owner's "one email" direction (§0.1) — revisit only if a real incident demonstrates the ~24h lag is actually a problem in practice, rather than speculatively building a second channel now. |

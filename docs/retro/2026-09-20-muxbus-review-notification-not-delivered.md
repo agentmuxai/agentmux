@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-20
 **Author:** Oozp (agent), investigating at the operator's request
-**Status:** root cause NOT conclusively confirmed, but see **§0 — live update**:
+**Status:** retro — root cause NOT conclusively confirmed, but see **§0 — live update**:
 delivery demonstrably works again as of ~08:29 PDT, which reshapes the
 ranking in §3. Treat §0 and §4 as the actionable parts.
 
@@ -24,8 +24,8 @@ other, ~19 minutes after the original #3448 failure:
 
 This is meaningful new evidence, not just "it works now so who cares":
 
-- It directly weakens **hypothesis #2** (deployed `agentmux-cloud` code
-  doesn't match what I read) and **#3** (webhook not configured/firing) —
+- It directly weakens **hypothesis #2** (the deployed cloud consumer
+  misbehaved) and **#3** (webhook not configured/firing) —
   both would need to have been broken and then fixed within the same
   ~20-minute window with no deploy or config change I'm aware of. Possible,
   but now the less likely explanation.
@@ -69,27 +69,14 @@ ever arrived.
 - **The review genuinely landed and is real, actionable content** — two
   findings (a version-downgrade P1, a stale-doc-comment P2), not a delivery
   artifact or a phantom event.
-- **The routing/mapping logic, as it exists in a local read-only mirror of
-  `agentmux-cloud`, looks correct for this exact case.**
-  `agent-mapping.ts`'s `getAgentId()` is *documented and tested* to return
-  `undefined` for `genericagentx-workflow[bot]` on purpose (it's the shared
-  fallback identity — ambiguous by username alone), which correctly falls
-  through to `extractAgentIdFromBody()` in `events/review.ts`
-  (`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md`'s username-first/
-  tag-fallback priority). My PR body carries
+- **The PR carried the routing tag correctly.** My PR body carries
   `<!-- agentmux:agent_id=oozp -->` (verified via the GitHub API that this
-  landed correctly in the PR body after I fixed the PR metadata), which
-  matches `AGENT_ID_TAG_RE` and `SAFE_AGENT_ID_RE` cleanly. The head repo
-  (`agentmuxai`) is in `TRUSTED_REPO_OWNERS`. On paper, this should resolve
-  to `targetAgentIds: ["oozp"]` and fire a jekt.
-  - **Caveat, load-bearing:** this is a *read-only checkout belonging to a
-    different agent* (`manoz-0803a`'s `agentmux-cloud`), last updated
-    2026-09-18. I have no way to confirm it matches what's actually
-    deployed to the production Lambda right now — `agentmux-cloud` is a
-    private repo I still have no write/clone access to myself (separate,
-    pre-existing gap — my own `git clone` of it fails auth). If the
-    deployed consumer differs from this mirror, everything in the
-    paragraph above is moot.
+  landed correctly in the PR body after I fixed the PR metadata), which is
+  what identifies the agent for a PR opened under the shared
+  `genericagentx-workflow[bot]` identity. Whether the deployed cloud
+  consumer handled this event as designed is something I could not check:
+  it lives in the private cloud repo, which I have no access to from this
+  session.
 - **This session's own `MUXBUS_TOKEN` (injected into my process env at
   spawn) was expired well before the review landed:** `iat` 07:18:44 PDT,
   `exp` 07:33:44 PDT (a 900-second/15-minute lifetime) — the review posted
@@ -133,11 +120,9 @@ Ranked by likelihood given the above, none confirmed:
    proof, but it's the one concrete anomaly I found, and the discovery
    endpoint's self-reported "subscribed" state is exactly the kind of
    stale-but-still-green status a broken reconnect loop would leave behind.
-2. **The deployed `agentmux-cloud` consumer doesn't match the code I read.**
-   My only visibility into that repo was a 2-day-stale read-only mirror
-   belonging to a different agent session. If a regression shipped there
-   since, or if the Lambda hasn't picked up a recent deploy, the
-   routing logic I traced through could be entirely moot.
+2. **The deployed cloud consumer misbehaved for this event.** I had no
+   visibility into the private cloud service, so a regression or a stale
+   deploy there can't be ruled out from this side.
 3. **The GitHub webhook isn't actually configured/firing for this repo**,
    consistent with the original spec's §3.4 ("GitHub webhook setup is
    manual... no validation that the webhook is working") never having been
@@ -145,7 +130,7 @@ Ranked by likelihood given the above, none confirmed:
 4. **Less likely:** a PR-body-tag parsing edge case. I consider this mostly
    ruled out — I independently re-fetched the PR body via the API after
    editing it and confirmed the tag is present, well-formed, and starts the
-   body exactly as `AGENT_ID_TAG_RE` expects.
+   body exactly as the convention requires.
 
 ## 4. Recommended next steps (need access I don't have)
 
@@ -153,8 +138,8 @@ Ranked by likelihood given the above, none confirmed:
   Accounts → AgentMux tile and check the connection status directly, or
   trigger `muxbus.status` from the frontend's own RPC channel — this
   single check would directly confirm or rule out hypothesis #1.
-- Check `agentmux-cloud`'s actual deployed Lambda version/logs for the
-  `consumers/github` function around 2026-09-20T15:09:56Z — confirms or
+- Check `agentmux-cloud`'s actual deployed version/logs for the
+  GitHub consumer around 2026-09-20T15:09:56Z — confirms or
   rules out #2 and #3 in one step, and is the only way to see whether the
   webhook fired at all. I have no access to do this myself.
 - If/when someone with repo-admin GitHub access is available, confirm the

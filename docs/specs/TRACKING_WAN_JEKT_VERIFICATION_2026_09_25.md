@@ -6,7 +6,7 @@ each step stands, what is live, what still needs a person, and what is
 deliberately not built. Not a design spec.
 **Status:** living — updated with every W3-S PR and after the C1 deploy.
 **Tracks:** issue #2586 (WAN half). Design of record for the cross-account
-phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
+phases W0–W2: the 2026-09-17 WAN-tier signing spec (no longer in this repo).
 
 ---
 
@@ -16,13 +16,13 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 |---|---|---|---|
 | — | Spec (three adversarial reviews) | #3649 | merged |
 | — | Pure primitives: instance id, key fingerprint, instance-signed certificate, revocation, envelope + freshness checks, cross-language vectors (spec §2.7) | #3727 | merged |
-| C1 | Cloud: carry the eight `wan_*` fields, store the sender account (never returned), `sender_same_account`, idempotent `(account, wan_msg_id)`, key directory + revocation routes with chain checks, `muxbus-agent-wan-keys-<env>` table | agentmux-cloud#91 | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
+| C1 | Cloud: carry the eight `wan_*` fields, return `sender_same_account`, key directory + revocation routes | cloud repo | merged; **deployed** 2026-09-25 21:00 UTC (`/api/health` 1.10.0) |
 | D1a | Channel-wide `wan.db`, instance key, agent WAN keys moved into it (survive upgrades), instance id as `AGENTMUX_HOST_LABEL`, agent-delete purge reaches `wan.db` | #3734 | merged |
 | D1b | Certify + publish each agent key (`muxbus/wan_publish.rs`), relay carry gate (`relay::wan_carry_gate`) | #3771 | merged |
 | D2 | Verifier (`muxbus/wan_verify.rs`), peer cache, known instances, replay table, `TRUST=wan-verified` marker, tier rules, audit, `wan` grants off | #3775 | merged |
 | — | Agent jekt policy (`~/.agentmux/agents/CLAUDE.md`) gains `TRUST=wan-verified` | — | **needs the operator** (§3) |
 | — | Trust a verified `new` same-account instance (`ESCALATE=none`), after agents stop holding the account login (#3881) — operator decision 2026-09-26, spec §2.6 amendment | this PR | open |
-| — | Host-gated instance approval window | — | **held** for GHSA-6726-q276-g6f6 (§4); since 2026-09-26 approval only sets the label, it no longer gates the stop |
+| — | Host-gated instance approval window | — | **held** (§4); since 2026-09-26 approval only sets the label, it no longer gates the stop |
 | — | Instance retirement from the desktop | — | not started (§4) |
 | — | End-to-end run across two machines (spec §5) | — | **blocked on the C1 deploy** |
 
@@ -36,8 +36,7 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 - The relay carries a signature only when the sender is host-verified, signed
   as this instance and channel, verifies under its `wan.db` key, and that key
   is confirmed published. Carrying works: same-account jekts between narko
-  and Area54 get the cloud's `inj-w-` ids, which it gives only to rows stored
-  with a valid carried tuple.
+  and Area54 arrive with their signature carried.
 - The receiver verifies whatever arrives carried. Until #3865 it did so only
   in the first 15 minutes of each cloud connection: the key lookup used the
   connection's shared token, loaded once at connect, and a desktop (PKCE)
@@ -49,10 +48,7 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 
 ## 3. Needs a person
 
-1. **Deploy C1** — `agentmux-cloud` `deploy.yml` (`workflow_dispatch`, manual
-   approval). Before relying on it, check `/api/health` reports server
-   `1.9.0` or later, and that `cdk diff` shows exactly one new table, one env
-   var and one grant.
+1. **Deploy C1** — done 2026-09-25 (`/api/health` reports server `1.10.0`).
 2. **Apply the jekt-policy text** proposed in the #3775 description to
    `~/.agentmux/agents/CLAUDE.md`. That file is outside the repo and tells
    agents not to trust unconfirmed edits to it, so the implementing agent did
@@ -70,7 +66,7 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
 
 | Item | Why | Unblocks when |
 |---|---|---|
-| Approval window (another install → `approved`) | Must be reachable only from the CEF host, not by agents holding `X-AuthKey`; the spec's §2.6 amendment holds it until GHSA-6726-q276-g6f6 is fixed. Until then no other install relaxes a stop. | the advisory is fixed |
+| Approval window (another install → `approved`) | Must be reachable only from the CEF host, not by agents holding `X-AuthKey`; the spec's §2.6 amendment ships it disabled. | later work enables it |
 | Instance retirement | Needs the same host-gated surface as approval. The cloud already accepts revocations (C1) and the verifier honours them. | with the approval window |
 | Honouring `wan` trusted-peer grants | Grants are keyed by bare name; on WAN one name can be several instances. Needs an instance-keyed grant (table rebuild) and a way to create grants. | spec 09-17 §3.5.1 |
 | Cross-account verification (W0–W2) | Out of W3-S's scope by construction. | spec 09-17 |
@@ -109,8 +105,8 @@ phases W0–W2: `SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md`.
   #3881**, step 1 of trusting same-account verified installs without an
   operator stop (operator decision, 2026-09-26).
 - §6.5 — keep the instance key out of agents' reach (OS keychain / separate
-  user); today a copied `wan.db` lets its holder speak as that instance until
-  it is retired.
+  user) as further hardening; reading `wan.db` off disk as the same OS user
+  is treated as machine compromise.
 - §6.6 — whether per-version `objects.db` also re-mints host and LAN keys on
   every upgrade.
 - Purge scope (#3734): the "name still in use" check reads this version's

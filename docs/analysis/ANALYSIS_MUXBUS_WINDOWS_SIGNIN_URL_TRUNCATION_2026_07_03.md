@@ -43,7 +43,7 @@ byte-for-byte (confirmed by hitting the live endpoint directly — see §2).
   hit the identical failure the moment a provider is activated.
 
 This is **not** a deploy-timing issue. The branded `auth.muxbus.agentmux.ai` Cognito
-domain (agentmux-cloud PR #21) is live and correctly configured — confirmed directly
+domain (set up in the cloud repo) is live and correctly configured — confirmed directly
 against the endpoint (§2). The desktop-side flip to that domain (agentmux PR #1882,
 shipped in v0.49.12) is unrelated to this bug; the same truncation would happen
 against the legacy `muxbus-auth.auth.us-east-1.amazoncognito.com` prefix domain too,
@@ -161,8 +161,7 @@ and `identity::oauth_client::*` test suites remain green (11/11).
 
 ## 4. Non-goals / out of scope
 
-- Did not touch the agentmux-cloud Cognito/CDK side — it's confirmed working correctly
-  (§2) and PR #21's deploy notes were followed correctly by whoever ran `cdk deploy`.
+- Did not touch the cloud sign-in side — it's confirmed working correctly (§2).
 - Did not change macOS/Linux `open_browser` — `open` (macOS) and `xdg-open` (Linux) are
   passed the URL as a single argv element via `Command::arg`, which does not go through
   a secondary shell re-parse, so they were never affected.

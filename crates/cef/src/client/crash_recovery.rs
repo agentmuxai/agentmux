@@ -473,7 +473,7 @@ impl AgentMuxHandler {
         // every early-return so we can confirm whether CEF is invoking
         // the callback at all for a given URL. The reagent-merged
         // browser-pane auth flow (#906) appeared to fail silently for
-        // some sites in dev mode (e.g. https://pulse.asaf.cc returns
+        // some sites in dev mode (e.g. https://protected.example.com returns
         // ERR_INVALID_AUTH_CREDENTIALS without `[browser-pane-auth]`
         // ever logging). This entry log narrows the diagnosis:
         //   - Visible → CEF is calling the callback; early return below

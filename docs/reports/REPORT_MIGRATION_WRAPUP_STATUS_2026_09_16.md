@@ -828,17 +828,14 @@ being necessary.
 - **#950** — `term.type` exists *only* in `docs/specs/app-api-extension.md`, not in server code: a doc promising an API that does not exist.
 - Eight tracking discussions last moved 2026-06-14/15 (~93 days) and are effectively abandoned.
 
-### 5.9 Jekt WAN sender-binding — built, inert, and nearly lost from the backlog 🟡 **[verified]**
+### 5.9 Jekt WAN sender-binding — nearly lost from the backlog 🟡 **[verified]**
 
-`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`’s title is "host-tier signing **+ WAN binding
-enforcement**". The host half shipped; the WAN half did not. `checkAgentBinding` in
-`agentmux-cloud` only warns, because `ENFORCE_AGENT_BINDING` is set in no CDK/Lambda
-environment config, and the spec’s §4.1/§6 require live verification and burn-in before the
-flag is flipped.
+`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`’s title names two halves, host-tier signing and
+WAN sender binding. The host half shipped; the WAN half is tracked in the private cloud repo.
 
 **Worth recording as a process finding, not just a backlog item.** This report’s first pass
 restamped that spec `implemented` on the strength of the host tier alone, which would have
-removed it from `INDEX.md`’s active backlog entirely and silently retired the sender-binding
+removed it from `INDEX.md`’s active backlog entirely and silently retired the WAN half's
 work — committing, inside the very PR arguing that bad statuses cause bad planning, the exact
 error it argues against. Caught in review (codex P2, PR #3284). The generalisable rule: **a
 spec whose title names two halves cannot be closed by one of them**, and “verified against a

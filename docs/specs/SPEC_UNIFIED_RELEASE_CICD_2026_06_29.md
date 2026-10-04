@@ -1,7 +1,7 @@
 # Unified Release CI/CD — agentmux + MS Store + Landing Page
 **Date:** 2026-06-29  
 **Status:** Draft  
-**Scope:** agentmuxai/agentmux, agentmuxai/agentmux-landing, a5af/shared-infrastructure
+**Scope:** agentmuxai/agentmux, agentmuxai/agentmux-landing, private infrastructure repo
 
 ---
 
@@ -14,7 +14,7 @@ Three delivery surfaces exist but are not connected into a single release flow:
 | **agentmuxai/agentmux** builds | Nightly artifacts CI passes (Linux/macOS); Windows fixed by PR #1845; no release workflow |
 | **Microsoft Store** | Spec'd in PR #1843 (not yet wired); requires Partner Center setup first |
 | **agentmux.ai landing page** | CDK + `fetch-release.mjs` deployed manually; no CI/CD workflow |
-| **gh-reporter nightly email** | Lambda healthy; `infrastructure-weekly-analysts` stack in `UPDATE_ROLLBACK_COMPLETE` |
+| **Nightly report email** | Healthy; one private infrastructure stack needed a fix (§4.1) |
 
 Today a release requires manual execution of at least five independent steps across four repos/systems. Gaps: artifacts not published to GitHub Releases, landing page not auto-updated, MS Store submission manual.
 
@@ -94,16 +94,9 @@ git tag v0.50.0 → push
 
 ## 4. Implementation Plan
 
-### 4.1 Fix: `infrastructure-weekly-analysts` stuck stack
+### 4.1 Fix: stuck private infrastructure stack
 
-**Root cause:** CDK renamed two SSM Documents (`weekly-security-researcher`, `weekly-architecture-analyst`) with explicit `documentName` properties. CloudFormation cannot replace a custom-named resource in-place — it requires create-new + delete-old, which it won't do if the old name is still in use.
-
-**Fix** (in `a5af/shared-infrastructure`):
-1. Remove `documentName` props from both SSM Document constructs in `weekly-analysts` CDK stack (let CDK generate unique names).
-2. `cdk deploy infrastructure-weekly-analysts` — without custom names, CloudFormation can replace by creating new names first.
-3. Verify stack reaches `UPDATE_COMPLETE`.
-
-No user-visible impact: these are internal SSM automation documents, not exposed externally.
+Handled in the private infrastructure repo. No user-visible impact: these are internal automation resources, not exposed externally.
 
 ---
 
@@ -206,7 +199,7 @@ The `publish` job needs the changelog entry for the current version from `VERSIO
 
 ```
 Week 1
-  ├── Fix infrastructure-weekly-analysts CFN stack (a5af/shared-infrastructure)
+  ├── Fix the stuck private infrastructure stack
   ├── Add landing-deploy.yml to agentmuxai/agentmux-landing
   └── Add extract-changelog.sh to agentmuxai/agentmux
 
@@ -232,8 +225,8 @@ Week 3 (after Partner Center setup)
 | # | Question | Owner |
 |---|---|---|
 | OQ1 | macOS patched CEF: gate release on `PATCHED_CEF_AVAILABLE` secret, or always ship stock + warn? | Needs decision |
-| OQ2 | `dl.agentmux.ai` S3 bucket — is it under `a5af/shared-infrastructure` CDK or separate? Confirm IAM permissions for release workflow | Needs audit |
-| OQ3 | gh-reporter email delivery: zero bounces/rejects from SES, not in spam. Is there a Gmail filter? | Still open |
+| OQ2 | `dl.agentmux.ai` bucket — who owns it, and what permissions does the release workflow need? | Needs audit |
+| OQ3 | Nightly report email delivery: no bounces or rejects, not in spam. Is there a mail filter? | Still open |
 | OQ4 | Should `ci-nightly-artifacts.yml` stay separate from `release.yml`? Recommendation: yes — nightly is a health signal on HEAD, release is a publishing event on a tag. | Recommend: keep separate |
 | OQ5 | Landing page QA deploy — should it auto-deploy on every `main` push too, not just release events? | Needs decision |
 
@@ -246,8 +239,7 @@ Week 3 (after Partner Center setup)
 | `.github/workflows/release.yml` | agentmuxai/agentmux | **Create** |
 | `scripts/extract-changelog.sh` | agentmuxai/agentmux | **Create** |
 | `.github/workflows/landing-deploy.yml` | agentmuxai/agentmux-landing | **Create** |
-| `weekly-analysts/lib/weekly-analysts-stack.ts` | a5af/shared-infrastructure | **Edit** — remove custom `documentName` props |
-| `gh-reporter/` | a5af/shared-infrastructure | No change needed (stack healthy) |
+| private infrastructure stack | private repo | **Edit** (§4.1) |
 
 ---
 
@@ -256,4 +248,4 @@ Week 3 (after Partner Center setup)
 - **Nightly build/test CI** (`ci-nightly-build.yml`, `ci-nightly-artifacts.yml`) — kept separate, not merged into release
 - **Auto-versioning** — version bump continues to go through `task release` + changesets; this spec only wires the post-bump publication
 - **macOS patched CEF CI** — tracked separately; the patched framework must be built locally and uploaded to `agentmuxai/cef` before CI can use it
-- **gh-reporter email delivery investigation** — SES is healthy; root cause TBD
+- **Nightly report email delivery investigation** — sending side is healthy; root cause TBD

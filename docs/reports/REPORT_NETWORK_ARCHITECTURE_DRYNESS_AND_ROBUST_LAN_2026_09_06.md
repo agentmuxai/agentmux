@@ -254,16 +254,15 @@ Three things worth recording from building it:
    it), and `X-Client-Wrapped: true` is required — without it the cloud wraps
    the message in its own `[JEKT:...]` marker *and* the receiving srv wraps it
    again in `Handler::inject_message`, so the recipient sees a doubled marker.
-   Both were established by reading
-   `agentmux-cloud/muxbus/server/src/index.ts` directly. An earlier draft of
-   this work inferred the body shape from a spec describing `createInjection`'s
-   stored row and would have shipped broken.
+   Both were established by reading the relay's own source directly. An
+   earlier draft of this work inferred the body shape from a spec and would
+   have shipped broken.
 2. **Tier 4 needs its own loop guard.** `forward_hops` cannot stop a
    relay↔subscriber ping-pong, because the cloud delivers each message as a
    *fresh* inbound request with the count reset. A message that arrived with
    `delivery_tier == "wan"` is therefore never re-relayed.
-3. **Queued is not delivered.** The relay persists and wakes subscribers; the
-   recipient's srv collects on its next sync, or never if it is offline. The
+3. **Queued is not delivered.** The relay only queues the message; the
+   recipient's srv collects it on its next sync, or never if it is offline. The
    outcome type is `Queued`, not `Delivered`, and the tool description now says
    so — the tier-3 path had exactly this conflation and it was a real bug.
 

@@ -1606,7 +1606,7 @@ async fn self_endpoint_resolves_seeded_agent() {
     assert!(json["window_id"].is_string(), "window_id resolved via reverse lookup");
 }
 
-// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1 — the scoped
+// The scoped
 // `lan_key` (broadcast via mDNS/UDP for LAN peer discovery) must be
 // accepted by the three LAN-forwarding routes but rejected everywhere else,
 // and the full `auth_key` must keep working on those same routes

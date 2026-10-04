@@ -4,8 +4,7 @@
 //! One live instance per agent across the WAN — the client side
 //! (`docs/specs/SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md` Phase 5, §4.5).
 //!
-//! The muxbus relay holds one lease per agent (agentmux-cloud
-//! `agent-lease-store.ts`). This instance claims it for every agent it polls
+//! The muxbus relay holds one lease per agent. This instance claims it for every agent it polls
 //! jekts for, renews it while the agent stays registered, and releases it
 //! when the agent goes away. While another instance holds it, the relay
 //! answers this instance's pending pulls with 409 — so it cannot consume the
@@ -356,8 +355,8 @@ pub(crate) async fn take_over(base: &str, agent_id: &str, token: &str, http: &re
 }
 
 /// The relay's answer to "which install holds `agent`'s lease?" —
-/// `GET /agents/lease/:agent_id` (agentmux-cloud#136,
-/// `docs/plans/PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md` §7.1). Asked by
+/// `GET /agents/lease/:agent_id`
+/// (`docs/plans/PLAN_JEKT_LOCAL_FIRST_ROUTING_2026_10_02.md` §7.1). Asked by
 /// a *sender* about a message's target, so it never touches this
 /// instance's own lease state ([`record`], admission): a read only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -499,7 +498,7 @@ mod tests {
         assert!(HOLDER_CACHE.lock().unwrap().get(&key(&lost)).is_none());
     }
 
-    /// The holder query's answers (agentmux-cloud#136). Anything the relay
+    /// The holder query's answers. Anything the relay
     /// does not say plainly is `Unknown`, which routes as before.
     #[test]
     fn holder_answers_map_to_routes() {

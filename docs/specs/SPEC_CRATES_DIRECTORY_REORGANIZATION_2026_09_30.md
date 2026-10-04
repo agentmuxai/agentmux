@@ -2,7 +2,7 @@
 
 **Author:** AgentY (narko), at operator request
 **Created:** 2026-09-30
-**Status:** implemented — spec #4072; the move is PR #4076, rebase-merged 2026-09-30 17:57 UTC (pure-move commit 3f1dd8ce0, path fixes a100543bb). Freeze 16:43–17:57 UTC. Follow-ups: agentmux-docs#140 (site source links, submodule), a5af/shared-infrastructure#548 (drift reporter read agentmux-cef/Cargo.toml, not listed in §4.3), a5af/reagent#294 (triage glob for launcher paths, also not listed).
+**Status:** implemented — spec #4072; the move is PR #4076, rebase-merged 2026-09-30 17:57 UTC (pure-move commit 3f1dd8ce0, path fixes a100543bb). Freeze 16:43–17:57 UTC. Follow-ups: agentmux-docs#140 (site source links, submodule), plus two path updates in private repos (drift reporter, ReAgent triage glob), neither listed in §4.3.
 **Scope:** folder layout of `agentmux-*` crates in this repo, and every path that points at them. Package names, binary names and Rust module paths do not change.
 
 ## 1. What changes
@@ -117,9 +117,9 @@ Hits left in comments that describe history are fine; everything else must be go
 - **agentmux-docs:** `scripts/build-rust-docs.mjs` passes package names (`-p agentmux-srv`), which
   don't change. Its `src/agentmux` submodule is pinned to a commit, so nothing moves until it's
   bumped. After the bump, check `/api/rust/` still builds (that deploy now fails loudly, #137).
-- **shared-infrastructure drift reporter:** reads `scripts/cef-build/cef-runtime-pins.sh` and
+- **CEF drift reporter (private infrastructure repo):** reads `scripts/cef-build/cef-runtime-pins.sh` and
   `.github/workflows/release.yml`, neither of which moves. No change.
-- **a5af/reagent, dev-tools, agentmux-cloud:** grep each for `agentmux-(srv|cef|…)/` paths
+- **Private repos (ReAgent, dev tools, the cloud repo):** grep each for `agentmux-(srv|cef|…)/` paths
   (review prompts, scripts). Fix any hits in follow-up PRs in those repos.
 - **Agent instructions:** Global Memory, per-agent `CLAUDE.md`, Personal Memory and skills that
   cite `agentmux-srv/src/...`. They go stale, not wrong in a dangerous way. Grep and fix the

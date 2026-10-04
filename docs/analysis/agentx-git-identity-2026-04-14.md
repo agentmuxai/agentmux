@@ -75,7 +75,7 @@ deployment has already built the real AgentX workspace elsewhere:
 ```
 
 — and that's where claw expects AgentX to run (see
-`a5af/claw:templates/host/CLAUDE.md` which reads
+claw's host `CLAUDE.md` template, which reads
 `You are **{{AGENT_DISPLAY}}**, running from ~/.claw/{{WORKSPACE}}`).
 
 So AgentMux launches AgentX in an empty parking-lot directory that
@@ -103,12 +103,12 @@ config still has to be right.
 
 ## 3. What claw *does* set up (and for whom)
 
-Searching `a5af/claw` for `user.name` / `user.email`:
+Searching claw (a private repo) for `user.name` / `user.email`:
 
 | Script | Target | Sets |
 |---|---|---|
-| `docker/lib/github-auth.sh:63` | **container** agents (agent1-5) via GitHub Apps | `user.name = ${agent}-workflow[bot]`, `user.email = <app-id>+${agent}-workflow[bot]@users.noreply.github.com` |
-| `docker/lib/github-auth.sh:67` | **container** agents via PAT fallback | `user.name = ${Agent^}-asaf` (e.g. `Agent1-asaf`), `user.email = ${agent}@asaf.cc` |
+| claw GitHub-auth setup | **container** agents (agent1-5) via GitHub Apps | `user.name = ${agent}-workflow[bot]`, `user.email = <app-id>+${agent}-workflow[bot]@users.noreply.github.com` |
+| claw GitHub-auth setup (fallback) | **container** agents via PAT fallback | `user.name = ${Agent^}-asaf` (e.g. `Agent1-asaf`), `user.email = ${agent}@example.com` |
 
 **Host agents (AgentX, AgentY) have no claw-side git identity setup.**
 The host templates under `templates/host/` include `CLAUDE.md`,
@@ -131,10 +131,10 @@ On this host, run once:
 
 ```powershell
 git config --global user.name "AgentX-asaf"
-git config --global user.email "agentx@asaf.cc"
+git config --global user.email "agentx@example.com"
 ```
 
-Mirrors claw's container-PAT naming (`Agent1-asaf`, `agent1@asaf.cc`).
+Mirrors claw's container-PAT naming (`Agent1-asaf`, `agent1@example.com`).
 Claude Code's startup warning goes away immediately. Every pane
 launched afterwards — AgentMux's forge agents, hand-started Claude,
 gh CLI — now has a valid commit identity.
@@ -207,12 +207,12 @@ agents. Possible shape:
 3. **Git identity probe:** when launching a host agent, run a
    pre-flight `git config --global user.name` + `user.email` check.
    If missing, pop a dialog offering to set them to the claw default
-   pattern (`AgentX-asaf` / `agentx@asaf.cc`). User confirms once;
+   pattern (`AgentX-asaf` / `agentx@example.com`). User confirms once;
    AgentMux runs the `git config --global` calls.
 
 4. **Per-workspace override:** for AgentY, also write
    `~/.claw/agenty-workspace/.git/config` (if the workspace is a git
-   repo) with `user.name = AgentY-asaf` / `user.email = agenty@asaf.cc`
+   repo) with `user.name = AgentY-asaf` / `user.email = agenty@example.com`
    so commits from that pane attribute correctly even though the
    global is AgentX-asaf.
 
@@ -247,11 +247,7 @@ AgentX and AgentY are host-side forge agents that expect their
 workspaces to exist under `~/.claw/`. Before launching them from
 the AgentMux agent picker:
 
-1. Install claw (one-liner from
-   https://github.com/a5af/claw/blob/main/bootstrap.ps1):
-   ```powershell
-   irm https://raw.githubusercontent.com/a5af/claw/main/bootstrap.ps1 | iex
-   ```
+1. Install claw with its bootstrap script (claw is a private repo).
 2. Deploy the host workspaces:
    ```powershell
    claw deploy agentx-workspace
@@ -260,7 +256,7 @@ the AgentMux agent picker:
 3. Set git identity once (claw naming convention):
    ```powershell
    git config --global user.name "AgentX-asaf"
-   git config --global user.email "agentx@asaf.cc"
+   git config --global user.email "agentx@example.com"
    ```
 
 On machines without claw installed, host forge agents will still
@@ -316,7 +312,7 @@ immediately get the right workspace.
    still work post-restart.
 6. Have AgentX attempt a trivial commit (e.g. `git init` + touch
    + commit a scratch file). Should succeed as `AgentX-asaf
-   <agentx@asaf.cc>`.
+   <agentx@example.com>`.
 
 ---
 

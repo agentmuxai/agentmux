@@ -22,7 +22,7 @@ Supports HTTP **Basic** and **Digest** auth (CEF handles both via the same callb
 
 ## 1. Problem
 
-User report 2026-05-18: opened `https://pulse.asaf.cc/` in the browser pane → page failed to load → host's error overlay showed `ERR_INVALID_AUTH_CREDENTIALS (-338)`. The site requires HTTP Basic auth.
+User report 2026-05-18: opened `https://protected.example.com/` in the browser pane → page failed to load → host's error overlay showed `ERR_INVALID_AUTH_CREDENTIALS (-338)`. The site requires HTTP Basic auth.
 
 CEF's `RequestHandler::get_auth_credentials` is the only hook by which the embedder can supply credentials in response to a `401`. Today our `AgentMuxRequestHandler` (`handlers.rs:316`) only implements `on_render_process_terminated`. The default behavior of an unimplemented `get_auth_credentials` is "no credentials available" → CEF treats the 401 as a fatal error.
 
@@ -190,7 +190,7 @@ User enters wrong creds → CEF gets the 401 again → fires `get_auth_credentia
 - [ ] Cancel → server's 401 body renders (typically "Authorization required").
 - [ ] Subresource auth on the same realm (page with images behind same auth) — only one prompt.
 - [ ] Cross-realm subresources → two prompts.
-- [ ] Two browser panes both pointed at `pulse.asaf.cc` — each prompts independently (no global cache).
+- [ ] Two browser panes both pointed at `protected.example.com` — each prompts independently (no global cache).
 - [ ] Close pane mid-prompt → no host-side memory leak, callback released within timeout.
 
 ---

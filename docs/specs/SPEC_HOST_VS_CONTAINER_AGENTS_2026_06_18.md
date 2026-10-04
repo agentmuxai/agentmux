@@ -92,7 +92,7 @@ Host      ─── full access ─ identical to the OS user running AgentMux
 
 ## 4. Design: Color Scheme
 
-Adapted from a5af/dev-tools `AGENT_COLORS.md` conventions, mapped to AgentMux design tokens.
+Adapted from the agent color conventions kept in a private tools repo, mapped to AgentMux design tokens.
 
 | Runtime | Color | Value | Maps to existing token |
 |---------|-------|-------|------------------------|
@@ -394,4 +394,4 @@ reset on every re-seed (version bump) — that's the correct mechanism.
 - `scripts/gen-seed.js:142` — current `agent_type: "host"` in seed
 - `docs/specs/SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md` — container architecture spec
 - `docker/Dockerfile.agent-agentmux` — container image definition
-- a5af/dev-tools: `docker/AGENT_COLORS.md` — color conventions (green=container, amber/red=host)
+- agent color conventions (green=container, amber/red=host), kept in a private tools repo

@@ -3,13 +3,12 @@
 **Date:** 2026-09-24
 **Status:** active — Phase 1 (host tier: lease, admission, fencing) shipped in PR #3738; Phase 2 (Take over) in PR
 #3742; Phase 3 (record fencing) in PR #3744; Phase 4 (LAN) in PR #3745; Phase 5 (WAN) in PR #3746 (client) and
-agentmux-cloud#92 (relay). See §12–§16 for what was built and what was left out. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
+a cloud-side change (relay). See §12–§16 for what was built and what was left out. §10's decisions are taken at their recommended option (repo owner, 2026-09-25:
 proceed to implementation without further sign-off). §11's open questions are all answered from logs and code.
 **Author:** Agent3 (UID `fb3e692d-caf9-48e3-b20a-e659361aa057`)
 **Trigger:** Repo owner, 2026-09-24: *"by mistake I opened up an instance of you in a 57.2 version running on the same
 host … we want a best practice method to ensure that 2 agents can't open simultaneously, even across the 3 tiers."*
-**Researched against:** `agentmuxai/agentmux` `main` @ `01100e9c9` (v0.57.3); `agentmuxai/agentmux-cloud` `main` @
-`fb93159`. The two instances in §1 ran v0.57.0 and v0.57.2.
+**Researched against:** `agentmuxai/agentmux` `main` @ `01100e9c9` (v0.57.3). The two instances in §1 ran v0.57.0 and v0.57.2.
 **Related:**
 - `docs/retro/RETRO_DEV_BUILD_SHARED_AGENT_SESSION_COLLISION_2026_07_29.md` — the same failure, found on 2026-07-29. It
   named "cross-process turn ownership" as follow-up work. A lease was built for it (§2.2) but never wired to interactive panes.
@@ -117,7 +116,7 @@ types into a terminal. It is not an instance guard.)
 | Same srv, second pane | prompted / refused via `agent_live_elsewhere` | in-process only |
 | **Host, different instance/channel/version** (this incident) | both run; second may resume the first's session or start a parallel one; jekt routing goes to the last registrant | **none** |
 | LAN | possible if the same definition exists on two peers; no cross-peer check | none |
-| WAN | possible, and jekts are **raced**: the relay ignores `subscribe` messages ("accepted but ignored — routing is broadcast", `agentmux-cloud` `muxbus/server/src/index.ts` @ `fb93159`), broadcasts a zero-metadata wake to every socket of the account, and each sidecar pulls `GET /reactive/pending/:agent_id` **by lower-cased name**. Two live copies of one agent both pull; whichever acks first gets each message | none **[verified]** |
+| WAN | possible, and jekts are **raced**: each sidecar pulls `GET /reactive/pending/:agent_id` **by lower-cased name**, and nothing tells the relay that two copies exist. Two live copies of one agent both pull; whichever acks first gets each message | none **[verified]** |
 
 ### 2.4 Version skew is part of the problem
 
@@ -254,12 +253,11 @@ LAN-tier signing spec). Extend that, do not build a coordinator:
 ### 4.5 WAN tier — the relay as coordinator
 
 The cloud relay is the only component every WAN participant already talks to, so it is the only place a *preventing*
-guarantee can live. Today it has **no per-agent state at all** (§2.3): `subscribe` is ignored, the wake is broadcast per
-account, and pending jekts are pulled by name. So this is new relay surface, not a tweak to subscriptions:
+guarantee can live. Today it does not know which instance drives an agent (§2.3), and pending jekts are pulled by name.
+So this is new relay surface:
 
 - **`POST /agents/lease`** `{agent_uid, agent_name, host_id, boot_id}` → `200 {epoch, ttl_ms}` or `409 {held_by: {host_id,
-  hostname, acquired_at, renewed_at}}`. Conditional write keyed by `(account, agent_uid)` — in DynamoDB a
-  `ConditionExpression` on `holder = :me OR expires_at < :now`, which is the relay store's native compare-and-set.
+  hostname, acquired_at, renewed_at}}`. The claim must be an atomic compare-and-set on the relay side.
   **`PUT` renews** (every 20 s, TTL 60 s — WAN-scale, not the host's 5/15 s); **`DELETE` releases**.
 - **Pending pulls are fenced by it.** `GET /reactive/pending/:agent_id` and `POST /reactive/ack` from a sidecar that does
   not hold the agent's WAN lease return `409 not_holder` instead of messages. This is what removes the race in §2.3: a
@@ -267,7 +265,7 @@ account, and pending jekts are pulled by name. So this is new relay surface, not
 - The lease is keyed by the **UID**; the name stays for the pending-queue path until that is re-keyed too.
 - Scope: the account the relay already authenticates. Two different muxbus accounts running "the same" agent are two
   agents to the relay — correct, since they cannot see each other's queues either.
-- **This is a change to `agentmux-cloud`** (`muxbus/server/src/index.ts` and its Lambda twin), outside this repo.
+- **This is a change to `agentmux-cloud`**, outside this repo.
 - Offline behaviour follows I7: if the relay is unreachable, the host/LAN tiers still govern, the agent is allowed to run
   (offline work must not be bricked), and the relay resolves on reconnect — the unexpired holder keeps it, the late claimant
   gets `409`, yields and fences (§4.3).
@@ -372,7 +370,7 @@ lesson, and the way that incident began).
 4. **LAN — detect and yield.** Advertisement field, peer query, tie-break. **Built as a peer query plus a periodic
    re-check — §15.**
 5. **WAN — relay coordinator.** UID-keyed lease endpoints and fenced pending pulls in `agentmux-cloud`; the client side
-   here. **Built — §16. The relay half is agentmux-cloud#92 (not deployed by merging).**
+   here. **Built — §16. The relay half is a cloud-side change (not deployed by merging).**
 
 Phases 4 and 5 can proceed independently of 2–3. Phase 1 is small: the lease, the locking and the tests exist; what is
 missing is the wiring and the key.
@@ -403,7 +401,7 @@ missing is the wiring and the key.
 | 1 | Is `LeaseStore`'s `instance_id` the agent UID? | Yes for user agents: `block.meta["agentId"]` at every call site = definition id = registry `instance_id` | §4.1 key — reuse as is |
 | 2 | Why did the second instance start fresh? | It tried `--resume` of the **live** first instance's session (from the shared registry); failed only on a config-dir mismatch | §1.1; the compat probe (§4.2 step 5) is required, not optional |
 | 3 | Why did the first instance lose its auth? | The second rebound the agent's account in the host-global identity store to an account the first cannot resolve | new **I9**, §4.1 order |
-| 4 | Relay semantics for a duplicate agent? | `subscribe` ignored; broadcast wake; name-keyed pull ⇒ jekts raced | §2.3, §4.5 rewritten, pending pulls fenced |
+| 4 | Relay semantics for a duplicate agent? | name-keyed pull, no instance awareness ⇒ jekts raced | §2.3, §4.5 rewritten, pending pulls fenced |
 | 5 | Is `registration_nonce` a usable epoch? | No — per-srv counter restarting at 1, `0` from the presence path | §4.2 step 5 note; `epoch` is new |
 | 6 | Can the shared root sit on a synced folder? | Only via an explicit env override | §4.2 step 6 — check the volume only then |
 
@@ -640,19 +638,15 @@ governs this host.
 
 ## 16. Phase 5 as built — WAN tier
 
-**Relay (agentmux-cloud#92).**
-- `agent-lease-store.ts` keeps one row per agent in a new `muxbus-agent-leases-${env}` table, keyed by the normalized agent
-  **name**. That is the key the relay's pending queue already uses, and a fence on pulls has to match it (see Limits).
-- Claim, renew and release are conditional writes guarded by the row as it was read, so two simultaneous claims cannot
-  both win. The epoch goes up on each ownership change. TTL is 60 s, and expired rows are swept by DynamoDB TTL.
+**Relay contract (the relay side is designed in the private cloud repo).**
+- The lease is per agent **name**, matching how pending jekts are addressed (see Limits). The epoch goes up on each
+  ownership change. TTL is 60 s.
 - Routes: `POST /agents/lease`, `POST /agents/lease/renew` and `POST /agents/lease/release`, for the caller's own agent
-  only (`X-Agent-ID` must match, and `checkAgentBinding` applies). A refusal names the holder's host, channel and version,
-  never its account or instance id.
+  only. A refusal names the holder's host, channel and version, never its account or instance id.
 - **The fence.** `GET /reactive/pending/:agent_id` and `POST /reactive/ack` answer **409 `not_holder`** while another
   instance holds a live lease. Callers identify themselves in `X-Agent-Instance`.
   - With no lease, nothing changes, so older clients are unaffected until a newer client holds the agent.
-  - The check fails open if the lease table cannot be read.
-- Merging does not deploy it (`deploy.yml` is manual). Either half is safe to land first.
+- Either half is safe to land first.
 
 **Client (this repo, `muxbus/wan_lease.rs`).**
 - The instance id is `host/channel`.
@@ -669,11 +663,6 @@ governs this host.
   open (D2).
 
 **Tests.**
-- Relay (8 + 8):
-  - claim, refuse and idempotent re-claim; expired takeover with a higher epoch; renew only for the holder; release;
-  - the fence (holder, other instance, header-less caller); two simultaneous claims have one winner;
-  - route-level (`app.inject`): no lease, no change; the holder pulls while others get 409; acks are fenced; the check
-    fails open; claim refused while held, and only for the caller's own agent.
 - Client:
   - holder description; claim answers mapped to outcomes; a `not_holder` answer is remembered for the early check and
     cleared by a grant; the instance id;
@@ -681,10 +670,8 @@ governs this host.
     `LiveElsewhere`.
 
 **Limits.**
-- **Keyed by name, not UID.** The relay routes jekts by agent name, so its lease is by name too. Two *different* agents
-  with the same name on two computers fence each other. That is a limit of name-keyed WAN routing that predates this
-  spec — the relay already delivered one's jekts to the other. Re-keying the relay's queue by UID is the fix, and it is
-  outside this spec.
+- **Keyed by name, not UID.** WAN jekts are addressed by agent name, so the WAN lease is by name too. Two *different*
+  agents with the same name on two computers fence each other. Moving WAN addressing to UIDs is outside this spec.
 - **Registered, not running.** On the WAN, an instance holds the agent while the agent is *registered* there (its pane
   is open and receiving jekts), not only while its CLI process runs. The host lease is per process. An idle but open
   pane therefore keeps the WAN lease, which is deliberate: that pane is where the agent's jekts go.

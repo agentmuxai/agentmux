@@ -89,12 +89,10 @@ Sources: `CEF_FORK_MAINTENANCE.md`, the 152 spec, `agentmuxai/cef` PRs #7–#9 a
 9. **Agents publish through their GitHub App — no operator step.** *(Corrected 2026-09-29, after
    the operator asked whether publishing goes through CI. This trap used to say "agent identities
    have no write access to `agentmuxai/cef` releases (r2 notes)". That was written before agents moved
-   to GitHub Apps (`shared-infrastructure` `AGENT_GITHUB_AUTH.md`). The r2 release it cites was
+   to GitHub Apps. The r2 release it cites was
    itself published by an agent App. Check it with
    `gh-agent api repos/agentmuxai/cef/releases --jq '.[0:2][] | [.tag_name, .author.login]'`:
-   `cef-windows-x86_64-152.0.7977.83-r2` → `agent3-workflow[bot]`, 2026-09-23. GHSA-6726-q276-g6f6
-   is not a reason for this trap: it concerns same-OS-user agent impersonation on a host, see
-   `SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md` §6.5.1.)* Each builder uploads its
+   `cef-windows-x86_64-152.0.7977.83-r2` → `agent3-workflow[bot]`, 2026-09-23.)* Each builder uploads its
    runtime as a **draft** from its own machine with `gh-agent release create --draft`, and the
    upgrade's manager publishes the three drafts (Day 2 step 4). A draft is not public and no build
    resolves it (step 2).
@@ -159,7 +157,7 @@ repository access covers it (org settings → GitHub Apps) before Day 1 — its 
 #### Day 1 results (2026-09-29)
 
 - **Prerequisite** merged: agentmuxai/agentmux#3987 (pins in `scripts/cef-build/cef-runtime-pins.sh`);
-  the drift reporter reads that file (a5af/shared-infrastructure#541, deployed).
+  the drift reporter reads that file (updated in the private infrastructure repo, deployed).
 - **`agentmuxai/cef` `8037`** cut from upstream **682c378d7**, not 564dd6c4: four later upstream
   fixes, same `refs/tags/154.0.8037.58`. Port PR #10, one commit per item, all 18 Layer B files
   3-way merged with no conflicts. **Build SHA: `660112374b790582d63a356da633fb2cb14b7538`**; gate

@@ -183,7 +183,7 @@ Verified live against the running dev instance via its CDP debug port
 - Dispatching `mouseenter` on a terminal pane's header (`[data-role="block-header"]`)
   produces a `[data-pane-overlay]` tooltip whose text matches that pane's
   previously-inline text exactly (confirmed with a real OSC-title-derived
-  `asafebgi@starpower:~` shell prompt).
+  `user@host:~` shell prompt).
 - Dispatching `mouseleave` removes it.
 
 Not covered by an automated test: `BlockFrame_Header` has no existing

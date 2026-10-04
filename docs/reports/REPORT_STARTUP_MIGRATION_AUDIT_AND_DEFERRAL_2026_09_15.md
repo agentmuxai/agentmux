@@ -38,7 +38,7 @@ constraints, not just history:
   skip-if-already-non-empty guard (§5 below) see tables the *already-running*
   instance had touched and skip backfilling other channels' data — for good,
   since a migration only ever runs once.
-- **`1052c985b`** (2026-06-27, **authored by `asaf <asafebgi@gmail.com>` —
+- **`1052c985b`** (2026-06-27, **authored by
   the repo owner, not an agent** — "feat(startup): run migrations in-process
   at srv startup for near-instant launch") — reverted the deferral entirely.
   Migrations moved back in-process, before `AGENTMUXSRV-ESTART`, specifically

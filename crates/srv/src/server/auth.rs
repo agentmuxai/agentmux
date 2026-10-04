@@ -153,7 +153,7 @@ pub(super) async fn admit_container_agent(
 /// `state.lan_key` grants access to ONLY the `lan_forward_routes` — never the rest
 /// of `/agentmux/service`, `/agentmux/file`, shell creation, credential/
 /// identity endpoints, etc. See `Config::lan_key`'s doc comment for why
-/// this exists (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1).
+/// this exists.
 /// Which of the two credentials `lan_or_full_auth_middleware` accepted
 /// authenticated this specific request. Inserted into the request's
 /// extensions so `handle_reactive_inject` can force `delivery_tier = "lan"`

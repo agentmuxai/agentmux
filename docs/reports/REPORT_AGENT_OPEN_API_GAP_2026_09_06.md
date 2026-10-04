@@ -166,9 +166,9 @@ second phase; do not do WAN in this work.** That mirrors the sequencing
 `FleetBulkStop`'s spec calls stopping "destructive" and scopes it carefully.
 Opening is destructive in a different, less obvious way: it **spawns a process,
 consumes provider tokens, and can bind credentials**. A remote open is closer to
-"execute code on that machine" than "stop something already running". The
-`ENFORCE_AGENT_BINDING` work (audit §4.2 — *"built, verified ~90%, never turned
-on"*) is directly relevant and should be settled before LAN/WAN, not after.
+"execute code on that machine" than "stop something already running".
+Server-side per-agent authorization is directly relevant and should be
+settled before LAN/WAN, not after.
 
 ### 4.2 Concurrency across instances is already unsolved
 

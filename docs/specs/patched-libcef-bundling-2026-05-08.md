@@ -11,7 +11,7 @@
 
 AgentMux's Linux build needs **two patches to `libcef.so`** that are not in upstream CEF:
 
-1. **`CefWindow::BeginWindowDrag()`** — added by [a5af/cef PR #1](https://github.com/a5af/cef/pull/1) (merged into the `agentmux/7680-drag-rightclick-and-transparency` branch). Needed by AgentMux PR #663 for left-click window drag on Linux/Wayland (`agentmux-cef/src/ui_tasks.rs::StartWindowDragTask` calls `cef::sys::_cef_window_t::begin_window_drag` via raw FFI; the slot doesn't exist in the upstream `_cef_window_t` struct).
+1. **`CefWindow::BeginWindowDrag()`** — added by PR #1 on the CEF fork (`a5af/cef`, now `agentmuxai/cef`; merged into the `agentmux/7680-drag-rightclick-and-transparency` branch). Needed by AgentMux PR #663 for left-click window drag on Linux/Wayland (`agentmux-cef/src/ui_tasks.rs::StartWindowDragTask` calls `cef::sys::_cef_window_t::begin_window_drag` via raw FFI; the slot doesn't exist in the upstream `_cef_window_t` struct).
 2. **Transparency broadening** for views-hosted browsers (cherry-pick of Chad Nelson's `SetBackgroundOpaque(false)` change) — needed for the eventual transparency feature.
 
 The patches live in a built `libcef.so` at `~/cef-build/chromium_git/chromium/src/out/Release_GN_x64/libcef.so` (642 MB stripped, head `5ab41b6` on the `agentmux/7680-...` branch — see `~/.claude/projects/-home-snowbark/memory/cef_build_in_progress.md`).

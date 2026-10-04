@@ -4,10 +4,7 @@
 
 ## 1. Source
 
-`a5af/shared-infrastructure`'s new `provider-reporter` Lambda (PR #458,
-`shared-infrastructure/provider-reporter/`) ran its scheduled drift check
-overnight and archived the result at
-`s3://infrastructure-provider-reporter-reports/reports/agentmux/2026-09-06.json`
+A scheduled internal provider-version drift check ran overnight
 (`generated_at: 2026-09-06T13:15:32Z`). It compares each provider's
 `pinnedVersion` in AgentMux's `catalog.ts` against the latest version
 published on npm.
@@ -40,8 +37,7 @@ packages are genuinely unpublished (muxcode is AgentMux's own first-party
 CLI, not yet released to npm; antigravity is Google's harness, not yet
 public on npm either). The reporter's `lookup-failed` severity (`warn`)
 already exists precisely to distinguish this from a registry error rather
-than silently reporting "no drift" (see `provider-reporter/README.md`
-"Known limitations"). There is nothing to bump for either provider — their
+than silently reporting "no drift". There is nothing to bump for either provider — their
 `pinnedVersion` stays as-is until the package actually publishes.
 
 ## 4. Fix — bump six pins across all locations the pin-consistency test enforces
@@ -89,10 +85,9 @@ inline.
 - No change to `muxcode`/`antigravity`/`kimi`/`pi` pins (§3, and pi/kimi
   need no change per §2).
 - No model catalog changes (all current per §2).
-- Not fixing `provider-reporter`'s own known limitation that `catalog.ts`
+- Not fixing the drift check's own known limitation that `catalog.ts`
   is scraped rather than consumed as a generated contract — tracked
-  separately in `shared-infrastructure/specs/SPEC_REPORTER_PLATFORM_CONSOLIDATION_2026_09_05.md`,
-  out of scope for this repo.
+  separately, out of scope for this repo.
 
 ## 6. Testing
 

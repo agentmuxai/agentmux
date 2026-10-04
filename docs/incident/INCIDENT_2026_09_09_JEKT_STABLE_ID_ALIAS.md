@@ -10,7 +10,7 @@ live `DiscoverAgents`/`env` reproduction of the underlying mismatch instead).
 
 ## Background
 
-`docs/incident/INCIDENT_2026_09_08_REAGENT_JEKT_NOT_DELIVERED.md` (PR #3100) root-caused why
+An earlier incident report (PR #3100, since moved to the private cloud repo) root-caused why
 GitHub PR-review notifications ("jekts") routed through the muxbus cloud relay were not reaching
 this agent, but that PR only *documented* the mechanism — it shipped no code change. This incident
 implements the fix its §6 pointed at.
@@ -51,7 +51,7 @@ none of #3100 §6's fix options had been implemented before this PR.
 
 (An earlier hypothesis in this investigation — that `"Claude"` vs `"claude"` in that same
 `DiscoverAgents` output was a case-sensitivity bug — was checked and disproven; see
-`INCIDENT_2026_09_09_JEKT_CASE_MISMATCH_SUBSCRIPTION.md`. Every comparison on this path already
+the companion report (also in the private cloud repo). Every comparison on this path already
 lowercases both sides. The real mismatch is `agentg` vs. `claude` — two different strings, not a
 case variant of one.)
 

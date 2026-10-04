@@ -65,7 +65,7 @@ Key properties:
 
 | Where | What |
 |---|---|
-| agentmux-cloud | `POST /login-relay` (create, from srv, unauthenticated-but-rate-limited — the record is opaque), `POST /desktop-callback-submit` (from the hosted page), `GET /login-relay/{state}` (single-read delete). DynamoDB item with TTL ≤ 5 min. Static `desktop-callback` page (no JS framework needed — one form-POST + message). CDK: Cognito app-client callback-URL update. |
+| agentmux-cloud | Relay endpoints to create a short-lived (≤ 5 min), single-read relay record keyed by `state`, accept the code from the hosted page, and return it once to the polling desktop app; a static hosted callback page; registering the new callback URL with the sign-in provider. |
 | agentmux (this repo) | `pkce.rs`: replace steps 4 & 7 (bind + accept loop) with relay create + poll loop. Everything else (verifier, challenge, state, token exchange, credential save) unchanged. Delete `try_bind_callback_listener` and the 400/404 HTML responses. |
 | Rollout | Ship cloud first (both callback URLs registered), then the desktop change; loopback path deleted one release later. |
 
@@ -85,8 +85,8 @@ Key properties:
 
 ## 5. Open questions
 
-1. Rate-limit/abuse posture for the unauthenticated relay endpoints (suggest:
-   per-IP token bucket + 512-byte body cap; records are opaque UUIDs).
+1. Rate-limit/abuse posture for the unauthenticated relay endpoints — a
+   relay-side decision, designed in the private cloud repo.
 2. Should the hosted page auto-close (`window.close()` works only for
    script-opened tabs — likely just show "return to AgentMux").
 3. Telemetry: count relay creates/completions to watch for the flow silently

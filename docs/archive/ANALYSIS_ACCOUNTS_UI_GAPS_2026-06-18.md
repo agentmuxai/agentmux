@@ -10,13 +10,13 @@
 
 ## 1. Context
 
-As part of populating AgentMux `db_identity_accounts` with credentials from AWS
-Secrets Manager (`services/infra`), we audited the Trust Center Accounts UI and
-found three bugs causing the view to feel "create-only": accounts we added were
-either invisible or showed stale/wrong metadata.
+As part of populating AgentMux `db_identity_accounts` with credentials from a
+private secret store, we audited the Trust Center Accounts UI and found three
+bugs causing the view to feel "create-only": accounts we added were either
+invisible or showed stale/wrong metadata.
 
-Secrets were added using `@a5af/secrets` CLI (v1.1.6) with `backend:
-secrets_manager` refs only — no plaintext values were stored in the DB or repo.
+Accounts were added with `backend: secrets_manager` refs only — no plaintext
+values were stored in the DB or repo.
 
 ---
 
@@ -113,10 +113,4 @@ for SM accounts instead.
 
 All use `backend: "secrets_manager"` — only path refs stored, no values on disk.
 
-| Name | Provider | Kind | SM key |
-|------|----------|------|--------|
-| Anthropic API | anthropic | api_key | `claude-api-token` |
-| Kimi API | custom | api_key | `kimi-api-key` |
-| GitHub (admin) | github | pat | `gh-admin-pat` |
-| GitHub (agent1–5, agentx, agenty) | github | pat | `gh-token-agent*` |
-| AgentMux Bus | agentmux | api_key | `agentmux-api-key` |
+(credential storage details are kept in the private infrastructure repo)

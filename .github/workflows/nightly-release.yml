@@ -8,27 +8,19 @@ name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
 # checkable precondition (name match, listener present on `main` well
 # before the upstream run, upstream run itself succeeding) being satisfied.
 #
-# The actual automated tag-and-publish responsibility now lives in
-# a5af/shared-infrastructure's gh-reporter Lambda instead — it already runs
-# reliably on its own AWS EventBridge schedule (every 30 min, not just
-# nightly) and already has the GitHub API credentials this needs. See
-# GH_REPORTER_RELEASE_AUTO_TAG_SPEC_2026_08_24.md, in the private
-# a5af/shared-infrastructure repo's specs directory (named without a
-# repo-relative path: it is not a file here, and a path-shaped reference to
-# another repository is the dangling pointer check-spec-citations.sh exists
-# to catch),
-# for the design, and docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md
-# in this repo for the original (now superseded, for the tagging half only)
-# design.
+# The actual automated tag-and-publish responsibility now lives in a
+# private release monitor, designed in a private infrastructure repo.
+# See docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md in this repo for
+# the original (now superseded, for the tagging half only) design.
 #
 # This workflow is KEPT, not deleted, as a manual escape hatch — e.g. if
-# gh-reporter's Lambda or its PAT is ever down, someone can still run this
-# by hand (Actions tab → "Run workflow") exactly as it always worked. The
+# the release monitor is ever down, someone can still run this by hand
+# (Actions tab → "Run workflow") exactly as it always worked. The
 # automatic `workflow_run` trigger is removed rather than left in place:
 # leaving two independent "automatic" taggers active would be redundant
 # (harmless in the common case — the second one just finds "already
-# tagged" and no-ops — but confusing) now that gh-reporter is the one that
-# actually works.
+# tagged" and no-ops — but confusing) now that the release monitor is the
+# one that actually works.
 #
 # It does NOT run `task release`, does NOT touch .changesets/, and does NOT
 # decide a version bump — it only finds the most recent `chore: release`
@@ -115,11 +107,8 @@ jobs:
           # The optional "<Agent>@<host>: " prefix is the title prefix
           # shared-identity PRs must carry (SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md);
           # squash merges keep it in the subject. Without it v0.56.10-v0.56.12
-          # were skipped. Must stay in sync with gh-reporter's
-          # _RELEASE_COMMIT_RE (a5af/shared-infrastructure), which gets the
-          # same prefix in a5af/shared-infrastructure#499. Until that is
-          # merged AND the Lambda redeployed, only this manual workflow
-          # recognizes prefixed release commits.
+          # were skipped. Must stay in sync with the release-commit pattern
+          # of the private release monitor.
           match=$(git log HEAD --format='%H%x09%s' | grep -m1 -E $'\t([^:]+@[^:[:space:]]+: )?chore: release v[0-9]+\\.[0-9]+\\.[0-9]+' || true)
           if [ -z "$match" ]; then
             echo "No \`chore: release\` commit found on main at all — nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"

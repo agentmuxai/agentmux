@@ -836,8 +836,7 @@ folded in as 2.3. Where §6.1–§6.4 disagree with the code, this section wins.
 - **Cannot: stop one agent from acting as another.** Every agent runs as the
   same OS user, and the instance key, the UI's powers and any per-agent token
   are reachable from a pane by several same-user routes (process
-  environments, files under the data dir, the shared registry), plus one
-  host-level exposure reported privately as GHSA-6726-q276-g6f6. On Windows a
+  environments, files under the data dir, the shared registry). On Windows a
   same-user process can read another's memory outright. **#3501 is recorded
   as not closable at the same-user boundary**; closing it needs per-agent OS
   users or a hardened host — a separate spec, for which peer-credential

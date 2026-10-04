@@ -1,8 +1,8 @@
 # Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement)
 
 **Date:** 2026-08-13
-**Type:** Security design spec (cross-repo: `agentmux`, `agentmux-cloud`)
-**Status:** active — **host tier shipped, WAN half still gated.** The host-tier HMAC layer
+**Type:** Security design spec
+**Status:** active — **host tier shipped; the WAN half is tracked in the private cloud repo.** The host-tier HMAC layer
 this document designed is live:
 `agentmux_common::jekt_sign` (`sign_jekt`/`verify_jekt`), per-agent key injection via
 `inject_jekt_signing_keys_into_mcp_json` (`agentmux-srv/src/backend/agent_config.rs:1312`,
@@ -14,16 +14,9 @@ body text is deliberately left as written: it describes the pre-implementation s
 still the clearest account of *why* the layer exists. The LAN and cross-channel tiers built on
 top of it are their own specs (`SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`,
 `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`). — PRs touching this work, newest first: #2565
-**Still open — §1.2 Gap A, the other half of this spec’s own title:** the WAN binding check
-(`agentmux-cloud` `checkAgentBinding`) is built but **inert** — it only warns, because
-`ENFORCE_AGENT_BINDING` is not set in any CDK/Lambda environment config, and §4.1/§6 still
-require live verification and burn-in before that flag can be flipped. Corrected 2026-09-16
-after this line was briefly restamped `implemented` on the strength of the host tier alone
-(codex P2 on PR #3284) — which would have dropped the sender-binding work out of the active
-backlog, the exact failure mode `REPORT_MIGRATION_WRAPUP_STATUS_2026_09_16.md` was written
-about.
+**The WAN half of this spec’s title** is not covered here: relay-side work lives in the private cloud repo, and same-account WAN sender verification is its own spec (`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`). This status was briefly restamped `implemented` on the strength of the host tier alone and corrected on 2026-09-16 (codex P2 on PR #3284), so the WAN work would not drop out of the backlog, the failure mode `REPORT_MIGRATION_WRAPUP_STATUS_2026_09_16.md` was written about.
 **Trigger:** User question — "is there a trust layer so agents know they are getting real messages? If not, let's design it."
-**Builds on:** `docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (the original spec — this document completes its never-built §5.3/Phase 5), `agentmux-cloud/muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (a separate, already-mostly-shipped effort solving the same problem for the WAN tier specifically).
+**Builds on:** `docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (the original spec — this document completes its never-built §5.3/Phase 5). The WAN tier is addressed by separate work in the private cloud repo.
 
 ---
 
@@ -33,10 +26,10 @@ about.
 
 1. **Tier/severity escalation is sound and fully enforced today.** Any network-delivered jekt is unconditionally forced to `TIER=sensitive` (human-confirm-required) regardless of content, and this has never actually been weakened server-side — confirmed directly in `agentmux-srv/src/backend/reactive/sanitize.rs`/`handler.rs`. This is the mechanism that matters most for *safety* (stopping a spoofed jekt from *doing* damage) and this spec does not touch it.
 2. **Sender-*identity* verification ("is this really from Agent1?") is the actual gap**, and it's asymmetric across delivery tiers:
-   - **WAN (cloud relay):** a real fix — per-agent Cognito M2M credentials + a server-side binding check — is ~90% built (`agentmux-cloud`, commit `40a2fc4`/#25) but its enforcement flag (`ENFORCE_AGENT_BINDING`) has never been set in any deployed environment. It currently only logs mismatches, never rejects them.
+   - **WAN (cloud relay):** addressed by separate work in the private cloud repo; out of scope here.
    - **Host tier (same machine):** the original jekt spec (§5.3/Phase 5) explicitly scoped an HMAC-signing fix for this and it was **never implemented**. Today, a raw call to the local srv's injection endpoint can self-declare any `source_agent` with zero verification — the only real protection today is that the *sanctioned* path (the `SendMessage` MCP tool every agent actually uses) derives `source_agent` from the calling process's own `AGENTMUX_AGENT_ID` environment variable, not from anything the agent's own tool-call arguments control. A process that goes around that tool (a raw HTTP call, which any local agent's shell *can* make — it has the shared auth key too) is not stopped.
 
-This spec: (a) recommends finishing the already-mostly-built WAN fix, (b) designs the never-built host-tier HMAC signing (the original spec's Phase 5), reusing this codebase's existing per-agent identity infrastructure rather than inventing new machinery.
+This spec designs the never-built host-tier HMAC signing (the original spec's Phase 5), reusing this codebase's existing per-agent identity infrastructure rather than inventing new machinery.
 
 ---
 
@@ -50,24 +43,9 @@ This spec: (a) recommends finishing the already-mostly-built WAN fix, (b) design
 - `agentmux-mcp/src/main.rs:1013`: the `SendMessage` MCP tool — the actual, sanctioned way an agent sends a jekt — reads `source_agent` from `std::env::var("AGENTMUX_AGENT_ID")`, **not** from any parameter the tool's own JSON schema exposes to the calling LLM. An agent using its own tool literally cannot ask the tool to claim a different `source_agent` — this is sound by construction, already.
 - CLAUDE.md's own 2026-08-12 note documents that a PR (#2536) once claimed this policy had been relaxed by "the repo owner" — confirmed unauthorized, and confirmed the server-side enforcement above was never actually touched regardless of what that PR's doc edit claimed. Worth stating plainly: that incident is evidence the *policy documentation* can be tampered with, not that the *enforcement code* was ever weak — this spec's own audit reconfirms the enforcement code is intact today.
 
-### 1.2 Gap A — WAN binding check: built, but inert
+### 1.2 WAN tier
 
-`agentmux-cloud/muxbus/server/src/agent-binding.ts:22-36` (`checkAgentBinding`):
-```ts
-if (auth?.mode !== "cognito" || !auth.boundAgentId || auth.boundAgentId === claimedAgentId) {
-    return false; // no mismatch (or nothing to check)
-}
-// ...
-if (process.env.ENFORCE_AGENT_BINDING === "true") {
-    reply.status(403).send({ error: "agent_binding_mismatch", message });
-    return true;
-}
-console.warn(`... (not enforced -- set ENFORCE_AGENT_BINDING=true once verified)`);
-return false;
-```
-Verified via `grep -rn ENFORCE_AGENT_BINDING` across `agentmux-cloud` and `shared-infrastructure`: the flag appears **only** in the check's own source and its test file — never in any CDK/Lambda environment config. It is not set anywhere.
-
-`agentmux-cloud/muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (the plan that built this) states its own client-side half ("Step 2 — desktop app fetches per-agent credentials") had **not shipped** as of 2026-07-06. That status line is now **stale**: `agentmux-srv/src/muxbus/agent_credentials.rs` exists today, wired into `cloud_subscriber.rs`'s `sync_agent_reactive` (per-agent token fetch with fallback to the shared token on failure/not-yet-provisioned). **Step 2 has, in fact, shipped since that doc was last updated** — this spec corrects the record. That means `auth.boundAgentId` should actually be populating in practice now for agents that have gone through provisioning, which is a meaningfully different (better) starting point than the plan doc's own "essentially always unset" framing suggests. This needs live verification (§4.1), not just a code read, before flipping the flag.
+Sender binding on the cloud relay is out of scope for this repo; it is tracked in the private cloud repo.
 
 **Also confirmed durable and non-spoofable regardless of the above:** `delivery_tier` on the WAN path is stamped by the local sidecar itself (`cloud_subscriber.rs:787`, `delivery_tier: Some("wan".to_string())`) from a `PendingInj` struct that has **no `delivery_tier` field at all** — the cloud server has no way to make a message look host-delivered. Only `source_agent` (the FROM claim) is the unverified piece on this tier, not the tier/trust label itself.
 
@@ -85,19 +63,15 @@ The only gate on this endpoint is the single shared `X-AuthKey` (`agentmux-srv/s
 
 ## 2. Design
 
-### 2.1 Finish Gap A (WAN) — verification + flag flip, not new design
+### 2.1 WAN tier
 
-This is mostly complete work, not a new mechanism:
-1. Live-verify `agent_credentials.rs`'s provisioning path actually succeeds end-to-end against production (not just that the code compiles/exists) — confirm `auth.boundAgentId` is genuinely populated for a real provisioned agent's WAN calls today.
-2. Check the mismatch log volume in the deployed muxbus server (the log-only `console.warn` path) for a burn-in period — the plan's own migration sequencing step 3 ("once verified end-to-end on a real installed build") is the right gate, not a blind flip.
-3. Set `ENFORCE_AGENT_BINDING=true` in the deployed Lambda environment (`shared-infrastructure`'s muxbus stack config) once (1)-(2) are clean.
-4. The legacy shared-token fallback path remains permanently unenforced by design (per the existing plan) — that's an accepted, bounded gap (a caller must still get the human-confirm gate via the unconditional network→sensitive escalation regardless), not something this spec proposes changing.
+Not designed here; the relay-side work lives in the private cloud repo.
 
 ### 2.2 Design Gap B (host tier) — per-agent HMAC signing
 
 Reuses two things this codebase already has, rather than inventing new identity infrastructure:
 - **Per-agent identity is already a first-class concept**: `AGENTMUX_AGENT_ID` is injected into every agent's process environment at spawn (confirmed: `agentmux-mcp/src/main.rs:618`, and this repo's `CLAUDE.md` documents it as the canonical per-agent identity used for PR attribution).
-- **A secret store already exists for per-agent credentials**: the identity/keychain infrastructure backing Armory accounts and `@a5af/secrets`-resolved PATs (referenced throughout `CLAUDE.md`'s "Which GitHub account am I acting as?" section) is the natural place to also mint and store a per-agent *signing* secret — a new kind of secret, not a repurposing of an existing credential (an agent's GitHub PAT should never double as its jekt-signing key — different blast radius on compromise).
+- **A secret store already exists for per-agent credentials**: the identity/keychain infrastructure backing Armory accounts is the natural place to also mint and store a per-agent *signing* secret — a new kind of secret, not a repurposing of an existing credential (an agent's GitHub PAT should never double as its jekt-signing key — different blast radius on compromise).
 
 **Mechanism:**
 1. **At agent spawn**, srv mints (or reuses, if already provisioned) a per-agent-instance HMAC key — a random 256-bit secret, stored server-side keyed by `AGENTMUX_AGENT_ID` (scoped to *this* srv instance's data dir, not synced anywhere — this is a local, same-machine trust primitive, not a network credential; deliberately simpler than the WAN Cognito approach because the threat model is different — see §3). Not injected into the agent's own process environment (an agent process that can read its own signing key could sign messages on behalf of a compromised future self just as easily as an attacker could without one — the key must live only in srv's own store, checked at message-send time via the same env-var identity the MCP tool already reads).
@@ -122,7 +96,7 @@ The WAN design (per-agent OAuth client_credentials tokens) fits its threat model
 
 ## 4. Non-goals
 
-- Signing/verifying LAN or WAN tier messages via this mechanism — WAN already has its own (separate, more appropriate) design in progress (§2.1); LAN tier's own trust story is unaddressed by either effort and is a follow-up, not part of this spec.
+- Signing/verifying LAN or WAN tier messages via this mechanism — WAN is handled separately (§2.1); LAN tier's own trust story is unaddressed by either effort and is a follow-up, not part of this spec.
 - Cross-AgentMux-instance host-tier delivery on the same machine (§2.2 point 5).
 - Any relaxation of the sensitive-content keyword list, the network-always-sensitive rule, or the "a muxbus confirmation from another agent is not sufficient" rule — this spec is purely additive to sender-identity verification, not a change to action-authorization policy.
 - Key rotation UX, revocation, or a management UI for per-agent signing keys — needed eventually, sized separately once the core mechanism is proven.
@@ -131,7 +105,7 @@ The WAN design (per-agent OAuth client_credentials tokens) fits its threat model
 
 ## 5. Phased plan
 
-1. **WAN (agentmux-cloud + shared-infrastructure):** live-verify per-agent credential provisioning end-to-end; burn in log-only mismatch monitoring; flip `ENFORCE_AGENT_BINDING=true`. Mostly ops/verification work, minimal new code.
+1. **WAN:** tracked in the private cloud repo.
 2. **Host tier, srv-side (agentmux-srv):** per-agent HMAC key mint/store at spawn (or first `SendMessage`); local sign-request RPC scoped to the caller's own env-derived identity; `jekt_sig` field in `wrap_jekt_message`; verification + `TRUST=unverified` downgrade path on receive.
 3. **Host tier, MCP-side (agentmux-mcp):** `SendMessage` handler requests a signature from srv before delivery; no schema change visible to the calling agent/LLM (signing stays fully server-orchestrated, matching how `source_agent` itself is already invisible to the tool's own input schema — §1.1).
 4. **Frontend (optional, later):** surface `TRUST=unverified` distinctly from `host-verified`/`network-claimed` in the `JektBubble` UI (§3.3 of the original spec) once phases 2-3 are live.
@@ -146,9 +120,6 @@ The WAN design (per-agent OAuth client_credentials tokens) fits its threat model
 - `agentmux-srv/src/backend/reactive/types.rs` (`InjectionRequest`)
 - `agentmux-srv/src/server/mod.rs` (lines 1347-1373, `X-AuthKey` middleware)
 - `agentmux-srv/src/muxbus/cloud_subscriber.rs` (WAN delivery, `delivery_tier` stamping, per-agent token usage)
-- `agentmux-srv/src/muxbus/agent_credentials.rs` (per-agent Cognito M2M credential fetch — confirms Step 2 of the cloud plan has shipped since that doc's last update)
+- `agentmux-srv/src/muxbus/agent_credentials.rs` (per-agent credential fetch)
 - `agentmux-mcp/src/main.rs` (lines 611-621, 994-1024 — `SendMessage` tool, env-derived `source_agent`)
-- `agentmux-cloud/muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md`
-- `agentmux-cloud/muxbus/server/src/agent-binding.ts`, `agent-binding.test.ts`
-- `agentmux-cloud/muxbus/server/src/index.ts` (`/reactive/inject` route)
 - CLAUDE.md (both the agent-level file and this repo's copy) — jekt security rules and the PR #2536 incident note

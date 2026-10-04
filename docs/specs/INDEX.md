@@ -205,7 +205,6 @@ partial list.
 | [`SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) | Agent tool-call tones get a visual twin: a subtle flash on the tab that made the sound |
 | [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via the Agent App API |
 | [`SPEC_AGENT_COLOR_2026_08_08`](SPEC_AGENT_COLOR_2026_08_08.md) | SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame |
-| [`SPEC_AGENT_DETECTION_PRIORITY_2026_08_07`](SPEC_AGENT_DETECTION_PRIORITY_2026_08_07.md) | SPEC: GitHub review-notification agent detection — username-first, tag as fallback |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
 | [`SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15`](SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md) | Spec: Agent-facing Global Memory API (MCP tools to add/list/read a Global Memory entry) |
 | [`SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20`](SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md) | SPEC: decommission the env-var pane color system; header inherits the agent's identity color |
@@ -355,6 +354,7 @@ partial list.
 | [`SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19`](SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) | Spec: Native Memory Version Control — Single Source of Truth, Two Views (Stash + Armory) |
 | [`SPEC_MIGRATION_FRAMEWORK_2026_06_24`](SPEC_MIGRATION_FRAMEWORK_2026_06_24.md) | Migration Framework Spec |
 | [`SPEC_MONOLITH_MODULE_SPLITS_2026_09_22`](SPEC_MONOLITH_MODULE_SPLITS_2026_09_22.md) | SPEC — Split the two largest `agentmux-srv` files into directory modules |
+| [`SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04`](SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md) | Plan: muxbus cross-channel duplicate delivery |
 | [`SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02`](SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md) | MuxBus cloud sign-in: scope the keychain tokens to the channel |
 | [`SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27`](SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md) | SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here" |
 | [`SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22`](SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md) | SPEC: `muxlog swarm -d/--dispatch` — a correlated dispatch-lifecycle verdict |
@@ -553,7 +553,6 @@ partial list.
 | [`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09`](SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md) | Spec: Instruction and Memory Portability |
 | [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01`](SPEC_JEKT_DELIVERY_STATES_AND_MAILBOX_2026_10_01.md) | SPEC: jekt delivery that tells the truth — receiver state, one mailbox, receipts |
-| [`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13`](SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md) | Spec: Securing LAN and WAN tier jekt delivery — closing cross-tenant and cross-network trust gaps |
 | [`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13`](SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md) | Spec: Completing the jekt sender-trust layer (host-tier signing + WAN binding enforcement) |
 | [`SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30`](SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md) | SPEC: Large-file module analysis and DRY opportunities |
 | [`SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11`](SPEC_LAUNCHER_TEARDOWN_BACKSTOP_2026_07_11.md) | SPEC: Launcher-side teardown backstop (UI-thread liveness probe + armed J0 teardown) |
@@ -563,7 +562,6 @@ partial list.
 | [`SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08`](SPEC_MCP_INTEGRATION_PARITY_ABLETON_PILOT_2026_07_08.md) | Spec: MCP integration parity with Claude Desktop / Cursor, piloted on Ableton MCP |
 | [`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16`](SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16.md) | Memory-Pressure Supervision & Graceful Degradation (host / instance level) |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
-| [`SPEC_MUXBUS_FREE_ACCOUNT_ABUSE_HARDENING_2026_08_17`](SPEC_MUXBUS_FREE_ACCOUNT_ABUSE_HARDENING_2026_08_17.md) | SPEC: muxbus free-account abuse hardening — closing the sign-up/messaging backdoors |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_MUXSH_CLI_2026_09_16`](SPEC_MUXSH_CLI_2026_09_16.md) | SPEC: `muxsh` — a terminal-side pane-opener for the Agent App API |
 | [`SPEC_MUXSH_FULL_COLLECTION_2026_09_16`](SPEC_MUXSH_FULL_COLLECTION_2026_09_16.md) | SPEC: The full `muxsh` collection — a consistent, wsh-familiar CLI over the Agent App API |
@@ -669,13 +667,11 @@ partial list.
 | [`SPEC_FLOATING_PANE_TEAROFF_2026_05_11`](SPEC_FLOATING_PANE_TEAROFF_2026_05_11.md) | Floating pane tear-off (subordinate window, owned by mother instance) |
 | [`SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26`](SPEC_FLOATING_PANE_TEAROFF_CROSS_PLATFORM_2026-05-26.md) | Floating pane tear-off — cross-platform recipes |
 | [`SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20`](SPEC_FOREGROUND_BACKGROUND_PROCESS_ABSTRACTION_2026_08_20.md) | Spec: Foreground/Background Process Abstraction for Agent-Run Commands |
-| [`SPEC_GENERIC_INTEGRATIONS_2026_09_24`](SPEC_GENERIC_INTEGRATIONS_2026_09_24.md) | SPEC: Generic integrations — external services talk to agents through one authenticated interface, nothing hard-coded |
 | [`SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24`](SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md) | SPEC — Global Identity, Memory, and Drone Definitions |
 | [`SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18`](SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md) | Spec: Host vs Container Agent Differentiation |
 | [`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06`](SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md) | Spec: Make isolated auth the default for every non-`stable` channel |
 | [`SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15`](SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md) | SPEC: Narrow TIER=sensitive to real red flags only |
 | [`SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17`](SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md) | SPEC: TIER=sensitive no longer STOPs work for a cryptographically verified sender |
-| [`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17`](SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md) | SPEC: general agent-to-agent WAN-tier jekt signing |
 | [`SPEC_LAN_FIREWALL_SETUP_2026_10_01`](SPEC_LAN_FIREWALL_SETUP_2026_10_01.md) | SPEC: LAN that works on a fresh install, with no manual firewall steps |
 | [`SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05`](SPEC_LAUNCHER_LINUX_PACKAGED_AND_SPLASH_2026_06_05.md) | SPEC: Launcher + reducer/saga parity on Linux + Linux splash |
 | [`SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30`](SPEC_LAUNCHER_MACOS_DEV_INTEGRATION_2026_05_30.md) | SPEC: Integrating `agentmux-launcher` into macOS / Linux `task dev` |
@@ -949,9 +945,7 @@ partial list.
 | [`SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03`](SPEC_MULTI_INSTANCE_ISOLATION_HARDENING_2026_06_03.md) | SPEC: Multi-Instance Isolation Hardening & Crash-Safety Verification |
 | [`SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06`](SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md) | SPEC: Multi-Session Agent Fork |
 | [`SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16`](SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md) | MuxBus — Persistent-Agent Delivery & Unified Agent Discovery |
-| [`SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04`](SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md) | Plan: muxbus cross-channel duplicate delivery |
 | [`SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15`](SPEC_MUXBUS_DELIVERY_HIERARCHY_2026_06_15.md) | MuxBus Delivery Hierarchy |
-| [`SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06`](SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md) | Plan: MuxBus multi-tenant security — current state and path to production isolation |
 | [`SPEC_NATIVE_BROWSER_PANE_2026_04_17`](SPEC_NATIVE_BROWSER_PANE_2026_04_17.md) | SPEC: Native Browser Pane via CefBrowserView |
 | [`SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23`](SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md) | Nightly Release Automation — Auto-Publish the Latest Pending Version Bump |
 | [`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14`](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | SPEC: Internal-event → frontend WaveObjUpdate bridge |

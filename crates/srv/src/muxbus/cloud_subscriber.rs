@@ -36,14 +36,9 @@ use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 use crate::broker::RefreshErrorKind;
 
-// Dedicated custom domain on the API Gateway WebSocket API (apigatewayv2
-// DomainName + ApiMapping), not a path under muxbus.agentmux.ai's CloudFront
-// distribution. A CloudFront path behavior would have forwarded this
-// client's literal /ws request path prefixed by originPath, landing at
-// /{stage}/ws on the origin — but the WS handshake endpoint only exists at
-// exactly /{stage}. No path suffix here: the domain root maps directly to
-// the API's default stage. Full design/history in the agentmux-cloud repo's
-// muxbus/ directory (search for the WebSocket relay redesign writeup).
+// The relay's WebSocket endpoint has its own domain, and the handshake is at
+// the domain root: no path suffix. The relay side is designed in the private
+// cloud repo.
 /// Fallback when the cloud publishes no settings (`discovery::ws_url`).
 pub(crate) const MUXBUS_WS_URL: &str = "wss://muxbus-ws.agentmux.ai";
 pub(crate) const MUXBUS_REST_URL: &str = "https://muxbus.agentmux.ai";
@@ -53,14 +48,13 @@ const MAX_RECONNECT_DELAY_SECS: u64 = 60;
 // (no network beyond the cached discovery document) in case another channel
 // sharing the store signed in.
 const STALE_RECHECK_SECS: u64 = 60;
-// AWS API Gateway WebSocket APIs enforce a 10-minute idle timeout with no
-// server-initiated keepalive of their own — the connection is dropped on
-// silence in both directions. Ping well under that so a quiet connection
-// (no inject_available traffic) survives indefinitely. The ping is an
-// app-level ClientMsg::Ping frame, not a WS-protocol-level Message::Ping —
-// API Gateway does not reliably relay raw protocol ping/pong control frames,
-// so a normal data frame is what actually keeps the connection alive in
-// production (see ClientMsg::Ping's doc comment).
+// The relay drops a WebSocket that has been silent in both directions for
+// 10 minutes and sends no keepalive of its own. Ping well under that so a
+// quiet connection (no inject_available traffic) survives indefinitely. The
+// ping is an app-level ClientMsg::Ping frame, not a WS-protocol-level
+// Message::Ping — raw protocol ping/pong control frames are not reliably
+// relayed, so a normal data frame is what actually keeps the connection
+// alive in production (see ClientMsg::Ping's doc comment).
 const CLIENT_PING_INTERVAL_SECS: u64 = 240;
 // How often the broker's background sweep re-checks the stored MuxBus
 // credential and proactively refreshes it if it's nearing expiry — now the
@@ -75,8 +69,8 @@ const BROKER_SWEEP_INTERVAL_SECS: u64 = 60;
 // from "now" and still verify — anti-replay, same purpose as
 // server/reactive.rs's JEKT_SIG_MAX_AGE_SECS for host-tier (reagentx P1 on
 // PR #2570). Wider than host-tier's 300s because this covers real network
-// delivery latency, not a same-machine call — matches the github-consumer
-// Lambda's own REVIEW_NOTIFICATION_TTL_SECONDS delivery window.
+// delivery latency, not a same-machine call — matches the review
+// notifications' own delivery window.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
 use agentmux_common::time::now_secs as now_unix_secs;
@@ -102,10 +96,9 @@ enum ClientMsg {
     #[serde(rename = "subscribe:remove")]
     SubscribeRemove { agents: Vec<String> },
     // Ack removed — ACK is sent via REST POST /reactive/ack, not WS
-    // App-level keepalive — see CLIENT_PING_INTERVAL_SECS. AWS API Gateway
-    // WebSocket APIs (the production transport) do not reliably relay raw
-    // WS-protocol Ping/Pong control frames, so the keepalive must be a normal
-    // data frame the server's $default route can see and reply to.
+    // App-level keepalive — see CLIENT_PING_INTERVAL_SECS. Raw WS-protocol
+    // Ping/Pong control frames are not reliably relayed in production, so the
+    // keepalive must be a normal data frame the relay can see and reply to.
     Ping,
 }
 
@@ -762,9 +755,8 @@ async fn connect_and_run(
 }
 
 /// How often the subscriber pulls for every registered agent whether or not a
-/// wake signal arrived. The relay's wake is a best-effort broadcast
-/// (`muxbus/server/src/broadcast.ts`: a lost one "just means that sidecar
-/// catches the injection on its own poll interval"), but this client had no
+/// wake signal arrived. The relay's wake is best-effort (a lost one is
+/// meant to be caught by the client's own poll), but this client had no
 /// poll interval, so a jekt that reached the relay before its agent was
 /// subscribed waited for the next unrelated wake: 8m46s on 2026-09-30. The
 /// lease is already renewed every [`super::wan_lease::RENEW_EVERY`], so a
@@ -885,9 +877,8 @@ enum AgentSyncOutcome {
 
 /// Does `status` mean "this credential is not accepted for this request,"
 /// regardless of the specific reason? 401 = expired/invalid token. 403 =
-/// `checkAgentBinding` rejected it (this credential is bound to a
-/// different agent_id than the one it's being used for — see
-/// `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2). Both mean the
+/// the cloud's agent-binding check rejected it (this credential is bound to a
+/// different agent_id than the one it's being used for). Both mean the
 /// SAME thing operationally for a poller CURRENTLY USING A PER-AGENT
 /// CREDENTIAL: that credential can't be used for this agent, so
 /// invalidate-and-retry-with-the-shared-token applies identically to either
@@ -910,7 +901,7 @@ fn is_credential_rejected(status: reqwest::StatusCode) -> bool {
 ///   productive: the outer loop's `load_valid_token` calls
 ///   `RefreshScheduler::ensure_fresh` first, which can mint a genuinely new,
 ///   accepted access token from the refresh_token before retrying.
-/// - 403 (checkAgentBinding rejected this account for `agent_id`) →
+/// - 403 (the agent-binding check rejected this account for `agent_id`) →
 ///   `AgentSyncOutcome::Ok` (skip this agent this cycle, log a warning).
 ///   `MuxBusCredentials::is_valid()` is purely expiry-based, so the still
 ///   time-valid access token survives `load_valid_token` unchanged after a
@@ -944,11 +935,9 @@ fn shared_token_rejection_outcome(status: reqwest::StatusCode, agent_id: &str) -
 /// invalidating the credential alone left this agent's pending injection
 /// undelivered until an unrelated InjectAvailable broadcast happened to
 /// fire again (no periodic resync exists). reagentx P1 (round 4) on
-/// PR #2342; 403 coverage added per
-/// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 (a prerequisite
-/// this spec identified before `ENFORCE_AGENT_BINDING` is safe to flip —
-/// without it, a genuine binding mismatch degrades to a silent stall
-/// instead of falling back the same way an expired token already does).
+/// PR #2342; 403 coverage added later (without it, a genuine binding
+/// mismatch degrades to a silent stall instead of falling back the same
+/// way an expired token already does).
 ///
 /// `base` is the relay's REST base URL ([`super::relay::rest_base_url`]); a
 /// parameter so a test can point one sync at a fake relay.
@@ -1253,8 +1242,8 @@ async fn sync_agent_reactive(
         // class of gap host-tier's `verify_jekt_signature` closed with
         // `JEKT_SIG_MAX_AGE_SECS`. `REAGENT_SIG_MAX_AGE_SECS` is wider
         // (600s vs. 300s) because this is real network delivery, not a
-        // same-machine call — matches the github-consumer Lambda's own
-        // REVIEW_NOTIFICATION_TTL_SECONDS delivery window, so a message
+        // same-machine call — matches the review notifications' own
+        // delivery window, so a message
         // that's still legitimately within its own staleness budget never
         // spuriously fails signature freshness on top of that.
         let reagent_verified = match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {
@@ -1776,8 +1765,7 @@ mod tests {
         assert_eq!(token, "connection-token");
     }
 
-    // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 — a
-    // checkAgentBinding rejection (403) must trigger the exact same
+    // An agent-binding rejection (403) must trigger the exact same
     // invalidate-and-retry-with-shared-token recovery as an expired token
     // (401), not silently fall through to a stalled, unretried delivery.
     #[test]
@@ -1829,8 +1817,7 @@ mod tests {
         }
     }
 
-    // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum —
-    // anti-replay for reagent-signed WAN jekts (reagentx P1 on PR #2570).
+    // Anti-replay for reagent-signed WAN jekts.
     #[test]
     fn reagent_sig_exactly_now_is_fresh() {
         assert!(reagent_sig_is_fresh(1_000, 1_000));

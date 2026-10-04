@@ -74,29 +74,12 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     // a string handed straight to the QR renderer below — it is never
     // logged and never sent anywhere else.
     //
-    // CORRECTED 2026-09-09 (found while researching the remote-terminals/
-    // conversation-history spec in the SEPARATE agentmux-mobile repo — that
-    // spec is not in this repo, so no docs/specs path here to cite):
-    // this comment used to justify handing out the full key by saying it's
-    // "the SAME value the backend already broadcasts in plaintext in its
-    // mDNS TXT record" — true when this shipped (PR #2243, 2026-07-20), and
-    // false since PR #2572 (2026-08-14, SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md
-    // LAN P0-1) narrowed the mDNS/UDP-broadcast credential to a separate,
-    // scoped `lan_key` (`Config::lan_key`, `crates/srv/src/config.rs`) —
-    // see that field's own doc comment for what it's now limited to. QR
-    // pairing was never updated to match, so it grants strictly more than
-    // its own original rationale claimed it did.
-    //
-    // Left as the full key for now, not narrowed to `lan_key`, because
-    // `lan_key` cannot reach `GET /agentmux/discovery`
-    // (`lan_or_full_auth_middleware` in `crates/srv/src/server/mod.rs`
-    // grants exactly three routes, none of them that one) — swapping it in
-    // here would silently break the one thing QR pairing exists for (the
-    // mobile app's Agents list actually populating). Fixing this properly
-    // needs a real scoped read credential wider than `lan_key` but narrower
-    // than `auth_key`, which doesn't exist yet — see that mobile-repo spec's
-    // §4.4 Option A. This comment fix is deliberately scoped to correcting
-    // the now-false claim, not to that larger, separate change.
+    // This is NOT the scoped `lan_key` the backend broadcasts over mDNS/UDP
+    // (`Config::lan_key`, `crates/srv/src/config.rs`); that one was narrowed
+    // in PR #2572 (2026-08-14). Pairing uses the full key because `lan_key`
+    // cannot reach `GET /agentmux/discovery` (`lan_or_full_auth_middleware`
+    // in `crates/srv/src/server/mod.rs` grants exactly three routes, none of
+    // them that one), and the mobile app's Agents list needs it.
     const connectUri = (): string | null => {
         const info = props.hostInfo();
         if (!info || !info.localIp || info.localIp === "127.0.0.1") return null;

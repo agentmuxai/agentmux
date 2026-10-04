@@ -2,7 +2,7 @@
 
 **Status:** implemented — Spec — implemented in this PR — #881
 **Date:** 2026-05-15
-**Owner:** asafebgi@gmail.com
+**Owner:** repo owner
 **Branch:** `agentu/multi-window-fixes` off `main`
 
 ## TL;DR

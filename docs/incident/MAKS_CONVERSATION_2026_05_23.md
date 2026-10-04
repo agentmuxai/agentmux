@@ -52,7 +52,7 @@ secrets --version && deploy --version && reagent --version
 
 ### 3. Secrets Access
 ```bash
-secrets health services/infra services/prod
+secrets health <secret-store paths>
 ```
 
 ### 4. MCP Servers
@@ -98,7 +98,7 @@ Running all verification checks in parallel.
 - 🔧 **2026-05-23 07:32:01Z** 🔧 Bash gh auth status 2>&1 ✓ (collapsed)
 - 🔧 **2026-05-23 07:32:07Z** 🔧 Bash git config user.name && git config user.email 2>&1 ✓ (collapsed)
 - 🔧 **2026-05-23 07:32:16Z** 🔧 Bash npm list -g @a5af/secrets @a5af/deploy-cli @a5af/database-cli @a5af/api-testing @a5af/file-tools @a5af/e2e-cli @a5af/reagent-cli @a5af/workspace-health 2>/dev/null | grep '@a5af/' || echo "MISSING" ✓ (collapsed)
-- 🔧 **2026-05-23 07:32:23Z** 🔧 Bash secrets health services/infra services/prod 2>&1 ✓ (collapsed)
+- 🔧 **2026-05-23 07:32:23Z** 🔧 Bash secrets health <secret-store paths> 2>&1 ✓ (collapsed)
 - 🔧 **2026-05-23 07:32:33Z** 🔧 Bash secrets --version && deploy --version && reagent --version 2>&1 ✓ (collapsed)
 - 🔧 **2026-05-23 07:32:33Z** 🛠️ ToolSearch  ✓ (collapsed)
 ### 💭 thinking — 2026-05-23 07:32:38Z — _node_3_
@@ -138,7 +138,7 @@ Here is the full verification report:
 | **GitHub** | OK | Active account: `<redacted-user>` (+ `a5af` also authenticated) |
 | **Git Identity** | OK | `<redacted-user>` / `<redacted-email>` |
 | **Dev Tools** | OK | All 8 `@a5af/*` packages installed — `secrets@1.1.0`, `deploy@0.4.34`, `reagent@0.3.7` |
-| **Secrets** | OK | `services/infra` (95/100, 1 warning) · `services/prod` (100/100) — 0 critical issues |
+| **Secrets** | OK | both secret-store paths healthy (1 warning) — 0 critical issues |
 | **MCP AgentBus** | PARTIAL | No dedicated AgentBus MCP tool found in this session; `reagent status` shows worker **offline**, queue empty |
 
 ---

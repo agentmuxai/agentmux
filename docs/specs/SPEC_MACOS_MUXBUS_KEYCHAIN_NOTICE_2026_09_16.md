@@ -8,9 +8,9 @@ follow-up:** added a parallel Linux notice (status bar panel only) — see §6;
 §1's original "Windows/Linux don't show an equivalent interactive OS dialog"
 claim was wrong for Linux, corrected there.
 **Repos touched:** `agentmuxai/agentmux` (desktop app) and `agentmuxai/agentmux-cloud`
-(hosted login-relay page). Cross-repo specs are kept in `agentmux`'s `docs/specs/`
-per existing precedent (see `SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md`,
-referenced from `agentmux-cloud/muxbus/server/src/login-relay.ts`).
+(hosted sign-in completion page). Cross-repo specs are kept in `agentmux`'s
+`docs/specs/` per existing precedent (see
+`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md`).
 **Related:** `docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md` —
 background on *why* macOS shows this prompt at all.
 
@@ -114,14 +114,13 @@ appears in two more places that share this component
 was specifically the status bar panel; whether to add the same note to those
 two is an open question (§4).
 
-### 2.2 Hosted login-relay page (agentmux-cloud repo)
+### 2.2 Hosted sign-in completion page (agentmux-cloud repo)
 
-`muxbus/server/src/login-relay.ts`'s `desktopCallbackHtml()` is the page
-Cognito redirects the user's **system browser** to after they authenticate
-(`GET /desktop-callback` — see `SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md`
-for the full relay design). It's a dependency-free inline HTML/JS string
-served by the relay Lambda; it forwards `{state, code}` to
-`/api/login-relay/submit` and then shows a success message:
+The hosted sign-in completion page is where the user's **system browser**
+lands after they authenticate (see
+`SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md` for the product
+flow). It's a small dependency-free page; it hands the sign-in result back
+to the desktop app and then shows a success message:
 
 ```html
 <h1 id="title">Finishing sign-in…</h1>
@@ -132,7 +131,7 @@ detail.textContent = "You can close this tab and return to AgentMux.";
 ```
 
 This runs entirely client-side in whatever browser the OS opened, so platform
-detection has to be **browser-side**, not server-side — the relay Lambda
+detection has to be **browser-side**, not server-side — the server
 itself has no reliable signal for the *desktop OS* (only whatever the
 browser's own `User-Agent` request header says, which is one more hop of
 indirection than just reading it in the page's own JS). `navigator.userAgent`
@@ -164,9 +163,8 @@ if (/Macintosh/.test(navigator.userAgent) && !/iPhone|iPad|iPod/.test(navigator.
 }
 ```
 
-No new dependency, no build step — `desktopCallbackHtml()` is a plain
-template string returned by a Lambda handler, matching the file's existing
-"deliberately dependency-free inline HTML" design note.
+No new dependency, no build step — the page is deliberately
+dependency-free inline HTML.
 
 ## 3. Copy
 
@@ -220,14 +218,14 @@ standalone `<div id="keychainNotice">`, hidden by default and shown (matching
 the existing macOS UA check) as its own bordered/tinted box below the detail
 paragraph, echoing the same visual language (purple accent matching
 `agentmux`'s own `--info-color` default) so the two surfaces read as one
-feature despite being in separate repos with no shared CSS
-(`agentmux-cloud/muxbus/server/src/login-relay.ts`). Copy unchanged.
+feature despite being in separate repos with no shared CSS. Copy
+unchanged.
 
 ## 6. 2026-09-21 follow-up: parallel Linux notice (status bar panel only)
 
 Scope: exactly the surface the user reported the issue on — the status bar
 panel's "MuxBus Cloud" row (`frontend/app/statusbar/HostPopover.tsx`). The
-login-relay page (§2.2, `agentmux-cloud` repo) and the two other
+sign-in completion page (§2.2) and the two other
 `MuxBusController` surfaces flagged in §4 (Identity tab's
 `MuxBusConnectSection`, Armory Accounts gallery tile) are **not** touched by
 this follow-up — same open-question status as before, not expanded just

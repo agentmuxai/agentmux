@@ -46,8 +46,8 @@ Counted mechanically against `git ls-files '*.md'` at `d060d1cf6`:
 
 ### 1.2 The blocking dependency nobody had noticed
 
-`docs/specs/SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` (dated 2026-09-17,
-**Status: proposed — nothing in this document has shipped**) states at L631:
+The WAN-tier signing spec (dated 2026-09-17, no longer in this repo,
+**Status: proposed — nothing in this document has shipped**) states:
 
 > CLAUDE.md's jekt section (repo copy and the workspace copies) must gain
 > `TRUST=wan-verified` in three places: the delivery-tier explainer, the
@@ -200,7 +200,7 @@ path-shaped reference to another repository is exactly the dangling pointer
 
 ### 4.3 Resolve the unlanded WAN-signing dependency
 
-`SPEC_JEKT_WAN_TIER_SIGNING_2026_09_17.md` (§1.2) instructs future
+The WAN-tier signing spec (§1.2) instructs future
 implementers to edit `CLAUDE.md`. Pick one, explicitly:
 
 - **(a)** Update that spec's L631 to name `docs/JEKT_SECURITY_RULES.md` and

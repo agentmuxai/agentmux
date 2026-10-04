@@ -7,7 +7,6 @@
 `docs/specs/SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md`,
 issue #1916 / PR #2350 (Tier 2b same-host cross-channel delivery — see §2 row
 below), `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`,
-`docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`,
 `agentmux-srv/src/backend/lan_discovery.rs`,
 `agentmux-srv/src/muxbus/cloud_subscriber.rs`.
 
@@ -40,7 +39,7 @@ not assumed from prior specs.
 | Discovery endpoint | `GET /agentmux/discovery` — aggregates `host` (same-channel only), `lan`, `wan.subscribed_agents` (this sidecar's own subscriptions only) | **Implemented; no `host.cross_channel[]` field as of this audit** — added in open PR #2350 alongside the Tier 2b fix above, not yet merged. |
 | Mobile LAN pairing | QR-code pairing + UDP broadcast probe, phone↔desktop | **Implemented** — but in `agentmux-mobile`, and scoped to mobile-finds-desktop, not desktop-finds-desktop or agent-to-agent. |
 | Cloud-side enumeration | "What agents/instances exist on the platform/account" | **Does not exist — a stated non-goal.** `cloud_subscriber.rs`'s own doc comment: the server can't correlate a wake signal to any particular agent/account; there's no directory query anywhere. |
-| Cloud-side per-agent authorization | Verifying a credential is actually allowed to act as the `agent_id` it claims | **Does not exist yet.** Per-agent M2M credentials just landed client-side (PR #2342, today), but server-side enforcement is still log-only (`ENFORCE_AGENT_BINDING` unset). Any valid muxbus credential can currently inject to/claim/impersonate any `agent_id`, cross-account. |
+| Cloud-side per-agent authorization | Verifying a credential is actually allowed to act as the `agent_id` it claims | Per-agent M2M credentials just landed client-side (PR #2342, today); the server-side half is tracked in the private cloud repo. |
 | **Remote API/RPC invocation** | Calling a specific tool/command on a *different* instance's agent | **Does not exist at all, on any tier.** Every tier carries exactly one payload shape: a text `message` string, delivered as a conversation turn or raw keystrokes. `SendMessage` is explicitly "text injection into the target's active conversation," not a structured call. There is no verb beyond message delivery anywhere in the wire protocol. |
 
 **The load-bearing finding**: the question "would this be through muxbus, query the instance, then run the API on that remote instance" has two independent parts, and only the first is even partially true today. Discovery (finding instances) is real and working at Tiers 2 (same-channel)/3/4. **Invocation (actually calling an API on what you found) doesn't exist as a concept anywhere in the codebase** — muxbus is a message bus, not an RPC bus. Closing the same-host cross-channel gap alone would not get you to "query then invoke"; it would only fix "query then send a hopeful text message."
@@ -187,9 +186,7 @@ posture), but gains a **separate, explicit directory endpoint** an
 instance can query for "what other instances/agents does *my own
 account* currently have connected" — deliberately narrower than a
 platform-wide directory (matches the existing per-account credential
-scoping direction from PR #2342, and avoids reopening the cross-account
-enumeration/impersonation risk `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`
-already flagged as unresolved). This is new server-side scope in
+scoping direction from PR #2342). This is new server-side scope in
 `agentmux-cloud`, not just the `amx` sidecar — flagging that explicitly
 since it's a bigger lift than the other items here and probably needs
 its own dedicated spec once this direction is agreed on, not a
@@ -224,17 +221,14 @@ gap-filling. Recommend, in order of what research most strongly supports:
   into a conversation).
 
 This item is the biggest, least like "finish what's already spec'd," and
-genuinely security-sensitive (per `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md`'s
-already-flagged, still-open cross-account authorization gap at Tier 4) —
-recommend it lands *after* Tier 4's per-agent authorization is actually
-enforced server-side (not just landed client-side), not in parallel with
-it. Adding a remote-invocation surface before authorization enforcement
-exists would make an already-flagged gap materially worse.
+genuinely security-sensitive —
+recommend it lands *after* Tier 4's per-agent authorization is confirmed
+server-side (not just landed client-side), not in parallel with it.
 
 ## Suggested sequencing
 
 1. ~~Finish #1916 (same-host cross-channel)~~ — **implemented, open PR #2350 (not yet merged).**
-2. Enforce Tier-4 per-agent authorization server-side (already tracked, already flagged as a gap, blocks item 5 below from being safe).
+2. Confirm Tier-4 per-agent authorization server-side (tracked in the cloud repo; item 5 below waits on it).
 3. LAN trust hardening (§2) — independent, can interleave with 2.
 4. Cloud coordination/directory endpoint (§3) — bigger lift, own spec, needed before meaningful WAN-tier enumeration.
 5. RPC layer (§4) — the real new capability, deliberately sequenced last and gated on #2, since it's the one item that turns a messaging bug into a security-relevant feature if done before authorization is solid.
@@ -268,4 +262,3 @@ exists would make an already-flagged gap materially worse.
 | `agentmux-srv/src/muxbus/cloud_subscriber.rs`, `agentmux-srv/src/muxbus/agent_credentials.rs` | §3, §4 gating — coordination role, per-agent auth enforcement |
 | `agentmux-mcp/src/main.rs` | §4 — candidate source for (or explicit non-source for, per Open Question #2) the RPC method allowlist |
 | issue #1916, PR #2350 | §1 — the design this doc called for, implemented directly against code rather than through a separate design doc (see the §2 audit row above for why) |
-| `docs/specs/SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` | §4 gating dependency — Tier-4 auth enforcement status |
