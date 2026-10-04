@@ -152,9 +152,9 @@ Until then the rows are selectable (the owner's request), the confirmation says 
 | **1: platform tag** | `os` in the TXT record and UDP reply; parse and sanitize; `RemoteChannel.os`; the tag on section headers. | AgentX's files, with their agreement | narko with a LAN peer on another OS |
 | **2: selection and the honest confirmation** | `FleetTarget`, checkboxes on remote rows and headers, the count, §5.3 naming (local agents too), stale rows disabled, group save disabled with a remote target. Stop works for this machine's other channels. | nothing new on the wire | narko `stable` plus a `task dev` channel |
 | **3: broadcast to other channels on this machine** | the §5.2 route and the forward in `fleet_broadcast_impl`. | a new loopback route | the same pair |
-| **4: other machines** | instance-signed messages and a stop with the target's override window, designed in `SPEC_SWARM_ACTIONS_ON_OTHER_MACHINES_2026_10_03.md` (LAN first, then cloud). | that spec's §10 | narko with Area54 |
+| **4: other machines** | instance-signed messages and a stop with the target's override window (LAN first, then cloud), designed separately. | §9 items 5 and 6 | narko with Area54 |
 
-Phases 1 to 3 add no new trust. Phase 4 is where the security design is, and has its own spec.
+Phases 1 to 3 add no new trust. Phase 4 is where the security design is, and is designed separately.
 
 ## 8. Tests
 
@@ -167,7 +167,7 @@ Phases 1 to 3 add no new trust. Phase 4 is where the security design is, and has
 
 ## 9. Decisions for the owner
 
-**Decided 2026-10-03** (the owner: "use recommended settings"): every item below as proposed. Items 5 and 6, and their consequences, are worked out in `SPEC_SWARM_ACTIONS_ON_OTHER_MACHINES_2026_10_03.md`.
+**Decided 2026-10-03** (the owner: "use recommended settings"): every item below as proposed. Items 5 and 6 are designed separately.
 
 1. **Spelling.** `macOS` (Apple's spelling, proposed) or `MacOS` as you wrote it.
 2. **Where the platform tag shows.** On each remote section's header and in confirmation and result lists (proposed), or on every row.
