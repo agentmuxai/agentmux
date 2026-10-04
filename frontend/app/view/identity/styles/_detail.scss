@@ -1,7 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Account detail content (rendered inside the unified Modal overlay).
+// Account detail content, in the panel that opens under its row
+// (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.2).
 
 // ── Meta row (provider badge + display name + status dot + status text) ──────
 
@@ -115,3 +116,54 @@
     }
 }
 
+// ── Panel under the row ─────────────────────────────────────────────────────
+
+.identity-row-chevron {
+    flex-shrink: 0;
+    width: 10px;
+    font-size: 9px;
+    color: var(--secondary-text-color);
+}
+
+// Reads as one card with the selected row above it: same accent border,
+// no top edge.
+.identity-account-panel {
+    border: 1px solid var(--accent-color);
+    border-top: none;
+    background: color-mix(in srgb, var(--accent-color) 4%, transparent);
+    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-1);
+    overflow: hidden;
+    // Slides open from under the row. `interpolate-size` lets `height: auto`
+    // transition from the `@starting-style` height.
+    interpolate-size: allow-keywords;
+    height: auto;
+    transition:
+        height 150ms ease-out,
+        opacity 150ms ease-out;
+
+    @starting-style {
+        height: 0;
+        opacity: 0;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        transition: none;
+    }
+}
+
+.identity-account-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    margin-top: var(--space-2);
+}
+
+.identity-delete-confirm p {
+    margin: 0 0 var(--space-1-5);
+    font-size: 12px;
+
+    &:last-child {
+        margin-bottom: 0;
+    }
+}

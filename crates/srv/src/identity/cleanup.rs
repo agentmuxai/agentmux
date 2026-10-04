@@ -11,7 +11,13 @@
 //! - `SecretRef::Keychain` — delete the OS-keychain entry (moved here
 //!   from the inline block in the `deleteidentityaccount` handler).
 //! - `SecretRef::OAuthConfigDir { dir }` — the CLI's live access +
-//!   refresh tokens sit in that directory; remove the tree. This is
+//!   refresh tokens sit in that directory; remove the tree, **except the
+//!   provider's conversation history** (`ProviderConfig::history_native_subdir`,
+//!   e.g. Claude's `projects/`), which lives in the same directory when
+//!   auth is shared. History and credentials are separate persistence
+//!   categories (SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+//!   P1); deleting a login must not delete the conversations
+//!   (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md H1). This is
 //!   best-effort and **containment-guarded**: the dir is only removed
 //!   when it resolves INSIDE the agentmux identities root
 //!   (`~/.agentmux/shared/identities/`). The legacy `~/.claude`
@@ -32,6 +38,7 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use crate::backend::providers::{all_providers, get_provider};
 use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
 
 /// What `cleanup_account_secrets` did, for callers/tests to assert on.
@@ -44,6 +51,10 @@ pub enum SecretCleanup {
     KeychainFailed(String),
     /// OAuth config dir tree removed.
     OAuthDirRemoved(PathBuf),
+    /// Everything in the OAuth config dir removed except the provider's
+    /// conversation history subdirectory, which was kept (so the dir
+    /// itself remains).
+    OAuthDirHistoryKept { dir: PathBuf, history: PathBuf },
     /// OAuth config dir was already gone — nothing to remove.
     OAuthDirAbsent(PathBuf),
     /// OAuth config dir NOT removed: it does not resolve inside the
@@ -54,6 +65,33 @@ pub enum SecretCleanup {
     OAuthDirFailed { dir: PathBuf, error: String },
     /// Secret backend holds no agentmux-owned on-host state.
     NoOp,
+}
+
+impl SecretCleanup {
+    /// The `cleanup` object `deleteidentityaccount` returns, so the Armory can
+    /// say whether the saved login is really gone
+    /// (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.4).
+    /// `outcome` is `removed`, `absent`, `skipped`, `failed` or `none` (no
+    /// on-host secret).
+    pub fn report(&self) -> serde_json::Value {
+        let path = |p: &Path| p.to_string_lossy().to_string();
+        match self {
+            SecretCleanup::KeychainRemoved => serde_json::json!({ "outcome": "removed" }),
+            SecretCleanup::KeychainFailed(e) => serde_json::json!({ "outcome": "failed", "detail": e }),
+            SecretCleanup::OAuthDirRemoved(d) => serde_json::json!({ "outcome": "removed", "path": path(d) }),
+            SecretCleanup::OAuthDirHistoryKept { dir, history } => serde_json::json!({
+                "outcome": "removed", "path": path(dir), "historyKept": true, "historyPath": path(history),
+            }),
+            SecretCleanup::OAuthDirAbsent(d) => serde_json::json!({ "outcome": "absent", "path": path(d) }),
+            SecretCleanup::OAuthDirSkipped { dir, reason } => {
+                serde_json::json!({ "outcome": "skipped", "path": path(dir), "detail": reason })
+            }
+            SecretCleanup::OAuthDirFailed { dir, error } => {
+                serde_json::json!({ "outcome": "failed", "path": path(dir), "detail": error })
+            }
+            SecretCleanup::NoOp => serde_json::json!({ "outcome": "none" }),
+        }
+    }
 }
 
 /// Best-effort removal of the on-host credential material behind
@@ -145,8 +183,19 @@ fn cleanup_oauth_dir(
             canon_root.display()
         ));
     }
-    match std::fs::remove_dir_all(&canon_dir) {
-        Ok(()) => {
+    let history = history_subdir_for(acct, &canon_dir);
+    match remove_credentials_keep_history(&canon_dir, history) {
+        Ok(Some(kept)) => {
+            tracing::info!(
+                account_id = %acct.id,
+                provider = %acct.provider,
+                dir = %dir.display(),
+                history = %kept.display(),
+                "identity.delete: oauth credentials removed, conversation history kept"
+            );
+            SecretCleanup::OAuthDirHistoryKept { dir: dir.to_path_buf(), history: kept }
+        }
+        Ok(None) => {
             // Verify the removal actually took — a "removed" log that leaves
             // the credential on disk is the exact login/logout-round bug this
             // diagnostic exists to catch (e.g. a racing re-seed, a bind-mount,
@@ -168,6 +217,9 @@ fn cleanup_oauth_dir(
             }
             SecretCleanup::OAuthDirRemoved(dir.to_path_buf())
         }
+        // Gone between the `exists()` check above and the removal (a second
+        // delete racing this one): already clean.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => SecretCleanup::OAuthDirAbsent(dir.to_path_buf()),
         Err(e) => {
             tracing::warn!(
                 account_id = %acct.id,
@@ -181,24 +233,125 @@ fn cleanup_oauth_dir(
     }
 }
 
-/// Canonicalizes both `dir` and `root`, then removes `dir`'s tree only if
-/// it resolves strictly inside `root` (never the root itself) — the same
-/// escape guard `cleanup_oauth_dir` uses for a single account's credential
-/// dir, generalized for `sweep_orphaned_account_dirs` below, which removes
-/// a whole per-account dir rather than one provider's subdir within it.
-fn remove_tree_if_contained(dir: &Path, root: &Path) -> Result<(), String> {
-    let canon_root =
-        std::fs::canonicalize(root).map_err(|e| format!("root not canonicalizable: {e}"))?;
-    let canon_dir =
-        std::fs::canonicalize(dir).map_err(|e| format!("dir not canonicalizable: {e}"))?;
-    if canon_dir == canon_root || !canon_dir.starts_with(&canon_root) {
-        return Err(format!(
-            "{} is not strictly inside {}",
-            canon_dir.display(),
-            canon_root.display()
-        ));
+/// The conversation-history subdirectory name for an OAuth config dir:
+/// from the account's provider, or else from the dir's own name, which is
+/// the provider's `auth_dir_name` (`identities/<account>/<auth_dir_name>/`).
+fn history_subdir_for(acct: &IdentityAccount, dir: &Path) -> Option<&'static str> {
+    if let Some(sub) = get_provider(&acct.provider).and_then(|p| p.history_native_subdir) {
+        return Some(sub);
     }
-    std::fs::remove_dir_all(&canon_dir).map_err(|e| e.to_string())
+    history_subdir_for_auth_dir(dir.file_name()?.to_str()?)
+}
+
+fn history_subdir_for_auth_dir(auth_dir_name: &str) -> Option<&'static str> {
+    all_providers()
+        .find(|p| p.auth_dir_name == auth_dir_name)
+        .and_then(|p| p.history_native_subdir)
+}
+
+/// Remove `dir`, keeping its `history` child when that child is a real,
+/// non-empty directory. Returns the kept path, or `None` when the whole
+/// tree was removed.
+///
+/// A history child that is a link (a symlink, or a Windows junction — the
+/// isolated-auth redirect to the always-global history, see
+/// `identity_auth_dirs::link_history_if_isolated`) does not hold the
+/// history itself, so the whole tree goes; `remove_dir_all` removes the
+/// link without following it. An empty history child is nothing to keep.
+///
+/// Keeps removing the other entries after one fails, so one locked file
+/// doesn't leave the rest of the credential behind, then reports the first
+/// failure.
+fn remove_credentials_keep_history(dir: &Path, history: Option<&str>) -> std::io::Result<Option<PathBuf>> {
+    let keep = history.map(|h| dir.join(h)).filter(|h| {
+        std::fs::symlink_metadata(h).map(|m| m.file_type().is_dir()).unwrap_or(false)
+            && std::fs::read_dir(h).map(|mut it| it.next().is_some()).unwrap_or(false)
+    });
+    let Some(keep) = keep else {
+        std::fs::remove_dir_all(dir)?;
+        return Ok(None);
+    };
+    let mut first_err: Option<std::io::Error> = None;
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path == keep {
+            continue;
+        }
+        let res = match entry.file_type() {
+            Ok(ft) if ft.is_dir() => std::fs::remove_dir_all(&path),
+            // A file or a link: `remove_file` for files and Unix links,
+            // `remove_dir` for Windows directory links and junctions.
+            _ => std::fs::remove_file(&path).or_else(|_| std::fs::remove_dir(&path)),
+        };
+        if let Err(e) = res {
+            if e.kind() != std::io::ErrorKind::NotFound && first_err.is_none() {
+                first_err = Some(std::io::Error::new(e.kind(), format!("{}: {e}", path.display())));
+            }
+        }
+    }
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(Some(keep)),
+    }
+}
+
+enum PruneOutcome {
+    /// The whole account dir was removed.
+    Removed,
+    /// Credentials removed; at least one provider's conversation history kept.
+    HistoryKept,
+    /// The dir held nothing but already-kept history.
+    NothingToRemove,
+}
+
+/// Removes an orphaned account dir (`<root>/<account_id>/`), only if it
+/// resolves strictly inside `root` (the same escape guard
+/// `cleanup_oauth_dir` uses), except that each provider subdir's
+/// conversation history is kept, the same rule account delete follows
+/// (`remove_credentials_keep_history`). Without this, the sweep would
+/// delete, a few minutes later, the history that deleting the account kept.
+fn prune_orphan_keeping_history(dir: &Path, root: &Path) -> Result<PruneOutcome, String> {
+    let canon_root = std::fs::canonicalize(root).map_err(|e| format!("root not canonicalizable: {e}"))?;
+    let canon_dir = std::fs::canonicalize(dir).map_err(|e| format!("dir not canonicalizable: {e}"))?;
+    if canon_dir == canon_root || !canon_dir.starts_with(&canon_root) {
+        return Err(format!("{} is not strictly inside {}", canon_dir.display(), canon_root.display()));
+    }
+    let mut kept_any = false;
+    let mut removed_any = false;
+    for entry in std::fs::read_dir(&canon_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let history = if is_dir {
+            path.file_name().and_then(|n| n.to_str()).and_then(history_subdir_for_auth_dir)
+        } else {
+            None
+        };
+        if let Some(h) = history {
+            // Already only history: leave it, and don't count it as a removal.
+            let only_history = std::fs::read_dir(&path)
+                .map(|it| it.flatten().all(|e| e.file_name() == h))
+                .unwrap_or(false);
+            if only_history && path.join(h).is_dir() {
+                kept_any = true;
+                continue;
+            }
+        }
+        if is_dir {
+            if remove_credentials_keep_history(&path, history).map_err(|e| e.to_string())?.is_some() {
+                kept_any = true;
+            }
+        } else {
+            std::fs::remove_file(&path).or_else(|_| std::fs::remove_dir(&path)).map_err(|e| e.to_string())?;
+        }
+        removed_any = true;
+    }
+    if kept_any {
+        return Ok(if removed_any { PruneOutcome::HistoryKept } else { PruneOutcome::NothingToRemove });
+    }
+    std::fs::remove_dir_all(&canon_dir).map_err(|e| e.to_string())?;
+    Ok(PruneOutcome::Removed)
 }
 
 /// Sweep `identities_root`'s direct children for orphaned per-account
@@ -263,8 +416,19 @@ pub fn sweep_orphaned_account_dirs(
         if age_secs < min_age_secs {
             continue; // could still be a login in progress
         }
-        match remove_tree_if_contained(&path, identities_root) {
-            Ok(()) => {
+        match prune_orphan_keeping_history(&path, identities_root) {
+            // Only conversation history was left, already pruned: nothing to do.
+            Ok(PruneOutcome::NothingToRemove) => {}
+            Ok(PruneOutcome::HistoryKept) => {
+                tracing::info!(
+                    account_id,
+                    dir = %path.display(),
+                    age_secs,
+                    "identity.sweep: orphaned account dir pruned, conversation history kept"
+                );
+                removed.push(path);
+            }
+            Ok(PruneOutcome::Removed) => {
                 tracing::info!(
                     account_id,
                     dir = %path.display(),
@@ -528,5 +692,97 @@ mod tests {
         let removed = sweep_orphaned_account_dirs(&store, &root, 0);
 
         assert!(removed.is_empty());
+    }
+
+    fn claude_dir_with_history(root: &Path, account: &str) -> PathBuf {
+        let dir = root.join(account).join("claude");
+        std::fs::create_dir_all(dir.join("projects").join("C--work")).unwrap();
+        std::fs::create_dir_all(dir.join("sessions")).unwrap();
+        std::fs::write(dir.join(".credentials.json"), "{}").unwrap();
+        std::fs::write(dir.join("settings.json"), "{}").unwrap();
+        std::fs::write(dir.join("sessions").join("s.json"), "{}").unwrap();
+        std::fs::write(dir.join("projects").join("C--work").join("t.jsonl"), "{}").unwrap();
+        dir
+    }
+
+    /// Deleting a Claude account removes its login but keeps the
+    /// conversation history that shares its config dir
+    /// (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md H1).
+    #[test]
+    fn oauth_delete_keeps_conversation_history() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities");
+        let dir = claude_dir_with_history(&root, "acct-test");
+        let mut acct = acct_with(SecretRef::OAuthConfigDir {
+            dir: dir.to_string_lossy().to_string(),
+        });
+        acct.provider = "claude".to_string();
+
+        let out = cleanup_account_secrets(&acct, Some(&root));
+
+        assert!(matches!(out, SecretCleanup::OAuthDirHistoryKept { .. }), "got {out:?}");
+        assert!(dir.join("projects").join("C--work").join("t.jsonl").exists(), "history must survive");
+        assert!(!dir.join(".credentials.json").exists(), "the login must be gone");
+        assert!(!dir.join("settings.json").exists());
+        assert!(!dir.join("sessions").exists());
+    }
+
+    /// The history subdir is found from the dir's own name when the
+    /// account's provider string isn't a registered provider id.
+    #[test]
+    fn oauth_delete_finds_history_by_dir_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities");
+        let dir = claude_dir_with_history(&root, "acct-test");
+        // acct_with's provider is "anthropic", not a registered provider id.
+        let acct = acct_with(SecretRef::OAuthConfigDir {
+            dir: dir.to_string_lossy().to_string(),
+        });
+
+        let out = cleanup_account_secrets(&acct, Some(&root));
+
+        assert!(matches!(out, SecretCleanup::OAuthDirHistoryKept { .. }), "got {out:?}");
+        assert!(dir.join("projects").join("C--work").join("t.jsonl").exists());
+        assert!(!dir.join(".credentials.json").exists());
+    }
+
+    /// An empty history dir is nothing to keep: the whole tree goes.
+    #[test]
+    fn oauth_delete_with_empty_history_removes_everything() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities");
+        let dir = root.join("acct-test").join("claude");
+        std::fs::create_dir_all(dir.join("projects")).unwrap();
+        std::fs::write(dir.join(".credentials.json"), "{}").unwrap();
+        let mut acct = acct_with(SecretRef::OAuthConfigDir {
+            dir: dir.to_string_lossy().to_string(),
+        });
+        acct.provider = "claude".to_string();
+
+        let out = cleanup_account_secrets(&acct, Some(&root));
+
+        assert!(matches!(out, SecretCleanup::OAuthDirRemoved(_)), "got {out:?}");
+        assert!(!dir.exists());
+    }
+
+    /// The orphan sweep follows the same rule: it removes the leftover
+    /// login but keeps history, and a second sweep finds nothing to do.
+    #[test]
+    fn sweep_keeps_history_of_an_orphaned_account_dir() {
+        let store = make_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("identities");
+        let dir = claude_dir_with_history(&root, "deleted-uuid");
+
+        let removed = sweep_orphaned_account_dirs(&store, &root, 0);
+
+        assert_eq!(removed, vec![root.join("deleted-uuid")]);
+        assert!(dir.join("projects").join("C--work").join("t.jsonl").exists(), "history must survive the sweep");
+        assert!(!dir.join(".credentials.json").exists());
+        assert!(!dir.join("sessions").exists());
+
+        let again = sweep_orphaned_account_dirs(&store, &root, 0);
+        assert!(again.is_empty(), "history-only dir must not be reported again: {again:?}");
+        assert!(dir.join("projects").join("C--work").join("t.jsonl").exists());
     }
 }

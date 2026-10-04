@@ -294,3 +294,25 @@ describe("candidateSublabel", () => {
         );
     });
 });
+
+describe("buildAccountRowMenu — Delete account… (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04 §3.1)", () => {
+    beforeEach(() => {
+        vi.mocked(RpcApi.ListAllAgentIdentitiesCommand).mockReset();
+        vi.mocked(RpcApi.ListAllAgentIdentitiesCommand).mockResolvedValue([]);
+    });
+
+    it("is the last item, after a separator, and opens the confirmation", async () => {
+        const onDelete = vi.fn();
+        const menu = await buildAccountRowMenu(mkAccount(), [], [], undefined, undefined, onDelete);
+        const last = menu[menu.length - 1];
+        expect(last.label).toBe("Delete account…");
+        expect(menu[menu.length - 2].type).toBe("separator");
+        last.click?.();
+        expect(onDelete).toHaveBeenCalledTimes(1);
+    });
+
+    it("is absent when the caller offers no delete", async () => {
+        const menu = await buildAccountRowMenu(mkAccount(), [], []);
+        expect(menu.some((m) => m.label === "Delete account…")).toBe(false);
+    });
+});
