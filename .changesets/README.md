@@ -60,9 +60,14 @@ The releaser then commits with a message like
 `chore: release v0.33.897` and opens a PR. That PR is the **only** PR that
 touches `package.json` / `Cargo.toml` / lockfiles.
 
-## What if I'm fixing a small thing and don't need a release?
+## Every PR needs one (CI-enforced)
 
-Then don't add a changeset. The PR ships without forcing a version bump.
+The `changeset` check (`.github/workflows/changeset.yml`) fails a PR that adds
+no `.changesets/*.md`, or whose changeset has no valid `type:` or no
+description. A PR that genuinely needs no entry (a CI tweak, a revert of
+something unreleased) gets the `no-changeset` label instead; adding the label
+re-runs the check. Dependabot/Renovate PRs and release PRs (which update
+`VERSION_HISTORY.md`) are exempt.
 
 ## Escape hatch: local-only version bumps for build labels
 

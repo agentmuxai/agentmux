@@ -1,0 +1,82 @@
+name: Changeset
+
+# Every PR adds one changeset: a new .changesets/<ts>-<slug>-<rand>.md made with
+# `scripts/changeset.sh <patch|minor|major> "<summary>"` (see .changesets/README.md).
+# A PR that genuinely needs no entry carries the `no-changeset` label instead.
+# Checked on every push and on label changes, so adding the label re-runs it.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changeset:
+    name: changeset
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require a changeset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          # A release PR (scripts/release.sh) updates these and deletes changesets.
+          RELEASE_FILES: "VERSION_HISTORY.md package.json"
+        run: |
+          set -euo pipefail
+          if printf '%s' "$LABELS" | grep -q '"no-changeset"'; then
+            echo "Skipped: the PR has the no-changeset label."; exit 0
+          fi
+          case "$AUTHOR" in
+            "dependabot[bot]"|"renovate[bot]") echo "Skipped: dependency update by $AUTHOR."; exit 0 ;;
+          esac
+
+          # "<status> <path> <blob sha>" per changed file. Blobs are read by sha from
+          # this repo, which also works for a PR from a fork.
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[] | "\(.status) \(.filename) \(.sha)"')
+
+          # A release PR consumes changesets instead of adding one: it updates the
+          # release history and the version file and deletes changesets. Any one of
+          # those alone is not enough.
+          if [ -n "${RELEASE_FILES:-}" ]; then
+            is_release=1
+            for f in $RELEASE_FILES; do
+              printf '%s\n' "$files" | awk -v f="$f" '$1=="modified" && $2==f {found=1} END {exit !found}' || is_release=0
+            done
+            printf '%s\n' "$files" | awk '$1=="removed" && $2 ~ /^\.changesets\/[0-9]+-[^\/]+\.md$/ {found=1} END {exit !found}' || is_release=0
+            if [ "$is_release" -eq 1 ]; then
+              echo "Release PR ($RELEASE_FILES updated, changesets consumed): no new changeset needed."; exit 0
+            fi
+          fi
+
+          # Same name pattern the release step consumes: a leading timestamp.
+          added=$(printf '%s\n' "$files" | awk '$1=="added" && $2 ~ /^\.changesets\/[0-9]+-[^\/]+\.md$/ {print $2 " " $3}')
+          if [ -z "$added" ]; then
+            echo "::error::This PR adds no changeset. Run: scripts/changeset.sh <patch|minor|major> \"<one-line summary>\" and commit the file it writes to .changesets/. If the PR truly needs no entry, add the no-changeset label."
+            exit 1
+          fi
+
+          bad=0
+          while read -r f sha; do
+            body=$(gh api "repos/$REPO/git/blobs/$sha" --jq .content | base64 -d)
+            # The same expression scripts/release.sh uses: delimiters are exactly '---',
+            # the first 'type:' line in the front matter counts, and its value is the
+            # second whitespace-separated field (so 'type:minor' without a space is invalid).
+            type=$(printf '%s\n' "$body" | awk '/^---$/{n++;next} n==1 && /^type:/{print $2; exit}' | tr -d '[:space:]')
+            case "$type" in
+              patch|minor|major) ;;
+              *) echo "::error file=$f::Front matter needs a first 'type: patch', 'type: minor' or 'type: major' line between two exact '---' lines (found: '${type}')."; bad=1 ;;
+            esac
+            text=$(printf '%s\n' "$body" | awk '$0=="---" {n++; next} n==2' | tr -d '[:space:]')
+            if [ -z "$text" ]; then
+              echo "::error file=$f::The changeset has no description after the front matter."; bad=1
+            fi
+          done <<< "$added"
+          [ "$bad" -eq 0 ] || exit 1
+          echo "Changeset(s) found:"; printf '%s\n' "$added" | awk '{print "  " $1}'
