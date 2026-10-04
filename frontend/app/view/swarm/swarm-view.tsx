@@ -126,6 +126,11 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                 when={!model.loadingAtom()}
                 fallback={<div class="swarm-loading">Loading…</div>}
             >
+                {/* Outside the tree's own Show: agents on other instances can be selected
+                    when this instance has none, and the toolbar is what acts on them. It
+                    shows itself only when there is something to select or act on. */}
+                <FleetToolbar model={model} allBlockIds={() => tree().flatMap((n) => (n.blockId ? [n.blockId] : []))} />
+                <FleetResultPanel model={model} />
                 <Show
                     when={tree().length > 0}
                     fallback={
@@ -138,8 +143,6 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                         </div>
                     }
                 >
-                    <FleetToolbar model={model} allBlockIds={() => tree().flatMap((n) => (n.blockId ? [n.blockId] : []))} />
-                    <FleetResultPanel model={model} />
                     <Show when={clearableCount() > 0}>
                         <div class="swarm-toolbar">
                             <button
