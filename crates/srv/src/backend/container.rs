@@ -234,9 +234,6 @@ pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
     // agent spawn: the guard dir is a host path that means nothing inside the
     // image, and the image controls its own `gh` state.
     "GH_CONFIG_DIR",
-    // `backend::publish_guard` points core.hooksPath at a host directory through
-    // GIT_CONFIG_*; git ignores the KEY/VALUE pairs without the count.
-    "GIT_CONFIG_COUNT",
     "PATH",
     "HOME",
     "USERPROFILE",

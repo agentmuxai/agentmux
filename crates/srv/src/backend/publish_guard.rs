@@ -59,24 +59,60 @@ pub fn is_guard_hooks_dir(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join("pre-push")).map(|s| s.contains(MARKER)).unwrap_or(false)
 }
 
-/// The variables that set `key = value` on top of the `GIT_CONFIG_*` entries
-/// `get` already sees: the slot that names `key` (case-insensitively, as git
-/// does for the section and name) is reused, otherwise one is appended.
-pub fn git_config_entries(get: impl Fn(&str) -> Option<String>, key: &str, value: &str) -> Vec<(String, String)> {
-    let count: usize = get(COUNT)
+fn parse_count(get: &impl Fn(&str) -> Option<String>) -> usize {
+    get(COUNT)
         .and_then(|c| c.trim().parse().ok())
         .filter(|c: &usize| *c <= MAX_ENTRIES)
-        .unwrap_or(0);
-    for i in 0..count {
-        if get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)) {
-            return vec![(format!("GIT_CONFIG_VALUE_{i}"), value.to_string()), (COUNT.to_string(), count.to_string())];
-        }
+        .unwrap_or(0)
+}
+
+/// The variables that set `key = value` on top of the `GIT_CONFIG_*` entries
+/// `get` already sees. Every slot that names `key` (case-insensitively, as git
+/// does for the section and name) gets the value, since git uses the last one
+/// it finds; with none, a slot is appended.
+pub fn git_config_entries(get: impl Fn(&str) -> Option<String>, key: &str, value: &str) -> Vec<(String, String)> {
+    let count = parse_count(&get);
+    let mut out: Vec<(String, String)> = (0..count)
+        .filter(|i| get(&format!("GIT_CONFIG_KEY_{i}")).is_some_and(|k| k.eq_ignore_ascii_case(key)))
+        .map(|i| (format!("GIT_CONFIG_VALUE_{i}"), value.to_string()))
+        .collect();
+    if !out.is_empty() {
+        out.push((COUNT.to_string(), count.to_string()));
+        return out;
     }
     vec![
         (format!("GIT_CONFIG_KEY_{count}"), key.to_string()),
         (format!("GIT_CONFIG_VALUE_{count}"), value.to_string()),
         (COUNT.to_string(), (count + 1).to_string()),
     ]
+}
+
+/// `env` without its `core.hooksPath` entries, the others renumbered: for a
+/// container, where the host's hooks directory means nothing, but any other
+/// `GIT_CONFIG_*` setting the agent's env carries must still work.
+pub fn without_hooks_path(env: &HashMap<String, String>) -> HashMap<String, String> {
+    let get = |k: &str| env.get(k).cloned();
+    let count = parse_count(&get);
+    let kept: Vec<(String, String)> = (0..count)
+        .filter_map(|i| Some((get(&format!("GIT_CONFIG_KEY_{i}"))?, get(&format!("GIT_CONFIG_VALUE_{i}")).unwrap_or_default())))
+        .filter(|(k, _)| !k.eq_ignore_ascii_case(HOOKS_PATH_KEY))
+        .collect();
+    if kept.len() == count {
+        return env.clone();
+    }
+    let mut out: HashMap<String, String> = env
+        .iter()
+        .filter(|(k, _)| k.as_str() != COUNT && !k.starts_with("GIT_CONFIG_KEY_") && !k.starts_with("GIT_CONFIG_VALUE_"))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    for (i, (k, v)) in kept.iter().enumerate() {
+        out.insert(format!("GIT_CONFIG_KEY_{i}"), k.clone());
+        out.insert(format!("GIT_CONFIG_VALUE_{i}"), v.clone());
+    }
+    if !kept.is_empty() {
+        out.insert(COUNT.to_string(), kept.len().to_string());
+    }
+    out
 }
 
 /// The hooks directory for a spawn whose own env is `env` (falling back to
@@ -219,6 +255,50 @@ mod tests {
         assert_eq!(e[COUNT], "2", "reuses the process env's own hooksPath slot");
         assert_eq!(PathBuf::from(&e["GIT_CONFIG_VALUE_1"]), dir.path());
         assert!(!e.contains_key("GIT_CONFIG_KEY_0"), "the other inherited slot is left alone");
+    }
+
+    #[test]
+    fn every_hooks_path_slot_gets_the_guard_because_git_uses_the_last() {
+        let dir = guard_dir();
+        let mut e = env(&[
+            (COUNT, "3"),
+            ("GIT_CONFIG_KEY_0", "core.hooksPath"),
+            ("GIT_CONFIG_VALUE_0", "/old"),
+            ("GIT_CONFIG_KEY_1", "user.name"),
+            ("GIT_CONFIG_VALUE_1", "x"),
+            ("GIT_CONFIG_KEY_2", "CORE.HOOKSPATH"),
+            ("GIT_CONFIG_VALUE_2", "/dev/null"),
+        ]);
+        apply_publish_guard_in(&mut e, dir.path(), no_process);
+        assert_eq!(e[COUNT], "3");
+        assert_eq!(PathBuf::from(&e["GIT_CONFIG_VALUE_0"]), dir.path());
+        assert_eq!(PathBuf::from(&e["GIT_CONFIG_VALUE_2"]), dir.path());
+        assert_eq!(e["GIT_CONFIG_VALUE_1"], "x");
+    }
+
+    #[test]
+    fn a_container_keeps_its_other_git_settings_but_not_the_host_hooks_path() {
+        let e = env(&[
+            (COUNT, "3"),
+            ("GIT_CONFIG_KEY_0", "url.x.insteadOf"),
+            ("GIT_CONFIG_VALUE_0", "y"),
+            ("GIT_CONFIG_KEY_1", "core.hooksPath"),
+            ("GIT_CONFIG_VALUE_1", "/host/hooks"),
+            ("GIT_CONFIG_KEY_2", "http.sslCAInfo"),
+            ("GIT_CONFIG_VALUE_2", "/ca.pem"),
+            ("OTHER", "kept"),
+        ]);
+        let out = without_hooks_path(&e);
+        assert_eq!(out[COUNT], "2");
+        assert_eq!(out["GIT_CONFIG_KEY_0"], "url.x.insteadOf");
+        assert_eq!(out["GIT_CONFIG_KEY_1"], "http.sslCAInfo");
+        assert_eq!(out["GIT_CONFIG_VALUE_1"], "/ca.pem");
+        assert!(!out.contains_key("GIT_CONFIG_KEY_2"));
+        assert_eq!(out["OTHER"], "kept");
+        let only = env(&[(COUNT, "1"), ("GIT_CONFIG_KEY_0", "core.hooksPath"), ("GIT_CONFIG_VALUE_0", "/h")]);
+        assert!(without_hooks_path(&only).is_empty(), "nothing left: no count either");
+        let untouched = env(&[("A", "b")]);
+        assert_eq!(without_hooks_path(&untouched), untouched);
     }
 
     #[test]
