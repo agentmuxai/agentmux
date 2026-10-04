@@ -433,10 +433,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const HOLD_MS = 350;
     const HOLD_RELEASE_MS = 160;
     let holdTimer: ReturnType<typeof setTimeout> | undefined;
+    // The hold must never be taller than the content. This runs inside the
+    // ResizeObserver that watches this element, so a min-height above the real
+    // height grows it and re-fires that observer; with the release timer that
+    // was a loop that never stopped, nudging the pane by about a pixel every
+    // ~367 ms. `offsetHeight` rounds, and at a fractional pane zoom it rounds up
+    // half the time, so floor the computed height, which is in the same CSS px
+    // as min-height under any ancestor `zoom`.
+    // docs/reports/REPORT_AGENT_PANE_SCROLL_LAYOUT_ARCHITECTURE_2026_10_04.md §2.2.
     function holdBufferHeight(): void {
         const el = streamingBufferRef;
         if (!el) return;
-        const h = el.offsetHeight; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
+        const h = Math.floor(parseFloat(getComputedStyle(el).height)); // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
         if (h > 0) el.style.minHeight = `${h}px`;
         clearTimeout(holdTimer);
         holdTimer = setTimeout(easeOutBufferHold, HOLD_MS);
