@@ -40,11 +40,6 @@
     .status-bar-left {
         display: flex;
         flex-direction: row;
-        // In a narrow window (or at a large chrome zoom) the left group wraps
-        // its items onto another row instead of pushing past the edge;
-        // `min-width: 0` lets it shrink below its content so it can.
-        flex-wrap: wrap;
-        min-width: 0;
         align-items: center;
         gap: var(--space-1);
         flex: 0 1 auto;
