@@ -57,6 +57,12 @@ pub(crate) fn invisible_activation(
 #[cfg(target_os = "windows")]
 static HAND_BACK_TARGET: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
+/// The invisible window that posted the pending hand-back. If it is destroyed
+/// before the posted message runs (a pane-pool window whose browser creation
+/// failed), the pending target is dropped with it. 0 = none.
+#[cfg(target_os = "windows")]
+static HAND_BACK_SOURCE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Posted to an invisible window that was just activated, so activation is
 /// handed back after the activation (and the window creation that caused it)
 /// has finished, not from inside `WM_ACTIVATE`.
@@ -136,6 +142,7 @@ unsafe fn hand_back_activation() {
     // window the user has since left (for another app, which our hook never
     // sees), and a later chain would hand activation back to it.
     let target = HAND_BACK_TARGET.swap(0, std::sync::atomic::Ordering::Relaxed) as *mut std::ffi::c_void;
+    HAND_BACK_SOURCE.store(0, std::sync::atomic::Ordering::Relaxed);
     if target.is_null() {
         return;
     }
@@ -214,10 +221,12 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
                 ) {
                     InvisibleActivation::Forget => {
                         HAND_BACK_TARGET.store(0, std::sync::atomic::Ordering::Relaxed);
+                        HAND_BACK_SOURCE.store(0, std::sync::atomic::Ordering::Relaxed);
                     }
                     InvisibleActivation::HandBackToPrevious => {
                         HAND_BACK_TARGET
                             .store(previous as usize, std::sync::atomic::Ordering::Relaxed);
+                        HAND_BACK_SOURCE.store(hwnd as usize, std::sync::atomic::Ordering::Relaxed);
                         PostMessageW(hwnd, WM_AGENTMUX_HAND_BACK_ACTIVATION, 0, 0);
                         tracing::info!(
                             "[focus-restore] invisible {:p} activated, took it from {:p}; handing back",
@@ -225,6 +234,7 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
                         );
                     }
                     InvisibleActivation::HandBackToRemembered => {
+                        HAND_BACK_SOURCE.store(hwnd as usize, std::sync::atomic::Ordering::Relaxed);
                         PostMessageW(hwnd, WM_AGENTMUX_HAND_BACK_ACTIVATION, 0, 0);
                     }
                     InvisibleActivation::Nothing => {}
@@ -292,13 +302,15 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
             })
             .unwrap_or(0);
         if is_ncdestroy {
-            // A dead window can't be handed activation back to.
-            let _ = HAND_BACK_TARGET.compare_exchange(
-                hwnd as usize,
-                0,
-                std::sync::atomic::Ordering::Relaxed,
-                std::sync::atomic::Ordering::Relaxed,
-            );
+            // A dead window can't be handed activation back to, and a hand-back
+            // posted by a window that died first will never run: drop the
+            // pending target in both cases, so a later chain can't use it.
+            let key = hwnd as usize;
+            let relaxed = std::sync::atomic::Ordering::Relaxed;
+            if HAND_BACK_TARGET.load(relaxed) == key || HAND_BACK_SOURCE.load(relaxed) == key {
+                HAND_BACK_TARGET.store(0, relaxed);
+                HAND_BACK_SOURCE.store(0, relaxed);
+            }
         }
         if original != 0 {
             CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
