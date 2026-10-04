@@ -415,22 +415,6 @@
       "alt": false,
       "meta": true,
       "vk": 71
-    },
-    {
-      "command": "dev:perfHud",
-      "ctrl": false,
-      "shift": true,
-      "alt": true,
-      "meta": true,
-      "vk": 80
-    },
-    {
-      "command": "dev:diagnostics",
-      "ctrl": false,
-      "shift": true,
-      "alt": true,
-      "meta": true,
-      "vk": 123
     }
   ],
   "other": [
@@ -833,22 +817,6 @@
       "alt": false,
       "meta": false,
       "vk": 71
-    },
-    {
-      "command": "dev:perfHud",
-      "ctrl": true,
-      "shift": true,
-      "alt": true,
-      "meta": false,
-      "vk": 80
-    },
-    {
-      "command": "dev:diagnostics",
-      "ctrl": true,
-      "shift": true,
-      "alt": true,
-      "meta": false,
-      "vk": 123
     }
   ]
 }

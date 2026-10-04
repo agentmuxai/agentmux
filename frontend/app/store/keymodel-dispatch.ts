@@ -207,6 +207,9 @@ export function appHandleKeyDown(muxEvent: MuxKeyboardEvent): boolean {
  *  keys from keybindings/host-keys.json). */
 export function registerHostShortcuts() {
     void getApi().listen<{ block_id: string; command: string }>("app-shortcut", (payload) => {
+        // Same rule as a key pressed in the app (the command palette turns
+        // global shortcuts off while it's open).
+        if (globalKeybindingsDisabled) return;
         runKeyCommand(payload.command, { repeat: false } as MuxKeyboardEvent);
     });
 }

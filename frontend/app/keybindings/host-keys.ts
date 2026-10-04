@@ -64,7 +64,9 @@ function vkOf(k: KeySpec): number | null {
  * terminal: the host can't tell whether the page has a text field focused.
  */
 function forwards(row: KeyBindingRow): boolean {
-    if (row.pane || !row.skipShell) return false;
+    // Dev rows have no handler in a release build; forwarding them would only
+    // swallow the key from the page.
+    if (row.pane || !row.skipShell || row.devOnly) return false;
     if (row.category === "Find & zoom" || row.category === "Terminal") return false;
     const terms = (row.when ?? "").split("&&").map((t) => t.trim()).filter(Boolean);
     // A browser pane is neither a document-tab host nor any excluded view.

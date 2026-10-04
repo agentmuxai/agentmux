@@ -27,6 +27,7 @@ describe("host-keys.json", () => {
         expect(other).not.toContain("view:zoom:in");
         expect(other).not.toContain("pane:find");
         expect(other).not.toContain("term:paste");
+        expect(other).not.toContain("dev:perfHud");
     });
 
     it("uses Windows virtual-key codes", () => {

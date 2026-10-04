@@ -25,7 +25,7 @@ vi.mock("@/layout/index", () => ({
 }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 
-import { appHandleKeyDown, isTypingFocus, keyCommands, registerHostShortcuts } from "./keymodel-dispatch";
+import { appHandleKeyDown, disableGlobalKeybindings, enableGlobalKeybindings, isTypingFocus, keyCommands, registerHostShortcuts } from "./keymodel-dispatch";
 import { adaptFromReactOrNativeKeyEvent, setKeyUtilPlatform } from "@/util/keyutil";
 import { setPlatform } from "@/util/platformutil";
 
@@ -124,6 +124,10 @@ describe("appHandleKeyDown", () => {
     it("runs a shortcut the host forwards out of a browser pane", () => {
         registerHostShortcuts();
         listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new" });
+        expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
+        disableGlobalKeybindings();
+        listeners.get("app-shortcut")?.({ block_id: "b1", command: "tab:new" });
+        enableGlobalKeybindings();
         expect(handlers["tab:new"]).toHaveBeenCalledTimes(1);
     });
 });
