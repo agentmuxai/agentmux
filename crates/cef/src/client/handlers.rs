@@ -270,6 +270,7 @@ static HOST_KEYS: std::sync::LazyLock<HostKeys> = std::sync::LazyLock::new(|| {
 /// native CEF child window, so the app's own key handling never sees its
 /// keys; without this, no window, tab or pane shortcut works while a page
 /// has focus (report §3.3, §6.5).
+#[cfg(test)]
 fn app_shortcut_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<&'static str> {
     host_key_for(ctrl, shift, alt, meta, vk, mac).map(|k| k.command.as_str())
 }
