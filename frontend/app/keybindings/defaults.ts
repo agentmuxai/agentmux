@@ -27,7 +27,9 @@ export interface KeyBindingRow {
     /** Rows sharing a group show as one help line ("Go to tab 1–8"). */
     helpGroup?: string;
     /** Handled by this pane's own key handler, never by the global
-     *  dispatcher. Its keys only apply while that pane has focus. */
+     *  dispatcher. While the pane handles the key it takes precedence over a
+     *  global row with the same key (it marks the key handled first, phase 0);
+     *  anywhere else, including the pane's text fields, the global row applies. */
     pane?: KeyPane;
     /** Dev builds only: left out of the help pane. Its handler is registered
      *  by the dev panel itself, so in a release build the key does nothing. */
@@ -43,18 +45,13 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "help:shortcuts", label: "Keyboard shortcuts", category: "General", mac: ["meta+/", "F1"], other: ["ctrl+/", "F1"], skipShell: true },
 
     // ── Tabs & windows ──
-    // The Files pane's own Ctrl/⌘+Shift+N makes a folder.
-    { command: "window:new", label: "New window", category: "Tabs & windows", mac: ["meta+shift+n"], other: ["ctrl+shift+n"], when: "viewType != files", skipShell: true },
-    // Document tabs reopen a closed document on Ctrl+Shift+T; the Files pane
-    // opens a folder tab on ⌘T.
-    { command: "tab:new", label: "New tab", category: "Tabs & windows", mac: ["meta+t"], when: "viewType != files", skipShell: true },
-    { command: "tab:new", label: "New tab", category: "Tabs & windows", other: ["ctrl+shift+t"], when: "!docTabsHost", skipShell: true },
+    { command: "window:new", label: "New window", category: "Tabs & windows", mac: ["meta+shift+n"], other: ["ctrl+shift+n"], skipShell: true },
+    { command: "tab:new", label: "New tab", category: "Tabs & windows", mac: ["meta+t"], other: ["ctrl+shift+t"], skipShell: true },
     { command: "tab:close", label: "Close tab", category: "Tabs & windows", mac: ["meta+shift+w"], other: ["ctrl+shift+alt+w", "ctrl+F4"], skipShell: true },
     { command: "tab:next", label: "Next tab", category: "Tabs & windows", mac: ["meta+]", "meta+shift+]"], other: ["ctrl+shift+]"], skipShell: true },
     { command: "tab:prev", label: "Previous tab", category: "Tabs & windows", mac: ["meta+[", "meta+shift+["], other: ["ctrl+shift+["], skipShell: true },
-    // In a pane with document tabs, Ctrl+Tab cycles the documents instead.
-    { command: "tab:next", label: "Next tab", category: "Tabs & windows", mac: ["ctrl+Tab"], other: ["ctrl+Tab"], when: "!docTabsHost", skipShell: true },
-    { command: "tab:prev", label: "Previous tab", category: "Tabs & windows", mac: ["ctrl+shift+Tab"], other: ["ctrl+shift+Tab"], when: "!docTabsHost", skipShell: true },
+    { command: "tab:next", label: "Next tab", category: "Tabs & windows", mac: ["ctrl+Tab"], other: ["ctrl+Tab"], skipShell: true },
+    { command: "tab:prev", label: "Previous tab", category: "Tabs & windows", mac: ["ctrl+shift+Tab"], other: ["ctrl+shift+Tab"], skipShell: true },
     ...[1, 2, 3, 4, 5, 6, 7, 8].map(
         (n): KeyBindingRow => ({ command: `tab:goto:${n}`, label: `Go to tab ${n}`, helpGroup: "Go to tab 1–8", category: "Tabs & windows", mac: [`meta+${n}`], other: [`ctrl+${n}`], skipShell: true })
     ),
@@ -63,20 +60,18 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "tab:moveRight", label: "Move tab right", category: "Tabs & windows", mac: ["meta+shift+PageDown"], other: ["ctrl+alt+shift+PageDown"], skipShell: true },
     // F2 renames whatever has focus (a file in the Files pane or editor tree
     // handles it first), so the tab only takes it when nothing else does.
-    { command: "tab:rename", label: "Rename tab", category: "Tabs & windows", mac: ["F2"], other: ["F2"], when: "!textInputFocus && viewType != files" },
+    { command: "tab:rename", label: "Rename tab", category: "Tabs & windows", mac: ["F2"], other: ["F2"], when: "!textInputFocus" },
 
     // ── Panes ──
     { command: "pane:new", label: "New pane", category: "Panes", mac: ["meta+n"], other: ["ctrl+shift+code:Backquote"], skipShell: true },
     { command: "open:agent", label: "New agent pane", category: "Panes", mac: ["meta+shift+a"], other: ["ctrl+shift+a"], skipShell: true },
     { command: "split:right", label: "Split right", category: "Panes", mac: ["meta+d"], other: ["ctrl+shift+d"], skipShell: true },
     { command: "split:down", label: "Split below", category: "Panes", mac: ["meta+shift+d"], other: ["ctrl+shift+alt+d"], skipShell: true },
-    { command: "split:up", label: "Split above", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowUp"], other: ["ctrl+shift+s ArrowUp"], when: "viewType != editor", skipShell: true },
-    { command: "split:down", label: "Split below", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowDown"], other: ["ctrl+shift+s ArrowDown"], when: "viewType != editor", skipShell: true },
-    { command: "split:left", label: "Split left", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowLeft"], other: ["ctrl+shift+s ArrowLeft"], when: "viewType != editor", skipShell: true },
-    { command: "split:right", label: "Split right", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowRight"], other: ["ctrl+shift+s ArrowRight"], when: "viewType != editor", skipShell: true },
-    // The Files pane's ⌘W closes its own folder tab.
-    { command: "pane:close", label: "Close pane", category: "Panes", mac: ["meta+w"], when: "viewType != files", skipShell: true },
-    { command: "pane:close", label: "Close pane", category: "Panes", other: ["ctrl+shift+w"], skipShell: true },
+    { command: "split:up", label: "Split above", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowUp"], other: ["ctrl+shift+s ArrowUp"], skipShell: true },
+    { command: "split:down", label: "Split below", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowDown"], other: ["ctrl+shift+s ArrowDown"], skipShell: true },
+    { command: "split:left", label: "Split left", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowLeft"], other: ["ctrl+shift+s ArrowLeft"], skipShell: true },
+    { command: "split:right", label: "Split right", helpGroup: "Split in a direction", category: "Panes", mac: ["ctrl+shift+s ArrowRight"], other: ["ctrl+shift+s ArrowRight"], skipShell: true },
+    { command: "pane:close", label: "Close pane", category: "Panes", mac: ["meta+w"], other: ["ctrl+shift+w"], skipShell: true },
     { command: "pane:magnify", label: "Maximize pane", category: "Panes", mac: ["meta+m"], other: ["ctrl+shift+m"], skipShell: true },
     { command: "pane:focus:up", label: "Focus pane above", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowUp"], other: ["ctrl+shift+ArrowUp"], when: "!textInputFocus", skipShell: true },
     { command: "pane:focus:down", label: "Focus pane below", helpGroup: "Focus pane by direction", category: "Panes", mac: ["ctrl+shift+ArrowDown"], other: ["ctrl+shift+ArrowDown"], when: "!textInputFocus", skipShell: true },
@@ -108,14 +103,12 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "pane:replaceWithLauncher", label: "Replace pane with launcher", category: "Panes", mac: ["ctrl+shift+k"], other: ["ctrl+shift+k"], when: "!textInputFocus", skipShell: true },
     { command: "pane:changeConnection", label: "Change connection", category: "Panes", mac: ["meta+shift+g"], other: ["ctrl+shift+g"], skipShell: true },
     { command: "term:multiInput", label: "Type into all terminals", category: "Terminal", mac: ["meta+shift+m"], other: ["ctrl+shift+alt+m"], skipShell: true },
-    // The editor's Ctrl/⌘+Shift+V toggles the markdown preview.
-    { command: "pane:voice", label: "Voice input", category: "General", mac: ["ctrl+shift+v"], other: ["ctrl+shift+v"], when: "!terminalFocus && viewType != editor" },
+    { command: "pane:voice", label: "Voice input", category: "General", mac: ["ctrl+shift+v"], other: ["ctrl+shift+v"], when: "!terminalFocus" },
 
     // ── Find & zoom ──
-    // The editor and the Files pane have their own find (pane rows below).
-    { command: "pane:find", label: "Find in pane", category: "Find & zoom", mac: ["meta+f"], when: "viewType != editor && viewType != files", skipShell: true },
+    { command: "pane:find", label: "Find in pane", category: "Find & zoom", mac: ["meta+f"], skipShell: true },
     // Ctrl+F is the shell's forward-char key: in a terminal, find is Ctrl+Shift+F.
-    { command: "pane:find", label: "Find in pane", category: "Find & zoom", other: ["ctrl+f"], when: "viewType != editor && viewType != files" },
+    { command: "pane:find", label: "Find in pane", category: "Find & zoom", other: ["ctrl+f"] },
     { command: "pane:find", label: "Find in pane", category: "Find & zoom", other: ["ctrl+shift+f"], when: "terminalFocus", skipShell: true },
     { command: "app:escape", label: "Close dialog or find bar", category: "General", mac: ["Escape"], other: ["Escape"] },
     { command: "view:zoom:in", label: "Zoom in", category: "Find & zoom", mac: ["meta+=", "meta+shift+=", "meta+code:NumpadAdd"], other: ["ctrl+=", "ctrl+shift+=", "ctrl+code:NumpadAdd"], skipShell: true },
