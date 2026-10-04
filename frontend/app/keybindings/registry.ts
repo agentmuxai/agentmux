@@ -4,6 +4,7 @@
 // Resolves a key press to a command from the default table (defaults.ts),
 // given where focus is. Pure: the dispatcher supplies the context.
 
+import { createSignal } from "solid-js";
 import { DEFAULT_KEYBINDINGS, type KeyBindingRow, type KeyPane } from "./defaults";
 import { formatKey, matchKey, parseKey, sameKey, type KeyEventLike, type KeyPlatform, type KeySpec } from "./keys";
 
@@ -55,12 +56,19 @@ export interface UserKeybinding {
 
 let userBindings: UserKeybinding[] = [];
 
+/** Bumped whenever the user's keybindings change, so views that read the
+ *  table (help pane, CodeMirror keymaps) can follow. */
+const [keybindingsVersion, setKeybindingsVersion] = createSignal(0);
+export { keybindingsVersion };
+
+const TABLE_COMMANDS = new Set(DEFAULT_KEYBINDINGS.map((r) => r.command));
+
 /**
  * Applies the `keybindings` setting. User keys come before the defaults, so
  * they win. Returns a message for every entry that was skipped; a bad entry
  * never breaks the defaults.
  */
-export function setUserKeybindings(entries: unknown): string[] {
+export function setUserKeybindings(entries: unknown, isKnownCommand: (id: string) => boolean = () => false): string[] {
     const warnings: string[] = [];
     const ok: UserKeybinding[] = [];
     for (const [i, raw] of (Array.isArray(entries) ? entries : []).entries()) {
@@ -83,6 +91,12 @@ export function setUserKeybindings(entries: unknown): string[] {
             warnings.push(`${where}: "${e.key}": a chord is at most two keys`);
             continue;
         }
+        const id = e.command.replace(/^-/, "");
+        if (!TABLE_COMMANDS.has(id) && !isKnownCommand(id)) {
+            // A typo on a default key would otherwise win and run nothing.
+            warnings.push(`${where}: unknown command "${id}"`);
+            continue;
+        }
         if (e.platform != null && e.platform !== "mac" && e.platform !== "other") {
             warnings.push(`${where}: platform must be "mac" or "other"`);
             continue;
@@ -98,6 +112,7 @@ export function setUserKeybindings(entries: unknown): string[] {
     }
     userBindings = ok;
     compiled.clear();
+    setKeybindingsVersion((v) => v + 1);
     return warnings;
 }
 
@@ -117,8 +132,20 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
         // A command's first row is its main one (later rows add chords or scoped keys).
         const byCommand = new Map<string, KeyBindingRow>();
         for (const r of DEFAULT_KEYBINDINGS) if (!byCommand.has(r.command)) byCommand.set(r.command, r);
+        // In list order: an unbind removes the defaults and your own entries
+        // above it, so "unbind, then rebind elsewhere" works.
+        const userRows: CompiledRow[] = [];
         for (const u of mine) {
-            if (u.command.startsWith("-") || !u.key) continue;
+            if (u.command.startsWith("-")) {
+                const command = u.command.slice(1);
+                const steps = u.key ? stepsOf(u.key) : null;
+                for (let i = userRows.length - 1; i >= 0; i--) {
+                    const r = userRows[i];
+                    if (r.row.command === command && (steps == null || sameSteps(steps, r.steps))) userRows.splice(i, 1);
+                }
+                continue;
+            }
+            if (!u.key) continue;
             const base = byCommand.get(u.command);
             const row: KeyBindingRow = {
                 command: u.command,
@@ -129,8 +156,9 @@ function rowsFor(platform: KeyPlatform): CompiledRow[] {
                 pane: base?.pane,
                 helpGroup: base?.helpGroup,
             };
-            rows.push({ row, source: u.key.trim(), steps: stepsOf(u.key) });
+            userRows.push({ row, source: u.key.trim(), steps: stepsOf(u.key) });
         }
+        rows.push(...userRows);
         for (const row of DEFAULT_KEYBINDINGS) {
             for (const source of (platform === "mac" ? row.mac : row.other) ?? []) {
                 const steps = source.split(" ").map((s) => parseKey(s, platform));

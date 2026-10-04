@@ -39,6 +39,7 @@ import {
 } from "./keymodel-nav";
 import { setUserKeybindings } from "@/app/keybindings/registry";
 import { createEffect, createRoot } from "solid-js";
+import { commandRegistry } from "./command-registry";
 
 function countTermBlocks(): number {
     return basicTermModels().length;
@@ -235,7 +236,8 @@ function deactivateSearch(): boolean {
 function registerUserKeybindings(): void {
     createRoot(() =>
         createEffect(() => {
-            for (const message of setUserKeybindings(settingsAtom()?.["keybindings"])) {
+            const known = (id: string) => keyCommands.has(id) || commandRegistry.get(id) != null;
+            for (const message of setUserKeybindings(settingsAtom()?.["keybindings"], known)) {
                 console.warn(`[keybindings] ${message}`);
             }
         })

@@ -8,7 +8,7 @@ import { isMacOS } from "@/util/platformutil";
 import type { KeyPane } from "./defaults";
 import { helpSections, type HelpSection } from "./help";
 import { formatKey, parseKey, type KeyEventLike, type KeyPlatform } from "./keys";
-import { formatCommand, keysFor, matchPaneKey } from "./registry";
+import { formatCommand, keybindingsVersion, keysFor, matchPaneKey } from "./registry";
 
 export function keyPlatform(): KeyPlatform {
     return isMacOS() ? "mac" : "other";
@@ -24,7 +24,9 @@ export function keyLabel(spec: string): string {
     return formatKey(spec, keyPlatform());
 }
 
+/** Reactive: an open help pane re-renders when your keybindings change. */
 export function shortcutHelp(): HelpSection[] {
+    keybindingsVersion();
     return helpSections(keyPlatform());
 }
 

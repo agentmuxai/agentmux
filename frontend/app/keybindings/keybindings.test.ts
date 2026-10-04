@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_KEYBINDINGS } from "./defaults";
 import { formatKey, matchKey, parseKey, type KeyEventLike } from "./keys";
 import { helpSections } from "./help";
-import { _rowsForTests, commandForKey, findConflicts, formatCommand, matchPaneKey, resolveKey, setUserKeybindings, whenDisjoint, type KeyContext } from "./registry";
+import { _rowsForTests, commandForKey, findConflicts, formatCommand, keybindingsVersion, matchPaneKey, resolveKey, setUserKeybindings, whenDisjoint, type KeyContext } from "./registry";
 
 function ev(key: string, code: string, mods: Partial<KeyEventLike> = {}): KeyEventLike {
     return { key, code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods };
@@ -235,6 +235,30 @@ describe("the keybindings setting", () => {
         expect(commandForKey("ctrl+shift+t", "other")).toBe("tab:new");
         setUserKeybindings([{ key: "ctrl+shift+t", command: "pane:close" }]);
         expect(commandForKey("ctrl+shift+t", "other")).toBe("pane:close");
+    });
+
+    it("an unbind removes your entries above it, not below", () => {
+        setUserKeybindings([
+            { key: "ctrl+shift+e", command: "split:right" },
+            { command: "-split:right" },
+            { key: "ctrl+shift+o", command: "split:right" },
+        ]);
+        expect(resolveKey(CSE, NONE, "other")).toBeNull();
+        expect(resolveKey(ev("D", "KeyD", { ctrlKey: true, shiftKey: true }), NONE, "other")).toBeNull();
+        expect(resolveKey(ev("O", "KeyO", { ctrlKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("split:right");
+    });
+
+    it("rejects an unknown command, so a typo can't disable a default key", () => {
+        expect(setUserKeybindings([{ key: "ctrl+shift+t", command: "tab:ner" }])).toHaveLength(1);
+        expect(resolveKey(CST, NONE, "other")?.row.command).toBe("tab:new");
+        // A command the app knows outside the table (the command palette's) is fine.
+        expect(setUserKeybindings([{ key: "ctrl+shift+e", command: "open:files" }], (id) => id === "open:files")).toEqual([]);
+    });
+
+    it("bumps the version views follow", () => {
+        const before = keybindingsVersion();
+        setUserKeybindings([{ key: "ctrl+shift+e", command: "split:right" }]);
+        expect(keybindingsVersion()).toBe(before + 1);
     });
 
     it("shows in the help pane", () => {
