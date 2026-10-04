@@ -165,6 +165,12 @@ function AccountRow(props: {
                 if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     props.onClick();
+                } else if (e.key === "Escape" && props.expanded) {
+                    // Focus stays on the row after a click, so Esc must close
+                    // the panel from here too, not only from inside it.
+                    e.preventDefault();
+                    e.stopPropagation();
+                    props.onClick();
                 }
             }}
             onContextMenu={(e) => props.onContextMenu?.(e)}
