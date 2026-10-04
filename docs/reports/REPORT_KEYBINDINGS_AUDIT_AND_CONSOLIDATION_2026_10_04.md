@@ -436,7 +436,7 @@ A shortcut made of one character key (no modifier) must either be possible to tu
   - **What's forwarded:** window, tab and pane commands that skip the shell, plus the palette, Settings and the shortcuts sheet.
   - **Left out:** find and zoom, which a page has its own of; typing-scoped keys, because the host can't see whether the page has a text field focused (F6 still leaves the pane); chords.
   - **Decided against: macOS native menu key equivalents.** An NSMenu key equivalent takes the key before the web view sees it, so it would bypass the table's `when` rules: ⌘W would close the pane even in the Files pane, whose own ⌘W closes a folder tab. The menu keeps running commands by click (`menu:invoke`), and its items show no accelerators. The command palette and the help pane show every key instead.
-- Phase 6 (the user-keys PR): **done.**
+- Phase 6 (#4328): **done.**
   - **A `keybindings` setting** (schema, TS type, `setUserKeybindings`), applied live:
     - user keys come before the defaults, so they win;
     - `-command` unbinds a command, every key or just one;
