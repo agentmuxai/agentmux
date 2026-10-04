@@ -182,6 +182,35 @@ describe("tokenizeShell heredocs", () => {
     });
 });
 
+describe("tokenizeShell arithmetic", () => {
+    it("does not read << inside $(( )) as a heredoc", () => {
+        const cmd = "x=$((1 << 2))\necho hi\nls";
+        const m = marks(cmd);
+        expect(m.filter(([, k]) => k === "heredoc-marker" || k === "heredoc-body")).toEqual([]);
+        expect(m).toContainEqual(["echo", "program"]);
+        expect(m).toContainEqual(["ls", "program"]);
+    });
+
+    it("marks variables inside arithmetic and keeps redirects out of it", () => {
+        expect(marks("echo $((a<<2 & $b)) && ls")).toEqual([
+            ["echo", "program"],
+            ["$((", "substitution"],
+            ["$b", "variable"],
+            ["))", "substitution"],
+            ["&&", "operator"],
+            ["ls", "program"],
+        ]);
+    });
+
+    it("handles the (( )) command form and nested parentheses", () => {
+        const cmd = "((i = (1 << 2) + 3))\nls";
+        const m = marks(cmd);
+        expect(m.filter(([, k]) => k === "heredoc-marker")).toEqual([]);
+        expect(m).toContainEqual(["ls", "program"]);
+        expect(roundTrip(cmd)).toBe(cmd);
+    });
+});
+
 describe("tokenizeShell segments", () => {
     it("splits at operators and newlines, with the program of each", () => {
         const cmd = "cd a && make -j4 | tee log\nls";

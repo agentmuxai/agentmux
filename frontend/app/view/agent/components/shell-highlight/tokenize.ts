@@ -255,6 +255,12 @@ class Scanner {
                 cmdPos = false;
                 continue;
             }
+            if (c === "(" && s[this.i + 1] === "(" && cmdPos && this.nest < MAX_NEST) {
+                open(this.i);
+                this.scanArithmetic(2);
+                cmdPos = false;
+                continue;
+            }
             if (c === "(") {
                 open(this.i);
                 this.emit(this.i, this.i + 1, "punct");
@@ -517,6 +523,36 @@ class Scanner {
         }
     }
 
+    /**
+     * `$((expr))` and `((expr))`: the body is arithmetic, not shell words, so
+     * `<<`, `<` and `&` in it are not heredocs, redirects or operators. Only
+     * variables inside are marked.
+     */
+    private scanArithmetic(openLen: number): void {
+        const s = this.s;
+        this.emit(this.i, this.i + openLen, "substitution");
+        this.i += openLen;
+        let depth = 0;
+        while (this.i < s.length) {
+            const c = s[this.i];
+            if (c === "$" && this.tryDollar()) continue;
+            if (c === "(") depth++;
+            else if (c === ")") {
+                if (depth === 0) {
+                    if (s[this.i + 1] === ")") {
+                        this.emit(this.i, this.i + 2, "substitution");
+                        this.i += 2;
+                    } else {
+                        this.i++;
+                    }
+                    return;
+                }
+                depth--;
+            }
+            this.i++;
+        }
+    }
+
     /** Length of the `$` construct at `at`, or 0 when it is just a dollar sign. */
     private dollarLength(at: number): number {
         const s = this.s;
@@ -535,6 +571,10 @@ class Scanner {
         const len = this.dollarLength(this.i);
         if (len === 0) return false;
         const next = s[this.i + 1];
+        if (next === "(" && s[this.i + 2] === "(") {
+            this.scanArithmetic(3);
+            return true;
+        }
         if (next === "(") {
             this.emit(this.i, this.i + 2, "substitution");
             this.i += 2;

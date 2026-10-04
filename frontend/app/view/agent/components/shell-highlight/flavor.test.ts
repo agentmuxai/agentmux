@@ -35,4 +35,17 @@ describe("detectShellFlavor", () => {
     ])("falls back to POSIX for %s", (cmd) => {
         expect(detectShellFlavor(cmd)).toBe("posix");
     });
+
+    it.each([
+        "cat > r.txt <<EOF\nSet-Cookie: a=b\nEOF",
+        'git commit -m "fix\nAdd-On support"',
+        "echo 'x\nWrite-Up'",
+        "ls # Get-ChildItem",
+    ])("does not read cmdlet-looking text inside strings, heredocs or comments as PowerShell: %s", (cmd) => {
+        expect(detectShellFlavor(cmd)).toBe("posix");
+    });
+
+    it("still reads a multi-line PowerShell script as PowerShell", () => {
+        expect(detectShellFlavor('$x = 1\nGet-ChildItem "C:\\a"\nWrite-Host $x')).toBe("powershell");
+    });
 });

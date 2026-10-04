@@ -9,6 +9,8 @@
  * Spec: docs/specs/SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.1
  */
 
+import { tokenizeShell, type TokenKind } from "./tokenize";
+
 export type ShellFlavor = "posix" | "powershell" | "cmd";
 
 const POWERSHELL_LAUNCH_RE = /^\s*(?:&\s*)?(?:powershell|pwsh)(?:\.exe)?\b/i;
@@ -22,9 +24,30 @@ const CMD_LAUNCH_RE = /^\s*cmd(?:\.exe)?\s+\/[ck]\b/i;
 const CMD_PERCENT_VAR_RE = /%[A-Za-z_][A-Za-z0-9_]{2,}%/;
 const CMD_BUILTIN_RE = /^\s*(?:@?echo\s+off|if\s+(?:not\s+)?exist\b|cd\s+\/d\b)/i;
 
+const MASKED: ReadonlySet<TokenKind> = new Set(["string", "heredoc-body", "heredoc-marker", "comment"]);
+
+/**
+ * `command` with quoted text, heredoc bodies and comments blanked (same
+ * length), so a line inside them that happens to start `Set-Cookie` or
+ * `Add-On` is not read as a cmdlet.
+ */
+function maskQuoted(command: string): string {
+    let out = "";
+    let pos = 0;
+    for (const t of tokenizeShell(command).tokens) {
+        if (!MASKED.has(t.kind)) continue;
+        out += command.slice(pos, t.start) + command.slice(t.start, t.end).replace(/[^\n]/g, " ");
+        pos = t.end;
+    }
+    return out + command.slice(pos);
+}
+
 export function detectShellFlavor(command: string): ShellFlavor {
-    if (POWERSHELL_LAUNCH_RE.test(command) || CMDLET_RE.test(command) || POWERSHELL_VAR_RE.test(command)) {
-        return "powershell";
+    if (POWERSHELL_LAUNCH_RE.test(command)) return "powershell";
+    if (CMDLET_RE.test(command) || POWERSHELL_VAR_RE.test(command)) {
+        // A cheap hit; confirm it is not text inside a string or heredoc.
+        const code = maskQuoted(command);
+        if (CMDLET_RE.test(code) || POWERSHELL_VAR_RE.test(code)) return "powershell";
     }
     if (CMD_LAUNCH_RE.test(command) || CMD_BUILTIN_RE.test(command) || CMD_PERCENT_VAR_RE.test(command)) {
         return "cmd";
