@@ -202,7 +202,6 @@ function deriveContract(root: string): Contract {
 /** FE makes live calls to these, but the backend registers no handler. */
 const KNOWN_LIVE_UNREGISTERED = [
     "activity",
-    "fileappend",
     "recordtevent",
     "resolveids",
     "setrtinfo",
