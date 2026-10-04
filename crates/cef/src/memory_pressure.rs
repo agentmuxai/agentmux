@@ -209,8 +209,13 @@ impl PressureTracker {
 pub const POOL_REFILL_SETTLE: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Decides when to refill the warm pools after commit pressure returns to
-/// `Normal`: only once it has stayed there for `POOL_REFILL_SETTLE`. Fed the
-/// level on every heartbeat tick; `tick` returns true once, when it is time.
+/// `Normal`: only once it has stayed there for `POOL_REFILL_SETTLE`, and then
+/// on every heartbeat tick until both pools are full again. The spawn
+/// functions are single-flight and do nothing when their pool is full or a
+/// browser pane is mid-close, so retrying each tick is cheap, and it is the
+/// only race-free way to make sure a refill that coincided with a pane close
+/// still happens: whether a pane is closing can change between any check here
+/// and the spawn's own check.
 #[derive(Debug, Default)]
 pub struct PoolRefillGate {
     normal_since: Option<std::time::Instant>,
@@ -222,16 +227,14 @@ impl PoolRefillGate {
     }
 
     /// `transition` is the tracker's return for this tick (`Some` on a level
-    /// change). `spawn_blocked` is true while the pool spawns would refuse to
-    /// run (a browser pane is mid-close): the gate then stays armed and fires
-    /// on a later tick instead of being spent on a refill that never happens.
-    /// Returns true when the pools should be refilled now.
+    /// change); `pools_full` is whether both warm pools are at their target
+    /// size. Returns true when the pool spawns should be called this tick.
     pub fn tick(
         &mut self,
         transition: Option<PressureLevel>,
         level: PressureLevel,
         now: std::time::Instant,
-        spawn_blocked: bool,
+        pools_full: bool,
     ) -> bool {
         if level != PressureLevel::Normal {
             self.normal_since = None;
@@ -242,9 +245,13 @@ impl PoolRefillGate {
             return false;
         }
         match self.normal_since {
-            Some(since) if now.duration_since(since) >= POOL_REFILL_SETTLE && !spawn_blocked => {
-                self.normal_since = None;
-                true
+            Some(since) if now.duration_since(since) >= POOL_REFILL_SETTLE => {
+                if pools_full {
+                    self.normal_since = None; // refilled: done until the next episode
+                    false
+                } else {
+                    true
+                }
             }
             _ => false,
         }
@@ -456,8 +463,19 @@ mod tests {
         assert!(!gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false));
         assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE / 2, false));
         assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, false));
-        // Once only.
-        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 2, false));
+    }
+
+    #[test]
+    fn pool_refill_keeps_trying_each_tick_until_the_pools_are_full() {
+        let t0 = std::time::Instant::now();
+        let mut gate = PoolRefillGate::new();
+        gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false);
+        // Due; the spawns may have refused (a pane was closing): try again.
+        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, false));
+        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 2, false));
+        // Full: stop, and stay stopped.
+        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 3, true));
+        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 4, false));
     }
 
     #[test]
@@ -479,17 +497,5 @@ mod tests {
         let mut gate = PoolRefillGate::new();
         // Steady Normal from startup: the pools were filled at startup, not here.
         assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 10, false));
-    }
-
-    #[test]
-    fn pool_refill_waits_out_a_pane_close_instead_of_losing_the_refill() {
-        let t0 = std::time::Instant::now();
-        let mut gate = PoolRefillGate::new();
-        gate.tick(Some(PressureLevel::Normal), PressureLevel::Normal, t0, false);
-        // Due, but a browser pane is closing: the spawns would bail. Stay armed.
-        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE, true));
-        assert!(!gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 2, true));
-        // The close finished: refill now.
-        assert!(gate.tick(None, PressureLevel::Normal, t0 + POOL_REFILL_SETTLE * 2, false));
     }
 }

@@ -186,16 +186,16 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                         while crate::commands::window_pool::evict_idle_pool_window(&state) {}
                     }
                 }
-                // The refill waits until Normal has held for POOL_REFILL_SETTLE
-                // (see PoolRefillGate): each refill creates windows, which on
-                // Windows took keyboard focus, and pressure flaps while builds run.
-                if pool_refill.tick(
-                    transition,
-                    level_now,
-                    std::time::Instant::now(),
-                    state.any_browser_pane_closing(),
-                ) {
-                    tracing::info!(target: "mem_pressure", "refilling warm pools after pressure settled");
+                // The refill waits until Normal has held for POOL_REFILL_SETTLE,
+                // then retries each tick until both pools are full (see
+                // PoolRefillGate): each refill creates windows, which on Windows
+                // took keyboard focus, and pressure flaps while builds run.
+                let pools_full = state.pool_queue_size()
+                    >= crate::commands::window_pool::POOL_TARGET_SIZE
+                    && state.pane_pool_queue_size()
+                        >= crate::commands::pane_pool::PANE_POOL_TARGET_SIZE;
+                if pool_refill.tick(transition, level_now, std::time::Instant::now(), pools_full) {
+                    tracing::debug!(target: "mem_pressure", "refilling warm pools after pressure settled");
                     crate::commands::window_pool::spawn_pane_pool_window(&state);
                     crate::commands::window_pool::spawn_pool_window(&state);
                 }
