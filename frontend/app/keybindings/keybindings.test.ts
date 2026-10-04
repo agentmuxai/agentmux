@@ -1,10 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_KEYBINDINGS } from "./defaults";
 import { formatKey, matchKey, parseKey, type KeyEventLike } from "./keys";
-import { _rowsForTests, findConflicts, formatCommand, matchPaneKey, resolveKey, whenDisjoint, type KeyContext } from "./registry";
+import { helpSections } from "./help";
+import { _rowsForTests, findConflicts, formatCommand, matchPaneKey, resolveKey, setUserKeybindings, whenDisjoint, type KeyContext } from "./registry";
 
 function ev(key: string, code: string, mods: Partial<KeyEventLike> = {}): KeyEventLike {
     return { key, code, ctrlKey: false, shiftKey: false, altKey: false, metaKey: false, ...mods };
@@ -161,5 +162,54 @@ describe("pane rows", () => {
         expect(whenDisjoint("!docTabsHost", "viewType == editor")).toBe(true);
         expect(whenDisjoint("docTabsHost", "viewType == editor")).toBe(false);
         expect(whenDisjoint("terminalFocus", "viewType == term")).toBe(false);
+    });
+});
+
+describe("the keybindings setting", () => {
+    afterEach(() => setUserKeybindings([]));
+    const CSE = ev("E", "KeyE", { ctrlKey: true, shiftKey: true });
+    const CST = ev("T", "KeyT", { ctrlKey: true, shiftKey: true });
+
+    it("adds a key alongside the defaults", () => {
+        expect(setUserKeybindings([{ key: "ctrl+shift+e", command: "split:right" }])).toEqual([]);
+        expect(resolveKey(CSE, NONE, "other")?.row.command).toBe("split:right");
+        expect(resolveKey(ev("D", "KeyD", { ctrlKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("split:right");
+    });
+
+    it("a user key wins over a default on the same key", () => {
+        setUserKeybindings([{ key: "ctrl+shift+t", command: "pane:new" }]);
+        expect(resolveKey(CST, NONE, "other")?.row.command).toBe("pane:new");
+    });
+
+    it("-command unbinds every key, or just the one given", () => {
+        setUserKeybindings([{ command: "-tab:new" }]);
+        expect(resolveKey(CST, NONE, "other")).toBeNull();
+        expect(formatCommand("tab:new", "other")).toBe("");
+        setUserKeybindings([{ command: "-tab:next", key: "ctrl+Tab" }]);
+        expect(resolveKey(ev("Tab", "Tab", { ctrlKey: true }), NONE, "other")).toBeNull();
+        expect(resolveKey(ev("}", "BracketRight", { ctrlKey: true, shiftKey: true }), NONE, "other")?.row.command).toBe("tab:next");
+    });
+
+    it("applies only to the platform it names", () => {
+        setUserKeybindings([{ key: "ctrl+shift+e", command: "split:right", platform: "mac" }]);
+        expect(resolveKey(CSE, NONE, "other")).toBeNull();
+        expect(resolveKey(CSE, NONE, "mac")?.row.command).toBe("split:right");
+    });
+
+    it("skips a bad entry with a warning and keeps the rest", () => {
+        const warnings = setUserKeybindings([
+            { key: "ctrl+hyper+e", command: "split:right" },
+            { key: "ctrl+shift+e", command: "split:right", when: "nosuchflag" },
+            { key: "ctrl+shift+e" },
+            { key: "ctrl+shift+e", command: "pane:new" },
+        ]);
+        expect(warnings).toHaveLength(3);
+        expect(resolveKey(CSE, NONE, "other")?.row.command).toBe("pane:new");
+    });
+
+    it("shows in the help pane", () => {
+        setUserKeybindings([{ key: "ctrl+shift+e", command: "split:right" }]);
+        const panes = helpSections("other").find((s) => s.category === "Panes");
+        expect(panes?.entries.find((e) => e.label === "Split right")?.keys).toContain("Ctrl+Shift+E");
     });
 });

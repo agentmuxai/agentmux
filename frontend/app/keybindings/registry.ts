@@ -43,18 +43,91 @@ interface CompiledRow {
 
 const compiled = new Map<KeyPlatform, CompiledRow[]>();
 
+/** One entry of the `keybindings` setting (report §6.6). */
+export interface UserKeybinding {
+    key?: string;
+    /** A command id; `-command` unbinds it (just `key`, or every key when no key is given). */
+    command: string;
+    when?: string;
+    /** Limit to one platform; both when omitted. */
+    platform?: KeyPlatform;
+}
+
+let userBindings: UserKeybinding[] = [];
+
+/**
+ * Applies the `keybindings` setting. User keys come before the defaults, so
+ * they win. Returns a message for every entry that was skipped; a bad entry
+ * never breaks the defaults.
+ */
+export function setUserKeybindings(entries: unknown): string[] {
+    const warnings: string[] = [];
+    const ok: UserKeybinding[] = [];
+    const ctx: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "", docTabsHost: false };
+    for (const [i, raw] of (Array.isArray(entries) ? entries : []).entries()) {
+        const e = raw as UserKeybinding;
+        const where = `keybindings[${i}]`;
+        if (!e || typeof e.command !== "string" || !e.command.replace(/^-/, "")) {
+            warnings.push(`${where}: needs a "command"`);
+            continue;
+        }
+        if (!e.command.startsWith("-") && typeof e.key !== "string") {
+            warnings.push(`${where}: needs a "key" for ${e.command}`);
+            continue;
+        }
+        if (e.platform != null && e.platform !== "mac" && e.platform !== "other") {
+            warnings.push(`${where}: platform must be "mac" or "other"`);
+            continue;
+        }
+        try {
+            if (e.key) for (const p of ["mac", "other"] as const) e.key.split(" ").forEach((k) => parseKey(k, p));
+            evalWhen(e.when, ctx);
+        } catch (err) {
+            warnings.push(`${where}: ${(err as Error).message}`);
+            continue;
+        }
+        ok.push(e);
+    }
+    userBindings = ok;
+    compiled.clear();
+    return warnings;
+}
+
 function rowsFor(platform: KeyPlatform): CompiledRow[] {
     let rows = compiled.get(platform);
     if (!rows) {
         rows = [];
+        const mine = userBindings.filter((u) => u.platform == null || u.platform === platform);
+        const unbound = (command: string, source: string) =>
+            mine.some((u) => u.command === `-${command}` && (u.key == null || u.key === source));
+        const byCommand = new Map(DEFAULT_KEYBINDINGS.map((r) => [r.command, r] as const));
+        for (const u of mine) {
+            if (u.command.startsWith("-") || !u.key) continue;
+            const base = byCommand.get(u.command);
+            const row: KeyBindingRow = {
+                command: u.command,
+                label: base?.label ?? u.command,
+                category: base?.category ?? "General",
+                when: u.when,
+                skipShell: base?.skipShell,
+                pane: base?.pane,
+            };
+            rows.push({ row, source: u.key, steps: u.key.split(" ").map((s) => parseKey(s, platform)) });
+        }
         for (const row of DEFAULT_KEYBINDINGS) {
             for (const source of (platform === "mac" ? row.mac : row.other) ?? []) {
+                if (unbound(row.command, source)) continue;
                 rows.push({ row, source, steps: source.split(" ").map((s) => parseKey(s, platform)) });
             }
         }
         compiled.set(platform, rows);
     }
     return rows;
+}
+
+/** Every row as resolved for `platform`, user keys first (for the help pane). */
+export function effectiveRows(platform: KeyPlatform): { row: KeyBindingRow; source: string }[] {
+    return rowsFor(platform).map(({ row, source }) => ({ row, source }));
 }
 
 /** `when` is `flag`, `!flag`, `viewType == x` or `viewType != x`, joined with `&&`. */

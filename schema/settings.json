@@ -66,6 +66,21 @@
         "term:shiftenternewline": {
           "type": "boolean"
         },
+        "keybindings": {
+          "type": "array",
+          "description": "Your own keyboard shortcuts, applied over the defaults. Each entry: {\"key\": \"ctrl+shift+e\", \"command\": \"split:right\"}. A command starting with - unbinds it: {\"command\": \"-tab:new\"} removes every key, or add \"key\" to remove one. Optional \"when\" (e.g. \"!terminalFocus\") and \"platform\" (\"mac\" or \"other\"). Command ids are listed in the keyboard shortcuts help.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": { "type": "string" },
+              "command": { "type": "string" },
+              "when": { "type": "string" },
+              "platform": { "enum": ["mac", "other"] }
+            },
+            "required": ["command"],
+            "additionalProperties": false
+          }
+        },
         "term:predictiveecho": {
           "type": "boolean"
         },

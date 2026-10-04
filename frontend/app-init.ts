@@ -8,6 +8,7 @@ import {
     registerControlShiftTracking,
     registerHostShortcuts,
     registerGlobalKeys,
+    registerUserKeybindings,
 } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
@@ -987,6 +988,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     registerGlobalKeys();
+    registerUserKeybindings();
     registerDefaultCommands();
     registerControlShiftTracking();
     registerHostShortcuts();
