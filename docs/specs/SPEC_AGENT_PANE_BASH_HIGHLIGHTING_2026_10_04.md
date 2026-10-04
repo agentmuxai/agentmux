@@ -1,6 +1,6 @@
 # SPEC: Robust highlighting for Bash tool panels in the agent pane
 
-**Status:** Draft
+**Status:** In progress. Steps 1-3 of §5 (POSIX tokenizer, sync render and theme, streaming header) are in the first PR; PowerShell shows through its Shiki grammar until step 4.
 **Date:** 2026-10-04
 **Author:** AgentX
 **Requested by:** the repo owner ("when hovering over agent pane tools, we get
@@ -192,15 +192,15 @@ stays the same as today so streaming does not re-render old lines.
 
 ### 3.5 Theme and CSS
 
-Sync-layer classes use new semantic tokens defined once in the theme layer
-(`--sh-program`, `--sh-flag`, `--sh-string`, `--sh-variable`, `--sh-operator`,
-`--sh-comment`, `--sh-danger`, `--sh-location`) with dark and light values,
-each checked to meet 4.5:1 contrast on the panel background in both. The
-forced `color: var(--accent-color)` on `.agent-bash-cmd-code` is removed.
-Embedded-body Shiki output picks `github-dark-high-contrast` or
-`github-light-high-contrast` from the active theme's `color-scheme`, and
-re-highlights when the theme flips (the cache key includes the theme).
-ANSI palette comes from the existing `text-ansi-*` classes.
+Sync-layer classes take their colours from each theme's terminal palette
+(`--term-green`, `--term-blue`, ...), plus `--accent-color` for programs and
+`--link-color` for URLs. Every theme already defines the palette against its
+own background, so light and dark themes stay legible without a second set of
+tokens. The forced `color: var(--accent-color)` on `.agent-bash-cmd-code` is
+removed. Embedded-body Shiki output (step 5) picks `github-dark-high-contrast`
+or `github-light-high-contrast` from the active theme's `color-scheme`, and
+re-highlights when the theme flips (the cache key includes the theme). The ANSI
+palette comes from the existing `text-ansi-*` classes.
 
 ### 3.6 Streaming panels show the command
 

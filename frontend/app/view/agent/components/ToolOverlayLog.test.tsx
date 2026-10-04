@@ -711,3 +711,17 @@ describe("ToolOverlayLog — follows the latest output", () => {
         });
     });
 });
+
+describe("ToolOverlayLog Bash command header", () => {
+    it("shows the command above the output while streaming", () => {
+        const { container } = render(() => <ToolOverlayLog node={streamingNode} />);
+        expect(container.querySelector(".agent-bash-cmd-code")!.textContent).toBe("sleep 1 && echo done");
+        expect(container.querySelector(".agent-tool-log-line")!.textContent).toBe("line 1");
+    });
+
+    it("shows no command header for other tools", () => {
+        const node: ToolNode = { ...streamingNode, tool: "Grep", params: { pattern: "x" } };
+        const { container } = render(() => <ToolOverlayLog node={node} />);
+        expect(container.querySelector(".agent-bash-cmd")).toBeNull();
+    });
+});
