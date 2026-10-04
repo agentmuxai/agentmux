@@ -14,9 +14,7 @@
 //! `(list_id, index, dir_hash)` from a list the server issued
 //! (`agent:memory:adoption_list`) — never a path.
 //!
-//! Until GHSA-6726-q276-g6f6 is fixed this protects against MCP tools, not a
-//! same-user process; the worst such a process could do is adopt memory
-//! from a folder the server listed for that agent.
+//! Further hardening of this path waits on a pending security fix.
 
 use serde::Deserialize;
 

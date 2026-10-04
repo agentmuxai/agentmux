@@ -119,35 +119,14 @@ screenshotting it.
 
 ### 4.1 General agent-to-agent WAN jekt signing (issue #2586's other half)
 
-Confirmed: **an arbitrary non-reagent agent's WAN jekt has zero
-cryptographic identity proof today** — `source_agent` is just a claimed
-field; only reagent's one pinned key is verified
-(`cloud_subscriber.rs:944-957`, no other WAN verification path exists in
-`reactive.rs`/`cloud_subscriber.rs`). A complete design already exists
-(`SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §5.1/§6.2): reuse the
-exact `agentmux_common::jekt_sign` HMAC pattern already shipped for
-host-tier, "just a new home" — but it's blocked on redesigning Cognito M2M
-provisioning (current scheme caps at 100 app clients **system-wide**, not
-per-account; needs one client per account + a pre-token Lambda injecting
-authorized `agent_id`s as a claim). This is real AWS infrastructure work in
-`agentmux-cloud`/`shared-infrastructure` — separate repos, live Cognito/
-Lambda config — not something to implement blind from this repo.
+At the time of this audit, general agent-to-agent WAN signing was not yet
+built in this repo. It has since shipped as same-account WAN verification
+(`SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, `TRUST=wan-verified`).
 
-### 4.2 `ENFORCE_AGENT_BINDING` — built, verified ~90%, never turned on
+### 4.2 WAN sender binding (relay side)
 
-`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` §1.2 ("Gap A"): the WAN
-binding-check enforcement flag lives in `agentmux-cloud` (Lambda env var),
-currently **log-only** — it detects a mismatch and warns, never rejects.
-`grep -rn ENFORCE_AGENT_BINDING` across `agentmux-cloud`/
-`shared-infrastructure` finds it only in the check's own source and test
-file — never set in any deployed environment config. The spec's own
-remaining steps are explicitly ops, not code: "live-verify per-agent
-credential provisioning end-to-end; burn in log-only mismatch monitoring;
-flip `ENFORCE_AGENT_BINDING=true`." One real prerequisite (403 rejection
-handling, §5.2) is confirmed already shipped in THIS repo
-(`cloud_subscriber.rs:670-679`) — so the remaining work is genuinely just
-verification + a deployed-config flip in a different repo's Lambda stack,
-not new engineering here.
+Relay-side sender-binding work is tracked in the private cloud repo, not
+here.
 
 ## 5. What's already solid (not a gap — stated for completeness)
 
@@ -181,8 +160,6 @@ push:
    (confirm the two jekt-rule additions muxspect Phase B/C needs, same
    live-conversation-confirmation protocol as every prior jekt-rule
    change this session).
-3. **Not this repo's work:** §4.1/§4.2 — real, already-designed,
-   already-~90%-built fixes that live in `agentmux-cloud`/
-   `shared-infrastructure` and need AWS-side verification + a config flip,
-   not new code here. Flagging so they're visible, not attempting them
-   from this session.
+3. **Not this repo's work:** §4.2 — cloud-side work tracked in the
+   private cloud repo. Flagging so it's visible, not attempting it from
+   this session.

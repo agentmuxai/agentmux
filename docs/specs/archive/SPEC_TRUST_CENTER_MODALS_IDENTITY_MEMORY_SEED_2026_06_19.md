@@ -1,12 +1,9 @@
 # SPEC: Trust Center Centered Modals + Identity/Memory Seed
 
-> **Redacted 2026-09-18.** This archived spec originally included the AWS
-> account ID and the per-agent Secrets Manager key names. This repository is
-> public, so those were replaced with placeholders; the real values live in
-> the private `shared-infrastructure` repository, in its credential
-> inventory standard. Note that git history still
-> contains the original values - they are identifiers, not credentials, and
-> nothing disclosed can authenticate.
+> **Redacted.** This archived spec originally included cloud account and
+> secret-store details. This repository is public, so those were replaced
+> with placeholders; the real values are kept in the private infrastructure
+> repo.
 
 
 > **Archived 2026-07-12.** Historical — modal-centering refactor + one-time credential/memory seed script, both complete. Consolidated tracking: issue #2024.
@@ -23,7 +20,7 @@ Three related initiatives shipped together:
 
 1. **Trust Center modal refactor** — detail views inside the Trust Center (BundleManagerModal) currently open as raw `position:fixed` overlays. Replace with proper centered `<Modal>` panels for focus trapping, backdrop, escape-key dismiss, and consistent chrome.
 
-2. **Identity seed** — one-time operation: create GitHub and AWS identity accounts for agent1–5, agentx, agenty and assign them. Credentials live in AWS Secrets Manager (`services/infra`). Idempotent — skips agents whose account slot is already populated.
+2. **Identity seed** — one-time operation: create GitHub and AWS identity accounts for agent1–5, agentx, agenty and assign them. Credentials live in a private secret store. Idempotent — skips agents whose account slot is already populated.
 
 3. **Memory seed** — one-time operation: write claw template `.md` files into each agent's native memory folder (`~/.claude/projects/<sanitized-cwd>/memory/`). Source is the `a5af/claw` GitHub repo (`templates/` tree). Idempotent — skip files that already exist.
 
@@ -130,8 +127,8 @@ Per-agent assignment stored as JSON blob in `db_agent_definitions.accounts`:
 ```json
 {
   "backend": "secrets_manager",
-  "sm_path": "services/infra",
-  "sm_json_path": "gh-token-agent1"
+  "sm_path": "<secret-path>",
+  "sm_json_path": "<key-name>"
 }
 ```
 
@@ -153,7 +150,7 @@ Per-agent assignment stored as JSON blob in `db_agent_definitions.accounts`:
 
 ### 3.3 GitHub App accounts (optional, Phase 2)
 
-Each agent also has a GitHub App identity (`agent1-workflow`, etc.) for Layer 1 access. Credentials stored at `services/infra → agent-configs.<agentname>` (JSON with `GITHUB_APP_ID`, `GITHUB_APP_INSTALLATION_ID`) and `services/infra → <agentname>-workflow-key` (PEM). These are higher-privilege and can be added as a second `provider="github"` account per agent with `kind="role"` and `context: { "layer": 1, "app_id": "...", "installation_id": "..." }`.
+Each agent also has a GitHub App identity (`agent1-workflow`, etc.) for Layer 1 access. Its app id, installation id and private key are kept in the private secret store. These are higher-privilege and can be added as a second `provider="github"` account per agent with `kind="role"` and `context: { "layer": 1, "app_id": "...", "installation_id": "..." }`.
 
 ### 3.4 Implementation options
 
@@ -164,7 +161,7 @@ A TypeScript script at `scripts/seed-identities.ts` (run via `npx tsx scripts/se
 ```typescript
 // Pseudocode
 const AGENTS = [
-  { name: "agent1", githubSecretKey: "gh-token-agent1", awsProfile: "Agent1" },
+  { name: "agent1", githubSecretKey: "<key-name>", awsProfile: "Agent1" },
   // ...agent2-5, agentx, agenty
 ];
 
@@ -181,7 +178,7 @@ for (const agent of AGENTS) {
   const ghAcct = await rpc("upsertidentityaccount", {
     id: "", provider: "github", kind: "pat",
     display_name: `${agent.name} GitHub`,
-    secret_ref: JSON.stringify({ backend: "secrets_manager", sm_path: "services/infra", sm_json_path: agent.githubSecretKey }),
+    secret_ref: JSON.stringify({ backend: "secrets_manager", sm_path: "<secret-path>", sm_json_path: agent.githubSecretKey }),
     context: "{}",
   });
 
@@ -387,9 +384,9 @@ Memory is written to the **host filesystem** in all cases (via `memory_dir_for_c
 
 1. **Trust Center tab panels always mounted** — toggling via `is-hidden` means all three managers are mounted simultaneously. Should the modal refactor also switch them to lazy-mount (unmount on hide, remount on show)? Lazy-mount reduces DOM but loses unsaved form state. Recommend: keep always-mounted for now, flag as a follow-up.
 
-2. **GitHub App accounts** (Phase 2 of identity seed) — do we want Layer 1 (App) accounts seeded alongside Layer 2 (PAT) accounts? Adds complexity: need to pull `GITHUB_APP_ID` and `GITHUB_APP_INSTALLATION_ID` from `services/infra → agent-configs.<agentname>`. Defer unless needed.
+2. **GitHub App accounts** (Phase 2 of identity seed) — do we want Layer 1 (App) accounts seeded alongside Layer 2 (PAT) accounts? Adds complexity: need to pull each App's ids from the private secret store. Defer unless needed.
 
-3. **agenty PAT path** — `gh-token-agenty` doesn't appear in the confirmed Secrets Manager key list (only `gh-token-agent1` through `gh-token-agent5` and `gh-token-agentx` confirmed). Verify before seeding.
+3. **agenty PAT path** — confirm the agenty credential exists in the private secret store before seeding.
 
 4. **Memory working_directory** — agent1–5 may be container agents with a Linux working_directory (e.g. `/workspace`). The memory path computed on the host would be `~/.claude/projects/-workspace/memory/` which may conflict if multiple container agents use `/workspace`. Clarify whether each container agent has a distinct host-side workspace path or a container-internal Linux path.
 
