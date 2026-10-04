@@ -37,8 +37,8 @@ data, and all were accepted.
 - **Reads:** sized from the database inside a read transaction (§2.1.1).
 - **Quarantine:** quarantined versions never become heads.
 - **Instances:** enrolled through the consent flow (§2.2).
-- **Residual:** stated plainly, and agent-written Global Memory is
-  quarantined by default when it arrives by sync (§2.2).
+- **Synced Global Memory:** agent-written entries are quarantined by
+  default when they arrive by sync (§2.2).
 - **Imported history:** rows from unproven sources are imported only
   when proven (§2.1.1).
 
@@ -652,7 +652,7 @@ in the browser; an agent cannot do it alone.
 (`SPEC_WAN_JEKT_VERIFICATION` §2.2). Every receiver checks it.
 
 **The signature proves the instance, not the author,** so `source` stays
-a label the sending instance asserts (WAN spec §4).
+a label the sending instance asserts.
 
 **Instances are enrolled through the consent flow.** The human confirms
 an instance in the system browser, with re-authentication, on a page
@@ -703,20 +703,13 @@ line.
 The relay side (routes, storage, ordering, uploads and wakes) is designed
 in the private cloud repo.
 
-**Residual, stated plainly.** Memory is loaded as instructions: MEMORY.md
-into every Claude session, Global Memory into CLAUDE.md.
-
-**Personal Memory in a group.** Any agent on an enrolled instance can
-write its own memory file, and that file is captured, synced, and
-projected on the linked machines. This is inherent and accepted: it is
-the same logical agent's memory reaching its own counterpart, exactly as
-if it had written its MEMORY.md there itself.
+**Personal Memory in a group.** An agent's own memory file is captured,
+synced, and projected on its linked counterparts, exactly as if it had
+written its MEMORY.md there itself.
 
 **Global Memory.** Agent-authored Global Memory is quarantined by default
-on receipt (above); an operator can turn that off.
-
-**Source labels.** Receivers treat `source` as advisory for now (WAN
-spec open question 5); later work may extend this.
+on receipt (above); an operator can turn that off. Receivers treat
+`source` as advisory (§4).
 
 ### 2.3 Armory: Global Memory as tiles (Part 3)
 
@@ -811,9 +804,6 @@ draft is dirty).
   as `legacy-build` (§2.1.6).
 - Concurrent builds of one channel use the conditional append and
   database-read sizes (§2.1.1), so they never fork a head.
-- Everything that relies on the host-gated window (adoption confirmation,
-  and approving sync instances) is intentionally limited for now; later
-  work may extend it.
 
 ---
 
@@ -822,15 +812,10 @@ draft is dirty).
 **Residuals:**
 - **Shared memory directories** don't get the record's benefits until the
   agents are given separate working directories (§2.1.2).
-- **Host-gated confirmation.** Adoption is limited to directories
-  the server lists for that agent. Instance enrolment for sync uses the
-  browser consent flow instead of the host channel.
-- **Any agent on an enrolled instance** can push its own Personal Memory
-  to its linked counterparts, which is inherent. Agent-authored Global
-  Memory is quarantined on receipt by default, and `source` labels are
-  advisory (§2.2).
 - **Unattributed writers** (no agent token) aren't recorded unless their
   directory is proven for exactly one agent (§2.1.5).
+
+Residual-risk notes for this design are kept in the private cloud repo.
 
 **Open questions:**
 1. **Adoption:** is the server-listed, human-confirmed list (§2.1.4)

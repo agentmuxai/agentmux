@@ -16,9 +16,8 @@ CLAUDE.md jekt section, the C1 deploy, and the §5 end-to-end run. Verified
 what is live, and what still needs the operator.
 **Revision history:** three adversarial reviews on 2026-09-24; every finding
 was verified against code and accepted. What each one changed:
-- **Review 1:** every spawned agent holds the account's cloud token, so an
-  account-authenticated key directory let any agent publish a key under any
-  name. Other fixes: hostname labels collide, a re-minted key was carried
+- **Review 1:** an account-authenticated key directory was not enough to
+  bind a key to the install that published it. Other fixes: hostname labels collide, a re-minted key was carried
   before being published, transient lookups raised false alarms, the cloud
   would leak the sender's account id, and the HTTP verifier site had no
   legitimate caller.
@@ -27,14 +26,13 @@ was verified against code and accepted. What each one changed:
   *version*; deferring via `/reactive/release` could lose messages. This
   produced **self-certifying instances** (§2.2).
 - **Review 3:**
-  - Instance approval needed a real boundary: agents hold `X-AuthKey`, which
-    reaches every `/ws` RPC.
+  - Instance approval needed a boundary agents can't reach.
   - The target binding must use the polled agent, not a message field.
   - Receiver state must live in the channel-wide store, which needs
     concurrency rules.
   - The agent-delete purge must reach that store.
   - Display labels are sender-chosen.
-  - A copied instance key needs revocation.
+  - An instance needs a way to be retired.
 **Trigger:** Repo owner, after a WAN jekt from their own trusted agent
 (`camper`) arrived `TRUST=network-claimed` with `ESCALATE=required`: *"figure
 out why it wasn't verified … write the WAN verification design spec covering
@@ -50,8 +48,8 @@ this spec, and this spec's guarantees are about `TRUST=wan-verified` only.
 **Relationship to the 2026-09-17 WAN-tier signing spec (no longer in this repo):** that spec
 remains the design of record for WAN signing in general and for the
 cross-account phases W0–W2. This spec:
-1. **Re-measures it:** the signing half (W3a) shipped after it was written,
-   and several of its statements are now stale or wrong (§1.4).
+1. **Re-measures it:** the signing half (W3a) shipped after it was written
+   (§1.4).
 2. **Adds phase W3-S**, same-account verification, not gated on W2.
 3. **Replaces its trust anchor for W3-S.** 09-17 anchors keys in the cloud's
    account boundary and adds a continuity chain (W4) to detect cloud-side
@@ -91,10 +89,7 @@ cross-account phases W0–W2. This spec:
 - **What it proves:** "agent `camper` on AgentMux install
   `narko~b3kq7zfe…` signed this, recently, for this recipient, once — and
   you approved that install". Neither the cloud nor an agent elsewhere in the
-  account can forge an existing instance. Anyone with the account's token
-  can mint a *new* instance: it verifies, shows `new`, and gets no
-  relaxation. A copied instance key is the one residual, bounded by
-  revocation (§4).
+  account can forge an existing instance (§4).
 - **Rollout needs no flag day:** every new field is optional on every hop,
   old peers ignore it, and every missing or transient piece degrades to
   today's `TRUST=network-claimed`, never to a false forgery alarm (§3).
@@ -145,22 +140,12 @@ cross-account phases W0–W2. This spec:
   test (`relay.rs:283-311`). The relay also runs when the host-tier check
   failed. `sig_verified` is computed before the relay runs
   (`server/reactive.rs:1026` vs `:1294`).
-- **What agents hold.** Every spawned agent gets:
-  - the account's cloud access token as `MUXBUS_TOKEN`
-    (`server/agent_handlers/input.rs:543`, `server/muxbus_handlers.rs:339`),
-    the same token the srv presents (`relay.rs:183`). **Removed by #3881**
-    (2026-09-26): no agent env carries it any more
-    (`backend/account_login_guard.rs`, on every spawn path);
-  - the srv's `AGENTMUX_AUTH_KEY` (`input.rs:564`), which reaches `/ws` and
-    `/agentmux/service` (`server/mod.rs:458-460`, `auth_middleware` at
-    `:2953`) — the same RPC the frontend writes settings through
-    (`websocket.rs:1716`).
-
-  Agents also run as the srv's OS user. The only srv surface they cannot
-  reach is the one gated by `AGENTMUX_HOST_REG_SECRET`, held by the CEF host
-  and removed from the srv's env at start (`config.rs:136-140`;
-  `server/service/credential.rs`, `host_ipc.rs`). §2.2, §2.6 and §4 are
-  built around these facts.
+- **The host-gated surface.** The srv surface gated by
+  `AGENTMUX_HOST_REG_SECRET`, held by the CEF host and removed from the
+  srv's env at start (`config.rs:136-140`; `server/service/credential.rs`,
+  `host_ipc.rs`), is the one agents cannot reach. §2.6 builds approval on
+  it. Since #3881 (2026-09-26) no agent env carries the account's cloud
+  token (`backend/account_login_guard.rs`, on every spawn path).
 
 ### 1.2 Cloud
 
@@ -210,19 +195,21 @@ relies on today:
     written with `INSERT OR REPLACE` (`migrations.rs:1189-1195`,
     `conversation_trust_grants.rs:59-75`).
 
-### 1.4 Corrections to the 09-17 WAN-tier signing spec
+### 1.4 The WAN signing half today
 
-| 09-17 says | Today |
-|---|---|
-| §1.1 "no `wan_sig` … appears anywhere" | Shipped: `wan_sig`, `wan_source_host`, `db_agent_wan_keys`, `sign_wan_jekt`/`verify_wan_jekt`. |
-| §3.1 "`signed_material` carries no domain separator" | True for host/LAN; WAN material is domain-separated (`amx-jekt-wan-v1`). |
-| §2.1.2 instance = `(hostname, channel)` | Hostnames collide and fall back to `"unknown"`; the data dir is per version. An instance needs its own key, stored channel-wide (§2.2 here). |
-| §3.2 "the trust anchor is the Cognito account boundary" | Every agent presents the same account token as the srv (§1.1). Directory entries must be self-certifying (§2.2). |
-| §3.4.1 lists `wan_msg_id`, `wan_ts_secs` | Also the as-signed source and target: the cloud normalises both (§2.1). |
-| §3.4.1 "reuse `reagent_sig_is_fresh`'s shape" | A 600 s window rejects deliveries the relay still holds for 1800 s (§2.4). |
-| §3.4.2 verify on both entry points | The HTTP entry point's named caller (`muxbus-client`'s fallback) sends no `X-AuthKey` and gets 401 (`server/mod.rs:3055-3068`); its other callers self-assert every field (§2.3). |
-| §3.5.1 migrate existing grants | No production path creates grants yet (§1.3). |
-| §4 W0 "closes cross-account impersonation at the cloud API" | W0's scope is tracked in the private cloud repo. |
+- Shipped: `wan_sig`, `wan_source_host`, `db_agent_wan_keys`,
+  `sign_wan_jekt`/`verify_wan_jekt`. WAN signed material is
+  domain-separated (`amx-jekt-wan-v1`).
+- An instance can't be `(hostname, channel)`: hostnames collide and fall
+  back to `"unknown"`, and the data dir is per version. An instance needs
+  its own key, stored channel-wide, and directory entries are
+  self-certifying (§2.2).
+- The carry includes the as-signed source and target, because the cloud
+  normalises both (§2.1).
+- The freshness window covers the 1800 s the relay holds a delivery
+  (§2.4).
+- The HTTP entry point is not a verification site; its callers
+  self-assert every field (§2.3).
 
 ---
 
@@ -361,8 +348,7 @@ instance key:
 `amx-wan-agent-cert-v1 ␁ instance_id ␁ lowercase(agent_id) ␁ channel ␁
 agent_pubkey ␁ host_hint ␁ issued_at`.
 
-**Instance revocation.** An instance key can be copied off its machine by
-any local agent (§4). The owner can **retire** an instance:
+**Instance revocation.** The owner can **retire** an instance:
 1. the srv mints a new instance, re-certifies its agent keys, and publishes
    them;
 2. it then publishes a revocation record signed by the **old** instance key:
@@ -466,45 +452,28 @@ Replay is stopped at two layers.
     broadcast signs each target with its own msgid
     (`agentmux-mcp/src/main.rs:1585`), so no legitimate message repeats.
 
-**Residual:** a malicious cloud can skip that duplicate check. It
-could then replay one captured message, within the window, to a *different*
-install running the same agent name, since each install's table is local.
-Bounded by the window and by the envelope binding (§2.1): same target name,
-same content.
-
 ### 2.6 Marker, approval, tier rules, trust grants
 
-**Approved instances.** Anyone holding the account's token can mint a new
-instance and publish certified keys under any agent name, and today that is
-every agent. Its messages verify, honestly: they really come from that
-instance. If verification alone relaxed escalation, a compromised agent could
-turn a sensitive jekt that stops today into one that doesn't.
-
-So `wan.db` keeps `wan_known_instances(instance_id, host_hint,
+**Approved instances.** A verified message proves which instance sent it,
+not that the receiver's owner recognises that instance. So `wan.db` keeps `wan_known_instances(instance_id, host_hint,
 first_seen_at, approved_at, revoked_at)`:
 - Every verified instance is recorded on first sight.
 - The receiver's own instance is approved implicitly.
 - A revoked instance is un-approved permanently.
-- **Approval is made where agents can't reach it.** An `X-AuthKey`-only RPC
-  would not do: every agent holds that key (§1.1). Approval and revocation
-  therefore follow the `credential_broker` pattern
+- **Approval is made where agents can't reach it** (§1.1). Approval and
+  revocation follow the `credential_broker` pattern
   (`server/service/credential.rs`, `host_ipc.rs`):
   - a CEF-host window shows the request;
   - the srv command that records it accepts only the
     `AGENTMUX_HOST_REG_SECRET`-authenticated host channel;
   - a caller holding only `X-AuthKey` is rejected.
-- A local agent can still write `wan.db` directly, as the same OS user. That
-  is machine compromise (§4).
 - **Amended 2026-09-24** (review 3): instance approval ships disabled, so every instance stays `new`, and
   gets no relaxation.
 - **Amended 2026-09-26 (operator decision): a verified `new` instance is
   trusted too.** The operator wants same-account agents on different
   machines to act on each other's verified jekts without an operator stop.
-  The premise above — every agent can mint an instance — was removed first:
-  #3881 stopped injecting `MUXBUS_TOKEN` into agent environments, so minting
-  needs the srv's stored login. The accepted residual is a same-user process
-  that reads that login (or a `wan.db`) from disk (§4, open question 5).
-  Approval still exists for the label (`INSTANCE_STATUS=approved`) and
+  #3881 first stopped injecting `MUXBUS_TOKEN` into agent environments, so
+  minting an instance needs the srv's stored login. Approval still exists for the label (`INSTANCE_STATUS=approved`) and
   revocation still forces sensitive, but neither gates the relaxation now.
 
 **The approval UI and the marker never show a sender-chosen label alone.**
@@ -632,7 +601,7 @@ Every field is optional on every hop, so the order below is a preference:
 - Agents keep their old host label until respawned, and the carry gate sends
   them unsigned until then.
 
-## 4. Security properties and residuals
+## 4. Security properties
 
 **Proves:**
 - The message was signed by an agent key certified by instance `I`'s key,
@@ -641,32 +610,12 @@ Every field is optional on every hop, so the order below is a preference:
 - `I` is not revoked.
 - With `INSTANCE_STATUS=approved`, a human also said `I` is one of theirs,
   through a surface agents can't reach.
+- An existing instance's keys can't be replaced by the directory: a
+  substituted record fails the chain (`Some(false)`, `wan_cert_invalid`).
+  For agent keys within an instance, this takes the place of 09-17's W4
+  continuity chain.
 
-**Does not prove:**
-- **That a new instance is legitimate.** Anyone holding the account token —
-  every agent (§1.1), or a compromised cloud — can mint one. It verifies,
-  shows `INSTANCE_STATUS=new`, and gets no relaxation. #3881 removed
-  `MUXBUS_TOKEN` from agent environments, which narrows who can mint to the
-  srv and anything that reads its stored login from disk (open question 4).
-- **Anything against a compromised machine.** An agent can read its own
-  machine's `wan.db`, including the instance key and approvals.
-  - This is **worse than the host and LAN tiers**, whose keys work only from
-    that host or LAN. A copied instance key lets its holder speak as every
-    agent of that instance, as an approved instance, from anywhere.
-  - That lasts until the owner retires the instance (§2.2) and receivers
-    refresh its status (hourly, §2.3).
-  - Whether to keep the instance key out of agents' reach (an OS keychain,
-    or a separate user) is open question 5.
-- **Cross-account identity.** Out of scope by construction (§2.3).
-- **Unsigned impersonation** is unchanged: an unsigned jekt still renders
-  `TRUST=network-claimed`. W0 (§1.4) addresses that at the API.
-
-**No longer a residual: a compromised cloud replacing an existing
-instance's keys.** It can't produce a certificate under the instance key, so
-a substituted record fails the chain (`Some(false)`, `wan_cert_invalid`).
-This is what 09-17's W4 continuity chain was for, and for agent keys within
-an instance it is no longer needed. The cloud can still withhold records or
-revocations (`None`, or delayed revocation). It cannot forge them.
+Residual-risk notes for this design are kept in the private cloud repo.
 
 ## 5. Tests
 
@@ -730,19 +679,11 @@ revocations (`None`, or delayed revocation). It cannot forge them.
 ## 6. Open questions
 
 1. **Stale → `None` or `Some(false)`?** Recommended: `None` (§2.4).
-2. **Revocation refresh interval.** Hourly bounds a copied key's useful life
-   after retirement; shorter costs more directory calls.
-3. **Retiring an instance whose machine is gone.** Revocation needs the old
-   key. If the machine is lost, only receivers' local un-approval is left.
-   An account-level revocation would need step-up authentication that agents
-   can't perform.
-4. **Stop injecting `MUXBUS_TOKEN` into agent environments?** Done in #3881
-   (2026-09-26). The audit found no reader that agents use. Minting now
-   needs the srv's stored login, which a same-user process can still read
-   from disk (question 5).
-5. **Keep the instance key out of agents' reach** (OS keychain, a separate
-   user)? It would remove the §4 copied-key residual.
-6. **Does the per-version `objects.db` also re-mint host and LAN keys on
+2. **Revocation refresh interval.** Hourly bounds how long a retired
+   instance keeps verifying; shorter costs more directory calls.
+3. **Stop injecting `MUXBUS_TOKEN` into agent environments?** Done in #3881
+   (2026-09-26). The audit found no reader that agents use.
+4. **Does the per-version `objects.db` also re-mint host and LAN keys on
    every upgrade**, breaking LAN peers' pins? Out of scope here, but §1.1's
    measurement suggests so; worth checking separately.
 

@@ -83,7 +83,7 @@ its own `Status:` field, per the hardening plan's own Phase 4 guardrail.
 
 ### Untracked (never went through review at all)
 
-- `docs/specs/SPEC_AGENT_COLOR_2026_08_05.md` — a plan I (Agent3) wrote for an agent-color picker feature. Confirmed **never implemented**: zero `color` field anywhere on `AgentDefinition`. Only untracked doc in the entire repo.
+- `SPEC_AGENT_COLOR_2026_08_05.md` (never committed) — a plan I (Agent3) wrote for an agent-color picker feature. Confirmed **never implemented**: zero `color` field anywhere on `AgentDefinition`. Only untracked doc in the entire repo.
 
 ### `docs/retro/` — two lower-urgency findings
 
