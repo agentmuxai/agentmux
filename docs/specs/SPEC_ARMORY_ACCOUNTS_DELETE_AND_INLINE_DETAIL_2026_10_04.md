@@ -93,7 +93,7 @@ Replace `window.confirm()` with `ConfirmModal` (`destructive`, which focuses Can
 - **Body**, only the lines that apply:
   - Always: "AgentMux forgets this account and removes its saved login from this computer."
   - Linked agents: "Used by 3 agents: AgentA, Lark, Opaz. They won't start until you bind another account. Any that are running keep working until they restart."
-  - CLI-OAuth accounts (H1): "Conversation history from this account is kept."
+  - CLI-OAuth accounts with a history folder (Claude, Codex, Gemini; H1): "Its conversation history is not deleted."
   - Key and token accounts (`keychain`, `env`, `secrets_manager`): "The key itself still works. To revoke it, do that at <provider> (link)." AgentMux never revokes provider-side (deauth spec §5), and saying so stops the user assuming it did.
   - A folder outside `identities_dir()` (for example a legacy `~/.claude` login, or a row adopted from another channel whose folder is under `channels/<old>/identities/`): "Its login files are outside AgentMux's folder and are left in place: <path>."
   - Non-`stable` channel (H5): "This login is shared by every AgentMux on this computer, including the main app."

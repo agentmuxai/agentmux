@@ -14,6 +14,11 @@ import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
 
+// CLI providers whose config dir holds conversation history that a delete
+// keeps: those with a `history_native_subdir` in
+// crates/srv/src/backend/providers.rs (Copilot has none).
+const PROVIDERS_WITH_KEPT_HISTORY = new Set(["claude", "codex", "gemini"]);
+
 const STATUS_DOT: Record<string, string> = {
     valid: "status-dot status-valid",
     expired: "status-dot status-expired",
@@ -387,7 +392,7 @@ function findScrollParent(el: HTMLElement | undefined): HTMLElement | null {
 function DeleteAccountConfirm({ model, account }: { model: IdentityViewModel; account: Account }): JSX.Element {
     const usedBy = useAccountAgentNames(account);
     const backend = account.secret_ref?.backend;
-    const keepsHistory = backend === "oauth_config_dir" && isCliOAuthProvider(account.provider);
+    const keepsHistory = backend === "oauth_config_dir" && PROVIDERS_WITH_KEPT_HISTORY.has(account.provider);
     const isKey = backend === "keychain" || backend === "env" || backend === "secrets_manager";
     const providerName = PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider;
     const editing = () => model.formOpenAtom() && model.editingAccountAtom()?.id === account.id;
@@ -411,7 +416,7 @@ function DeleteAccountConfirm({ model, account }: { model: IdentityViewModel; ac
                     </p>
                 </Show>
                 <Show when={keepsHistory}>
-                    <p>Conversation history from this account is kept.</p>
+                    <p>Its conversation history is not deleted.</p>
                 </Show>
                 <Show when={isKey}>
                     <p>The key itself still works. To revoke it, do that at {providerName}.</p>
