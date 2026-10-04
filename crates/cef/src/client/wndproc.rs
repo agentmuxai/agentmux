@@ -274,11 +274,32 @@ pub(crate) unsafe fn install_top_level_focus_restore_hook(hwnd: *mut std::ffi::c
         }
 
         // ALWAYS pass through. We observe WM_ACTIVATE; CEF still owns it.
+        // On WM_NCDESTROY, take the entry out as we read it (HWND-reuse
+        // safety, same discipline as CLOSE_ROUTING_WNDPROCS): Windows can
+        // hand this HWND value to a later window, and a stale entry would
+        // make install_top_level_focus_restore_hook skip that window. The
+        // original WndProc still gets this last message below.
+        let is_ncdestroy = msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_NCDESTROY;
         let original = FOCUS_RESTORE_WNDPROCS
             .lock()
             .ok()
-            .and_then(|m| m.get(&(hwnd as usize)).copied())
+            .and_then(|mut m| {
+                if is_ncdestroy {
+                    m.remove(&(hwnd as usize))
+                } else {
+                    m.get(&(hwnd as usize)).copied()
+                }
+            })
             .unwrap_or(0);
+        if is_ncdestroy {
+            // A dead window can't be handed activation back to.
+            let _ = HAND_BACK_TARGET.compare_exchange(
+                hwnd as usize,
+                0,
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
         if original != 0 {
             CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
         } else {
