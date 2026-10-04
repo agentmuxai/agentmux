@@ -173,6 +173,28 @@ pub(super) struct AgentStopForwardRequest {
 }
 
 #[derive(serde::Deserialize)]
+pub(super) struct AgentBroadcastForwardRequest {
+    pub(super) block_id: String,
+    pub(super) body: String,
+    pub(super) msg_id: String,
+    pub(super) recipients: usize,
+}
+
+/// `POST /agentmux/agent/broadcast`: another channel on this machine asks this
+/// one to deliver a Swarm broadcast to one of its agent panes (same trust model
+/// as the stop forward above: loopback, this instance's own auth key). The
+/// header is built here; the caller supplies only the body.
+pub(super) async fn handle_agent_broadcast_forward(
+    State(state): State<AppState>,
+    Json(req): Json<AgentBroadcastForwardRequest>,
+) -> impl IntoResponse {
+    match app_api::fleet::deliver_forwarded_broadcast(&state, &req.block_id, &req.body, &req.msg_id, req.recipients).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response(),
+        Err(e) => (StatusCode::OK, Json(serde_json::json!({ "success": false, "error": e }))).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
 pub(super) struct AgentStopPendingForwardRequest {
     pub(super) block_id: String,
     pub(super) signal: Option<String>,

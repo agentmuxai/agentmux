@@ -22,6 +22,15 @@
 //! The turn is `BROADCAST_TURN_ORIGIN` (`Automated`), not `User`: srv, not the
 //! text, decides what a turn may authorize (e.g. it cannot satisfy the self-quit
 //! gate), and anything that holds the pane key could otherwise mint a `User` turn.
+//! A target running on another channel on this machine is reached over loopback,
+//! the way a stop is (`forward_broadcast_to_channel`): the sender passes only the
+//! target block, the body, the `MSGID` and the `RECIPIENTS` count, and the
+//! receiving instance builds the header and starts the turn itself
+//! (`deliver_forwarded_broadcast`). Agents on other machines are not reachable
+//! this way: nothing on the LAN proves who is asking
+//! (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §6).
+//! The forward uses the same loopback auth as the stop forward, and reaches only
+//! what that channel's own `fleet.broadcast` already does.
 //! An AGENT-initiated broadcast instead loops the EXISTING signed single-target
 //! `SendMessage` MCP tool path client-side (see `agentmux-mcp`'s `FleetBroadcast`
 //! tool) — only the calling agent's own process holds its `AGENTMUX_JEKT_KEY`, so
@@ -188,6 +197,109 @@ async fn deliver_broadcast_turn(
     }
 }
 
+/// How one broadcast target is reached.
+enum BroadcastRoute {
+    /// An agent pane of this instance.
+    Local(String),
+    /// An agent on another channel on this machine, via its own srv.
+    Channel(crate::backend::reactive::registry::AgentEntry),
+}
+
+impl BroadcastRoute {
+    fn agent_id(&self) -> &str {
+        match self {
+            BroadcastRoute::Local(agent) => agent,
+            BroadcastRoute::Channel(entry) => &entry.agent_id,
+        }
+    }
+}
+
+/// What a forwarded broadcast carries. No header text: the receiving instance
+/// writes the header, so a caller on loopback cannot supply its own.
+pub(crate) struct BroadcastForward<'a> {
+    pub block_id: &'a str,
+    pub body: &'a str,
+    pub msg_id: &'a str,
+    /// Agents addressed on every machine and channel, for the header.
+    pub recipients: usize,
+}
+
+/// Asks the instance at `local_url` (another channel on this machine, its
+/// `auth_key` from the shared registry, same user) to deliver one broadcast.
+/// A channel from before the route answers 404 and is named as such, for that
+/// target only.
+pub(crate) async fn forward_broadcast_to_channel(
+    client: &reqwest::Client,
+    local_url: &str,
+    auth_key: &str,
+    req: &BroadcastForward<'_>,
+) -> Result<(), String> {
+    let mut http = client
+        .post(format!("{local_url}/agentmux/agent/broadcast"))
+        .json(&serde_json::json!({
+            "block_id": req.block_id,
+            "body": req.body,
+            "msg_id": req.msg_id,
+            "recipients": req.recipients,
+        }));
+    if !auth_key.is_empty() {
+        http = http.header("X-AuthKey", auth_key);
+    }
+    let resp = http.send().await.map_err(|e| format!("cross-channel forward failed: {e}"))?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err("that channel is on an older build and can't receive a broadcast from here".to_string());
+    }
+    if !resp.status().is_success() {
+        return Err(format!("cross-channel forward: HTTP {}", resp.status()));
+    }
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("cross-channel forward: response parse failed: {e}"))?;
+    if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
+        Ok(())
+    } else {
+        Err(body.get("error").and_then(|v| v.as_str()).unwrap_or("cross-channel forward failed").to_string())
+    }
+}
+
+/// The receiving end of `forward_broadcast_to_channel`: builds the header here,
+/// from the target's own agent id, and delivers it as any broadcast turn
+/// (`BROADCAST_TURN_ORIGIN`). Audited on this side too, naming where it came
+/// from.
+pub(crate) async fn deliver_forwarded_broadcast(
+    state: &AppState,
+    block_id: &str,
+    body: &str,
+    msg_id: &str,
+    recipients: usize,
+) -> Result<(), String> {
+    let result = match state.reactive_handler.get_agent_by_block(block_id) {
+        None => Err(NO_REGISTERED_AGENT.to_string()),
+        Some(agent) => {
+            let text = broadcast_turn_message(&agent.agent_id, recipients, msg_id, body);
+            let deps = AgentTurnDeps::from_state(state);
+            deliver_broadcast_turn(&deps, block_id.to_string(), text, BROADCAST_TURN_ORIGIN).await
+        }
+    };
+    let target = state
+        .reactive_handler
+        .get_agent_by_block(block_id)
+        .map(|a| a.agent_id)
+        .unwrap_or_else(|| block_id.to_string());
+    state.reactive_handler.log_fleet_action_audit(
+        None,
+        &target,
+        block_id,
+        FLEET_BROADCAST_AUDIT_ACTION,
+        result.is_ok(),
+        result.as_ref().err().map(String::as_str),
+        msg_id,
+        Some("forwarded from another channel on this machine"),
+    );
+    result
+}
+
 pub(crate) async fn fleet_broadcast_impl(
     state: &AppState,
     targets: Vec<String>,
@@ -195,15 +307,42 @@ pub(crate) async fn fleet_broadcast_impl(
 ) -> FleetActionResult {
     let deps = AgentTurnDeps::from_state(state);
     let msg_id = uuid::Uuid::new_v4().to_string();
+    // This instance's own panes first, then the machine's other channels. A
+    // block known to neither has no route and fails, as before.
+    let routes: std::collections::HashMap<String, BroadcastRoute> = targets
+        .iter()
+        .filter_map(|block_id| {
+            let route = match state.reactive_handler.get_agent_by_block(block_id) {
+                Some(agent) => BroadcastRoute::Local(agent.agent_id),
+                None => BroadcastRoute::Channel(shared_channel_for(state, block_id)?),
+            };
+            Some((block_id.clone(), route))
+        })
+        .collect();
+    let routes = Arc::new(routes);
+    // The same count `run_broadcast` puts in the local headers: every target
+    // that resolved, here or on another channel.
+    let recipients = targets.iter().filter(|b| routes.contains_key(*b)).count();
     let outcomes = run_broadcast(
         targets,
         &message,
         &msg_id,
         BROADCAST_CONCURRENCY,
-        |block_id| state.reactive_handler.get_agent_by_block(block_id).map(|a| a.agent_id),
+        |block_id| routes.get(block_id).map(|r| r.agent_id().to_string()),
         |block_id, text, origin| {
             let deps = deps.clone();
-            async move { deliver_broadcast_turn(&deps, block_id, text, origin).await }
+            let routes = routes.clone();
+            let client = state.http_client.clone();
+            let (body, msg_id) = (message.clone(), msg_id.clone());
+            async move {
+                match routes.get(&block_id) {
+                    Some(BroadcastRoute::Channel(entry)) => {
+                        let forward = BroadcastForward { block_id: &block_id, body: &body, msg_id: &msg_id, recipients };
+                        forward_broadcast_to_channel(&client, &entry.local_url, &entry.auth_key, &forward).await
+                    }
+                    _ => deliver_broadcast_turn(&deps, block_id, text, origin).await,
+                }
+            }
         },
     )
     .await;
@@ -975,6 +1114,99 @@ mod broadcast_action_tests {
         assert_eq!(
             broadcast_action(Err("persistent process not running".into())),
             BroadcastAction::Fail("persistent process not running".into())
+        );
+    }
+}
+
+#[cfg(test)]
+mod forward_broadcast_tests {
+    use super::*;
+    use axum::routing::post;
+    use std::sync::{Arc, Mutex};
+
+    type Seen = Arc<Mutex<Vec<(Option<String>, serde_json::Value)>>>;
+
+    /// A fake other channel: records each request's `X-AuthKey` and body, and
+    /// answers with `status` and `reply`.
+    async fn peer(status: axum::http::StatusCode, reply: serde_json::Value) -> (String, Seen) {
+        let seen: Seen = Default::default();
+        let s = seen.clone();
+        let app = axum::Router::new().route(
+            "/agentmux/agent/broadcast",
+            post(move |headers: axum::http::HeaderMap, axum::Json(body): axum::Json<serde_json::Value>| {
+                let (s, reply) = (s.clone(), reply.clone());
+                async move {
+                    let key = headers.get("X-AuthKey").and_then(|v| v.to_str().ok()).map(str::to_string);
+                    s.lock().unwrap().push((key, body));
+                    (status, axum::Json(reply))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        (url, seen)
+    }
+
+    fn forward<'a>() -> BroadcastForward<'a> {
+        BroadcastForward { block_id: "blk-loap", body: "merge on approval", msg_id: "m-1", recipients: 3 }
+    }
+
+    #[tokio::test]
+    async fn the_caller_sends_the_body_and_counts_and_never_a_header() {
+        let (url, seen) = peer(axum::http::StatusCode::OK, serde_json::json!({ "success": true })).await;
+        let out = forward_broadcast_to_channel(&reqwest::Client::new(), &url, "chan-key", &forward()).await;
+        assert_eq!(out, Ok(()));
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0.as_deref(), Some("chan-key"), "that channel's own key");
+        let mut keys: Vec<&str> = seen[0].1.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["block_id", "body", "msg_id", "recipients"], "no header field for a caller to forge");
+        assert_eq!(seen[0].1["body"], "merge on approval");
+        assert_eq!(seen[0].1["recipients"], 3);
+    }
+
+    #[tokio::test]
+    async fn a_channel_that_cannot_take_it_says_why_for_that_target_only() {
+        let (url, _) = peer(axum::http::StatusCode::OK, serde_json::json!({ "success": false, "error": "no registered agent" })).await;
+        assert_eq!(
+            forward_broadcast_to_channel(&reqwest::Client::new(), &url, "", &forward()).await,
+            Err("no registered agent".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_channel_from_before_the_route_is_named_as_an_older_build() {
+        let (url, _) = peer(axum::http::StatusCode::NOT_FOUND, serde_json::json!({})).await;
+        let Err(e) = forward_broadcast_to_channel(&reqwest::Client::new(), &url, "", &forward()).await else {
+            panic!("a 404 must fail the target");
+        };
+        assert!(e.contains("older build"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn a_missing_key_sends_no_key_header() {
+        let (url, seen) = peer(axum::http::StatusCode::OK, serde_json::json!({ "success": true })).await;
+        forward_broadcast_to_channel(&reqwest::Client::new(), &url, "", &forward()).await.unwrap();
+        assert_eq!(seen.lock().unwrap()[0].0, None);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_channel_fails_the_target() {
+        let Err(e) = forward_broadcast_to_channel(&reqwest::Client::new(), "http://127.0.0.1:9", "", &forward()).await else {
+            panic!("nothing listens there");
+        };
+        assert!(e.starts_with("cross-channel forward failed"), "{e}");
+    }
+
+    #[tokio::test]
+    async fn the_receiver_refuses_a_block_it_has_no_agent_for() {
+        let state = crate::server::tests::test_state();
+        assert_eq!(
+            deliver_forwarded_broadcast(&state, "no-such-block", "hi", "m-1", 1).await,
+            Err(NO_REGISTERED_AGENT.to_string())
         );
     }
 }

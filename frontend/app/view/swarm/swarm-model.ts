@@ -3,6 +3,14 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import type { BackgroundTaskView, FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
+import {
+    localFleetTargets,
+    partitionTargets,
+    remoteCount,
+    remoteFleetTargets,
+    targetLabel,
+    type FleetTargetInfo,
+} from "./swarm-fleet-targets";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
@@ -11,7 +19,7 @@ import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
-import type { SwarmOtherInstances } from "./swarm-remote";
+import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
@@ -420,6 +428,27 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
 export function hasRenderableBlock<T>(block: T | null | undefined, isLoading: boolean): boolean {
     if (isLoading) return true;
     return block != null;
+}
+
+/** The last broadcast or stop, with a name for every target so the result
+ *  panel can say which agent on which machine, not a block id. */
+export interface FleetResultEntry {
+    action: "broadcast" | "bulk-stop";
+    result: FleetActionResult;
+    labels: Record<string, string>;
+}
+
+const EMPTY_FLEET_RESULT: FleetActionResult = { succeeded: [], failed: [], aborted_early: false };
+
+/** `result` plus the targets the action could not reach, each with its reason,
+ *  so a target is never silently left out. */
+function withUnreachable(result: FleetActionResult, unreachable: { key: string; reason: string }[]): FleetActionResult {
+    if (unreachable.length === 0) return result;
+    return { ...result, failed: [...result.failed, ...unreachable.map((u) => ({ id: u.key, error: u.reason }))] };
+}
+
+function labelsOf(keys: string[], known: Map<string, FleetTargetInfo>): Record<string, string> {
+    return Object.fromEntries(keys.map((key) => [key, targetLabel(key, known)]));
 }
 
 /**
@@ -961,12 +990,12 @@ export class SwarmViewModel {
     // commonly-cited fleet-ops UX pitfall). Cleared explicitly by the user
     // dismissing the panel, not auto-cleared on a timer, so a failure list
     // can't disappear before it's been read.
-    private _lastFleetResult = createSignal<{ action: "broadcast" | "bulk-stop"; result: FleetActionResult } | null>(
+    private _lastFleetResult = createSignal<FleetResultEntry | null>(
         null,
     );
-    lastFleetResultAtom: Accessor<{ action: "broadcast" | "bulk-stop"; result: FleetActionResult } | null> =
+    lastFleetResultAtom: Accessor<FleetResultEntry | null> =
         this._lastFleetResult[0];
-    private setLastFleetResult: Setter<{ action: "broadcast" | "bulk-stop"; result: FleetActionResult } | null> =
+    private setLastFleetResult: Setter<FleetResultEntry | null> =
         this._lastFleetResult[1];
 
     private _fleetActionInFlight = createSignal<boolean>(false);
@@ -1601,7 +1630,15 @@ export class SwarmViewModel {
     loadOtherInstances = async (): Promise<void> => {
         try {
             const result = await RpcApi.SwarmOtherInstancesCommand(TabRpcClient, {});
+            const before = remoteFleetTargets(remoteSections(this._otherInstances[0]()));
             this._otherInstances[1](result ?? null);
+            // A selected remote agent that has gone, or whose section went stale,
+            // leaves the selection: an action on it would only fail.
+            const after = remoteFleetTargets(remoteSections(result ?? null));
+            const gone = (key: string) => before.has(key) && (!after.has(key) || after.get(key)!.stale);
+            if ([...this.selectedBlockIdsAtom()].some(gone)) {
+                this.setSelectedBlockIds((prev) => new Set([...prev].filter((key) => !gone(key))));
+            }
         } catch {
             // Older srv without the command, or a transient failure.
         }
@@ -1648,6 +1685,33 @@ export class SwarmViewModel {
         this.setSelectedBlockIds(new Set(blockIds));
     }
 
+    /** Adds `keys` to the selection, or removes them: a machine's header
+     *  checkbox selects exactly that machine's agents. */
+    setManySelected(keys: string[], on: boolean): void {
+        this.setSelectedBlockIds((prev) => {
+            const next = new Set(prev);
+            for (const key of keys) {
+                if (on) next.add(key);
+                else next.delete(key);
+            }
+            return next;
+        });
+    }
+
+    /** Everything that can be selected: this instance's agents and the other
+     *  instances' (docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §4). */
+    fleetTargets(): Map<string, FleetTargetInfo> {
+        return new Map([
+            ...localFleetTargets(this.buildTree()),
+            ...remoteFleetTargets(remoteSections(this.otherInstancesAtom())),
+        ]);
+    }
+
+    /** How many of the selected agents are on other instances. */
+    selectedRemoteCount(): number {
+        return remoteCount(this.selectedBlockIdsAtom(), remoteFleetTargets(remoteSections(this.otherInstancesAtom())));
+    }
+
     clearSelection(): void {
         this.setSelectedBlockIds(new Set<string>());
     }
@@ -1664,11 +1728,14 @@ export class SwarmViewModel {
     /** Non-destructive: executes immediately, no confirmation — see spec
      *  §5.2/§3 (reserve blocking confirms for irreversible actions). */
     async broadcastToSelection(message: string): Promise<FleetActionResult> {
-        const targets = Array.from(this.selectedBlockIdsAtom());
+        const selected = Array.from(this.selectedBlockIdsAtom());
+        const known = this.fleetTargets();
+        const { reachable: targets, unreachable } = partitionTargets(selected, "broadcast", known);
         this.setFleetActionInFlight(true);
         try {
-            const result = await RpcApi.FleetBroadcastCommand(TabRpcClient, { targets, message });
-            this.setLastFleetResult({ action: "broadcast", result });
+            const sent = targets.length > 0 ? await RpcApi.FleetBroadcastCommand(TabRpcClient, { targets, message }) : EMPTY_FLEET_RESULT;
+            const result = withUnreachable(sent, unreachable);
+            this.setLastFleetResult({ action: "broadcast", result, labels: labelsOf(selected, known) });
             return result;
         } finally {
             this.setFleetActionInFlight(false);
@@ -1681,11 +1748,14 @@ export class SwarmViewModel {
      *  completion regardless of outcome, since the stopped panes are no
      *  longer a meaningful target set to keep checked. */
     async bulkStopSelection(opts?: { signal?: string; staged?: FleetStagePlan }): Promise<FleetActionResult> {
-        const targets = Array.from(this.selectedBlockIdsAtom());
+        const selected = Array.from(this.selectedBlockIdsAtom());
+        const known = this.fleetTargets();
+        const { reachable: targets, unreachable } = partitionTargets(selected, "stop", known);
         this.setFleetActionInFlight(true);
         try {
-            const result = await RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts });
-            this.setLastFleetResult({ action: "bulk-stop", result });
+            const stopped = targets.length > 0 ? await RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts }) : EMPTY_FLEET_RESULT;
+            const result = withUnreachable(stopped, unreachable);
+            this.setLastFleetResult({ action: "bulk-stop", result, labels: labelsOf(selected, known) });
             return result;
         } finally {
             this.setFleetActionInFlight(false);
@@ -1707,6 +1777,9 @@ export class SwarmViewModel {
     }
 
     async saveSelectionAsGroup(name: string): Promise<void> {
+        // A group stores block ids, and an agent on another machine has no durable
+        // one: the toolbar disables Save for such a selection, and this refuses it.
+        if (this.selectedRemoteCount() > 0) return;
         const member_ids = Array.from(this.selectedBlockIdsAtom());
         await RpcApi.FleetGroupCreateCommand(TabRpcClient, { name, member_ids });
         await this.loadFleetGroups();
