@@ -411,7 +411,7 @@ class TermViewModel {
         // takes only its skip-list bindings and its own copy / paste / clear;
         // every other key goes to the shell. A pending chord's second key
         // goes to the dispatcher.
-        const resolved = resolveKeyEvent(muxEvent, { terminalFocus: true, textInputFocus: false, viewType: "term" });
+        const resolved = resolveKeyEvent(muxEvent, { terminalFocus: true, textInputFocus: false, viewType: "term", docTabsHost: false });
         const consume = () => {
             event.preventDefault();
             event.stopPropagation();

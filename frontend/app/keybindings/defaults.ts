@@ -5,7 +5,10 @@
 // dispatcher, the terminal, the help pane, the menus and the docs all read it
 // (docs/reports/REPORT_KEYBINDINGS_AUDIT_AND_CONSOLIDATION_2026_10_04.md §6, §12).
 
-export type KeyCategory = "Tabs & windows" | "Panes" | "Find & zoom" | "Terminal" | "General";
+export type KeyCategory = "Tabs & windows" | "Panes" | "Find & zoom" | "Terminal" | "Documents" | "Editor" | "Files" | "General";
+
+/** A pane that matches its own rows (registry.ts `matchPaneKey`). */
+export type KeyPane = "doctabs" | "editor" | "files";
 
 export interface KeyBindingRow {
     command: string;
@@ -23,6 +26,11 @@ export interface KeyBindingRow {
     skipShell?: boolean;
     /** Rows sharing a group show as one help line ("Go to tab 1–8"). */
     helpGroup?: string;
+    /** Handled by this pane's own key handler, never by the global
+     *  dispatcher. While the pane handles the key it takes precedence over a
+     *  global row with the same key (it marks the key handled first, phase 0);
+     *  anywhere else, including the pane's text fields, the global row applies. */
+    pane?: KeyPane;
     /** Dev builds only: left out of the help pane. Its handler is registered
      *  by the dev panel itself, so in a release build the key does nothing. */
     devOnly?: boolean;
@@ -40,8 +48,10 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "window:new", label: "New window", category: "Tabs & windows", mac: ["meta+shift+n"], other: ["ctrl+shift+n"], skipShell: true },
     { command: "tab:new", label: "New tab", category: "Tabs & windows", mac: ["meta+t"], other: ["ctrl+shift+t"], skipShell: true },
     { command: "tab:close", label: "Close tab", category: "Tabs & windows", mac: ["meta+shift+w"], other: ["ctrl+shift+alt+w", "ctrl+F4"], skipShell: true },
-    { command: "tab:next", label: "Next tab", category: "Tabs & windows", mac: ["meta+]", "meta+shift+]", "ctrl+Tab"], other: ["ctrl+shift+]", "ctrl+Tab"], skipShell: true },
-    { command: "tab:prev", label: "Previous tab", category: "Tabs & windows", mac: ["meta+[", "meta+shift+[", "ctrl+shift+Tab"], other: ["ctrl+shift+[", "ctrl+shift+Tab"], skipShell: true },
+    { command: "tab:next", label: "Next tab", category: "Tabs & windows", mac: ["meta+]", "meta+shift+]"], other: ["ctrl+shift+]"], skipShell: true },
+    { command: "tab:prev", label: "Previous tab", category: "Tabs & windows", mac: ["meta+[", "meta+shift+["], other: ["ctrl+shift+["], skipShell: true },
+    { command: "tab:next", label: "Next tab", category: "Tabs & windows", mac: ["ctrl+Tab"], other: ["ctrl+Tab"], skipShell: true },
+    { command: "tab:prev", label: "Previous tab", category: "Tabs & windows", mac: ["ctrl+shift+Tab"], other: ["ctrl+shift+Tab"], skipShell: true },
     ...[1, 2, 3, 4, 5, 6, 7, 8].map(
         (n): KeyBindingRow => ({ command: `tab:goto:${n}`, label: `Go to tab ${n}`, helpGroup: "Go to tab 1–8", category: "Tabs & windows", mac: [`meta+${n}`], other: [`ctrl+${n}`], skipShell: true })
     ),
@@ -106,13 +116,50 @@ export const DEFAULT_KEYBINDINGS: KeyBindingRow[] = [
     { command: "view:zoom:reset", label: "Reset zoom", category: "Find & zoom", mac: ["meta+0", "meta+code:Numpad0"], other: ["ctrl+0", "ctrl+code:Numpad0"], skipShell: true },
     { command: "view:zoom:resetAll", label: "Reset zoom on all panes", category: "Find & zoom", mac: ["meta+shift+0"], other: ["ctrl+shift+0"], skipShell: true },
 
+    // ── Document tabs (editor and media panes; SPEC_DOCUMENT_TABS_2026_10_02.md §4.3) ──
+    // Literal Ctrl on every platform: ⌘ belongs to window tabs.
+    { command: "doctab:new", label: "New document tab", category: "Documents", pane: "doctabs", mac: ["ctrl+t"], other: ["ctrl+t"] },
+    { command: "doctab:close", label: "Close document tab", category: "Documents", pane: "doctabs", mac: ["ctrl+w"], other: ["ctrl+w"] },
+    { command: "doctab:reopen", label: "Reopen closed document", category: "Documents", pane: "doctabs", mac: ["ctrl+shift+t"], other: ["ctrl+shift+t"] },
+    { command: "doctab:next", label: "Next document", category: "Documents", pane: "doctabs", mac: ["ctrl+Tab", "ctrl+PageDown"], other: ["ctrl+Tab", "ctrl+PageDown"] },
+    { command: "doctab:prev", label: "Previous document", category: "Documents", pane: "doctabs", mac: ["ctrl+shift+Tab", "ctrl+PageUp"], other: ["ctrl+shift+Tab", "ctrl+PageUp"] },
+    { command: "doctab:moveRight", label: "Move document right", category: "Documents", pane: "doctabs", mac: ["ctrl+shift+PageDown"], other: ["ctrl+shift+PageDown"] },
+    { command: "doctab:moveLeft", label: "Move document left", category: "Documents", pane: "doctabs", mac: ["ctrl+shift+PageUp"], other: ["ctrl+shift+PageUp"] },
+
+    // ── Editor ──
+    { command: "editor:save", label: "Save", category: "Editor", pane: "editor", mac: ["meta+s"], other: ["ctrl+s"] },
+    { command: "editor:saveAs", label: "Save as (scratch documents)", category: "Editor", pane: "editor", mac: ["meta+shift+s"], other: ["ctrl+shift+s"] },
+    { command: "editor:find", label: "Find and replace", category: "Editor", pane: "editor", mac: ["meta+f"], other: ["ctrl+f"] },
+    { command: "editor:togglePreview", label: "Toggle markdown preview", category: "Editor", pane: "editor", mac: ["meta+shift+v"], other: ["ctrl+shift+v"] },
+
+    // ── Files pane ──
+    { command: "files:back", label: "Back", category: "Files", pane: "files", mac: ["alt+ArrowLeft"], other: ["alt+ArrowLeft"] },
+    { command: "files:forward", label: "Forward", category: "Files", pane: "files", mac: ["alt+ArrowRight"], other: ["alt+ArrowRight"] },
+    { command: "files:up", label: "Up a folder", category: "Files", pane: "files", mac: ["alt+ArrowUp"], other: ["alt+ArrowUp"] },
+    { command: "files:openInNewTab", label: "Open in new tab", category: "Files", pane: "files", mac: ["meta+Enter"], other: ["ctrl+Enter"] },
+    { command: "files:newTabHere", label: "New tab here", category: "Files", pane: "files", mac: ["meta+t"], other: ["ctrl+t"] },
+    { command: "files:closeTab", label: "Close this tab", category: "Files", pane: "files", mac: ["meta+w"], other: ["ctrl+w"] },
+    { command: "files:editPath", label: "Type a path", category: "Files", pane: "files", mac: ["meta+l"], other: ["ctrl+l"] },
+    { command: "files:filter", label: "Filter", category: "Files", pane: "files", mac: ["meta+f"], other: ["ctrl+f"] },
+    { command: "files:newFolder", label: "New folder", category: "Files", pane: "files", mac: ["meta+shift+n"], other: ["ctrl+shift+n"] },
+    { command: "files:rename", label: "Rename", category: "Files", pane: "files", mac: ["F2"], other: ["F2"] },
+    { command: "files:refresh", label: "Refresh", category: "Files", pane: "files", mac: ["F5"], other: ["F5"] },
+    { command: "files:trash", label: "Move to Trash", category: "Files", pane: "files", mac: ["Delete"], other: ["Delete"] },
+    { command: "files:deletePermanently", label: "Delete permanently", category: "Files", pane: "files", mac: ["shift+Delete"], other: ["shift+Delete"] },
+    { command: "files:selectAll", label: "Select all", category: "Files", pane: "files", mac: ["meta+a"], other: ["ctrl+a"] },
+    { command: "files:copy", label: "Copy", category: "Files", pane: "files", mac: ["meta+c"], other: ["ctrl+c"] },
+    { command: "files:cut", label: "Cut", category: "Files", pane: "files", mac: ["meta+x"], other: ["ctrl+x"] },
+    { command: "files:paste", label: "Paste", category: "Files", pane: "files", mac: ["meta+v"], other: ["ctrl+v"] },
+    { command: "files:undo", label: "Undo", category: "Files", pane: "files", mac: ["meta+z"], other: ["ctrl+z"] },
+    { command: "files:mention", label: "Mention in agent", category: "Files", pane: "files", mac: ["alt+k"], other: ["alt+k"] },
+
     // ── Dev builds ──
     { command: "dev:perfHud", label: "Performance HUD", category: "General", mac: ["meta+alt+shift+p"], other: ["ctrl+alt+shift+p"], skipShell: true, devOnly: true },
     { command: "dev:diagnostics", label: "Diagnostics panel", category: "General", mac: ["meta+alt+shift+F12"], other: ["ctrl+alt+shift+F12"], skipShell: true, devOnly: true },
 
     // ── Terminal (run by the terminal itself) ──
     // macOS: ⌘C / ⌘V already copy and paste natively in the terminal.
-    { command: "term:copy", label: "Copy", category: "Terminal", other: ["ctrl+shift+c"], when: "terminalFocus", skipShell: true },
-    { command: "term:paste", label: "Paste", category: "Terminal", other: ["ctrl+shift+v"], when: "terminalFocus", skipShell: true },
-    { command: "term:clear", label: "Clear", category: "Terminal", mac: ["meta+k"], other: ["ctrl+shift+l"], when: "terminalFocus", skipShell: true },
+    { command: "term:copy", label: "Copy", category: "Terminal", other: ["ctrl+shift+c"], when: "terminalFocus && viewType == term", skipShell: true },
+    { command: "term:paste", label: "Paste", category: "Terminal", other: ["ctrl+shift+v"], when: "terminalFocus && viewType == term", skipShell: true },
+    { command: "term:clear", label: "Clear", category: "Terminal", mac: ["meta+k"], other: ["ctrl+shift+l"], when: "terminalFocus && viewType == term", skipShell: true },
 ];
