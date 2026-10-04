@@ -5,7 +5,7 @@
 **Severity:** Medium. No data is lost, but every close costs a mouse trip before the user can type again, and the most common closes (`exit` in a terminal, `/quit` in an agent pane) are keyboard actions where the user's hands are already on the keys.
 **Requested by:** repo owner (asafebgi).
 **Extends:** `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` (#3519). That spec made *selecting* a pane focus its input: click, arrow keys, Cmd+1..9, creation, tab switch. Pane close was not in its scope, and today it is the one way a pane becomes selected without its input getting focus.
-**Related, separate bug:** focus lost mid-typing to a hidden pool window, fixed in #4306 (its report, `docs/reports/REPORT_INPUT_FOCUS_STOLEN_BY_POOL_REFILL_2026_10_03.md`, lands with that PR). Different cause, similar symptom; not repeated here.
+**Related, separate bug:** focus lost mid-typing to a hidden pool window, fixed in #4306. Different cause, similar symptom; not repeated here.
 
 ---
 
