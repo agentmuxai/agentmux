@@ -92,6 +92,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::050544946291:role/reagent-actions-agentmux-role
           aws-region: us-east-1
+          mask-aws-account-id: true
 
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin

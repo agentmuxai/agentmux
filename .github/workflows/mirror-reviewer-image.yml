@@ -38,7 +38,9 @@ jobs:
       id-token: write # OIDC for the mirror role, no static keys
       packages: write # push to ghcr.io/agentmuxai/reagent-reviewer, prune old tags
     env:
-      ECR_REPO: 050544946291.dkr.ecr.us-east-1.amazonaws.com/reagent-reviewer-image
+      # The ECR registry is derived at run time (and masked) rather than written
+      # here: this repo and its Actions logs are public.
+      ECR_REPO_NAME: reagent-reviewer-image
       GHCR_IMAGE: ghcr.io/agentmuxai/reagent-reviewer
     steps:
       - name: The package must be private
@@ -55,13 +57,17 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::050544946291:role/reagent-actions-agentmux-mirror-role
           aws-region: us-east-1
+          mask-aws-account-id: true
 
       - name: Mirror when ECR's :prod moved
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          ecr_digest=$(aws ecr describe-images --repository-name reagent-reviewer-image \
+          account=$(aws sts get-caller-identity --query Account --output text)
+          echo "::add-mask::$account"
+          ECR_REPO="$account.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO_NAME"
+          ecr_digest=$(aws ecr describe-images --repository-name "$ECR_REPO_NAME" \
             --image-ids imageTag=prod --query 'imageDetails[0].imageDigest' --output text)
           echo "ECR :prod = $ecr_digest"
 
