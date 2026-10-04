@@ -107,9 +107,13 @@ pub fn apply_gh_guard_in(env_vars: &mut HashMap<String, String>, config_home: &P
     env_vars.insert(GH_CONFIG_DIR.to_string(), dir.to_string_lossy().into_owned());
 }
 
-/// [`apply_gh_guard_in`] under this instance's config dir.
+/// [`apply_gh_guard_in`] under this instance's config dir, plus the publish
+/// guard's `core.hooksPath` ([`crate::backend::publish_guard`]): every path that
+/// spawns an agent process or runs a command for one comes through here.
 pub fn apply_gh_guard(env_vars: &mut HashMap<String, String>) {
     apply_gh_guard_in(env_vars, &guard_config_home());
+    #[cfg(not(test))]
+    crate::backend::publish_guard::apply_publish_guard(env_vars);
 }
 
 /// Where guard dirs live. Under test, a per-process temp dir: every test that
