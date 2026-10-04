@@ -127,6 +127,16 @@ export const IdentityApi = {
          *  §4). Optional so older backends' `{ deleted }` shape stays
          *  assignable. */
         affectedAgents?: string[];
+        /** What removing the saved login did; null when there was no row
+         *  (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04 §3.4).
+         *  Optional so older backends' shape stays assignable. */
+        cleanup?: {
+            outcome: "removed" | "absent" | "skipped" | "failed" | "none";
+            path?: string;
+            detail?: string;
+            historyKept?: boolean;
+            historyPath?: string;
+        } | null;
     }> {
         return client.rpcCall("deleteidentityaccount", data, opts);
     },

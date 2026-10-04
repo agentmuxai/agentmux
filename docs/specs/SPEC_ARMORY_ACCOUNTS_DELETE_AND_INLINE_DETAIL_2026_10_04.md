@@ -1,6 +1,6 @@
 # SPEC — Armory Accounts: Delete in the right-click menu, account details in an inline panel
 
-**Status:** draft — spec only, no code written yet.
+**Status:** implemented (#4317) — phases 1 and 2; see §6 for where the build differs from the design.
 **Trigger:** owner request, 2026-10-04: "add a delete entry to the right click menu on the Armory → Accounts's Connected Accounts. We want to be able to delete the auth entries. Think of edge cases and graceful solutions." Then: "we don't want account details in a modal. Instead, it should slip out as a panel from underneath the account."
 **Scope:** the Connected accounts list in Armory → Accounts (`AccountsManager` → `AccountsTab`, `AccountRow`, `AccountDetail`), the account row's right-click menu, and the `deleteidentityaccount` handler and the secret cleanup it runs. More Armory Accounts changes are expected; add them as further sections here.
 **Relation to other specs:**
@@ -93,7 +93,7 @@ Replace `window.confirm()` with `ConfirmModal` (`destructive`, which focuses Can
 - **Body**, only the lines that apply:
   - Always: "AgentMux forgets this account and removes its saved login from this computer."
   - Linked agents: "Used by 3 agents: AgentA, Lark, Opaz. They won't start until you bind another account. Any that are running keep working until they restart."
-  - CLI-OAuth accounts (H1): "Conversation history from this account is kept."
+  - CLI-OAuth accounts with a history folder (Claude, Codex, Gemini; H1): "Its conversation history is not deleted."
   - Key and token accounts (`keychain`, `env`, `secrets_manager`): "The key itself still works. To revoke it, do that at <provider> (link)." AgentMux never revokes provider-side (deauth spec §5), and saying so stops the user assuming it did.
   - A folder outside `identities_dir()` (for example a legacy `~/.claude` login, or a row adopted from another channel whose folder is under `channels/<old>/identities/`): "Its login files are outside AgentMux's folder and are left in place: <path>."
   - Non-`stable` channel (H5): "This login is shared by every AgentMux on this computer, including the main app."
@@ -167,7 +167,24 @@ Replace the `formError` path (H2) with the list's notice area (`deleteNoticeAtom
 | 2 | Frontend: menu item, `ConfirmModal` flow with the conditional lines, notices (§3.5), inline panel replacing the modal. |
 | 3 | Edit inside the panel instead of the form overlay, so no modal opens from Accounts' rows at all. |
 
-## 6. Open questions
+## 6. As built
+
+Phases 1 and 2 are built. Where the build differs from §3, this section wins:
+
+- **Stale references (§3.4.3, H4): no change needed.** The layer-3 spawn gate (`resolver/inject.rs`) refuses an OAuth-class agent whose binding was cascaded away, before a stale `cmd:env` config dir could be used. So the leftover `cmd:env`, the legacy `db_agents.accounts` entry and an instance's `identity_id` are inert. They name an account id that no longer exists and is never reissued.
+- **A re-login in progress (§3.4.6): not cancelled.** If a re-login for the account finishes after the delete, it re-creates the account with a fresh login (`identity_auth_persist.rs` upserts it). That is visible in the list and harmless, so no cancellation plumbing was added.
+- **Confirmation lines (§3.3):**
+  - The "shared by every AgentMux on this computer" line is not shown. The frontend does not know its channel or whether auth is isolated, and exposing that is a follow-up.
+  - The "login files outside AgentMux's folder" case is reported after the delete, from the backend's `skipped` outcome, not predicted in the confirmation.
+- **Panel (§3.2):**
+  - "Used by" lists agent names; they are not links yet.
+  - Closing the panel is instant. Opening it animates through `@starting-style` and `interpolate-size`.
+- **Feedback (§3.5):** the last-account "Add account" offer is not built.
+- **Edit (phase 3)** still opens the form overlay.
+
+The history rule is in `identity/cleanup.rs`: `remove_credentials_keep_history` for a delete, and `prune_orphan_keeping_history` for the orphan sweep, which would otherwise delete the kept history a few minutes later.
+
+## 7. Open questions
 
 1. **The AgentMux Cloud row.** It has no right-click menu. Should it get one with "Sign out…" (MuxBus sign-out, which clears the shared session for every channel) for symmetry? Recommended: yes, as a separate item with its own confirmation, not "Delete".
 2. **Showing kept history.** After a delete, should the Armory say where the kept transcripts are, or offer "Delete history too" as an explicit second checkbox in the confirmation (unchecked by default)? Recommended: offer the checkbox in a later phase, not now.

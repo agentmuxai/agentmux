@@ -475,6 +475,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // side log lines can carry it.
                 let acct = mstore.identity_get(&cmd.id).ok().flatten();
                 let provider = acct.as_ref().map(|a| a.provider.clone()).unwrap_or_default();
+                // What the cleanup did, returned to the Armory so a login that
+                // couldn't be removed is reported, not hidden
+                // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md H3).
+                let mut cleanup_report = serde_json::Value::Null;
                 if let Some(acct) = acct {
                     // Containment root for OAuth dirs: only paths inside
                     // ~/.agentmux/shared/identities/ are ever removed (the
@@ -482,13 +486,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // CLI login — never ours to delete).
                     let identities_root = agentmux_common::DataPaths::from_env()
                         .map(|p| p.identities_dir());
-                    let _ = tokio::task::spawn_blocking(move || {
+                    cleanup_report = match tokio::task::spawn_blocking(move || {
                         crate::identity::cleanup::cleanup_account_secrets(
                             &acct,
                             identities_root.as_deref(),
                         )
                     })
-                    .await;
+                    .await
+                    {
+                        Ok(outcome) => outcome.report(),
+                        Err(e) => json!({ "outcome": "failed", "detail": e.to_string() }),
+                    };
                 }
                 let outcome = mstore
                     .identity_delete(&cmd.id)
@@ -594,6 +602,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "deleted": deleted,
                     // Layer 4 — Armory delete-time disclosure (spec §4).
                     "affectedAgents": affected_agents,
+                    // Null when there was no account row to clean up after.
+                    "cleanup": cleanup_report,
                 })))
             })
         }),

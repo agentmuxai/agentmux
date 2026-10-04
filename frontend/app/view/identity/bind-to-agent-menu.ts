@@ -237,6 +237,10 @@ export async function buildAccountRowMenu(
      *  notice banner. */
     onBindError?: (message: string) => void,
     onBound?: () => void,
+    /** "Delete account…" — opens the shared delete confirmation
+     *  (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.1).
+     *  Omitted → no delete item. */
+    onDelete?: () => void,
 ): Promise<ContextMenuItem[]> {
     let allLinks: AgentDefinitionIdentity[] = [];
     try {
@@ -305,5 +309,10 @@ export async function buildAccountRowMenu(
                 void import("@/util/clipboard").then(({ writeText }) => writeText(account.id));
             },
         },
+        // Last, after a separator, so it is never the item under the
+        // pointer when the menu opens.
+        ...(onDelete
+            ? ([{ type: "separator" }, { label: "Delete account…", click: onDelete }] as ContextMenuItem[])
+            : []),
     ];
 }

@@ -140,6 +140,48 @@ export function deleteDisclosureNotice(affectedAgents: string[] | undefined): st
     return `Account deleted. ${n} agent(s) were using it — any still running hold its tokens until restarted.`;
 }
 
+/** What the backend's secret cleanup did (`deleteidentityaccount`'s `cleanup`). */
+export interface DeleteCleanupReport {
+    outcome: "removed" | "absent" | "skipped" | "failed" | "none";
+    path?: string;
+    detail?: string;
+    historyKept?: boolean;
+    historyPath?: string;
+}
+
+/**
+ * The notice shown after a delete, or null when the row disappearing is
+ * feedback enough (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md
+ * §3.5). A cleanup failure is reported even though the row is gone: the
+ * user asked for the login to go, and part of it is still on disk.
+ */
+export function deleteResultNotice(result: {
+    deleted: boolean;
+    affectedAgents?: string[];
+    cleanup?: DeleteCleanupReport | null;
+}): string | null {
+    if (!result.deleted) return "This account was already removed.";
+    const parts: string[] = [];
+    const cleanup = result.cleanup;
+    if (cleanup?.outcome === "failed") {
+        parts.push(
+            `Account deleted, but its saved login couldn't all be removed (${cleanup.detail ?? "unknown error"}).` +
+                (cleanup.path ? ` You can delete ${cleanup.path} yourself.` : ""),
+        );
+    } else if (cleanup?.outcome === "skipped") {
+        parts.push(
+            "Account deleted. Its login files are outside AgentMux's folder and were left in place" +
+                (cleanup.path ? `: ${cleanup.path}` : "") +
+                ".",
+        );
+    }
+    const disclosure = deleteDisclosureNotice(result.affectedAgents);
+    if (disclosure) {
+        parts.push(parts.length > 0 ? disclosure.replace(/^Account deleted\. /, "") : disclosure);
+    }
+    return parts.length > 0 ? parts.join(" ") : null;
+}
+
 export const PROVIDER_LABELS: Record<AccountProvider, string> = {
     github: "GitHub",
     openai: "OpenAI",
@@ -459,6 +501,13 @@ export class IdentityViewModel implements ViewModel {
     selectedAccountAtom: Accessor<Account | null> = this._selectedAccount[0];
     setSelectedAccount: Setter<Account | null> = this._selectedAccount[1];
 
+    // Account awaiting delete confirmation. One confirmation, reached from
+    // the row's right-click menu and from the detail panel's Delete button
+    // (SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md §3.3).
+    private _pendingDelete = createSignal<Account | null>(null);
+    pendingDeleteAtom: Accessor<Account | null> = this._pendingDelete[0];
+    private setPendingDelete: Setter<Account | null> = this._pendingDelete[1];
+
     // Add/edit form state
     private _formOpen = createSignal<boolean>(false);
     formOpenAtom: Accessor<boolean> = this._formOpen[0];
@@ -595,22 +644,51 @@ export class IdentityViewModel implements ViewModel {
         }
     };
 
-    deleteAccount = async (id: string): Promise<void> => {
+    /** Ask for confirmation before deleting `account`. Re-resolves it by id
+     *  first: a menu built before the account was deleted elsewhere must
+     *  not open a confirmation for a row that is already gone. */
+    requestDelete = (account: Account): void => {
+        if (!this.accountsAtom().some((a) => a.id === account.id)) {
+            this.setDeleteNotice("This account was already removed.");
+            return;
+        }
+        this.setPendingDelete(account);
+    };
+
+    cancelDelete = (): void => {
+        this.setPendingDelete(null);
+    };
+
+    /** Delete the account awaiting confirmation; resolves when done. */
+    confirmDelete = async (): Promise<void> => {
+        const account = this.pendingDeleteAtom();
+        if (!account) return;
+        // An edit form open on this account would save into a deleted row.
+        if (this.formOpenAtom() && this.editingAccountAtom()?.id === account.id) {
+            this.cancelForm();
+        }
+        try {
+            await this.deleteAccount(account.id, accountLabel(account));
+        } finally {
+            this.setPendingDelete(null);
+        }
+    };
+
+    deleteAccount = async (id: string, label?: string): Promise<void> => {
         try {
             const result = await RpcApi.DeleteIdentityAccountCommand(TabRpcClient, { id });
-            // Layer-4 disclosure (spec §4): agents that were using the
-            // account may still hold its tokens in a live process.
-            // null (no affected agents) also clears any stale notice
-            // from a previous delete.
-            this.setDeleteNotice(deleteDisclosureNotice(result?.affectedAgents));
+            // Layer-4 disclosure (spec §4) plus the cleanup outcome. null
+            // (nothing to say) also clears any stale notice from a
+            // previous delete.
+            this.setDeleteNotice(result ? deleteResultNotice(result) : null);
             await refreshAccountCache();
             if (this.selectedAccountAtom()?.id === id) {
                 this.setSelectedAccount(null);
             }
         } catch (err) {
-            // Surface delete failures via formError so the user sees them
-            // even when the form isn't open.
-            this.setFormError((err as Error)?.message ?? String(err));
+            // The notice row, not formError: the form is usually closed
+            // when a delete runs, and an error there would never be seen.
+            this.setDeleteNotice(`Couldn't delete ${label ?? "the account"}: ${(err as Error)?.message ?? String(err)}`);
         }
     };
 
@@ -632,7 +710,7 @@ export class IdentityViewModel implements ViewModel {
     };
 
     openEditForm = (account: Account): void => {
-        this.setSelectedAccount(null); // close detail modal before opening form
+        this.setSelectedAccount(null); // close the detail panel before opening the form
         this.setEditingAccount(account);
         this.setAddPreset(null);
         this.setFormError(null);

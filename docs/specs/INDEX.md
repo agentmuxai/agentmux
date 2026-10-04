@@ -253,6 +253,7 @@ partial list.
 | [`SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03`](SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md) | SPEC: A Unified Framework for Ambient (Non-User-Driven) Model Calls |
 | [`SPEC_AMBIENT_NARRATION_INLINE_AGENT_VOICE_2026_09_24`](SPEC_AMBIENT_NARRATION_INLINE_AGENT_VOICE_2026_09_24.md) | SPEC: Ambient narration — render inline, in the agent's voice, with a trailing tag |
 | [`SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17`](SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md) | SPEC: Pane title tracks the session's overall goal, not the latest micro-step |
+| [`SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04`](SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md) | SPEC — Armory Accounts: Delete in the right-click menu, account details in an inline panel |
 | [`SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09`](SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md) | SPEC — Armory "Bind to Agent" context menu on account rows |
 | [`SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15`](SPEC_ARMORY_GLOBAL_MEMORY_DECLUTTER_2026_09_15.md) | Spec: Armory Global Memory — declutter to a simple file list |
 | [`SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22`](SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md) | Spec: Armory rail — "Global Memory" / "Personal Memory" rename + reposition |
@@ -864,7 +865,6 @@ partial list.
 | [`SPEC_ALWAYS_RESPOND_TO_USER_ACTIONS_2026_04_15`](SPEC_ALWAYS_RESPOND_TO_USER_ACTIONS_2026_04_15.md) | SPEC: Always Respond to User Actions |
 | [`SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08`](SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md) | SPEC: Ambient Haiku-Summary Sanitization + Terseness Pass |
 | [`SPEC_APP_API_AGENT_DEFINE_2026_06_06`](SPEC_APP_API_AGENT_DEFINE_2026_06_06.md) | SPEC: App API — `agent.define` (Import / Upsert Agent Definition) |
-| [`SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04`](SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md) | SPEC — Armory Accounts: Delete in the right-click menu, account details in an inline panel |
 | [`SPEC_ARMORY_ACCOUNTS_NO_MODALS_2026_07_16`](SPEC_ARMORY_ACCOUNTS_NO_MODALS_2026_07_16.md) | SPEC — Armory Accounts: AgentMux icon (already correct) + remove modals, match single-pane page dynamics |
 | [`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md) | SPEC — Armory Phase 5: drop Identities, rename/reorder tabs, seed a starter Skill catalog |
 | [`SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05`](SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05.md) | SPEC: Global Memory is the only concept — remove shared provider config, materialize into the provider's file |
