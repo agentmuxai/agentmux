@@ -1,6 +1,6 @@
 # SPEC: Robust highlighting for Bash tool panels in the agent pane
 
-**Status:** In progress. Steps 1-3 of §5 (POSIX tokenizer, sync render and theme, streaming header) are in the first PR; PowerShell shows through its Shiki grammar until step 4.
+**Status:** proposed. Steps 1-3 of §5 (POSIX tokenizer, sync render and theme, streaming header) are being built in the first PR.
 **Date:** 2026-10-04
 **Author:** AgentX
 **Requested by:** the repo owner ("when hovering over agent pane tools, we get
