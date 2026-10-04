@@ -215,6 +215,11 @@ pub struct LanInstance {
     /// for a peer on a build from before it was advertised.
     #[serde(default)]
     pub channel: String,
+    /// The peer's operating system (`windows`, `macos`, `linux`), for the
+    /// platform tag in the Swarm. Display only; empty for a peer that does not
+    /// advertise it (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
+    #[serde(default)]
+    pub os: String,
     pub address: String,
     pub port: u16,
     pub auth_key: String,
@@ -465,11 +470,13 @@ impl LanDiscovery {
         let service_name = mdns_instance_label(&hostname, port);
         let host_name_mdns = mdns_hostname(&hostname);
         let channel = crate::backend::reactive::registry::local_channel_id();
+        let os = crate::backend::host_os::local_os();
         let properties = [
             ("version", version.as_str()),
             ("hostname", hostname.as_str()),
             ("instance_id", instance_id.as_str()),
             ("channel", channel.as_str()),
+            ("os", os.as_str()),
             ("auth_key", auth_key.as_str()),
         ];
         // `""` alone does NOT mean "auto-detect" despite how that reads —
@@ -827,6 +834,7 @@ impl LanDiscovery {
         // this instance over UDP can tell two channels on one host apart. An
         // extra field: older parsers (mobile included) ignore it.
         response["channel"] = json!(crate::backend::reactive::registry::local_channel_id());
+        response["os"] = json!(crate::backend::host_os::local_os());
         response
     }
 
@@ -1107,6 +1115,11 @@ impl LanDiscovery {
                     .get_property_val_str("channel")
                     .unwrap_or_default()
                     .to_string();
+                // Self-reported by the peer, so only a plain token is kept.
+                let os = info
+                    .get_property_val_str("os")
+                    .and_then(crate::backend::host_os::sanitize_os)
+                    .unwrap_or_default();
                 let other_ttl_secs = info.get_other_ttl();
 
                 let mut instances = self.instances.write();
@@ -1119,6 +1132,7 @@ impl LanDiscovery {
                     hostname: hostname.clone(),
                     version: version.clone(),
                     channel: channel.clone(),
+                    os: os.clone(),
                     address: address.clone(),
                     port: info.get_port(),
                     auth_key: auth_key.clone(),
@@ -1157,6 +1171,9 @@ impl LanDiscovery {
                 }
                 if !channel.is_empty() {
                     entry.channel = channel;
+                }
+                if !os.is_empty() {
+                    entry.os = os;
                 }
                 // The UDP route may have found this peer first; one entry per
                 // peer, the mDNS one (udp_peers::merge_udp_peer is the converse).
@@ -2915,6 +2932,7 @@ mod peer_fanout_tests {
             hostname: "test".into(),
             version: "0".into(),
             channel: String::new(),
+            os: String::new(),
             address: host.to_string(),
             port: port.parse().unwrap(),
             auth_key: "k".into(),

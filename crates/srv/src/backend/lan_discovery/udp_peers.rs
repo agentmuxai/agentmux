@@ -77,6 +77,9 @@ pub(super) struct UdpPeer {
     pub version: String,
     /// Empty when the peer predates advertising it.
     pub channel: String,
+    /// The peer's operating system, only if it is a plain lowercase token.
+    /// Empty when the peer predates advertising it.
+    pub os: String,
     pub address: IpAddr,
     pub port: u16,
     pub auth_key: String,
@@ -108,6 +111,11 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
     // Optional: a peer from before it was advertised sends none, and an
     // oversize one is dropped rather than refusing the whole reply.
     let channel = text("channel", MAX_CHANNEL_LEN).unwrap_or_default();
+    let os = value
+        .get("os")
+        .and_then(|v| v.as_str())
+        .and_then(crate::backend::host_os::sanitize_os)
+        .unwrap_or_default();
     let port = u16::try_from(value.get("port")?.as_u64()?)
         .ok()
         .filter(|p| *p >= MIN_PEER_PORT)?;
@@ -116,6 +124,7 @@ pub(super) fn parse_peer_reply(bytes: &[u8], src: &std::net::SocketAddr) -> Opti
         hostname,
         version,
         channel,
+        os,
         address: src.ip(),
         port,
         auth_key,
@@ -177,6 +186,9 @@ pub(super) fn merge_udp_peer(
             if !peer.channel.is_empty() {
                 existing.channel = peer.channel.clone();
             }
+            if !peer.os.is_empty() {
+                existing.os = peer.os.clone();
+            }
             existing.auth_key = peer.auth_key.clone();
         } else {
             if existing.auth_key.is_empty() {
@@ -184,6 +196,9 @@ pub(super) fn merge_udp_peer(
             }
             if existing.channel.is_empty() {
                 existing.channel = peer.channel.clone();
+            }
+            if existing.os.is_empty() {
+                existing.os = peer.os.clone();
             }
         }
         return Merge::Refreshed;
@@ -204,6 +219,7 @@ pub(super) fn merge_udp_peer(
             hostname: peer.hostname.clone(),
             version: peer.version.clone(),
             channel: peer.channel.clone(),
+            os: peer.os.clone(),
             address,
             port: peer.port,
             auth_key: peer.auth_key.clone(),
@@ -425,6 +441,7 @@ mod tests {
             hostname: "h".into(),
             version: "0.59.4".into(),
             channel: "stable".into(),
+            os: String::new(),
             address: addr.parse().unwrap(),
             port,
             auth_key: "k".into(),
@@ -437,6 +454,7 @@ mod tests {
             hostname: "mdns-name".into(),
             version: "0.59.4".into(),
             channel: String::new(),
+            os: String::new(),
             address: addr.into(),
             port,
             auth_key: "mdns-key".into(),
@@ -450,9 +468,9 @@ mod tests {
 
     #[test]
     fn a_well_formed_reply_from_a_lan_address_is_a_peer() {
-        let p = parse_peer_reply(&reply("abc", 29700), &src("192.168.1.26")).unwrap();
+        let p = parse_peer_reply(&reply("abc", 29700), &src("10.0.0.26")).unwrap();
         assert_eq!(p.instance_id, "abc");
-        assert_eq!(p.address, "192.168.1.26".parse::<IpAddr>().unwrap());
+        assert_eq!(p.address, "10.0.0.26".parse::<IpAddr>().unwrap());
         assert_eq!(p.port, 29700);
         assert_eq!(p.auth_key, "k-secret");
     }
@@ -461,14 +479,14 @@ mod tests {
     fn the_channel_is_read_when_present_and_optional_when_not() {
         let mut v: serde_json::Value = serde_json::from_slice(&reply("abc", 29700)).unwrap();
         assert_eq!(
-            parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("192.168.1.26"))
+            parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("10.0.0.26"))
                 .unwrap()
                 .channel,
             ""
         );
         v["channel"] = json!("dev-fix-lan");
         assert_eq!(
-            parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("192.168.1.26"))
+            parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("10.0.0.26"))
                 .unwrap()
                 .channel,
             "dev-fix-lan"
@@ -476,24 +494,68 @@ mod tests {
         // Oversize: dropped, the reply still counts.
         v["channel"] = json!("c".repeat(MAX_CHANNEL_LEN + 1));
         assert_eq!(
-            parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("192.168.1.26"))
+            parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("10.0.0.26"))
                 .unwrap()
                 .channel,
             ""
         );
     }
 
+    // The platform tag (SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §3).
+    #[test]
+    fn the_os_is_read_when_it_is_a_plain_token_and_dropped_otherwise() {
+        let mut v: serde_json::Value = serde_json::from_slice(&reply("abc", 29700)).unwrap();
+        let os_of = |v: &serde_json::Value| {
+            parse_peer_reply(&serde_json::to_vec(v).unwrap(), &src("10.0.0.26"))
+                .unwrap()
+                .os
+        };
+        assert_eq!(os_of(&v), "");
+        for ok in ["windows", "macos", "linux"] {
+            v["os"] = json!(ok);
+            assert_eq!(os_of(&v), ok);
+        }
+        // Anything else is dropped; the reply still counts.
+        for bad in ["Windows", "<b>x</b>", "../etc", "", "a-very-long-platform-name"] {
+            v["os"] = json!(bad);
+            assert_eq!(os_of(&v), "", "{bad:?}");
+        }
+        v["os"] = json!(42);
+        assert_eq!(os_of(&v), "");
+    }
+
+    #[test]
+    fn a_reply_without_an_os_keeps_the_known_one() {
+        let mut t = HashMap::new();
+        let mut with = peer("abc", "10.0.0.26", 29700);
+        with.os = "macos".into();
+        merge_udp_peer(&mut t, &with, 100);
+        assert_eq!(t["udp:10.0.0.26:29700"].os, "macos");
+        merge_udp_peer(&mut t, &peer("abc", "10.0.0.26", 29700), 200);
+        assert_eq!(t["udp:10.0.0.26:29700"].os, "macos");
+    }
+
+    #[test]
+    fn an_mdns_entry_with_no_os_learns_it_from_a_udp_reply() {
+        let mut t = HashMap::new();
+        t.insert("mdns-full".to_string(), mdns_entry("abc", "10.0.0.26", 29700));
+        let mut udp = peer("abc", "10.0.0.26", 29700);
+        udp.os = "linux".into();
+        merge_udp_peer(&mut t, &udp, 100);
+        assert_eq!(t["mdns-full"].os, "linux");
+    }
+
     #[test]
     fn the_address_is_the_datagrams_source_never_a_claimed_one() {
         let mut v: serde_json::Value = serde_json::from_slice(&reply("abc", 29700)).unwrap();
         v["address"] = json!("10.9.9.9");
-        let p = parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("192.168.1.26")).unwrap();
-        assert_eq!(p.address.to_string(), "192.168.1.26");
+        let p = parse_peer_reply(&serde_json::to_vec(&v).unwrap(), &src("10.0.0.26")).unwrap();
+        assert_eq!(p.address.to_string(), "10.0.0.26");
     }
 
     #[test]
     fn replies_that_are_not_trustworthy_enough_to_record_are_refused() {
-        let ok = src("192.168.1.26");
+        let ok = src("10.0.0.26");
         // Not from the private ranges: a public host must not seed the table.
         assert!(parse_peer_reply(&reply("abc", 29700), &src("8.8.8.8")).is_none());
         // A probe, noise, another version.
@@ -526,10 +588,10 @@ mod tests {
     fn a_new_peer_is_recorded_under_a_udp_key_with_a_short_ttl() {
         let mut t = HashMap::new();
         assert_eq!(
-            merge_udp_peer(&mut t, &peer("abc", "192.168.1.26", 29700), 100),
+            merge_udp_peer(&mut t, &peer("abc", "10.0.0.26", 29700), 100),
             Merge::Inserted
         );
-        let e = &t["udp:192.168.1.26:29700"];
+        let e = &t["udp:10.0.0.26:29700"];
         assert_eq!(
             (e.last_seen, e.first_seen, e.other_ttl_secs),
             (100, 100, UDP_PEER_TTL_SECS)
@@ -541,13 +603,13 @@ mod tests {
     fn a_peer_mdns_already_knows_is_not_listed_twice() {
         // By address and port, whatever the TXT record says or has not said yet.
         for known in [
-            mdns_entry("abc", "192.168.1.26", 29700),
-            mdns_entry("", "192.168.1.26", 29700),
+            mdns_entry("abc", "10.0.0.26", 29700),
+            mdns_entry("", "10.0.0.26", 29700),
         ] {
             let mut t = HashMap::new();
             t.insert("agentmux-x._agentmux._tcp.local.".to_string(), known);
             assert_eq!(
-                merge_udp_peer(&mut t, &peer("abc", "192.168.1.26", 29700), 500),
+                merge_udp_peer(&mut t, &peer("abc", "10.0.0.26", 29700), 500),
                 Merge::Refreshed
             );
             assert_eq!(t.len(), 1, "no second entry");
@@ -562,23 +624,23 @@ mod tests {
     fn a_reply_without_a_channel_keeps_the_known_one() {
         // Codex P2 on #4241: an older build (or an oversize field) sends none.
         let mut t = HashMap::new();
-        merge_udp_peer(&mut t, &peer("abc", "192.168.1.26", 29700), 100);
-        assert_eq!(t["udp:192.168.1.26:29700"].channel, "stable");
-        let mut no_channel = peer("abc", "192.168.1.26", 29700);
+        merge_udp_peer(&mut t, &peer("abc", "10.0.0.26", 29700), 100);
+        assert_eq!(t["udp:10.0.0.26:29700"].channel, "stable");
+        let mut no_channel = peer("abc", "10.0.0.26", 29700);
         no_channel.channel = String::new();
         merge_udp_peer(&mut t, &no_channel, 200);
-        assert_eq!(t["udp:192.168.1.26:29700"].channel, "stable");
+        assert_eq!(t["udp:10.0.0.26:29700"].channel, "stable");
     }
 
     #[test]
     fn a_later_reply_updates_a_udp_entry_in_place() {
         let mut t = HashMap::new();
-        merge_udp_peer(&mut t, &peer("abc", "192.168.1.26", 29700), 100);
-        let mut renamed = peer("abc", "192.168.1.26", 29700);
+        merge_udp_peer(&mut t, &peer("abc", "10.0.0.26", 29700), 100);
+        let mut renamed = peer("abc", "10.0.0.26", 29700);
         renamed.hostname = "area54-renamed".into();
         assert_eq!(merge_udp_peer(&mut t, &renamed, 200), Merge::Refreshed);
         assert_eq!(t.len(), 1);
-        let e = &t["udp:192.168.1.26:29700"];
+        let e = &t["udp:10.0.0.26:29700"];
         assert_eq!((e.hostname.as_str(), e.last_seen), ("area54-renamed", 200));
     }
 
@@ -588,22 +650,22 @@ mod tests {
     fn two_machines_on_the_same_release_are_two_peers() {
         let mut t = HashMap::new();
         assert_eq!(
-            merge_udp_peer(&mut t, &peer("v0.59.5", "192.168.1.26", 29700), 1),
+            merge_udp_peer(&mut t, &peer("v0.59.5", "10.0.0.26", 29700), 1),
             Merge::Inserted
         );
         assert_eq!(
-            merge_udp_peer(&mut t, &peer("v0.59.5", "192.168.1.195", 29700), 1),
+            merge_udp_peer(&mut t, &peer("v0.59.5", "10.0.0.195", 29700), 1),
             Merge::Inserted
         );
         assert_eq!(t.len(), 2);
         // And an mDNS entry for one of them does not swallow the other.
         t.insert(
             "mdns-a".into(),
-            mdns_entry("v0.59.5", "192.168.1.26", 29700),
+            mdns_entry("v0.59.5", "10.0.0.26", 29700),
         );
         drop_udp_duplicates(&mut t);
-        assert!(t.contains_key("udp:192.168.1.195:29700"));
-        assert!(!t.contains_key("udp:192.168.1.26:29700"));
+        assert!(t.contains_key("udp:10.0.0.195:29700"));
+        assert!(!t.contains_key("udp:10.0.0.26:29700"));
     }
 
     #[test]
@@ -643,16 +705,16 @@ mod tests {
     #[test]
     fn an_mdns_resolution_after_the_udp_one_replaces_it() {
         let mut t = HashMap::new();
-        merge_udp_peer(&mut t, &peer("abc", "192.168.1.26", 29700), 100);
-        merge_udp_peer(&mut t, &peer("other", "192.168.1.40", 29700), 100);
+        merge_udp_peer(&mut t, &peer("abc", "10.0.0.26", 29700), 100);
+        merge_udp_peer(&mut t, &peer("other", "10.0.0.40", 29700), 100);
         t.insert(
             "agentmux-x._agentmux._tcp.local.".to_string(),
-            mdns_entry("abc", "192.168.1.26", 29700),
+            mdns_entry("abc", "10.0.0.26", 29700),
         );
         drop_udp_duplicates(&mut t);
-        assert!(!t.contains_key("udp:192.168.1.26:29700"));
+        assert!(!t.contains_key("udp:10.0.0.26:29700"));
         assert!(
-            t.contains_key("udp:192.168.1.40:29700"),
+            t.contains_key("udp:10.0.0.40:29700"),
             "an unrelated UDP peer stays"
         );
         assert!(t.contains_key("agentmux-x._agentmux._tcp.local."));
@@ -792,7 +854,7 @@ mod tests {
         let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let own_port = socket.local_addr().unwrap().port();
         // Same instance id as ours (the release), from another machine: a peer.
-        let from: std::net::SocketAddr = "192.168.1.77:29700".parse().unwrap();
+        let from: std::net::SocketAddr = "10.0.0.77:29700".parse().unwrap();
         a.handle_datagram(&socket, own_port, &reply("v0.59.5", 29799), from)
             .await;
         assert_eq!(
@@ -828,7 +890,7 @@ mod tests {
         for (age, listed) in [(0, true), (floor - 5, true), (floor + 5, false)] {
             merge_udp_peer(
                 &mut a.instances.write(),
-                &peer("abc", "192.168.1.26", 29700),
+                &peer("abc", "10.0.0.26", 29700),
                 now - age,
             );
             assert_eq!(a.get_instances().len(), usize::from(listed), "age {age}s");
@@ -842,13 +904,13 @@ mod tests {
     #[test]
     fn a_restarted_peer_keeps_one_entry_under_its_new_id() {
         let mut t = HashMap::new();
-        merge_udp_peer(&mut t, &peer("v0.59.4", "192.168.1.26", 29700), 100);
+        merge_udp_peer(&mut t, &peer("v0.59.4", "10.0.0.26", 29700), 100);
         assert_eq!(
-            merge_udp_peer(&mut t, &peer("v0.59.5", "192.168.1.26", 29700), 200),
+            merge_udp_peer(&mut t, &peer("v0.59.5", "10.0.0.26", 29700), 200),
             Merge::Refreshed
         );
         assert_eq!(t.len(), 1, "{:?}", t.keys().collect::<Vec<_>>());
-        let e = &t["udp:192.168.1.26:29700"];
+        let e = &t["udp:10.0.0.26:29700"];
         assert_eq!(
             (e.instance_id.as_str(), e.first_seen, e.last_seen),
             ("v0.59.5", 100, 200)
