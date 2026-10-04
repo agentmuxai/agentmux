@@ -47,6 +47,7 @@ import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
 import { paneCommandFor, shortcutFor } from "@/app/keybindings";
+import { isEditableTarget } from "@/util/focusutil";
 
 export const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -420,6 +421,96 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
 
     // ── Keyboard (§5.3.1) ──────────────────────────────────────────────────
 
+    /** Runs a `files:*` command from the shortcut table; false if unknown. */
+    const runFilesCommand = (command: string): boolean => {
+        const sel = model.selection();
+        switch (command) {
+            case "files:back":
+                model.goBack();
+                return true;
+            case "files:forward":
+                model.goForward();
+                return true;
+            case "files:up":
+                model.goUp();
+                return true;
+            case "files:openInNewTab":
+                // Folders in new tabs; files open as usual.
+                for (const entry of model.selectedEntries()) {
+                    if (entry.is_dir) openInNewTab(model.pathOf(entry.name));
+                    else openEntry(entry);
+                }
+                return true;
+            case "files:newTabHere":
+                openInNewTab(model.path());
+                return true;
+            case "files:closeTab":
+                void closeOwnTab(model.blockId).then(
+                    (closed) => {
+                        if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
+                    },
+                    (err) => model.setStatus({ text: `Couldn't close this tab: ${errorText(err)}`, tone: "error" })
+                );
+                return true;
+            case "files:rename":
+                if (sel.focus && sel.names.size === 1 && sel.names.has(sel.focus)) model.setRenaming(sel.focus);
+                return true;
+            case "files:refresh":
+                model.refresh();
+                return true;
+            case "files:trash":
+                void model.trash(model.selectedEntries());
+                return true;
+            case "files:deletePermanently":
+                askDeletePermanently(model.selectedEntries());
+                return true;
+            case "files:selectAll":
+                model.setSelection(selectAll(sel, order()));
+                return true;
+            case "files:undo":
+                void model.undo();
+                return true;
+            case "files:copy":
+                // Both: the files for a paste in Hangar, the paths for anywhere else.
+                model.copyToClipboard("copy", model.selectedEntries());
+                copyPaths(model.selectedEntries(), true);
+                return true;
+            case "files:cut":
+                model.copyToClipboard("cut", model.selectedEntries());
+                return true;
+            case "files:paste":
+                void model.paste();
+                return true;
+            case "files:editPath":
+                startEditingPath();
+                return true;
+            case "files:mention":
+                mentionIn(model.selectedEntries());
+                return true;
+            case "files:newFolder":
+                void model.createNew("dir");
+                return true;
+            case "files:filter":
+                openFilter();
+                return true;
+        }
+        return false;
+    };
+
+    // Files commands from anywhere in the pane (toolbar, sidebar), not only
+    // the list: the global shortcuts that share these keys stand aside in
+    // this pane. Text fields (filter, rename, path) keep their own keys, and
+    // the list handles its own focus first.
+    const onPaneKeyDown = (e: KeyboardEvent): void => {
+        if (e.defaultPrevented || model.renaming() || editingPath() || isEditableTarget(e.target)) return;
+        if (listEl?.contains(e.target as Node)) return;
+        const command = paneCommandFor(e, "files");
+        if (command && runFilesCommand(command)) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+    };
+
     const onKeyDown = (e: KeyboardEvent): void => {
         if (model.renaming() || editingPath()) return;
         const sel = model.selection();
@@ -465,78 +556,8 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         // Command keys are the `files:*` rows of the shortcut table, so they
         // show in the help pane and can't collide with a global shortcut. The
         // list's own keys (arrows, paging, Enter, type-ahead) stay here.
-        switch (paneCommandFor(e, "files")) {
-            case "files:back":
-                model.goBack();
-                break;
-            case "files:forward":
-                model.goForward();
-                break;
-            case "files:up":
-                model.goUp();
-                break;
-            case "files:openInNewTab":
-                // Folders in new tabs; files open as usual.
-                for (const entry of model.selectedEntries()) {
-                    if (entry.is_dir) openInNewTab(model.pathOf(entry.name));
-                    else openEntry(entry);
-                }
-                break;
-            case "files:newTabHere":
-                openInNewTab(model.path());
-                break;
-            case "files:closeTab":
-                void closeOwnTab(model.blockId).then(
-                    (closed) => {
-                        if (!closed) model.setStatus({ text: "This is the pane's only tab. Use the pane's × to close it.", tone: "info" }, 3000);
-                    },
-                    (err) => model.setStatus({ text: `Couldn't close this tab: ${errorText(err)}`, tone: "error" })
-                );
-                break;
-            case "files:rename":
-                if (sel.focus && sel.names.size === 1 && sel.names.has(sel.focus)) model.setRenaming(sel.focus);
-                break;
-            case "files:refresh":
-                model.refresh();
-                break;
-            case "files:trash":
-                void model.trash(model.selectedEntries());
-                break;
-            case "files:deletePermanently":
-                askDeletePermanently(model.selectedEntries());
-                break;
-            case "files:selectAll":
-                model.setSelection(selectAll(sel, order()));
-                break;
-            case "files:undo":
-                void model.undo();
-                break;
-            case "files:copy":
-                // Both: the files for a paste in Hangar, the paths for anywhere else.
-                model.copyToClipboard("copy", model.selectedEntries());
-                copyPaths(model.selectedEntries(), true);
-                break;
-            case "files:cut":
-                model.copyToClipboard("cut", model.selectedEntries());
-                break;
-            case "files:paste":
-                void model.paste();
-                break;
-            case "files:editPath":
-                startEditingPath();
-                break;
-            case "files:mention":
-                mentionIn(model.selectedEntries());
-                break;
-            case "files:newFolder":
-                void model.createNew("dir");
-                break;
-            case "files:filter":
-                openFilter();
-                break;
-            default:
-                handled = listKey();
-        }
+        const command = paneCommandFor(e, "files");
+        handled = command ? runFilesCommand(command) : listKey();
         if (handled) {
             e.preventDefault();
             e.stopPropagation();
@@ -757,7 +778,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const placeLabel = (path: string): string => model.protectedPlace(path)?.label ?? path;
 
     return (
-        <div class="files-view" onContextMenu={(e) => e.preventDefault()}>
+        <div class="files-view" onContextMenu={(e) => e.preventDefault()} onKeyDown={onPaneKeyDown}>
             <div class="files-toolbar">
                 <button type="button" class="files-tool" title={`Back (${shortcutFor("files:back")})`} disabled={!model.canBack()} onClick={() => model.goBack()}>
                     <i class="fa fa-arrow-left" />
