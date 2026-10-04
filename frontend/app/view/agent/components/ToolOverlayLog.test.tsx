@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal } from "solid-js";
 
 import { ToolOverlayLog } from "./ToolOverlayLog";
-import type { ToolNode } from "../types";
+import type { ToolLogChunk, ToolNode } from "../types";
 
 let reducedMotion = false;
 vi.mock("@/app/store/global", () => ({
@@ -717,6 +717,17 @@ describe("ToolOverlayLog Bash command header", () => {
         const { container } = render(() => <ToolOverlayLog node={streamingNode} />);
         expect(container.querySelector(".agent-bash-cmd-code")!.textContent).toBe("sleep 1 && echo done");
         expect(container.querySelector(".agent-tool-log-line")!.textContent).toBe("line 1");
+    });
+
+    it("shows the command while a running call has no visible output yet", () => {
+        const marker: ToolLogChunk = { kind: "system", content: "[bashwrap] starting: 20 chars", timestamp: 1 };
+        for (const chunks of [[], [marker]]) {
+            const node: ToolNode = { ...streamingNode, log: { open: true, chunks } };
+            const { container, unmount } = render(() => <ToolOverlayLog node={node} />);
+            expect(container.querySelector(".agent-bash-cmd-code")!.textContent).toBe("sleep 1 && echo done");
+            expect(container.querySelector(".agent-tool-loading")).not.toBeNull();
+            unmount();
+        }
     });
 
     it("shows no command header for other tools", () => {

@@ -20,8 +20,9 @@ const CMDLET_RE =
     /(?:^|[|;({&]|\n)\s*(?:Get|Set|New|Remove|Select|Where|ForEach|Invoke|Write|Out|Test|Start|Stop|Add|Import|Export|Copy|Move|Join|Split|Resolve|Format|Measure|Sort|Compare|Clear|Rename|Restart|Enable|Disable|Install|Uninstall)-[A-Z][A-Za-z]+/;
 const POWERSHELL_VAR_RE = /\$env:[A-Za-z_]|\$\([ ]*Get-[A-Z]|\$_\.[A-Za-z]/;
 const CMD_LAUNCH_RE = /^\s*cmd(?:\.exe)?\s+\/[ck]\b/i;
-// 3+ characters, so `date +%Y%m%d` and printf formats are not read as cmd.
-const CMD_PERCENT_VAR_RE = /%[A-Za-z_][A-Za-z0-9_]{2,}%/;
+// A whole `%NAME%` word part (3+ characters, bounded by a separator), so
+// `date +%Y%m%d`, git's `--format=%h%x09%s` and printf formats are not cmd.
+const CMD_PERCENT_VAR_RE = /(?:^|[\s"'=;(\\])%[A-Za-z_][A-Za-z0-9_]{2,}%(?=$|[\s"'\\;)/:.])/;
 const CMD_BUILTIN_RE = /^\s*(?:@?echo\s+off|if\s+(?:not\s+)?exist\b|cd\s+\/d\b)/i;
 
 const MASKED: ReadonlySet<TokenKind> = new Set(["string", "heredoc-body", "heredoc-marker", "comment"]);

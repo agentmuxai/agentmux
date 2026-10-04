@@ -464,7 +464,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
                     <ChunkList chunks={chunks()} command={bashCommand()} />
                 </Match>
                 <Match when={!hasChunks() && !hasResult()}>
-                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
+                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} command={bashCommand()} />
                 </Match>
             </Switch>
             </div>
@@ -532,7 +532,12 @@ ToolOverlayLog.displayName = "ToolOverlayLog";
  * rendered. Used when there are no streaming chunks yet (or the tool
  * doesn't stream).
  */
-function ToolOverlayResult(props: { node: ToolNode; dispatchMatch?: AgentDispatch }): JSX.Element {
+function ToolOverlayResult(props: {
+    node: ToolNode;
+    dispatchMatch?: AgentDispatch;
+    /** Bash calls still waiting for output: the command, shown above the spinner. */
+    command?: string;
+}): JSX.Element {
     // NEVER destructure `const node = props.node`. The streaming
     // buffer keeps this component mounted across reducer updates;
     // the reducer's ToolChunkAppend replaces the ToolNode reference
@@ -546,9 +551,16 @@ function ToolOverlayResult(props: { node: ToolNode; dispatchMatch?: AgentDispatc
         <Show
             when={props.node.status !== "running"}
             fallback={
-                <div class="agent-tool-loading">
-                    <span class="agent-tool-spinner">⏳</span> Thinking...
-                </div>
+                <>
+                    <Show when={props.command}>
+                        <div class="agent-bash">
+                            <BashCommandView command={props.command!} />
+                        </div>
+                    </Show>
+                    <div class="agent-tool-loading">
+                        <span class="agent-tool-spinner">⏳</span> Thinking...
+                    </div>
+                </>
             }
         >
             {renderToolResultBody(props.node, { dispatchMatch: props.dispatchMatch })}

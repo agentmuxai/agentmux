@@ -16,7 +16,13 @@ describe("detectShellFlavor", () => {
         expect(detectShellFlavor(cmd)).toBe("powershell");
     });
 
-    it.each(["cmd /c dir", "echo %USERPROFILE%", "if exist build rmdir /s /q build", "@echo off"])(
+    it.each([
+        "cmd /c dir",
+        "echo %USERPROFILE%",
+        'copy a.txt "%TEMP%\\a.txt"',
+        "if exist build rmdir /s /q build",
+        "@echo off",
+    ])(
         "reads %s as cmd",
         (cmd) => {
             expect(detectShellFlavor(cmd)).toBe("cmd");
@@ -31,6 +37,9 @@ describe("detectShellFlavor", () => {
         'curl -H "Set-Cookie: a=b" https://example.com',
         "echo $PATH",
         "cd x && cargo test",
+        "git log --pretty=format:%h%x09%s",
+        "git log --format=%h%x09%an%x09%s -5",
+        `python -c "print('100%abc%')"`,
         "",
     ])("falls back to POSIX for %s", (cmd) => {
         expect(detectShellFlavor(cmd)).toBe("posix");
