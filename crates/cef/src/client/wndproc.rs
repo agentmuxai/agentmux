@@ -132,7 +132,10 @@ unsafe fn is_own_window(hwnd: *mut std::ffi::c_void) -> bool {
 #[cfg(target_os = "windows")]
 unsafe fn hand_back_activation() {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
-    let target = HAND_BACK_TARGET.load(std::sync::atomic::Ordering::Relaxed) as *mut std::ffi::c_void;
+    // Used once, whatever happens below: a target kept after this could be a
+    // window the user has since left (for another app, which our hook never
+    // sees), and a later chain would hand activation back to it.
+    let target = HAND_BACK_TARGET.swap(0, std::sync::atomic::Ordering::Relaxed) as *mut std::ffi::c_void;
     if target.is_null() {
         return;
     }
@@ -140,9 +143,6 @@ unsafe fn hand_back_activation() {
     if fg.is_null() || user_can_see(fg) || is_promoting(fg) || !is_own_window(fg) {
         return; // a window the user can see (or is about to) has it; leave it
     }
-    // Used once: a target kept after this could be a window the user has
-    // since left, and a later chain would hand activation back to it.
-    HAND_BACK_TARGET.store(0, std::sync::atomic::Ordering::Relaxed);
     if !user_can_see(target) {
         return;
     }
