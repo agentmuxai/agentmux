@@ -863,6 +863,7 @@ partial list.
 | [`SPEC_ALWAYS_RESPOND_TO_USER_ACTIONS_2026_04_15`](SPEC_ALWAYS_RESPOND_TO_USER_ACTIONS_2026_04_15.md) | SPEC: Always Respond to User Actions |
 | [`SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08`](SPEC_AMBIENT_SUMMARY_SANITIZATION_AND_TERSENESS_2026_07_08.md) | SPEC: Ambient Haiku-Summary Sanitization + Terseness Pass |
 | [`SPEC_APP_API_AGENT_DEFINE_2026_06_06`](SPEC_APP_API_AGENT_DEFINE_2026_06_06.md) | SPEC: App API — `agent.define` (Import / Upsert Agent Definition) |
+| [`SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04`](SPEC_ARMORY_ACCOUNTS_DELETE_AND_INLINE_DETAIL_2026_10_04.md) | SPEC — Armory Accounts: Delete in the right-click menu, account details in an inline panel |
 | [`SPEC_ARMORY_ACCOUNTS_NO_MODALS_2026_07_16`](SPEC_ARMORY_ACCOUNTS_NO_MODALS_2026_07_16.md) | SPEC — Armory Accounts: AgentMux icon (already correct) + remove modals, match single-pane page dynamics |
 | [`SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13`](SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md) | SPEC — Armory Phase 5: drop Identities, rename/reorder tabs, seed a starter Skill catalog |
 | [`SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05`](SPEC_ARMORY_SHARED_PROVIDER_SETUP_2026_09_05.md) | SPEC: Global Memory is the only concept — remove shared provider config, materialize into the provider's file |
