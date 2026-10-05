@@ -136,38 +136,24 @@ export async function resolveCliBin(
 }
 
 /**
- * Resolve the effective provider for a launch, preferring the agent's
- * bound ABF bundle's copy over its own (driftable) `provider` field.
+ * The provider a launch runs: the agent's own. A bundle carries no harness
+ * (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1); the agent owns it,
+ * read-only after creation. Mirrors the server's
+ * `resolve_effective_provider_id`, which spawn and the credential gate use,
+ * so the CLI launched here and the credentials checked there agree.
  *
- * The bundle is the readonly-once-set source of truth
- * (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.1);
- * `AgentDefinition.provider` can drift post-creation via `agent.define`'s
- * `if_exists=update` path. The backend already resolves this way for
- * both `agent.open`'s own spawn path (`agent_open.rs`) and the layer-3
- * credential gate (`identity/resolver/inject.rs`) — without this, the
- * CLI binary `launchAgentDefinition` actually launches could disagree
- * with which provider's credentials the backend gate validates and
- * injects (PR #2592 review — fixing only the backend gate wasn't
- * sufficient).
- *
- * Extracted as its own function, separate from `launchAgentDefinition`,
- * so this resolution logic is unit-testable in isolation — that
- * function's own RPC/side-effect surface (Node.js checks, CLI
- * resolution, content/skill loading, instance creation, etc.) has no
- * existing test harness anywhere in this codebase (every caller mocks
- * the whole function away), so testing this piece through it isn't
- * practical.
- *
- * Falls back to `agent.provider` on any failure (unbound, fetch error,
- * empty bundle provider) — this must never block a launch on its own.
+ * The bound bundle's `provider` is consulted only when the agent has none,
+ * a definition the server's migration couldn't reach; there it is the value
+ * the agent has always run with. Any failure falls back to `agent.provider`;
+ * this never blocks a launch on its own.
  */
 export async function resolveEffectiveLaunchProvider(agent: AgentDefinition): Promise<string> {
-    if (!agent.memory_id) return agent.provider;
+    if (agent.provider || !agent.memory_id) return agent.provider;
     try {
         const bundle = await RpcApi.GetBundleCommand(TabRpcClient, { id: agent.memory_id });
-        return bundle?.provider || agent.provider;
+        return bundle?.provider ?? "";
     } catch (e: any) {
-        Logger.warn("agent", "Failed to resolve agent's bound bundle for provider; falling back to agent.provider", {
+        Logger.warn("agent", "Failed to read the bound bundle for an agent with no provider", {
             agentId: agent.id,
             error: String(e),
         });

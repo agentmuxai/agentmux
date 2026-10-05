@@ -405,10 +405,9 @@ export class AgentViewModel {
         targetBlockId?: string,
         targetTabId?: string,
     ): Promise<boolean> => {
-        // See resolveEffectiveLaunchProvider's own doc comment
-        // (agent-launch-env.ts) for why this must resolve through the
-        // agent's bound bundle rather than trusting `agent.provider`
-        // directly.
+        // The shared resolver (agent-launch-env.ts), the one the server's
+        // spawn and credential gate mirror: the agent's own provider, or
+        // its bundle's only when it has none.
         const effectiveProvider = await resolveEffectiveLaunchProvider(agent);
 
         const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[resolveProviderAlias(effectiveProvider)];

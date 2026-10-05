@@ -258,14 +258,11 @@ pub fn migrate_promote_template_sessions_v1(
             // `agentdefcreatefromtemplate` handler
             // (server/agent_handlers/template.rs).
             let now = now_ms() as i64;
-            // Resolve through the template's own bound bundle when it has
-            // one, not the possibly-drifted `db_agent_definitions.provider`
-            // column directly (#2594, same pattern as
-            // `agentdefcreatefromtemplate`/`forkagentdefinition`). Only
-            // `mstore` is available in this migration (no id_store/shared
-            // store handoff at this point in the boot sequence) — falls
-            // back to `template.provider` when the bundle isn't found via
-            // this store, same as it did before this fix.
+            // The shared resolver (#2594, same as
+            // `agentdefcreatefromtemplate`/`forkagentdefinition`): the
+            // template's own provider, or its bundle's when it has none
+            // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). Only `mstore` is available this early in boot, so a
+            // bundle that lives in the shared store isn't found here.
             let effective_provider = mstore.resolve_effective_provider_id(template);
             let mut new_def = crate::backend::storage::store::AgentDefinition {
                 id: promote_target_id.clone(),

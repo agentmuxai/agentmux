@@ -37,17 +37,10 @@ export interface BundleDraft {
     id?: string;
     name: string;
     description: string;
-    /** The CLI/harness this ABF runs on (e.g. "claude"), and the resolved
-     *  model vendor (e.g. "anthropic"). Readonly once set — enforced by
-     *  the backend (`bundle.upsert`), not just this form: an ABF's whole
-     *  portability guarantee (it's self-describing about what it needs to
-     *  run) depends on these never silently changing after creation. Empty
-     *  string means "not yet set" (only valid pre-creation, on a brand-new
-     *  draft with no id). See
-     *  ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7 — this reverses
-     *  SPEC_MEMORY_IDENTITY_ARCH §4.1a's "presets are provider-agnostic"
-     *  decision on purpose, trading cross-provider reusability for
-     *  self-contained portability. */
+    /** Who the bundle was made for (e.g. "claude" / "anthropic"): an
+     *  optional, editable hint. A bundle carries no harness; the agent it is
+     *  bound to decides its own (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md
+     *  §3.2). Empty means no hint. `model` holds the vendor. */
     provider: string;
     model: string;
     instructions: string;

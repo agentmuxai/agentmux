@@ -358,9 +358,12 @@ describe("AgentCreateFromTemplateModalPanel", () => {
     // BUNDLE, not its possibly-drifted `.provider` column directly —
     // `agentdefcreatefromtemplate` itself already resolves the clone's
     // provider this way server-side (template.rs, #2607).
-    describe("resolves through the template's bound bundle, not a drifted provider column (ReAgent P1 on #2618)", () => {
+    // A template with no provider of its own takes its bundle's
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1); these pin that the
+    // modal resolves through that path (#2618).
+    describe("resolves the provider through resolveEffectiveLaunchProvider", () => {
         it("shows the resolved (bundle) provider's models, not the drifted column's", async () => {
-            const drifted = { ...template, provider: "codex", memory_id: "mem-1" } as AgentDefinition;
+            const drifted = { ...template, provider: "", memory_id: "mem-1" } as AgentDefinition;
             vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "claude" } as any);
 
             render(() => (
@@ -384,7 +387,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         });
 
         it("filters accounts by the resolved (bundle) provider, not the drifted column's", async () => {
-            const drifted = { ...template, provider: "codex", memory_id: "mem-1" } as AgentDefinition;
+            const drifted = { ...template, provider: "", memory_id: "mem-1" } as AgentDefinition;
             vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "claude" } as any);
             vi.mocked(refreshAccountCache).mockResolvedValue([
                 { id: "acct-claude", name: "Claude Work", provider: "claude" } as any,
@@ -419,7 +422,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             // auto-pick effect gets a chance to fire against the stale
             // fallback provider ("claude") first — this is what makes
             // the race actually reproducible.
-            const drifted = { ...template, provider: "claude", memory_id: "mem-1" } as AgentDefinition;
+            const drifted = { ...template, provider: "", memory_id: "mem-1" } as AgentDefinition;
             vi.mocked(refreshAccountCache).mockResolvedValue([
                 { id: "acct-claude", name: "Claude Work", provider: "claude" } as any,
                 { id: "acct-codex", name: "Codex Work", provider: "codex" } as any,

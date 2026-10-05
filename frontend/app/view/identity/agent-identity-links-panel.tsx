@@ -122,10 +122,9 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
         return agents().find((a) => a.id === id) ?? null;
     });
 
-    // Resolve through the agent's bound bundle rather than the possibly-
-    // drifted `agent.provider` column directly — #2594, same "gate vs.
-    // actual launch can disagree" risk class #2592/#2596/#2607/#2609/
-    // #2610 fixed. Gates the "Connect Anthropic account" CTA below; falls
+    // Same resolver as the launch and the credential gate (#2594), so the
+    // "Connect Anthropic account" CTA below follows the provider the agent
+    // actually runs; falls
     // back to `agent()?.provider` while loading/unbound/on failure, same
     // fallback contract `resolveEffectiveLaunchProvider` itself documents
     // — a brief stale flash here is cosmetic (button visibility only),

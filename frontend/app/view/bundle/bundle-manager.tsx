@@ -304,88 +304,46 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                 />
                             </label>
 
-                            {/* Provider + model — readonly once set (has an id AND
-                                a non-empty provider, i.e. an already-provisioned
-                                bundle, not a legacy row awaiting backfill or a
-                                brand-new draft). See
-                                ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7:
-                                this reverses SPEC_MEMORY_IDENTITY_ARCH §4.1a on
-                                purpose — an ABF now carries its own provider/model
-                                so it stays self-describing when exported. Backend
-                                (bundle.upsert) is the real enforcement; disabling
-                                here is just so the UI doesn't invite an edit the
-                                server will reject. */}
-                            <Show when={draft().id && draft().provider}>
+                            {/* Who the bundle was made for: a hint, optional and
+                                editable. A bundle carries no harness; the agent it's
+                                bound to decides its own
+                                (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.2). */}
+                            <label class="bundle-view-field">
+                                <span class="bundle-view-field-label">
+                                    Suggested for
+                                    <FieldHelp text="The provider this bundle was made with in mind. A hint only: a bundle can be bound to any agent, and the agent's own provider decides which CLI runs." />
+                                </span>
+                                <select
+                                    class="bundle-view-input"
+                                    value={draft().provider}
+                                    onChange={(e) => {
+                                        const provider = e.currentTarget.value;
+                                        updateDraft("provider", provider);
+                                        updateDraft("model", PROVIDERS[provider]?.supportedVendors?.[0] ?? "");
+                                    }}
+                                >
+                                    <option value="">Any provider</option>
+                                    <For each={Object.values(PROVIDERS)}>
+                                        {(p) => <option value={p.id}>{p.displayName}</option>}
+                                    </For>
+                                </select>
+                            </label>
+                            <Show when={(PROVIDERS[draft().provider]?.supportedVendors?.length ?? 0) > 1}>
                                 <label class="bundle-view-field">
                                     <span class="bundle-view-field-label">
-                                        Provider
-                                        <FieldHelp text="Which CLI/harness this ABF runs on. Fixed at creation and cannot be changed afterward — an ABF's portability guarantee depends on it accurately describing what it needs to run." />
-                                    </span>
-                                    <input
-                                        class="bundle-view-input"
-                                        type="text"
-                                        value={PROVIDERS[draft().provider]?.displayName ?? draft().provider}
-                                        disabled
-                                        readonly
-                                    />
-                                </label>
-                                <label class="bundle-view-field">
-                                    <span class="bundle-view-field-label">
-                                        Model vendor
-                                        <FieldHelp text="Which backend this ABF's provider talks to. Fixed at creation, same reason as Provider." />
-                                    </span>
-                                    <input
-                                        class="bundle-view-input"
-                                        type="text"
-                                        value={draft().model}
-                                        disabled
-                                        readonly
-                                    />
-                                </label>
-                            </Show>
-                            <Show when={!(draft().id && draft().provider)}>
-                                <label class="bundle-view-field">
-                                    <span class="bundle-view-field-label">
-                                        Provider *
-                                        <FieldHelp text="Which CLI/harness this ABF will run on. Required, and cannot be changed once set — pick carefully." />
+                                        Suggested vendor
+                                        <FieldHelp text="The backend that provider was meant to talk to. A hint, like the provider." />
                                     </span>
                                     <select
                                         class="bundle-view-input"
-                                        value={draft().provider}
-                                        onChange={(e) => {
-                                            const provider = e.currentTarget.value;
-                                            const vendor = PROVIDERS[provider]?.supportedVendors?.[0] ?? "";
-                                            updateDraft("provider", provider);
-                                            updateDraft("model", vendor);
-                                        }}
-                                        required
+                                        value={draft().model}
+                                        onChange={(e) => updateDraft("model", e.currentTarget.value)}
                                     >
-                                        <option value="" disabled>
-                                            Select a provider…
-                                        </option>
-                                        <For each={Object.values(PROVIDERS)}>
-                                            {(p) => <option value={p.id}>{p.displayName}</option>}
+                                        <For each={PROVIDERS[draft().provider]?.supportedVendors ?? []}>
+                                            {(v) => <option value={v}>{v}</option>}
                                         </For>
                                     </select>
                                 </label>
-                                <Show when={(PROVIDERS[draft().provider]?.supportedVendors?.length ?? 0) > 1}>
-                                    <label class="bundle-view-field">
-                                        <span class="bundle-view-field-label">
-                                            Model vendor *
-                                            <FieldHelp text="Which backend this provider should talk to. Cannot be changed once set." />
-                                        </span>
-                                        <select
-                                            class="bundle-view-input"
-                                            value={draft().model}
-                                            onChange={(e) => updateDraft("model", e.currentTarget.value)}
-                                            required
-                                        >
-                                            <For each={PROVIDERS[draft().provider]?.supportedVendors ?? []}>
-                                                {(v) => <option value={v}>{v}</option>}
-                                            </For>
-                                        </select>
-                                    </label>
-                                </Show>
                             </Show>
 
                             <label class="bundle-view-field">
@@ -443,12 +401,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                 <button
                                     type="submit"
                                     class="bundle-view-save-btn"
-                                    disabled={
-                                        model.savingAtom() ||
-                                        !draft().name.trim() ||
-                                        !draft().provider ||
-                                        !draft().model
-                                    }
+                                    disabled={model.savingAtom() || !draft().name.trim()}
                                 >
                                     {model.savingAtom() ? "Saving…" : "Save"}
                                 </button>

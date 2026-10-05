@@ -1,6 +1,6 @@
 # SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent
 
-**Status:** active — shipped: Phase A (the v0.3 format), #4346. Remaining: Phase B (bind to any agent, §3)
+**Status:** implemented — Phase A (the v0.3 format), #4346; Phase B (the bundle carries no harness, the agent owns its provider), #4352. Per-harness composition is left to its own design (§5)
 **Date:** 2026-10-05
 **Author:** Camper (agent), at operator request
 **Related:** `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md` §4.6–4.7 (the
@@ -23,9 +23,9 @@ this spec splits the work in two, each its own PR:
 - **Phase A, the format.** v0.3 writes `bundle.json` with the `agent-bundle/v0.3` schema;
   `provider` / `model` become an optional `suggestedFor` hint. The importer reads v0.1–v0.3
   forever. No behaviour change at spawn.
-- **Phase B, the binding.** The agent's own provider decides its harness; the bundle's becomes
-  a hint, shown but not enforced. That changes one resolver on each side (server and frontend),
-  the bundle editor, and an immutability guard.
+- **Phase B, the bundle carries no harness.** The agent owns its provider (read-only after
+  creation, as the bundle's is today); new bundles store none; a migration first copies each
+  bundle's provider onto its agent so nothing changes CLI (§3).
 
 ## 1. What the code does today
 
@@ -128,46 +128,94 @@ reads a v0.1, a v0.2 and a v0.3 bundle (manifest name, hint mapping, no spurious
 warning); an archive with both manifests; a v0.3 export round-trips through import; the
 `components` and `import_for_agent` paths find `bundle.json`.
 
-## 3. Phase B: bind to any agent
+## 3. Phase B: the bundle carries no harness
 
-### 3.1 The agent's provider decides
+A provider-agnostic bundle means the harness lives on the agent alone. That touches three
+places: what decides the CLI at spawn, what's written when an agent is created, and the data
+already written under the old rule (operator, 2026-10-05: "its provider agnostic, so there may
+also need to be migrations").
 
-`resolve_effective_provider_id` and `resolveEffectiveLaunchProvider` return the **agent's own**
-provider, and fall back to the bundle's only when the agent has none (agents older than the
-provider field; `m0021` set those bundles to `claude`). The two stay in step: one table-driven
-test on each side, same cases.
+### 3.1 The agent owns its harness, and keeps it
 
-Consequences, all intended:
+- **Spawn reads the agent.** `resolve_effective_provider_id` and
+  `resolveEffectiveLaunchProvider` return `agent.provider`. They read the bound bundle's only for
+  an agent with no provider at all: after the migration (§3.3) there should be none, but it runs
+  per channel and best-effort, and for such an agent the bundle's value is what it has always run
+  with. Every caller listed in §1.2 (CLI choice, startup file name, credential gate, clone, fork,
+  export) follows without its own change.
+- **The lock moves from the bundle to the agent.** The bundle's provider was made read-only
+  because the agent's could drift (`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §7.4.1).
+  That reason still holds once the agent owns it: an agent's sessions, its account links and its
+  native memory folder all belong to one harness, so silently switching CLI under them breaks
+  resume and sign-in. So `agent.provider` becomes read-only after creation: `updateagent` and
+  `agent.define` with `if_exists=update` refuse a different provider with the same
+  `FORBIDDEN … readonly once set` error the bundle guard returns today. Running the same setup on
+  another harness is a new agent: fork it and pick the provider, which already copies everything
+  else. The UI has no provider editor today, so only API callers see the refusal.
+- **The bundle's guard goes.** `check_provider_model_immutable` (`app_api/bundle/mod.rs`) and
+  its tests are removed: the fields it guards no longer decide anything.
 
-- Editing an agent's provider now takes effect, instead of being silently overridden.
-- A bundle can be bound to (or imported for) an agent on a different harness without changing
-  that agent's harness.
+### 3.2 Creating agents and bundles
 
-### 3.2 The hint in the UI
+- **`bundle_provision_for_new_agent` writes no provider or vendor.** An agent's own bundle starts
+  as plain content. All six creation paths (new agent, template clone, fork, Claude import, bulk
+  import, `agent.define`) go through it, so none needs its own change. Clone and fork already
+  take the new agent's provider from the source agent (through the resolver, §3.1).
+- **The vendor isn't stored at all.** It's derived from the agent's provider and
+  `model_vendor_base_url` (`resolve_effective_vendor`) wherever it's needed.
+- **The bundle editor** shows "Suggested for" (provider, vendor) as optional and editable, and
+  never blocks Save on it. New bundles created there start with it empty.
+- **Export fills the hint from the agent, not the row.** `bundle.export_for_agent` knows the
+  agent, so it writes `suggestedFor` from that agent's provider and derived vendor; a plain
+  `bundle.export` writes the row's hint if it has one (imported bundles keep theirs). The hint
+  then says something true about where the bundle came from without the bundle having to store a
+  harness.
+- **Import is unchanged:** an imported hint is stored as a hint and never sets an agent's
+  provider.
 
-The bundle editor shows provider and vendor as an optional "Suggested for" hint: editable, not
-required, never blocking Save. `check_provider_model_immutable` (`app_api/bundle/mod.rs`) goes:
-it guarded a field that no longer decides anything, and the editor's own save path never
-applied it.
+### 3.3 Migrating what's there
 
-### 3.3 Saying what a harness can't take
+One new migration (after `m0034`), idempotent, on the same stores and with the same reach as
+`m0021` (local-channel definitions; bundles in `AppState.id_store`'s store):
 
-When an agent spawns with a bound bundle whose components its harness doesn't read (MCP servers
-or skills for a CLI that reads neither Claude layout), the spawn logs it and the agent pane
-shows a one-line notice naming what was left out. Composing per-harness formats is out of scope
-here (§5).
+1. **Make every agent's own provider the one it runs today.** For each definition with a
+   `memory_id` whose bound bundle has a non-empty `provider` different from the definition's
+   (including an empty definition provider): set the definition's `provider` to the bundle's.
+   Log each change (agent, from, to). After this, §3.1's resolver gives every agent exactly the
+   CLI the old rule gave it. In practice this touches only agents changed through
+   `agent.define` updates and the empty-provider agents `m0021` backfilled as `claude`.
+2. **Leave the bundle rows' values in place, as hints.** Clearing them in the same migration
+   isn't safe: bundles live in the store every channel shares, definitions live per channel, so a
+   channel that migrates later would find the bundle's value already gone and couldn't do step 1.
+   The values are harmless once nothing reads them for the harness, and exports of an agent's own
+   bundle take the hint from the agent anyway (§3.2). A later clean-up can clear them once every
+   channel has run this migration, if it's worth it.
+3. **Downgrade stays safe.** An older build still prefers the bundle's provider, which step 2
+   kept and step 1 made equal to the agent's, so it runs the same CLI.
+
+Definitions known only from the global registry carry no `memory_id` (`m0021`'s documented
+gap), so the old rule never overrode them; they need nothing.
 
 ### 3.4 Tests
 
-The resolver tables (agent provider wins; empty agent provider falls back to the bundle; no
-bundle), the editor's Save with an empty hint, the removed guard's tests, and the notice for a
-harness without MCP or skills support.
+- Resolvers: the agent's provider decides; the bundle's is read only for an agent with none.
+- The agent lock: `updateagent` and `agent.define` update refuse a changed provider, and
+  accept an unchanged one.
+- Creation: a new agent's bundle has an empty provider and vendor, across the creation paths.
+- The migration: a drifted agent takes its bundle's provider; an empty-provider agent takes
+  `claude` from its `m0021` bundle; an agent already in step is untouched; a second run changes
+  nothing; bundle rows are not modified.
+- Export: `export_for_agent` writes `suggestedFor` from the agent; a plain export of an empty-hint
+  bundle omits it.
+- The editor saves with an empty hint; the removed bundle guard's tests go.
 
 ## 4. Compatibility and risks
 
 | Risk | Mitigation |
 |---|---|
-| An agent whose bundle's provider differs from its own runs a different CLI after Phase B | that is the fix (§1.2); the release note says so. Every provisioned agent's bundle was created from the agent's own provider, so this only affects agents whose provider was edited later |
+| An agent runs a different CLI after Phase B | the migration first copies each bound bundle's provider onto its agent (§3.3), so every agent keeps the CLI it runs today |
+| A script changes an agent's provider through `agent.define` and is now refused | the error says the provider is read-only once set; fork the agent to run it on another harness (§3.1) |
+| A channel that hasn't migrated yet shares bundles with one that has | the migration never clears bundle rows (§3.3 step 2), so an unmigrated channel's old rule still finds them |
 | A v0.3 file opened in an older AgentMux | it looks for `armory.json` and refuses the import; the release note says to update. Exporting for older versions isn't offered |
 | Third-party tools reading `armory.json` | none known; the schema page documents both |
 
@@ -176,9 +224,21 @@ harness without MCP or skills support.
 Choosing `instructions_by_provider` at spawn and writing MCP servers and skills in each
 harness's own layout. Both are needed for "any agent" to be complete; each is its own design.
 
+Telling the user when a harness can't take a component (MCP servers or skills on a CLI that
+reads neither Claude layout) was drafted here and moved out: it isn't specific to bundles. An
+agent's own MCP servers and skills are written in Claude's layout too, and a non-Claude agent
+drops them the same way, so the notice belongs with the per-harness composition above.
+
 ## 6. Decisions
 
-1. **Phase A and Phase B as separate PRs** (recommended): A is a format change with no
+Decided (operator, 2026-10-05: the recommendations below, then Phase B as revised in §3):
+
+1. **Phase A and Phase B as separate PRs**: A is a format change with no
    behaviour change; B changes which CLI some agents run.
-2. **`model` becomes `vendor` in the hint** (recommended), since that's what it holds.
-3. **No "export as v0.2" option** (recommended): older versions are a release behind at most.
+2. **`model` becomes `vendor` in the hint**, since that's what it holds.
+3. **No "export as v0.2" option**: older versions are a release behind at most.
+4. **The agent's provider is read-only after creation** (§3.1): the lock that kept
+   sessions and accounts on one harness moves from the bundle to the agent, rather than letting a
+   provider change switch CLIs.
+5. **The migration keeps bundle rows' values** (§3.3): clearing them is unsafe
+   while channels share bundles but migrate separately.

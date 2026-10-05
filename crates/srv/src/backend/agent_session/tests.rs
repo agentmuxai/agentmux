@@ -712,14 +712,12 @@ fn template_promote_clones_template_and_moves_zones() {
 }
 
 #[test]
-fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drifted_column() {
-    // Template's own `.provider` column says "codex" (drifted/stale —
-    // simulates the same drift class #2592 fixed: some definition-time
-    // write path changed this column after the bundle was already
-    // provisioned/immutable), but its bound bundle's REAL provider is
-    // "claude". The promoted clone must carry "claude", not "codex"
-    // (#2594, same pattern as `agentdefcreatefromtemplate`/
-    // `forkagentdefinition`).
+fn template_promote_carries_the_templates_own_provider_not_its_bundles() {
+    // The template says "codex"; its bound bundle, from before bundles
+    // stopped carrying a harness, says "claude". The agent owns its
+    // harness, so the promoted clone carries "codex"
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1; same as
+    // `agentdefcreatefromtemplate`/`forkagentdefinition`).
     let dir = tempdir().unwrap();
     let mstore = open_temp_mstore(dir.path());
     let filestore = fresh_filestore();
@@ -761,8 +759,8 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
         .unwrap()
         .unwrap();
     assert_eq!(
-        promoted.provider, "claude",
-        "promoted clone must carry the template's REAL (bundle-resolved) provider, not the drifted `codex` column"
+        promoted.provider, "codex",
+        "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1)"
     );
 }
 

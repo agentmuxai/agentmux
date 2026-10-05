@@ -205,6 +205,7 @@ partial list.
 | [`SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23`](SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) | Activity Dock: coalesce event-triggered refreshes on pane reopen |
 | [`SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) | Agent tool-call tones get a visual twin: a subtle flash on the tab that made the sound |
 | [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via the Agent App API |
+| [`SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05`](SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md) | SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent |
 | [`SPEC_AGENT_COLOR_2026_08_08`](SPEC_AGENT_COLOR_2026_08_08.md) | SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
 | [`SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15`](SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md) | Spec: Agent-facing Global Memory API (MCP tools to add/list/read a Global Memory entry) |
@@ -498,7 +499,6 @@ partial list.
 | [`SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23`](SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) | SPEC: show the provider account's email in the Armory |
 | [`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24`](SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md) | Activity flash matches its sound: same strikes, same timing, same relative intensity |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
-| [`SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05`](SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md) | SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent |
 | [`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery |
 | [`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23`](SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md) | SPEC: agent identity is carried, never derived |
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |

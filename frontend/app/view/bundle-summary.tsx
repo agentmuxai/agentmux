@@ -92,7 +92,7 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                             <p class="bundle-summary-bound-name">{bundle().name}</p>
                             <Show when={bundle().provider}>
                                 <p class="bundle-summary-bound-provider">
-                                    {PROVIDERS[bundle().provider ?? ""]?.displayName ?? bundle().provider}
+                                    Suggested for {PROVIDERS[bundle().provider ?? ""]?.displayName ?? bundle().provider}
                                 </p>
                             </Show>
                         </div>

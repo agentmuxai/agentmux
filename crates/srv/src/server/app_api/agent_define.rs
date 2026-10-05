@@ -27,6 +27,21 @@ pub(crate) fn validate_vendor_base_url(provider_id: &str, base_url: &str) -> Res
     }
 }
 
+/// An agent's provider is read-only once set: its sessions, linked accounts
+/// and native memory all belong to that harness, so switching it would
+/// strand them. Run the same setup on another harness by forking the agent.
+/// The lock moved here from the agent's bundle
+/// (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). An empty stored
+/// provider can still be set once.
+pub(crate) fn check_provider_unchanged(agent_id: &str, existing: &str, incoming: &str) -> Result<(), String> {
+    if existing.is_empty() || existing == incoming {
+        return Ok(());
+    }
+    Err(format!(
+        "FORBIDDEN: agent {agent_id} provider is readonly once set (has '{existing}', got '{incoming}'); fork the agent to run it on another provider"
+    ))
+}
+
 /// Infer a provider slug from a model name prefix.
 /// Only maps prefixes that correspond to a registered provider slug.
 /// Callers must still validate the result via `providers::get_provider`.
@@ -249,36 +264,46 @@ mod agent_define_core_vendor_tests {
         assert_eq!(def.model_vendor_base_url, "", "explicit empty string must clear the override");
     }
 
+    // The provider is read-only once set (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md
+    // §3.1), so the old "change provider and clear a stale override in the
+    // same call" path is now a refusal; the override itself still updates.
     #[tokio::test]
-    async fn a_stale_override_left_by_a_provider_change_is_recoverable_not_a_permanent_block() {
+    async fn an_update_cannot_change_the_provider_but_can_change_the_rest() {
         let state = test_state();
 
         let created = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
-            "name": "vendor-poison-test",
+            "name": "provider-lock-test",
             "provider": "claude",
             "model_vendor_base_url": "https://my-proxy.example.com",
         }))).await.unwrap();
 
-        // Changing provider to one that doesn't support the override, without
-        // clearing it, must fail validation rather than silently succeeding.
-        let err = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
-            "name": "vendor-poison-test",
-            "if_exists": "update",
-            "provider": "codex",
-        }))).await.unwrap_err();
-        assert!(err.contains("does not support"));
+        for change in [json!({ "provider": "codex" }), json!({ "model": "gemini-2.5-pro" })] {
+            let mut req = json!({ "name": "provider-lock-test", "if_exists": "update" });
+            req.as_object_mut().unwrap().extend(change.as_object().unwrap().clone());
+            let err = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(req))
+                .await
+                .unwrap_err();
+            assert!(err.contains("readonly once set"), "{err}");
+        }
 
-        // The agent must not be permanently stuck: clearing the override in
-        // the SAME call that changes provider must succeed.
         agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
-            "name": "vendor-poison-test",
+            "name": "provider-lock-test",
             "if_exists": "update",
-            "provider": "codex",
+            "provider": "claude",
             "model_vendor_base_url": "",
+            "description": "updated",
         }))).await.unwrap();
         let def = state.mstore.agent_def_get(&created.definition_id).unwrap().unwrap();
-        assert_eq!(def.provider, "codex");
+        assert_eq!(def.provider, "claude");
         assert_eq!(def.model_vendor_base_url, "");
+        assert_eq!(def.description, "updated");
+    }
+
+    #[test]
+    fn check_provider_unchanged_allows_setting_an_empty_provider_once() {
+        assert!(check_provider_unchanged("a", "", "codex").is_ok());
+        assert!(check_provider_unchanged("a", "codex", "codex").is_ok());
+        assert!(check_provider_unchanged("a", "codex", "claude").is_err());
     }
 }
 
@@ -294,7 +319,7 @@ mod agent_define_core_bundle_provisioning_tests {
     }
 
     #[tokio::test]
-    async fn fresh_insert_provisions_its_own_bundle_from_the_agents_own_provider() {
+    async fn fresh_insert_provisions_its_own_bundle_and_the_agent_keeps_the_provider() {
         let state = test_state();
 
         let created = agent_define_core(state.mstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
@@ -306,8 +331,8 @@ mod agent_define_core_bundle_provisioning_tests {
         assert!(!def.memory_id.is_empty(), "fresh agent.define insert must bind a bundle");
         let bundle = state.mstore.bundle_get(&def.memory_id).unwrap().unwrap();
         assert!(!bundle.is_blank);
-        assert_eq!(bundle.provider, "gemini");
-        assert_eq!(bundle.model, "google", "vendor defaults from gemini's supported_vendors[0]");
+        assert_eq!(def.provider, "gemini");
+        assert_eq!((bundle.provider.as_str(), bundle.model.as_str()), ("", ""), "the bundle carries no harness");
     }
 
     #[tokio::test]
@@ -531,7 +556,10 @@ pub(crate) async fn agent_define_core(
                 let mut updated = existing.clone();
                 // provider was already validated/defaulted above; only
                 // overwrite if the caller explicitly supplied a provider or model.
-                if !cmd.provider.is_empty() || !cmd.model.is_empty() { updated.provider = provider.clone(); }
+                if !cmd.provider.is_empty() || !cmd.model.is_empty() {
+                    agent_define::check_provider_unchanged(&existing.id, &existing.provider, &provider)?;
+                    updated.provider = provider.clone();
+                }
                 // Persist the model as a CLI flag so the agent launches with
                 // the requested model rather than the provider default.
                 // If the provider changes but no model is supplied, clear stale

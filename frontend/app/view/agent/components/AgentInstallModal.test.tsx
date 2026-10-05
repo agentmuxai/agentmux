@@ -84,13 +84,13 @@ const baseAgent = (over: Partial<AgentDefinition>): AgentDefinition =>
         ...over,
     }) as AgentDefinition;
 
-describe("AgentInstallModal — installs the bound bundle's provider, not a drifted agent.provider (#2594)", () => {
-    it("starts the install against the resolved (bundle) provider, not the drifted column", async () => {
-        // Drifted `.provider` column says "claude", but the bound
-        // bundle's REAL provider is "codex" — a correct install must
-        // fetch/run codex's CLI, not claude's.
+// The agent's own provider decides; its bound bundle is read only for an
+// agent with none (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). These
+// pin that the modal goes through that resolver.
+describe("AgentInstallModal — resolves the provider through resolveEffectiveLaunchProvider", () => {
+    it("starts the install against the resolved provider (an agent with none takes its bundle's)", async () => {
         vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "codex" } as any);
-        const agent = baseAgent({ provider: "claude", memory_id: "mem-1" });
+        const agent = baseAgent({ provider: "", memory_id: "mem-1" });
 
         render(() => (
             <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />
@@ -109,9 +109,9 @@ describe("AgentInstallModal — installs the bound bundle's provider, not a drif
         });
     });
 
-    it("shows the resolved (bundle) provider's display name in the header, not the drifted column's", async () => {
+    it("shows the resolved provider's display name in the header", async () => {
         vi.mocked(RpcApi.GetBundleCommand).mockResolvedValue({ provider: "codex" } as any);
-        const agent = baseAgent({ provider: "claude", memory_id: "mem-1", name: "Agent One" });
+        const agent = baseAgent({ provider: "", memory_id: "mem-1", name: "Agent One" });
 
         render(() => (
             <AgentInstallModalPanel agent={agent} onCancel={vi.fn()} onInstalled={vi.fn()} />

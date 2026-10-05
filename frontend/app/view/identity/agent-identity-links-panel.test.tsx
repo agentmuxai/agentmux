@@ -36,9 +36,10 @@ vi.mock("@/app/view/agent/components/AgentPicker", () => ({
             { id: "agent-1", name: "Agent One", provider: "claude" },
             { id: "agent-2", name: "Agent Two", provider: "claude" },
             { id: "agent-3", name: "Agent Three (codex)", provider: "codex" },
-            // #2594 drift fixtures — column vs. bound bundle disagree.
-            { id: "agent-4", name: "Agent Four (drifted to claude)", provider: "codex", memory_id: "mem-4" },
-            { id: "agent-5", name: "Agent Five (drifted away from claude)", provider: "claude", memory_id: "mem-5" },
+            // #2594 fixtures: no provider of their own, so the bound bundle's
+            // decides (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1).
+            { id: "agent-4", name: "Agent Four (bundle says claude)", provider: "", memory_id: "mem-4" },
+            { id: "agent-5", name: "Agent Five (bundle says codex)", provider: "", memory_id: "mem-5" },
         ],
         () => false,
     ],
@@ -344,7 +345,7 @@ describe("AgentIdentityLinksPanel", () => {
         // bundle, not the possibly-drifted `agent.provider` column
         // directly (same "gate vs. actual launch can disagree" risk
         // class #2592/#2596/#2607/#2609/#2610 fixed).
-        it("#2594: offers 'Connect Anthropic account' when the drifted column says non-claude but the bound bundle resolves to claude", async () => {
+        it("#2594: offers 'Connect Anthropic account' when an agent with no provider resolves to claude through its bundle", async () => {
             listAllAgentIdentities.mockResolvedValue([]);
             getMemoryCommand.mockImplementation(async (_c: unknown, data: { id: string }) =>
                 data.id === "mem-4" ? { provider: "claude" } : undefined,
@@ -356,7 +357,7 @@ describe("AgentIdentityLinksPanel", () => {
             expect(button).toBeInTheDocument();
         });
 
-        it("#2594: does NOT offer 'Connect Anthropic account' when the drifted column says claude but the bound bundle resolves away from it", async () => {
+        it("#2594: does NOT offer 'Connect Anthropic account' when an agent with no provider resolves away from claude", async () => {
             listAllAgentIdentities.mockResolvedValue([]);
             getMemoryCommand.mockImplementation(async (_c: unknown, data: { id: string }) =>
                 data.id === "mem-5" ? { provider: "codex" } : undefined,

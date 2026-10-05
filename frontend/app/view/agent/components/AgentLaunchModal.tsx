@@ -135,19 +135,13 @@ interface LaunchFormState {
 }
 
 export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
-    // Resolve the effective provider through the agent's bound ABF
-    // bundle, not `props.agent.provider` directly — same fix as
-    // `resolveEffectiveLaunchProvider` (agent-launch-env.ts), applied
-    // here because this modal independently gates which accounts are
-    // offered and drives the entire pre-launch auth flow
-    // (`PreLaunchAuthPanel`, below) from the provider it resolves, all
-    // BEFORE the launch RPC ever reaches the backend's already-correct
-    // resolution (PR #2592; see issue #2594 for the full remaining
-    // scope). `agent.provider` can drift post-creation via
-    // `agent.define`'s `if_exists=update` path while the bundle's own
-    // copy is backend-enforced immutable — without this, a user could
-    // be offered accounts for / walked through auth for the WRONG
-    // provider.
+    // Resolve the effective provider with `resolveEffectiveLaunchProvider`
+    // (agent-launch-env.ts), the resolver the backend's spawn and credential
+    // gate mirror: this modal gates which accounts are offered and drives
+    // the pre-launch auth flow (`PreLaunchAuthPanel`, below) before the
+    // launch RPC runs, so it must pick the same provider (#2592, #2594):
+    // the agent's own, or its bundle's when it has none
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1).
     //
     // `createResource` rather than an inline async fetch inside the
     // memo below: memos must stay synchronous, so the fetch lives here.

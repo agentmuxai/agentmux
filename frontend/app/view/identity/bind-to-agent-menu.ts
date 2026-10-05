@@ -50,12 +50,11 @@ export function computeBindCandidates(
     openDefinitions: Map<string, string>,
     accountNameById: Map<string, string>,
     /**
-     * Resolves an agent's EFFECTIVE provider — through its bound bundle
-     * when it has one, not the possibly-drifted `agent.provider` column
-     * directly (#2594, same "gate vs. actual launch can disagree" risk
-     * class #2592/#2596/#2607/#2609/#2610 fixed). Defaults to reading
+     * Resolves an agent's EFFECTIVE provider, the one its launch uses: its
+     * own, or its bundle's when it has none (#2594;
+     * SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). Defaults to reading
      * `.provider` directly so this stays a pure, sync, DOM/RPC-mock-free
-     * function for callers (tests) that don't care about drift;
+     * function for callers (tests) that don't need the fallback;
      * `buildAccountRowMenu` passes a real resolver backed by a batch
      * bundle-resolution pass, since resolving N agents' bundles is
      * inherently async and this core must stay sync/pure.
@@ -249,12 +248,10 @@ export async function buildAccountRowMenu(
         // Best-effort: without links the submenu still binds correctly —
         // it just can't annotate current bindings.
     }
-    // Batch-resolve every agent's EFFECTIVE provider through its bound
-    // bundle (#2594) — a drifted `.provider` column could otherwise
-    // offer (or wrongly hide) an agent whose real launch provider
-    // doesn't actually match this account. `resolveEffectiveLaunchProvider`
-    // is a no-op (no RPC) for an unbound agent, so this only costs a
-    // round-trip per agent that actually has a bundle.
+    // Batch-resolve every agent's EFFECTIVE provider (#2594), so an agent is
+    // offered exactly when its launch provider matches this account.
+    // `resolveEffectiveLaunchProvider` makes no RPC unless the agent has no
+    // provider of its own, so this costs nothing for almost every agent.
     const effectiveProviderById = new Map<string, string>();
     await Promise.all(
         agents.map(async (a) => {
