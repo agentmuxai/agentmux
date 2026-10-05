@@ -210,6 +210,12 @@ export class RemotesViewModel {
         if (this.expanded() === name) this.setExpanded(null);
     }
 
+    /** Forget "always allow" for `agent` on `name` (§4.10). */
+    async revokeAgent(name: string, agent: string): Promise<void> {
+        await RpcApi.RemoteAgentRevokeCommand(TabRpcClient, { connection: name, agent });
+        this.scheduleRefresh();
+    }
+
     // ── Adding and testing (§4.4) ───────────────────────────────────────────
 
     /** Append the host to ~/.ssh/config; srv shows the user the exact block

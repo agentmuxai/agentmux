@@ -90,6 +90,31 @@ pub fn remember(agent: &str, connection: &str) -> std::io::Result<()> {
     )
 }
 
+/// Forget "always" for `agent` on `connection` (Remotes' Revoke,
+/// SPEC_REMOTES_PANE_2026_10_05.md §4.10): the agent is asked again on its
+/// next use of the host. `false` if there was no such grant.
+pub fn revoke_in(config_home: &Path, agent: &str, connection: &str) -> std::io::Result<bool> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let path = path_in(config_home);
+    let mut grants = read(&path);
+    let before = grants.always.len();
+    grants
+        .always
+        .retain(|g| !(g.agent.eq_ignore_ascii_case(agent) && g.connection == connection.trim()));
+    if grants.always.len() == before {
+        return Ok(false);
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_vec_pretty(&grants).unwrap_or_default())?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(true)
+}
+
+/// [`revoke_in`] under this instance's config dir.
+pub fn revoke(agent: &str, connection: &str) -> std::io::Result<bool> {
+    revoke_in(&crate::backend::base::get_mux_config_dir(), agent, connection)
+}
+
 /// Every "always" grant, as `(agent, connection)` (the Remotes pane lists them
 /// per host, SPEC_REMOTES_PANE_2026_10_05.md §4.10).
 pub fn all_in(config_home: &Path) -> Vec<(String, String)> {
@@ -134,6 +159,20 @@ mod tests {
         );
         let text = std::fs::read_to_string(home.join(FILE_NAME)).unwrap();
         assert_eq!(text.matches("area54").count(), 1, "stored once: {text}");
+    }
+
+    #[test]
+    fn revoking_asks_again_and_leaves_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        remember_in(home, "korp", "area54").unwrap();
+        remember_in(home, "korp", "nas").unwrap();
+        remember_in(home, "agentx", "area54").unwrap();
+        assert!(revoke_in(home, "KORP", " area54 ").unwrap());
+        assert!(!always_allowed_in(home, "korp", "area54"));
+        assert!(always_allowed_in(home, "korp", "nas"), "another host keeps its grant");
+        assert!(always_allowed_in(home, "agentx", "area54"), "another agent keeps its grant");
+        assert!(!revoke_in(home, "korp", "area54").unwrap(), "nothing left to revoke");
     }
 
     #[test]

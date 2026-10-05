@@ -8,6 +8,7 @@ import { RpcClient } from "../rpc-client";
 import type { CommandRemoteForgetData } from "@/types/rpc/CommandRemoteForgetData";
 import type { CommandRemoteHelperRemoveData } from "@/types/rpc/CommandRemoteHelperRemoveData";
 import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
+import type { CommandRemoteAgentRevokeData } from "@/types/rpc/CommandRemoteAgentRevokeData";
 import type { CommandRemoteTestData } from "@/types/rpc/CommandRemoteTestData";
 import type { CommandRemoteSshLocateData } from "@/types/rpc/CommandRemoteSshLocateData";
 import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
@@ -49,6 +50,11 @@ export const RemotesApi = {
     /** Log in to a listed remote and run `true`. */
     RemoteTestCommand(client: RpcClient, data: CommandRemoteTestData, opts?: RpcOpts): Promise<RemoteTestResult> {
         return client.rpcCall("remotetest", data, opts);
+    },
+
+    /** Forget "always allow" for an agent on a host; it is asked again next time. */
+    RemoteAgentRevokeCommand(client: RpcClient, data: CommandRemoteAgentRevokeData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("remoteagentrevoke", data, opts);
     },
 
     /** Where ~/.ssh/config (or a file it includes) defines a host; null if it doesn't. */

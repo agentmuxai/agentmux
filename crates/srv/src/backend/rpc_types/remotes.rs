@@ -150,3 +150,12 @@ pub struct RemoteSshLocation {
     pub path: String,
     pub line: u32,
 }
+
+/// `remoteagentrevoke`: forget "always allow" for `agent` on `connection`
+/// (SPEC_REMOTES_PANE_2026_10_05.md §4.10).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandRemoteAgentRevokeData {
+    pub connection: String,
+    pub agent: String,
+}

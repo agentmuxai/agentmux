@@ -13,6 +13,7 @@ const rpc = vi.hoisted(() => ({
     RemoteAddCommand: vi.fn(),
     RemoteTestCommand: vi.fn(),
     RemoteSshLocateCommand: vi.fn(),
+    RemoteAgentRevokeCommand: vi.fn(),
     ConnConnectCommand: vi.fn(),
     ConnDisconnectCommand: vi.fn(),
 }));
@@ -267,6 +268,15 @@ describe("RemotesView", () => {
             {}
         );
         expect(model.notice()).toContain("line 12");
+    });
+
+    it("lists the agents allowed on a host, each with Revoke", async () => {
+        await renderWith([remote("db1", { agents: ["agentx", "korp"] })]);
+        fireEvent.click(document.querySelector('[data-remote="db1"]')!);
+        expect([...document.querySelectorAll(".remotes-agent-name")].map((e) => e.textContent)).toEqual(["agentx", "korp"]);
+        fireEvent.click(screen.getByRole("button", { name: "Revoke korp on db1" }));
+        await Promise.resolve();
+        expect(rpc.RemoteAgentRevokeCommand).toHaveBeenCalledWith(expect.anything(), { connection: "db1", agent: "korp" });
     });
 
     it("offers Forget only for a recent connection", async () => {

@@ -375,7 +375,23 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
             </div>
             <Show when={r().agents.length > 0}>
                 <div class="remotes-agents">
-                    <span>Agents always allowed here:</span> {r().agents.join(", ")}
+                    <span>Agents always allowed here (as you, with your SSH keys):</span>
+                    <ul>
+                        <For each={r().agents}>
+                            {(agent) => (
+                                <li>
+                                    <span class="remotes-agent-name">{agent}</span>
+                                    <button
+                                        class="remotes-link"
+                                        aria-label={`Revoke ${agent} on ${r().name}`}
+                                        onClick={run("Revoke", () => model.revokeAgent(r().name, agent))}
+                                    >
+                                        Revoke
+                                    </button>
+                                </li>
+                            )}
+                        </For>
+                    </ul>
                 </div>
             </Show>
         </div>
