@@ -83,7 +83,7 @@ impl std::fmt::Display for SpawnGateError {
             SpawnGateError::MissingCredentials { provider } => write!(
                 f,
                 "no credentials for {}: the bound account was deleted or is \
-                 unresolvable. Bind an account for this provider in the Armory.",
+                 unresolvable. Bind an account for this provider in Connectors → Accounts.",
                 provider,
             ),
             SpawnGateError::InjectionUnavailable { detail } => write!(
@@ -98,7 +98,7 @@ impl std::fmt::Display for SpawnGateError {
                  {provider} config directory ({dir}) instead of an isolated AgentMux \
                  account — AgentMux no longer allows spawning an agent against your \
                  own global CLI login. Re-bind this identity to an isolated account \
-                 in Armory → Accounts (delete the current {provider} account and log \
+                 in Connectors → Accounts (delete the current {provider} account and log \
                  in again to create a fresh, isolated one), then retry.",
             ),
             SpawnGateError::ClaudeMdSeedFailed { provider, dir, error } => write!(

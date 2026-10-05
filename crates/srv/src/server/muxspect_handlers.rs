@@ -1382,7 +1382,7 @@ mod tests {
         // agent_handlers/input.rs) — with the `[AgentMux] ` prefix already
         // stripped, as the real caller does before classifying.
         assert_eq!(
-            classify_last_error_source("no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory."),
+            classify_last_error_source("no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in Connectors → Accounts."),
             "identity"
         );
         assert_eq!(
@@ -1391,12 +1391,12 @@ mod tests {
         );
         // codex P2, PR #2802: SpawnGateError::AmbientHomeDirNotAllowed.
         assert_eq!(
-            classify_last_error_source("this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Armory \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry."),
+            classify_last_error_source("this agent's claude identity points directly at your personal claude config directory (C:\\Users\\user\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Connectors \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry."),
             "identity"
         );
         // ReAgent P2, PR #2854: SpawnGateError::ClaudeMdSeedFailed.
         assert_eq!(
-            classify_last_error_source("could not isolate this agent's claude config directory (C:\\Users\\asafe\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists."),
+            classify_last_error_source("could not isolate this agent's claude config directory (C:\\Users\\user\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists."),
             "identity"
         );
         assert_eq!(
@@ -1450,7 +1450,7 @@ mod tests {
         let mut content = String::new();
         content.push_str("{\"type\":\"assistant\",\"text\":\"normal turn output\"}\n");
         content.push_str(&error_frame_line(
-            "[AgentMux] no credentials for claude: bind an account in the Armory.",
+            "[AgentMux] no credentials for claude: bind an account in Connectors → Accounts.",
         ));
         content.push('\n');
         filestore.write_file("block-1", "output", content.as_bytes()).unwrap();
@@ -1458,7 +1458,7 @@ mod tests {
         let found = last_error_frame(&filestore, "block-1").expect("last line is an error frame");
         assert_eq!(
             found.message,
-            "[AgentMux] no credentials for claude: bind an account in the Armory."
+            "[AgentMux] no credentials for claude: bind an account in Connectors → Accounts."
         );
         assert_eq!(found.source, "identity");
         assert!(found.written_ms > 0);

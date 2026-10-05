@@ -1106,7 +1106,7 @@ pub async fn show_open_bundle_dialog(
     let path = tokio::task::spawn_blocking(|| {
         let _dialog_guard = host_dialog_guard();
         rfd::FileDialog::new()
-            .add_filter("Armory Bundle", &["abf"])
+            .add_filter("Agent bundle", &["abf"])
             .pick_file()
     })
     .await

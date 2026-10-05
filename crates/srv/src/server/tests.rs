@@ -2799,7 +2799,7 @@ async fn muxspect_describe_surfaces_last_error_for_a_wedged_block() {
         "type": "result",
         "is_error": true,
         "subtype": "error_during_execution",
-        "error": {"message": "[AgentMux] no credentials for claude: bind an account for this provider in the Armory."}
+        "error": {"message": "[AgentMux] no credentials for claude: bind an account for this provider in Connectors → Accounts."}
     })
     .to_string();
     filestore
@@ -2824,7 +2824,7 @@ async fn muxspect_describe_surfaces_last_error_for_a_wedged_block() {
     // ...but is no longer diagnostically empty about why.
     assert_eq!(
         json["last_error"]["message"],
-        "[AgentMux] no credentials for claude: bind an account for this provider in the Armory."
+        "[AgentMux] no credentials for claude: bind an account for this provider in Connectors → Accounts."
     );
     assert_eq!(json["last_error"]["source"], "identity");
     assert!(json["last_error"]["written_ms"].as_u64().unwrap() > 0);
