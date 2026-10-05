@@ -1980,7 +1980,7 @@ mod tests {
         // wording) — pin the load-bearing pieces.
         let msg = res.unwrap_err().to_string();
         assert!(msg.contains("no credentials for claude"), "got: {msg}");
-        assert!(msg.contains("Bind an account for this provider in the Armory"), "got: {msg}");
+        assert!(msg.contains("Bind an account for this provider in Connectors → Accounts"), "got: {msg}");
     }
 
     #[test]

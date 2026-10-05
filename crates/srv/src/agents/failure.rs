@@ -199,7 +199,12 @@ pub fn classify(
     // to `UnknownNonZero`, which offers only "Retry" — a retry can never
     // succeed against a gate that blocks every respawn identically, so the
     // agent pane got stuck showing a dead-end error with no way out.
-    if hay.contains("bind an account for this provider in the armory") {
+    // "in the armory" is the wording before the Armory became Connectors
+    // (SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md §4.4);
+    // a failure recorded then still has to classify.
+    if hay.contains("bind an account for this provider in connectors")
+        || hay.contains("bind an account for this provider in the armory")
+    {
         // codex P2 on PR #2413: this branch matches EVERY oauth-class
         // provider's MissingCredentials refusal (Codex, Gemini, OpenClaw,
         // Copilot — not just Claude), but a prior version of this message
@@ -271,7 +276,7 @@ pub fn classify(
             &format!(
                 "{provider_phrase} is bound directly to your personal CLI login \
                  directory, which AgentMux no longer allows. Re-bind it to an \
-                 isolated account in Armory \u{2192} Accounts, then retry."
+                 isolated account in Connectors \u{2192} Accounts, then retry."
             ),
             false,
             exit_code,
@@ -441,8 +446,8 @@ fn build(
 
 /// Pulls the provider id out of `SpawnGateError::MissingCredentials`'s own
 /// Display wording ("no credentials for {provider}: the bound account was
-/// deleted or is unresolvable. Bind an account for this provider in the
-/// Armory." — identity/resolver/errors.rs). Returns `None` on any mismatch
+/// deleted or is unresolvable. Bind an account for this provider in
+/// Connectors → Accounts." — identity/resolver/errors.rs). Returns `None` on any mismatch
 /// (e.g. that wording drifts) rather than guessing — callers fall back to
 /// generic phrasing instead of asserting a specific, possibly wrong,
 /// provider name.
@@ -775,11 +780,25 @@ mod tests {
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
-            "error": { "message": "[AgentMux] no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory." }
+            "error": { "message": "[AgentMux] no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in Connectors → Accounts." }
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
         assert!(f.detail.contains("Claude"), "detail: {}", f.detail);
+    }
+
+    #[test]
+    fn spawn_gate_missing_credentials_from_before_the_armory_split_still_classifies() {
+        // A failure recorded while the message still said "in the Armory".
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] no credentials for codex: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Auth);
+        assert!(f.detail.contains("Codex"), "detail: {}", f.detail);
     }
 
     #[test]
@@ -792,7 +811,7 @@ mod tests {
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
-            "error": { "message": "[AgentMux] no credentials for gemini: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory." }
+            "error": { "message": "[AgentMux] no credentials for gemini: the bound account was deleted or is unresolvable. Bind an account for this provider in Connectors → Accounts." }
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
@@ -810,7 +829,7 @@ mod tests {
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
-            "error": { "message": "[AgentMux] this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Armory \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry." }
+            "error": { "message": "[AgentMux] this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Connectors \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry." }
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
@@ -825,7 +844,7 @@ mod tests {
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
-            "error": { "message": "[AgentMux] this agent's codex identity points directly at your personal codex config directory (/home/user/.codex) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Armory \u{2192} Accounts (delete the current codex account and log in again to create a fresh, isolated one), then retry." }
+            "error": { "message": "[AgentMux] this agent's codex identity points directly at your personal codex config directory (/home/user/.codex) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Connectors \u{2192} Accounts (delete the current codex account and log in again to create a fresh, isolated one), then retry." }
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
