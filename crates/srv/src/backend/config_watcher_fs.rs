@@ -262,19 +262,13 @@ fn reload_and_broadcast(
     broadcast_full_config(config_watcher, event_bus);
 }
 
-/// Push the current `FullConfigType` snapshot to every connected client, in
-/// the same wire shape the initial `getfullconfig` RPC response uses.
-///
-/// Factored out of what used to be this file's own `reload_and_broadcast`
-/// tail — the `setconfig` handler (`server/websocket.rs`) duplicated the
-/// same broadcast-construction block verbatim as its own step 4, and
-/// `browser_start_page.rs`'s watcher needs the identical broadcast a third
-/// time. One shared function instead of a third copy.
 /// Change one connection's settings (`settings.json` → `connections.<name>`,
 /// SPEC_REMOTES_PANE_2026_10_05.md §4.3): a `null` value removes a key. Edits
 /// the raw `connections` object read from disk, so keys AgentMux doesn't know
 /// survive, then writes, updates the live config and broadcasts it, as
-/// `setconfig` does. Serialized, so two quick edits can't drop each other's.
+/// `setconfig` does. An edit that leaves the entry unreadable is refused
+/// before anything is written. Serialized, so two quick edits can't drop
+/// each other's.
 pub fn set_connection_values(
     config_watcher: &Arc<ConfigState>,
     event_bus: &Arc<EventBus>,
@@ -290,6 +284,7 @@ pub fn set_connection_values(
         _ => serde_json::Map::new(),
     };
     crate::backend::remote::remotes::apply_connection_values(&mut connections, connection, values);
+    crate::backend::remote::remotes::check_connection_entry(&connections, connection)?;
     let mut keys = serde_json::Map::new();
     keys.insert("connections".to_string(), serde_json::Value::Object(connections));
     merge_settings_to_disk(keys.clone())?;
@@ -299,6 +294,14 @@ pub fn set_connection_values(
     Ok(())
 }
 
+/// Push the current `FullConfigType` snapshot to every connected client, in
+/// the same wire shape the initial `getfullconfig` RPC response uses.
+///
+/// Factored out of what used to be this file's own `reload_and_broadcast`
+/// tail — the `setconfig` handler (`server/websocket.rs`) duplicated the
+/// same broadcast-construction block verbatim as its own step 4, and
+/// `browser_start_page.rs`'s watcher needs the identical broadcast a third
+/// time. One shared function instead of a third copy.
 pub fn broadcast_full_config(config_watcher: &Arc<ConfigState>, event_bus: &Arc<EventBus>) {
     let config = config_watcher.get_full_config();
     let client_count = event_bus.connection_count();

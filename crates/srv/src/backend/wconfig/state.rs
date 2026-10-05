@@ -131,4 +131,26 @@ mod tests {
         state.update_settings(SettingsType::default());
         assert!(state.get_full_config().connections.is_empty());
     }
+
+    /// One wrong-typed value in one connection's entry costs only that entry,
+    /// not the whole settings file.
+    #[test]
+    fn a_bad_connection_entry_does_not_fail_the_settings() {
+        let settings: SettingsType = serde_json::from_value(serde_json::json!({
+            "term:theme": "default-dark",
+            "connections": {
+                "bad": { "term:durable": "yes" },
+                "good": { "display:pinned": true }
+            }
+        }))
+        .expect("the file still parses");
+        assert_eq!(settings.term_theme, "default-dark");
+        assert!(!settings.connections.contains_key("bad"));
+        assert_eq!(settings.connections["good"].display_pinned, Some(true));
+
+        let not_an_object: SettingsType =
+            serde_json::from_value(serde_json::json!({ "term:theme": "x", "connections": "nope" })).unwrap();
+        assert_eq!(not_an_object.term_theme, "x");
+        assert!(not_an_object.connections.is_empty());
+    }
 }

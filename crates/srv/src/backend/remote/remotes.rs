@@ -197,6 +197,22 @@ pub fn apply_connection_values(
     }
 }
 
+/// Refuse an edit that would leave `connection`'s entry unreadable (a string
+/// where `display:pinned` wants a boolean, say): the write would land on disk
+/// while the live config silently kept the old values.
+pub fn check_connection_entry(
+    connections: &serde_json::Map<String, serde_json::Value>,
+    connection: &str,
+) -> Result<(), String> {
+    let name = connection.trim();
+    match connections.get(name) {
+        None => Ok(()),
+        Some(entry) => serde_json::from_value::<ConnKeywords>(entry.clone())
+            .map(|_| ())
+            .map_err(|e| format!("invalid setting for {name}: {e}")),
+    }
+}
+
 /// Tell every Remotes pane its list changed.
 pub fn publish_change(broker: &Broker) {
     broker.publish(MuxEvent {
@@ -539,5 +555,20 @@ mod tests {
         let pin = serde_json::json!({ "display:pinned": true }).as_object().unwrap().clone();
         apply_connection_values(&mut connections, "me@box", &pin);
         assert_eq!(connections["me@box"], serde_json::json!({ "display:pinned": true }));
+    }
+
+    #[test]
+    fn an_edit_that_would_not_parse_is_refused() {
+        let connections = serde_json::json!({
+            "ok": { "display:pinned": true, "custom:key": 7 },
+            "bad": { "display:pinned": "yes" }
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        assert!(check_connection_entry(&connections, "ok").is_ok(), "unknown keys are fine");
+        assert!(check_connection_entry(&connections, "gone").is_ok(), "a removed entry is fine");
+        let err = check_connection_entry(&connections, " bad ").unwrap_err();
+        assert!(err.contains("bad"), "{err}");
     }
 }

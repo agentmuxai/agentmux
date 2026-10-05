@@ -24,6 +24,33 @@ pub(crate) fn is_zero_f32(v: &f32) -> bool {
     *v == 0.0
 }
 
+/// `settings.json` → `connections`, entry by entry. An entry that doesn't
+/// parse (say `"term:durable": "yes"`) is skipped with a warning; failing it
+/// would fail the whole `SettingsType`, which resets every setting at startup
+/// and drops every later edit on reload. The entry stays on disk untouched.
+fn deserialize_connections<'de, D>(d: D) -> Result<HashMap<String, ConnKeywords>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Value::deserialize(d)?;
+    let Value::Object(entries) = raw else {
+        if !raw.is_null() {
+            tracing::warn!("settings.json: `connections` is not an object; ignoring it");
+        }
+        return Ok(HashMap::new());
+    };
+    Ok(entries
+        .into_iter()
+        .filter_map(|(name, entry)| match serde_json::from_value::<ConnKeywords>(entry) {
+            Ok(keywords) => Some((name, keywords)),
+            Err(e) => {
+                tracing::warn!(connection = %name, error = %e, "settings.json: ignoring this connection's settings");
+                None
+            }
+        })
+        .collect())
+}
+
 pub(crate) fn is_zero_i32(v: &i32) -> bool {
     *v == 0
 }
@@ -466,7 +493,9 @@ pub struct SettingsType {
     /// `FullConfigType::connections`, which every per-connection reader uses
     /// (`ConfigState::update_settings` copies it). Before this field the object
     /// fell into `extra` and no connection setting ever took effect.
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    /// Read entry by entry ([`deserialize_connections`]), so one bad entry
+    /// can't fail the whole file.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty", deserialize_with = "deserialize_connections")]
     pub connections: HashMap<String, ConnKeywords>,
 
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
