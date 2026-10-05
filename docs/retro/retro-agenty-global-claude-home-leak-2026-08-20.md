@@ -40,14 +40,14 @@ block's own meta, matching the log).
 the path `--resume` should search:
 
 ```
-C:\Users\asafe\.agentmux\shared\providers\claude\projects\C--Users-asafe--agentmux-agents-agenty-0629j\705f6a8a-3ad0-4a7d-99f2-42097a1bcf1f.jsonl
+C:\Users\user\.agentmux\shared\providers\claude\projects\C--Users-user--agentmux-agents-agenty-0629j\705f6a8a-3ad0-4a7d-99f2-42097a1bcf1f.jsonl
 ```
 
 47.6MB, created 2026-07-10, **last written 2026-07-29**. Content confirms it's genuinely
 this agent's own prior work (a MuxBus PR #1916 conversation).
 
 **Every session since has been landing in the wrong place.** Listing
-`C:\Users\asafe\.claude\projects\C--Users-asafe--agentmux-agents-agenty-0629j\` — the
+`C:\Users\user\.claude\projects\C--Users-user--agentmux-agents-agenty-0629j\` — the
 operator's own **global**, non-isolated Claude Code home — shows an unbroken chain of this
 agent's own session files:
 

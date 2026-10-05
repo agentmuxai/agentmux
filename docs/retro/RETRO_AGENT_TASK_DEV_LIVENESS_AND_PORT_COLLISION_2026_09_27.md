@@ -61,7 +61,7 @@ scripts, alongside several peers doing the same on one shared host."
 
 ### 1. `MAX_PATH` (confirmed, matches the existing retro exactly)
 
-Workspace: `C:\Users\asafe\.agentmux\agents\agent3-0630k\work\survey\agentmuxai__agentmux`
+Workspace: `C:\Users\user\.agentmux\agents\agent3-0630k\work\survey\agentmuxai__agentmux`
 (78 characters before even reaching a repo-relative path). `cargo build --release -p agentmux-srv`
 succeeded; the vendored `cef-dll-sys` build script's CMake/Ninja step failed
 identically to the July retro:

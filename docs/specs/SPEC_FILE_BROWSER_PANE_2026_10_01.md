@@ -78,7 +78,7 @@ Condensed from the sources in §15. Each item becomes a requirement in §5–§9
 
 ```
 ┌ Hangar ───────────────────────────────────────────────── ⟲ ⚙ ┐
-│ ◀ ▶ ▲  C: › Users › asafe › .agentmux › agents › korp   🔍 ⌕ │  breadcrumb (click a segment; Ctrl+L = text path)
+│ ◀ ▶ ▲  C: › Users › user › .agentmux › agents › korp   🔍 ⌕ │  breadcrumb (click a segment; Ctrl+L = text path)
 ├────────┬──────────────────────────────────────┬──────────────┤
 │ Places │ Name              Modified   Size    │  Preview     │
 │ Home   │ ▸ agentmux/       2 min ago          │  (Editor /   │

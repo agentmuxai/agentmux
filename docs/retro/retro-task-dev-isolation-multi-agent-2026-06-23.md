@@ -29,9 +29,9 @@ The first failure was attributed to a *different agent* sharing the same clone. 
 Each agent in the fleet has **its own clone**:
 
 ```
-/c/Users/asafe/.agentmux/agents/mazs-0527n/agentmux    ← my clone
-/c/Users/asafe/.agentmux/agents/korp-0620g/agentmux    ← korp's clone
-/c/Users/asafe/.agentmux/agents/smike-06122/agentmux   ← smike's clone
+/c/Users/user/.agentmux/agents/mazs-0527n/agentmux    ← my clone
+/c/Users/user/.agentmux/agents/korp-0620g/agentmux    ← korp's clone
+/c/Users/user/.agentmux/agents/smike-06122/agentmux   ← smike's clone
 ...
 ```
 

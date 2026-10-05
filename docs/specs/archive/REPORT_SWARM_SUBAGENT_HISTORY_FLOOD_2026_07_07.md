@@ -1,6 +1,6 @@
 # Report: Swarm view floods with stale subagents on reopen
 
-**Status:** Findings 1-3 fixed and merged (#2008). Finding 4 fixed
+**Status:** historical — findings 1-3 fixed and merged (#2008). Finding 4 fixed
 (frontend-only, workflow grouping) — PR #2018.
 **Author:** AgentX
 **Date:** 2026-07-07
@@ -35,7 +35,7 @@ Four distinct, independently-confirmed issues in `agentmux-srv/src/backend/subag
 ```
 14:58:45.363  reactive register request received
 14:58:45.364  WARN failed to watch directory for subagents
-              dir=C:\Users\asafe\.config\claude-mazs
+              dir=C:\Users\user\.config\claude-mazs
               error="Input watch path is neither a file nor a directory."
 14:59:32.550  persistent process spawned            ← 47 seconds later
 ```

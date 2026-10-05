@@ -210,7 +210,7 @@ it isn't in PR #3215 or anywhere on `origin`.
 
 Everything else in this clone (the other 8 branches' tips, `main`) matches `origin` exactly —
 no other divergent work, no stashes, no untracked files. This clone is otherwise redundant
-with the primary working copy at `C:\Users\asafe\.agentmux\agents\korp-0620g\agentmux`, which
+with the primary working copy at `C:\Users\user\.agentmux\agents\korp-0620g\agentmux`, which
 already has all 9 branches fetched.
 
 ---

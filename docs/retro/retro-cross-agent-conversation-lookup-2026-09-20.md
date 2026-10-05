@@ -41,7 +41,7 @@ currently-active session.
    `term:next_prompt_suggestion`, `session:line_count`, etc.) matching the block_id from
    the `DiscoverAgents`/`FleetList` APIs.
 7. **Used that real session id (`738ffcfb-8c91-45d9-8481-eaa5cac672c3`) to find the file
-   directly** — and it was at `C:\Users\asafe\.agentmux\shared\identities\<identity-id>\claude\projects\...\738ffcfb-....jsonl`.
+   directly** — and it was at `C:\Users\user\.agentmux\shared\identities\<identity-id>\claude\projects\...\738ffcfb-....jsonl`.
    Note the root: **`shared\identities\`, not `channels\<channel-id>\identities\`.**
    Same identity UUID, two different roots on disk, only one of which had current content.
    Nothing in steps 1-5 pointed at `shared/` at all.

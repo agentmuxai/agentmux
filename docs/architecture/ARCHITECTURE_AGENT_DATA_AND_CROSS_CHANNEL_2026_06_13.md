@@ -107,8 +107,8 @@ let rel = abs.strip_prefix(&row.agents_root).ok()?;   // → None ⇒ "unmappabl
 ```
 But the actual `working_directory` values are **global**:
 ```
-Qooma     -> C:\Users\asafe\.agentmux/agents/qooma-0612g
-Clamk     -> C:\Users\asafe\.agentmux/agents/clamk-0612a
+Qooma     -> C:\Users\user\.agentmux/agents/qooma-0612g
+Clamk     -> C:\Users\user\.agentmux/agents/clamk-0612a
 Naki/CodexPo/GeminiOpp -> …\.agentmux/agents/<name>
 ```
 These are under the **global** `~/.agentmux/agents/`, **not** under any channel's agents dir. So `strip_prefix` fails for every one → all unmappable → 0 instances in the global registry → **My Agents is empty in every channel.** (Mixed separators `…\.agentmux/agents/…` make the prefix match even more fragile.)

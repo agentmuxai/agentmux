@@ -23,7 +23,7 @@ Logs from the child host:
 AgentMux host starting           version="0.33.680" ...
 Initializing CEF browser process version="0.33.680"
                                  runtime_mode=Some("portable")
-                                 data_dir=C:\Users\asafe\.agentmux\versions\0.33.669\cef-cache
+                                 data_dir=C:\Users\user\.agentmux\versions\0.33.669\cef-cache
 ...
 CEF early exit (process singleton or similar) — exiting cleanly exit_code=24
 Opening in existing browser session.

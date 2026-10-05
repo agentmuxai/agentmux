@@ -26,7 +26,7 @@ Checked the reported instance's own logs (it isn't currently running, so
 this is post-hoc log analysis, not a live CDP session):
 
 ```
-C:\Users\asafe\.agentmux\channels\local-main-b28b7a-577e65c6\versions\0.53.4\logs\agentmux-host-v0.53.4.log.2026-07-14
+C:\Users\user\.agentmux\channels\local-main-b28b7a-577e65c6\versions\0.53.4\logs\agentmux-host-v0.53.4.log.2026-07-14
 ```
 
 - 1× `[pane-wrapper] created` — confirms this session did create at least
@@ -218,4 +218,4 @@ and report first.
   `frontend/app/window/action-widgets.tsx` (`:159`, `:221`) — the two
   reported-affected surfaces, both going through the identical
   `usePaneOverlay` primitive
-- Instance logs analyzed: `C:\Users\asafe\.agentmux\channels\local-main-b28b7a-577e65c6\versions\0.53.4\logs\agentmux-host-v0.53.4.log.2026-07-14`
+- Instance logs analyzed: `C:\Users\user\.agentmux\channels\local-main-b28b7a-577e65c6\versions\0.53.4\logs\agentmux-host-v0.53.4.log.2026-07-14`

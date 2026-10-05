@@ -197,5 +197,5 @@ this one instance.
   `972a6a4f-6a7e-439d-aebc-358452a13d78` (2.8MB, actively being written by
   the original, still-running instance) — never consulted
 - Resulting blank session: `777d47f6-d4c2-4f67-8d5d-57ab26063b59`
-- Log source: `C:\Users\asafe\.agentmux\logs\agentmuxsrv-v0.55.18.log.2026-08-21`,
+- Log source: `C:\Users\user\.agentmux\logs\agentmuxsrv-v0.55.18.log.2026-08-21`,
   `02:02:08.132769Z` through `02:02:10.537867Z`

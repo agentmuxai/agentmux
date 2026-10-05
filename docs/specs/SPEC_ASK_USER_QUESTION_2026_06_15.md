@@ -405,7 +405,7 @@ update in 7.2 (and/or a matching `tool_result` echo if the provider emits one). 
 
 ## 10. Validation / smoke test — ✅ PASSED 2026-06-15
 
-Run against the user's `claude` (`C:\Users\asafe\.local\bin\claude`) with the
+Run against the user's `claude` (`C:\Users\user\.local\bin\claude`) with the
 **exact** persistent args from §2 (`--input-format stream-json --output-format
 stream-json --verbose --include-partial-messages --dangerously-skip-permissions`,
 plus `--model sonnet`). Two-phase Python harness (real OS pipes; an MSYS FIFO won't

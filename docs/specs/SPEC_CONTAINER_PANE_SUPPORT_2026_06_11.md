@@ -233,8 +233,8 @@ This is intentionally minimal. Add tools (gh CLI, aws, etc.) in a derived image 
 Pass native Windows paths directly to Docker. Docker Desktop translates them to Linux paths inside the container automatically.
 
 ```
-Host:      C:\Users\asafe\.claw\workspaces\agent1
-Mount arg: C:/Users/asafe/.claw/workspaces/agent1:/workspace
+Host:      C:\Users\user\.claw\workspaces\agent1
+Mount arg: C:/Users/user/.claw/workspaces/agent1:/workspace
 Container: /workspace
 ```
 

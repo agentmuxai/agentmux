@@ -26,7 +26,7 @@ describe("dirnameOf", () => {
     });
 
     it("strips the last windows segment", () => {
-        expect(dirnameOf("C:\\Users\\asafe\\clips\\shot.webm")).toBe("C:\\Users\\asafe\\clips");
+        expect(dirnameOf("C:\\Users\\user\\clips\\shot.webm")).toBe("C:\\Users\\user\\clips");
     });
 
     it("returns empty string when there's no separator", () => {
@@ -40,7 +40,7 @@ describe("basenameOf", () => {
     });
 
     it("returns the last windows segment", () => {
-        expect(basenameOf("C:\\Users\\asafe\\clips\\shot.webm")).toBe("shot.webm");
+        expect(basenameOf("C:\\Users\\user\\clips\\shot.webm")).toBe("shot.webm");
     });
 
     it("returns the path unchanged when there's no separator", () => {

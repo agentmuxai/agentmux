@@ -763,8 +763,8 @@ mod tests {
     use super::*;
 
     const ALL: u32 = 0x7FFF_FFFF;
-    const EXE: &str = r"C:\Users\asafe\Desktop\agentmux-0.59.1\runtime\agentmux-srv-0.59.1-windows.x64.exe";
-    const OLD_EXE: &str = r"C:\Users\asafe\Desktop\agentmux-0.58.2\runtime\agentmux-srv-0.58.2-windows.x64.exe";
+    const EXE: &str = r"C:\Users\user\Desktop\agentmux-0.59.1\runtime\agentmux-srv-0.59.1-windows.x64.exe";
+    const OLD_EXE: &str = r"C:\Users\user\Desktop\agentmux-0.58.2\runtime\agentmux-srv-0.58.2-windows.x64.exe";
 
     fn needs() -> Vec<Need> {
         lan_needs(29700, 29701)

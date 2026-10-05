@@ -511,10 +511,10 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
     // equal to a tab's own (never-prefixed) filePath, so live-reload
     // silently never fires on Windows at all.
     it("canonicalizePath strips Windows' \\\\?\\ extended-length prefix so it matches the un-prefixed form", () => {
-        const prefixed = canonicalizePath("\\\\?\\C:\\Users\\asafe\\AppData\\Local\\Temp\\probe.md");
-        const unprefixed = canonicalizePath("C:\\Users\\asafe\\AppData\\Local\\Temp\\probe.md");
+        const prefixed = canonicalizePath("\\\\?\\C:\\Users\\user\\AppData\\Local\\Temp\\probe.md");
+        const unprefixed = canonicalizePath("C:\\Users\\user\\AppData\\Local\\Temp\\probe.md");
         expect(prefixed).toBe(unprefixed);
-        expect(prefixed).toBe("c:/Users/asafe/AppData/Local/Temp/probe.md");
+        expect(prefixed).toBe("c:/Users/user/AppData/Local/Temp/probe.md");
     });
 
     // Codex P2 on PR #2739: an earlier version of this fix stripped the

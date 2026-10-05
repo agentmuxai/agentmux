@@ -20,7 +20,7 @@ My own "Agent" tool calls (Claude Code subagent dispatches, materializing as rea
 
 ```
 reactive register request  agent_id=Agent5 block_id=a04e8274...
-watching for subagent JSONL files  agent=Agent5 dir=C:\Users\asafe\.agentmux\shared\providers\claude\projects
+watching for subagent JSONL files  agent=Agent5 dir=C:\Users\user\.agentmux\shared\providers\claude\projects
 ```
 
 Confirmed directly against my own srv log: this pair of lines appears **exactly once** across my instance's entire history, even though the underlying persistent CLI process restarted several times in between (`ControllerResync` with `forcerestart=true`). The watched directory is a generic, ambient `shared/providers/claude` path — not my actual, currently-live identity-bound config dir (`...\identities\02317200-.../claude`, confirmed directly on the filesystem as where my real subagent JSONL files were being written the entire time).

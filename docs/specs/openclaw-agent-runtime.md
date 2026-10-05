@@ -445,7 +445,7 @@ These two specs are **complementary, not conflicting**:
 
 ## 8. Known Facts (from live system inspection)
 
-- **Installed:** `openclaw v2026.3.8 (3caab92)` at `C:\Users\asafe\AppData\Roaming\npm\openclaw` — in `$PATH` ✅
+- **Installed:** `openclaw v2026.3.8 (3caab92)` at `C:\Users\user\AppData\Roaming\npm\openclaw` — in `$PATH` ✅
 - **Gateway running:** `localhost:18789` responds `{"ok":true,"status":"live"}` ✅; registered as Windows Scheduled Task ✅
 - **API keys:** None needed separately. Configured providers are `amazon-bedrock` (uses existing AWS SDK credentials via `aws-sdk` auth) and `github-copilot`. Zero extra setup required. ✅
 - **`openclaw tui`** is the correct interactive command for a terminal pane. Connects over WebSocket to the running gateway. Accepts user input, streams agent responses, shows history.

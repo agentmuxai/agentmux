@@ -202,5 +202,5 @@ Camper-heavy skew from §1) rather than a universal per-build defect.
   (the smaller prior dataset this doc builds on)
 - `docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`
   (original `[wave-scroll-shrink]` diagnostic + three-source theory)
-- Instance A: `C:\Users\asafe\.agentmux\channels\local-main-b28b7a-697d25a4\versions\0.55.18\logs\agentmux-host-v0.55.18.log.2026-08-22`
-- Instance B: `C:\Users\asafe\.agentmux\channels\local-main-b28b7a-b966d418\versions\0.55.19\logs\agentmux-host-v0.55.19.log.2026-08-22`
+- Instance A: `C:\Users\user\.agentmux\channels\local-main-b28b7a-697d25a4\versions\0.55.18\logs\agentmux-host-v0.55.18.log.2026-08-22`
+- Instance B: `C:\Users\user\.agentmux\channels\local-main-b28b7a-b966d418\versions\0.55.19\logs\agentmux-host-v0.55.19.log.2026-08-22`

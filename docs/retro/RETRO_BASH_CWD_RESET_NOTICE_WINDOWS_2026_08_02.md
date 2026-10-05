@@ -11,7 +11,7 @@ investigation), reproduced live during the investigation itself.
 A line reading
 
 ```
-Shell cwd was reset to C:\Users\asafe\.agentmux\agents\<agent-slug>
+Shell cwd was reset to C:\Users\user\.agentmux\agents\<agent-slug>
 ```
 
 appears at the end of Bash tool-call previews in the agent pane, on Windows. Per the report, this
@@ -22,15 +22,15 @@ used to be a macOS-only occurrence; it is now also showing up on Windows.
 The message fired after **almost every single Bash tool call** issued in this session — not
 occasionally, not only after an explicit `cd`. Concretely:
 
-1. `cd "C:/Users/asafe/agentmux" && git status --short --branch && git remote -v` — succeeded,
+1. `cd "C:/Users/user/agentmux" && git status --short --branch && git remote -v` — succeeded,
    printed real output, **then** the reset line was appended.
-2. `cd "C:/Users/asafe/agentmux" && git fetch origin main && git log ...` — same again.
+2. `cd "C:/Users/user/agentmux" && git fetch origin main && git log ...` — same again.
 3. A follow-up call, **without** an explicit `cd`, `git log --oneline -3` — failed with
    `fatal: not a git repository (or any of the parent directories): .git`.
 
 (3) proves the `cd` from calls (1)/(2) did not actually persist at the OS level between tool calls
 — the process was back in a directory with no `.git` above it (the agent's home directory,
-`C:\Users\asafe\.agentmux\agents\agent3-0630k`, exactly the path the notice reports). This is a
+`C:\Users\user\.agentmux\agents\agent3-0630k`, exactly the path the notice reports). This is a
 real, reproducible loss of shell state, not just a cosmetic message.
 
 ## 2. The message does not come from AgentMux's own code

@@ -21,7 +21,7 @@ see §4.
 
 ```
 $ node ~/.agentmux/shell/muxlog.mjs swarm --grep "ab786c0dbcfa0a121|71a6b2ae" -n 500
-=== swarm trace: C:\Users\asafe\.agentmux\logs\agentmuxsrv-v0.55.18.log.2026-08-22 ===
+=== swarm trace: C:\Users\user\.agentmux\logs\agentmuxsrv-v0.55.18.log.2026-08-22 ===
 ```
 
 `muxlog ls` run moments later showed the actually-freshest srv log was

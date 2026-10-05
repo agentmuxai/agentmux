@@ -249,7 +249,7 @@ inside a discriminated envelope, **this needs a new translator**; neither
 Past the tar issue, the same run surfaced more:
 
 ```
-Installing dependencies in C:\Users\asafe\.ori\global...
+Installing dependencies in C:\Users\user\.ori\global...
 Could not refresh global workspace dependencies: NotFound: ChildProcess.spawn (bun install --silent)
 WARN: feature boot degraded; feature "dashboard" disabled ... Could not resolve: "react-dom/server"
 Runtime server error while swapping code skill wrapper: Unknown: FileSystem.rename (...)

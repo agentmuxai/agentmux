@@ -121,4 +121,4 @@ anchor ⇄ session id) need a single end-to-end test, not two unit checks.
 - `agentmux-srv/src/server/app_api.rs:1066` (`global_output_source`).
 - `agentmux-srv/src/backend/blockcontroller/subprocess.rs:290–334` (`hydrate_session_id_from_config`, `--resume`).
 - `agentmux-srv/src/registry/schema.rs` (`session_id` field, written only in tests).
-- Evidence: `~/.agentmux/shared/agents/registry/34ee9b58-…json`; `…/transcripts/filestore.db` zone `agent:f81f9785…:current`; `…/providers/claude/projects/C--Users-asafe--agentmux-agents-naki-0612a/`.
+- Evidence: `~/.agentmux/shared/agents/registry/34ee9b58-…json`; `…/transcripts/filestore.db` zone `agent:f81f9785…:current`; `…/providers/claude/projects/C--Users-user--agentmux-agents-naki-0612a/`.

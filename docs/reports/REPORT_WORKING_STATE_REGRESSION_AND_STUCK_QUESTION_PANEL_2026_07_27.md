@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-27
 **Author:** Agent1
-**Status:** §1 audit-only, fix proposed, not implemented. §2 (Agent2's stuck pane) — live-confirmed post-merge (§2.7): the CLI subprocess itself had gone unresponsive (`Dead` per the backend health monitor), not a frontend-only race; recovered by closing/reopening the pane. §2.8 — a second, distinct, code-confirmed bug (answering a question can never succeed after any process respawn) is **fixed and merged**. §4 (surface/auto-recover a `Dead` persistent agent before the user has to notice) — the minimum-viable version (surface a "Restart" recovery row; auto-restart stretch goal deliberately NOT built) is **implemented and merged**, see §4's own status line.
+**Status:** analysis — §1 audit-only, fix proposed, not implemented. §2 (Agent2's stuck pane) — live-confirmed post-merge (§2.7): the CLI subprocess itself had gone unresponsive (`Dead` per the backend health monitor), not a frontend-only race; recovered by closing/reopening the pane. §2.8 — a second, distinct, code-confirmed bug (answering a question can never succeed after any process respawn) is **fixed and merged**. §4 (surface/auto-recover a `Dead` persistent agent before the user has to notice) — the minimum-viable version (surface a "Restart" recovery row; auto-restart stretch goal deliberately NOT built) is **implemented and merged**, see §4's own status line.
 **2026-08-27 note:** the "Restart" recovery row this report's §4 shipped (and
 the backend `Dead`/unresponsive health-monitor state §2.7 references) was
 removed in `docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md`
@@ -65,7 +65,7 @@ Small-to-medium. No reducer/type-machine changes required for the core fix (§1.
 
 ### 2.1 What was directly observed
 
-Agent2 (block `210a0e08-1740-4bf0-8f26-93c82a107e4c`), running live in the pane adjacent to this one, is stuck showing an AskUserQuestion prompt (`AgentQuestionPanel`) that isn't resolving. Direct live inspection of Agent2's own backend state (its `db_agent_instances`/block meta row) was **attempted and not completed** in this pass — the `objects.db` reachable from this environment (`C:\Users\asafe\.agentmux\dev\main\data\db\objects.db`) turned out to hold a small, stale instance (3 blocks, 1 tab/window/workspace total) rather than the live multi-agent instance Agent1-5 are actually running in; the correct live DB's location wasn't located in this pass. So the analysis below is grounded in code reading, not a live state dump — flagged explicitly so it isn't mistaken for a confirmed root cause.
+Agent2 (block `210a0e08-1740-4bf0-8f26-93c82a107e4c`), running live in the pane adjacent to this one, is stuck showing an AskUserQuestion prompt (`AgentQuestionPanel`) that isn't resolving. Direct live inspection of Agent2's own backend state (its `db_agent_instances`/block meta row) was **attempted and not completed** in this pass — the `objects.db` reachable from this environment (`C:\Users\user\.agentmux\dev\main\data\db\objects.db`) turned out to hold a small, stale instance (3 blocks, 1 tab/window/workspace total) rather than the live multi-agent instance Agent1-5 are actually running in; the correct live DB's location wasn't located in this pass. So the analysis below is grounded in code reading, not a live state dump — flagged explicitly so it isn't mistaken for a confirmed root cause.
 
 ### 2.2 Code path
 

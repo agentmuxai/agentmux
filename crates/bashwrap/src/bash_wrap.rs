@@ -2389,7 +2389,7 @@ mod tests {
     fn sanitize_state_key_replaces_unsafe_chars() {
         assert_eq!(sanitize_state_key("agent3-0630k"), "agent3-0630k");
         assert_eq!(sanitize_state_key("Agent With Spaces"), "Agent_With_Spaces");
-        assert_eq!(sanitize_state_key(r"C:\Users\asafe"), "C__Users_asafe");
+        assert_eq!(sanitize_state_key(r"C:\Users\user"), "C__Users_user");
     }
 
     #[test]

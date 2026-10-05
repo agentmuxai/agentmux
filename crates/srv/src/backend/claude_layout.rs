@@ -190,8 +190,8 @@ pub(crate) mod tests {
     #[test]
     fn a_windows_agent_directory() {
         assert_eq!(
-            project_dir_name(r"C:\Users\asafe\.agentmux\agents\agent3-0630k"),
-            "C--Users-asafe--agentmux-agents-agent3-0630k"
+            project_dir_name(r"C:\Users\user\.agentmux\agents\agent3-0630k"),
+            "C--Users-user--agentmux-agents-agent3-0630k"
         );
     }
 
@@ -239,10 +239,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_long_windows_path_is_cut_at_200_and_hashed() {
-        let cwd = format!(r"C:\Users\asafe\{}", "a".repeat(230));
+        let cwd = format!(r"C:\Users\user\{}", "a".repeat(230));
         assert_eq!(
             project_dir_name(&cwd),
-            format!("C--Users-asafe-{}-py1bvd", "a".repeat(185))
+            format!("C--Users-user-{}-eqzdy0", "a".repeat(186))
         );
     }
 
