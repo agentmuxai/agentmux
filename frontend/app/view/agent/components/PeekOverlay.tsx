@@ -43,8 +43,9 @@
  *
  * Positioning ("end" mode) is peek-placement.ts's job, and the panel always sits
  * near the pointer. Horizontally: right-aligned to the row when it fits the row's
- * width; pinned to the row's left edge and extending right over the pane border,
- * by at most half the row's width, when wider. Vertically: below or above the pointer
+ * width; when wider, reaching over the pane borders by at most half the row's width,
+ * split by the pane's place in the window (all to the right at the left edge, all to
+ * the left at the right edge, even when centred). Vertically: below or above the pointer
  * inside the transcript when it fits; otherwise it leaves the transcript, on the
  * side of the pointer with more room, with its HEIGHT cut to that room so it can
  * never reach the pointer, and the rest scrolls. The old code clamped the
@@ -393,8 +394,9 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         }
         // Shrink-wrapped, near the pointer. Horizontal and vertical are decided
         // by peek-placement.ts (see its header): right-aligned to the row, or
-        // pinned left and extending over the pane border when wider than the
-        // row; below/above the pointer, leaving the transcript and cutting its
+        // reaching over the pane borders, split by the pane's place in the
+        // window, when wider than the row; below/above the pointer, leaving the
+        // transcript and cutting its
         // height to the room when too tall. The invariant it keeps — the
         // pointer is never inside the panel — is swept by its tests.
         const viewport = { width: window.innerWidth, height: window.innerHeight };
@@ -437,7 +439,7 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
                     position: "fixed",
                     left: `${hz.left}px`,
                     top: `${vt.top}px`,
-                    ...(hz.alignRight ? { transform: "translateX(-100%)" } : {}),
+                    ...(hz.shift > 0 ? { transform: `translateX(${-hz.shift * 100}%)` } : {}),
                     "max-width": `${hz.maxWidth}px`,
                     "min-width": `${hz.minWidth}px`,
                     "max-height": `${vt.maxHeight}px`,
