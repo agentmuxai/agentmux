@@ -13,6 +13,7 @@ pub mod agent_access;
 pub mod askpass;
 pub mod conn;
 pub mod files;
+pub mod helper_consent;
 pub mod helper_hosts;
 pub mod helper_install;
 pub mod remotes;

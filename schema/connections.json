@@ -15,6 +15,15 @@
         "conn:shellpath": {
           "type": "string"
         },
+        "conn:helper": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "always",
+            "never"
+          ],
+          "description": "Installing AgentMux's helper on an SSH host: ask first (the default), always, or never."
+        },
         "conn:ignoresshconfig": {
           "type": "boolean"
         },

@@ -6,6 +6,7 @@
 
 import { RpcClient } from "../rpc-client";
 import type { CommandRemoteForgetData } from "@/types/rpc/CommandRemoteForgetData";
+import type { CommandRemoteHelperRemoveData } from "@/types/rpc/CommandRemoteHelperRemoveData";
 import type { CommandRemoteSetConfigData } from "@/types/rpc/CommandRemoteSetConfigData";
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 
@@ -28,5 +29,10 @@ export const RemotesApi = {
     /** Drop a connection from the recent list. */
     RemoteForgetCommand(client: RpcClient, data: CommandRemoteForgetData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("remoteforget", data, opts);
+    },
+
+    /** Remove AgentMux's helper from an SSH host, once the user confirms in the approval window. */
+    RemoteHelperRemoveCommand(client: RpcClient, data: CommandRemoteHelperRemoveData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("remotehelperremove", data, opts);
     },
 };

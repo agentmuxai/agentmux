@@ -20,6 +20,7 @@ pub(super) async fn handle_pane_open(
     // SSH keys: over HTTP (where agents call from) that takes the agent's
     // signed identity and the user's consent for that host, as `Shell` does
     // (remote terminals spec §8.2). Named as the field or inside `meta`.
+    let mut opened_by_agent = None;
     if let Some(conn) = ssh_connection_of(&req) {
         let block = req.split_reference_block_id.clone().unwrap_or_default();
         let agent = match app_api::connections::verified_agent(&state, &block, req.auth.as_ref()) {
@@ -34,9 +35,17 @@ pub(super) async fn handle_pane_open(
         if let Err(e) = app_api::connections::consent_for_ssh(&state, &block, &agent, &conn, &what).await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
+        opened_by_agent = Some(agent);
     }
     match app_api::open_pane(&state, req).await {
-        Ok(result) => (StatusCode::OK, Json(json!(result))).into_response(),
+        Ok(result) => {
+            // The pane is the agent's: installing the helper from it is
+            // always asked about (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+            if let Some(agent) = &opened_by_agent {
+                crate::backend::remote::helper_consent::note_agent_pane(&result.block_id, agent);
+            }
+            (StatusCode::OK, Json(json!(result))).into_response()
+        }
         Err(e) => {
             // Argument/validation errors from build_pane_meta are the caller's
             // fault (400); everything else is a server-side failure (500).

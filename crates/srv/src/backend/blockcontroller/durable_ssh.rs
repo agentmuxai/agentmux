@@ -718,12 +718,8 @@ impl Run {
                         installed_once = true;
                         match self.install_helper().await {
                             Ok(()) => continue,
-                            Err(e) => {
-                                self.note(&format!(
-                                    "Could not install AgentMux's helper on {}: {e}. Turn off \"Keep Session Alive\" for a plain SSH terminal.",
-                                    self.conn
-                                ))
-                                .await;
+                            Err(line) => {
+                                self.note(&line).await;
                                 return over(EXIT_COMMAND_NOT_FOUND);
                             }
                         }
@@ -1002,8 +998,18 @@ impl Run {
     }
 
     /// Put this version's helper on the host (`helper_install::ensure`),
-    /// saying so in the pane.
+    /// saying so in the pane, once the user has said yes
+    /// (`helper_consent`). `Err` is the line for the pane.
     async fn install_helper(&self) -> Result<(), String> {
+        let plain = "Turn off \"Keep Session Alive\" for a plain SSH terminal.";
+        if let Err(why) =
+            crate::backend::remote::helper_consent::allow_install(&self.conn, Some(&self.block_id)).await
+        {
+            return Err(format!(
+                "This pane can't stay alive without AgentMux's helper on {}: {why}. {plain}",
+                self.conn
+            ));
+        }
         crate::backend::remote::helper_install::ensure(&self.host, &self.conn, &self.session, |size| {
             self.note_owned(format!(
                 "Installing AgentMux's helper on {} ({} KB, in ~/.agentmux-remote) so this pane can stay alive…",
@@ -1012,6 +1018,7 @@ impl Run {
             ))
         })
         .await
+        .map_err(|e| format!("Could not install AgentMux's helper on {}: {e}. {plain}", self.conn))
     }
 
     fn read_offset(&self) -> u64 {
@@ -1419,6 +1426,8 @@ elif ' attach ' in remote:
             sh
         };
         std::env::set_var("FAKE_HOST_DIR", dir.path());
+        // The user says Install when asked.
+        crate::backend::remote::helper_consent::install_answering_yes();
         // The "release" build, from a local folder.
         let builds = dir.path().join("builds");
         std::fs::create_dir_all(&builds).unwrap();

@@ -83,3 +83,13 @@ pub struct CommandRemoteSetConfigData {
 pub struct CommandRemoteForgetData {
     pub connection: String,
 }
+
+/// `remotehelperremove`: remove AgentMux's helper from the SSH host
+/// `connection`, once the user confirms in the window of pane `blockid`
+/// (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandRemoteHelperRemoveData {
+    pub connection: String,
+    pub blockid: String,
+}

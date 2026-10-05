@@ -126,6 +126,20 @@ pub fn install_command(version: &str, tag: &str, sha256: &str) -> String {
     ))
 }
 
+/// Removes the helper from the host (SPEC_REMOTES_PANE_2026_10_05.md §4.9):
+/// ends every session each installed version's daemon holds, then deletes
+/// `~/.agentmux-remote`. The daemon, with no sessions left, exits on its own.
+/// Prints `ok`.
+pub fn remove_command() -> String {
+    sh("for p in \"$HOME\"/.agentmux-remote/bin/*/agentmux-remote; do \
+          [ -x \"$p\" ] || continue; \
+          \"$p\" list 2>/dev/null | while read -r id rest; do \
+            \"$p\" end --session \"$id\" >/dev/null 2>&1; \
+          done; \
+        done; \
+        rm -rf \"$HOME/.agentmux-remote\" && echo ok")
+}
+
 /// What a probe found.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Probe {
@@ -369,5 +383,32 @@ mod tests {
             .exists());
         let probe = parse_probe(&run(&probe_command("0.59.8"), b""), "0.59.8");
         assert!(probe.installed, "{probe:?}");
+    }
+
+    /// Removing ends each session through the helper, then deletes its folder.
+    #[cfg(unix)]
+    #[test]
+    fn remove_ends_the_sessions_and_deletes_the_folder() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = home.path().join(".agentmux-remote/bin/0.59.8");
+        std::fs::create_dir_all(&dir).unwrap();
+        let ended = home.path().join("ended");
+        let fake = format!(
+            "#!/bin/sh\ncase \"$1\" in list) echo 'amx-1 10 -'; echo 'amx-2 5 0';; end) echo \"$3\" >> '{}';; esac\n",
+            ended.display()
+        );
+        let bin = dir.join("agentmux-remote");
+        std::fs::write(&bin, fake).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(remove_command())
+            .env("HOME", home.path())
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
+        assert_eq!(std::fs::read_to_string(&ended).unwrap(), "amx-1\namx-2\n");
+        assert!(!home.path().join(".agentmux-remote").exists());
     }
 }
