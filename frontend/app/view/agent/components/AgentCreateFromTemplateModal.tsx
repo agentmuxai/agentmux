@@ -83,14 +83,11 @@ export const AgentCreateFromTemplateModalPanel = (
         props.template.model_vendor_base_url ?? "",
     );
 
-    // Resolve through the template's bound bundle rather than its
-    // possibly-drifted `.provider` column directly — #2594-class drift
-    // (ReAgent P1 on PR #2618): `agentdefcreatefromtemplate` itself
-    // already resolves the clone's provider this way server-side
-    // (template.rs, #2607's fix) — a template whose column has drifted
-    // from its bundle would otherwise show this modal offering
-    // accounts/models/endpoint-support for the WRONG provider relative
-    // to what actually gets cloned. Falls back to `props.template.provider`
+    // Through the same resolver `agentdefcreatefromtemplate` uses for the
+    // clone's provider server-side (template.rs), so this modal offers
+    // accounts, models and endpoint support for the provider that actually
+    // gets cloned: the template's own, or its bundle's when it has none
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). Falls back to `props.template.provider`
     // while loading/on failure, same contract `resolveEffectiveLaunchProvider`
     // itself documents — a brief stale flash here is cosmetic (form
     // options), not a spawn/credential decision the way it would be in

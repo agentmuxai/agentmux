@@ -48,7 +48,7 @@ describe("BundleSummaryPanel", () => {
         expect(screen.queryByText("This agent's own bundle")).not.toBeInTheDocument();
     });
 
-    it("shows the bound bundle's name and provider when the agent has one", async () => {
+    it("shows the bound bundle's name, and its provider as a hint, when the agent has one", async () => {
         agentsList = [{ id: "agent-1", name: "Agent One", provider: "claude", memory_id: "mem-1" }];
         getMemory.mockResolvedValue({
             id: "mem-1",
@@ -65,6 +65,7 @@ describe("BundleSummaryPanel", () => {
             expect(screen.getByText("Agent One — ABF")).toBeInTheDocument();
         });
         expect(getMemory).toHaveBeenCalledWith({}, { id: "mem-1" });
+        expect(screen.getByText(/^Suggested for /)).toBeInTheDocument();
         expect(screen.getByText(/Edit in Knowledge/)).toBeInTheDocument();
     });
 

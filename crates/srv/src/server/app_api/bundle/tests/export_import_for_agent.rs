@@ -1338,11 +1338,11 @@ async fn export_then_import_carries_provider_and_model_through() {
 }
 
 #[tokio::test]
-async fn export_of_an_unbound_bundle_omits_provider_and_model_rather_than_exporting_empty_strings() {
+async fn an_agent_scoped_export_takes_the_hint_from_the_agent_not_the_bundle() {
     let state = test_state();
     let config_a = tempfile::tempdir().unwrap();
     make_agent(&state, "agent-a", "/work/a", config_a.path());
-    make_bundle(&state, "bundle-unbound", "Shared instructions."); // provider/model left empty
+    make_bundle(&state, "bundle-unbound", "Shared instructions."); // no hint of its own
 
     let exported = bundle_export_for_agent_impl(&state.id_store, &state.mstore, &state.identity_store, ExportForAgentReq {
         bundle_id: "bundle-unbound".to_string(),
@@ -1354,7 +1354,8 @@ async fn export_of_an_unbound_bundle_omits_provider_and_model_rather_than_export
         .find(|f| f["path"] == "bundle.json")
         .expect("bundle.json must be present");
     let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
-    assert!(manifest.get("suggestedFor").is_none(), "an unset hint must not export as empty strings");
+    // The bundle carries no harness; the export names the agent it came from.
+    assert_eq!(manifest["suggestedFor"], serde_json::json!({ "provider": "claude", "vendor": "anthropic" }));
 }
 
 // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md

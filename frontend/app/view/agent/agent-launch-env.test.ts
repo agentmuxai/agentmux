@@ -86,31 +86,29 @@ describe("resolveEffectiveLaunchProvider", () => {
         expect(getMemory).not.toHaveBeenCalled();
     });
 
-    // The core regression case: a drifted agent.provider must not win
-    // over the bound bundle's own copy — this is the exact scenario the
-    // PR #2592 review flagged (gate validates "claude" from the bundle,
-    // frontend used to launch "codex" from the drifted column).
-    it("prefers the bound bundle's provider over a drifted agent.provider", async () => {
+    // The agent owns its harness: a bundle that says otherwise is a hint
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1).
+    it("is the agent's own provider, even when its bundle says otherwise", async () => {
         getMemory.mockResolvedValue({ id: "mem1", provider: "claude" });
-        const agent = agentWith("codex", "mem1");
-        const result = await resolveEffectiveLaunchProvider(agent);
-        expect(result).toBe("claude");
+        const result = await resolveEffectiveLaunchProvider(agentWith("codex", "mem1"));
+        expect(result).toBe("codex");
+        expect(getMemory).not.toHaveBeenCalled();
+    });
+
+    it("reads the bundle only for an agent with no provider", async () => {
+        getMemory.mockResolvedValue({ id: "mem1", provider: "gemini" });
+        const result = await resolveEffectiveLaunchProvider(agentWith("", "mem1"));
+        expect(result).toBe("gemini");
         expect(getMemory).toHaveBeenCalledWith({}, { id: "mem1" });
     });
 
-    it("falls back to agent.provider when the bundle fetch fails", async () => {
-        getMemory.mockRejectedValue(new Error("not found"));
-        const agent = agentWith("claude", "mem-deleted");
-        const result = await resolveEffectiveLaunchProvider(agent);
-        expect(result).toBe("claude");
+    it("falls back to agent.provider when that bundle fetch fails", async () => {
+        getMemory.mockImplementation(async () => {
+            throw new Error("not found");
+        });
+        const result = await resolveEffectiveLaunchProvider(agentWith("", "mem-deleted"));
+        expect(result).toBe("");
         expect(loggerWarn).toHaveBeenCalled();
-    });
-
-    it("falls back to agent.provider when the bundle's provider is empty", async () => {
-        getMemory.mockResolvedValue({ id: "mem1", provider: "" });
-        const agent = agentWith("claude", "mem1");
-        const result = await resolveEffectiveLaunchProvider(agent);
-        expect(result).toBe("claude");
     });
 });
 

@@ -311,10 +311,8 @@ pub struct ParsedBundleImport {
     /// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3: harness +
     /// vendor, carried through from the manifest's `suggestedFor` (v0.3) or
     /// top-level `provider`/`model` (v0.1–v0.2). Empty when it has neither
-    /// (an older export predating this, or a bundle that was never
-    /// bound to an agent) — the RPC handler treats empty the same as "not
-    /// set yet," matching `check_provider_model_immutable`'s own
-    /// first-time-set-is-allowed semantics.
+    /// (an older export predating this, or a bundle made with no hint). A
+    /// hint only: it never sets an agent's provider.
     pub provider: String,
     pub model: String,
     pub instructions: String,

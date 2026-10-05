@@ -96,7 +96,7 @@ fn resolve_backfill_provider_and_model(provider: &str, model_vendor_base_url: &s
 /// where the runtime RPC layer will look for it. Best-effort or degrade,
 /// never hard-fail: an unusable shared store means "not today," same
 /// posture the global-registry attach above already has.
-fn resolve_bundle_store(ctx: &MigrationContext, mstore: &Arc<Store>) -> Arc<Store> {
+pub(super) fn resolve_bundle_store(ctx: &MigrationContext, mstore: &Arc<Store>) -> Arc<Store> {
     match Store::open_shared(&ctx.shared_store_path) {
         Ok(shared) => Arc::new(shared),
         Err(e) => {

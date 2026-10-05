@@ -186,6 +186,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let existing = mstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
                 let old = existing.iter().find(|a| a.id == cmd.id)
                     .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
+                crate::server::app_api::check_provider_unchanged(&old.id, &old.provider, &cmd.provider)
+                    .map_err(|e| format!("updateagent: {e}"))?;
                 // Model vendor base URL: `None` (omitted) preserves the
                 // stored value; `Some(url)` overrides it (including
                 // `Some("")` to explicitly clear). Validated against the
@@ -699,15 +701,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         })
                         .collect::<Vec<_>>();
 
-                    // Resolve through the agent's bound bundle rather than
-                    // the possibly-drifted `agent.provider` column directly
-                    // — #2594, same "gate vs. actual launch can disagree"
-                    // risk class #2592/#2596/#2607/#2609/#2610/#2612 fixed.
-                    // `importagents` round-trips whatever this exports
-                    // straight into a NEW definition+bundle
-                    // (agent_def_provision_and_bind_bundle), so an already-
-                    // drifted export would seed the imported agent's bundle
-                    // with the WRONG provider from the start.
+                    // The provider the agent runs, from the shared resolver
+                    // (#2594; SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1): `importagents` gives it to the new
+                    // agent, so the import runs the same CLI.
                     let effective_provider = id_store.resolve_effective_provider_id(&agent);
                     agent_exports.push(AgentDefinitionExport {
                         id: agent.slug.clone(),
@@ -770,14 +766,10 @@ mod tests {
         state.id_store.bundle_upsert(&bundle).unwrap();
     }
 
-    // Template's own `.provider` column says "codex" (drifted/stale —
-    // simulates the same drift class #2592 fixed: some definition-time
-    // write path changed this column after the bundle was already
-    // provisioned/immutable), but its bound bundle's REAL provider is
-    // "claude". A correct export must carry "claude", not "codex" —
-    // #2594: `importagents` round-trips whatever this exports straight
-    // into a new definition+bundle, so an already-drifted export would
-    // seed the imported agent's bundle with the wrong provider.
+    // The agent says "codex"; its bound bundle, from before bundles stopped
+    // carrying a harness, says "claude". The agent owns its harness
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1), so the export
+    // carries "codex", which `importagents` gives the imported agent.
     fn seed_drifted_agent(state: &AppState, def_id: &str, bundle_id: &str) {
         let mut def = AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
@@ -815,7 +807,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exportagents_resolves_provider_through_the_agents_bundle_not_the_drifted_column() {
+    async fn exportagents_carries_the_agents_own_provider_not_its_bundles() {
         let state = test_state();
         seed_bundle(&state, "bundle-claude", "claude");
         seed_drifted_agent(&state, "agent-drift", "bundle-claude");
@@ -843,8 +835,8 @@ mod tests {
             .find(|a| a.id == "agent-drift")
             .expect("exported agent should be present");
         assert_eq!(
-            exported.provider, "claude",
-            "export must carry the agent's REAL (bundle-resolved) provider, not the drifted `codex` column"
+            exported.provider, "codex",
+            "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1)"
         );
     }
 }

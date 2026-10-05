@@ -395,6 +395,13 @@ above), and not proposed anywhere else in the repo (verified by search).
 Recorded here because it changes what "unit of portability" means for
 everything above.
 
+> [!NOTE]
+> **§7's harness-on-the-bundle design was reversed on 2026-10-05**
+> (`SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md` §3): a bundle carries no harness and can be
+> bound to any agent. The agent owns its provider, read-only after creation (the lock moved there
+> from the bundle); new bundles store no provider or vendor; migration `m0035` copied each bound
+> bundle's provider onto its agent first. Every agent still gets its own bundle (§1–§6 stand).
+
 ### 7.0 Correction found during implementation (2026-08-14): this reverses a prior deliberate decision, not "adding new fields"
 
 While implementing §7.4.1-7.4.3 against the actual schema, found that

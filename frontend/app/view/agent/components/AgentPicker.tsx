@@ -374,13 +374,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // there scoped to that tier's data source — not here.
 
     const checkInstalled = async (agent: AgentDefinition) => {
-        // Resolve through the agent's bound bundle rather than reading
-        // the possibly-drifted `agent.provider` column directly — #2594,
-        // same "gate vs. actual launch can disagree" risk class #2592/
-        // #2596 fixed. Without this, a drifted agent could get its CLI
-        // never checked/installed (wrong provider's npmPackage/cliCommand
-        // resolved here) while the actual launch (agent-model.ts, already
-        // resolved this way) spawns the real, uninstalled provider.
+        // Same resolver as the launch (agent-model.ts), so the CLI checked
+        // here is the one that will run (#2594).
         const providerId = await resolveEffectiveLaunchProvider(agent);
         const prov = getProvider(providerId);
         // Non-npm providers (kimi via pip, system-PATH CLIs) don't go
@@ -451,10 +446,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         // modal's auth panel. This now only fires for the "+ Add
         // account" (manual/API-key) button.
         onRequestAddAccount: async (current: LaunchFormStateWire) => {
-            // Resolve through the bound bundle (#2594) — offering an
-            // "add account" flow for the drifted `agent.provider` instead
-            // of the bundle's real provider would create an account the
-            // agent can never actually use at launch.
+            // Same resolver as the launch (#2594), so the account added is
+            // one the agent can use.
             const providerId = await resolveEffectiveLaunchProvider(agent);
             // Thread the user's whole live form snapshot through the
             // add-account round-trip so name/runtime/image/memory
@@ -671,10 +664,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
     const probeMissingPrereqs = async (agent: AgentDefinition) => {
-        // Resolve through the bound bundle (#2594) — probing prereqs for
-        // the drifted `agent.provider` instead of the bundle's real
-        // provider could pass a launch through with the ACTUAL provider's
-        // system prereqs never checked.
+        // Same resolver as the launch (#2594), so the prereqs probed are
+        // those of the provider that will run.
         const providerId = await resolveEffectiveLaunchProvider(agent);
         const prov = getProvider(providerId);
         const reqs = prov?.systemPrereqs ?? [];
@@ -970,17 +961,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         agent,
         originBlockId: props.model.blockId,
         onInstalled: async (continueToLaunch: boolean) => {
-            // Resolve THIS agent's effective (bundle) provider — #2594.
-            // Reading `agent.provider` directly here would compare the
-            // just-installed CLI's canonical id against `agent`'s own
-            // possibly-drifted column, missing the exact row this cache
-            // update exists to set (the agent the user just installed
-            // for). Other agents in the bulk-invalidation loop below are
-            // still compared via their own `.provider` column as a
-            // cache-priming heuristic only — any of THEM that has also
-            // drifted just misses this shortcut and gets a correct,
-            // resolved answer next time it hits `checkInstalled` itself
-            // (now fixed too), never a wrong CLI/credential outcome.
+            // Resolve THIS agent's effective provider (#2594): for an agent
+            // with no provider of its own that's its bundle's, which
+            // `agent.provider` alone would miss, skipping the exact row this
+            // cache update exists to set. Other agents in the bulk loop below
+            // are compared via their own `.provider` as a cache-priming
+            // heuristic only; one that misses gets a resolved answer the next
+            // time it hits `checkInstalled`, never a wrong CLI.
             const canonicalId = await resolveEffectiveLaunchProvider(agent);
             const canonical = getProvider(canonicalId)?.id ?? canonicalId;
             // Other pickers must not keep serving the pre-install answer.

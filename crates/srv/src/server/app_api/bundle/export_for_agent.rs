@@ -73,6 +73,16 @@ pub(super) async fn build_export_for_agent(
     // Always empty now — see the note at the agent-less export path.
     let missing_skill_ids: Vec<String> = Vec::new();
 
+    // The hint names the agent this was exported from: the bundle itself
+    // carries no harness (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.2).
+    let mut bundle = bundle;
+    let provider = id_store.resolve_effective_provider_id(&agent);
+    if !provider.is_empty() {
+        bundle.model =
+            crate::backend::storage::store::Store::resolve_effective_vendor(&provider, &agent.model_vendor_base_url);
+        bundle.provider = provider;
+    }
+
     let mut export = crate::backend::bundle_export::export_bundle(
         &bundle,
         &components.skills,
