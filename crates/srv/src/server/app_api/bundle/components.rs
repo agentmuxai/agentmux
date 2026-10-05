@@ -271,7 +271,7 @@ pub(super) fn bound_agent_has_native_memory(
         .unwrap_or(false)
 }
 
-/// Register `entries` under `components.<key>` in the export's `armory.json`.
+/// Register `entries` under `components.<key>` in the export's manifest (`bundle.json`).
 ///
 /// Takes JSON values rather than paths: most components are a list of archive
 /// paths, but `projectInstructions` carries an object per file, because a bare
@@ -324,7 +324,7 @@ pub(super) fn splice_history_component(
 }
 
 /// Splice native-memory files into an already-built bundle export's
-/// `armory.json` manifest and files list, adding `components.memory` (ABF
+/// `bundle.json` manifest and files list, adding `components.memory` (ABF
 /// v0.2 §2.3). Kept OUTSIDE `bundle_export.rs` deliberately — that
 /// module's `export_bundle()` is scoped to a bundle's own components
 /// (instructions/skills/MCP/accounts) with no concept of "agent" or

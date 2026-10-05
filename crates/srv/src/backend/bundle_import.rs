@@ -604,14 +604,6 @@ fn parse_instruction_component_paths(
     instructions_parts.join("\n\n---\n\n")
 }
 
-/// Parse and validate a bundle's files into [`ParsedBundleImport`].
-/// Structural failures (missing/malformed `armory.json`) reject the whole
-/// import — `Err` — since there is nothing safe to partially write.
-/// Per-entry problems (a missing referenced file, an unsafe path, a
-/// malformed SKILL.md) degrade to a warning and that entry is skipped —
-/// matches `bundle_export.rs`'s own philosophy, and lets a lossy import
-/// still produce a usable bundle rather than an all-or-nothing failure on
-/// e.g. one corrupt skill among five good ones.
 /// The manifest an ABF v0.3 archive carries
 /// (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §2.1).
 pub const MANIFEST_FILE: &str = "bundle.json";
@@ -622,7 +614,7 @@ pub const SCHEMA_V0_3: &str = "https://docs.agentmux.ai/schemas/agent-bundle/v0.
 
 /// Which manifest file a set of archive paths carries: `bundle.json`, else
 /// the legacy `armory.json`.
-pub fn manifest_file_name<'a>(mut has: impl FnMut(&str) -> bool) -> Option<&'static str> {
+pub fn manifest_file_name(mut has: impl FnMut(&str) -> bool) -> Option<&'static str> {
     [MANIFEST_FILE, LEGACY_MANIFEST_FILE].into_iter().find(|name| has(name))
 }
 
@@ -642,6 +634,14 @@ pub fn abf_format_version(manifest: &Value) -> Option<&'static str> {
     }
 }
 
+/// Parse and validate a bundle's files into [`ParsedBundleImport`].
+/// Structural failures (no manifest, `bundle.json` or `armory.json`, or a
+/// malformed one) reject the whole import — `Err` — since there is nothing safe to partially write.
+/// Per-entry problems (a missing referenced file, an unsafe path, a
+/// malformed SKILL.md) degrade to a warning and that entry is skipped —
+/// matches `bundle_export.rs`'s own philosophy, and lets a lossy import
+/// still produce a usable bundle rather than an all-or-nothing failure on
+/// e.g. one corrupt skill among five good ones.
 pub fn parse_bundle_import(files: &[BundleImportFile]) -> Result<ParsedBundleImport, String> {
     parse_bundle_import_with_budget(files, WarningBudget::unbounded())
 }
@@ -1384,7 +1384,7 @@ pub fn unzip_bundle_import_with_budget(
 
     // First pass: collect every non-dir entry's raw name, to DETECT
     // whether every single one shares one common wrapping directory
-    // (`zip_bundle_export`'s convention: `<root_slug>/armory.json`, etc.)
+    // (`zip_bundle_export`'s convention: `<root_slug>/bundle.json`, etc.)
     // before deciding whether to strip a path component at all.
     //
     // reagent P1, PR #2379: the previous version unconditionally stripped
