@@ -69,7 +69,7 @@
         }
     },
     "defwidget@remotes": {
-        "display:order": 6,
+        "display:order": 16,
         "display:pinned": false,
         "icon": "server",
         "label": "Remotes",
