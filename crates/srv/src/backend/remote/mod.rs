@@ -21,6 +21,7 @@ pub mod host;
 pub mod sessions;
 pub mod ssh;
 pub mod ssh_config;
+pub mod ssh_config_edit;
 pub mod status;
 pub mod wsl;
 pub mod wsl_fs;

@@ -7,6 +7,11 @@
 import { RpcClient } from "../rpc-client";
 import type { CommandRemoteForgetData } from "@/types/rpc/CommandRemoteForgetData";
 import type { CommandRemoteHelperRemoveData } from "@/types/rpc/CommandRemoteHelperRemoveData";
+import type { CommandRemoteAddData } from "@/types/rpc/CommandRemoteAddData";
+import type { CommandRemoteTestData } from "@/types/rpc/CommandRemoteTestData";
+import type { CommandRemoteSshLocateData } from "@/types/rpc/CommandRemoteSshLocateData";
+import type { RemoteTestResult } from "@/types/rpc/RemoteTestResult";
+import type { RemoteSshLocation } from "@/types/rpc/RemoteSshLocation";
 import type { CommandRemoteSetConfigData } from "@/types/rpc/CommandRemoteSetConfigData";
 import type { RemoteRecord } from "@/types/rpc/RemoteRecord";
 
@@ -34,5 +39,24 @@ export const RemotesApi = {
     /** Remove AgentMux's helper from an SSH host, once the user confirms in the approval window. */
     RemoteHelperRemoveCommand(client: RpcClient, data: CommandRemoteHelperRemoveData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("remotehelperremove", data, opts);
+    },
+
+    /** Append a host to ~/.ssh/config, once the user confirms the block in the approval window. */
+    RemoteAddCommand(client: RpcClient, data: CommandRemoteAddData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("remoteadd", data, opts);
+    },
+
+    /** Log in to a listed remote and run `true`. */
+    RemoteTestCommand(client: RpcClient, data: CommandRemoteTestData, opts?: RpcOpts): Promise<RemoteTestResult> {
+        return client.rpcCall("remotetest", data, opts);
+    },
+
+    /** Where ~/.ssh/config (or a file it includes) defines a host; null if it doesn't. */
+    RemoteSshLocateCommand(
+        client: RpcClient,
+        data: CommandRemoteSshLocateData,
+        opts?: RpcOpts
+    ): Promise<RemoteSshLocation | null> {
+        return client.rpcCall("remotesshlocate", data, opts);
     },
 };

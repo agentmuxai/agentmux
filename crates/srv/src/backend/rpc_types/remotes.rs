@@ -97,3 +97,56 @@ pub struct CommandRemoteHelperRemoveData {
     pub connection: String,
     pub blockid: String,
 }
+
+/// `remoteadd`: append a `Host` block to the user's `~/.ssh/config`, once
+/// the user confirms it in the window of pane `blockid`
+/// (SPEC_REMOTES_PANE_2026_10_05.md §4.4). Only `alias` is required.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandRemoteAddData {
+    pub alias: String,
+    #[serde(default)]
+    pub hostname: String,
+    #[serde(default)]
+    pub user: String,
+    #[serde(default)]
+    pub port: String,
+    #[serde(default)]
+    pub identityfile: String,
+    #[serde(default)]
+    pub proxyjump: String,
+    pub blockid: String,
+}
+
+/// `remotetest`: log in to a remote AgentMux already lists and run `true`,
+/// ssh's prompts going to the user in the window of pane `blockid`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandRemoteTestData {
+    pub connection: String,
+    pub blockid: String,
+}
+
+/// What `remotetest` found.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct RemoteTestResult {
+    pub ok: bool,
+    /// ssh's own message when it failed.
+    pub message: String,
+}
+
+/// `remotesshlocate`: where the user's ssh config defines `connection`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandRemoteSshLocateData {
+    pub connection: String,
+}
+
+/// The file and 1-based line of a host's `Host` line.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct RemoteSshLocation {
+    pub path: String,
+    pub line: u32,
+}

@@ -8,7 +8,7 @@
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
-import type { RemotesViewModel } from "./remotes-model";
+import type { NewRemote, RemotesViewModel } from "./remotes-model";
 import {
     displayName,
     groupRemotes,
@@ -35,6 +35,7 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
     const groups = createMemo(() => groupRemotes(model.records(), model.filter()));
     const [hiddenOpen, setHiddenOpen] = createSignal(false);
     const [menu, setMenu] = createSignal<MenuState | null>(null);
+    const [adding, setAdding] = createSignal(false);
     // Another pane's link named a host: show its row.
     createEffect(() => {
         const want = model.expandRequest();
@@ -61,7 +62,13 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
                 <button class="remotes-icon-button" title="Refresh" aria-label="Refresh" onClick={() => void model.refresh()}>
                     <i class="fa fa-rotate-right" />
                 </button>
+                <button class="remotes-add-button" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
+                    <i class="fa fa-plus" /> Add remote
+                </button>
             </div>
+            <Show when={adding()}>
+                <AddRemoteForm model={model} onDone={() => setAdding(false)} />
+            </Show>
             <Show when={model.error()}>
                 <div class="remotes-error" role="alert">
                     {model.error()}
@@ -272,7 +279,27 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                 <Show when={r().helper.installed}>
                     <button onClick={run("Remove helper", () => model.removeHelper(r().name))}>Remove helper</button>
                 </Show>
+                <Show when={r().kind === "ssh"}>
+                    <button
+                        disabled={model.testing() === r().name}
+                        onClick={run("Test connection", () => model.testConnection(r().name))}
+                    >
+                        {model.testing() === r().name ? "Testing…" : "Test connection"}
+                    </button>
+                </Show>
+                <Show when={r().sources.includes("ssh_config")}>
+                    <button onClick={run("Edit in ssh config", () => model.editInSshConfig(r().name))}>
+                        Edit in ssh config
+                    </button>
+                </Show>
             </div>
+            <Show when={model.testResults()[r().name]}>
+                {(result) => (
+                    <div class={result() === true ? "remotes-test-ok" : "remotes-detail-error"} role="status">
+                        {result() === true ? "Connected and ran a command." : `Test failed: ${result()}`}
+                    </div>
+                )}
+            </Show>
             <div class="remotes-settings">
                 <label class="remotes-setting">
                     <span>Nickname</span>
@@ -352,6 +379,75 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                 </div>
             </Show>
         </div>
+    );
+}
+
+const EMPTY_REMOTE: NewRemote = { alias: "", hostname: "", user: "", port: "", identityfile: "", proxyjump: "" };
+
+const ADD_FIELDS: { key: keyof NewRemote; label: string; placeholder: string }[] = [
+    { key: "alias", label: "Alias", placeholder: "db1" },
+    { key: "hostname", label: "Host name or address", placeholder: "db1.example.com" },
+    { key: "user", label: "User", placeholder: "as in your ssh config" },
+    { key: "port", label: "Port", placeholder: "22" },
+    { key: "identityfile", label: "Identity file", placeholder: "~/.ssh/id_ed25519" },
+    { key: "proxyjump", label: "Jump host", placeholder: "bastion" },
+];
+
+/** Add remote (§4.4): appends a Host block to ~/.ssh/config, after the user
+ *  confirms the exact block in the approval window. */
+function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): JSX.Element {
+    const [host, setHost] = createSignal<NewRemote>({ ...EMPTY_REMOTE });
+    const [busy, setBusy] = createSignal(false);
+    const [error, setError] = createSignal("");
+    const submit = async (e: Event) => {
+        e.preventDefault();
+        if (!host().alias.trim()) {
+            setError("A remote needs an alias.");
+            return;
+        }
+        setBusy(true);
+        setError("");
+        try {
+            if (await props.model.addRemote(host())) props.onDone();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <form class="remotes-add" onSubmit={(e) => void submit(e)}>
+            <div class="remotes-settings">
+                <For each={ADD_FIELDS}>
+                    {(f) => (
+                        <label class="remotes-setting">
+                            <span>{f.label}</span>
+                            <input
+                                type="text"
+                                placeholder={f.placeholder}
+                                value={host()[f.key]}
+                                onInput={(e) => setHost({ ...host(), [f.key]: e.currentTarget.value })}
+                            />
+                        </label>
+                    )}
+                </For>
+            </div>
+            <div class="remotes-add-note">
+                Added to the end of ~/.ssh/config (a copy of the file is kept first), so every ssh on this computer
+                sees it. You'll see exactly what is written before it is.
+            </div>
+            <Show when={error()}>
+                <div class="remotes-detail-error">{error()}</div>
+            </Show>
+            <div class="remotes-detail-actions">
+                <button type="submit" disabled={busy()}>
+                    {busy() ? "Adding…" : "Add"}
+                </button>
+                <button type="button" onClick={() => props.onDone()}>
+                    Cancel
+                </button>
+            </div>
+        </form>
     );
 }
 
