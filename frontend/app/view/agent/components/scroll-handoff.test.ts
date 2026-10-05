@@ -9,6 +9,7 @@ import {
     SKID_NOTCHES,
     attachScrollHandoff,
     nextSkid,
+    type ScrollHandoffOptions,
     type SkidInput,
     type WheelSkid,
 } from "./scroll-handoff";
@@ -30,6 +31,10 @@ function makeBox(g: Geo): HTMLElement {
 
 /** The pane's `.agent-document` with one or more boxes, and a bare row outside them. */
 function setup(...geos: Geo[]) {
+    return setupWith({}, ...geos);
+}
+
+function setupWith(opts: ScrollHandoffOptions, ...geos: Geo[]) {
     const pane = document.createElement("div");
     pane.className = "agent-document";
     let paneTop = 1000;
@@ -42,7 +47,7 @@ function setup(...geos: Geo[]) {
         return box;
     });
     document.body.appendChild(pane);
-    const detach = boxes.map((b) => attachScrollHandoff(b));
+    const detach = boxes.map((b) => attachScrollHandoff(b, opts));
     let clock = 0;
     /** One wheel event; `wheelDeltaY` set = a notched wheel, absent = continuous. */
     const wheel = (target: Element, deltaY: number, o: { notch?: boolean; wheelDeltaY?: number; at?: number; ctrlKey?: boolean } = {}) => {
@@ -117,10 +122,24 @@ describe("attachScrollHandoff", () => {
         expect(s.pane()).toBe(1120);
     });
 
-    it("a box whose content fits never skids", () => {
+    it("a box whose content fits never skids by default", () => {
         const s = setup({ scrollTop: 0, clientHeight: 200, scrollHeight: 200 });
         expect(s.wheel(s.box, 120)).toBe(true);
         expect(s.pane()).toBe(1120);
+    });
+
+    it("with skidWhenFits (tool previews), a box that fits skids in either direction", () => {
+        const fits = { scrollTop: 0, clientHeight: 200, scrollHeight: 200 };
+        const s = setupWith({ skidWhenFits: true }, fits);
+        s.skid(s.box, 120);
+        expect(s.pane()).toBe(1000);
+        expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(true);
+        s.wheel(s.box, 120);
+        expect(s.pane()).toBe(1120);
+        s.skid(s.box, -120); // reversing is a new arrival
+        expect(s.pane()).toBe(1120);
+        s.wheel(s.box, -120);
+        expect(s.pane()).toBe(1000);
     });
 
     it("a coalesced three-notch event skids two notches and forwards the third", () => {
@@ -209,7 +228,7 @@ describe("nextSkid", () => {
         box,
         dir: 1,
         deltaY: 100,
-        overflows: true,
+        canSkid: true,
         atEdge: true,
         notches: 1,
         timeStamp: 0,
@@ -261,7 +280,7 @@ describe("nextSkid", () => {
         expect(step({ notches: null, timeStamp: 2 * SKID_GESTURE_IDLE_MS })).toEqual({ kind: "forward", deltaY: 100 });
     });
 
-    it("a box that doesn't overflow forwards at once", () => {
-        expect(step({ overflows: false })).toEqual({ kind: "forward", deltaY: 100 });
+    it("a box that doesn't take part forwards at once", () => {
+        expect(step({ canSkid: false })).toEqual({ kind: "forward", deltaY: 100 });
     });
 });

@@ -55,8 +55,9 @@ export interface SkidInput {
     box: object;
     dir: -1 | 1;
     deltaY: number;
-    /** The box has content to scroll at all; one that fits never skids. */
-    overflows: boolean;
+    /** The box takes part in the skid: it has content to scroll, or it opted in
+     *  with `skidWhenFits`. Otherwise it hands every notch straight on. */
+    canSkid: boolean;
     /** The box can't scroll further in `dir`. */
     atEdge: boolean;
     /** Whole notches this event carries, or null for continuous input. */
@@ -72,7 +73,7 @@ export type SkidAction = { kind: "native" } | { kind: "absorb" } | { kind: "forw
 export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid; action: SkidAction } {
     const arrival = prev.box !== input.box || prev.dir !== input.dir;
     const base = { box: input.box, dir: input.dir, lastAt: input.timeStamp };
-    if (!input.overflows) return { state: { ...base, phase: "spent", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    if (!input.canSkid) return { state: { ...base, phase: "spent", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
     if (!input.atEdge) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "native" } };
 
     const phase = arrival ? "armed" : prev.phase;
@@ -128,8 +129,14 @@ function watchPane(pane: HTMLElement): void {
     );
 }
 
+export interface ScrollHandoffOptions {
+    /** Skid even when the content fits, so the box has no scrollbar. A box that
+     *  fits is at both edges at once, so every arrival over it skids. */
+    skidWhenFits?: boolean;
+}
+
 /** Returns the cleanup. The box must carry `overscroll-behavior: contain`. */
-export function attachScrollHandoff(el: HTMLElement): () => void {
+export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions = {}): () => void {
     boxes.add(el);
     el.classList.add("scroll-handoff-box");
     const initialPane = el.closest<HTMLElement>(".agent-document");
@@ -153,13 +160,13 @@ export function attachScrollHandoff(el: HTMLElement): () => void {
         const dir = e.deltaY < 0 ? -1 : 1;
         // 1 px slack: fractional layout at non-100% zoom leaves a true bottom
         // a hair short of scrollHeight.
-        const overflows = el.scrollHeight - el.clientHeight > 1;
+        const canSkid = opts.skidWhenFits === true || el.scrollHeight - el.clientHeight > 1;
         const atEdge = dir < 0 ? el.scrollTop <= 0 : el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
         const { state, action } = nextSkid(skids.get(pane) ?? SKID_IDLE, {
             box: el,
             dir,
             deltaY: e.deltaY,
-            overflows,
+            canSkid,
             atEdge,
             notches: wheelNotches(e),
             timeStamp: e.timeStamp,

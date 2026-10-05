@@ -18,7 +18,8 @@ already replaced the tool preview's own wheel listener with one shared hand-off,
 conversation. So the draft's plan for a new controller (`wheelHandoff.ts`) and re-plumbing
 four boxes was out of date. §3–§7 are rewritten against main: the skid goes inside
 `attachScrollHandoff`, and no call site changes. §1 and §2 stand. The operator's answers
-to the open questions are in §8, including a later change from one notch to two.
+to the open questions are in §8, including two later changes: two notches instead of one, and tool previews skid even
+when their content fits.
 
 ## 1. The problem
 
@@ -148,7 +149,9 @@ Ignore, without touching state: `ctrlKey` (zoom) and `deltaY === 0` (a horizonta
 
 1. **Arrival:** `box` or `dir` differs from the state's. The phase becomes `armed`.
 2. **A box whose content fits** (`scrollHeight - clientHeight <= 1`) isn't a scroller:
-   forward the event at once and set `spent`. It never skids (as before).
+   forward the event at once and set `spent` (as before), **unless the box opted in with
+   `skidWhenFits`**. The tool preview does (§8, decision 4). A box that fits is at both
+   edges at once, so every arrival over it skids, in either direction.
 3. **Not at its edge in `dir`:** the box scrolls natively; set `armed`. Any movement off
    the edge re-arms the skid.
 4. **At the edge:**
@@ -194,16 +197,17 @@ each box (for the transition) and toggles `scroll-handoff-skid--top` /
 ## 5. Edits
 
 1. `components/scroll-handoff.ts`: `nextSkid` (pure), `wheelNotches`, the per-pane state
-   and passive pane listener, and the edge flash. `attachScrollHandoff` keeps its
-   signature.
-2. `styles/_document-nodes.scss`: `.scroll-handoff-box` (the transition) and the two
+   and passive pane listener, and the edge line. `attachScrollHandoff(el, opts?)` gains an
+   optional `{ skidWhenFits }`; existing calls are unchanged.
+2. `ToolOverlayLog.tsx`: passes `{ skidWhenFits: true }` (§8, decision 4).
+3. `styles/_document-nodes.scss`: `.scroll-handoff-box` (the transition) and the two
    `.scroll-handoff-skid--*` edge lines.
-3. `components/scroll-handoff.test.ts`: the hand-off tests now expect the skid.
-4. A pointer to this spec from `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` and
+4. `components/scroll-handoff.test.ts`: the hand-off tests now expect the skid.
+5. A pointer to this spec from `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` and
    `SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md` §2.
 
-No renderer changes: `ToolOverlayLog.tsx`, `JektBubble.tsx` and `ContextDeliveryCard.tsx`
-already call `attachScrollHandoff`.
+`JektBubble.tsx` and `ContextDeliveryCard.tsx` are unchanged; they already call
+`attachScrollHandoff`.
 
 ## 6. Tests
 
@@ -214,7 +218,8 @@ that doesn't overflow forwards at once.
 
 **DOM, `attachScrollHandoff`** (stubbed geometry; `wheelDeltaY` and `timeStamp` set on the
 event): skid then forward, at the bottom and at the top; a notch that brings the box to its
-edge, then the skid; Ctrl+wheel and `deltaY 0` ignored; a box that fits forwards at once; a
+edge, then the skid; Ctrl+wheel and `deltaY 0` ignored; a box that fits forwards at once by
+default, and skids in both directions with `skidWhenFits`; a
 three-notch event; reversal; leaving for the pane and returning; a second box; a trackpad
 gesture; the edge flash and its fade; detach.
 
@@ -243,3 +248,7 @@ The operator accepted the recommendations:
    line kept on for the whole skid rather than flashing once per notch.
 3. **Scope:** every capped box in the conversation, which on main is the four boxes of §3,
    all through the one helper.
+4. **Tool previews without a scrollbar skid too** (2026-10-05, after trying it). A tool
+   preview whose content fits still holds the first two notches, with the edge line, before
+   the pane moves (`skidWhenFits`). Jekt and context-delivery boxes that fit keep handing
+   notches straight on.

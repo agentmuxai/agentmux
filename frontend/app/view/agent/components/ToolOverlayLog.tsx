@@ -141,9 +141,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
 
     // Scroll hand-off to the outer pane once this box can't scroll further
     // (scroll-handoff.ts; this box carries `overscroll-behavior: contain` in
-    // _tool-overlay-portal.scss).
+    // _tool-overlay-portal.scss). A tool preview skids at its edge even when its
+    // content fits, so a short preview under the pointer still holds the wheel.
     onMount(() => {
-        if (scrollRef) onCleanup(attachScrollHandoff(scrollRef));
+        if (scrollRef) onCleanup(attachScrollHandoff(scrollRef, { skidWhenFits: true }));
     });
 
     // Track whether the overlay panel is collapsed (content-visibility: hidden).
