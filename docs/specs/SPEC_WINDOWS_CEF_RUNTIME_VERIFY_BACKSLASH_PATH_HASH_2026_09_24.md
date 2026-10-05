@@ -76,7 +76,7 @@ Task expands `$HOME` with its own shell interpreter, not Git Bash, and on
 Windows that yields the Windows form `C:\Users\<user>`. The guard receives
 `C:\Users\<user>/cef-build/...`: mixed separators, with backslashes. Observed on
 2026-09-23 in a local `task dev`, whose error printed
-`Runtime: C:\Users\asafe/cef-build/chromium_git/chromium/src/out/Release_GN_x64`.
+`Runtime: C:\Users\user/cef-build/chromium_git/chromium/src/out/Release_GN_x64`.
 
 By contrast, `$HOME` expanded *inside* a script run with `bash` is the POSIX form
 `/c/Users/<user>`. Scripts that build paths internally are therefore not

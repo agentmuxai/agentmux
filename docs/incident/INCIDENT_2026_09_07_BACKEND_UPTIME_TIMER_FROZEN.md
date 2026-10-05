@@ -3,9 +3,9 @@
 **Status:** implemented — fix shipped in PR #3084 (`try_register_agent_with_nonce`, `agentmux-srv/src/backend/reactive/handler.rs` + `.../blockcontroller/persistent.rs`).
 
 **Severity:** Critical. Every agent-to-agent path on the host dead; UI frozen; all health signals green.
-**Affected:** v0.55.37, srv PID 19280 (`C:\Users\asafe\Downloads\agentmux-0.55.37-x64-portable\`, ports 60237/60238).
+**Affected:** v0.55.37, srv PID 19280 (`C:\Users\user\Downloads\agentmux-0.55.37-x64-portable\`, ports 60237/60238).
 **Also vulnerable:** v0.55.38 (what the operator moved to) and `main` @ `9b62c7a75`. Not fixed anywhere.
-**Incident status at writing (2026-09-07, before the fix below existed):** 19280 still wedged (~6h). Minidump captured: `C:\Users\asafe\workspace\srv-19280-wedged.dmp` (156 MB).
+**Incident status at writing (2026-09-07, before the fix below existed):** 19280 still wedged (~6h). Minidump captured: `C:\Users\user\workspace\srv-19280-wedged.dmp` (156 MB).
 **Investigated from:** v0.55.38, by Claude (claude-0823b). Primary source for stage 1: Manpo's own postmortem, written from inside the wedged instance — `~/.agentmux/agents/manpo-0906k/POSTMORTEM-same-host-sendmessage-wedge-2026-09-07.md`. Every claim in it that I could check against source and logs checked out.
 
 Times are UTC. Host local = UTC−7.
@@ -138,10 +138,10 @@ The LIFO slot is not work-stealable (tokio 1.52.3, stock `#[tokio::main]`, `disa
 ## 8. Evidence index
 
 - Launcher log: `~/.agentmux/logs/agentmux-launcher.log` (contains NUL bytes; use `grep -a`).
-- Manpo transcript: `~/.agentmux/shared/identities/…/projects/C--Users-asafe--agentmux-agents-manpo-0906k/3ca084c3-….jsonl`, line 611.
+- Manpo transcript: `~/.agentmux/shared/identities/…/projects/C--Users-user--agentmux-agents-manpo-0906k/3ca084c3-….jsonl`, line 611.
 - Manpo's postmortem and issue: `~/.agentmux/agents/manpo-0906k/`.
-- Minidump of the wedged srv: `C:\Users\asafe\workspace\srv-19280-wedged.dmp`. **Capture more before restarting 19280 if you have better tooling; this state is perishable.**
-- Source clone at `main` @ `9b62c7a75`: `C:\Users\asafe\workspace\agentmux`. Tags `v0.55.37` = `5d65cbe58`, `v0.55.38` = `b3ea05181`.
+- Minidump of the wedged srv: `C:\Users\user\workspace\srv-19280-wedged.dmp`. **Capture more before restarting 19280 if you have better tooling; this state is perishable.**
+- Source clone at `main` @ `9b62c7a75`: `C:\Users\user\workspace\agentmux`. Tags `v0.55.37` = `5d65cbe58`, `v0.55.38` = `b3ea05181`.
 - Live state at writing: srv 19280 `Responding=True`, 165 s CPU total; WS conn `127.0.0.1:60238 ← 127.0.0.1:62943` `ESTABLISHED`; 0.55.38 srv 8524 clean (zero egress warnings).
 
 ## 9. What went right

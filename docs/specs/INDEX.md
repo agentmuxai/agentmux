@@ -1281,6 +1281,7 @@ section above, do not bulk-restamp them.
 |---|---|
 | [`REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25`](REPORT_AGENT_HISTORY_LOST_ON_NEW_BUILD_2026_09_25.md) | Why AgentA Started Blank on the v0.57.5 Build — Incident Report |
 | [`REPORT_JEKT_MIDTURN_INTERRUPT_AUDIT_2026_09_23`](REPORT_JEKT_MIDTURN_INTERRUPT_AUDIT_2026_09_23.md) | REPORT: Can a jekt interrupt an agent mid-turn today? |
+| [`REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16`](REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md) | Jekt Signing-Key Injection Gap — Normal-Launch Agents Never Got a Verified Identity |
 | [`SPEC_BROWSER_PANE_LIFECYCLE`](SPEC_BROWSER_PANE_LIFECYCLE.md) | SPEC: Browser Pane Lifecycle & State Machine |
 | [`cef-drag-window-management`](cef-drag-window-management.md) | Spec: CEF Drag, Drop, and Window Management |
 | [`cef-transparency-architecture`](cef-transparency-architecture.md) | Spec: CEF Transparency Architecture |
@@ -1421,12 +1422,6 @@ section above, do not bulk-restamp them.
 | Spec | Title |
 |---|---|
 | [`SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22`](SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md) | SPEC — Status bar popovers render offset (and undersized) under Chrome zoom |
-
-**`root`**
-
-| Spec | Title |
-|---|---|
-| [`REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16`](REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md) | Jekt Signing-Key Injection Gap — Normal-Launch Agents Never Got a Verified Identity |
 
 **`rootcause`**
 

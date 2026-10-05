@@ -199,7 +199,7 @@ impl ClaudeHistoryAdapter {
     }
 
     /// Decode a project directory name back to a path.
-    /// e.g., "C--Users-asafe--claw-agentx-workspace" → "C:/Users/asafe/.claw/agentx-workspace"
+    /// e.g., "C--Users-user--claw-agentx-workspace" → "C:/Users/user/.claw/agentx-workspace"
     /// This is lossy — real hyphens are indistinguishable from path separators.
     fn decode_project_path(encoded: &str) -> String {
         // Best-effort: replace leading drive pattern and path separators

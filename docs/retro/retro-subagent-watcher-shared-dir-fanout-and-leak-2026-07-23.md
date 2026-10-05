@@ -36,7 +36,7 @@ logged under six different `parent`/`parent_block_id` pairs — `Agent1`, `Agent
 `find ~/.agentmux -type d -name d019e2e4-7223-4eeb-a2a6-b16b688b9893` returns exactly **one** match:
 
 ```
-/c/Users/asafe/.agentmux/shared/providers/claude/projects/C--Users-asafe--agentmux-agents-agentx-0623n/d019e2e4-7223-4eeb-a2a6-b16b688b9893
+/c/Users/user/.agentmux/shared/providers/claude/projects/C--Users-user--agentmux-agents-agentx-0623n/d019e2e4-7223-4eeb-a2a6-b16b688b9893
 ```
 
 — i.e. this is genuinely `AgentX`'s own, real, single session. There is no UUID collision and no duplicate session file. The other five names are misattributions of AgentX's activity to themselves, not five agents that coincidentally share a session.

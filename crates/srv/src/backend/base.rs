@@ -320,8 +320,8 @@ pub fn expand_home_dir_safe(path: &str) -> PathBuf {
 /// Convert an MSYS / Git-Bash POSIX drive path to a native Windows path.
 ///
 /// Agents on Windows typically run inside a bash shell (MSYS2 / Git Bash),
-/// so they naturally emit paths like `/c/Users/asafe/project` or the WSL
-/// form `/mnt/c/Users/asafe/project`. Passing one of those straight to
+/// so they naturally emit paths like `/c/Users/user/project` or the WSL
+/// form `/mnt/c/Users/user/project`. Passing one of those straight to
 /// `std::process::Command::current_dir` makes `CreateProcess` fail with
 /// `os error 267` (ERROR_DIRECTORY, "The directory name is invalid").
 ///
@@ -779,12 +779,12 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn test_msys_to_windows_path() {
-        assert_eq!(msys_to_windows_path("/c/Users/asafe/p"), "C:\\Users\\asafe\\p");
-        assert_eq!(msys_to_windows_path("/mnt/c/Users/asafe/p"), "C:\\Users\\asafe\\p");
+        assert_eq!(msys_to_windows_path("/c/Users/user/p"), "C:\\Users\\user\\p");
+        assert_eq!(msys_to_windows_path("/mnt/c/Users/user/p"), "C:\\Users\\user\\p");
         assert_eq!(msys_to_windows_path("/d/work"), "D:\\work");
         assert_eq!(msys_to_windows_path("/c"), "C:\\");
         // Already-native paths pass through untouched.
-        assert_eq!(msys_to_windows_path("C:\\Users\\asafe"), "C:\\Users\\asafe");
+        assert_eq!(msys_to_windows_path("C:\\Users\\user"), "C:\\Users\\user");
         // Not a drive path: leading `/usr` is not `/<letter>/`.
         assert_eq!(msys_to_windows_path("/usr/bin"), "/usr/bin");
         // `/ab/...` — second segment is multi-char, not a drive.

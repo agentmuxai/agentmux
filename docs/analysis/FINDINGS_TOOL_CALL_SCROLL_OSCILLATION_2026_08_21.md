@@ -30,7 +30,7 @@ collected data was never pulled and correlated.** This doc does that.
 
 ## Data source
 
-`C:\Users\asafe\.agentmux\dev\loap-fix-tool-call-scroll-shrink-oscillation\415610cb303ae11d\logs\agentmux-host-v0.55.11.log.2026-08-17`
+`C:\Users\user\.agentmux\dev\loap-fix-tool-call-scroll-shrink-oscillation\415610cb303ae11d\logs\agentmux-host-v0.55.11.log.2026-08-17`
 (+ a 1-line continuation in the `.log.2026-08-18` rotation). 8 total
 `[wave-scroll-shrink]` events, all on the same pane (`2a15f3f`,
 agent "ScrollPinTest-host-7c31"), correlated against the same log's

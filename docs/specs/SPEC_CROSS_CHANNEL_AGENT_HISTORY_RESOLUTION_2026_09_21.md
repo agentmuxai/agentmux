@@ -195,10 +195,10 @@ What *does* hold, verified on the same machine:
 
 | Source | Value |
 |---|---|
-| `db_agents` row | `working_directory = C:\Users\asafe\.agentmux\agents\agenty-0629j` |
+| `db_agents` row | `working_directory = C:\Users\user\.agentmux\agents\agenty-0629j` |
 | Registry record | `source_agents_base` + `working_dir` → the same path |
-| Transcript's own `cwd` field | `C:\Users\asafe\.agentmux\agents\agenty-0629j` |
-| Session project dir name | `C--Users-asafe--agentmux-agents-agenty-0629j` |
+| Transcript's own `cwd` field | `C:\Users\user\.agentmux\agents\agenty-0629j` |
+| Session project dir name | `C--Users-user--agentmux-agents-agenty-0629j` |
 
 **The working directory is the join key that actually holds**, and it is
 already recorded on both sides (`SessionMeta.working_directory`, parsed from

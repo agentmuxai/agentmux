@@ -49,7 +49,7 @@ the gap.
 ## Investigation method
 
 Rather than guess from reading CSS, I built an isolated static repro
-(`C:\Users\asafe\.agentmux\agents\agent1-06309\repro\ring-repro.html`) that
+(`C:\Users\user\.agentmux\agents\agent1-06309\repro\ring-repro.html`) that
 reproduces the exact selector structure and computed values pulled from the
 real theme (`frontend/app/theme.scss`, `frontend/tailwindsetup.css`):
 
@@ -280,7 +280,7 @@ not by relying on opacity.
 
 ## Repro artifacts
 
-`C:\Users\asafe\.agentmux\agents\agent1-06309\repro\`:
+`C:\Users\user\.agentmux\agents\agent1-06309\repro\`:
 - `ring-repro.html` — isolated static repro, flat-color variant, focused
   state (opaque border); currently reflects the v2 fix
 - `ring-default.html` / `ring-focused-alone.html` — v2 fix under the real

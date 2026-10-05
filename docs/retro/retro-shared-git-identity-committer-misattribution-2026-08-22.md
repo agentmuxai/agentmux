@@ -55,7 +55,7 @@ Traced to this machine's **global** `~/.gitconfig`:
 
 Neither `amx` nor `agentmux-cloud`'s local clones (checked in agenty's own
 working copies) have a `[user]` override in `.git/config` — so any agent
-running on this shared Windows account (`asafe`), committing from a clone
+running on this shared Windows account (`user`), committing from a clone
 that doesn't set its own local override, silently inherits **my** identity
 as the git commit author, no matter which agent is actually doing the work.
 

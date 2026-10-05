@@ -28,7 +28,7 @@ The July 2 retro asserted (from a single observation) that only a full AgentMux 
 
 - A commit logger (5 s samples: system commit used/limit, Σ process private, per-family private for `agentmux*`/`claude`/`parsecd`/`vmmem`) was started as a **scheduled task**, outside AgentMux's process tree, so it survived the restart.
 - The user closed AgentMux fully, waited ~1 minute, reopened it.
-- Raw data archived at `C:\Users\asafe\commit-log-2026-07-16-restart-experiment.csv` (machine: claudius, Win11, 62 GB RAM, dual GPU stacks — NVIDIA + Radeon both resident).
+- Raw data archived at `C:\Users\user\commit-log-2026-07-16-restart-experiment.csv` (machine: claudius, Win11, 62 GB RAM, dual GPU stacks — NVIDIA + Radeon both resident).
 
 ## 3. Result — decisive
 

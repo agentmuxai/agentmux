@@ -187,7 +187,7 @@ confirms AgentY has a real, valid, `status: "valid"` binding:
 ```
 db_agent_identity_links: (AgentY's definition_id, account a1990489-..., 'claude')
 db_accounts: account a1990489-..., name "Claude (personal)", kind "oauth",
-             secret_ref: {"backend":"oauth_config_dir","dir":"C:\Users\asafe\.claude"}
+             secret_ref: {"backend":"oauth_config_dir","dir":"C:\Users\user\.claude"}
 ```
 
 **So: the gate is not broken. §4's "0 rows" finding was a real fact about the

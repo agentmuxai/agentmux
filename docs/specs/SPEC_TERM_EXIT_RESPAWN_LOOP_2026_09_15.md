@@ -563,7 +563,7 @@ own SQLite store for the block that had actually just exited:
 
 ```json
 {"oid":"d2743404-…","version":4,
- "meta":{"view":"term","controller":"shell","cmd:cwd":"C:/Users/asafe",
+ "meta":{"view":"term","controller":"shell","cmd:cwd":"C:/Users/user",
          "term:osc_title":"C:\Program Files\PowerShell\7\pwsh.EXE"},
  "parentoref":"tab:2f65a023-…"}
 ```

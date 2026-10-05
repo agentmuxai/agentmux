@@ -88,7 +88,7 @@ Every line in a subagent JSONL file is a JSON object:
   "parentUuid": "uuid-or-null",
   "isSidechain": true,
   "userType": "external",
-  "cwd": "C:\\Users\\asafe\\.claw\\agentx-workspace",
+  "cwd": "C:\\Users\\user\\.claw\\agentx-workspace",
   "sessionId": "uuid",
   "version": "2.1.34",
   "agentId": "ac1e917",

@@ -228,9 +228,9 @@ lead, not the diagnosis.
   ~850MB/1.94M-line rebuild), Smike (`9a8194e2-337e-4f32-a272-53b8b1be94c3`,
   ~165-166MB/~400K-line rebuild, ×3 in-window)
 - Log sources:
-  `C:\Users\asafe\.agentmux\logs\agentmuxsrv-v0.55.19.log.2026-08-22`
+  `C:\Users\user\.agentmux\logs\agentmuxsrv-v0.55.19.log.2026-08-22`
   (srv, top-level shared path) and
-  `C:\Users\asafe\.agentmux\channels\local-main-b28b7a-b966d418\versions\0.55.19\logs\agentmux-host-v0.55.19.log.2026-08-22`
+  `C:\Users\user\.agentmux\channels\local-main-b28b7a-b966d418\versions\0.55.19\logs\agentmux-host-v0.55.19.log.2026-08-22`
   (host/frontend)
 - Window analyzed: `07:55:15Z`–`07:59:00Z`
 

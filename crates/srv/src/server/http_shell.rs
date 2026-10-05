@@ -80,7 +80,7 @@ pub(super) async fn handle_shell_create(
     };
 
     // Normalize the cwd before it reaches the spawner. Agents on Windows run
-    // inside a bash shell and emit MSYS paths like `/c/Users/asafe/project`;
+    // inside a bash shell and emit MSYS paths like `/c/Users/user/project`;
     // passing those straight to `Command::current_dir` fails with os error 267
     // (ERROR_DIRECTORY). This converts them to native form and expands `~`.
     let effective_cwd = if remote {

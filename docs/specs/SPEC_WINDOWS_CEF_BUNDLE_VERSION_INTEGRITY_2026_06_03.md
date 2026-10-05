@@ -26,7 +26,7 @@ shipped a CEF runtime that does not match the host binary.
 
 ## 2. Root cause (evidence)
 
-Repo `C:/Users/asafe/.claw/agentx-workspace/agentmux`, HEAD `3012bfc5`.
+Repo `C:/Users/user/.claw/agentx-workspace/agentmux`, HEAD `3012bfc5`.
 
 | Fact | Evidence |
 |---|---|

@@ -33,7 +33,7 @@ The agent's `agentmux-bashwrap` hook is a **bare PATH lookup**, the dev build **
 
 3. **A stale portable was on the system PATH.**
    ```
-   PATH ⊃ C:\Users\asafe\Downloads\agentmux-0.44.1+g6fc6d864.dirty.20260612T092359…-portable\runtime\tools\bin
+   PATH ⊃ C:\Users\user\Downloads\agentmux-0.44.1+g6fc6d864.dirty.20260612T092359…-portable\runtime\tools\bin
    ```
    `g6fc6d864` predates #1368. `Get-Command agentmux-bashwrap` → that path. The agent ran it → exit 130.
 
@@ -62,7 +62,7 @@ Packaging copies the freshly-built tool into the portable: `cp target/release/ag
 Overwrote the PATH-winning stale binary with a fresh build:
 ```
 cp -f target/release/agentmux-bashwrap.exe \
-  "C:\Users\asafe\Downloads\agentmux-…g6fc6d864…-portable\runtime\tools\bin\agentmux-bashwrap.exe"
+  "C:\Users\user\Downloads\agentmux-…g6fc6d864…-portable\runtime\tools\bin\agentmux-bashwrap.exe"
 ```
 Verified the fresh binary: `echo …; cat; echo EOF_OK` → `<exited 0>` (no 130; the brace-group `{…} </dev/null` gives stdin-readers EOF without hanging). Qooma's next bash call uses it. **This is a hack — it patches a random Downloads build that happens to be on PATH. The build must stop depending on that.**
 

@@ -266,12 +266,12 @@ On every launch, log a structured diagnostic block:
 [agentmuxsrv startup]
   version: 0.31.67
   platform: windows / x86_64
-  data_dir: C:\Users\asafe\.agentmux
-  log_dir: C:\Users\asafe\.agentmux\logs
-  db_path: C:\Users\asafe\.agentmux\db\wave.db
-  config_path: C:\Users\asafe\AppData\Roaming\AgentMux\settings.json
+  data_dir: C:\Users\user\.agentmux
+  log_dir: C:\Users\user\.agentmux\logs
+  db_path: C:\Users\user\.agentmux\db\wave.db
+  config_path: C:\Users\user\AppData\Roaming\AgentMux\settings.json
   shell: C:\Program Files\PowerShell\7\pwsh.exe
-  wsh_binary: C:\Users\asafe\.agentmux\bin\wsh.exe
+  wsh_binary: C:\Users\user\.agentmux\bin\wsh.exe
   env.AGENTMUX_DATA_HOME: (not set)
   env.AGENTMUX_CONFIG_HOME: (not set)
   env.RUST_LOG: (not set)
@@ -369,7 +369,7 @@ The config watcher (already exists) reloads this and updates the `EnvFilter` via
 ### JSON (file output)
 
 ```json
-{"timestamp":"2026-03-07T04:15:23.456Z","level":"INFO","target":"agentmuxsrv::backend::blockcontroller::shell","span":{"block_id":"blk-abc123","controller":"shell"},"fields":{"message":"Spawning command","cmd":"codex","effective_path":"C:\\Users\\asafe\\.agentmux\\cli\\codex\\node_modules\\.bin","interactive":true}}
+{"timestamp":"2026-03-07T04:15:23.456Z","level":"INFO","target":"agentmuxsrv::backend::blockcontroller::shell","span":{"block_id":"blk-abc123","controller":"shell"},"fields":{"message":"Spawning command","cmd":"codex","effective_path":"C:\\Users\\user\\.agentmux\\cli\\codex\\node_modules\\.bin","interactive":true}}
 ```
 
 ### Human-readable (stderr)
@@ -387,13 +387,13 @@ With this logging in place, the blank screen scenario would produce:
 ```
 INFO  [fe] agent: Provider button clicked {provider: "codex"}
 INFO  [fe] agent: Detecting codex CLI
-INFO  [fe] agent: CLI found at C:\Users\asafe\.agentmux\cli\codex\node_modules\.bin\codex.cmd
+INFO  [fe] agent: CLI found at C:\Users\user\.agentmux\cli\codex\node_modules\.bin\codex.cmd
 INFO  [fe] agent: Launching codex {cmd: "codex", binDir: "...\.bin"}
 INFO  [fe] rpc: SetMetaCommand {oref: "block:blk-abc", keys: ["view","controller","cmd","cmd:args","cmd:interactive","cmd:runonstart","cmd:env"]}
 INFO  [ws] SetMeta applied {oref: "block:blk-abc", keys: 7}
 INFO  [ws] ControllerResync {block_id: "blk-abc", forcerestart: true}
 INFO  [shell] Block start {block_id: "blk-abc", cmd: "codex", args: [], interactive: true}
-INFO  [shell] cmd:env injected {block_id: "blk-abc", PATH_prepend: "C:\Users\asafe\.agentmux\cli\codex\node_modules\.bin"}
+INFO  [shell] cmd:env injected {block_id: "blk-abc", PATH_prepend: "C:\Users\user\.agentmux\cli\codex\node_modules\.bin"}
 INFO  [shell] Resolved command: CommandBuilder::new("codex") {block_id: "blk-abc"}
 ERROR [shell] Spawn failed {block_id: "blk-abc", error: "The system cannot find the file specified. (os error 2)", cmd: "codex"}
 ```

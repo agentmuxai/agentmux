@@ -6,7 +6,7 @@
 this document describe a build-parallelism theory that was thoroughly
 tested and **disproven**. The real, confirmed root cause is Windows'
 260-character `MAX_PATH` limit: this dev machine's agent workspace path
-(`C:\Users\...\agenty-0629j\Usersasafe.agentmuxagentsagenty-0629jagentmux\...`
+(`C:\Users\...\agenty-0629j\Usersuser.agentmuxagentsagenty-0629jagentmux\...`
 — note the unusual duplicated-looking final segment) is long enough that,
 combined with CEF's own deeply-nested `libcef_dll/{cpptoc,ctocpp}/test/`
 source tree and its longest auto-generated filenames, several `.obj` output
@@ -246,7 +246,7 @@ to tune around it.
 5. Noticed the error text itself — `Cannot open compiler generated file:
    ''` (an empty filename) — and checked `TMP`/`TEMP`: this Bash/MSYS
    shell sets `TMP=/tmp`, `TEMP=/tmp` (POSIX-style), while `cmd.exe`'s
-   native environment correctly shows `C:\Users\asafe\AppData\Local\Temp`.
+   native environment correctly shows `C:\Users\user\AppData\Local\Temp`.
    Explicitly set correct Windows-style `TMP`/`TEMP` before the build —
    **still identical failure.** (This may still be worth fixing separately
    for hygiene, but it isn't the cause here.)
@@ -317,7 +317,7 @@ system-wide change outside a single build's scope.
 **Root fix for the repo itself (not attempted here):** the workspace path
 that triggered this is specific to how this particular agent's working
 directory was provisioned (a duplicated-looking path segment,
-`agenty-0629j\Usersasafe.agentmuxagentsagenty-0629jagentmux`) — shortening
+`agenty-0629j\Usersuser.agentmuxagentsagenty-0629jagentmux`) — shortening
 that provisioning convention, or having `cef-dll-sys`'s fork request even
 shorter object-file names/hashes (Option B from the now-superseded
 mitigation section above would coincidentally have helped here too, by

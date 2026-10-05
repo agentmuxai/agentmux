@@ -1,6 +1,6 @@
 # Report: CEF build has no H.264/AAC support — a whole-app gap, not a Media-pane bug
 
-**Status:** Confirmed root cause, no fix implemented. Filed as a tracked
+**Status:** analysis — confirmed root cause, no fix implemented. Filed as a tracked
 follow-up so it doesn't get rediscovered from scratch next time a pane
 needs to play video.
 **Author:** Agent2
@@ -10,7 +10,7 @@ discovered while testing MP4 playback in the new Media pane).
 
 ## Finding
 
-Playing `C:\Users\asafe\Videos\yey.mp4` (a normal H.264/AAC MP4) in the
+Playing `C:\Users\user\Videos\clip.mp4` (a normal H.264/AAC MP4) in the
 Media pane failed with:
 
 ```

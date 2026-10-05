@@ -40,7 +40,7 @@ UI surface, not the existing static placeholder text (§3).
 ## 1. What Claude Code's native feature actually is (ground truth)
 
 Investigated by inspecting the installed CLI binary (`claude` v2.1.112,
-`/c/Users/asafe/.local/bin/claude`) directly for the literal strings its
+`/c/Users/user/.local/bin/claude`) directly for the literal strings its
 compiled bundle contains — not blog posts, which turned out to be
 unreliable for this (§1.3).
 

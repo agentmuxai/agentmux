@@ -175,7 +175,7 @@ repository access covers it (org settings → GitHub Apps) before Day 1 — its 
 
 | Platform | Owner (did 152) | Machine | GN args | Watch for |
 |---|---|---|---|---|
-| Windows x86_64 | Korp | narko | `args-windows.gn` | `use_static_angle=false`, tracer off, exclude `installer_tests`. **Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs** (open question 2). The 152 checkout at `C:\Users\asafe\cef-build` can be synced forward instead of recloned, which may need less — confirm before starting |
+| Windows x86_64 | Korp | narko | `args-windows.gn` | `use_static_angle=false`, tracer off, exclude `installer_tests`. **Disk: narko has 82 GB free, about 40 GB short of the ≥120 GB a cold build needs** (open question 2). The 152 checkout at `C:\Users\user\cef-build` can be synced forward instead of recloned, which may need less — confirm before starting |
 | macOS arm64 | Clare | Clare's Mac | `args-darwin.gn` | keep ANGLE static (no override), `dcheck_always_on=false`, hermetic Xcode pin |
 | Linux x86_64 | Opaz | charlie | `args.gn` | `use_static_angle=false`, keep `libcef.so` **unstripped** (verify-cef-patch reads `.symtab`; corrected 2026-09-29), `-codecs` |
 

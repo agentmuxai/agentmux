@@ -238,7 +238,7 @@ mod tests {
     fn find_largest_session_for_working_dir_locates_the_real_transcript() {
         let tmp = tempfile::tempdir().unwrap();
         let config_dir = tmp.path();
-        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n";
+        let working_dir = r"C:\Users\user\.agentmux\agents\agentx-0623n";
         let slug = project_dir_name(working_dir);
         let dir = config_dir.join("projects").join(&slug);
         fs::create_dir_all(&dir).unwrap();
@@ -255,7 +255,7 @@ mod tests {
         // An unset CLAUDE_CONFIG_DIR (empty string) must not be treated as
         // "search the current directory" — nothing to recover from.
         assert_eq!(
-            find_largest_session_for_working_dir("", r"C:\Users\asafe\.agentmux\agents\agentx-0623n"),
+            find_largest_session_for_working_dir("", r"C:\Users\user\.agentmux\agents\agentx-0623n"),
             None
         );
     }
@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(
             find_largest_session_for_working_dir(
                 &tmp.path().to_string_lossy(),
-                r"C:\Users\asafe\.agentmux\agents\nobody-here",
+                r"C:\Users\user\.agentmux\agents\nobody-here",
             ),
             None
         );

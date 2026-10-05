@@ -868,7 +868,7 @@ fn retry_after_resume_failure_clears_inner_session_id_even_when_poison_resume_ha
 fn find_recovery_session_id_recovers_the_largest_on_disk_session() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
-    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let working_dir = r"C:\Users\user\.agentmux\agents\agentx-0623n".to_string();
     let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
@@ -960,7 +960,7 @@ fn find_recovery_session_id_refuses_an_already_poisoned_candidate() {
 fn retry_after_resume_failure_hydrates_inner_session_id_from_the_recovered_session() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
-    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let working_dir = r"C:\Users\user\.agentmux\agents\agentx-0623n".to_string();
     let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
@@ -1010,7 +1010,7 @@ fn retry_after_resume_failure_hydrates_inner_session_id_from_the_recovered_sessi
 fn retry_after_resume_failure_with_no_entries_adopts_the_recovered_session_without_launching() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
-    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let working_dir = r"C:\Users\user\.agentmux\agents\agentx-0623n".to_string();
     let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
@@ -1095,7 +1095,7 @@ fn retry_after_resume_failure_with_no_entries_and_no_recovery_candidate_settles_
 fn retry_after_resume_failure_with_no_entries_hands_a_queued_prompt_and_its_candidate_to_the_leftover_respawn() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
-    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let working_dir = r"C:\Users\user\.agentmux\agents\agentx-0623n".to_string();
     let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
@@ -2354,7 +2354,7 @@ fn retry_after_resume_failure_emits_fresh_outcome_immediately_when_no_recovery_f
 fn retry_after_resume_failure_does_not_emit_an_outcome_yet_when_recovery_is_found() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
-    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let working_dir = r"C:\Users\user\.agentmux\agents\agentx-0623n".to_string();
     let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();
@@ -2457,7 +2457,7 @@ fn retry_after_resume_failure_publishes_retrying_then_resolved_when_no_recovery_
 fn retry_after_resume_failure_only_publishes_retrying_when_recovery_is_found() {
     let tmp = tempfile::tempdir().unwrap();
     let config_dir = tmp.path().to_string_lossy().to_string();
-    let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+    let working_dir = r"C:\Users\user\.agentmux\agents\agentx-0623n".to_string();
     let slug = crate::backend::claude_layout::project_dir_name(&working_dir);
     let dir = tmp.path().join("projects").join(&slug);
     std::fs::create_dir_all(&dir).unwrap();

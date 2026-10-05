@@ -101,7 +101,7 @@ ls -la --time-style=+%F_%R ~/.agentmux/channels/<channel>/identities/
 
 # 2. the project dir is the agent cwd with / and . mangled to -
 ls -t ~/.agentmux/shared/identities/<old-uuid>/claude/projects/\
-C--Users-asafe--agentmux-agents-agent4-0831d/
+C--Users-user--agentmux-agents-agent4-0831d/
 
 # 3. biggest/newest .jsonl is the orphaned session; parse, don't cat (13.7 MB)
 ```

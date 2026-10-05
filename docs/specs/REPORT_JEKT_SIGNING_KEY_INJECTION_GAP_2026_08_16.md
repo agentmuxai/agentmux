@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-16
 **Author:** Clamk (agent, `~/.agentmux/agents/clamk-0612a`)
-**Status:** Root cause confirmed with direct evidence (live `.mcp.json`, server logs, code); fix implemented,
+**Status:** analysis — root cause confirmed with direct evidence (live `.mcp.json`, server logs, code); fix implemented,
 tested, and included in this same change (see §4). Not yet merged.
 **Ground truth basis:** `agentmuxai/agentmux` `origin/main` at `72aefad4d` / worktree branch
 `clamk/agent-identity-history-protocol`. Live evidence gathered directly from this machine's own running
@@ -25,7 +25,7 @@ real, currently-live gap, not a stale/outdated build.
 ### 1.1 This agent's actual `.mcp.json` has no signing keys
 
 ```
-$ cat C:/Users/asafe/.agentmux/agents/clamk-0612a/.mcp.json
+$ cat C:/Users/user/.agentmux/agents/clamk-0612a/.mcp.json
 {
   "mcpServers": {
     "agentmux": {
@@ -45,7 +45,7 @@ No `AGENTMUX_JEKT_KEY`, no `AGENTMUX_LAN_KEY` — only `AGENTMUX_AGENT_ID`.
 ### 1.2 That file is current, not stale
 
 ```
-$ stat C:/Users/asafe/.agentmux/agents/clamk-0612a/.mcp.json
+$ stat C:/Users/user/.agentmux/agents/clamk-0612a/.mcp.json
 Modify: 2026-08-16 05:20:53.262266900 -0700   (= 2026-08-16T12:20:53Z)
 ```
 
@@ -77,7 +77,7 @@ explanation.
 last modified:
 
 ```json
-{"timestamp":"2026-08-16T12:20:53.256237Z","level":"INFO","fields":{"message":"WriteAgentConfig","working_dir":"C:\\Users\\asafe\\.agentmux\\agents\\clamk-0612a","file_count":9,"auto_allocate":false},"target":"agentmux_srv::server::editor_handlers"}
+{"timestamp":"2026-08-16T12:20:53.256237Z","level":"INFO","fields":{"message":"WriteAgentConfig","working_dir":"C:\\Users\\user\\.agentmux\\agents\\clamk-0612a","file_count":9,"auto_allocate":false},"target":"agentmux_srv::server::editor_handlers"}
 ```
 
 Searching the entire log file for the strings that would appear if `agent.open`'s Rust-side key injection had

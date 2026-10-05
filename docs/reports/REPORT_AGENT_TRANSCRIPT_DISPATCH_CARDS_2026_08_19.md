@@ -215,4 +215,4 @@ Modified:
   frontend/app/view/agent/styles/_document-nodes.scss
 ```
 
-Plan file: `C:\Users\asafe\.claude\plans\fluttering-strolling-sutherland.md`
+Plan file: `C:\Users\user\.claude\plans\fluttering-strolling-sutherland.md`
