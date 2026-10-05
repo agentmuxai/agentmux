@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.59.10 — 2026-10-05
+
+- feat(swarm): a Stats button in the Swarm toolbar opens a panel with the outcomes of AgentMux's own model calls (titles, names, suggestions); the unused Groups picker and the Instance panel's Titles row are removed
+- test(srv): the rest of the subagent watcher tests remove their temp folders even when a test fails
+- feat(agent-pane): scrolling past a preview's edge skids a few wheel notches first, with a line on that edge, so a preview under the pointer can't be scrolled past by accident; tool previews do it even when they fit without a scrollbar
+- feat(remote): every package carries the SSH host helper for all four platforms, so files and durable sessions work on a new host without downloading anything; releases no longer publish it as separate files
+- fix(help): the shortcuts list packs into as many columns as the pane is wide and balances the sections, so there are no blank gaps beside long sections
+- fix(remote): per-connection settings in settings.json (connections.<name>) now take effect, and srv gains the Remotes list, recent connections and per-connection settings writes for the Remotes pane
+- A Remotes pane lists every remote machine (SSH hosts, recent connections, WSL) with its status, platform, helper and sessions; open a terminal or files there, and pin, hide, nickname or colour it.
+- The Armory is split into two panes: Connectors (Accounts, MCP servers) and Knowledge (Global, Personal, Skills, Bundles). Every link opens the right section, saved Armory panes and layout files move over on their own, and the widget bar now pins Agent, Connectors, Knowledge, Swarm, Hangar, Terminal, Editor, Browser, Messengers, Sysinfo and Help by default.
+- Error messages, the spawn-refusal text and the Global Memory tool descriptions agents read now point to Connectors → Accounts and the Knowledge pane instead of the Armory; the bundle file dialog says "Agent bundle".
+- AgentMux now asks before installing its helper on an SSH host (Install, Always, Not now, Never), with a global default in Settings → Terminal and a per-host one in Remotes; Remotes can also remove the helper from a host.
+- Bundles now export as Agent Bundle Format v0.3: the manifest is bundle.json, its schema is agent-bundle/v0.3, and who a bundle was made for is an optional suggestedFor hint. Every older .abf file (armory.json, v0.1 and v0.2) still imports.
+- Remotes show everywhere a pane can be remote: the connection picker lists them in the same sections with nicknames and colours, plus Manage remotes…; a remote pane's chip shows its nickname and colour, with a colour stripe along the pane's top; Hangar's Remote places follow the same list.
+- Bundles no longer carry a provider: a bundle can be bound to any agent, and the agent's own provider decides which CLI it runs. An agent's provider is now fixed once set (fork the agent to run it on another provider), and an upgrade migration first gives every agent the provider it already runs with, so no agent changes CLI.
+- Remotes can add an SSH host: Add remote appends a Host block to ~/.ssh/config (after showing you exactly what it writes, keeping a copy of the file, and refusing an alias it already has); each SSH host can be tested, and opened in your ssh config.
+- Remotes lists the agents you have always allowed on each SSH host, with Revoke to make an agent ask again.
+
 ## 0.59.9 — 2026-10-04
 
 - fix(statusbar): the left group no longer wraps onto extra rows; the sideways-shift fix stays through overflow: clip
