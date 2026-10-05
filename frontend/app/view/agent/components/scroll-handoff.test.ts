@@ -77,9 +77,11 @@ afterEach(() => {
 
 // SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2 and
 // SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.3.
+const N = SKID_NOTCHES;
+
 describe("attachScrollHandoff", () => {
-    it("skids two notches", () => {
-        expect(SKID_NOTCHES).toBe(2);
+    it("skids three notches (the tuned value; the other tests follow SKID_NOTCHES)", () => {
+        expect(SKID_NOTCHES).toBe(3);
     });
 
     it("at the bottom, the first notches skid and the next go to the pane", () => {
@@ -145,22 +147,20 @@ describe("attachScrollHandoff", () => {
         const fits = { scrollTop: 0, clientHeight: 200, scrollHeight: 200 };
         const s = setupWith({ skidWhenFits: true }, fits);
         // a box with no overflow cancels the absorbed notches itself
-        expect(s.wheel(s.box, 120)).toBe(true);
-        expect(s.wheel(s.box, 120)).toBe(true);
+        for (let i = 0; i < N; i++) expect(s.wheel(s.box, 120)).toBe(true);
         expect(s.pane()).toBe(1000);
         expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(true);
         s.wheel(s.box, 120);
         expect(s.pane()).toBe(1120);
-        expect(s.wheel(s.box, -120)).toBe(true); // reversing is a new arrival
-        expect(s.wheel(s.box, -120)).toBe(true);
+        for (let i = 0; i < N; i++) expect(s.wheel(s.box, -120)).toBe(true); // reversing is a new arrival
         expect(s.pane()).toBe(1120);
         s.wheel(s.box, -120);
         expect(s.pane()).toBe(1000);
     });
 
-    it("a coalesced three-notch event skids two notches and forwards the third", () => {
+    it("a coalesced event skids the first notches and forwards the one beyond", () => {
         const s = setup(atBottom);
-        expect(s.wheel(s.box, 300, { wheelDeltaY: -360 })).toBe(true);
+        expect(s.wheel(s.box, (N + 1) * 100, { wheelDeltaY: -(N + 1) * 120 })).toBe(true);
         expect(s.pane()).toBe(1100);
         expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(true);
     });
@@ -168,7 +168,7 @@ describe("attachScrollHandoff", () => {
     it("a coalesced event can finish a skid that a single notch started", () => {
         const s = setup(atBottom);
         s.wheel(s.box, 120);
-        expect(s.wheel(s.box, 200, { wheelDeltaY: -240 })).toBe(true);
+        expect(s.wheel(s.box, N * 100, { wheelDeltaY: -N * 120 })).toBe(true);
         expect(s.pane()).toBe(1100);
     });
 
@@ -260,9 +260,8 @@ describe("nextSkid", () => {
         s = SKID_IDLE;
     });
 
-    it("arrival at the edge: absorb two notches, then forward", () => {
-        expect(step()).toEqual({ kind: "absorb" });
-        expect(step()).toEqual({ kind: "absorb" });
+    it("arrival at the edge: absorb SKID_NOTCHES notches, then forward", () => {
+        for (let i = 0; i < N; i++) expect(step()).toEqual({ kind: "absorb" });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
     });
@@ -270,22 +269,19 @@ describe("nextSkid", () => {
     it("off the edge is native and starts the skid over", () => {
         step();
         expect(step({ atEdge: false })).toEqual({ kind: "native" });
-        expect(step()).toEqual({ kind: "absorb" });
-        expect(step()).toEqual({ kind: "absorb" });
+        for (let i = 0; i < N; i++) expect(step()).toEqual({ kind: "absorb" });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
     });
 
     it("a different box or direction is an arrival", () => {
-        step();
-        step();
-        step();
+        for (let i = 0; i <= N; i++) step();
         expect(step({ box: other })).toEqual({ kind: "absorb" });
         expect(step({ box: other, dir: -1, deltaY: -100 })).toEqual({ kind: "absorb" });
         expect(s.absorbed).toBe(1);
     });
 
     it("forwards the notches beyond the skid, and says it absorbed some", () => {
-        expect(step({ notches: 3, deltaY: 300 })).toEqual({ kind: "forward", deltaY: 100, absorbed: true });
+        expect(step({ notches: N + 1, deltaY: (N + 1) * 100 })).toEqual({ kind: "forward", deltaY: 100, absorbed: true });
         expect(s.phase).toBe("spent");
         expect(step({ notches: 2, deltaY: 200 })).toEqual({ kind: "forward", deltaY: 200 });
     });
@@ -302,8 +298,7 @@ describe("nextSkid", () => {
 
     it("a box that starts overflowing after forwarding still skids", () => {
         expect(step({ canSkid: false })).toEqual({ kind: "forward", deltaY: 100 });
-        expect(step()).toEqual({ kind: "absorb" });
-        expect(step()).toEqual({ kind: "absorb" });
+        for (let i = 0; i < N; i++) expect(step()).toEqual({ kind: "absorb" });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
     });
 });

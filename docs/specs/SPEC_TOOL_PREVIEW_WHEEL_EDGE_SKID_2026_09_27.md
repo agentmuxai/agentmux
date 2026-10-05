@@ -1,4 +1,4 @@
-# SPEC: Wheel edge skid — a nested preview absorbs two wheel notches before the pane scrolls
+# SPEC: Wheel edge skid — a nested preview absorbs a few wheel notches before the pane scrolls
 
 **Status:** implemented — #4335 (2026-10-04), in `components/scroll-handoff.ts`
 **Date:** 2026-09-27, revised 2026-10-04 against main before implementing (see §0)
@@ -18,8 +18,8 @@ already replaced the tool preview's own wheel listener with one shared hand-off,
 conversation. So the draft's plan for a new controller (`wheelHandoff.ts`) and re-plumbing
 four boxes was out of date. §3–§7 are rewritten against main: the skid goes inside
 `attachScrollHandoff`, and no call site changes. §1 and §2 stand. The operator's answers
-to the open questions are in §8, including two later changes: two notches instead of one, and tool previews skid even
-when their content fits.
+to the open questions are in §8, including two later changes: a skid of more than one
+notch (tuned by feel, `SKID_NOTCHES`), and tool previews skid even when their content fits.
 
 ## 1. The problem
 
@@ -73,8 +73,8 @@ all-or-nothing, with no "one notch of resistance". A skid can only be done in JS
    operator asked for it in **notches**, and that's the better fit for a notched mouse
    wheel. A notch is a deliberate unit the user feels. Time-based latching makes a fast
    spin stop dead at every preview until the user pauses, which over a long conversation
-   full of previews would be worse. So: **a fixed number of notches** (one at first, two
-   after trying it, §8) for a notched wheel, and the browsers' gesture rule for a
+   full of previews would be worse. So: **a fixed number of notches** (`SKID_NOTCHES`,
+   tuned by trying it, §8) for a notched wheel, and the browsers' gesture rule for a
    trackpad, which has no notches (§4.3).
 3. Chromium's async wheel events make every event after the first in a sequence
    non-cancelable. So for a box that overflows, the design doesn't depend on
@@ -161,10 +161,10 @@ Ignore, without touching state: `ctrlKey` (zoom) and `deltaY === 0` (a horizonta
    - `spent`: forward `deltaY` to the pane (`pane.scrollTop += deltaY`, with
      `preventDefault()`), exactly as before.
    - **Notched input** (`wheelDeltaY` a non-zero multiple of 120, or `deltaMode` line or
-     page): the skid is `SKID_NOTCHES` (two) notches. Absorb notches until two have been
-     absorbed in this skid. If an event coalesced *n* notches and only *k* remain, absorb
-     *k* and forward `deltaY × (n−k)/n` (the edge still shows its line). Once two are
-     absorbed, `spent`.
+     page): the skid is `SKID_NOTCHES` notches (currently three). Absorb notches until that
+     many have been absorbed in this skid. If an event coalesced *n* notches and only *k*
+     remain, absorb *k* and forward `deltaY × (n−k)/n` (the edge still shows its line).
+     Once the skid is used up, `spent`.
    - **Continuous input** (trackpad, high-resolution wheel, or no `wheelDeltaY`): absorb,
      and stay `skidding` until an event arrives `SKID_GESTURE_IDLE_MS` (250 ms) or more
      after the previous one; that one is forwarded, then `spent`.
@@ -178,8 +178,8 @@ absorbed notch is cancelled with `preventDefault()`.
 ### 4.4 What the user feels
 
 With a notched wheel and the pointer still: the pane scrolls, a preview slides under the
-pointer, notches scroll the preview to its edge, the next two notches are the skid, and
-the one after scrolls the pane. The same happens downward. Reversing direction re-arms.
+pointer, notches scroll the preview to its edge, the next `SKID_NOTCHES` notches are the skid,
+and the one after scrolls the pane. The same happens downward. Reversing direction re-arms.
 
 **The edge line (decided: on).** While a box absorbs, the edge it's pinned against shows
 a 2 px accent line (`box-shadow: inset`, so nothing moves). It stays on for the whole
@@ -248,12 +248,12 @@ rely on. A real mouse and a precision touchpad each still need one manual pass.
 The operator accepted the recommendations:
 
 1. **The edge flash during a skid:** on (§4.4).
-2. **Skid length:** a constant, not a setting, until someone asks for one. First one
-   notch; after trying it the operator raised it to **two** (`SKID_NOTCHES`), with the edge
-   line kept on for the whole skid rather than flashing once per notch.
+2. **Skid length:** a constant (`SKID_NOTCHES`), not a setting, until someone asks for
+   one, tuned by trying it: one notch at first, then two (with the edge line kept on for
+   the whole skid rather than flashing once per notch), then **three** (2026-10-05).
 3. **Scope:** every capped box in the conversation, which on main is the four boxes of §3,
    all through the one helper.
 4. **Tool previews without a scrollbar skid too** (2026-10-05, after trying it). A tool
-   preview whose content fits still holds the first two notches, with the edge line, before
+   preview whose content fits still holds the skid, with the edge line, before
    the pane moves (`skidWhenFits`). Jekt and context-delivery boxes that fit keep handing
    notches straight on.

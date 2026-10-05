@@ -5,7 +5,7 @@
  * Scroll hand-off from a capped preview box to the agent pane
  * (SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md Phase 2; shared by every
  * capped transcript box per SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2),
- * with a two-notch "skid" at the box's edge
+ * with a short "skid" (SKID_NOTCHES notches) at the box's edge
  * (SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md).
  *
  * Native scroll chaining latches a wheel gesture to the inner box, so reaching
@@ -29,7 +29,7 @@
  *  frame, so a quarter second of silence means the gesture ended. */
 export const SKID_GESTURE_IDLE_MS = 250;
 /** How many notches of a notched wheel the edge absorbs before the pane moves. */
-export const SKID_NOTCHES = 2;
+export const SKID_NOTCHES = 3;
 /** How long the edge line stays on after the last absorbed notch, so it reads
  *  as one indicator for the whole skid. */
 export const SKID_FLASH_MS = 300;
