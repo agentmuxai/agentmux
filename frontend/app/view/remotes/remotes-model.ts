@@ -194,9 +194,10 @@ export class RemotesViewModel {
 
     /** Remove the helper from the host; srv asks the user first, naming the sessions that end. */
     async removeHelper(name: string): Promise<void> {
-        // The question waits up to two minutes for the user, and the removal runs over ssh.
+        // srv lists the sessions over ssh, asks (up to two minutes), then
+        // removes over ssh; each ssh may wait on a prompt in the window.
         try {
-            await RpcApi.RemoteHelperRemoveCommand(TabRpcClient, { connection: name, blockid: this.blockId }, { timeout: 240_000 });
+            await RpcApi.RemoteHelperRemoveCommand(TabRpcClient, { connection: name, blockid: this.blockId }, { timeout: 450_000 });
         } catch (e) {
             // "Keep It" is the user's answer, not a failure.
             if (!String(e instanceof Error ? e.message : e).includes("kept:")) throw e;

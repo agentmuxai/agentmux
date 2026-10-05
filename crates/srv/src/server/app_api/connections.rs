@@ -279,7 +279,7 @@ async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<
     }
     let mut host = HostSsh::for_connection(&name)?;
     let _grant = (!block.is_empty()).then(|| host.ask_user_in(block, &name, &state.auth_key)).flatten();
-    let out = host.run("true", None, std::time::Duration::from_secs(60)).await;
+    let out = host.run("true", None, SSH_WITH_PROMPTS).await;
     Ok(match out.and_then(|o| o.ok()) {
         Ok(_) => RemoteTestResult { ok: true, message: String::new() },
         Err(message) => RemoteTestResult { ok: false, message },
@@ -322,7 +322,7 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
     let mut host = HostSsh::for_connection(&name)?;
     let _grant = host.ask_user_in(block, &name, &state.auth_key);
     let out = host
-        .run(&helper_install::remove_command(), None, std::time::Duration::from_secs(60))
+        .run(&helper_install::remove_command(), None, SSH_WITH_PROMPTS)
         .await?
         .ok()?;
     if out.trim() != "ok" {
@@ -511,6 +511,10 @@ pub(crate) fn one_line(text: &str, max: usize) -> String {
 
 /// How long the user has to answer a consent or askpass dialog.
 const DIALOG_TIMEOUT_MS: u64 = 120_000;
+
+/// How long an ssh run whose prompts go to the approval window may take: the
+/// dialog's own wait, and some to spare.
+const SSH_WITH_PROMPTS: std::time::Duration = std::time::Duration::from_millis(DIALOG_TIMEOUT_MS + 30_000);
 
 /// The user's answer to [`ask_user`]. `answered` is false when the window was
 /// closed, timed out, or could not be opened.
