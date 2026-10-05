@@ -1,0 +1,66 @@
+name: ReAgent review log guard
+
+# Runs after each "ReAgent review" run and scans its logs for anything that
+# must never be public: credential shapes, email addresses, AWS account ids
+# and ARNs. On a hit it deletes that run's logs and fails, naming only the
+# pattern, never the text. The review job already prints only fixed lines;
+# this is the backstop.
+
+on:
+  workflow_run:
+    workflows: ["ReAgent review"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write   # read the run's logs, and delete them on a hit
+    steps:
+      - name: Scan the run's logs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          dir=$(mktemp -d)
+          if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/logs" > "$dir/logs.zip" 2>/dev/null; then
+            echo "no logs for run $RUN_ID (skipped run)"; exit 0
+          fi
+          unzip -q -o "$dir/logs.zip" -d "$dir/logs" || { echo "no logs"; exit 0; }
+          python3 - "$dir/logs" <<'EOF'
+          import os, re, sys
+          patterns = {
+              'github-token': r'\b(gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\b',
+              'anthropic-key': r'sk-ant-[A-Za-z0-9_-]{20,}',
+              'aws-key-id': r'\b(AKIA|ASIA)[0-9A-Z]{16}\b',
+              'private-key': r'-----BEGIN [A-Z ]*PRIVATE KEY-----',
+              'jwt': r'\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}',
+              'email': r'\b[A-Za-z0-9._%+-]+@(?!users\.noreply\.github\.com\b)[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b',
+              'aws-arn': r'\barn:aws:[a-z0-9-]+:[a-z0-9-]*:\d{12}:',
+              'aws-account-host': r'\b\d{12}\.dkr\.ecr\.',
+          }
+          hits = set()
+          for root, _, files in os.walk(sys.argv[1]):
+              for name in files:
+                  text = open(os.path.join(root, name), encoding='utf-8', errors='replace').read()
+                  hits.update(k for k, rx in patterns.items() if re.search(rx, text))
+          if hits:
+              print('found: ' + ', '.join(sorted(hits)))
+              open(os.environ['GITHUB_ENV'], 'a').write('LOG_GUARD_HIT=1\n')
+          else:
+              print('clean')
+          EOF
+
+      - name: Delete the run's logs on a hit
+        if: env.LOG_GUARD_HIT == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/logs"
+          echo "::error::ReAgent review run $RUN_ID printed something that must not be public; its logs are deleted."
+          exit 1
