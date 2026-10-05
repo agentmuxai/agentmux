@@ -132,12 +132,7 @@ pub fn recent_in(config_home: &Path) -> Vec<RecentEntry> {
     recent
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+use agentmux_common::time::now_ms_u64 as now_ms;
 
 /// [`record_recent_in`] under this instance's config dir, now. Best effort.
 pub fn record_recent(connection: &str) -> bool {
