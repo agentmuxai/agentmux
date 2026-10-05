@@ -1,6 +1,6 @@
 # SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent
 
-**Status:** active — shipped: Phase A (the v0.3 format), #4346. Remaining: Phase B (bind to any agent, §3)
+**Status:** implemented — Phase A (the v0.3 format), #4346; Phase B (the bundle carries no harness, the agent owns its provider), #4352. Per-harness composition is left to its own design (§5)
 **Date:** 2026-10-05
 **Author:** Camper (agent), at operator request
 **Related:** `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md` §4.6–4.7 (the
