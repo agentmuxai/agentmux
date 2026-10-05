@@ -228,13 +228,6 @@ jobs:
             --keychain   "$KEYCHAIN_PATH" \
             --no-validate
 
-      # ── Build + sign + notarize ────────────────────────────────────────────
-      # RELEASE_CHANNEL=stable is REQUIRED here as of
-      # docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md: `task
-      # package:macos` (no override) now bakes a per-build LOCAL channel, same
-      # as Windows/Linux. Without this, every release DMG would ship isolated
-      # from the user's real (stable) data dir. Matches build-linux.yml, which
-      # calls its script directly with the same override for the same reason.
       # ── Remote helpers ─────────────────────────────────────────────────────
       # Every package carries agentmux-remote for all four SSH host platforms
       # (scripts/build-remote-helpers.sh, called by the packager; spec
@@ -252,6 +245,13 @@ jobs:
           # Rosetta runs the Intel helper in check-remote-helpers.sh.
           softwareupdate --install-rosetta --agree-to-license || true
 
+      # ── Build + sign + notarize ────────────────────────────────────────────
+      # RELEASE_CHANNEL=stable is REQUIRED here as of
+      # docs/specs/SPEC_MACOS_DMG_PER_BUILD_CHANNEL_2026_08_24.md: `task
+      # package:macos` (no override) now bakes a per-build LOCAL channel, same
+      # as Windows/Linux. Without this, every release DMG would ship isolated
+      # from the user's real (stable) data dir. Matches build-linux.yml, which
+      # calls its script directly with the same override for the same reason.
       - name: Build, sign, and notarize DMG (RELEASE_CHANNEL=stable)
         run: |
           mkdir -p "$OUT"

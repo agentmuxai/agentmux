@@ -244,14 +244,6 @@ jobs:
       - name: Install rpmbuild
         run: sudo apt-get install -y --no-install-recommends rpm
 
-      # ── Build all Linux release formats from ONE compile ───────────────────
-      # package-linux.sh's --format= flag accepts a comma-separated list and
-      # runs the frontend/backend/host/schema/bundle build exactly once,
-      # then packages each format from that same build output — see that
-      # script's header comment. Do not call it once per format here; that
-      # would silently quadruple the compile time (and the CEF download/cache
-      # cost above is per-job, not per-format, so this is the only place
-      # that duplication could sneak back in).
       # ── Remote helpers ─────────────────────────────────────────────────────
       # Every package carries agentmux-remote for all four SSH host platforms
       # (scripts/build-remote-helpers.sh, called by the packager; spec
@@ -269,6 +261,14 @@ jobs:
           # qemu runs the arm64 helper in check-remote-helpers.sh.
           sudo apt-get install -y --no-install-recommends qemu-user-static
 
+      # ── Build all Linux release formats from ONE compile ───────────────────
+      # package-linux.sh's --format= flag accepts a comma-separated list and
+      # runs the frontend/backend/host/schema/bundle build exactly once,
+      # then packages each format from that same build output — see that
+      # script's header comment. Do not call it once per format here; that
+      # would silently quadruple the compile time (and the CEF download/cache
+      # cost above is per-job, not per-format, so this is the only place
+      # that duplication could sneak back in).
       - name: Build AppImage + deb + rpm + tarball
         run: |
           mkdir -p "$OUT"
