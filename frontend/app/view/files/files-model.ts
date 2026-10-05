@@ -27,6 +27,8 @@ import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
 import { isSshConnection } from "@/app/view/term/termSettingsMenu";
 import { isValidAgentColor, pickAgentColor } from "@/app/view/agent/agent-color";
+import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
+import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";
 import { batch, createMemo, createSignal } from "solid-js";
 import { baseName, isWithin, joinPath, normalizePath, parentOf, samePath } from "./files-path";
 import { EMPTY_SELECTION, pruneSelection, type Selection } from "./files-selection";
@@ -75,6 +77,24 @@ type UndoEntry =
     | { kind: "trash"; paths: string[] }
     | { kind: "rename"; from: string; to: string }
     | { kind: "create"; path: string };
+
+/** An SSH host in the Remote section of Places. */
+export interface HangarRemote {
+    /** The connection name. */
+    name: string;
+    /** Its nickname, else the name. */
+    label: string;
+    color?: string;
+}
+
+/** The Remote section's hosts: SSH remotes in the Remotes pane's order
+ *  (pinned, SSH hosts, recent), hidden ones left out. */
+export function hangarRemotes(records: RemoteRecord[]): HangarRemote[] {
+    return groupRemotes(records.filter((r) => r.kind === "ssh"))
+        .filter((g) => g.section !== "hidden")
+        .flatMap((g) => g.records)
+        .map((r) => ({ name: r.name, label: displayName(r), color: remoteColor(r) }));
+}
 
 export interface StatusMessage {
     text: string;
@@ -182,8 +202,8 @@ export class FilesModel {
     readonly connection: () => string;
     private readonly setConnection: (c: string) => void;
     /** SSH hosts for the Remote section of Places. */
-    readonly remotes: () => string[];
-    private readonly setRemotes: (r: string[]) => void;
+    readonly remotes: () => HangarRemote[];
+    private readonly setRemotes: (r: HangarRemote[]) => void;
     readonly agents: () => AgentPlace[];
     /** What git says about the folder shown: markers per entry, the branch. */
     readonly git: () => FsGitStatus | null;
@@ -245,7 +265,7 @@ export class FilesModel {
         [this.places, this.setPlaces] = createSignal<FsPlace[]>([]);
         const conn = ctx.meta()?.[META_CONN];
         [this.connection, this.setConnection] = createSignal(isSshConnection(conn) ? String(conn).trim() : "");
-        [this.remotes, this.setRemotes] = createSignal<string[]>([]);
+        [this.remotes, this.setRemotes] = createSignal<HangarRemote[]>([]);
         [this.agents, this.setAgents] = createSignal<AgentPlace[]>([]);
         [this.git, this.setGit] = createSignal<FsGitStatus | null>(null);
         this.gitStateOf = createMemo(() => new Map((this.git()?.entries ?? []).map((e) => [e.name, e.state])));
@@ -354,12 +374,13 @@ export class FilesModel {
         }
     }
 
-    /** The user's SSH hosts (ssh config and those used this session), for
-     *  the Remote section of Places. */
+    /** The SSH hosts in Remotes (pinned, then ssh config and settings, then
+     *  recent; not hidden), with their nicknames and colours, for the Remote
+     *  section of Places (SPEC_REMOTES_PANE_2026_10_05.md §4.7). */
     private async loadRemotes(): Promise<void> {
         try {
-            const names = await RpcApi.ConnListCommand(TabRpcClient, { timeout: 5000 });
-            if (!this.disposed) this.setRemotes((names ?? []).filter((n) => isSshConnection(n)));
+            const records = await RpcApi.RemotesListCommand(TabRpcClient, { timeout: 5000 });
+            if (!this.disposed) this.setRemotes(hangarRemotes(records ?? []));
         } catch {
             // No Remote section.
         }

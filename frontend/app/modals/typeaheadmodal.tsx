@@ -38,7 +38,11 @@ const Suggestions = (props: SuggestionsProps) => {
             <div class="typeahead-item-name ellipsis">
                 {item.icon &&
                     renderIcon(item.icon, "iconColor" in item && item.iconColor ? item.iconColor : "inherit")}
+                {"swatchColor" in item && item.swatchColor && (
+                    <span class="typeahead-swatch" style={{ background: item.swatchColor }} />
+                )}
                 {item.label}
+                {"detail" in item && item.detail && <span class="typeahead-detail">{item.detail}</span>}
             </div>
             {"current" in item && item.current && (
                 <i class={clsx(makeIconClass("check", false), "typeahead-current-checkbox")} />

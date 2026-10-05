@@ -6,6 +6,9 @@
 
 import type { RemoteHelper, RemotePlatform, RemoteRecord, RemoteStatus } from "@/app/store/rpc-api/remotes";
 
+/** Block meta: the host whose row a Remotes tab should expand, once (open-remotes.ts). */
+export const META_REMOTES_EXPAND = "remotes:expand";
+
 export type RemoteSection = "pinned" | "ssh" | "recent" | "wsl" | "hidden";
 
 export const SECTION_ORDER: RemoteSection[] = ["pinned", "ssh", "recent", "wsl", "hidden"];

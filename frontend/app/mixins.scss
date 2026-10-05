@@ -167,6 +167,15 @@
             overflow: hidden;
         }
 
+        // The remote's colour, set in Remotes (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
+        .connection-swatch {
+            flex: 0 0 auto;
+            width: 4px;
+            height: 12px;
+            margin-right: 4px;
+            border-radius: 2px;
+        }
+
         .connection-name {
             flex: 1 2 auto;
             overflow: hidden;

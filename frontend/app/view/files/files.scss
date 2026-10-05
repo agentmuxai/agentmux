@@ -154,6 +154,25 @@
     color: var(--secondary-text-color);
 }
 
+// The Remote heading's link to Remotes (SPEC_REMOTES_PANE_2026_10_05.md §4.1).
+.files-places-heading-with-action {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.files-places-heading-action {
+    padding: 0 2px;
+    border: none;
+    background: none;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
 .files-place {
     display: flex;
     align-items: center;

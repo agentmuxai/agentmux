@@ -39,6 +39,20 @@
     // pseudo-element overlay rather than a real border, why
     // `--pane-ring-color` is read from an inline custom property, why
     // `z-index`/`will-change` matter once focused).
+    // The remote's colour along the top edge, when the active tab is on a
+    // remote that has one (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
+    &.pane-stack-remote-color::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: var(--pane-remote-color);
+        pointer-events: none;
+        z-index: var(--zindex-block-mask-inner);
+    }
+
     &::after {
         content: "";
         position: absolute;

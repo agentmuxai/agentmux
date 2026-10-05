@@ -5,7 +5,7 @@
 // every remote machine in sections, a row per remote, and an inline detail
 // panel with its actions and settings.
 
-import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import type { RemotesViewModel } from "./remotes-model";
@@ -35,6 +35,11 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
     const groups = createMemo(() => groupRemotes(model.records(), model.filter()));
     const [hiddenOpen, setHiddenOpen] = createSignal(false);
     const [menu, setMenu] = createSignal<MenuState | null>(null);
+    // Another pane's link named a host: show its row.
+    createEffect(() => {
+        const want = model.expandRequest();
+        if (want) model.takeExpandRequest(want);
+    });
 
     const showMenu = (r: RemoteRecord, e: MouseEvent) => {
         e.preventDefault();

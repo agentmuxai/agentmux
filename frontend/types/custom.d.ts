@@ -877,6 +877,10 @@ declare global {
         iconColor: string;
         onSelect?: (_: string) => void;
         current?: boolean;
+        /** A remote's colour (`#rrggbb`), drawn as a swatch before the label. */
+        swatchColor?: string;
+        /** Muted text after the label: a nickname's real name, or the platform. */
+        detail?: string;
     }
 
     interface SuggestionConnectionScope {

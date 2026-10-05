@@ -14,6 +14,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { showHostSessions } from "@/app/view/term/hostSessions";
+import { META_REMOTES_EXPAND } from "./remotes-sections";
 
 /** Changes arrive in bursts (a connect publishes several statuses); one fetch per burst. */
 const REFRESH_DEBOUNCE_MS = 150;
@@ -41,8 +42,17 @@ export class RemotesViewModel {
     private refreshTimer: ReturnType<typeof setTimeout> | null = null;
     private disposed = false;
 
-    constructor(ctx: Pick<PaneTabHostContext, "blockId">, opts: { subscribe?: boolean } = {}) {
+    /** The host another pane asked this tab to show (`remotes:expand`, open-remotes.ts). */
+    readonly expandRequest: Accessor<string>;
+    private readonly setMeta?: PaneTabHostContext["setMeta"];
+
+    constructor(
+        ctx: Pick<PaneTabHostContext, "blockId"> & Partial<Pick<PaneTabHostContext, "meta" | "setMeta">>,
+        opts: { subscribe?: boolean } = {}
+    ) {
         this.blockId = ctx.blockId;
+        this.expandRequest = () => (ctx.meta?.()?.[META_REMOTES_EXPAND] as string | undefined) ?? "";
+        this.setMeta = ctx.setMeta;
         [this.records, this.setRecords] = createSignal<RemoteRecord[]>([]);
         [this.loaded, this.setLoaded] = createSignal(false);
         [this.error, this.setError] = createSignal("");
@@ -81,6 +91,12 @@ export class RemotesViewModel {
             this.refreshTimer = null;
             void this.refresh();
         }, REFRESH_DEBOUNCE_MS);
+    }
+
+    /** Expand the requested host's row and clear the request, so it acts once. */
+    takeExpandRequest(name: string): void {
+        this.setExpanded(name);
+        void this.setMeta?.({ [META_REMOTES_EXPAND]: null });
     }
 
     toggleExpanded(name: string): void {
