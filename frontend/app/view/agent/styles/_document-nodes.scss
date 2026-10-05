@@ -3001,3 +3001,22 @@ $transcript-preview-max-height: calc(50vh / 3);
 .agent-resume-preflight-pending .agent-resume-preflight-sigil {
     color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
 }
+
+// The wheel-edge skid (components/scroll-handoff.ts): while a capped box absorbs
+// the notches that arrive at its edge, that edge shows a 2 px accent line, inset
+// so nothing moves, then fades. SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.4.
+.scroll-handoff-box {
+    transition: box-shadow 150ms ease-out;
+
+    @media (prefers-reduced-motion: reduce) {
+        transition: none;
+    }
+}
+
+.scroll-handoff-skid--top {
+    box-shadow: inset 0 2px 0 0 var(--accent-color);
+}
+
+.scroll-handoff-skid--bottom {
+    box-shadow: inset 0 -2px 0 0 var(--accent-color);
+}

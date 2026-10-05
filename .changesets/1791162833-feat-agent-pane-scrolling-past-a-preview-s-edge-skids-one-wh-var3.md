@@ -1,0 +1,5 @@
+---
+type: minor
+---
+
+feat(agent-pane): scrolling past a preview's edge skids a few wheel notches first, with a line on that edge, so a preview under the pointer can't be scrolled past by accident; tool previews do it even when they fit without a scrollbar

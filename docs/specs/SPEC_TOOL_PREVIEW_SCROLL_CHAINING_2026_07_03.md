@@ -232,3 +232,11 @@ Verified live the same way as the initial repro: synthetic markup matching the r
 (post-fix) DOM shape injected into the running dev window, wheel ticks driven via CDP in
 both directions, `scrollTop` asserted after each tick. Confirmed the outer pane now picks up
 immediately and smoothly at both the top and bottom boundary, with no dead zone.
+
+## Addendum (2026-10-04): a skid of a few notches at the edge
+
+The hand-off (now shared, `components/scroll-handoff.ts`, per
+`SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md` §2) no longer forwards the first wheel
+notches that reach a box's edge: the first few (`SKID_NOTCHES`) are absorbed while a line
+shows on that edge, and the next notch scrolls the pane. A trackpad gesture is absorbed until it pauses.
+See `SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md`.
