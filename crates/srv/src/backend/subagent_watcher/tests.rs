@@ -435,7 +435,7 @@ fn parse_event_type_result_line_without_content_falls_back() {
 
 #[test]
 fn process_jsonl_change_marks_completed_on_result_event() {
-    let dir = std::env::temp_dir().join(format!("amx-subagent-test-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-test-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-sub-a.jsonl");
     std::fs::write(
@@ -460,8 +460,6 @@ fn process_jsonl_change_marks_completed_on_result_event() {
             SubagentEventType::Result { .. }
         ));
     }
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// The subagent's parent-side tool_use_id comes from its `.meta.json`
@@ -469,7 +467,7 @@ fn process_jsonl_change_marks_completed_on_result_event() {
 /// the transcript (the CLI writes them separately).
 #[test]
 fn process_jsonl_change_reads_the_spawning_tool_use_id_from_the_sidecar() {
-    let dir = std::env::temp_dir().join(format!("amx-subagent-test-owner-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-test-owner-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-sub-o.jsonl");
     std::fs::write(
@@ -494,8 +492,6 @@ fn process_jsonl_change_reads_the_spawning_tool_use_id_from_the_sidecar() {
     .unwrap();
     watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
     assert_eq!(tool_use_id(&watcher).as_deref(), Some("toolu_spawn"));
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 fn drain_event_names(rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>) -> Vec<String> {
@@ -515,7 +511,7 @@ fn drain_event_names(rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>) ->
 /// as a re-sent `subagent:spawned` (the dock's sources add rows on that).
 #[test]
 fn a_late_sidecar_with_no_new_transcript_lines_announces_the_id_once() {
-    let dir = std::env::temp_dir().join(format!("amx-subagent-test-late-sidecar-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-test-late-sidecar-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-sub-l.jsonl");
     std::fs::write(
@@ -541,13 +537,11 @@ fn a_late_sidecar_with_no_new_transcript_lines_announces_the_id_once() {
 
     watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
     assert!(drain_event_names(&mut rx).is_empty(), "id already known — nothing to announce");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn process_jsonl_change_stays_active_without_result_event() {
-    let dir = std::env::temp_dir().join(format!("amx-subagent-test-active-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-test-active-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-sub-b.jsonl");
     std::fs::write(
@@ -565,8 +559,6 @@ fn process_jsonl_change_stays_active_without_result_event() {
         let state = session.subagents.get("sub-b").expect("subagent recorded");
         assert_eq!(state.info.status, SubAgentStatus::Active);
     }
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 // ── AgentDispatch (SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17) ──
@@ -576,7 +568,7 @@ fn process_jsonl_change_parses_spawned_from_agent_id_from_parent_uuid() {
     // Empirically null in every real transcript checked (SPEC §9.2), but
     // the field is captured defensively — verify it round-trips when
     // present so a future real occurrence isn't silently dropped.
-    let dir = std::env::temp_dir().join(format!("amx-subagent-parentuuid-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-parentuuid-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-child-a.jsonl");
     std::fs::write(
@@ -595,13 +587,11 @@ fn process_jsonl_change_parses_spawned_from_agent_id_from_parent_uuid() {
         state.info.spawned_from_agent_id.as_deref(),
         Some("parent-turn-uuid-123")
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn process_jsonl_change_leaves_spawned_from_agent_id_none_when_parent_uuid_is_null() {
-    let dir = std::env::temp_dir().join(format!("amx-subagent-parentuuid-null-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-parentuuid-null-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-child-b.jsonl");
     std::fs::write(
@@ -617,13 +607,11 @@ fn process_jsonl_change_leaves_spawned_from_agent_id_none_when_parent_uuid_is_nu
     let session = sessions.values().next().expect("session recorded");
     let state = session.subagents.get("child-b").expect("subagent recorded");
     assert_eq!(state.info.spawned_from_agent_id, None);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn list_dispatches_synthesizes_a_solo_dispatch_for_a_loose_subagent() {
-    let dir = std::env::temp_dir().join(format!("amx-solo-dispatch-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-solo-dispatch-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-solo-a.jsonl");
     std::fs::write(
@@ -648,13 +636,11 @@ fn list_dispatches_synthesizes_a_solo_dispatch_for_a_loose_subagent() {
     let active = watcher.list_active();
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].dispatch_id, "solo:solo-a");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn list_dispatches_marks_solo_dispatch_done_once_its_member_completes() {
-    let dir = std::env::temp_dir().join(format!("amx-solo-dispatch-done-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-solo-dispatch-done-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-solo-b.jsonl");
     std::fs::write(&jsonl_path, "{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
@@ -666,13 +652,11 @@ fn list_dispatches_marks_solo_dispatch_done_once_its_member_completes() {
     assert_eq!(dispatches.len(), 1);
     assert_eq!(dispatches[0].members_done, 1);
     assert_eq!(dispatches[0].status, DispatchStatus::Completed);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
 fn list_dispatches_includes_a_tracked_workflow_dispatch_from_its_journal() {
-    let dir = std::env::temp_dir().join(format!("amx-workflow-dispatch-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-workflow-dispatch-");
     let run_dir = dir.join("subagents").join("workflows").join("wf_xyz789");
     std::fs::create_dir_all(&run_dir).unwrap();
     let journal_path = run_dir.join("journal.jsonl");
@@ -696,8 +680,6 @@ fn list_dispatches_includes_a_tracked_workflow_dispatch_from_its_journal() {
     assert_eq!(d.member_count, 2);
     assert_eq!(d.members_done, 0);
     assert_eq!(d.status, DispatchStatus::Running);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -706,7 +688,7 @@ fn workflow_member_activity_is_buffered_not_broadcast_immediately() {
     // pending_activity, not broadcast per-member — the direct fix for
     // the crash-storm mechanism in
     // docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md.
-    let dir = std::env::temp_dir().join(format!("amx-coalesce-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-coalesce-");
     let run_dir = dir.join("subagents").join("workflows").join("wf_coalesce1");
     std::fs::create_dir_all(&run_dir).unwrap();
     let jsonl_path = run_dir.join("agent-member-a.jsonl");
@@ -732,8 +714,6 @@ fn workflow_member_activity_is_buffered_not_broadcast_immediately() {
         let pending = watcher.pending_activity.lock().unwrap();
         assert!(pending.is_empty(), "flush must drain every dispatch's buffer");
     }
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A —
@@ -745,7 +725,7 @@ fn workflow_member_activity_is_buffered_not_broadcast_immediately() {
 /// gating logic in `process_jsonl_change`, not the async Haiku call.
 #[test]
 fn process_jsonl_change_claims_naming_triggered_once_per_workflow_not_once_per_member() {
-    let dir = std::env::temp_dir().join(format!("amx-naming-wf-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-naming-wf-");
     let run_dir = dir.join("subagents").join("workflows").join("wf_naming1");
     std::fs::create_dir_all(&run_dir).unwrap();
 
@@ -766,8 +746,6 @@ fn process_jsonl_change_claims_naming_triggered_once_per_workflow_not_once_per_m
     // dedup key that keeps the eventual Haiku call to exactly one per
     // dispatch regardless of member count.
     assert!(watcher.naming_triggered_contains("wf_naming1"));
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19 Phase A —
@@ -782,7 +760,7 @@ fn process_jsonl_change_claims_naming_triggered_once_per_workflow_not_once_per_m
 /// Haiku spend instead of WS broadcast volume.
 #[test]
 fn process_jsonl_change_never_claims_naming_triggered_during_backfill_replay() {
-    let dir = std::env::temp_dir().join(format!("amx-naming-backfill-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-naming-backfill-");
     let subagents_dir = dir.join("subagents");
     std::fs::create_dir_all(&subagents_dir).unwrap();
     let jsonl_path = subagents_dir.join("agent-replayed.jsonl");
@@ -799,8 +777,6 @@ fn process_jsonl_change_never_claims_naming_triggered_during_backfill_replay() {
         !watcher.naming_triggered_contains("solo:replayed"),
         "backfill replay (live=false) must never claim naming_triggered"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Issue: agentmuxai/agentmux#2829 — `select_unnamed_backlog`'s core
@@ -989,6 +965,23 @@ fn workflow_id_none_for_stray_file_in_workflows_dir() {
 fn session_id_flat_layout() {
     let path = p("projects/proj-enc/subagents/agent-a1.jsonl");
     assert_eq!(derive_session_id(&path), "proj-enc");
+}
+
+/// Removes its directory when dropped, including when a failed assertion unwinds out of the test.
+/// Unlike a `remove_dir_all` after the assertions, which a panic skips. It does not create the
+/// directory: tests that need it to start absent keep that.
+struct ScratchGuard(std::path::PathBuf);
+
+impl Drop for ScratchGuard {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+/// A uniquely named path under the temp directory, removed when the guard drops.
+fn temp_scratch(prefix: &str) -> (ScratchGuard, std::path::PathBuf) {
+    let path = std::env::temp_dir().join(format!("{prefix}{}", now_millis()));
+    (ScratchGuard(path.clone()), path)
 }
 
 /// A scratch directory under the user's real home, removed when the returned guard drops, which
@@ -1588,8 +1581,7 @@ async fn live_fs_event_with_empty_block_id_bypasses_the_ownership_check() {
 /// not every session the identity has ever run.
 #[test]
 fn scan_session_subagents_only_backfills_the_named_session() {
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-session-test-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-session-test-");
     let target_session = "target-session-uuid";
     let other_session = "other-session-uuid";
 
@@ -1624,14 +1616,11 @@ fn scan_session_subagents_only_backfills_the_named_session() {
     assert_eq!(active.len(), 1, "only the target session's subagent should be backfilled");
     assert_eq!(active[0].agent_id, "wanted");
     assert_eq!(active[0].session_id, target_session);
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 #[test]
 fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-session-unknown-test-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-session-unknown-test-");
     let existing_dir = config_dir
         .join("projects")
         .join("ws-enc")
@@ -1648,8 +1637,6 @@ fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
     watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
 
     assert!(watcher.list_active().is_empty(), "unknown session id must not fall back to scanning everything");
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 // ── subagent:backfill_status (docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md) ──
@@ -1660,8 +1647,7 @@ fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
 /// not to report whether anything was backfilled.
 #[test]
 fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-backfill-status-found-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-backfill-status-found-");
     let target_session = "target-session-uuid";
     let target_dir = config_dir.join("projects").join("ws-enc").join(target_session).join("subagents");
     std::fs::create_dir_all(&target_dir).unwrap();
@@ -1686,8 +1672,6 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
         .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
         .collect();
     assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 /// The other half: even when the session directory is never found at all
@@ -1696,8 +1680,7 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
 /// must not be left permanently gated as "still backfilling."
 #[test]
 fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found() {
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-backfill-status-notfound-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-backfill-status-notfound-");
     std::fs::create_dir_all(config_dir.join("projects")).unwrap();
 
     let watcher = fixture_watcher();
@@ -1715,8 +1698,6 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found(
         .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
         .collect();
     assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 /// A `SubagentWatcher` built via bare `fixture_watcher()` (no `set_broker`
@@ -1725,14 +1706,11 @@ fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found(
 /// posture explicitly, matching `self_ref`'s established convention.
 #[test]
 fn scan_session_subagents_does_not_panic_without_a_broker_wired() {
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-backfill-status-nobroker-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-backfill-status-nobroker-");
     std::fs::create_dir_all(config_dir.join("projects")).unwrap();
 
     let watcher = fixture_watcher();
     watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 /// reagentx P2 (PR #2781, round 2): two overlapping `scan_session_subagents`
@@ -1772,8 +1750,7 @@ fn is_backfill_generation_current_returns_false_once_superseded() {
 
 #[test]
 fn scan_subagents_dir_caps_cold_backfill_to_the_most_recent_files() {
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-backfill-cap-test-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-backfill-cap-test-");
     let session_id = "backfill-cap-session";
     let subagents_dir = config_dir
         .join("projects")
@@ -1810,14 +1787,11 @@ fn scan_subagents_dir_caps_cold_backfill_to_the_most_recent_files() {
             .any(|a| a.agent_id == format!("id{:04}", total - 1)),
         "the newest file must always survive the cap"
     );
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 #[test]
 fn scan_subagents_dir_processes_workflow_journal_even_beyond_the_member_cap() {
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-backfill-journal-test-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-backfill-journal-test-");
     let session_id = "backfill-journal-session";
     let run_dir = config_dir
         .join("projects")
@@ -1854,8 +1828,6 @@ fn scan_subagents_dir_processes_workflow_journal_even_beyond_the_member_cap() {
     let dispatches = watcher.list_dispatches();
     assert_eq!(dispatches.len(), 1, "the run's journal must still be processed");
     assert_eq!(dispatches[0].dispatch_id, "wf_test-run");
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 // ── reconcile_stale_subagents ─────────────────────────────────────────
@@ -2239,7 +2211,7 @@ fn reconcile_stale_subagents_then_late_result_line_ends_completed_not_stuck_aban
     let block_id = format!("recon-late-result-{}", now_millis());
     register_stub_controller(&block_id, false);
 
-    let dir = std::env::temp_dir().join(format!("amx-recon-late-result-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-recon-late-result-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-sub-a.jsonl");
     // Turn ends before the subagent's own Result line has been written —
@@ -2274,8 +2246,6 @@ fn reconcile_stale_subagents_then_late_result_line_ends_completed_not_stuck_aban
 
     let info = watcher.get_info("sub-a").expect("sub-a should still exist");
     assert_eq!(info.status, SubAgentStatus::Completed, "a late-arriving Result line must win over an earlier Abandoned reconciliation, not be stuck behind it");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Dispatch-level counterpart (codex P2 on PR #2677): a Workflow dispatch
@@ -2289,7 +2259,7 @@ fn reconcile_stale_subagents_then_late_result_line_ends_completed_not_stuck_aban
 /// this test is only that it's no longer PERMANENTLY stuck at `Abandoned`.
 #[test]
 fn dispatch_marked_abandoned_is_not_stuck_once_new_member_evidence_lands() {
-    let dir = std::env::temp_dir().join(format!("amx-dispatch-late-evidence-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-dispatch-late-evidence-");
     let run_dir = dir.join("subagents").join("workflows").join("wf_late1");
     std::fs::create_dir_all(&run_dir).unwrap();
     let jsonl_path = run_dir.join("agent-member-a.jsonl");
@@ -2323,8 +2293,6 @@ fn dispatch_marked_abandoned_is_not_stuck_once_new_member_evidence_lands() {
     let dispatches = watcher.list_dispatches();
     let d = dispatches.iter().find(|d| d.dispatch_id == "wf_late1").unwrap();
     assert_ne!(d.status, DispatchStatus::Abandoned, "new member evidence must be allowed to move the dispatch off Abandoned, not leave it permanently stuck");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// End-to-end: a subagent JSONL with no terminal `result` line, backfilled
@@ -2336,8 +2304,7 @@ fn scan_session_subagents_reconciles_an_unterminated_file_to_abandoned_when_pare
     let block_id = format!("recon-scan-{}", now_millis());
     register_stub_controller(&block_id, false);
 
-    let config_dir = std::env::temp_dir()
-        .join(format!("amx-scan-reconcile-test-{}", now_millis()));
+    let (_config_dir_scratch, config_dir) = temp_scratch("amx-scan-reconcile-test-");
     let session_id = "target-session-uuid";
     let target_dir = config_dir
         .join("projects")
@@ -2360,8 +2327,6 @@ fn scan_session_subagents_reconciles_an_unterminated_file_to_abandoned_when_pare
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].agent_id, "crashed");
     assert_eq!(active[0].status, SubAgentStatus::Abandoned);
-
-    std::fs::remove_dir_all(&config_dir).ok();
 }
 
 #[test]
@@ -2372,7 +2337,7 @@ fn session_id_nested_workflow_layout() {
 
 #[test]
 fn journal_counts_incremental() {
-    let dir = std::env::temp_dir().join(format!("amx-journal-test-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-journal-test-");
     std::fs::create_dir_all(&dir).unwrap();
     let journal = dir.join("journal.jsonl");
 
@@ -2392,8 +2357,6 @@ fn journal_counts_incremental() {
     std::fs::write(&journal, existing).unwrap();
     let (started2, results2, _) = read_journal_counts(&journal, offset).unwrap();
     assert_eq!((started2, results2), (2, 0));
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 /// Regression test for a race where the journal writer has flushed a
@@ -2404,7 +2367,7 @@ fn journal_counts_incremental() {
 /// silently losing the record.
 #[test]
 fn journal_counts_skips_unterminated_trailing_line() {
-    let dir = std::env::temp_dir().join(format!("amx-journal-test-partial-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-journal-test-partial-");
     std::fs::create_dir_all(&dir).unwrap();
     let journal = dir.join("journal.jsonl");
 
@@ -2427,8 +2390,6 @@ fn journal_counts_skips_unterminated_trailing_line() {
     std::fs::write(&journal, existing).unwrap();
     let (started2, results2, _) = read_journal_counts(&journal, offset).unwrap();
     assert_eq!((started2, results2), (1, 0), "completed line must be picked up whole, not dropped");
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 // ── backfill replay must not assert false-Active state ───────────────
@@ -2461,7 +2422,7 @@ fn write_unfinished_transcript(dir: &std::path::Path, agent_id: &str) -> std::pa
 fn backfill_replay_is_born_abandoned_when_the_parent_turn_is_confirmed_idle() {
     let block_id = format!("backfill-idle-{}", now_millis());
     register_stub_controller(&block_id, false);
-    let dir = std::env::temp_dir().join(format!("amx-backfill-idle-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-backfill-idle-");
     let jsonl_path = write_unfinished_transcript(&dir, "sub-replay");
 
     let watcher = fixture_watcher();
@@ -2474,8 +2435,6 @@ fn backfill_replay_is_born_abandoned_when_the_parent_turn_is_confirmed_idle() {
         SubAgentStatus::Abandoned,
         "a replayed spawn under a confirmed-idle parent must never enter the Active set"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -2484,7 +2443,7 @@ fn live_spawn_stays_active_even_when_the_parent_turn_reads_idle() {
     // is the regression that would break real-time subagent rows.
     let block_id = format!("backfill-live-{}", now_millis());
     register_stub_controller(&block_id, false);
-    let dir = std::env::temp_dir().join(format!("amx-backfill-live-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-backfill-live-");
     let jsonl_path = write_unfinished_transcript(&dir, "sub-live");
 
     let watcher = fixture_watcher();
@@ -2492,8 +2451,6 @@ fn live_spawn_stays_active_even_when_the_parent_turn_reads_idle() {
 
     let info = watcher.get_info("sub-live").expect("subagent recorded");
     assert_eq!(info.status, SubAgentStatus::Active);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -2503,7 +2460,7 @@ fn backfill_replay_stays_active_when_the_parent_turn_is_running() {
     // `reconcile_stale_subagents` uses, applied earlier.
     let block_id = format!("backfill-busy-{}", now_millis());
     register_stub_controller(&block_id, true);
-    let dir = std::env::temp_dir().join(format!("amx-backfill-busy-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-backfill-busy-");
     let jsonl_path = write_unfinished_transcript(&dir, "sub-busy");
 
     let watcher = fixture_watcher();
@@ -2511,8 +2468,6 @@ fn backfill_replay_stays_active_when_the_parent_turn_is_running() {
 
     let info = watcher.get_info("sub-busy").expect("subagent recorded");
     assert_eq!(info.status, SubAgentStatus::Active);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -2522,7 +2477,7 @@ fn backfill_replay_stays_active_when_no_controller_is_registered() {
     // `reconcile_stale_subagents`'s retry path as the authority rather than
     // guessing Abandoned from absence of information.
     let block_id = format!("backfill-unknown-{}", now_millis());
-    let dir = std::env::temp_dir().join(format!("amx-backfill-unknown-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-backfill-unknown-");
     let jsonl_path = write_unfinished_transcript(&dir, "sub-unknown");
 
     let watcher = fixture_watcher();
@@ -2530,8 +2485,6 @@ fn backfill_replay_stays_active_when_no_controller_is_registered() {
 
     let info = watcher.get_info("sub-unknown").expect("subagent recorded");
     assert_eq!(info.status, SubAgentStatus::Active);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -2541,7 +2494,7 @@ fn a_finished_replayed_transcript_is_completed_not_abandoned() {
     // be relabelled as abandoned just because it arrived via backfill.
     let block_id = format!("backfill-done-{}", now_millis());
     register_stub_controller(&block_id, false);
-    let dir = std::env::temp_dir().join(format!("amx-backfill-done-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-backfill-done-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-sub-done.jsonl");
     std::fs::write(
@@ -2558,8 +2511,6 @@ fn a_finished_replayed_transcript_is_completed_not_abandoned() {
 
     let info = watcher.get_info("sub-done").expect("subagent recorded");
     assert_eq!(info.status, SubAgentStatus::Completed);
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -2573,7 +2524,7 @@ fn a_racing_live_observation_promotes_a_replay_abandoned_entry_back_to_active() 
     // abandoned until a result line happened to show up.
     let block_id = format!("backfill-race-{}", now_millis());
     register_stub_controller(&block_id, false);
-    let dir = std::env::temp_dir().join(format!("amx-backfill-race-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-backfill-race-");
     let jsonl_path = write_unfinished_transcript(&dir, "sub-race");
 
     let watcher = fixture_watcher();
@@ -2600,8 +2551,6 @@ fn a_racing_live_observation_promotes_a_replay_abandoned_entry_back_to_active() 
         SubAgentStatus::Active,
         "a live observation must outrank the replay's inference"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 #[test]
@@ -2611,7 +2560,7 @@ fn a_live_observation_does_not_resurrect_a_completed_subagent() {
     // trailing live write would flip a finished subagent back to running.
     let block_id = format!("backfill-done-race-{}", now_millis());
     register_stub_controller(&block_id, false);
-    let dir = std::env::temp_dir().join(format!("amx-backfill-done-race-{}", now_millis()));
+    let (_dir_scratch, dir) = temp_scratch("amx-backfill-done-race-");
     std::fs::create_dir_all(&dir).unwrap();
     let jsonl_path = dir.join("agent-sub-fin.jsonl");
     std::fs::write(
@@ -2647,8 +2596,6 @@ fn a_live_observation_does_not_resurrect_a_completed_subagent() {
         SubAgentStatus::Completed,
         "Completed is observed from the transcript and must not be promoted"
     );
-
-    std::fs::remove_dir_all(&dir).ok();
 }
 
 // ── parse_event_timestamp ────────────────────────────────────────────────
