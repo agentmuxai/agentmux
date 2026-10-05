@@ -829,7 +829,7 @@ mod tests {
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
-            "error": { "message": "[AgentMux] this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Connectors \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry." }
+            "error": { "message": "[AgentMux] this agent's claude identity points directly at your personal claude config directory (C:\\Users\\user\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Connectors \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry." }
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);
@@ -865,7 +865,7 @@ mod tests {
             "type": "result",
             "is_error": true,
             "subtype": "error_during_execution",
-            "error": { "message": "[AgentMux] could not isolate this agent's claude config directory (C:\\Users\\asafe\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists." }
+            "error": { "message": "[AgentMux] could not isolate this agent's claude config directory (C:\\Users\\user\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists." }
         });
         let f = classify(Some(1), None, "", Some(&frame));
         assert_eq!(f.code, FailureClass::Auth);

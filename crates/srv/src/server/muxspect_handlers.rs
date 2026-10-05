@@ -1391,12 +1391,12 @@ mod tests {
         );
         // codex P2, PR #2802: SpawnGateError::AmbientHomeDirNotAllowed.
         assert_eq!(
-            classify_last_error_source("this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Connectors \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry."),
+            classify_last_error_source("this agent's claude identity points directly at your personal claude config directory (C:\\Users\\user\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Connectors \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry."),
             "identity"
         );
         // ReAgent P2, PR #2854: SpawnGateError::ClaudeMdSeedFailed.
         assert_eq!(
-            classify_last_error_source("could not isolate this agent's claude config directory (C:\\Users\\asafe\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists."),
+            classify_last_error_source("could not isolate this agent's claude config directory (C:\\Users\\user\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists."),
             "identity"
         );
         assert_eq!(
