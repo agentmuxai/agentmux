@@ -95,13 +95,21 @@ Researched on 2026-10-05: VS Code Remote-SSH and Remote Explorer, JetBrains Gate
 
 ### 4.1 The pane
 
-- **View type** `remotes`: label "Remotes", icon `server`, tooltip "Remote machines (SSH, WSL)". It is registered like Armory and Swarm.
-- **One per window.** Opening it again focuses the existing one.
+Remotes is an ordinary widget: a pane tab type like Hangar, Armory or Swarm, under the Pane Tab contract (`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md`). Nothing about it is special to the host.
+
+- **Manifest:** `remotesPaneTab: PaneTabManifest` in `view/remotes/remotes.tsx`, listed in `block-registry.ts` beside `swarmPaneTab`:
+  - `view: "remotes"`;
+  - label "Remotes", icon `server`, tooltip "Remote machines (SSH, WSL)";
+  - `capabilities: { paneZoom: {} }`;
+  - the default lifecycle (`remount`): its data comes from srv, so nothing is lost when an inactive tab unmounts.
+- **Anywhere, any number.** A Remotes tab opens in any pane, beside any other tabs, as many times as the user likes. Every copy shows the same live list, because the list is srv's (`RemotesList`, §4.6), not the tab's.
 - **Opened from:**
-  - the launcher and the command palette ("Open Remotes");
+  - the launcher, the new-tab menu and the command palette ("Open Remotes"), like any widget;
   - the connection picker's footer, "Manage remotes…";
   - the Remote heading in Hangar's sidebar;
-  - a pane's connection chip menu, "Remote settings…", which opens the pane with that host's row expanded.
+  - a pane's connection chip menu, "Remote settings…".
+
+  The last three are links from inside another pane. They open a Remotes tab in that same pane, beside it, with the host's row expanded where one is named. If that pane already has a Remotes tab, they switch to it instead of adding another.
 
 ### 4.2 The list
 
@@ -314,6 +322,6 @@ R3 should ship before the next release. The helper installs without asking until
 
 1. **Add remote writes to `~/.ssh/config`** (recommended, so there is one place hosts are defined), or keeps AgentMux-only hosts in `settings.json`?
 2. **WSL in Remotes** (recommended: one list for everything not local), or SSH only?
-3. **One Remotes pane per window** (recommended), or any number?
+3. ~~One Remotes pane per window, or any number?~~ Decided by the owner on 2026-10-05: an ordinary widget that can appear as a pane tab anywhere, like the others (§4.1).
 4. **The colour stripe** on remote panes' frames (recommended), or the chip only?
 5. **Order:** R1 and R3 first (the list, and asking before installing), then R2, R4 and R5?
