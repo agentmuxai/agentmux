@@ -139,23 +139,44 @@ impl AgentMuxHandler {
                 parent_instance_id: None,
             }
         } else {
-            // Phase F.1 — dequeue via the host reducer. The reducer
-            // emits PendingWindowQueueEmpty on miss; the fallback
-            // (synthesize a UUID-labelled FullInstance entry) lives
-            // in the legacy code path it always has.
+            // Take THIS browser's own pending entry: the label its handler was
+            // made for, or the tag on its Views BrowserView. Popping the queue
+            // head instead hands a browser another creation's label whenever
+            // two creations finish out of order (see `creation_labels`). The
+            // head is only a fallback for a browser nothing names. The reducer
+            // emits PendingWindowQueueEmpty on miss; the fallback (synthesize
+            // a UUID-labelled FullInstance entry) lives below as it always has.
+            let bound_label = self
+                .creation_label
+                .take()
+                .or_else(|| super::creation_labels::take_view_label(&browser));
             tracing::info!(
                 elapsed_us = t0.elapsed().as_micros() as u64,
-                "[on-after-created] dispatching DequeuePendingWindowCreation"
+                bound_label = bound_label.as_deref().unwrap_or(""),
+                "[on-after-created] taking this browser's pending creation"
             );
-            let out = self
-                .state
-                .host_dispatch(crate::reducer::HostCommand::DequeuePendingWindowCreation);
+            let taken = bound_label.as_ref().and_then(|label| {
+                self.state
+                    .host_dispatch(crate::reducer::HostCommand::TakePendingWindowCreation {
+                        label: label.clone(),
+                    })
+                    .dequeued
+            });
+            let dequeued = taken.or_else(|| {
+                tracing::warn!(
+                    bound_label = bound_label.as_deref().unwrap_or(""),
+                    "[on-after-created] no pending creation names this browser — taking the queue head"
+                );
+                self.state
+                    .host_dispatch(crate::reducer::HostCommand::DequeuePendingWindowCreation)
+                    .dequeued
+            });
             tracing::info!(
                 elapsed_us = t0.elapsed().as_micros() as u64,
-                dequeued_some = out.dequeued.is_some(),
-                "[on-after-created] DequeuePendingWindowCreation returned"
+                dequeued_some = dequeued.is_some(),
+                "[on-after-created] pending creation resolved"
             );
-            out.dequeued.unwrap_or_else(|| {
+            dequeued.unwrap_or_else(|| {
                 let lbl = format!("window-{}", uuid::Uuid::new_v4());
                 tracing::warn!(label = %lbl, "[on_after_created] no pending creation entry — defaulting to FullInstance");
                 crate::state::PendingWindowCreation {

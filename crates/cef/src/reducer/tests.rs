@@ -59,6 +59,53 @@ fn fifo_order_preserved() {
     }
 }
 
+/// Two creations queued together can finish in either order. Each browser
+/// takes its own entry by label, and the other stays queued for its owner.
+/// (2026-10-05: a pane-pool and a window-pool window refilled together got
+/// each other's labels through the FIFO pop.)
+#[test]
+fn take_by_label_removes_that_entry_wherever_it_is() {
+    let mut state = HostState::default();
+    for label in ["floating-pool-a", "window-pool-b", "window-c"] {
+        update(&mut state, HostCommand::EnqueuePendingWindowCreation { entry: entry(label) });
+    }
+    // The second-queued window's browser arrives first.
+    let out = update(
+        &mut state,
+        HostCommand::TakePendingWindowCreation { label: "window-pool-b".into() },
+    );
+    assert_eq!(out.dequeued.as_ref().unwrap().label, "window-pool-b");
+    assert!(matches!(
+        out.events.as_slice(),
+        [HostEvent::PendingWindowDequeued { queue_len_after: 2, .. }]
+    ));
+    // The first-queued one is still there for its own browser.
+    let out = update(
+        &mut state,
+        HostCommand::TakePendingWindowCreation { label: "floating-pool-a".into() },
+    );
+    assert_eq!(out.dequeued.as_ref().unwrap().label, "floating-pool-a");
+    // And the FIFO fallback still sees what's left, in order.
+    let out = update(&mut state, HostCommand::DequeuePendingWindowCreation);
+    assert_eq!(out.dequeued.as_ref().unwrap().label, "window-c");
+}
+
+#[test]
+fn take_by_label_misses_without_touching_the_queue() {
+    let mut state = HostState::default();
+    update(&mut state, HostCommand::EnqueuePendingWindowCreation { entry: entry("w1") });
+    let out = update(
+        &mut state,
+        HostCommand::TakePendingWindowCreation { label: "w2".into() },
+    );
+    assert!(out.dequeued.is_none());
+    assert!(matches!(
+        out.events.as_slice(),
+        [HostEvent::PendingWindowNotFound { label, .. }] if label == "w2"
+    ));
+    assert_eq!(state.pending_window_creations.len(), 1);
+}
+
 #[test]
 fn enqueue_during_shutdown_is_rejected() {
     let mut state = HostState::default();
@@ -91,6 +138,7 @@ fn version_increments_monotonically() {
         HostEvent::PendingWindowEnqueued { version, .. } => *version,
         HostEvent::PendingWindowDequeued { version, .. } => *version,
         HostEvent::PendingWindowQueueEmpty { version } => *version,
+        HostEvent::PendingWindowNotFound { version, .. } => *version,
         HostEvent::BrowserPaneCreateRequested { version, .. } => *version,
         HostEvent::BrowserPaneLive { version, .. } => *version,
         HostEvent::BrowserPaneClosing { version, .. } => *version,

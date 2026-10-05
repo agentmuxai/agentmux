@@ -602,9 +602,12 @@ wrap_task! {
             // only fires on success. The `floating-` exclusion in
             // `orphan_reconcile.rs` is belt-and-suspenders; this is
             // the actual cleanup. Codex/reagent P1 round 2 on #811.
+            // By label: the queue head may be another creation's entry.
             let dequeue = || {
                 self.state.host_dispatch(
-                    crate::reducer::HostCommand::DequeuePendingWindowCreation,
+                    crate::reducer::HostCommand::TakePendingWindowCreation {
+                        label: self.window_label.clone(),
+                    },
                 );
             };
 
@@ -673,9 +676,10 @@ wrap_task! {
                 height: self.height,
             };
 
-            let handler = crate::client::AgentMuxHandler::new_with_browser_pane(
+            let handler = crate::client::AgentMuxHandler::new_for_creation(
                 self.state.clone(),
                 true,
+                &self.window_label,
             );
             let mut client = Some(crate::client::AgentMuxClient::new(handler, true, /* drag_capture: a floater renders panes that take file drops */ true));
 
@@ -837,9 +841,12 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            // By label: the queue head may be another creation's entry.
             let dequeue = || {
                 self.state.host_dispatch(
-                    crate::reducer::HostCommand::DequeuePendingWindowCreation,
+                    crate::reducer::HostCommand::TakePendingWindowCreation {
+                        label: self.label.clone(),
+                    },
                 );
             };
 
@@ -907,9 +914,10 @@ wrap_task! {
                 width: crate::commands::window_pool::PANE_POOL_WIDTH,
                 height: crate::commands::window_pool::PANE_POOL_HEIGHT,
             };
-            let handler = crate::client::AgentMuxHandler::new_with_browser_pane(
+            let handler = crate::client::AgentMuxHandler::new_for_creation(
                 self.state.clone(),
                 true,
+                &self.label,
             );
             let mut client = Some(crate::client::AgentMuxClient::new(handler, true, /* drag_capture: a floater renders panes that take file drops */ true));
             let url_cef = CefString::from(self.url.as_str());

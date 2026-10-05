@@ -303,7 +303,18 @@ pub enum HostCommand {
     /// `HostEvent::PendingWindowQueueEmpty` if the queue was empty.
     /// Consumer side of the queue (replaces
     /// `client.rs::on_after_created`'s direct `pop_front`).
+    ///
+    /// Only a fallback now: browsers finish creating in no particular order,
+    /// so popping the head can hand a browser another creation's label (two
+    /// pool windows refilled together swapped labels; the pane tear-off then
+    /// drove the wrong page). `on_after_created` takes its own entry by label
+    /// with `TakePendingWindowCreation` whenever it knows the label.
     DequeuePendingWindowCreation,
+
+    /// Remove the pending entry for `label`, wherever it is in the queue.
+    /// Returns it via `HostEvent::PendingWindowDequeued`, or
+    /// `HostEvent::PendingWindowNotFound` if no entry has that label.
+    TakePendingWindowCreation { label: String },
 
     // ── H.1 — pane lifecycle ────────────────────────────────────────────
 
@@ -537,6 +548,10 @@ impl std::fmt::Debug for HostCommand {
             HostCommand::DequeuePendingWindowCreation => {
                 f.write_str("DequeuePendingWindowCreation")
             }
+            HostCommand::TakePendingWindowCreation { label } => f
+                .debug_struct("TakePendingWindowCreation")
+                .field("label", label)
+                .finish(),
             HostCommand::EnqueueBrowserPaneCreate { block_id, label } => f
                 .debug_struct("EnqueueBrowserPaneCreate")
                 .field("block_id", block_id)
@@ -713,6 +728,10 @@ pub enum HostEvent {
     /// is responsible for the fallback (the legacy code paths
     /// synthesize a UUID-labelled FullInstance entry).
     PendingWindowQueueEmpty { version: u64 },
+
+    /// `TakePendingWindowCreation` found no entry with this label. The
+    /// caller falls back to the head of the queue.
+    PendingWindowNotFound { label: String, version: u64 },
 
     // ── H.1 — pane lifecycle events ─────────────────────────────────────
 
@@ -1075,6 +1094,9 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
         HostCommand::DequeuePendingWindowCreation => {
             handle_dequeue_pending_window_creation(state)
         }
+        HostCommand::TakePendingWindowCreation { label } => {
+            handle_take_pending_window_creation(state, label)
+        }
         // H.1 panes
         HostCommand::EnqueueBrowserPaneCreate { block_id, label } => {
             panes::handle_enqueue_browser_pane_create(state, block_id, label)
@@ -1202,6 +1224,28 @@ fn handle_enqueue_pending_window_creation(
             queue_len_after,
             version: v,
         }],
+        ..Default::default()
+    }
+}
+
+fn handle_take_pending_window_creation(state: &mut HostState, label: String) -> DispatchOutput {
+    let Some(pos) = state.pending_window_creations.iter().position(|e| e.label == label) else {
+        let v = state.bump_version();
+        return DispatchOutput {
+            events: vec![HostEvent::PendingWindowNotFound { label, version: v }],
+            ..Default::default()
+        };
+    };
+    let entry = state.pending_window_creations.remove(pos).expect("position is in range");
+    let queue_len_after = state.pending_window_creations.len();
+    let v = state.bump_version();
+    DispatchOutput {
+        events: vec![HostEvent::PendingWindowDequeued {
+            label,
+            queue_len_after,
+            version: v,
+        }],
+        dequeued: Some(entry),
         ..Default::default()
     }
 }

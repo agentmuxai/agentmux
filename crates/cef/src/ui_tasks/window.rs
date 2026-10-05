@@ -1742,6 +1742,12 @@ wrap_task! {
                 elapsed_us = t0.elapsed().as_micros() as u64,
                 "[create-window] browser_view_create returned"
             );
+            // The browser is created inside `window_create_top_level` below and
+            // shares the top-level client, so tag its view now: that is how
+            // `on_after_created` knows which pending creation it is.
+            if let Some(view) = browser_view.as_ref() {
+                crate::client::creation_labels::tag_browser_view(view, &self.label);
+            }
 
             let mut wd = crate::app::AgentMuxWindowDelegate::new(
                 RefCell::new(browser_view),

@@ -49,6 +49,7 @@ const RESUME_FLOOR_MB: u64 = 512;
 const MEMORY_PAUSE_BUDGET: usize = 5;
 const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 
+pub(crate) mod creation_labels;
 mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;
@@ -202,6 +203,10 @@ pub struct AgentMuxHandler {
     /// completes (the "stray Sign In window"; reagent P1 on PR #2545), because
     /// nothing else closes a popup's Views window when its browser dies.
     popup_browser_ids: std::collections::HashSet<i32>,
+    /// The label of the creation this handler was made for, when it serves
+    /// one browser only. `on_after_created` takes that label's pending entry
+    /// instead of the queue head (see `creation_labels`). Consumed once.
+    creation_label: Option<String>,
 }
 
 impl AgentMuxHandler {
@@ -210,6 +215,16 @@ impl AgentMuxHandler {
     }
 
     pub fn new_with_browser_pane(state: Arc<AppState>, is_browser_pane: bool) -> Arc<Mutex<Self>> {
+        Self::build(state, is_browser_pane, None)
+    }
+
+    /// A handler for exactly one browser, created for the pending creation
+    /// queued under `label`.
+    pub fn new_for_creation(state: Arc<AppState>, is_browser_pane: bool, label: &str) -> Arc<Mutex<Self>> {
+        Self::build(state, is_browser_pane, Some(label.to_string()))
+    }
+
+    fn build(state: Arc<AppState>, is_browser_pane: bool, creation_label: Option<String>) -> Arc<Mutex<Self>> {
         Arc::new(Mutex::new(Self {
             browser_list: Vec::new(),
             is_closing: false,
@@ -221,6 +236,7 @@ impl AgentMuxHandler {
             terminated_unresponsive: std::collections::HashSet::new(),
             pending_popups: 0,
             popup_browser_ids: std::collections::HashSet::new(),
+            creation_label,
         }))
     }
 
