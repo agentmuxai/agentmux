@@ -1,6 +1,6 @@
 # SPEC: Robust highlighting for Bash tool panels in the agent pane
 
-**Status:** active. Steps 1-3 of §5 (POSIX tokenizer, sync render and theme, streaming header) shipped in #4314; steps 4-7 remain (PowerShell and cmd tokenizers, embedded bodies, output rendering, row highlighting and danger markers).
+**Status:** active. Steps 1-3 of §5 (POSIX tokenizer, sync render and theme, streaming header) shipped in #4314. Step 5's heredoc bodies (§3.2) and step 7's collapsed row (§3.7, plus the peek popover) are built; step 5's inline scripts, step 7's danger markers, and steps 4 and 6 (PowerShell and cmd tokenizers, output rendering) remain.
 **Date:** 2026-10-04
 **Author:** AgentX
 **Requested by:** the repo owner ("when hovering over agent pane tools, we get
@@ -121,18 +121,33 @@ functions (no DOM, no Solid). Components consume its output.
 
 `embeddedBodies(tokens, command)` returns `{ start, end, lang }` for:
 
-- heredoc bodies, language from (in order) the command that reads it
-  (`python`, `python3`, `node`, `bash`, `sh`, `psql`, `sqlite3`, `jq`, `ruby`,
-  `perl`), then the redirect target's extension (`cat > a.ts <<EOF`), then
-  `detectLanguage` (the existing helper in `detectLanguage.ts`) on the body;
-- inline scripts: `python -c '...'`, `node -e "..."`, `sh -c '...'`,
-  `pwsh -Command "..."`, `jq '<filter>'`, `awk '<prog>'`, `sed 's/..'`;
-- `git commit -m`/`gh pr create --body` bodies as `markdown`.
+- heredoc bodies (`shell-highlight/embedded.ts`), language from, in order:
+  1. the program that reads it (`python`, `node`, `deno`, `bash`, `sh`,
+     `psql`, `sqlite3`, `jq`, `kubectl`, `ruby`, `perl`, `pwsh`, ...);
+  2. the file it is written to, through `detectLanguage` (`cat > a.ts <<EOF`,
+     `cat >> f <<EOF`, `tee [-a] f <<EOF`; tee's operand wins over a
+     `>/dev/null` after it);
+  3. commit messages and PR/issue bodies as `markdown`: the program is `git`,
+     `gh`, `gh-agent` or `glab`, directly (`--body-file - <<EOF`) or around a
+     `cat` (`git commit -m "$(cat <<'EOF' ... EOF)"`);
+  4. the delimiter's name (`<<'PY'`, `<<JSON`, `<<SQL`);
+  5. what the heredoc is piped into (`cat <<EOF | kubectl apply -f -`);
+  6. a shebang on the body's first line;
+- inline scripts (not built yet): `python -c '...'`, `node -e "..."`,
+  `sh -c '...'`, `pwsh -Command "..."`, `jq '<filter>'`, `awk '<prog>'`,
+  `sed 's/..'`, and `git commit -m "..."` as `markdown`.
 
-Bodies are highlighted by Shiki with that language and spliced into the
-token stream. Unknown language leaves the body as `heredoc-body`. Nesting is
-one level deep (a heredoc inside `$(...)` inside `-m` is the common case and
-is handled; deeper nesting stays flat).
+A survey of 5,790 heredocs in agent transcripts on one host (2026-10-05):
+48% are read by a known program, 13.5% are written to a file with a known
+extension, about 35% are commit messages or PR bodies, 0.1% are told only by
+the delimiter, and about 3% stay unknown. 99% have a quoted delimiter.
+
+Shell bodies are rendered with the sync tokenizer, so they are coloured on
+first paint. Bodies in other languages are highlighted by Shiki and spliced
+into the token stream. Unknown language leaves the body as `heredoc-body`,
+in the plain text colour (it used to be string green, which turned a whole
+pasted file green). Nesting is one level deep (a heredoc inside `$(...)`
+inside `-m` is the common case and is handled; deeper nesting stays flat).
 
 ### 3.3 Rendering without a flash
 
@@ -197,9 +212,13 @@ Sync-layer classes take their colours from each theme's terminal palette
 `--link-color` for URLs. Every theme already defines the palette against its
 own background, so light and dark themes stay legible without a second set of
 tokens. The forced `color: var(--accent-color)` on `.agent-bash-cmd-code` is
-removed. Embedded-body Shiki output (step 5) picks `github-dark-high-contrast`
-or `github-light-high-contrast` from the active theme's `color-scheme`, and
-re-highlights when the theme flips (the cache key includes the theme). The ANSI
+removed. Embedded-body Shiki output (step 5) is highlighted with
+`github-dark-high-contrast` and `github-light-high-contrast` at once
+(`codeToTokens` with `themes` and `defaultColor: false`): each run carries
+`--shiki-dark` and `--shiki-light`, and the stylesheet picks one by
+`[data-theme-polarity="light"]`, so a theme flip needs no re-highlight. Runs
+are rendered as spans with text children and only `--shiki-*` style
+variables, never through `innerHTML`. The ANSI
 palette comes from the existing `text-ansi-*` classes.
 
 ### 3.6 Streaming panels show the command
@@ -215,6 +234,14 @@ The one-line header's detail text uses the sync layer too (program in accent,
 flags dimmed, the rest default), single-line, ellipsis as today. It must not
 re-measure on hover; classes only, no layout-affecting differences (no bold
 shifting widths).
+
+Built as `ShellTokens` (the panel's token run without its `<pre>`). The row's
+"Bash" label keeps the tool colour; the command is in the text colour, with
+the program in accent and flags, operators, redirects and comments in the
+secondary colour. The row never highlights embedded bodies, so a transcript
+of rows never loads Shiki. The peek popover over the row shows the whole
+command with the panel's full palette, embedded bodies included, in the text
+colour rather than the tool colour.
 
 ### 3.8 Danger markers
 

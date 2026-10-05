@@ -244,13 +244,17 @@ describe("PeekOverlay", () => {
             }
         });
 
-        it("a panel wider than the row pins to the row's left edge and extends right", () => {
+        it("a panel wider than the row reaches over the pane borders, split by the pane's place", () => {
             vi.useFakeTimers();
             try {
                 setup({ panelHeight: 40, panelWidth: 900 });
-                expect(panel()!.style.left).toBe("100px");
-                expect(panel()!.style.transform).toBe("");
-                expect(parseFloat(panel()!.style.maxWidth)).toBe(700 * 1.5); // overshoots the 700px row by half
+                // The 700px row starts a seventh of the way across the 1400px window,
+                // so a seventh of its 350px overshoot goes left: room 50..1100.
+                const maxWidth = parseFloat(panel()!.style.maxWidth);
+                expect(maxWidth).toBe(700 * 1.5);
+                const shift = -parseFloat(/translateX\((-?[\d.]+)%\)/.exec(panel()!.style.transform)![1]) / 100;
+                expect(shift).toBeCloseTo(1 / 7);
+                expect(parseFloat(panel()!.style.left) - shift * maxWidth).toBeCloseTo(50);
             } finally {
                 vi.useRealTimers();
             }

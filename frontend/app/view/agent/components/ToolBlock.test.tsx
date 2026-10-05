@@ -324,6 +324,33 @@ describe("ToolBlock — panel mode", () => {
             }
         });
 
+        // SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.7: a Bash command is
+        // shell-coloured in the row and the popover, with its text unchanged.
+        it("colours a Bash command in the row and the popover; other tools stay plain", () => {
+            vi.useFakeTimers();
+            try {
+                const cmd = "git status | head -5";
+                const bash: ToolNode = { ...baseTool, params: { command: cmd }, summary: `Bash ${cmd}` };
+                const { container } = render(() => <ToolBlock node={bash} pinned={false} onTogglePin={() => {}} />);
+                const detail = container.querySelector(".agent-tool-detail")!;
+                expect(detail.classList.contains("agent-shell-inline")).toBe(true);
+                expect(detail.querySelector(".sh-program")?.textContent).toBe("git");
+                expect(detail.textContent).toBe(cmd);
+                hoverToolName(container);
+                const tip = document.body.querySelector(".agent-node-peek-tooltip-body")!;
+                expect(tip.querySelector(".agent-shell-command .sh-program")?.textContent).toBe("git");
+                expect(tip.textContent).toBe(`Bash ${cmd}`);
+
+                cleanup();
+                const grep: ToolNode = { ...baseTool, id: "tc-g", tool: "Grep", params: { pattern: "a | b" }, summary: "Grep a | b" };
+                const other = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
+                expect(other.container.querySelector(".agent-tool-detail .sh-program")).toBeNull();
+                expect(other.container.querySelector(".agent-shell-inline")).toBeNull();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         // SPEC_PEEK_PANEL_META_ROW_AND_MONO_COMMAND_2026_09_27.md §4.2: the popover is
         // Portal-rendered outside the row, so it carries the row's own data-tool to
         // take the same per-tool colour.

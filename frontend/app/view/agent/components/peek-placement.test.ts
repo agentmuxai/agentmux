@@ -19,39 +19,68 @@ const CONTAINER = { top: 100, bottom: 900 };
 describe("computePeekHorizontal", () => {
     it("right-aligns to the row when the panel fits within the row's width", () => {
         const h = computePeekHorizontal({ row: ROW, viewport: VIEWPORT, naturalWidth: 300 });
-        expect(h).toEqual({ left: 900, maxWidth: 500, minWidth: 0, alignRight: true, extendsPastRow: false });
+        expect(h).toEqual({ left: 900, maxWidth: 500, minWidth: 0, shift: 1, extendsPastRow: false });
     });
 
-    it("pins to the row's LEFT edge and extends right over the pane border when wider than the row", () => {
-        const h = computePeekHorizontal({ row: ROW, viewport: VIEWPORT, naturalWidth: 900 });
-        expect(h.alignRight).toBe(false);
-        expect(h.left).toBe(400);
-        expect(h.extendsPastRow).toBe(true);
-        // The row is 500 wide: it may reach 250 (half the row) past its right edge.
+    it("may reach past the row by half its width in total", () => {
         expect(MAX_OVERSHOOT_FRACTION).toBe(0.5);
+        const h = computePeekHorizontal({ row: ROW, viewport: VIEWPORT, naturalWidth: 900 });
+        expect(h.extendsPastRow).toBe(true);
         expect(h.maxWidth).toBe(750);
     });
 
-    it("overshoots the row by at most half its width, however long the line", () => {
-        const h = computePeekHorizontal({ row: ROW, viewport: VIEWPORT, naturalWidth: 50_000 });
-        expect(placedSpan(h, 50_000)).toEqual({ left: 400, right: 900 + 250 });
+    // The overshoot's split follows the pane's place in the window.
+    const W = { width: 1500, height: 1000 };
+    const at = (left: number) => ({ left, right: left + 500, top: 300, bottom: 330 });
+    const span = (row: ReturnType<typeof at>) =>
+        placedSpan(computePeekHorizontal({ row, viewport: W, naturalWidth: 50_000 }), 50_000);
+
+    it("at the window's left edge, overshoots only to the right", () => {
+        expect(span(at(0))).toEqual({ left: 0, right: 750 });
     });
 
-    it("near the window's right edge, stops at the edge before the half-width cap", () => {
-        const row = { left: 800, right: 1300, top: 300, bottom: 330 }; // cap would reach 1550
-        const h = computePeekHorizontal({ row, viewport: VIEWPORT, naturalWidth: 50_000 });
-        expect(placedSpan(h, 50_000).right).toBe(VIEWPORT.width - VIEWPORT_MARGIN_PX);
+    it("at the window's right edge, overshoots only to the left", () => {
+        expect(span(at(1000))).toEqual({ left: 750, right: 1500 });
     });
 
-    it("never grows past the window's right edge", () => {
-        const h = computePeekHorizontal({ row: ROW, viewport: VIEWPORT, naturalWidth: 700 });
-        expect(placedSpan(h, 700).right).toBeLessThanOrEqual(VIEWPORT.width - VIEWPORT_MARGIN_PX);
+    it("centred, overshoots a quarter of the row's width on each side", () => {
+        expect(span(at(500))).toEqual({ left: 375, right: 1125 });
+    });
+
+    it("in between, interpolates the split", () => {
+        // A quarter of the way across: a quarter of the overshoot to the left.
+        expect(span(at(250))).toEqual({ left: 250 - 62.5, right: 750 + 187.5 });
+    });
+
+    it("a panel narrower than the cap grows out of the row in the same split", () => {
+        const h = computePeekHorizontal({ row: at(500), viewport: W, naturalWidth: 600 }); // centred
+        expect(placedSpan(h, 600)).toEqual({ left: 450, right: 1050 });
+    });
+
+    it("gives the room a window edge takes from one side to the other", () => {
+        const viewport = { width: 1000, height: 1000 };
+        const row = { left: 100, right: 900, top: 300, bottom: 330 }; // centred, 800 wide: would reach -100..1100
+        const s = placedSpan(computePeekHorizontal({ row, viewport, naturalWidth: 50_000 }), 50_000);
+        expect(s).toEqual({ left: VIEWPORT_MARGIN_PX, right: viewport.width - VIEWPORT_MARGIN_PX });
+    });
+
+    it("never leaves the window, and always covers its row", () => {
+        for (let left = 0; left <= 1000; left += 50) {
+            const row = at(left);
+            for (const naturalWidth of [501, 600, 700, 5000]) {
+                const s = placedSpan(computePeekHorizontal({ row, viewport: W, naturalWidth }), naturalWidth);
+                expect(s.left).toBeGreaterThanOrEqual(0);
+                expect(s.right).toBeLessThanOrEqual(W.width);
+                expect(s.left).toBeLessThanOrEqual(row.left + 1e-9);
+                expect(s.right).toBeGreaterThanOrEqual(row.right - 1e-9);
+            }
+        }
     });
 
     it("stays right-aligned in the row when the window offers no more width than the row has", () => {
         const wide = { left: 0, right: 1392, top: 300, bottom: 330 };
         const h = computePeekHorizontal({ row: wide, viewport: VIEWPORT, naturalWidth: 5000 });
-        expect(h.alignRight).toBe(true);
+        expect(h.shift).toBe(1);
         expect(h.extendsPastRow).toBe(false);
     });
 });
@@ -60,32 +89,34 @@ describe("computePeekHorizontal: minimum width", () => {
     it("a thin panel in a wide row stays right-aligned, at least the minimum wide", () => {
         const row = { left: 100, right: 900, top: 300, bottom: 330 }; // 800 wide
         const h = computePeekHorizontal({ row, viewport: VIEWPORT, naturalWidth: 120, minWidth: 600 });
-        expect(h.alignRight).toBe(true);
+        expect(h.shift).toBe(1);
         expect(h.minWidth).toBe(600);
         expect(placedSpan(h, 120).right - placedSpan(h, 120).left).toBe(600);
     });
 
-    it("a thin panel in a row narrower than the minimum goes left-pinned, over the pane border", () => {
+    it("a thin panel in a row narrower than the minimum reaches over the pane borders", () => {
         const h = computePeekHorizontal({ row: ROW, viewport: VIEWPORT, naturalWidth: 120, minWidth: 600 }); // row 500 wide
-        expect(h.alignRight).toBe(false);
-        expect(h.left).toBe(400);
         expect(h.minWidth).toBe(600);
         expect(h.extendsPastRow).toBe(true);
+        const s = placedSpan(h, 120);
+        expect(s.left).toBeLessThan(ROW.left);
+        expect(s.right).toBeGreaterThan(ROW.right);
     });
 
     it("in a very narrow row the minimum gives way to the half-width cap", () => {
-        const row = { left: 400, right: 700, top: 300, bottom: 330 }; // 300 wide → at most 450
+        const row = { left: 400, right: 700, top: 300, bottom: 330 }; // 300 wide: at most 450
         const h = computePeekHorizontal({ row, viewport: VIEWPORT, naturalWidth: 120, minWidth: 600 });
         expect(h.maxWidth).toBe(450);
         expect(h.minWidth).toBe(450);
     });
 
-    it("never runs off the window: the minimum is capped to the room there is", () => {
+    it("at the window's right edge, the minimum is met by reaching left", () => {
         const row = { left: 1000, right: 1392, top: 300, bottom: 330 }; // pane at the window's right edge
         const h = computePeekHorizontal({ row, viewport: VIEWPORT, naturalWidth: 120, minWidth: 600 });
-        expect(h.minWidth).toBe(392);
-        expect(placedSpan(h, 120).right).toBeLessThanOrEqual(VIEWPORT.width);
-        expect(placedSpan(h, 120).left).toBeGreaterThanOrEqual(0);
+        expect(h.minWidth).toBe(588); // 392 plus half of it
+        const s = placedSpan(h, 120);
+        expect(s.right).toBeLessThanOrEqual(VIEWPORT.width - VIEWPORT_MARGIN_PX);
+        expect(s.left).toBeCloseTo(804);
     });
 });
 
@@ -226,6 +257,7 @@ describe("the pointer is never inside the placed panel", () => {
                             expect(e.bottom).toBeLessThanOrEqual(viewport.height);
                             expect(e.top).toBeGreaterThanOrEqual(0);
                             expect(s.right).toBeLessThanOrEqual(viewport.width);
+                            expect(s.left).toBeGreaterThanOrEqual(0);
                         }
                     });
                   }
