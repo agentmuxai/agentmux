@@ -3003,8 +3003,8 @@ $transcript-preview-max-height: calc(50vh / 3);
 }
 
 // The wheel-edge skid (components/scroll-handoff.ts): while a capped box absorbs
-// the notch that arrives at its edge, that edge flashes a 2 px accent line,
-// inset so nothing moves. SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.4.
+// the notches that arrive at its edge, that edge shows a 2 px accent line, inset
+// so nothing moves, then fades. SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.4.
 .scroll-handoff-box {
     transition: box-shadow 150ms ease-out;
 

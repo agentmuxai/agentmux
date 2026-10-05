@@ -18,7 +18,7 @@ already replaced the tool preview's own wheel listener with one shared hand-off,
 conversation. So the draft's plan for a new controller (`wheelHandoff.ts`) and re-plumbing
 four boxes was out of date. §3–§7 are rewritten against main: the skid goes inside
 `attachScrollHandoff`, and no call site changes. §1 and §2 stand. The operator's answers
-to the open questions are in §8.
+to the open questions are in §8, including a later change from one notch to two.
 
 ## 1. The problem
 
@@ -136,6 +136,7 @@ interface WheelSkid {
     box: object | null;   // the box the last wheel event was over, or null
     dir: -1 | 0 | 1;      // sign of that event's deltaY
     phase: "armed" | "skidding" | "spent";
+    absorbed: number;     // notches absorbed in this skid so far
     lastAt: number;       // timeStamp of the last wheel event over box
 }
 ```
@@ -153,8 +154,10 @@ Ignore, without touching state: `ctrlKey` (zoom) and `deltaY === 0` (a horizonta
    - `spent`: forward `deltaY` to the pane (`pane.scrollTop += deltaY`, with
      `preventDefault()`), exactly as before.
    - **Notched input** (`wheelDeltaY` a non-zero multiple of 120, or `deltaMode` line or
-     page): the skid is one notch. Absorb it; if the event coalesced *n* notches, forward
-     `deltaY × (n−1)/n`. Then `spent`.
+     page): the skid is `SKID_NOTCHES` (two) notches. Absorb notches until two have been
+     absorbed in this skid. If an event coalesced *n* notches and only *k* remain, absorb
+     *k* and forward `deltaY × (n−k)/n` (the edge still shows its line). Once two are
+     absorbed, `spent`.
    - **Continuous input** (trackpad, high-resolution wheel, or no `wheelDeltaY`): absorb,
      and stay `skidding` until an event arrives `SKID_GESTURE_IDLE_MS` (250 ms) or more
      after the previous one; that one is forwarded, then `spent`.
@@ -166,12 +169,13 @@ nothing scrolls.
 ### 4.4 What the user feels
 
 With a notched wheel and the pointer still: the pane scrolls, a preview slides under the
-pointer, notches scroll the preview to its edge, the next notch is the skid, and the one
-after scrolls the pane. The same happens downward. Reversing direction re-arms.
+pointer, notches scroll the preview to its edge, the next two notches are the skid, and
+the one after scrolls the pane. The same happens downward. Reversing direction re-arms.
 
-**The edge flash (decided: on).** While a box absorbs, the edge it's pinned against shows
-a 2 px accent line (`box-shadow: inset`, so nothing moves), which fades out over 150 ms
-(`SKID_FLASH_MS`) after the last absorbed event. The helper adds `scroll-handoff-box` to
+**The edge line (decided: on).** While a box absorbs, the edge it's pinned against shows
+a 2 px accent line (`box-shadow: inset`, so nothing moves). It stays on for the whole
+skid, one indicator rather than a flash per notch, and starts a 150 ms fade
+`SKID_FLASH_MS` (300 ms) after the last absorbed notch. The helper adds `scroll-handoff-box` to
 each box (for the transition) and toggles `scroll-handoff-skid--top` /
 `scroll-handoff-skid--bottom`. None of the four boxes sets its own `box-shadow` or
 `transition`, so nothing is overridden. Reduced motion drops the fade, not the flash.
@@ -222,7 +226,7 @@ rely on. A real mouse and a precision touchpad each still need one manual pass.
 
 | Risk | Mitigation |
 |---|---|
-| A skid at every box edge slows a fast scroll through a long conversation | One notch per edge, by design. If it proves too sticky, skip the skid when the previous wheel event was under ~40 ms ago (a fast spin). Not in v1. |
+| A skid at every box edge slows a fast scroll through a long conversation | Two notches per edge, by design. If it proves too sticky, skip the skid when the previous wheel event was under ~40 ms ago (a fast spin). Not in v1. |
 | High-resolution wheels (a fraction of 120 per event) are treated as continuous | They skid until the gesture pauses, like a trackpad, which matches how they feel. Tests pin both classes. |
 | A box that grows or shrinks under the pointer (streaming output) flips `atEdge` | Read per event; leaving the edge re-arms, so at worst one more skid. |
 | The virtual list replaces a box node mid-gesture | A new node is a different box: an arrival, one skid. Harmless. |
@@ -233,6 +237,8 @@ rely on. A real mouse and a precision touchpad each still need one manual pass.
 The operator accepted the recommendations:
 
 1. **The edge flash during a skid:** on (§4.4).
-2. **Skid length:** a constant of one notch, not a setting, until someone asks for one.
+2. **Skid length:** a constant, not a setting, until someone asks for one. First one
+   notch; after trying it the operator raised it to **two** (`SKID_NOTCHES`), with the edge
+   line kept on for the whole skid rather than flashing once per notch.
 3. **Scope:** every capped box in the conversation, which on main is the four boxes of §3,
    all through the one helper.

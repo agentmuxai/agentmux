@@ -15,20 +15,24 @@
  * does the relay by hand. Bubbling doesn't help: `contain` isn't an
  * event-propagation setting.
  *
- * The skid: when the wheel arrives at a box's edge, the first notch is absorbed
- * (nothing moves, the edge flashes), and only the next one scrolls the pane —
- * so a preview that slides under the pointer can't be scrolled past by a notch
- * meant for it. A trackpad or high-resolution wheel is absorbed until its
- * gesture pauses. This is the browsers' own wheel-latching rule, done by hand
- * because `contain` takes the browser's out of the loop.
+ * The skid: when the wheel arrives at a box's edge, the first SKID_NOTCHES
+ * notches are absorbed (nothing moves, a line shows on that edge), and only
+ * the next one scrolls the pane — so a preview that slides under the pointer
+ * can't be scrolled past by notches meant for it. A trackpad or
+ * high-resolution wheel is absorbed until its gesture pauses. This is the
+ * browsers' own wheel-latching rule, done by hand because `contain` takes the
+ * browser's out of the loop.
  */
 
 /** A continuous gesture (trackpad, high-res wheel) at the edge is absorbed
  *  until this long passes between two of its events: momentum arrives every
  *  frame, so a quarter second of silence means the gesture ended. */
 export const SKID_GESTURE_IDLE_MS = 250;
-/** How long the edge flash stays on after the last absorbed event. */
-export const SKID_FLASH_MS = 150;
+/** How many notches of a notched wheel the edge absorbs before the pane moves. */
+export const SKID_NOTCHES = 2;
+/** How long the edge line stays on after the last absorbed notch, so it reads
+ *  as one indicator for the whole skid. */
+export const SKID_FLASH_MS = 300;
 /** Chromium's `wheelDeltaY` for one notch of a standard wheel. */
 const WHEEL_NOTCH = 120;
 
@@ -39,11 +43,13 @@ export interface WheelSkid {
     box: object | null;
     dir: -1 | 0 | 1;
     phase: SkidPhase;
+    /** Notches absorbed in this skid so far. */
+    absorbed: number;
     /** `timeStamp` of the last wheel event over `box`. */
     lastAt: number;
 }
 
-export const SKID_IDLE: WheelSkid = { box: null, dir: 0, phase: "armed", lastAt: 0 };
+export const SKID_IDLE: WheelSkid = { box: null, dir: 0, phase: "armed", absorbed: 0, lastAt: 0 };
 
 export interface SkidInput {
     box: object;
@@ -58,29 +64,36 @@ export interface SkidInput {
     timeStamp: number;
 }
 
-export type SkidAction = { kind: "native" } | { kind: "absorb" } | { kind: "forward"; deltaY: number };
+/** `absorbed` on a forward: this event also used up part of the skid, so the
+ *  edge still flashes. */
+export type SkidAction = { kind: "native" } | { kind: "absorb" } | { kind: "forward"; deltaY: number; absorbed?: true };
 
 /** One wheel event over a box: what happens to it, and the next state. Pure. */
 export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid; action: SkidAction } {
     const arrival = prev.box !== input.box || prev.dir !== input.dir;
     const base = { box: input.box, dir: input.dir, lastAt: input.timeStamp };
-    if (!input.overflows) return { state: { ...base, phase: "spent" }, action: { kind: "forward", deltaY: input.deltaY } };
-    if (!input.atEdge) return { state: { ...base, phase: "armed" }, action: { kind: "native" } };
+    if (!input.overflows) return { state: { ...base, phase: "spent", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    if (!input.atEdge) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "native" } };
 
     const phase = arrival ? "armed" : prev.phase;
-    if (phase === "spent") return { state: { ...base, phase }, action: { kind: "forward", deltaY: input.deltaY } };
+    const already = phase === "skidding" ? prev.absorbed : 0;
+    if (phase === "spent") return { state: { ...base, phase, absorbed: already }, action: { kind: "forward", deltaY: input.deltaY } };
 
     if (input.notches !== null) {
-        // The skid is one notch: absorb it, and pass on any further notches
-        // this event coalesced (wheelDeltaY ±360 is three of them).
-        const rest = input.notches > 1 ? (input.deltaY * (input.notches - 1)) / input.notches : 0;
-        return { state: { ...base, phase: "spent" }, action: rest !== 0 ? { kind: "forward", deltaY: rest } : { kind: "absorb" } };
+        // Absorb up to SKID_NOTCHES notches in all, and pass on any further
+        // notches this event coalesced (wheelDeltaY ±360 is three of them).
+        const take = Math.min(input.notches, SKID_NOTCHES - already);
+        const absorbed = already + take;
+        const rest = (input.deltaY * (input.notches - take)) / input.notches;
+        const state: WheelSkid = { ...base, phase: absorbed >= SKID_NOTCHES ? "spent" : "skidding", absorbed };
+        if (rest === 0) return { state, action: { kind: "absorb" } };
+        return { state, action: take > 0 ? { kind: "forward", deltaY: rest, absorbed: true } : { kind: "forward", deltaY: rest } };
     }
     // Continuous: absorb until the gesture pauses, then the next event moves the pane.
     if (phase === "skidding" && input.timeStamp - prev.lastAt >= SKID_GESTURE_IDLE_MS) {
-        return { state: { ...base, phase: "spent" }, action: { kind: "forward", deltaY: input.deltaY } };
+        return { state: { ...base, phase: "spent", absorbed: already }, action: { kind: "forward", deltaY: input.deltaY } };
     }
-    return { state: { ...base, phase: "skidding" }, action: { kind: "absorb" } };
+    return { state: { ...base, phase: "skidding", absorbed: already }, action: { kind: "absorb" } };
 }
 
 /** Whole notches in a wheel event, or null when it's continuous input. */
@@ -156,6 +169,7 @@ export function attachScrollHandoff(el: HTMLElement): () => void {
             // `contain` keeps the box's own edge from relaying, so nothing moves.
             flash(dir);
         } else if (action.kind === "forward") {
+            if (action.absorbed) flash(dir);
             e.preventDefault();
             pane.scrollTop += action.deltaY;
         }

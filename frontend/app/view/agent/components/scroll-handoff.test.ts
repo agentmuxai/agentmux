@@ -6,6 +6,7 @@ import {
     SKID_FLASH_MS,
     SKID_GESTURE_IDLE_MS,
     SKID_IDLE,
+    SKID_NOTCHES,
     attachScrollHandoff,
     nextSkid,
     type SkidInput,
@@ -53,7 +54,11 @@ function setup(...geos: Geo[]) {
         target.dispatchEvent(e);
         return e.defaultPrevented;
     };
-    return { pane: () => paneTop, row, boxes, box: boxes[0], wheel, detach: () => detach.forEach((d) => d()) };
+    /** The full skid: SKID_NOTCHES notches that move nothing. */
+    const skid = (target: Element, deltaY: number) => {
+        for (let i = 0; i < SKID_NOTCHES; i++) expect(wheel(target, deltaY)).toBe(false);
+    };
+    return { pane: () => paneTop, row, boxes, box: boxes[0], wheel, skid, detach: () => detach.forEach((d) => d()) };
 }
 
 const atBottom: Geo = { scrollTop: 300, clientHeight: 200, scrollHeight: 500 };
@@ -68,9 +73,13 @@ afterEach(() => {
 // SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2 and
 // SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md §4.3.
 describe("attachScrollHandoff", () => {
-    it("at the bottom, the first notch skids and the next goes to the pane", () => {
+    it("skids two notches", () => {
+        expect(SKID_NOTCHES).toBe(2);
+    });
+
+    it("at the bottom, the first notches skid and the next go to the pane", () => {
         const s = setup(atBottom);
-        expect(s.wheel(s.box, 120)).toBe(false);
+        s.skid(s.box, 120);
         expect(s.pane()).toBe(1000);
         expect(s.wheel(s.box, 120)).toBe(true);
         expect(s.pane()).toBe(1120);
@@ -78,9 +87,9 @@ describe("attachScrollHandoff", () => {
         expect(s.pane()).toBe(1240);
     });
 
-    it("at the top, the first notch up skids and the next goes to the pane", () => {
+    it("at the top, the first notches up skid and the next goes to the pane", () => {
         const s = setup(atTop);
-        s.wheel(s.box, -120);
+        s.skid(s.box, -120);
         expect(s.pane()).toBe(1000);
         s.wheel(s.box, -120);
         expect(s.pane()).toBe(880);
@@ -92,7 +101,7 @@ describe("attachScrollHandoff", () => {
         expect(s.wheel(s.box, 120)).toBe(false);
         expect(s.pane()).toBe(1000);
         g.scrollTop = 300; // that notch brought it to its bottom
-        s.wheel(s.box, 120); // skid
+        s.skid(s.box, 120);
         expect(s.pane()).toBe(1000);
         s.wheel(s.box, 120);
         expect(s.pane()).toBe(1120);
@@ -102,8 +111,10 @@ describe("attachScrollHandoff", () => {
         const s = setup(atBottom);
         expect(s.wheel(s.box, 120, { ctrlKey: true })).toBe(false);
         expect(s.wheel(s.box, 0)).toBe(false);
-        s.wheel(s.box, 120); // still the first notch at the edge: skids
+        s.skid(s.box, 120); // the skid is still whole
         expect(s.pane()).toBe(1000);
+        s.wheel(s.box, 120);
+        expect(s.pane()).toBe(1120);
     });
 
     it("a box whose content fits never skids", () => {
@@ -112,16 +123,23 @@ describe("attachScrollHandoff", () => {
         expect(s.pane()).toBe(1120);
     });
 
-    it("a coalesced three-notch event skids one notch and forwards the other two", () => {
+    it("a coalesced three-notch event skids two notches and forwards the third", () => {
         const s = setup(atBottom);
         expect(s.wheel(s.box, 300, { wheelDeltaY: -360 })).toBe(true);
-        expect(s.pane()).toBe(1200);
+        expect(s.pane()).toBe(1100);
+        expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(true);
+    });
+
+    it("a coalesced event can finish a skid that a single notch started", () => {
+        const s = setup(atBottom);
+        s.wheel(s.box, 120);
+        expect(s.wheel(s.box, 200, { wheelDeltaY: -240 })).toBe(true);
+        expect(s.pane()).toBe(1100);
     });
 
     it("reversing direction re-arms: the box scrolls back first", () => {
-        const g = { ...atBottom };
-        const s = setup(g);
-        s.wheel(s.box, 120);
+        const s = setup(atBottom);
+        s.skid(s.box, 120);
         s.wheel(s.box, 120);
         expect(s.pane()).toBe(1120);
         expect(s.wheel(s.box, -120)).toBe(false); // the box has room upward: native
@@ -130,11 +148,11 @@ describe("attachScrollHandoff", () => {
 
     it("leaving the box for the pane and coming back is a new arrival", () => {
         const s = setup(atBottom);
-        s.wheel(s.box, 120);
+        s.skid(s.box, 120);
         s.wheel(s.box, 120);
         expect(s.pane()).toBe(1120);
         s.wheel(s.row, 120); // over the pane: native, resets the skid
-        s.wheel(s.box, 120);
+        s.skid(s.box, 120);
         expect(s.pane()).toBe(1120);
         s.wheel(s.box, 120);
         expect(s.pane()).toBe(1240);
@@ -142,10 +160,10 @@ describe("attachScrollHandoff", () => {
 
     it("another box arriving under the pointer gets its own skid", () => {
         const s = setup(atBottom, atBottom);
-        s.wheel(s.boxes[0], 120);
+        s.skid(s.boxes[0], 120);
         s.wheel(s.boxes[0], 120);
         expect(s.pane()).toBe(1120);
-        s.wheel(s.boxes[1], 120);
+        s.skid(s.boxes[1], 120);
         expect(s.pane()).toBe(1120);
         s.wheel(s.boxes[1], 120);
         expect(s.pane()).toBe(1240);
@@ -161,21 +179,24 @@ describe("attachScrollHandoff", () => {
         expect(s.pane()).toBe(1030);
     });
 
-    it("flashes the edge it is pinned against while it skids", () => {
+    it("shows a line on the edge it is pinned against for the whole skid, then clears", () => {
         vi.useFakeTimers();
         const s = setup(atBottom);
         expect(s.box.classList.contains("scroll-handoff-box")).toBe(true);
         s.wheel(s.box, 120);
         expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(true);
-        vi.advanceTimersByTime(SKID_FLASH_MS);
+        vi.advanceTimersByTime(SKID_FLASH_MS - 50);
+        s.wheel(s.box, 120); // the second notch keeps it on
+        vi.advanceTimersByTime(SKID_FLASH_MS - 50);
+        expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(true);
+        vi.advanceTimersByTime(50);
         expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(false);
     });
 
     it("does nothing once detached", () => {
         const s = setup(atBottom);
         s.detach();
-        expect(s.wheel(s.box, 120)).toBe(false);
-        expect(s.wheel(s.box, 120)).toBe(false);
+        for (let i = 0; i <= SKID_NOTCHES; i++) expect(s.wheel(s.box, 120)).toBe(false);
         expect(s.pane()).toBe(1000);
         expect(s.box.classList.contains("scroll-handoff-box")).toBe(false);
     });
@@ -204,29 +225,34 @@ describe("nextSkid", () => {
         s = SKID_IDLE;
     });
 
-    it("arrival at the edge: absorb, then forward", () => {
+    it("arrival at the edge: absorb two notches, then forward", () => {
+        expect(step()).toEqual({ kind: "absorb" });
         expect(step()).toEqual({ kind: "absorb" });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
         expect(step()).toEqual({ kind: "forward", deltaY: 100 });
     });
 
-    it("off the edge is native and re-arms", () => {
-        step();
+    it("off the edge is native and starts the skid over", () => {
         step();
         expect(step({ atEdge: false })).toEqual({ kind: "native" });
         expect(step()).toEqual({ kind: "absorb" });
+        expect(step()).toEqual({ kind: "absorb" });
+        expect(step()).toEqual({ kind: "forward", deltaY: 100 });
     });
 
     it("a different box or direction is an arrival", () => {
         step();
         step();
+        step();
         expect(step({ box: other })).toEqual({ kind: "absorb" });
         expect(step({ box: other, dir: -1, deltaY: -100 })).toEqual({ kind: "absorb" });
+        expect(s.absorbed).toBe(1);
     });
 
-    it("forwards the notches beyond the first", () => {
-        expect(step({ notches: 3, deltaY: 300 })).toEqual({ kind: "forward", deltaY: 200 });
+    it("forwards the notches beyond the skid, and says it absorbed some", () => {
+        expect(step({ notches: 3, deltaY: 300 })).toEqual({ kind: "forward", deltaY: 100, absorbed: true });
         expect(s.phase).toBe("spent");
+        expect(step({ notches: 2, deltaY: 200 })).toEqual({ kind: "forward", deltaY: 200 });
     });
 
     it("continuous input: absorbed under the idle gap, forwarded after it", () => {
