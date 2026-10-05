@@ -77,9 +77,11 @@ all-or-nothing, with no "one notch of resistance". A skid can only be done in JS
    after trying it, §8) for a notched wheel, and the browsers' gesture rule for a
    trackpad, which has no notches (§4.3).
 3. Chromium's async wheel events make every event after the first in a sequence
-   non-cancelable. The design must not depend on `preventDefault()`. It doesn't: the
-   preview already carries `overscroll-behavior: contain`, so an event we choose not to
-   forward scrolls nothing by itself.
+   non-cancelable. So for a box that overflows, the design doesn't depend on
+   `preventDefault()`: the box carries `overscroll-behavior: contain`, so an event we
+   choose not to forward scrolls nothing by itself. A box that fits gives `contain`
+   nothing to act on, so there an absorbed notch is also cancelled (§4.3); the box can't
+   scroll itself, so a non-cancelable later event costs at most a notch of pane scroll.
 
 **What a notch is in the DOM** (Chromium on Windows, default settings): `deltaY = ±100`,
 `deltaMode = 0` (pixels), and the legacy `wheelDeltaY = ±120` (Windows `WHEEL_DELTA`),
@@ -168,8 +170,10 @@ Ignore, without touching state: `ctrlKey` (zoom) and `deltaY === 0` (a horizonta
      after the previous one; that one is forwarded, then `spent`.
 5. Record `box`, `dir` and `lastAt`.
 
-"Absorb" means don't forward and don't `preventDefault()`: with `contain` on the box,
-nothing scrolls.
+"Absorb" means don't forward. Over a box that overflows, it also means don't
+`preventDefault()`: `contain` on the box keeps anything from scrolling. Over a box whose
+content fits (a `skidWhenFits` tool preview), `contain` has nothing to act on, so the
+absorbed notch is cancelled with `preventDefault()`.
 
 ### 4.4 What the user feels
 
