@@ -10,6 +10,9 @@ const rpc = vi.hoisted(() => ({
     RemoteSetConfigCommand: vi.fn(),
     RemoteForgetCommand: vi.fn(),
     RemoteHelperRemoveCommand: vi.fn(),
+    RemoteAddCommand: vi.fn(),
+    RemoteTestCommand: vi.fn(),
+    RemoteSshLocateCommand: vi.fn(),
     ConnConnectCommand: vi.fn(),
     ConnDisconnectCommand: vi.fn(),
 }));
@@ -208,6 +211,62 @@ describe("RemotesView", () => {
         render(() => <RemotesView model={model} />);
         expect(model.expanded()).toBe("web");
         expect(setMeta).toHaveBeenCalledWith({ "remotes:expand": null });
+    });
+
+    it("adds a remote through srv, which shows the user the block first", async () => {
+        const { model } = await renderWith([]);
+        fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
+        const field = (label: string) => screen.getByLabelText(label) as HTMLInputElement;
+        fireEvent.input(field("Alias"), { target: { value: "db1" } });
+        fireEvent.input(field("Host name or address"), { target: { value: "db1.example.com" } });
+        fireEvent.input(field("Port"), { target: { value: "2222" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(rpc.RemoteAddCommand).toHaveBeenCalledWith(
+            expect.anything(),
+            { alias: "db1", hostname: "db1.example.com", user: "", port: "2222", identityfile: "", proxyjump: "", blockid: "blk-1" },
+            expect.anything()
+        );
+        expect(model.expanded()).toBe("db1");
+        expect(screen.queryByLabelText("Alias")).toBeNull();
+    });
+
+    it("keeps the form open, without an error, when the user cancels in the window", async () => {
+        await renderWith([]);
+        rpc.RemoteAddCommand.mockRejectedValueOnce(new Error("kept: the user chose not to add it"));
+        fireEvent.click(screen.getByRole("button", { name: /Add remote/ }));
+        fireEvent.input(screen.getByLabelText("Alias"), { target: { value: "db1" } });
+        fireEvent.click(screen.getByRole("button", { name: "Add" }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(screen.getByLabelText("Alias")).toBeTruthy();
+        expect(document.querySelector(".remotes-add .remotes-detail-error")).toBeNull();
+    });
+
+    it("tests a connection and says how it went", async () => {
+        await renderWith([remote("db1")]);
+        rpc.RemoteTestCommand.mockResolvedValueOnce({ ok: false, message: "Permission denied (publickey)." });
+        fireEvent.click(document.querySelector('[data-remote="db1"]')!);
+        fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+        expect(await screen.findByText("Test failed: Permission denied (publickey).")).toBeTruthy();
+        expect(rpc.RemoteTestCommand).toHaveBeenCalledWith(
+            expect.anything(),
+            { connection: "db1", blockid: "blk-1" },
+            expect.anything()
+        );
+    });
+
+    it("opens the ssh config file that defines the host", async () => {
+        const { model } = await renderWith([remote("db1")]);
+        rpc.RemoteSshLocateCommand.mockResolvedValueOnce({ path: "/home/u/.ssh/config", line: 12 });
+        fireEvent.click(document.querySelector('[data-remote="db1"]')!);
+        fireEvent.click(screen.getByRole("button", { name: "Edit in ssh config" }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(tabRpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            expect.objectContaining({ view: "editor", file: "/home/u/.ssh/config" }),
+            {}
+        );
+        expect(model.notice()).toContain("line 12");
     });
 
     it("offers Forget only for a recent connection", async () => {

@@ -318,3 +318,39 @@
         margin-right: 4px;
     }
 }
+
+// Add remote (§4.4).
+.remotes-add-button {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    padding: 3px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md, 4px);
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color);
+    }
+}
+
+.remotes-add {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 12px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--panel-bg-alt);
+}
+
+.remotes-add-note {
+    font-size: 12px;
+    color: var(--secondary-text-color);
+}
+
+.remotes-test-ok {
+    color: var(--success-color);
+}

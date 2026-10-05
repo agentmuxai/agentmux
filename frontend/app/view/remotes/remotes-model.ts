@@ -16,6 +16,16 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { showHostSessions } from "@/app/view/term/hostSessions";
 import { META_REMOTES_EXPAND } from "./remotes-sections";
 
+/** What the Add remote form gives; only `alias` is required. */
+export interface NewRemote {
+    alias: string;
+    hostname: string;
+    user: string;
+    port: string;
+    identityfile: string;
+    proxyjump: string;
+}
+
 /** Changes arrive in bursts (a connect publishes several statuses); one fetch per burst. */
 const REFRESH_DEBOUNCE_MS = 150;
 
@@ -59,6 +69,8 @@ export class RemotesViewModel {
         [this.filter, this.setFilter] = createSignal("");
         [this.expanded, this.setExpanded] = createSignal<string | null>(null);
         [this.notice, this.setNotice] = createSignal("");
+        [this.testResults, this.setTestResults] = createSignal<Record<string, true | string>>({});
+        [this.testing, this.setTesting] = createSignal<string | null>(null);
         if (opts.subscribe !== false) {
             this.unsubscribe = muxEventSubscribe(
                 { eventType: WpsEvent.ConnChange, handler: () => this.scheduleRefresh() },
@@ -105,9 +117,10 @@ export class RemotesViewModel {
 
     /** Run a row action; a failure shows in the pane instead of vanishing. */
     async run(what: string, action: () => Promise<void>): Promise<void> {
+        // Cleared first, so an action may leave a notice of its own.
+        this.setNotice("");
         try {
             await action();
-            if (!this.disposed) this.setNotice("");
         } catch (e) {
             if (!this.disposed) this.setNotice(`${what} failed: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -181,9 +194,10 @@ export class RemotesViewModel {
 
     /** Remove the helper from the host; srv asks the user first, naming the sessions that end. */
     async removeHelper(name: string): Promise<void> {
-        // The question waits up to two minutes for the user, and the removal runs over ssh.
+        // srv lists the sessions over ssh, asks (up to two minutes), then
+        // removes over ssh; each ssh may wait on a prompt in the window.
         try {
-            await RpcApi.RemoteHelperRemoveCommand(TabRpcClient, { connection: name, blockid: this.blockId }, { timeout: 240_000 });
+            await RpcApi.RemoteHelperRemoveCommand(TabRpcClient, { connection: name, blockid: this.blockId }, { timeout: 450_000 });
         } catch (e) {
             // "Keep It" is the user's answer, not a failure.
             if (!String(e instanceof Error ? e.message : e).includes("kept:")) throw e;
@@ -194,6 +208,52 @@ export class RemotesViewModel {
     async forget(name: string): Promise<void> {
         await RpcApi.RemoteForgetCommand(TabRpcClient, { connection: name });
         if (this.expanded() === name) this.setExpanded(null);
+    }
+
+    // ── Adding and testing (§4.4) ───────────────────────────────────────────
+
+    /** Append the host to ~/.ssh/config; srv shows the user the exact block
+     *  first. Resolves `false` when they cancel. Expands the new row. */
+    async addRemote(host: NewRemote): Promise<boolean> {
+        try {
+            // The question waits up to two minutes for the user.
+            await RpcApi.RemoteAddCommand(TabRpcClient, { ...host, blockid: this.blockId }, { timeout: 180_000 });
+        } catch (e) {
+            if (String(e instanceof Error ? e.message : e).includes("kept:")) return false;
+            throw e;
+        }
+        this.setExpanded(host.alias.trim());
+        await this.refresh();
+        return true;
+    }
+
+    /** The last connection test per remote: `true`, or ssh's message. */
+    readonly testResults: Accessor<Record<string, true | string>>;
+    private readonly setTestResults: (v: Record<string, true | string>) => void;
+    readonly testing: Accessor<string | null>;
+    private readonly setTesting: (v: string | null) => void;
+
+    /** Log in and run `true`, ssh's prompts going to the user's window. */
+    async testConnection(name: string): Promise<void> {
+        this.setTesting(name);
+        try {
+            const res = await RpcApi.RemoteTestCommand(TabRpcClient, { connection: name, blockid: this.blockId }, { timeout: 200_000 });
+            this.setTestResults({ ...this.testResults(), [name]: res.ok ? true : res.message || "ssh failed" });
+        } finally {
+            if (this.testing() === name) this.setTesting(null);
+        }
+    }
+
+    /** Open the ssh config file defining `name` in an editor beside this pane. */
+    async editInSshConfig(name: string): Promise<void> {
+        const where = await RpcApi.RemoteSshLocateCommand(TabRpcClient, { connection: name });
+        if (!where) throw new Error(`your ssh config doesn't define ${name}`);
+        await TabRpcClient.rpcCall(
+            "pane.open",
+            { view: "editor", file: where.path, split_direction: "right", split_reference_block_id: this.blockId },
+            {}
+        );
+        this.setNotice(`${name} is defined on line ${where.line} of ${where.path}.`);
     }
 
     dispose(): void {

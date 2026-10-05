@@ -192,6 +192,98 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let app = app.clone();
         async move { remove_helper(&app, &cmd.connection, &cmd.blockid).await }
     });
+    // Adding a host writes the user's ssh config, which every ssh on the
+    // machine reads (git's included), so it is the user's decision, made in
+    // the approval window: a new alias could otherwise send another tool's
+    // ssh somewhere else.
+    let app = state.clone();
+    engine.register_typed(COMMAND_REMOTE_ADD, move |cmd: CommandRemoteAddData, _ctx| {
+        let app = app.clone();
+        async move { add_remote(&app, cmd).await }
+    });
+    // Testing logs in with the user's keys, so only to a host AgentMux
+    // already lists (the user's own ssh config, settings or a connection
+    // they made), never one an RPC names.
+    let app = state.clone();
+    engine.register_typed(COMMAND_REMOTE_TEST, move |cmd: CommandRemoteTestData, _ctx| {
+        let app = app.clone();
+        async move { test_remote(&app, &cmd.connection, &cmd.blockid).await }
+    });
+    engine.register_typed(COMMAND_REMOTE_SSH_LOCATE, move |cmd: CommandRemoteSshLocateData, _ctx| async move {
+        let found = tokio::task::spawn_blocking(move || {
+            let (config, ssh_dir) = crate::backend::remote::ssh_config_edit::user_paths()?;
+            crate::backend::remote::ssh_config_edit::locate_in(&config, &ssh_dir, &cmd.connection)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        Ok(found.map(|(path, line)| RemoteSshLocation {
+            path: path.to_string_lossy().into_owned(),
+            line: line as u32,
+        }))
+    });
+}
+
+/// Add a host to the user's ssh config (§4.4 of SPEC_REMOTES_PANE_2026_10_05.md),
+/// once they confirm the exact block in the window of pane `cmd.blockid`.
+async fn add_remote(state: &AppState, cmd: CommandRemoteAddData) -> Result<(), String> {
+    use crate::backend::remote::ssh_config_edit::{self, NewHost};
+    if cmd.blockid.is_empty() {
+        return Err("adding a remote needs the pane asking, to ask the user in".into());
+    }
+    let host = NewHost {
+        alias: cmd.alias,
+        hostname: cmd.hostname,
+        user: cmd.user,
+        port: cmd.port,
+        identity_file: cmd.identityfile,
+        proxy_jump: cmd.proxyjump,
+    };
+    let block = ssh_config_edit::host_block(&host)?;
+    let (config, ssh_dir) =
+        ssh_config_edit::user_paths().ok_or_else(|| "there is no home folder for an ssh config".to_string())?;
+    let question = serde_json::json!({
+        "kind": "consent",
+        "title": format!("Add {} to your ssh config", one_line(&host.alias, 80)),
+        "message": format!(
+            "Add this to the end of {}?\n\n{}\nEvery ssh on this computer will use it.",
+            config.display(),
+            block
+        ),
+        "ok_label": "Add",
+        "cancel_label": "Cancel",
+    });
+    let answer = ask_user(state, &cmd.blockid, question).await?;
+    if !(answer.answered && answer.approve) {
+        return Err("kept: the user chose not to add it".into());
+    }
+    tokio::task::spawn_blocking(move || ssh_config_edit::add_host_in(&config, &ssh_dir, &host))
+        .await
+        .map_err(|e| e.to_string())??;
+    remotes::publish_change(&state.broker);
+    Ok(())
+}
+
+/// Log in to `connection` and run `true` (§4.4): success, or ssh's message.
+async fn test_remote(state: &AppState, connection: &str, block: &str) -> Result<RemoteTestResult, String> {
+    use crate::backend::remote::host::HostSsh;
+    let name = match ConnTarget::parse(connection)? {
+        t @ ConnTarget::Ssh(_) => t.name(),
+        _ => return Err(format!("{} is not an SSH host", one_line(connection, 80))),
+    };
+    let known = remotes::list(state.config_watcher.get_full_config().connections.clone())
+        .await
+        .iter()
+        .any(|r| r.kind == "ssh" && r.name == name);
+    if !known {
+        return Err(format!("{} isn't one of your remotes", one_line(&name, 80)));
+    }
+    let mut host = HostSsh::for_connection(&name)?;
+    let _grant = (!block.is_empty()).then(|| host.ask_user_in(block, &name, &state.auth_key)).flatten();
+    let out = host.run("true", None, SSH_WITH_PROMPTS).await;
+    Ok(match out.and_then(|o| o.ok()) {
+        Ok(_) => RemoteTestResult { ok: true, message: String::new() },
+        Err(message) => RemoteTestResult { ok: false, message },
+    })
 }
 
 /// Remove AgentMux's helper from SSH host `connection` (Remotes, §4.9 of
@@ -230,7 +322,7 @@ async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Resul
     let mut host = HostSsh::for_connection(&name)?;
     let _grant = host.ask_user_in(block, &name, &state.auth_key);
     let out = host
-        .run(&helper_install::remove_command(), None, std::time::Duration::from_secs(60))
+        .run(&helper_install::remove_command(), None, SSH_WITH_PROMPTS)
         .await?
         .ok()?;
     if out.trim() != "ok" {
@@ -419,6 +511,10 @@ pub(crate) fn one_line(text: &str, max: usize) -> String {
 
 /// How long the user has to answer a consent or askpass dialog.
 const DIALOG_TIMEOUT_MS: u64 = 120_000;
+
+/// How long an ssh run whose prompts go to the approval window may take: the
+/// dialog's own wait, and some to spare.
+const SSH_WITH_PROMPTS: std::time::Duration = std::time::Duration::from_millis(DIALOG_TIMEOUT_MS + 30_000);
 
 /// The user's answer to [`ask_user`]. `answered` is false when the window was
 /// closed, timed out, or could not be opened.

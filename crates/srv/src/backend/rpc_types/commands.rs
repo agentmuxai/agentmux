@@ -428,6 +428,9 @@ pub const COMMAND_REMOTES_LIST: &str = "remoteslist";
 pub const COMMAND_REMOTE_SET_CONFIG: &str = "remotesetconfig";
 pub const COMMAND_REMOTE_FORGET: &str = "remoteforget";
 pub const COMMAND_REMOTE_HELPER_REMOVE: &str = "remotehelperremove";
+pub const COMMAND_REMOTE_ADD: &str = "remoteadd";
+pub const COMMAND_REMOTE_TEST: &str = "remotetest";
+pub const COMMAND_REMOTE_SSH_LOCATE: &str = "remotesshlocate";
 /// Ambient call outcomes since srv started, by purpose then outcome label
 /// (`ambient::outcome::snapshot`). For the Instance panel.
 pub const COMMAND_AMBIENT_OUTCOMES: &str = "ambient.outcomes";
