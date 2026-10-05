@@ -110,6 +110,8 @@ def grant():
 
 def main():
     mode = os.environ['MODE']
+    if not os.environ.get('BROKER_URL', '').startswith('https://'):
+        fail('the broker URL is not set (the ACTIONS_BROKER_URL repository secret)')
     if mode in ('grant', 'aws'):
         data = grant()
         if mode == 'grant':
