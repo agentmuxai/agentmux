@@ -1,6 +1,6 @@
 # SPEC: Retire the Armory — two panes, Connectors and Knowledge
 
-**Status:** active — decided (§9); Phase 1 (the two panes, entry points, migration, default widget bar) ships with this spec, Phases 2 and 3 follow (§5)
+**Status:** active — decided (§9). Shipped: Phase 1 (the two panes, entry points, migration, default widget bar), #4345. Remaining: Phase 2 (server and agent-facing text) and Phase 3 (removing the Armory shim), §5
 **Date:** 2026-10-05
 **Author:** Camper (agent), at operator request
 **Related:** `ARCHITECTURE_ARMORY_2026_07_20.md` (what the Armory holds and why),
