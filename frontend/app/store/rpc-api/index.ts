@@ -19,6 +19,7 @@ import { BrowserStartPageApi } from "./browser-start-page";
 import { BundleApi, BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
+import { RemotesApi } from "./remotes";
 import { FsApi } from "./fs";
 import { IdentityApi } from "./identity";
 import { LayoutApi } from "./layout";
@@ -341,6 +342,7 @@ export const RpcApi = {
     ...SkillApi,
     ...BundleImportApi,
     ...FleetApi,
+    ...RemotesApi,
     ...ReactiveApi,
     ...BookmarksApi,
     ...LayoutApi,
