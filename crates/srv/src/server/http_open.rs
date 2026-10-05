@@ -21,6 +21,7 @@ pub(super) async fn handle_pane_open(
     // signed identity and the user's consent for that host, as `Shell` does
     // (remote terminals spec §8.2). Named as the field or inside `meta`.
     let mut opened_by_agent = None;
+    let mut opening = None;
     if let Some(conn) = ssh_connection_of(&req) {
         let block = req.split_reference_block_id.clone().unwrap_or_default();
         let agent = match app_api::connections::verified_agent(&state, &block, req.auth.as_ref()) {
@@ -35,6 +36,8 @@ pub(super) async fn handle_pane_open(
         if let Err(e) = app_api::connections::consent_for_ssh(&state, &block, &agent, &conn, &what).await {
             return (StatusCode::FORBIDDEN, Json(json!({ "error": e }))).into_response();
         }
+        // Until the pane is noted below, an install on this host asks.
+        opening = Some(crate::backend::remote::helper_consent::begin_agent_open(&conn));
         opened_by_agent = Some(agent);
     }
     match app_api::open_pane(&state, req).await {
@@ -44,6 +47,7 @@ pub(super) async fn handle_pane_open(
             if let Some(agent) = &opened_by_agent {
                 crate::backend::remote::helper_consent::note_agent_pane(&result.block_id, agent);
             }
+            drop(opening);
             (StatusCode::OK, Json(json!(result))).into_response()
         }
         Err(e) => {

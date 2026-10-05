@@ -114,12 +114,36 @@ pub fn install_answering_yes() {
     });
 }
 
+/// The most agent panes remembered; past it the oldest go (a pane that old
+/// has long since installed the helper, or not).
+const MAX_AGENT_PANES: usize = 512;
+
 /// Panes an agent opened on a host, and the agent: an install from one of
 /// them is the agent's doing. Kept in memory, not in the pane's meta, which
-/// any caller holding srv's key could clear.
-fn agent_panes() -> &'static Mutex<HashMap<String, String>> {
-    static PANES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    PANES.get_or_init(|| Mutex::new(HashMap::new()))
+/// any caller holding srv's key could clear. `opening` counts the agent
+/// `pane.open`s in flight per host: until one returns its pane isn't noted
+/// yet, so any install on that host asks.
+#[derive(Default)]
+struct AgentPanes {
+    by_block: HashMap<String, String>,
+    order: std::collections::VecDeque<String>,
+    opening: HashMap<String, u32>,
+}
+
+fn agent_panes() -> &'static Mutex<AgentPanes> {
+    static PANES: OnceLock<Mutex<AgentPanes>> = OnceLock::new();
+    PANES.get_or_init(|| Mutex::new(AgentPanes::default()))
+}
+
+fn lock() -> std::sync::MutexGuard<'static, AgentPanes> {
+    agent_panes().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// One host, however it is spelled.
+fn host_key(connection: &str) -> String {
+    super::ConnTarget::parse(connection)
+        .map(|t| t.name())
+        .unwrap_or_else(|_| connection.trim().to_string())
 }
 
 /// `block_id` was opened by `agent` (a verified agent's `pane.open` on a host).
@@ -127,19 +151,47 @@ pub fn note_agent_pane(block_id: &str, agent: &str) {
     if block_id.is_empty() {
         return;
     }
-    agent_panes()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(block_id.to_string(), agent.to_string());
+    let mut panes = lock();
+    if panes.by_block.insert(block_id.to_string(), agent.to_string()).is_none() {
+        panes.order.push_back(block_id.to_string());
+    }
+    while panes.order.len() > MAX_AGENT_PANES {
+        if let Some(old) = panes.order.pop_front() {
+            panes.by_block.remove(&old);
+        }
+    }
+}
+
+/// An agent's `pane.open` on a host is in flight while this lives.
+pub struct AgentOpening(String);
+
+impl Drop for AgentOpening {
+    fn drop(&mut self) {
+        let mut panes = lock();
+        if let Some(n) = panes.opening.get_mut(&self.0) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                panes.opening.remove(&self.0);
+            }
+        }
+    }
+}
+
+/// Call before an agent's `pane.open` on `connection`; hold the guard until
+/// the pane is noted ([`note_agent_pane`]).
+pub fn begin_agent_open(connection: &str) -> AgentOpening {
+    let key = host_key(connection);
+    *lock().opening.entry(key.clone()).or_default() += 1;
+    AgentOpening(key)
 }
 
 fn agent_of(block_id: Option<&str>) -> Option<String> {
     let block_id = block_id.filter(|b| !b.is_empty())?;
-    agent_panes()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .get(block_id)
-        .cloned()
+    lock().by_block.get(block_id).cloned()
+}
+
+fn agent_opening(connection: &str) -> bool {
+    lock().opening.contains_key(&host_key(connection))
 }
 
 /// The question (§4.9).
@@ -170,7 +222,7 @@ pub async fn allow_install(connection: &str, block_id: Option<&str>) -> Result<(
         .get()
         .ok_or_else(|| "AgentMux could not ask whether to install its helper".to_string())?;
     let agent = agent_of(block_id);
-    let by_agent = agent.is_some() || block_id.is_none_or(str::is_empty);
+    let by_agent = agent.is_some() || block_id.is_none_or(str::is_empty) || agent_opening(connection);
     let (host, global) = (deps.settings)(connection);
     match step(Policy::resolve(&host, &global), by_agent) {
         Step::Install => return Ok(()),
@@ -252,5 +304,29 @@ mod tests {
         assert_eq!(agent_of(Some("blk-agent-opened")).as_deref(), Some("korp"));
         assert_eq!(agent_of(Some("blk-users-own")), None);
         assert_eq!(agent_of(None), None);
+    }
+
+    #[test]
+    fn a_host_an_agent_is_opening_a_pane_on_asks() {
+        assert!(!agent_opening("me@opening-host"));
+        let first = begin_agent_open("me@opening-host");
+        let second = begin_agent_open(" me@opening-host ");
+        assert!(agent_opening("me@opening-host"), "however it is spelled");
+        assert!(!agent_opening("me@other-host"));
+        drop(first);
+        assert!(agent_opening("me@opening-host"), "one still in flight");
+        drop(second);
+        assert!(!agent_opening("me@opening-host"));
+    }
+
+    #[test]
+    fn the_agent_panes_kept_are_bounded() {
+        for i in 0..MAX_AGENT_PANES + 10 {
+            note_agent_pane(&format!("blk-bound-{i}"), "korp");
+        }
+        let panes = lock();
+        assert!(panes.by_block.len() <= MAX_AGENT_PANES);
+        assert_eq!(panes.by_block.len(), panes.order.len());
+        assert!(!panes.by_block.contains_key("blk-bound-0"), "the oldest went");
     }
 }
