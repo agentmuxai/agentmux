@@ -225,7 +225,7 @@ that doesn't overflow forwards at once.
 event): skid then forward, at the bottom and at the top; a notch that brings the box to its
 edge, then the skid; Ctrl+wheel and `deltaY 0` ignored; a box that fits forwards at once by
 default, and skids in both directions with `skidWhenFits`; a
-three-notch event; reversal; leaving for the pane and returning; a second box; a trackpad
+coalesced event carrying more notches than the skid; reversal; leaving for the pane and returning; a second box; a trackpad
 gesture; the edge flash and its fade; detach.
 
 **Live** (isolated `task dev`): drive real wheel input over a box with CDP
@@ -237,7 +237,7 @@ rely on. A real mouse and a precision touchpad each still need one manual pass.
 
 | Risk | Mitigation |
 |---|---|
-| A skid at every box edge slows a fast scroll through a long conversation | Two notches per edge, by design. If it proves too sticky, skip the skid when the previous wheel event was under ~40 ms ago (a fast spin). Not in v1. |
+| A skid at every box edge slows a fast scroll through a long conversation | `SKID_NOTCHES` notches per edge, by design. If it proves too sticky, skip the skid when the previous wheel event was under ~40 ms ago (a fast spin). Not in v1. |
 | High-resolution wheels (a fraction of 120 per event) are treated as continuous | They skid until the gesture pauses, like a trackpad, which matches how they feel. Tests pin both classes. |
 | A box that grows or shrinks under the pointer (streaming output) flips `atEdge` | Read per event; leaving the edge re-arms, so at worst one more skid. |
 | The virtual list replaces a box node mid-gesture | A new node is a different box: an arrival, one skid. Harmless. |
