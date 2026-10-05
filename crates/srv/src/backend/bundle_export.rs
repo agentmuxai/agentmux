@@ -10,7 +10,7 @@
 //!
 //! ```text
 //! <bundle-slug>/
-//! ├── armory.json
+//! ├── bundle.json
 //! ├── instructions/
 //! │   ├── AGENTS.md
 //! │   └── context/…
@@ -63,7 +63,7 @@ use super::storage::store::{derive_slug, Bundle};
 use super::storage::Skill;
 
 /// One file within an exported bundle, path relative to the bundle root
-/// (e.g. `"armory.json"`, `"instructions/AGENTS.md"`).
+/// (e.g. `"bundle.json"`, `"instructions/AGENTS.md"`).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct BundleExportFile {
     pub path: String,
@@ -407,7 +407,7 @@ pub fn export_bundle(
         &mut warnings,
     );
     // manifest_instructions_by_provider preserves insertion order isn't
-    // required (armory.json's own object key order is not meaningful), but
+    // required (the manifest's own object key order is not meaningful), but
     // BTreeMap gives deterministic output ordering across export calls,
     // which matters for reproducible zip byte content.
     let mut manifest_instructions_by_provider: std::collections::BTreeMap<String, Vec<String>> =
@@ -623,34 +623,34 @@ pub fn export_bundle(
         });
     }
 
-    let manifest = json!({
-        // ABF v0.2 §2.4: bumped from v0.1 — components.instructions's shape
-        // itself changed (flat array -> keyed object, §2.2). $schema is the
-        // ABF FORMAT version, distinct from the "version" field below
-        // (the bundle's own content version, which has nothing to do with
-        // which ABF shape produced this file).
-        "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
+    // Who the bundle was made for: a hint, never enforced (ABF v0.3,
+    // SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §2.1). The row's `model`
+    // has always held a vendor, so that's its name here. Omitted when unset.
+    let mut suggested_for = serde_json::Map::new();
+    if !bundle.provider.is_empty() {
+        suggested_for.insert("provider".into(), json!(bundle.provider));
+    }
+    if !bundle.model.is_empty() {
+        suggested_for.insert("vendor".into(), json!(bundle.model));
+    }
+    let mut manifest = json!({
+        // The ABF FORMAT version (Agent Bundle Format v0.3), distinct from
+        // the "version" field below (the bundle's own content version).
+        "$schema": crate::backend::bundle_import::SCHEMA_V0_3,
         "name": root_slug,
         // Bundles have no native version concept (no `version` column) --
         // ABF requires one, so this is an export-time default the user is
         // expected to bump before actually publishing the bundle anywhere.
         "version": "0.1.0",
         "description": bundle.description,
-        // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3/§7.5 step
-        // 6: harness + vendor, readonly-once-set on the source bundle (see
-        // `check_provider_model_immutable` in `server/app_api/bundle/mod.rs`) —
-        // carried through export so a re-imported ABF is self-describing
-        // about what it needs to run, not silently reset to unbound.
-        // Written as `null` (not an empty string) when the source bundle
-        // itself has none set yet, so older/still-unbound bundles don't
-        // export a misleadingly-present-but-empty value.
-        "provider": if bundle.provider.is_empty() { Value::Null } else { json!(bundle.provider) },
-        "model": if bundle.model.is_empty() { Value::Null } else { json!(bundle.model) },
         "components": Value::Object(components),
         "metadata": {},
     });
+    if !suggested_for.is_empty() {
+        manifest["suggestedFor"] = Value::Object(suggested_for);
+    }
     files.push(BundleExportFile {
-        path: "armory.json".to_string(),
+        path: crate::backend::bundle_import::MANIFEST_FILE.to_string(),
         content: serde_json::to_string_pretty(&manifest).unwrap_or_else(|_| "{}".to_string()),
     });
 
@@ -1298,8 +1298,8 @@ mod tests {
             r#"["skill-a"]"#,
         );
         let export = export_with_inline_mcp(&bundle, &[make_agent_skill("Deploy")]);
-        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
-        let manifest: Value = serde_json::from_str(&manifest_file.content).expect("armory.json must be valid JSON");
+        let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
+        let manifest: Value = serde_json::from_str(&manifest_file.content).expect("bundle.json must be valid JSON");
         assert_eq!(manifest["name"], "backend-dev-bundle");
         // ABF v0.2 §2.2: components.instructions is the keyed-object shape
         // ("default" + provider variants), not a flat array.
@@ -1323,7 +1323,7 @@ mod tests {
             .expect("expected instructions/codex/AGENTS.md");
         assert_eq!(codex_file.content, "Codex-specific override.");
 
-        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
         assert_eq!(manifest["components"]["instructions"]["default"], json!(["instructions/AGENTS.md"]));
         assert_eq!(manifest["components"]["instructions"]["claude"], json!(["instructions/claude/AGENTS.md"]));
@@ -1339,7 +1339,7 @@ mod tests {
         bundle.instructions_by_provider = r#"{"claude":"   "}"#.to_string();
         let export = export_with_inline_mcp(&bundle, &[]);
         assert!(!export.files.iter().any(|f| f.path.starts_with("instructions/claude/")));
-        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
         assert!(manifest["components"]["instructions"].get("claude").is_none());
     }
@@ -1363,7 +1363,7 @@ mod tests {
         // matters is that it's deterministic and there's only one.
         assert_eq!(claude_files[0].content, "Second.");
 
-        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
         assert_eq!(
             manifest["components"]["instructions"]["claude"],
@@ -1379,7 +1379,7 @@ mod tests {
         // "skills/<slug>" (the directory), not "skills/<slug>/SKILL.md".
         let bundle = make_bundle("", "[]", "[]", r#"["skill-a"]"#);
         let export = export_with_inline_mcp(&bundle, &[make_agent_skill("Deploy Checklist")]);
-        let manifest_file = export.files.iter().find(|f| f.path == "armory.json").unwrap();
+        let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
         let skills = manifest["components"]["skills"].as_array().unwrap();
         assert_eq!(skills, &vec![json!("skills/deploy-checklist")]);
@@ -1388,10 +1388,48 @@ mod tests {
     }
 
     #[test]
+    fn writes_an_abf_v0_3_manifest_with_a_suggested_for_hint() {
+        let mut bundle = make_bundle("Be concise.", "[]", "[]", "[]");
+        bundle.provider = "codex".into();
+        bundle.model = "openai".into();
+        let export = export_with_inline_mcp(&bundle, &[]);
+        let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").expect("bundle.json");
+        assert!(!export.files.iter().any(|f| f.path == "armory.json"));
+        let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
+        assert_eq!(manifest["$schema"], "https://docs.agentmux.ai/schemas/agent-bundle/v0.3/bundle.schema.json");
+        assert_eq!(manifest["suggestedFor"], json!({ "provider": "codex", "vendor": "openai" }));
+        assert!(manifest.get("provider").is_none() && manifest.get("model").is_none());
+    }
+
+    #[test]
+    fn omits_the_hint_when_the_bundle_has_none() {
+        let export = export_with_inline_mcp(&make_bundle("x", "[]", "[]", "[]"), &[]);
+        let manifest: Value = serde_json::from_str(&export.files.iter().find(|f| f.path == "bundle.json").unwrap().content).unwrap();
+        assert!(manifest.get("suggestedFor").is_none());
+    }
+
+    #[test]
+    fn a_v0_3_export_round_trips_through_import() {
+        let mut bundle = make_bundle("Be concise.", "[]", "[]", "[]");
+        bundle.provider = "gemini".into();
+        bundle.model = "google".into();
+        let export = export_with_inline_mcp(&bundle, &[]);
+        let files: Vec<crate::backend::bundle_import::BundleImportFile> = export
+            .files
+            .iter()
+            .map(|f| crate::backend::bundle_import::BundleImportFile { path: f.path.clone(), content: f.content.clone() })
+            .collect();
+        let parsed = crate::backend::bundle_import::parse_bundle_import(&files).unwrap();
+        assert_eq!((parsed.provider.as_str(), parsed.model.as_str()), ("gemini", "google"));
+        assert!(parsed.instructions.contains("Be concise."));
+        assert!(parsed.warnings.is_empty(), "{:?}", parsed.warnings);
+    }
+
+    #[test]
     fn empty_bundle_still_produces_a_valid_manifest() {
         let bundle = make_bundle("", "[]", "[]", "[]");
         let export = export_with_inline_mcp(&bundle, &[]);
-        // armory.json is always written, even for a fully empty bundle.
+        // bundle.json is always written, even for a fully empty bundle.
         assert_eq!(export.files.len(), 1);
         let manifest: Value = serde_json::from_str(&export.files[0].content).unwrap();
         assert_eq!(manifest["components"], json!({}));
@@ -1410,10 +1448,10 @@ mod tests {
         let mut found = false;
         for i in 0..archive.len() {
             let file = archive.by_index(i).unwrap();
-            if file.name() == "backend-dev-bundle/armory.json" {
+            if file.name() == "backend-dev-bundle/bundle.json" {
                 found = true;
             }
         }
-        assert!(found, "expected backend-dev-bundle/armory.json in the archive");
+        assert!(found, "expected backend-dev-bundle/bundle.json in the archive");
     }
 }

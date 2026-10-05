@@ -295,13 +295,11 @@ pub(super) fn set_manifest_component(
     if entries.is_empty() {
         return Ok(());
     }
-    let manifest_idx = export
-        .files
-        .iter()
-        .position(|f| f.path == "armory.json")
-        .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
+    let manifest_name = crate::backend::bundle_import::manifest_file_name(|n| export.files.iter().any(|f| f.path == n))
+        .ok_or_else(|| "bundle export has no manifest".to_string())?;
+    let manifest_idx = export.files.iter().position(|f| f.path == manifest_name).expect("found above");
     let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
-        .map_err(|e| format!("armory.json: {e}"))?;
+        .map_err(|e| format!("{manifest_name}: {e}"))?;
     manifest["components"][key] = json!(entries);
     export.files[manifest_idx].content =
         serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
