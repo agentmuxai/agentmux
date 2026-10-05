@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Swarm's "AgentMux AI" section: how AgentMux's own model calls (session
- * titles, names, prompt suggestions, narration) have gone since srv started,
+ * The Swarm toolbar's Stats panel (swarm-stats.tsx): how AgentMux's own model
+ * calls (session titles, names, prompt suggestions, narration) have gone since srv started,
  * from `ambient.outcomes` (crates/srv/src/ambient/outcome.rs), so "the swarm
  * has been blank for an hour" is visible without copying a database.
  * docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.8.
