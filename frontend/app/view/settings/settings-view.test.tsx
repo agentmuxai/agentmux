@@ -6,7 +6,7 @@
  * for this view before; added alongside the dynamic-pane-title fix (see
  * docs/specs/SPEC_SECTIONED_PANE_DYNAMIC_TITLE_2026_08_12.md §3.2, §8) since
  * that fix touches this file and there was nothing to catch a regression.
- * Mirrors armory-view.test.tsx / warden-view.test.tsx's structure where it
+ * Mirrors section-pane.test.tsx / warden-view.test.tsx's structure where it
  * applies; Settings has no per-pane zoom and no meta-backed section state
  * (SettingsViewModel has no blockAtom), so there's no zoom `describe` block
  * and section switches are asserted via `model.activeSection()` directly

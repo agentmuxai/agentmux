@@ -86,7 +86,7 @@
       "type": "object",
       "required": ["type"],
       "properties": {
-        "type": { "type": "string", "description": "agent, term, browser, editor, codeeditor, preview, media, sysinfo, armory, swarm, … — unknown types are kept as placeholders." },
+        "type": { "type": "string", "description": "agent, term, browser, editor, codeeditor, preview, media, files, sysinfo, connectors, knowledge, swarm, … (armory, from older files, opens as connectors or knowledge) — unknown types are kept as placeholders." },
         "config": { "type": "object" },
         "resume": { "type": "object", "description": "Opt-in, machine-local resume references (e.g. an agent session_id)." }
       }

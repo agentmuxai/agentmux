@@ -9,7 +9,7 @@ vi.mock("@/app/store/global", () => ({
             widgets: {
                 "defwidget@slack": { icon: "brands@slack", blockdef: { meta: { view: "browser" } } },
                 "defwidget@browser": { icon: "globe", blockdef: { meta: { view: "browser" } } },
-                "defwidget@armory": { icon: "vault", label: "Armory", blockdef: { meta: { view: "armory" } } },
+                "defwidget@knowledge": { icon: "book", label: "Knowledge", blockdef: { meta: { view: "knowledge" } } },
                 "defwidget@terminal": { icon: "square-terminal", blockdef: { meta: { view: "term" } } },
             },
         }),
@@ -28,7 +28,7 @@ const iconFor = (view: string, meta: Record<string, unknown> = {}) =>
 
 describe("pane tab icons", () => {
     it("match the widget-bar icon for the view", () => {
-        expect(iconFor("armory")).toEqual({ kind: "fa", name: "vault" });
+        expect(iconFor("knowledge")).toEqual({ kind: "fa", name: "book" });
         expect(iconFor("term")).toEqual({ kind: "fa", name: "square-terminal" });
     });
 
@@ -37,7 +37,7 @@ describe("pane tab icons", () => {
     });
 
     it("let frame:icon win over the widget icon", () => {
-        expect(iconFor("armory", { "frame:icon": "rocket" })).toEqual({ kind: "fa", name: "rocket" });
+        expect(iconFor("knowledge", { "frame:icon": "rocket" })).toEqual({ kind: "fa", name: "rocket" });
     });
 
     it("fall back to the built-in view icon when no widget opens the view", () => {
@@ -47,8 +47,8 @@ describe("pane tab icons", () => {
 
 describe("pane tab labels", () => {
     it("fall back to the widget-bar label for the view", () => {
-        const tab = describePaneTab({ blockId: "b-a", view: "armory", meta: { view: "armory" }, ordinal: 1, liveViewModel: null });
-        expect(tab.label).toBe("Armory");
+        const tab = describePaneTab({ blockId: "b-a", view: "knowledge", meta: { view: "knowledge" }, ordinal: 1, liveViewModel: null });
+        expect(tab.label).toBe("Knowledge");
     });
 });
 

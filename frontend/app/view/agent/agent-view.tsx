@@ -27,7 +27,6 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import {
     getApi,
     getBlockMetaKeyAtom,
-    openOrFocusPaneByView,
     MOS,
 } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -38,6 +37,7 @@ import {
     accountLabel,
     loadAccounts,
 } from "@/app/view/identity/identity-model";
+import { openConnectors } from "@/app/view/section-pane/panes";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -1046,7 +1046,7 @@ export const AgentPresentationView = ({
             log("agent", r.released ? `Take over — released by ${r.fromChannel ?? "the other instance"}` : "Take over — nobody else was running it");
             if (turnAttempted) retryLastTurn();
         },
-        onOpenArmory: () => void openOrFocusPaneByView("armory"),
+        onOpenAccounts: () => void openConnectors("accounts"),
         // context_exceeded recovery — archive the over-full session and return
         // to the picker for a clean relaunch (resuming would only re-fail).
         onNewSession: () => {

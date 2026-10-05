@@ -12,7 +12,6 @@ import {
     createTab,
     getApi,
     MOS,
-    openOrFocusPaneByView,
     setActiveTab,
 } from "@/app/store/global";
 import { splitBlockDefFor } from "@/app/block/split-block-def";
@@ -22,6 +21,7 @@ import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
+import { openConnectors, openKnowledge } from "@/app/view/section-pane/panes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +33,10 @@ export interface CommandEntry {
     category: string;
     icon?: string;
     iconColor?: string;
+    /** More words the palette's search matches, beyond the label. */
+    keywords?: string;
+    /** Left out of the palette; still runs by id (a menu, a keybinding). */
+    hidden?: boolean;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: () => void | Promise<any>;
 }
@@ -380,11 +384,30 @@ export function registerDefaultCommands(): void {
         execute: () => zoomReset(),
     });
     commandRegistry.register({
-        id: "app:identity",
-        label: "Identity & Memory",
+        id: "app:connectors",
+        label: "Connectors",
         category: "App",
-        icon: "id-card",
-        execute: () => void openOrFocusPaneByView("armory"),
+        icon: "plug",
+        keywords: "accounts sign in login mcp servers armory",
+        execute: () => openConnectors(),
+    });
+    commandRegistry.register({
+        id: "app:knowledge",
+        label: "Knowledge",
+        category: "App",
+        icon: "book",
+        keywords: "memory global personal skills bundles abf armory",
+        execute: () => openKnowledge(),
+    });
+    // The Armory's old command, for a keybinding that still names it. Remove
+    // with the Armory (SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md).
+    commandRegistry.register({
+        id: "app:identity",
+        label: "Connectors",
+        category: "App",
+        icon: "plug",
+        hidden: true,
+        execute: () => openConnectors(),
     });
     commandRegistry.register({
         id: "help:docs",

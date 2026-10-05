@@ -644,3 +644,50 @@ fn a_files_pane_round_trips_its_folder() {
     assert_eq!(m["view"], "files");
     assert_eq!(m["files:path"], home.path().join("src").to_string_lossy().as_ref());
 }
+
+#[test]
+fn connectors_and_knowledge_are_written_with_their_section() {
+    let store = Store::open_in_memory().unwrap();
+    for (m, kind, section) in [
+        (json!({ "view": "connectors", "connectors:section": "mcp" }), "connectors", "mcp"),
+        (json!({ "view": "knowledge", "knowledge:section": "skills", "term:zoom": 1.2 }), "knowledge", "skills"),
+    ] {
+        let v = view_from_block(&store, &meta(m), &ctx(false), &mut Vec::new());
+        assert_eq!(v.view_type, kind);
+        assert_eq!(v.config, json!({ "section": section }).as_object().unwrap().clone());
+    }
+}
+
+#[test]
+fn a_saved_armory_block_is_written_as_the_pane_that_replaced_it() {
+    let store = Store::open_in_memory().unwrap();
+    for (m, kind, section) in [
+        (json!({ "view": "armory" }), "connectors", "accounts"),
+        (json!({ "view": "trust", "armory:section": "mcp" }), "connectors", "mcp"),
+        (json!({ "view": "armory", "armory:section": "memory", "armory:memory:subsection": "personal" }), "knowledge", "personal"),
+        (json!({ "view": "armory", "armory:section": "native_memory" }), "knowledge", "personal"),
+        (json!({ "view": "armory", "armory:section": "bundles" }), "knowledge", "bundles"),
+    ] {
+        let v = view_from_block(&store, &meta(m.clone()), &ctx(false), &mut Vec::new());
+        assert_eq!((v.view_type.as_str(), v.config["section"].as_str()), (kind, Some(section)), "{m}");
+    }
+}
+
+#[test]
+fn connectors_knowledge_and_old_armory_entries_open_the_new_panes() {
+    let home = tempfile::tempdir().unwrap();
+    let store = Store::open_in_memory().unwrap();
+    for (view, pane, key, section) in [
+        (json!({ "type": "connectors", "config": { "section": "mcp" } }), "connectors", "connectors:section", "mcp"),
+        (json!({ "type": "knowledge", "config": { "section": "bundles" } }), "knowledge", "knowledge:section", "bundles"),
+        (json!({ "type": "armory", "config": { "section": "skills" } }), "knowledge", "knowledge:section", "skills"),
+        (json!({ "type": "armory" }), "connectors", "connectors:section", "accounts"),
+    ] {
+        let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
+        let m = block_meta(&plan, 0, 0);
+        assert_eq!(m["view"], pane, "{view}");
+        assert_eq!(m[key], section, "{view}");
+        assert!(!m.contains_key("armory:section"), "{view}");
+        assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+    }
+}

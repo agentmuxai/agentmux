@@ -6,14 +6,14 @@
  * reactive, read-only list of every MCP server visible to this agent
  * (global + this agent's own, if any exist), plus a bound-state-aware
  * Bind/Unbind toggle for global ones (driven by `bound_to_agent` — see
- * AgentMcpModel's doc comment). Servers are authored in the Armory, not
- * here — see AgentMcpModel's doc comment for why this is no longer a
+ * AgentMcpModel's doc comment). Servers are authored in Connectors → MCP
+ * servers, not here — see AgentMcpModel's doc comment for why this is no longer a
  * create/edit/delete surface.
  */
 
 import { onCleanup, For, Show, type JSX } from "solid-js";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
-import { openOrFocusPaneByView } from "@/app/store/global";
+import { openConnectors } from "@/app/view/section-pane/panes";
 import { AgentMcpModel } from "../agent-mcp-model";
 import "./AgentPrimitiveModal.scss";
 
@@ -62,9 +62,9 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
 
             <button
                 class="agent-primitive-modal-new-btn"
-                onClick={() => void openOrFocusPaneByView("armory")}
+                onClick={() => void openConnectors("mcp")}
             >
-                Browse the Armory catalog →
+                Browse all in Connectors →
             </button>
         </div>
     );
@@ -79,11 +79,11 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
                     <div class="agent-primitive-modal-readonly">
                         <h3 class="agent-primitive-modal-name">{server().name}</h3>
                         <p class="agent-primitive-modal-global-note">
-                            Global — managed in the Armory. You can bind/unbind it here, or{" "}
+                            Global — managed in Connectors → MCP servers. You can bind/unbind it here, or{" "}
                             <button
                                 type="button"
                                 class="agent-primitive-modal-link-btn"
-                                onClick={() => void openOrFocusPaneByView("armory")}
+                                onClick={() => void openConnectors("mcp")}
                             >
                                 edit it there
                             </button>

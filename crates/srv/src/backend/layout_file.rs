@@ -366,6 +366,22 @@ fn ratios(sizes: &[f64]) -> Vec<f64> {
     out
 }
 
+/// Where a saved Armory pane goes, by its section (and, for the old Memory
+/// section, its Global/Personal subsection): its pane, `connectors` or
+/// `knowledge`, and that pane's section. Mirrors `armoryTarget` in
+/// frontend/app/view/section-pane/panes.ts.
+fn armory_target(section: Option<&str>, subsection: Option<&str>) -> (&'static str, &'static str) {
+    match section {
+        Some("mcp") => ("connectors", "mcp"),
+        Some("memory") if subsection == Some("personal") => ("knowledge", "personal"),
+        Some("memory") => ("knowledge", "global"),
+        Some("native_memory") => ("knowledge", "personal"),
+        Some("skills") => ("knowledge", "skills"),
+        Some("bundles") => ("knowledge", "bundles"),
+        _ => ("connectors", "accounts"),
+    }
+}
+
 fn meta_str<'a>(meta: &'a MetaMapType, key: &str) -> Option<&'a str> {
     meta.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
 }
@@ -404,10 +420,17 @@ fn strip_query(url: &str) -> String {
 /// paths, failure records — is never written. An unknown view type is
 /// written as `{type}` alone.
 fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warnings: &mut Vec<String>) -> LayoutView {
-    let view_type = meta_str(meta, "view").unwrap_or("unknown").to_string();
+    let mut view_type = meta_str(meta, "view").unwrap_or("unknown").to_string();
     let home = ctx.home.as_deref();
     let mut config = Map::new();
     let mut resume = None;
+    // A saved Armory block the app hasn't moved to its new pane yet (it does
+    // when the block loads) is written as that pane.
+    if matches!(view_type.as_str(), "armory" | "trust") {
+        let (pane, section) = armory_target(meta_str(meta, "armory:section"), meta_str(meta, "armory:memory:subsection"));
+        view_type = pane.to_string();
+        config.insert("section".into(), Value::String(section.to_string()));
+    }
     match view_type.as_str() {
         "agent" => {
             // The definition's portable identity, never its local row id.
@@ -488,8 +511,8 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
                 config.insert("sysinfo_type".into(), Value::String(kind.to_string()));
             }
         }
-        "armory" => {
-            if let Some(section) = meta_str(meta, "armory:section") {
+        "connectors" | "knowledge" => {
+            if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
                 config.insert("section".into(), Value::String(section.to_string()));
             }
         }
@@ -920,12 +943,20 @@ impl PlanBuilder<'_> {
                 }
                 self.summary.push("System info".to_string());
             }
-            "armory" => {
-                meta.insert("view".into(), "armory".into());
-                if let Some(s) = cfg_str(view, "section") {
-                    meta.insert("armory:section".into(), Value::String(s.to_string()));
+            // Files saved before the Armory was split say "armory".
+            "connectors" | "knowledge" | "armory" => {
+                let (pane, section) = match kind {
+                    "armory" => {
+                        let (pane, section) = armory_target(cfg_str(view, "section"), None);
+                        (pane, Some(section))
+                    }
+                    pane => (pane, cfg_str(view, "section")),
+                };
+                meta.insert("view".into(), pane.into());
+                if let Some(s) = section {
+                    meta.insert(format!("{pane}:section"), Value::String(s.to_string()));
                 }
-                self.summary.push("Armory".to_string());
+                self.summary.push(if pane == "connectors" { "Connectors" } else { "Knowledge" }.to_string());
             }
             k if PLAIN_VIEWS.contains(&k) => {
                 meta.insert("view".into(), Value::String(k.to_string()));

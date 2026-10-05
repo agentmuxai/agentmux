@@ -1,7 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Ported from bundle-manager-modal.scss — adapted for a full-height pane layout.
+// The sectioned pane shared by Connectors and Knowledge (section-pane.tsx); ported from
+// the Armory, which it replaced. The class names and the `armory` container name stay:
+// the managers inside (native-memory-manager.scss) query that container.
 
 // Container wrapper — carries container-type so that .armory-view (a descendant)
 // can be targeted by @container armory queries. A container element cannot
@@ -62,7 +64,7 @@
 
     &.is-active {
         background: var(--accent-color);
-        color: var(--accent-text-color, #fff);
+        color: var(--accent-text-color);
 
         i {
             opacity: 1;
@@ -149,55 +151,6 @@
             i { color: var(--accent-color); }
         }
     }
-}
-
-// ── Merged Memory pane — Global/Personal sub-nav ─────────────────────────────
-// See SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md. .memory-subnav-content
-// establishes the containing block the nested .bundle-manager-pane rules
-// (position: absolute; inset: 0) already expect.
-
-.memory-pane {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-}
-
-.memory-subnav {
-    display: flex;
-    flex-direction: row;
-    gap: 4px;
-    padding: 8px;
-    flex-shrink: 0;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--panel-bg-color, var(--main-bg-color));
-
-    button {
-        padding: 6px 14px;
-        border: none;
-        border-radius: 4px;
-        background: transparent;
-        color: var(--main-text-color);
-        font-size: 12px;
-        cursor: default;
-        opacity: 0.7;
-
-        &:hover:not(.is-active) {
-            opacity: 1;
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
-        }
-
-        &.is-active {
-            opacity: 1;
-            background: var(--accent-color);
-            color: var(--accent-text-color, #fff);
-        }
-    }
-}
-
-.memory-subnav-content {
-    position: relative;
-    flex: 1 1 auto;
-    overflow: hidden;
 }
 
 // ── Responsive container queries ─────────────────────────────────────────────

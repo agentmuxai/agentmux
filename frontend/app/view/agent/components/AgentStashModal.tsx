@@ -70,9 +70,9 @@ interface AgentStashModalProps {
 interface StashTabDef {
     id: StashTabId;
     label: string;
-    /** FontAwesome icon name — same choice as the matching section in the
-     *  global Armory pane (armory-view.tsx's RAIL), for visual parity since
-     *  this modal is the per-agent-scoped analogue of it. */
+    /** FontAwesome icon name — same choice as the matching section of the
+     *  Connectors and Knowledge panes (connectors.tsx, knowledge.tsx), for
+     *  visual parity since this modal is the per-agent-scoped analogue of them. */
     icon: string;
 }
 
@@ -84,7 +84,7 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
         { id: "memory", label: "Personal Memory", icon: "brain" },
         { id: "mcp", label: "MCP Servers", icon: "plug" },
         { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
-        // layer-group: same icon armory-view.tsx's RAIL uses for "Bundles" —
+        // layer-group: same icon Knowledge uses for "Bundles" —
         // this tab picks a bundle as startup instructions, so it's the same
         // concept scoped to one agent.
         { id: "startup", label: "Startup", icon: "layer-group" },
@@ -99,7 +99,7 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
     return (
         // agent-stash-modal carries container-type so the tabs below (a
         // descendant) can be targeted by @container agent-stash queries —
-        // same technique as armory-view.tsx's .armory-container wrapper.
+        // same technique as section-pane.tsx's .armory-container wrapper.
         <div class="agent-stash-modal">
             <div class="agent-stash-modal-tabs" role="tablist">
                 <For each={tabs}>

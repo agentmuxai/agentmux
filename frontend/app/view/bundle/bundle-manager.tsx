@@ -274,7 +274,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                             <label class="bundle-view-field">
                                 <span class="bundle-view-field-label">
                                     Name *
-                                    <FieldHelp text="The bundle's display name — shown in the Armory list and in the agent launch picker. Required." />
+                                    <FieldHelp text="The bundle's display name — shown in Knowledge → Bundles and in the agent launch picker. Required." />
                                 </span>
                                 <input
                                     class="bundle-view-input"

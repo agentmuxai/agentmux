@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the Warden rail (`WardenView`) — mirrors armory-view.test.tsx's
+ * Tests for the Warden rail (`WardenView`) — mirrors section-pane.test.tsx's
  * structure/pattern exactly, adapted for Warden's 5 sections (Host, LAN,
  * Internet, Audit, Supervisor).
  */
@@ -34,7 +34,7 @@ vi.mock("@/app/view/warden-supervisor/warden-supervisor-manager", () => ({
 // signal, and having the host context's setMeta write into it, reproduces the
 // real write -> MPS push -> blockAtom update round trip closely enough for
 // clicking a rail item to actually flip the visible/active section here,
-// the same way it does against the real backend. Mirrors armory-view.test.tsx.
+// the same way it does against the real backend. Mirrors section-pane.test.tsx.
 const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
 
 const setMetaMock = vi.fn((patch: Record<string, unknown>) => {
@@ -90,7 +90,7 @@ describe("WardenView rail", () => {
         const hostPane = screen.getByTestId("host-manager").closest(".bundle-manager-pane");
         expect(hostPane?.classList.contains("is-hidden")).toBe(true);
         // Host manager is still mounted (in the DOM), just hidden — the
-        // keep-everything-mounted pattern armory-view.tsx also uses.
+        // keep-everything-mounted pattern section-pane.tsx also uses.
         expect(screen.getByTestId("host-manager")).toBeInTheDocument();
     });
 

@@ -34,16 +34,17 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
 
     const filtered = createMemo(() => {
         const q = query().trim();
-        const all = sortCommands(commandRegistry.all());
+        const all = sortCommands(commandRegistry.all().filter((c) => !c.hidden));
         if (!q) return all; // browsing, unfiltered: keep category+label order
         // Relevance-ranked while actively searching — best match first, same
         // as every other command palette (VS Code included) — rather than
         // still being category+label sorted mid-search.
         return fuzzySearch(all, q, {
             keys: [
-                { name: "label", weight: 0.6 },
-                { name: "category", weight: 0.25 },
-                { name: "id", weight: 0.15 },
+                { name: "label", weight: 0.5 },
+                { name: "keywords", weight: 0.2 },
+                { name: "category", weight: 0.2 },
+                { name: "id", weight: 0.1 },
             ],
         });
     });

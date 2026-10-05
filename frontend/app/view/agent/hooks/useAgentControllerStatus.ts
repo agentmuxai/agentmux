@@ -998,7 +998,7 @@ export function useAgentControllerStatus(
                         // another channel or another app can no longer satisfy
                         // this one by design.
                         "Couldn't start a browser login or open a terminal window on this platform. " +
-                        "Sign in to this provider from Armory → Accounts, then try again.",
+                        "Sign in to this provider from Connectors → Accounts, then try again.",
                     );
                     break;
             }
