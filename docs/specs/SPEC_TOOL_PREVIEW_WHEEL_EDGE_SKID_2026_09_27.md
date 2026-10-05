@@ -149,7 +149,8 @@ Ignore, without touching state: `ctrlKey` (zoom) and `deltaY === 0` (a horizonta
 
 1. **Arrival:** `box` or `dir` differs from the state's. The phase becomes `armed`.
 2. **A box whose content fits** (`scrollHeight - clientHeight <= 1`) isn't a scroller:
-   forward the event at once and set `spent` (as before), **unless the box opted in with
+   forward the event at once (as before) and leave the skid `armed`, so if the box starts
+   overflowing later (its output grew) the next notch still skids, **unless the box opted in with
    `skidWhenFits`**. The tool preview does (§8, decision 4). A box that fits is at both
    edges at once, so every arrival over it skids, in either direction.
 3. **Not at its edge in `dir`:** the box scrolls natively; set `armed`. Any movement off

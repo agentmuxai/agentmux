@@ -128,6 +128,19 @@ describe("attachScrollHandoff", () => {
         expect(s.pane()).toBe(1120);
     });
 
+    it("a box that grows from fitting to overflowing skids on the next notch", () => {
+        const g = { scrollTop: 0, clientHeight: 200, scrollHeight: 200 };
+        const s = setup(g);
+        s.wheel(s.box, 120); // fits: handed on
+        expect(s.pane()).toBe(1120);
+        g.scrollHeight = 500; // output grew; the preview pins itself to its bottom
+        g.scrollTop = 300;
+        s.skid(s.box, 120);
+        expect(s.pane()).toBe(1120);
+        s.wheel(s.box, 120);
+        expect(s.pane()).toBe(1240);
+    });
+
     it("with skidWhenFits (tool previews), a box that fits skids in either direction", () => {
         const fits = { scrollTop: 0, clientHeight: 200, scrollHeight: 200 };
         const s = setupWith({ skidWhenFits: true }, fits);
@@ -282,5 +295,12 @@ describe("nextSkid", () => {
 
     it("a box that doesn't take part forwards at once", () => {
         expect(step({ canSkid: false })).toEqual({ kind: "forward", deltaY: 100 });
+    });
+
+    it("a box that starts overflowing after forwarding still skids", () => {
+        expect(step({ canSkid: false })).toEqual({ kind: "forward", deltaY: 100 });
+        expect(step()).toEqual({ kind: "absorb" });
+        expect(step()).toEqual({ kind: "absorb" });
+        expect(step()).toEqual({ kind: "forward", deltaY: 100 });
     });
 });

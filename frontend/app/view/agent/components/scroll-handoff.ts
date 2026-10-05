@@ -73,7 +73,9 @@ export type SkidAction = { kind: "native" } | { kind: "absorb" } | { kind: "forw
 export function nextSkid(prev: WheelSkid, input: SkidInput): { state: WheelSkid; action: SkidAction } {
     const arrival = prev.box !== input.box || prev.dir !== input.dir;
     const base = { box: input.box, dir: input.dir, lastAt: input.timeStamp };
-    if (!input.canSkid) return { state: { ...base, phase: "spent", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
+    // Stay armed: a box that starts overflowing later (a preview whose output
+    // grew) must still skid on the next notch in the same direction.
+    if (!input.canSkid) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "forward", deltaY: input.deltaY } };
     if (!input.atEdge) return { state: { ...base, phase: "armed", absorbed: 0 }, action: { kind: "native" } };
 
     const phase = arrival ? "armed" : prev.phase;
