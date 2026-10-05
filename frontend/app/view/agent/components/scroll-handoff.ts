@@ -5,7 +5,7 @@
  * Scroll hand-off from a capped preview box to the agent pane
  * (SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md Phase 2; shared by every
  * capped transcript box per SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §2),
- * with a one-notch "skid" at the box's edge
+ * with a two-notch "skid" at the box's edge
  * (SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md).
  *
  * Native scroll chaining latches a wheel gesture to the inner box, so reaching

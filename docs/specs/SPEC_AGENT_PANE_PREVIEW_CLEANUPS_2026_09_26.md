@@ -62,8 +62,8 @@ two jekt boxes `overscroll-behavior: contain`. Every capped transcript box then
 scrolls the same way.
 
 **Later (2026-10-04):** the hand-off no longer forwards the first wheel notch that
-reaches a box's edge. That notch is absorbed (a one-notch "skid", with an edge
-flash), and the next one scrolls the pane. See
+reaches a box's edge. The first two notches there are absorbed (a "skid", with a line
+on that edge), and the next one scrolls the pane. See
 `SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md`.
 
 ## 3. Estimates follow the preview cap (B4)

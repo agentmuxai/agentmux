@@ -1,4 +1,4 @@
-# SPEC: Wheel edge skid — a nested preview absorbs one wheel notch before the pane scrolls
+# SPEC: Wheel edge skid — a nested preview absorbs two wheel notches before the pane scrolls
 
 **Status:** implemented — #4335 (2026-10-04), in `components/scroll-handoff.ts`
 **Date:** 2026-09-27, revised 2026-10-04 against main before implementing (see §0)
@@ -72,8 +72,9 @@ all-or-nothing, with no "one notch of resistance". A skid can only be done in JS
    operator asked for it in **notches**, and that's the better fit for a notched mouse
    wheel. A notch is a deliberate unit the user feels. Time-based latching makes a fast
    spin stop dead at every preview until the user pauses, which over a long conversation
-   full of previews would be worse. So: **one notch** for a notched wheel, and the
-   browsers' gesture rule for a trackpad, which has no notches (§4.3).
+   full of previews would be worse. So: **a fixed number of notches** (one at first, two
+   after trying it, §8) for a notched wheel, and the browsers' gesture rule for a
+   trackpad, which has no notches (§4.3).
 3. Chromium's async wheel events make every event after the first in a sequence
    non-cancelable. The design must not depend on `preventDefault()`. It doesn't: the
    preview already carries `overscroll-behavior: contain`, so an event we choose not to
