@@ -75,6 +75,11 @@ pub fn host_block(host: &NewHost) -> Result<String, String> {
     if identity.chars().any(|c| c.is_control() || c == '"') {
         return Err("the identity file's path can't contain quotes".into());
     }
+    // In a quoted value a trailing `\` would escape the closing quote and
+    // leave the whole config unparseable; a key file never ends in one.
+    if identity.ends_with('\\') {
+        return Err("the identity file's path can't end in a backslash".into());
+    }
     if !identity.is_empty() {
         if identity.contains(char::is_whitespace) {
             block.push_str(&format!("    IdentityFile \"{identity}\"\n"));
@@ -92,10 +97,10 @@ fn all_host_words(path: &Path, ssh_dir: &Path, depth: usize, out: &mut Vec<Strin
     if depth > super::ssh_config::MAX_INCLUDE_DEPTH {
         return;
     }
-    let Ok(text) = std::fs::read_to_string(path) else {
+    let Ok(bytes) = std::fs::read(path) else {
         return;
     };
-    for line in text.lines() {
+    for line in String::from_utf8_lossy(&bytes).lines() {
         let Some((keyword, args)) = super::ssh_config::split_line(line) else {
             continue;
         };
@@ -122,24 +127,37 @@ pub fn add_host_in(config: &Path, ssh_dir: &Path, host: &NewHost) -> Result<Stri
         return Err(format!("your ssh config already has a host {alias:?}"));
     }
     std::fs::create_dir_all(ssh_dir).map_err(|e| format!("could not create {}: {e}", ssh_dir.display()))?;
-    let existing = std::fs::read_to_string(config).ok();
+    // As bytes, so anything in the file survives exactly. Only a missing file
+    // counts as no config: a file that can't be read is left alone.
+    let existing = match std::fs::read(config) {
+        Ok(bytes) => Some(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("could not read {} ({e}); nothing was changed", config.display())),
+    };
     let backup = ssh_dir.join(BACKUP_NAME);
-    if let Some(text) = &existing {
+    if let Some(bytes) = &existing {
         if !backup.exists() {
-            std::fs::write(&backup, text).map_err(|e| format!("could not keep a copy of your ssh config: {e}"))?;
+            std::fs::write(&backup, bytes).map_err(|e| format!("could not keep a copy of your ssh config: {e}"))?;
             owner_only(&backup);
         }
     }
-    let mut out = existing.clone().unwrap_or_default();
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
+    // Appended, never rewritten: what is there stays byte for byte.
+    let mut add = String::new();
+    if let Some(bytes) = existing.as_deref().filter(|b| !b.is_empty()) {
+        if !bytes.ends_with(b"\n") {
+            add.push('\n');
+        }
+        add.push('\n');
     }
-    if !out.is_empty() {
-        out.push('\n');
-    }
-    out.push_str("# Added by AgentMux (Remotes)\n");
-    out.push_str(&block);
-    std::fs::write(config, out).map_err(|e| format!("could not write {}: {e}", config.display()))?;
+    add.push_str("# Added by AgentMux (Remotes)\n");
+    add.push_str(&block);
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create_new(existing.is_none())
+        .open(config)
+        .and_then(|mut f| f.write_all(add.as_bytes()))
+        .map_err(|e| format!("could not write {}: {e}", config.display()))?;
     if existing.is_none() {
         owner_only(config);
     }
@@ -163,8 +181,8 @@ pub fn locate_in(config: &Path, ssh_dir: &Path, alias: &str) -> Option<(PathBuf,
         if depth > super::ssh_config::MAX_INCLUDE_DEPTH {
             return None;
         }
-        let text = std::fs::read_to_string(path).ok()?;
-        for (i, line) in text.lines().enumerate() {
+        let bytes = std::fs::read(path).ok()?;
+        for (i, line) in String::from_utf8_lossy(&bytes).lines().enumerate() {
             let Some((keyword, args)) = super::ssh_config::split_line(line) else {
                 continue;
             };
@@ -224,6 +242,7 @@ mod tests {
             NewHost { user: "a b".into(), ..host("a") },
             NewHost { proxy_jump: "-oProxyCommand=calc".into(), ..host("a") },
             NewHost { identity_file: "k\"\nProxyCommand x".into(), ..host("a") },
+            NewHost { identity_file: r"C:\Users\John Doe\.ssh\".into(), ..host("a") },
             NewHost { port: "0".into(), ..host("a") },
             NewHost { port: "ssh".into(), ..host("a") },
             host(""),
@@ -255,6 +274,34 @@ mod tests {
         assert_eq!(locate_in(&config, dir.path(), "web").map(|(_, l)| l), Some(text.lines().count() + 3));
         assert_eq!(locate_in(&config, dir.path(), "nas"), Some((dir.path().join("extra"), 1)));
         assert_eq!(locate_in(&config, dir.path(), "nope"), None);
+    }
+
+    /// Bytes that aren't UTF-8 (a Latin-1 comment) survive exactly, and the
+    /// copy has them too.
+    #[test]
+    fn a_config_that_isnt_utf8_is_kept_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        let original: &[u8] = b"# caf\xe9\nHost nas\n";
+        std::fs::write(&config, original).unwrap();
+        assert!(add_host_in(&config, dir.path(), &host("nas")).is_err(), "nas is still seen");
+        add_host_in(&config, dir.path(), &host("box")).unwrap();
+        let after = std::fs::read(&config).unwrap();
+        assert!(after.starts_with(original), "{:?}", String::from_utf8_lossy(&after));
+        assert!(after.ends_with(b"Host box\n    HostName 10.0.0.5\n    User asaf\n"));
+        assert_eq!(std::fs::read(dir.path().join(BACKUP_NAME)).unwrap(), original);
+    }
+
+    /// A config that exists but can't be read is left alone.
+    #[test]
+    fn an_unreadable_config_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        std::fs::create_dir(&config).unwrap();
+        let err = add_host_in(&config, dir.path(), &host("box")).unwrap_err();
+        assert!(err.contains("nothing was changed"), "{err}");
+        assert!(config.is_dir());
+        assert!(!dir.path().join(BACKUP_NAME).exists());
     }
 
     #[test]
