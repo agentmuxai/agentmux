@@ -177,6 +177,16 @@ cp target/release/agentmux-bashwrap.exe "$PORTABLE/runtime/tools/bin/"
 # See docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.2.
 cp target/release/agentmux-mcp.exe "$PORTABLE/runtime/tools/bin/"
 
+# Remote helpers — agentmux-remote for every SSH host platform, since any
+# AgentMux may connect to any host; srv uploads the matching one to a host for
+# file browsing and durable sessions. tools/remote/<target>/agentmux-remote.
+# See docs/specs/SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §9.1.
+bash scripts/build-remote-helpers.sh dist/remote
+if [ -d dist/remote ]; then
+    mkdir -p "$PORTABLE/runtime/tools/remote"
+    cp -R dist/remote/. "$PORTABLE/runtime/tools/remote/"
+fi
+
 # wsh has been retired — see docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md. No binary
 # to ship anymore; AGENTMUX env var is now a plain "1" sentinel.
 

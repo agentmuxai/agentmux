@@ -64,6 +64,18 @@ for p in "${PACKAGERS[@]}"; do
     done
 done
 
+# The remote helpers (docs/specs/SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md
+# §9.1): every packager builds them and copies them into the package. A package
+# without them can't install the helper on an SSH host, so file browsing and
+# durable sessions there fail, and nothing else in CI would notice.
+for p in "${PACKAGERS[@]}"; do
+    [ -f "$p" ] || continue
+    if ! grep -q 'scripts/build-remote-helpers.sh' "$p" || ! grep -qE '(tools|Resources)/remote' "$p"; then
+        echo "check-bundled-tools: $p does not build the remote helpers (scripts/build-remote-helpers.sh) into tools/remote." >&2
+        fail=1
+    fi
+done
+
 if [ "$fail" -ne 0 ]; then
     echo "" >&2
     echo "Agents run these tools by bare name (see $CONFIG). A packager that omits one" >&2
@@ -71,4 +83,4 @@ if [ "$fail" -ne 0 ]; then
     exit 1
 fi
 
-echo "check-bundled-tools: ${#PACKAGERS[@]} packagers each bundle: ${TOOLS[*]}"
+echo "check-bundled-tools: ${#PACKAGERS[@]} packagers each bundle: ${TOOLS[*]}, and the remote helpers"
