@@ -11,6 +11,8 @@ export const WpsEvent = {
     BlockFile: "blockfile",
     BlockClose: "blockclose",
     ConnChange: "connchange",
+    /** The Remotes pane's list changed (SPEC_REMOTES_PANE_2026_10_05.md §4.6). */
+    RemotesChange: "remoteschange",
     SysInfo: "sysinfo",
     ControllerStatus: "controllerstatus",
     // What an agent process was spawned with (model, effort, permission) and
