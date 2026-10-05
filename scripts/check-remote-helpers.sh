@@ -20,7 +20,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"
 
 DIR="${1:-dist/remote}"
-VERSION="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml | head -1)"
+# awk, not sed: macOS's BSD sed rejects GNU sed's one-line `{s/.../p}` block.
+VERSION="$(awk '/^\[workspace\.package\]/ { inpkg = 1; next } /^\[/ { inpkg = 0 } inpkg && /^version *=/ { gsub(/^version *= *"|"[[:space:]]*$/, ""); print; exit }' Cargo.toml)"
 PROTOCOL="$(sed -n 's/^pub const PROTOCOL: u32 = \([0-9]*\);/\1/p' crates/remote/src/frame.rs)"
 if [ -z "$VERSION" ] || [ -z "$PROTOCOL" ]; then
     echo "check-remote-helpers: could not read the version ($VERSION) or protocol ($PROTOCOL)." >&2
