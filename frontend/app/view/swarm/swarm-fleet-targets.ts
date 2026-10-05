@@ -119,10 +119,3 @@ export function targetLabel(key: string, known: Map<string, FleetTargetInfo>): s
     if (!t) return key;
     return t.where ? `${t.name} · ${t.where}` : t.name;
 }
-
-/** How many of `keys` are agents on other instances. */
-export function remoteCount(keys: Iterable<string>, known: Map<string, FleetTargetInfo>): number {
-    let n = 0;
-    for (const k of keys) if (known.get(k)?.remote) n++;
-    return n;
-}

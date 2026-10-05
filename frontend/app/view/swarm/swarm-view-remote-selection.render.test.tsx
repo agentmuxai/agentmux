@@ -60,7 +60,8 @@ function setup() {
                 return next;
             }),
         setManySelected: () => {},
-        fleetGroupsAtom: () => [],
+        ambientOutcomesAtom: () => null,
+        statsOpenAtom: () => false,
         fleetActionInFlightAtom: () => false,
         lastFleetResultAtom: () => null,
         dismissFleetResult: () => {},

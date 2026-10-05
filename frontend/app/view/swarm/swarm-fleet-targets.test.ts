@@ -6,7 +6,6 @@ import {
     localFleetTargets,
     partitionTargets,
     remoteAgentKey,
-    remoteCount,
     remoteFleetTargets,
     targetLabel,
     unavailableReason,
@@ -111,7 +110,7 @@ describe("partitionTargets", () => {
     });
 });
 
-describe("targetLabel and remoteCount", () => {
+describe("targetLabel", () => {
     const known = new Map([...localFleetTargets([{ blockId: "blk-korp", agentName: "Korp" }]), ...remote]);
 
     it("names an agent here by name alone, and one elsewhere with its machine", () => {
@@ -121,9 +120,5 @@ describe("targetLabel and remoteCount", () => {
 
     it("falls back to the key for something no longer listed", () => {
         expect(targetLabel("blk-gone", known)).toBe("blk-gone");
-    });
-
-    it("counts only agents on other instances", () => {
-        expect(remoteCount(["blk-korp", "blk-loap", "remote:lan:area54#1/stable/Opaz", "blk-gone"], known)).toBe(2);
     });
 });

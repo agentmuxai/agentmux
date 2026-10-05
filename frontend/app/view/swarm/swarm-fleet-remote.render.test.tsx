@@ -5,11 +5,11 @@
  * The fleet toolbar with agents of other instances selected: the count says
  * where they are, an action counts only what it can reach, the stop
  * confirmation names every target and why one can't be reached, results use
- * those names, and a group can't hold an agent on another machine.
+ * those names.
  * docs/specs/SPEC_SWARM_REMOTE_AGENTS_PLATFORM_TAG_AND_SELECTION_2026_10_03.md §4, §5.
  */
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -54,7 +54,8 @@ function modelStub(selectedKeys: string[]) {
         selectedBlockIdsAtom: selected,
         otherInstancesAtom: () => others,
         fleetTargets: () => known,
-        fleetGroupsAtom: () => [],
+        ambientOutcomesAtom: () => null,
+        statsOpenAtom: () => false,
         fleetActionInFlightAtom: () => false,
         selectAll: vi.fn(),
         clearSelection: vi.fn(),
@@ -62,9 +63,6 @@ function modelStub(selectedKeys: string[]) {
         isSelected: (k: string) => selected().has(k),
         broadcastToSelection: vi.fn(),
         bulkStopSelection: vi.fn(),
-        saveSelectionAsGroup: vi.fn(),
-        applyGroupAsSelection: () => {},
-        deleteFleetGroup: vi.fn(),
         lastFleetResultAtom: () => null,
         dismissFleetResult: () => {},
     } as unknown as SwarmViewModel;
@@ -108,21 +106,6 @@ describe("FleetToolbar with agents of other instances selected", () => {
         toolbar(modelStub([MANOZ, LOAP]));
         expect((screen.getByText("Broadcast").closest("button") as HTMLButtonElement).disabled).toBe(false);
         expect((screen.getByText(/Stop 1/).closest("button") as HTMLButtonElement).disabled).toBe(false);
-    });
-
-    it("can't save a group that includes an agent on another machine", async () => {
-        toolbar(modelStub(["blk-korp", MANOZ]));
-        fireEvent.click(screen.getByText(/Groups/));
-        const save = await screen.findByText("Save selection as group…");
-        expect((save as HTMLButtonElement).disabled).toBe(true);
-        expect((save as HTMLButtonElement).title).toMatch(/this instance's agents only/);
-    });
-
-    it("can save a group of this instance's agents", async () => {
-        toolbar(modelStub(["blk-korp"]));
-        fireEvent.click(screen.getByText(/Groups/));
-        const save = await screen.findByText("Save selection as group…");
-        expect((save as HTMLButtonElement).disabled).toBe(false);
     });
 });
 

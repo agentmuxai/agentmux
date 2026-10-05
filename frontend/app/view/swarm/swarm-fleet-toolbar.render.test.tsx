@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "Select all" reachability and the broadcast/stop button conflict, pinned
- * through the actual `FleetToolbar` component.
+ * "Select all" and Stats reachability and the broadcast/stop button conflict,
+ * pinned through the actual `FleetToolbar` component.
  */
 
-import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -16,19 +16,21 @@ vi.mock("@/app/element/confirm-modal", () => ({
 
 import { FleetToolbar } from "./swarm-fleet-toolbar";
 import type { SwarmViewModel } from "./swarm-model";
-import type { FleetGroup } from "@/app/store/rpc-api";
+import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 
 afterEach(() => cleanup());
 
-function modelStub(initialSelected: string[] = []) {
+function modelStub(initialSelected: string[] = [], outcomes: AmbientOutcomes | null = null) {
     const [selected, setSelected] = createSignal<Set<string>>(new Set(initialSelected));
-    const [groups] = createSignal<FleetGroup[]>([]);
+    const [statsOpen, setStatsOpen] = createSignal(false);
     const [inFlight] = createSignal(false);
 
     const model = {
         selectedBlockIdsAtom: selected,
         otherInstancesAtom: () => null,
-        fleetGroupsAtom: groups,
+        ambientOutcomesAtom: () => outcomes,
+        statsOpenAtom: statsOpen,
+        toggleStats: vi.fn(() => setStatsOpen(!statsOpen())),
         fleetActionInFlightAtom: inFlight,
         selectAll: vi.fn((ids: string[]) => setSelected(new Set(ids))),
         clearSelection: vi.fn(() => setSelected(new Set<string>())),
@@ -36,9 +38,6 @@ function modelStub(initialSelected: string[] = []) {
         isSelected: (id: string) => selected().has(id),
         broadcastToSelection: vi.fn(),
         bulkStopSelection: vi.fn(),
-        saveSelectionAsGroup: vi.fn(),
-        applyGroupAsSelection: () => {},
-        deleteFleetGroup: vi.fn(),
     } as unknown as SwarmViewModel;
 
     return model;
@@ -70,26 +69,40 @@ describe("FleetToolbar — select all", () => {
         expect(model.clearSelection).toHaveBeenCalled();
     });
 
-    it("does not render when there are no agents and no selection and no saved groups", () => {
+    it("does not render when there are no agents, no selection and no stats", () => {
         const model = modelStub([]);
         const { container } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
         expect(container.querySelector(".swarm-fleet-toolbar")).toBeNull();
     });
 });
 
-describe("FleetToolbar — groups dropdown", () => {
-    it("opens without throwing (portaled + floating-ui positioned)", async () => {
-        const model = modelStub(["a"]);
-        const { getByText } = render(() => (
-            <FleetToolbar model={model} allBlockIds={() => ["a"]} />
-        ));
+describe("FleetToolbar — Stats", () => {
+    it("has no Groups button any more", () => {
+        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"])} allBlockIds={() => ["a"]} />);
+        expect(queryByText(/Groups/)).toBeNull();
+    });
 
-        fireEvent.click(getByText("Groups"));
-        // computeMenuPosition resolves asynchronously, and the dropdown is
-        // portaled to document.body (not a descendant of the render
-        // container) — `screen` queries the whole document, unlike the
-        // container-scoped queries `render()` returns.
-        expect(await screen.findByText("No saved groups yet")).not.toBeNull();
+    it("shows Stats once there are counts, even with no agents here, and toggles the panel", () => {
+        const model = modelStub([], { activity_summary: { accepted: 3 } });
+        const { getByText, container } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
+        const stats = getByText("Stats").closest("button")!;
+        expect(stats.getAttribute("aria-expanded")).toBe("false");
+        fireEvent.click(stats);
+        expect(model.toggleStats).toHaveBeenCalled();
+        expect(stats.getAttribute("aria-expanded")).toBe("true");
+        expect(stats.classList.contains("swarm-fleet-btn--active")).toBe(true);
+        expect(container.querySelector(".swarm-stats-failing")).toBeNull();
+    });
+
+    it("says how many kinds of call are failing", () => {
+        const model = modelStub([], { activity_summary_pushed: { accepted: 1, cli_failed: 4 } });
+        const { getByText } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
+        expect(getByText("1 failing")).not.toBeNull();
+    });
+
+    it("has no Stats button before any call has ended", () => {
+        const { queryByText } = render(() => <FleetToolbar model={modelStub(["a"], {})} allBlockIds={() => ["a"]} />);
+        expect(queryByText("Stats")).toBeNull();
     });
 });
 
