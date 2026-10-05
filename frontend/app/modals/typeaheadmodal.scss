@@ -107,6 +107,21 @@
                     position: relative;
                     top: 2px;
                 }
+
+                // A remote's colour (SPEC_REMOTES_PANE_2026_10_05.md §4.7).
+                .typeahead-swatch {
+                    flex: 0 0 auto;
+                    align-self: center;
+                    width: 4px;
+                    height: 12px;
+                    border-radius: 2px;
+                }
+
+                .typeahead-detail {
+                    color: var(--secondary-text-color);
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
             }
 
             .typeahead-current-checkbox {

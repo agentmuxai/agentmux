@@ -4,7 +4,7 @@
 /**
  * AgentStartupModal — the "Startup" tab body inside AgentStashModal.
  *
- * Lets an agent select an existing Armory Bundle to serve as its Session
+ * Lets an agent select an existing Bundle to serve as its Session
  * Context "Startup Instructions" (see buildStartupPayload.ts). This is a
  * single-selection field, not a CRUD primitive like AgentMcpModal/
  * AgentSkillsModal — no draft/edit state, no model class, just a select
@@ -22,7 +22,7 @@
 import { createResource, createSignal, For, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { openOrFocusPaneByView } from "@/app/store/global";
+import { openKnowledge } from "@/app/view/section-pane/panes";
 import "./AgentPrimitiveModal.scss";
 
 const STARTUP_BUNDLE_CONTENT_TYPE = "startup_bundle_id";
@@ -104,9 +104,9 @@ export const AgentStartupModal = (props: AgentStartupModalProps): JSX.Element =>
                             <button
                                 type="button"
                                 class="agent-primitive-modal-link-btn"
-                                onClick={() => void openOrFocusPaneByView("armory")}
+                                onClick={() => void openKnowledge("bundles")}
                             >
-                                Armory → Bundles
+                                Knowledge → Bundles
                             </button>
                             . Changing "{bundle().name}" there updates every agent using
                             it, including this one.

@@ -49,7 +49,7 @@ const QuickTips = (): JSX.Element => {
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Header Icons</span>
                 </div>
-                <div class="grid grid-cols-1 @lg:grid-cols-2 gap-3">
+                <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
                     <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-window-maximize fa-fw" />
@@ -93,11 +93,14 @@ const QuickTips = (): JSX.Element => {
                 </div>
 
                 {/* Generated from the shortcut table (frontend/app/keybindings/defaults.ts),
-                    so this list can't disagree with what the keys do. */}
-                <div class="grid grid-cols-1 @lg:grid-cols-2 gap-x-5 gap-y-6">
+                    so this list can't disagree with what the keys do. Columns, not a grid:
+                    the browser fits as many 17rem columns as the pane is wide and balances
+                    the sections between them, so a short section is followed straight away
+                    by the next one instead of leaving a gap beside a long one. */}
+                <div class="columns-[17rem] gap-x-5">
                     <For each={shortcutHelp()}>
                         {(section) => (
-                            <div class="flex flex-col gap-1.5">
+                            <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
                                 <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">
                                     {section.category}
                                 </div>
@@ -114,7 +117,7 @@ const QuickTips = (): JSX.Element => {
                             </div>
                         )}
                     </For>
-                    <div class="flex flex-col gap-1.5">
+                    <div class="flex flex-col gap-1.5 mb-6 break-inside-avoid">
                         <div class="text-sm text-accent-400 font-semibold uppercase tracking-wide mb-1">Mouse</div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-hover transition-colors">
                             <span class="text-[15px]">Resize a single border</span>
@@ -162,7 +165,7 @@ const QuickTips = (): JSX.Element => {
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Need More Help?</span>
                 </div>
-                <div class="grid grid-cols-1 @sm:grid-cols-2 gap-2">
+                <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-2">
                     <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-brands fa-discord fa-fw" />

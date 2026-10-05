@@ -1,15 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden rail/pane chrome — same structure as armory-view.scss, ported for
-// consistency (Warden is the "active governance" counterpart to Armory's
-// resource management). Deliberately does NOT redefine .bundle-manager-rail/
+// Warden rail/pane chrome — same structure as section-pane.scss, ported for
+// consistency (Warden is the "active governance" counterpart to Connectors'
+// and Knowledge's resource management). Deliberately does NOT redefine .bundle-manager-rail/
 // -rail-item/-section/-pane/-tab-bar — those base rules live only in
-// armory-view.scss and are reused here by class-name convention, matching
-// how Armory's own AccountsManager/SkillManager/McpManager children already
-// reuse them without a local import (armory-view.scss's own doc comment).
+// section-pane.scss and are reused here by class-name convention, matching
+// how the AccountsManager/SkillManager/McpManager inside those panes already
+// reuse them without a local import (section-pane.scss's own doc comment).
 // This is safe because block-registry.ts statically imports every view's
-// barrel (including Armory's) up front, so armory-view.scss is always part
+// barrel (including Connectors' and Knowledge's) up front, so section-pane.scss is always part
 // of the bundle by the time any pane renders — not because these classes
 // are Warden-local. Only the responsive breakpoints below are duplicated
 // (query names must differ per @container name), everything else is a
@@ -55,7 +55,7 @@
 // a sibling import; fixed by requiring the explicit import everywhere).
 
 // ── Responsive container queries ─────────────────────────────────────────────
-// Identical breakpoints to armory-view.scss's @container armory rules —
+// Identical breakpoints to section-pane.scss's @container armory rules —
 // query name swapped to warden, everything else verbatim.
 
 // sm: compress outer rail to icon-only (48px)

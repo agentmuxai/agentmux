@@ -175,38 +175,6 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
-/// Reject a `bundle.upsert` write that would change `provider`/`model` on
-/// an existing bundle that already has them set —
-/// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.2. These are
-/// readonly-once-set: an ABF's portability guarantee (it's self-describing
-/// about what it needs to run) depends on them never silently changing
-/// after creation, and the UI-only disabling in `bundle-manager.tsx` is
-/// advisory, not a guarantee — this is the actual enforcement.
-///
-/// `existing = None` (fresh insert) or an existing row with `provider`/
-/// `model` still empty (legacy row awaiting backfill, or was raced to
-/// create without them) always allows the write — that's how a bundle's
-/// provider/model get set the FIRST time. Once non-empty, they're locked.
-///
-/// Pure — no I/O — directly unit-testable without spinning up an
-/// `AppState`, mirroring `agent_open.rs`'s `resolve_vendor_env_override`.
-fn check_provider_model_immutable(existing: Option<&Bundle>, incoming: &Bundle) -> Result<(), String> {
-    let Some(existing) = existing else { return Ok(()) };
-    if !existing.provider.is_empty() && existing.provider != incoming.provider {
-        return Err(format!(
-            "FORBIDDEN: bundle {} provider is readonly once set (has '{}', got '{}')",
-            existing.id, existing.provider, incoming.provider
-        ));
-    }
-    if !existing.model.is_empty() && existing.model != incoming.model {
-        return Err(format!(
-            "FORBIDDEN: bundle {} model is readonly once set (has '{}', got '{}')",
-            existing.id, existing.model, incoming.model
-        ));
-    }
-    Ok(())
-}
-
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
         let id_store = state.id_store.clone();
@@ -233,12 +201,9 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if existing.is_global {
                             return Err("FORBIDDEN: cannot mutate a global bundle".to_string());
                         }
-                        // provider/model are readonly once set — the actual
-                        // enforcement behind the portability guarantee (the
-                        // bundle editor's disabled-input UI is advisory
-                        // only). See check_provider_model_immutable's doc
-                        // comment.
-                        check_provider_model_immutable(Some(&existing), &memory)?;
+                        // provider/model are a "suggested for" hint and may
+                        // change: the agent owns its harness, and its lock
+                        // moved there (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1).
                     }
                 }
                 if memory.id.is_empty() {

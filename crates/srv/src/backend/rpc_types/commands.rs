@@ -423,6 +423,15 @@ pub const COMMAND_CONN_DISCONNECT: &str = "conndisconnect";
 pub const COMMAND_CONN_SESSIONS: &str = "connsessions";
 /// `{ connname, sessionid, blockid? }`: end one; `true` if the host had it.
 pub const COMMAND_CONN_SESSION_END: &str = "connsessionend";
+/// The Remotes pane (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6).
+pub const COMMAND_REMOTES_LIST: &str = "remoteslist";
+pub const COMMAND_REMOTE_SET_CONFIG: &str = "remotesetconfig";
+pub const COMMAND_REMOTE_FORGET: &str = "remoteforget";
+pub const COMMAND_REMOTE_HELPER_REMOVE: &str = "remotehelperremove";
+pub const COMMAND_REMOTE_ADD: &str = "remoteadd";
+pub const COMMAND_REMOTE_TEST: &str = "remotetest";
+pub const COMMAND_REMOTE_SSH_LOCATE: &str = "remotesshlocate";
+pub const COMMAND_REMOTE_AGENT_REVOKE: &str = "remoteagentrevoke";
 /// Ambient call outcomes since srv started, by purpose then outcome label
 /// (`ambient::outcome::snapshot`). For the Instance panel.
 pub const COMMAND_AMBIENT_OUTCOMES: &str = "ambient.outcomes";

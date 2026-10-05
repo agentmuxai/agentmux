@@ -13,6 +13,7 @@
 // component is fully self-contained (no TabBar state coupling).
 
 import { createTab, getApi, openOrFocusPaneByView, settingsAtom } from "@/store/global";
+import { openConnectors, openKnowledge } from "@/app/view/section-pane/panes";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
@@ -135,9 +136,14 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 onClick: () => openModal(CommandPaletteModal),
             },
             {
-                label: "Armory",
-                icon: "vault",
-                onClick: () => fireAndForget(() => openOrFocusPaneByView("armory")),
+                label: "Connectors",
+                icon: "plug",
+                onClick: () => fireAndForget(() => openConnectors()),
+            },
+            {
+                label: "Knowledge",
+                icon: "book",
+                onClick: () => fireAndForget(() => openKnowledge()),
             },
             {
                 label: "Toolchain",

@@ -292,7 +292,7 @@ async fn export_carries_project_instructions_with_their_owner() {
         .expect("the repository's own CLAUDE.md must be carried");
     assert!(carried["content"].as_str().unwrap().contains("House rules"));
 
-    let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
     let manifest: serde_json::Value =
         serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
     let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
@@ -336,7 +336,7 @@ async fn export_carries_a_readable_but_empty_instruction_file() {
         files.iter().any(|f| f["path"] == "instructions/project/CLAUDE.md"),
         "an empty-but-present CLAUDE.md must still be recorded"
     );
-    let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
     let manifest: serde_json::Value =
         serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
     let entries = manifest["components"]["projectInstructions"].as_array().unwrap();
@@ -371,7 +371,7 @@ fn empty_export() -> crate::backend::bundle_export::BundleExport {
     crate::backend::bundle_export::BundleExport {
         root_slug: "b".to_string(),
         files: vec![crate::backend::bundle_export::BundleExportFile {
-            path: "armory.json".to_string(),
+            path: "bundle.json".to_string(),
             content: "{\"components\":{}}".to_string(),
         }],
         skipped_skills: Vec::new(),
@@ -608,7 +608,7 @@ async fn export_for_agent_includes_normal_components_and_native_memory() {
         .expect("expected memory/MEMORY.md in the export — live-FS refresh must have picked it up");
     assert_eq!(memory_file["content"], "Learned fact.");
 
-    let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
     let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
     assert_eq!(manifest["components"]["memory"], json!(["memory/MEMORY.md"]));
 
@@ -635,7 +635,7 @@ async fn export_for_agent_omits_memory_component_when_agent_has_none() {
 
     let files = result["files"].as_array().unwrap();
     assert!(!files.iter().any(|f| f["path"].as_str().unwrap_or("").starts_with("memory/")));
-    let manifest_file = files.iter().find(|f| f["path"] == "armory.json").unwrap();
+    let manifest_file = files.iter().find(|f| f["path"] == "bundle.json").unwrap();
     let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
     assert!(manifest["components"].get("memory").is_none());
 }
@@ -1314,11 +1314,10 @@ async fn export_then_import_carries_provider_and_model_through() {
     }).await.unwrap();
 
     let manifest_file = exported["files"].as_array().unwrap().iter()
-        .find(|f| f["path"] == "armory.json")
-        .expect("armory.json must be present");
+        .find(|f| f["path"] == "bundle.json")
+        .expect("bundle.json must be present");
     let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
-    assert_eq!(manifest["provider"], "claude");
-    assert_eq!(manifest["model"], "anthropic");
+    assert_eq!(manifest["suggestedFor"], serde_json::json!({ "provider": "claude", "vendor": "anthropic" }));
 
     let files: Vec<FileEntry> = exported["files"].as_array().unwrap().iter()
         .map(|f| FileEntry {
@@ -1339,11 +1338,11 @@ async fn export_then_import_carries_provider_and_model_through() {
 }
 
 #[tokio::test]
-async fn export_of_an_unbound_bundle_omits_provider_and_model_rather_than_exporting_empty_strings() {
+async fn an_agent_scoped_export_takes_the_hint_from_the_agent_not_the_bundle() {
     let state = test_state();
     let config_a = tempfile::tempdir().unwrap();
     make_agent(&state, "agent-a", "/work/a", config_a.path());
-    make_bundle(&state, "bundle-unbound", "Shared instructions."); // provider/model left empty
+    make_bundle(&state, "bundle-unbound", "Shared instructions."); // no hint of its own
 
     let exported = bundle_export_for_agent_impl(&state.id_store, &state.mstore, &state.identity_store, ExportForAgentReq {
         bundle_id: "bundle-unbound".to_string(),
@@ -1352,11 +1351,11 @@ async fn export_of_an_unbound_bundle_omits_provider_and_model_rather_than_export
     }).await.unwrap();
 
     let manifest_file = exported["files"].as_array().unwrap().iter()
-        .find(|f| f["path"] == "armory.json")
-        .expect("armory.json must be present");
+        .find(|f| f["path"] == "bundle.json")
+        .expect("bundle.json must be present");
     let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
-    assert!(manifest["provider"].is_null(), "unset provider must not export as an empty string");
-    assert!(manifest["model"].is_null(), "unset model must not export as an empty string");
+    // The bundle carries no harness; the export names the agent it came from.
+    assert_eq!(manifest["suggestedFor"], serde_json::json!({ "provider": "claude", "vendor": "anthropic" }));
 }
 
 // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
@@ -1442,8 +1441,8 @@ mod with_history_tests {
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
         let name = (0..archive.len())
             .map(|i| archive.by_index(i).unwrap().name().to_string())
-            .find(|n| n.ends_with("armory.json"))
-            .expect("export must contain armory.json");
+            .find(|n| n.ends_with("bundle.json"))
+            .expect("export must contain bundle.json");
         let mut content = String::new();
         archive.by_name(&name).unwrap().read_to_string(&mut content).unwrap();
         serde_json::from_str(&content).unwrap()

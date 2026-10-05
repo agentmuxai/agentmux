@@ -379,12 +379,11 @@ async fn open_agent_inner(
                     .map_err(|e| format!("agent.open: {e}"))?;
                 let mut agent = select_openable_agent(&agents, &cmd.agent_id)?.clone();
 
-                // Shadow `agent.provider` with the bound ABF bundle's copy,
-                // the readonly-once-set source of truth (see
-                // Store::resolve_effective_provider_id's own doc comment
-                // in backend/storage/agents.rs) — one lookup here instead
-                // of rewriting every downstream `agent.provider` read in
-                // this handler. MUST be app_state.id_store, never mstore.
+                // Settle `agent.provider` once through the shared resolver
+                // (the agent's own, or its bundle's when it has none; see
+                // Store::resolve_effective_provider_id) instead of at every
+                // downstream read in this handler. MUST be
+                // app_state.id_store, never mstore.
                 agent.provider = app_state.id_store.resolve_effective_provider_id(&agent);
 
                 // Serialize the rest of this handler per agent definition —

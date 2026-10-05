@@ -7,11 +7,11 @@
  * preset split always pointed at the FIRST child instead of the PREVIOUS
  * one, so a split with 3+ children didn't land in declared order. This
  * only surfaced once DEFAULT_TAB_PRESET grew a 3-child vertical split
- * (swarm/armory/sysinfo, SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) — a
+ * (swarm/knowledge/sysinfo, SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) — a
  * 2-child split can't distinguish "first child" from "previous child".
  *
  * DEFAULT_TAB_PRESET is back down to a 2-child right column (sysinfo above
- * swarm; armory dropped from the starter set), so the shipped default no
+ * swarm; knowledge dropped from the starter set), so the shipped default no
  * longer exercises this path. The fixtures below are deliberately local
  * and stay 3-child: the applier still supports N children, and this is the
  * only thing guarding that ordering — don't retire it just because the
@@ -35,7 +35,7 @@ vi.mock("@/app/store/services", () => ({
 const widgets: Record<string, any> = {
     "defwidget@agent": { blockdef: { meta: { view: "agent" } } },
     "defwidget@swarm": { blockdef: { meta: { view: "swarm" } } },
-    "defwidget@armory": { blockdef: { meta: { view: "armory" } } },
+    "defwidget@knowledge": { blockdef: { meta: { view: "knowledge" } } },
     "defwidget@sysinfo": { blockdef: { meta: { view: "sysinfo" } } },
 };
 
@@ -76,7 +76,7 @@ describe("applyTabPreset sibling ordering (Codex P2 on PR #2796)", () => {
                 { widget: "defwidget@agent" },
                 {
                     split: "vertical",
-                    children: [{ widget: "defwidget@swarm" }, { widget: "defwidget@armory" }, { widget: "defwidget@sysinfo" }],
+                    children: [{ widget: "defwidget@swarm" }, { widget: "defwidget@knowledge" }, { widget: "defwidget@sysinfo" }],
                 },
             ],
         };
@@ -87,11 +87,11 @@ describe("applyTabPreset sibling ordering (Codex P2 on PR #2796)", () => {
         expect(dispatched[0]).toMatchObject({ type: "insert" });
         // swarm: first child of the vertical split — splits off agent.
         expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent-1" });
-        // armory: splits off swarm (the previous sibling).
+        // knowledge: splits off swarm (the previous sibling).
         expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-swarm-2" });
-        // sysinfo: splits off armory (the previous sibling) — NOT off
+        // sysinfo: splits off knowledge (the previous sibling) — NOT off
         // swarm again, which is the bug this test guards against.
-        expect(dispatched[3]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-armory-3" });
+        expect(dispatched[3]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-knowledge-3" });
     });
 
     it("a 2-child split still works (previous === first for exactly 2 children)", async () => {
@@ -117,7 +117,7 @@ describe("applyTabPreset concurrent creation", () => {
             { widget: "defwidget@agent" },
             {
                 split: "vertical",
-                children: [{ widget: "defwidget@swarm" }, { widget: "defwidget@armory" }, { widget: "defwidget@sysinfo" }],
+                children: [{ widget: "defwidget@swarm" }, { widget: "defwidget@knowledge" }, { widget: "defwidget@sysinfo" }],
             },
         ],
     };
@@ -136,13 +136,13 @@ describe("applyTabPreset concurrent creation", () => {
         const done = applyTabPreset("tab-1", preset);
         await vi.waitFor(() => expect(createBlock).toHaveBeenCalledTimes(4));
         expect(dispatched).toHaveLength(0);
-        for (const view of ["sysinfo", "swarm", "agent", "armory"]) pending.get(view)!(`block-${view}`);
+        for (const view of ["sysinfo", "swarm", "agent", "knowledge"]) pending.get(view)!(`block-${view}`);
         await done;
 
         expect(dispatched[0]).toMatchObject({ type: "insert" });
         expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent" });
         expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-swarm" });
-        expect(dispatched[3]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-armory" });
+        expect(dispatched[3]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-knowledge" });
         expect(markBlockRecentlyCreated).toHaveBeenCalledTimes(4);
     });
 
@@ -155,8 +155,8 @@ describe("applyTabPreset concurrent creation", () => {
 
         expect(dispatched).toHaveLength(3);
         expect(dispatched[0]).toMatchObject({ type: "insert" });
-        // armory is now the column's first child: it splits off agent, as swarm would have.
+        // knowledge is now the column's first child: it splits off agent, as swarm would have.
         expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent" });
-        expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-armory" });
+        expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-knowledge" });
     });
 });

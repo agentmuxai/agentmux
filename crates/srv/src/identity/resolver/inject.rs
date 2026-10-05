@@ -561,15 +561,11 @@ pub fn inject_identity_env_with_broker(
     // links exist.
     //
     // Provider is resolved via `id_store.resolve_effective_provider_id`
-    // (`backend/storage/agents.rs`), NOT `d.provider` directly — the
-    // definition's own column can drift post-creation (`agent.define`'s
-    // `if_exists=update` path) while the agent's bound ABF bundle's copy
-    // is backend-enforced immutable, so the bundle is the one to trust
-    // for a security-relevant decision like this gate. Found during a
-    // follow-up scoping pass after `agent_open.rs`'s spawn path was fixed
-    // for the identical bug (ReAgent review, PR #2587 round 3) — the same
-    // resolution logic is now shared between both call sites specifically
-    // so they can't drift on it independently again.
+    // (`backend/storage/agents.rs`), the one resolver `agent_open.rs`'s
+    // spawn path also uses, so this gate checks credentials for exactly the
+    // provider that will run: the agent's own, read-only after creation, or
+    // its bundle's when it has none (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md
+    // §3.1). One resolver for both call sites so they can't disagree (#2587).
     //
     // Canonicalized via `resolve_provider_alias` (codex P1 on PR #2377): a
     // definition's own `provider` field predates this alias table in rare
@@ -1980,7 +1976,7 @@ mod tests {
         // wording) — pin the load-bearing pieces.
         let msg = res.unwrap_err().to_string();
         assert!(msg.contains("no credentials for claude"), "got: {msg}");
-        assert!(msg.contains("Bind an account for this provider in the Armory"), "got: {msg}");
+        assert!(msg.contains("Bind an account for this provider in Connectors → Accounts"), "got: {msg}");
     }
 
     #[test]
@@ -3135,19 +3131,15 @@ mod tests {
     // AppState.mstore/id_store split, but meaning none of them could
     // have caught this class of bug).
     //
-    // Scenario: the definition's own `provider` column has drifted to
-    // "codex" (e.g. via a since-superseded agent.define update), but
-    // its bound bundle's copy — the backend-enforced-immutable one —
-    // still correctly says "claude", and the agent has a perfectly
-    // valid Claude OAuth account bound. Before the fix, the gate read
-    // `d.provider` directly, saw "codex", found no binding for codex
-    // (only claude), and WRONGLY BLOCKED a correctly-configured agent's
-    // spawn with "no account bound for the agent's provider" — even
-    // though a valid claude credential was right there. After the fix,
-    // it resolves "claude" via the bundle, the claude binding injects
-    // successfully, and the spawn proceeds.
+    // Scenario: the agent says "codex"; its bound bundle, from before
+    // bundles stopped carrying a harness, says "claude", and the agent has
+    // a Claude account bound. The agent owns its harness
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1), so the gate checks
+    // codex, finds no codex account, and refuses; the bundle's value never
+    // decides. (The §3.3 migration makes the two agree before this rule
+    // takes effect, so a real agent doesn't land here.)
     #[test]
-    fn spawn_gate_resolves_provider_through_the_bound_bundle_not_the_drifted_definition_column() {
+    fn spawn_gate_checks_the_agents_own_provider_not_its_bundles() {
         let mstore = make_store();
         // Real shared-store schema, not open_in_memory's channel schema —
         // db_agent_identity_links only has a `db_agents` FK in the
@@ -3241,11 +3233,11 @@ mod tests {
         let mut env: HashMap<String, String> = HashMap::new();
         let res = inject_identity_env(mstore, id_store, identity_store, "block-drift", &mut env);
 
-        assert!(res.is_ok(), "a valid claude account must not be blocked by a stale codex column: {res:?}");
-        assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").cloned(),
-            Some(test_config_dir("id-drift")),
-            "the claude binding must actually inject, proving the gate expected claude (from the bundle), not codex (from the drifted column)"
+        // The gate checks the agent's own provider (codex), which has no
+        // account bound; the bundle's claude is only a hint.
+        assert!(
+            matches!(&res, Err(SpawnGateError::MissingCredentials { provider }) if provider == "codex"),
+            "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1): {res:?}"
         );
     }
 

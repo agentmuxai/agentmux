@@ -60,7 +60,10 @@ const h = vi.hoisted(() => {
             { instance_name: "korp", definition_name: "korp", definition_id: "def-korp", working_directory: "C:\\Users\\a\\.agentmux\\agents\\korp" },
             { instance_name: "loap", definition_name: "loap", definition_id: "def-loap", working_directory: "C:\\Users\\a\\.agentmux\\agents\\loap" },
         ]),
-        ConnListCommand: vi.fn(async () => ["user@box", "wsl://Ubuntu"]),
+        RemotesListCommand: vi.fn(async () => [
+            { name: "user@box", kind: "ssh", sources: ["recent"], settings: {} },
+            { name: "wsl://Ubuntu", kind: "wsl", sources: ["wsl"], settings: {} },
+        ]),
         GetAgentContentCommand: vi.fn(async (_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "def-korp" ? { agent_id: req.agent_id, content_type: "ui:color", content: "#22c55e", updated_at: 0 } : null
         ),

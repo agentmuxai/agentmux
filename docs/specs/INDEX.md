@@ -205,6 +205,7 @@ partial list.
 | [`SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23`](SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) | Activity Dock: coalesce event-triggered refreshes on pane reopen |
 | [`SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) | Agent tool-call tones get a visual twin: a subtle flash on the tab that made the sound |
 | [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via the Agent App API |
+| [`SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05`](SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md) | SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent |
 | [`SPEC_AGENT_COLOR_2026_08_08`](SPEC_AGENT_COLOR_2026_08_08.md) | SPEC: Per-agent color — assign at creation, backfill existing, show on the pane frame |
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
 | [`SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15`](SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md) | Spec: Agent-facing Global Memory API (MCP tools to add/list/read a Global Memory entry) |
@@ -459,6 +460,7 @@ partial list.
 | [`SPEC_TOOL_PREVIEW_DEDENT_2026_08_08`](SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md) | SPEC: Tool preview common-indentation stripping (dedent) |
 | [`SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25`](SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md) | SPEC: tool previews — cap at one third of today's height, and always follow the latest output |
 | [`SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08`](SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md) | SPEC: Tool preview scrollbar-to-edge padding removal |
+| [`SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27`](SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md) | SPEC: Wheel edge skid — a nested preview absorbs a few wheel notches before the pane scrolls |
 | [`SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17`](SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md) | SPEC: Tool-result renderer registry (rich, per-tool result UIs that scale) |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md) | Spec: hover-to-peek on tool calls and thinking clumps |
 | [`SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25`](SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.md) | Spec: hover-to-peek on EVERY transcript node kind, 50ms delay |
@@ -583,6 +585,7 @@ partial list.
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
+| [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
@@ -729,6 +732,7 @@ partial list.
 | [`SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06`](SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md) | Provider CLI version upgrade (2026-09-06 drift report) |
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
 | [`SPEC_RELEASE_CICD_CORRECTION_2026_06_30`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md) | Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication |
+| [`SPEC_REMOTES_PANE_2026_10_05`](SPEC_REMOTES_PANE_2026_10_05.md) | SPEC: The Remotes pane: one place for every remote machine |
 | [`SPEC_REMOVE_PIN_FEATURE`](SPEC_REMOVE_PIN_FEATURE.md) | SPEC: Remove Tab Pinning, Uniform Inter-Tab Separator |
 | [`SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01`](SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md) | SPEC: Finishing the runtime menu — approval prompts, a remembered runtime, the resolved model, and install cleanup |
 | [`SPEC_SHARED_AGENT_REGISTRY_2026_05_12`](SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md) | Spec: Shared agent registry — cross-version "Continue agent" dropdown |

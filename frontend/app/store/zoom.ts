@@ -75,7 +75,7 @@ function computeEffectiveFontSize(baseFontSize: number, zoom: number): number {
 
 // "warden" added here per Codex review on PR #3090: warden-view.tsx already
 // reads/writes the identical "term:zoom" meta key and applies it as CSS
-// zoom exactly like armory/swarm (both already listed) — leaving it out
+// zoom exactly like knowledge/swarm (both already listed) — leaving it out
 // was an oversight in this allowlist, not a deliberate exclusion, and it
 // made the all-panes batch below silently skip a pane that individual
 // Ctrl+Scroll already zooms today via the exact same mechanism.

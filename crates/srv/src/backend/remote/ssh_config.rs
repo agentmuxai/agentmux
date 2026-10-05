@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 /// How deep `Include` is followed (ssh's own limit is 16; real configs use one
 /// or two levels).
-const MAX_INCLUDE_DEPTH: usize = 8;
+pub(super) const MAX_INCLUDE_DEPTH: usize = 8;
 
 /// The plain `Host` names in the user's ssh config, sorted, each once.
 pub fn hosts() -> Vec<String> {
@@ -62,7 +62,7 @@ fn read(path: &Path, ssh_dir: &Path, depth: usize, found: &mut BTreeSet<String>)
 /// A config line's keyword and its arguments: `Keyword arg ...` or
 /// `Keyword=arg ...`, with double-quoted arguments kept whole. `None` for a
 /// blank line or a comment.
-fn split_line(line: &str) -> Option<(String, Vec<String>)> {
+pub(super) fn split_line(line: &str) -> Option<(String, Vec<String>)> {
     let line = line.trim();
     if line.is_empty() || line.starts_with('#') {
         return None;
@@ -95,7 +95,7 @@ fn split_line(line: &str) -> Option<(String, Vec<String>)> {
 
 /// A name the user can open as it is: not a pattern, and nothing ssh's own
 /// destination check (conn.rs) would refuse.
-fn is_plain_name(name: &str) -> bool {
+pub(super) fn is_plain_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains(['*', '?', '!'])
         && super::conn::ConnTarget::parse(name).is_ok_and(|t| !t.is_local())
@@ -103,7 +103,7 @@ fn is_plain_name(name: &str) -> bool {
 
 /// The files an `Include` names: `~/` is the home, a relative path is under
 /// `ssh_dir`, and a `*` in the last part matches any run of characters there.
-fn expand_include(pattern: &str, ssh_dir: &Path) -> Vec<PathBuf> {
+pub(super) fn expand_include(pattern: &str, ssh_dir: &Path) -> Vec<PathBuf> {
     let path = match pattern.strip_prefix("~/") {
         Some(rest) => match dirs::home_dir() {
             Some(home) => home.join(rest),

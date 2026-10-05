@@ -3,7 +3,8 @@
 
 import { NumActiveConnColors } from "@/app/block/blockframe";
 import { paneTabIconFor, paneTabLabelFor } from "@/app/block/pane-tab-registry";
-import { getConnStatusAtom } from "@/app/store/global";
+import { atoms, getConnStatusAtom } from "@/app/store/global";
+import { remoteDisplay } from "@/app/store/remote-display";
 import * as util from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
@@ -71,6 +72,8 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
     const connStatus = createMemo(() => getConnStatusAtom(props.connection)());
     const connColorNum = createMemo(() => computeConnColorNum(connStatus()));
     const color = createMemo(() => `var(--conn-icon-color-${connColorNum()})`);
+    // The nickname and colour set in Remotes (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
+    const display = createMemo(() => remoteDisplay(atoms.fullConfigAtom()?.connections, props.connection));
     const clickHandler = function () {
         props.changeConnModalAtom._set(true);
         setConnModalOpen(true);
@@ -152,7 +155,10 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
                         }}
                     />
                 </span>
-                <div class="connection-name ellipsis">{props.connection}</div>
+                <Show when={display()?.color}>
+                    <span class="connection-swatch" style={{ background: display()!.color }} />
+                </Show>
+                <div class="connection-name ellipsis">{display()?.name ?? props.connection}</div>
             </div>
         </Show>
     );

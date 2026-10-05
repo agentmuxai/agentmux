@@ -1,7 +1,7 @@
 # Report: agent-pane scroll and layout — blank-space overshoot, the self-correcting "prediction", and whether the architecture needs a rethink
 
 **Date:** 2026-10-04
-**Author:** Camper (agent, `~/.agentmux/agents/camper-0622h`), at operator request
+**Author:** Camper (agent), at operator request
 **Status:** analysis — research and recommendations only; no code changed. Findings are labelled **verified** (read in the code or measured live), **inferred** (reasoned from verified facts) or **unverified** (needs an experiment).
 **Trigger:** Operator: *"it often overshoots the conversation with blank space inserted, then scrolls back to recover the blank space. what is that? looks like some prediction mechanism that corrects itself. can we get something more elegant? does it need an architecture rethink? research best practices online. … some of the files are very large, lets do a modularization and DRY analysis too."* Earlier the same session the operator also reported a faint constant "tremor" in the pane (edge glitter, cursor flipping between pointer and text).
 **Related:** `SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md` (the contract this report builds on), `REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`, `ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md` and its two FINDINGS follow-ups, `SPEC_AGENT_PANE_LAYOUT_REDUCER_2026_06_02.md`, `SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md`.

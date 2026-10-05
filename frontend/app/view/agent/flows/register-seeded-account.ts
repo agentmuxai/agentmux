@@ -81,12 +81,12 @@ export async function persistSeededAccount(
             secret_ref: { backend: "oauth_config_dir", dir },
             status: "valid",
         });
-        log("auth", "registered a real Armory account from your existing login");
+        log("auth", "registered a real account (Connectors → Accounts) from your existing login");
         return true;
     } catch (e: any) {
         log(
             "auth",
-            `credential seeded but the Armory account couldn't be registered: ${e?.message ?? String(e)}`,
+            `credential seeded but the account couldn't be registered in Connectors → Accounts: ${e?.message ?? String(e)}`,
             "error",
         );
         return false;

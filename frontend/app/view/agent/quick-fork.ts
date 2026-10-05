@@ -91,8 +91,8 @@ export interface QuickForkModel {
  * original two-button design (unbound-by-default + an opt-in "inherit
  * identity" variant) was removed for this reason.
  *
- * When the fork's effective provider (resolved through its bound bundle,
- * same as `launchAgentDefinition` itself does) doesn't support
+ * When the fork's effective provider (from the same resolver
+ * `launchAgentDefinition` uses) doesn't support
  * `--fork-session`, `fork-session-args.ts`'s `resolveForkSessionArgs`
  * (invoked inside `launchAgentDefinition`) silently drops the session id
  * rather than plain-resuming the parent's live session. That's the right

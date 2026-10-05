@@ -5,8 +5,6 @@ import { computeConnColorNum } from "@/app/block/blockutil";
 import { TypeAheadModal } from "@/app/modals/typeaheadmodal";
 import {
     atoms,
-    createBlock,
-    getApi,
     getConnStatusAtom,
     getHostName,
     getUserName,
@@ -17,9 +15,11 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { NodeModel } from "@/layout/index";
 import * as keyutil from "@/util/keyutil";
-import * as util from "@/util/util";
 import { createEffect, createSignal, onMount, type Accessor } from "solid-js";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { refreshRemotes, remotesList } from "@/app/store/remotes-store";
+import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
+import { remoteSuggestionScopes } from "./conn-remote-items";
 
 // newConnList -> connList => filteredList -> remoteItems -> sortedRemoteItems => remoteSuggestion
 // filteredList -> createNew
@@ -47,48 +47,6 @@ function sortConnSuggestionItems(
         const valueA = connectionsConfig?.[connNameA]?.["display:order"] ?? 0;
         const valueB = connectionsConfig?.[connNameB]?.["display:order"] ?? 0;
         return valueA - valueB;
-    });
-}
-
-function createRemoteSuggestionItems(
-    filteredList: Array<string>,
-    connection: string,
-    connStatusMap: Map<string, ConnStatus>
-): Array<SuggestionConnectionItem> {
-    return filteredList.map((connName) => {
-        const connStatus = connStatusMap.get(connName);
-        const connColorNum = computeConnColorNum(connStatus);
-        const item: SuggestionConnectionItem = {
-            status: "connected",
-            icon: "arrow-right-arrow-left",
-            iconColor:
-                connStatus?.status == "connected" ? `var(--conn-icon-color-${connColorNum})` : "var(--grey-text-color)",
-            value: connName,
-            label: connName,
-            current: connName == connection,
-        };
-        return item;
-    });
-}
-
-function createWslSuggestionItems(
-    filteredList: Array<string>,
-    connection: string,
-    connStatusMap: Map<string, ConnStatus>
-): Array<SuggestionConnectionItem> {
-    return filteredList.map((connName) => {
-        const connStatus = connStatusMap.get(`wsl://${connName}`);
-        const connColorNum = computeConnColorNum(connStatus);
-        const item: SuggestionConnectionItem = {
-            status: "connected",
-            icon: "arrow-right-arrow-left",
-            iconColor:
-                connStatus?.status == "connected" ? `var(--conn-icon-color-${connColorNum})` : "var(--grey-text-color)",
-            value: "wsl://" + connName,
-            label: "wsl://" + connName,
-            current: "wsl://" + connName == connection,
-        };
-        return item;
     });
 }
 
@@ -156,49 +114,6 @@ function getReconnectItem(
     return reconnectSuggestionItem;
 }
 
-function getLocalSuggestions(
-    localName: string,
-    connList: Array<string>,
-    connection: string,
-    connSelected: string,
-    connStatusMap: Map<string, ConnStatus>,
-    fullConfig: FullConfigType
-): SuggestionConnectionScope | null {
-    const wslFiltered = filterConnections(connList, connSelected, fullConfig);
-    const wslSuggestionItems = createWslSuggestionItems(wslFiltered, connection, connStatusMap);
-    const localSuggestionItem = createFilteredLocalSuggestionItem(localName, connection, connSelected);
-    const combinedSuggestionItems = [...localSuggestionItem, ...wslSuggestionItems];
-    const sortedSuggestionItems = sortConnSuggestionItems(combinedSuggestionItems, fullConfig);
-    if (sortedSuggestionItems.length == 0) {
-        return null;
-    }
-    const localSuggestions: SuggestionConnectionScope = {
-        headerText: "Local",
-        items: sortedSuggestionItems,
-    };
-    return localSuggestions;
-}
-
-function getRemoteSuggestions(
-    connList: Array<string>,
-    connection: string,
-    connSelected: string,
-    connStatusMap: Map<string, ConnStatus>,
-    fullConfig: FullConfigType
-): SuggestionConnectionScope | null {
-    const filtered = filterConnections(connList, connSelected, fullConfig);
-    const suggestionItems = createRemoteSuggestionItems(filtered, connection, connStatusMap);
-    const sortedSuggestionItems = sortConnSuggestionItems(suggestionItems, fullConfig);
-    if (sortedSuggestionItems.length == 0) {
-        return null;
-    }
-    const remoteSuggestions: SuggestionConnectionScope = {
-        headerText: "Remote",
-        items: sortedSuggestionItems,
-    };
-    return remoteSuggestions;
-}
-
 function getS3Suggestions(
     s3Profiles: Array<string>,
     connection: string,
@@ -244,34 +159,27 @@ function getDisconnectItem(
     return disconnectSuggestionItem;
 }
 
-function getConnectionsEditItem(
+/** "Manage remotes…": the Remotes pane, in this pane (SPEC_REMOTES_PANE_2026_10_05.md §4.7). */
+function getManageRemotesItem(
+    blockId: string,
+    connection: string | undefined,
     setChangeConnModalOpen: (v: boolean) => void,
     connSelected: string
 ): SuggestionConnectionItem | null {
     if (connSelected != "") {
         return null;
     }
-    const connectionsEditItem: SuggestionConnectionItem = {
+    return {
         status: "disconnected",
-        icon: "gear",
+        icon: "server",
         iconColor: "var(--grey-text-color)",
-        value: "Edit Connections",
-        label: "Edit Connections",
+        value: "Manage remotes…",
+        label: "Manage remotes…",
         onSelect: () => {
-            util.fireAndForget(async () => {
-                setChangeConnModalOpen(false);
-                const path = `${getApi().getConfigDir()}/connections.json`;
-                const blockDef: BlockDef = {
-                    meta: {
-                        view: "preview",
-                        file: path,
-                    },
-                };
-                await createBlock(blockDef, false, true);
-            });
+            setChangeConnModalOpen(false);
+            openRemotesInPane(blockId, connection || undefined).catch((e) => console.log("could not open Remotes", e));
         },
     };
-    return connectionsEditItem;
 }
 
 function getNewConnectionSuggestionItem(
@@ -323,8 +231,7 @@ const ChangeConnectionBlockModal = ({
     const isNodeFocused = nodeModel.isFocused;
     const connection = () => blockData()?.meta?.connection;
     const connStatus = () => getConnStatusAtom(connection())();
-    const [connList, setConnList] = createSignal<Array<string>>([]);
-    const [wslList, setWslList] = createSignal<Array<string>>([]);
+    const remotes = remotesList();
     const [s3List, setS3List] = createSignal<Array<string>>([]);
     const allConnStatus = atoms.allConnStatus;
     const [rowIndex, setRowIndex] = createSignal(0);
@@ -333,22 +240,9 @@ const ChangeConnectionBlockModal = ({
 
     createEffect(() => {
         if (!changeConnModalOpen()) {
-            setConnList([]);
             return;
         }
-        const prtn = RpcApi.ConnListCommand(TabRpcClient, { timeout: 2000 });
-        prtn.then((newConnList) => {
-            setConnList(newConnList ?? []);
-        }).catch((e) => console.log("unable to load conn list from backend. using blank list: ", e));
-        const p2rtn = RpcApi.WslListCommand(TabRpcClient, { timeout: 2000 });
-        p2rtn
-            .then((newWslList) => {
-                console.log(newWslList);
-                setWslList(newWslList ?? []);
-            })
-            .catch((e) => {
-                // failing silently
-            });
+        void refreshRemotes();
         RpcApi.ConnListAWSCommand(TabRpcClient, { timeout: 2000 })
             .then((s3ListResult) => setS3List(s3ListResult ?? []))
             .catch((e) => console.log("unable to load s3 list from backend:", e));
@@ -408,21 +302,17 @@ const ChangeConnectionBlockModal = ({
 
         const reconnectSuggestionItem = getReconnectItem(cs, connSelected(), blockId);
         const localName = getUserName() + "@" + getHostName();
-        const localSuggestions = getLocalSuggestions(
-            localName,
-            wslList(),
-            conn,
-            connSelected(),
-            connStatusMap,
-            fc
+        const localItems = createFilteredLocalSuggestionItem(localName, conn, connSelected());
+        const localSuggestions: SuggestionConnectionScope | null = localItems.length
+            ? { headerText: "Local", items: localItems }
+            : null;
+        // Pinned, SSH hosts, Recent and WSL, as in the Remotes pane (§4.7).
+        const remoteScopes = remoteSuggestionScopes(remotes(), connSelected(), conn, (name) =>
+            computeConnColorNum(connStatusMap.get(name))
         );
-        const remoteSuggestions = getRemoteSuggestions(
-            connList(),
-            conn,
-            connSelected(),
-            connStatusMap,
-            fc
-        );
+        // Only the remotes the picker shows: a hidden one left out must still
+        // offer "(New Connection)" for what was typed.
+        const remoteNames = remoteScopes.flatMap((s) => s.items.map((i) => i.value));
         let s3Suggestions: SuggestionConnectionScope = null;
         if (showS3()) {
             s3Suggestions = getS3Suggestions(
@@ -433,13 +323,13 @@ const ChangeConnectionBlockModal = ({
                 fc
             );
         }
-        const connectionsEditItem = getConnectionsEditItem(setChangeConnModalOpen, connSelected());
+        const manageRemotesItem = getManageRemotesItem(blockId, conn, setChangeConnModalOpen, connSelected());
         const disconnectItem = getDisconnectItem(conn, connStatusMap);
         const newConnectionSuggestionItem = getNewConnectionSuggestionItem(
             connSelected(),
             localName,
-            connList(),
-            wslList(),
+            remoteNames,
+            [],
             s3List(),
             changeConnection,
             setChangeConnModalOpen
@@ -448,10 +338,10 @@ const ChangeConnectionBlockModal = ({
         const sug: Array<SuggestionsType> = [
             ...(reconnectSuggestionItem ? [reconnectSuggestionItem] : []),
             ...(localSuggestions ? [localSuggestions] : []),
-            ...(remoteSuggestions ? [remoteSuggestions] : []),
+            ...remoteScopes,
             ...(s3Suggestions ? [s3Suggestions] : []),
             ...(disconnectItem ? [disconnectItem] : []),
-            ...(connectionsEditItem ? [connectionsEditItem] : []),
+            ...(manageRemotesItem ? [manageRemotesItem] : []),
             ...(newConnectionSuggestionItem ? [newConnectionSuggestionItem] : []),
         ];
         return sug;

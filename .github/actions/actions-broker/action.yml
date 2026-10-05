@@ -1,0 +1,41 @@
+name: Actions broker
+description: >-
+  Get short-lived credentials for this workflow run from the actions broker,
+  or hand it a result. The job proves which workflow it is with GitHub's OIDC
+  token (needs `permissions: id-token: write`); every returned value is masked.
+inputs:
+  broker-url:
+    description: The broker's URL (keep it in a secret).
+    required: true
+  entry:
+    description: The broker policy entry for this workflow.
+    required: true
+  mode:
+    description: "grant (write the grant to a file), aws (export AWS credentials) or result (submit result-file)."
+    required: true
+  context:
+    description: JSON the entry's gate needs, e.g. the PR number.
+    default: '{}'
+  result-file:
+    description: File to submit in result mode.
+    default: ''
+outputs:
+  skip:
+    description: Non-empty when the broker's gate decided this run gets nothing.
+    value: ${{ steps.broker.outputs.skip }}
+  grant-file:
+    description: The grant (mode 600) in grant mode.
+    value: ${{ steps.broker.outputs.grant-file }}
+runs:
+  using: composite
+  steps:
+    - id: broker
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        BROKER_URL: ${{ inputs.broker-url }}
+        ENTRY: ${{ inputs.entry }}
+        CONTEXT: ${{ inputs.context }}
+        GRANT_FILE: ${{ runner.temp }}/broker-grant.json
+        RESULT_FILE: ${{ inputs.result-file }}
+      run: python3 "$GITHUB_ACTION_PATH/broker.py"

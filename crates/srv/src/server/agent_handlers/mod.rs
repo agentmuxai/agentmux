@@ -966,8 +966,7 @@ mod recent_sessions_tests {
             .unwrap()
             .expect("bound bundle should exist");
         assert!(!bundle.is_blank, "must be a real bundle, not the shared blank singleton");
-        assert_eq!(bundle.provider, "claude", "provider carries from the agent's own harness");
-        assert_eq!(bundle.model, "anthropic", "vendor defaults from claude's supported_vendors[0]");
+        assert_eq!((bundle.provider.as_str(), bundle.model.as_str()), ("", ""), "the bundle carries no harness");
         assert!(bundle.name.contains("Asaf"));
 
         // "Own" bundle — not the template's own (empty, since tpl-claude
@@ -1020,8 +1019,8 @@ mod recent_sessions_tests {
         let stored = state.mstore.agent_def_get(&created.id).unwrap().unwrap();
         assert_eq!(stored.memory_id, created.memory_id);
         let bundle = state.mstore.bundle_get(&created.memory_id).unwrap().unwrap();
-        assert_eq!(bundle.provider, "codex");
-        assert_eq!(bundle.model, "openai", "vendor defaults from codex's supported_vendors[0]");
+        assert_eq!((bundle.provider.as_str(), bundle.model.as_str()), ("", ""), "the bundle carries no harness");
+        assert_eq!(stored.provider, "codex");
     }
 
     // agent.define's own provisioning coverage lives in

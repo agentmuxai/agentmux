@@ -30,7 +30,8 @@ import {
 } from "@/app/block/blockframe";
 import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
-import { getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
+import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
+import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { closeBlockInStack, moveBlockInStack, setActiveBlockInStack, type NodeModel } from "@/layout/index";
@@ -67,6 +68,11 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
 
     const isFocused = () => nodeModel.isFocused();
     const isAlone = () => nodeModel.numLeafs() <= 1;
+    // A stripe in the remote's colour when the active tab is on one
+    // (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
+    const remoteColor = createMemo(
+        () => remoteDisplay(atoms.fullConfigAtom()?.connections, activeBlockData()?.meta?.connection)?.color
+    );
     const ringBorderColor = createMemo(() => {
         const themeId = getSettingsKeyAtom("window:theme")();
         const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
@@ -424,9 +430,10 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
             classList={{
                 "pane-stack-focused": isFocused() && !isAlone(),
                 "pane-stack-focused-alone": isFocused() && isAlone(),
+                "pane-stack-remote-color": !!remoteColor(),
                 ...(model()?.rootClass ? { [model()!.rootClass]: true } : {}),
             }}
-            style={{ "--pane-ring-color": ringBorderColor() }}
+            style={{ "--pane-ring-color": ringBorderColor(), "--pane-remote-color": remoteColor() }}
             data-blockid={activeBlockId()}
             data-file-drop={dropState()?.state}
             onClick={() => nodeModel.focusNode()}

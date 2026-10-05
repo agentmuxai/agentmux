@@ -12,7 +12,7 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createBlock } from "@/store/global";
+import { createBlock, openOrFocusPaneByView } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 
 /**
@@ -92,7 +92,9 @@ export function getChildWidgets(
  * Return the effective pinned short-names (no "defwidget@" prefix), in order.
  *
  * Priority:
- *  1. widget:pinned is set → authoritative. A grouped child listed here IS
+ *  1. widget:pinned is set → authoritative, except that "armory" reads as
+ *     "connectors" and "knowledge", the two panes that replaced it
+ *     (SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md §4.3). A grouped child listed here IS
  *     honored (not stripped) — that's exactly how an individual child gets
  *     promoted out of its parent group onto the bar (see
  *     getEffectiveGroupedChildKeys).
@@ -108,7 +110,8 @@ export function getPinnedKeys(
 ): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
     if (pinned !== undefined) {
-        return pinned.filter((shortName) => wmap[`defwidget@${shortName}`] != null);
+        const keys = pinned.flatMap((shortName) => (shortName === "armory" ? ["connectors", "knowledge"] : [shortName]));
+        return [...new Set(keys)].filter((shortName) => wmap[`defwidget@${shortName}`] != null);
     }
     const grouped = getGroupedChildKeys(wmap);
     return Object.entries(wmap)
@@ -215,7 +218,16 @@ export function buildPaneWidgetMenuItems(
 
 // ── Widget actions ────────────────────────────────────────────────────────────
 
+/** Views whose widget focuses the pane already open in this tab instead of
+ *  opening another: there's one Connectors and one Knowledge to manage. */
+const FOCUS_EXISTING_VIEWS = new Set(["connectors", "knowledge"]);
+
 export async function handleWidgetSelect(widget: WidgetConfigType) {
+    const view = widget.blockdef?.meta?.["view"] as string | undefined;
+    if (view && FOCUS_EXISTING_VIEWS.has(view) && !widget.magnified) {
+        await openOrFocusPaneByView(view, widget.blockdef);
+        return;
+    }
     createBlock(widget.blockdef, widget.magnified);
 }
 

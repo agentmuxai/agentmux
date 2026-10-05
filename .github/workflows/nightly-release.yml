@@ -63,7 +63,7 @@ jobs:
       # -- the reason a PAT was needed at all -- a tag pushed with it DOES
       # trigger release.yml and container-image.yml. GitHub's anti-recursion
       # rule is scoped to GITHUB_TOKEN's identity, not to "any token".
-      # Proven in ci-app-token-smoke.yml: a real ref was created and deleted
+      # Proven by ci-app-token-smoke.yml (since removed): a real ref was created and deleted
       # with this token before this swap.
       - name: Mint a short-lived token that can push tags
         id: tag_token

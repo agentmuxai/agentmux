@@ -6,6 +6,5 @@
 //! — the `bundle` module itself — so it sees exactly what the inline
 //! module used to see via `use super::*;`, private items included.
 
-mod check_provider_model_immutable;
 mod import_preview_commit;
 mod export_import_for_agent;

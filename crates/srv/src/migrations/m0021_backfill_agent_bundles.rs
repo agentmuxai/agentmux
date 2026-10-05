@@ -4,9 +4,12 @@
 //! Backfill a dedicated ABF bundle for every existing agent definition that
 //! doesn't have one — the data-migration half of
 //! `docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3/§7:
-//! "every agent must have an ABF," and that ABF carries its own
-//! provider/model (readonly once set — enforced separately in
-//! `bundle.upsert`, see `check_provider_model_immutable`).
+//! "every agent must have an ABF," and, at the time, that ABF carried its
+//! own provider/model (readonly once set by a bundle-level guard). Since
+//! SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3 the bundle carries no
+//! harness: the agent owns its provider, locked by
+//! `app_api::check_provider_unchanged`, and `m0035` reconciles agents with
+//! the bundles this migration wrote.
 //!
 //! For every definition with an empty `memory_id`: create a fresh
 //! `db_bundles` row (empty instructions/context — a legitimate starting
@@ -22,7 +25,7 @@
 //! regardless of `def.provider`, reasoning from §7.3's operator-confirmed
 //! "every agent on this instance is Claude Code + OAuth Anthropic." That's
 //! true today, but baking it into the migration is unsafe: combined with
-//! `check_provider_model_immutable`'s enforcement and `agent_open.rs`'s
+//! the then bundle-level read-only lock and `agent_open.rs`'s
 //! spawn-time bundle-provider preference, hardcoding here would silently
 //! reassign any non-Claude agent (codex, gemini, ...) — present now or
 //! added before this migration runs on a given install — to spawn as
@@ -96,7 +99,7 @@ fn resolve_backfill_provider_and_model(provider: &str, model_vendor_base_url: &s
 /// where the runtime RPC layer will look for it. Best-effort or degrade,
 /// never hard-fail: an unusable shared store means "not today," same
 /// posture the global-registry attach above already has.
-fn resolve_bundle_store(ctx: &MigrationContext, mstore: &Arc<Store>) -> Arc<Store> {
+pub(super) fn resolve_bundle_store(ctx: &MigrationContext, mstore: &Arc<Store>) -> Arc<Store> {
     match Store::open_shared(&ctx.shared_store_path) {
         Ok(shared) => Arc::new(shared),
         Err(e) => {
@@ -443,9 +446,10 @@ mod tests {
     // derive each bundle's provider from THAT definition's own
     // `provider`, never a hardcoded value — a hardcoded claude/anthropic
     // default would silently reassign a non-Claude agent's harness on
-    // backfill, permanently, once check_provider_model_immutable locks it
-    // in and agent_open.rs starts preferring the bundle's provider over
-    // the definition's own.
+    // backfill, permanently, while the bundle's provider was read-only and
+    // preferred over the definition's own at spawn (as it was until
+    // SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3; `m0035` relies on
+    // these values to reconcile agents).
     #[test]
     fn backfill_derives_provider_and_model_from_the_definitions_own_provider_not_a_hardcoded_default() {
         with_isolated_home(|_home| {

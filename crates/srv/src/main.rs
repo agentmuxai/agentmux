@@ -140,6 +140,9 @@ async fn main() {
     // (SPEC_DURABLE_JEKT_DELIVERY_2026_09_24.md).
     server::jekt_held::install(&state);
 
+    // The helper install asks first (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+    server::app_api::connections::install_helper_consent(&state);
+
     // Now that AppState exists, wire up close-on-exit so a shell pane can
     // actually close itself when its process exits — see
     // `bootstrap::install_close_on_exit_handler`'s doc comment.

@@ -46,6 +46,7 @@ import { clickRow, moveFocus, selectAll, toggleFocused } from "./files-selection
 import { extensionOf, type SortKey } from "./files-sort";
 import { TypeAhead } from "./typeahead";
 import "./files.scss";
+import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { paneCommandFor, shortcutFor } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
 
@@ -941,18 +942,33 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                             </For>
                         </Show>
                         <Show when={model.remotes().length > 0}>
-                            <div class="files-places-heading">Remote</div>
+                            <div class="files-places-heading files-places-heading-with-action">
+                                <span>Remote</span>
+                                <button
+                                    type="button"
+                                    class="files-places-heading-action"
+                                    title="Manage remotes…"
+                                    aria-label="Manage remotes"
+                                    onClick={() =>
+                                        void openRemotesInPane(model.blockId, model.connection() || undefined).catch(
+                                            (e) => console.log("could not open Remotes", e)
+                                        )
+                                    }
+                                >
+                                    <i class="fa fa-gear" />
+                                </button>
+                            </div>
                             <For each={model.remotes()}>
                                 {(host) => (
                                     <button
                                         type="button"
                                         class="files-place"
-                                        classList={{ "files-place-active": model.connection() === host }}
-                                        title={`Your home folder on ${host}, over SSH`}
-                                        onClick={() => void model.openOn(host, "~")}
+                                        classList={{ "files-place-active": model.connection() === host.name }}
+                                        title={`Your home folder on ${host.name}, over SSH`}
+                                        onClick={() => void model.openOn(host.name, "~")}
                                     >
-                                        <i class="fa fa-server" />
-                                        <span>{host}</span>
+                                        <i class="fa fa-server" style={host.color ? { color: host.color } : undefined} />
+                                        <span>{host.label}</span>
                                     </button>
                                 )}
                             </For>

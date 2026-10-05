@@ -5,7 +5,7 @@
  * Tests for the all-panes zoom stepper (Ctrl+Shift+Scroll — see
  * docs/specs/SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md). Existing
  * single-pane zoom (zoomBlockIn/Out, chromeZoomIn/Out) is exercised
- * end-to-end already via armory-view.test.tsx / warden-view.test.tsx; this
+ * end-to-end already via section-pane.test.tsx / warden-view.test.tsx; this
  * file covers zoomAllPanesIn/Out specifically — the actual new logic this
  * feature adds, independent of any one view's rendering.
  */
@@ -62,7 +62,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // declares it for the built-ins.
 import { registerPaneTab } from "@/app/block/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
-for (const view of ["term", "agent", "swarm", "armory", "warden"]) {
+for (const view of ["term", "agent", "swarm", "knowledge", "warden"]) {
     registerPaneTab(stubPaneTab(view, { capabilities: { paneZoom: {} } }));
 }
 registerPaneTab(stubPaneTab("editor", { capabilities: { paneZoom: { baseFontSize: 13 } } }));
@@ -127,11 +127,11 @@ describe("zoomAllPanesIn/Out", () => {
 
     // Codex review, PR #3090: warden-view.tsx reads/writes the identical
     // "term:zoom" meta key and applies it as CSS zoom exactly like
-    // armory/swarm (both already included) — leaving it out of
+    // knowledge/swarm (both already included) — leaving it out of
     // getBlockZoom's allowlist was an oversight, not a deliberate
     // exclusion (unlike browser, which is excluded on purpose — see the
     // spec's Non-goals). A warden pane must be part of the batch.
-    it("includes warden panes in the batch — they already speak term:zoom identically to armory/swarm", () => {
+    it("includes warden panes in the batch — they already speak term:zoom identically to knowledge/swarm", () => {
         setBlock("t1", "term");
         setBlock("w1", "warden");
 

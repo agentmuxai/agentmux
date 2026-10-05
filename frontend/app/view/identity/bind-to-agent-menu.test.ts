@@ -204,7 +204,7 @@ describe("buildAccountRowMenu — batch-resolves through the bound bundle (#2594
     it("offers a drifted agent whose bound bundle resolves to the account's real provider", async () => {
         // Column says "codex" (would be excluded by the default reader),
         // but the bundle it's actually bound to says "claude".
-        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "codex", memory_id: "mem-1" });
+        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "", memory_id: "mem-1" });
         getMemoryMock.mockImplementation(async (_c: unknown, data: { id: string }) =>
             data.id === "mem-1" ? ({ provider: "claude" } as any) : undefined,
         );
@@ -218,7 +218,7 @@ describe("buildAccountRowMenu — batch-resolves through the bound bundle (#2594
     it("hides an agent whose bound bundle resolves AWAY from the account's provider despite a matching raw column", async () => {
         // Column says "claude" (would be offered by the default reader),
         // but the bundle it's actually bound to says "codex".
-        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "claude", memory_id: "mem-1" });
+        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "", memory_id: "mem-1" });
         getMemoryMock.mockImplementation(async (_c: unknown, data: { id: string }) =>
             data.id === "mem-1" ? ({ provider: "codex" } as any) : undefined,
         );

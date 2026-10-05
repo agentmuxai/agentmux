@@ -55,13 +55,10 @@ const DESCRIPTION = {
 } as const;
 
 export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.Element => {
-    // Resolve through the agent's bound bundle rather than the possibly-
-    // drifted `agent.provider` column directly — #2594, same "gate vs.
-    // actual launch can disagree" risk class #2592/#2596/#2607/#2609
-    // fixed. This modal determines which CLI package literally gets
-    // installed; disagreeing with what AgentPicker's checkInstalled
-    // (already fixed) decided needed installing would install the wrong
-    // provider's CLI.
+    // Through the same resolver as the launch and AgentPicker's
+    // checkInstalled (#2594), so this installs the CLI the agent will
+    // actually run: its own provider, or its bundle's when it has none
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1).
     //
     // Used only for the cosmetic header (icon/displayName/version) —
     // `start` re-resolves directly rather than reading this resource, so a

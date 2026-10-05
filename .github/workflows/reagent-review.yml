@@ -1,0 +1,119 @@
+name: ReAgent review
+
+# ReAgent reviews this repository's PRs here, on free GitHub Actions minutes.
+#
+# This job holds no write credential. It asks the actions broker (its URL is
+# the ACTIONS_BROKER_URL secret) for what it needs, proving which workflow it
+# is with GitHub's OIDC token. The broker first checks the PR itself (same
+# repository, open, trusted author) and then grants only a Claude login. The
+# reviewer runs with that and this job's read-only GITHUB_TOKEN, records the
+# review and comments it would post, and hands them back; the broker checks
+# each against the PR it verified and posts them. Fork PRs are reviewed
+# elsewhere.
+#
+# HARD CONSTRAINTS for any edit to this file:
+# - Never check out the PR's head. The checkout below is this repository's
+#   own .github/actions from the base branch (pull_request_target runs main's
+#   copy of this file); the reviewer container fetches the PR itself.
+# - Keep the job's permissions read-only plus id-token.
+# - The broker matches this exact file on main; a copy on a branch gets nothing.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+  issue_comment:
+    types: [created]
+
+permissions: {}
+
+jobs:
+  review:
+    # Pre-pull gate: a superset of the reviewer's own filter, so it never skips
+    # an event the reviewer would act on, but drops the ones it would certainly
+    # drop: edits that change neither the base, title nor body, closed PRs,
+    # ReAgent's own comments, and comments from humans with no @-mention.
+    # ReAgent's tests read THIS expression from main; keep the
+    # `pull_request.state == 'open'` clause (the test uses it as a marker).
+    if: >-
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.state == 'open' &&
+       (github.event.action != 'edited' || github.event.changes.base ||
+        github.event.changes.title || github.event.changes.body)) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       github.event.comment.user.login != 'reagentx-workflow[bot]' &&
+       (contains(github.event.comment.body, '@reagentx-workflow') ||
+        endsWith(github.event.comment.user.login, '[bot]') ||
+        startsWith(github.event.comment.user.login, 'GenericAgentX-')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Job-level: a run the `if:` skips must not occupy the group. A synchronize
+    # mid-review doesn't cancel the review in flight; the reviewer handles a
+    # stale head and doesn't post duplicates.
+    concurrency:
+      group: reagent-review-${{ github.event.pull_request.number || github.event.issue.number }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write    # OIDC token for the actions broker
+      contents: read
+      pull-requests: read
+      issues: read
+      packages: read     # pull the reviewer image from GHCR
+    steps:
+      - name: Broker client (from main, never the PR)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Ask the broker
+        id: grant
+        uses: ./.github/actions/actions-broker
+        with:
+          broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
+          entry: reagent-review
+          mode: grant
+          context: >-
+            {"pr": ${{ github.event.pull_request.number || github.event.issue.number }},
+             "comment_id": ${{ github.event.comment.id || 0 }},
+             "head_sha": "${{ github.event.pull_request.head.sha }}"}
+
+      - name: Review
+        if: steps.grant.outputs.skip == ''
+        env:
+          REVIEWER_IMAGE: ghcr.io/agentmuxai/reagent-reviewer:prod
+          GRANT_FILE: ${{ steps.grant.outputs.grant-file }}
+          GH_READ_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --user: the Claude CLI refuses to run as root. HOME=/tmp in the image.
+        run: |
+          set -euo pipefail
+          echo "$GH_READ_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin >/dev/null
+          docker pull --quiet "$REVIEWER_IMAGE" >/dev/null
+          mkdir -p "$RUNNER_TEMP/review-out"
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            -e GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
+            -e GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+            -e GITHUB_TOKEN="$GH_READ_TOKEN" \
+            -e GITHUB_EVENT_PATH=/tmp/event.json \
+            -e REAGENT_GRANT_FILE=/tmp/grant.json \
+            -e REAGENT_RESULT_FILE=/out/result.json \
+            -v "$GITHUB_EVENT_PATH:/tmp/event.json:ro" \
+            -v "$GRANT_FILE:/tmp/grant.json:ro" \
+            -v "$RUNNER_TEMP/review-out:/out" \
+            --entrypoint python \
+            "$REVIEWER_IMAGE" \
+            github_actions_entrypoint.py
+          rm -f "$GRANT_FILE"
+          if [ -f "$RUNNER_TEMP/review-out/result.json" ]; then
+            echo "has_result=true" >> "$GITHUB_OUTPUT"
+          fi
+        id: review
+
+      - name: Hand the review to the broker
+        if: steps.review.outputs.has_result == 'true'
+        uses: ./.github/actions/actions-broker
+        with:
+          broker-url: ${{ secrets.ACTIONS_BROKER_URL }}
+          entry: reagent-review
+          mode: result
+          result-file: ${{ runner.temp }}/review-out/result.json

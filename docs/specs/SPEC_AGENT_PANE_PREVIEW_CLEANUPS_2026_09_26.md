@@ -61,6 +61,11 @@ Use it from `ToolOverlayLog`, the jekt body and the jekt raw payload. Give those
 two jekt boxes `overscroll-behavior: contain`. Every capped transcript box then
 scrolls the same way.
 
+**Later (2026-10-04):** the hand-off no longer forwards the first wheel notch that
+reaches a box's edge. The first few notches there (`SKID_NOTCHES`) are absorbed (a
+"skid", with a line on that edge), and the next one scrolls the pane. See
+`SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md`.
+
 ## 3. Estimates follow the preview cap (B4)
 
 The CSS cap is `$transcript-preview-max-height: calc(50vh / 3)`. The estimates

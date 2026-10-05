@@ -159,11 +159,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     "local".to_string()
                 };
-                // Template's EFFECTIVE provider — resolved through its own
-                // bound bundle when it has one, not the possibly-drifted
-                // `db_agent_definitions.provider` column directly (#2594,
-                // same "gate vs. actual launch can disagree" risk class
-                // #2592 fixed). Used for both the vendor-base-url
+                // Template's EFFECTIVE provider, from the shared resolver
+                // (#2594; SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). Used for both the vendor-base-url
                 // validation below and the clone's own `provider` field so
                 // the two can't disagree with each other.
                 let effective_provider = id_store.resolve_effective_provider_id(template);
@@ -409,10 +406,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     cmd.branch_label.clone()
                 };
                 let branch_slug_part = crate::backend::storage::store::derive_slug(&branch_label);
-                // Source's EFFECTIVE provider — resolved through its own
-                // bound bundle when it has one, not the possibly-drifted
-                // `db_agent_definitions.provider` column directly (#2594,
-                // same pattern as the create-from-template clone site).
+                // Source's EFFECTIVE provider, from the shared resolver
+                // (#2594; same as the create-from-template clone site).
                 let effective_provider = id_store.resolve_effective_provider_id(&source);
                 let mut fork = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -643,11 +638,10 @@ mod tests {
         state.id_store.bundle_upsert(&bundle).unwrap();
     }
 
-    // Template's own `.provider` column says "codex" (drifted/stale —
-    // simulates the same drift class #2592 fixed: some definition-time
-    // write path changed this column after the bundle was already
-    // provisioned/immutable), but its bound bundle's REAL provider is
-    // "claude". A correct clone/fork must carry "claude", not "codex".
+    // The template says "codex"; its bound bundle, from before bundles
+    // stopped carrying a harness, says "claude". The agent owns its harness
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1), so a clone or fork
+    // carries "codex".
     fn seed_drifted_template(state: &AppState, def_id: &str, bundle_id: &str) {
         let mut def = AgentDefinition {
             conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
@@ -824,7 +818,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agentdefcreatefromtemplate_resolves_provider_through_the_templates_bundle() {
+    async fn agentdefcreatefromtemplate_carries_the_templates_own_provider() {
         let state = test_state();
         seed_bundle(&state, "bundle-claude", "claude");
         seed_drifted_template(&state, "tpl-1", "bundle-claude");
@@ -855,13 +849,13 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            cloned.provider, "claude",
-            "clone must carry the template's REAL (bundle-resolved) provider, not the drifted `codex` column"
+            cloned.provider, "codex",
+            "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1)"
         );
     }
 
     #[tokio::test]
-    async fn forkagentdefinition_resolves_provider_through_the_sources_bundle() {
+    async fn forkagentdefinition_carries_the_sources_own_provider() {
         let state = test_state();
         seed_bundle(&state, "bundle-claude", "claude");
         seed_drifted_template(&state, "src-1", "bundle-claude");
@@ -887,8 +881,8 @@ mod tests {
             serde_json::from_value(resp.data.expect("expected result data")).unwrap();
 
         assert_eq!(
-            fork.provider, "claude",
-            "fork must carry the source's REAL (bundle-resolved) provider, not the drifted `codex` column"
+            fork.provider, "codex",
+            "the agent owns its harness; the bundle's provider is a hint (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1)"
         );
     }
 

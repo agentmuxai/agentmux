@@ -73,6 +73,16 @@ pub(super) async fn build_export_for_agent(
     // Always empty now — see the note at the agent-less export path.
     let missing_skill_ids: Vec<String> = Vec::new();
 
+    // The hint names the agent this was exported from: the bundle itself
+    // carries no harness (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.2).
+    let mut bundle = bundle;
+    let provider = id_store.resolve_effective_provider_id(&agent);
+    if !provider.is_empty() {
+        bundle.model =
+            crate::backend::storage::store::Store::resolve_effective_vendor(&provider, &agent.model_vendor_base_url);
+        bundle.provider = provider;
+    }
+
     let mut export = crate::backend::bundle_export::export_bundle(
         &bundle,
         &components.skills,
@@ -360,7 +370,7 @@ pub(super) async fn bundle_export_for_agent_with_history_impl(
         all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
 
         // §3.5: the files above are in the archive; say so in the manifest too.
-        // Must happen before zipping — armory.json is zipped from export.files.
+        // Must happen before zipping — the manifest (bundle.json) is zipped from export.files.
         splice_history_component(&mut export, history_paths)
             .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
 

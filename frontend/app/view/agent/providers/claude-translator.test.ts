@@ -458,12 +458,12 @@ describe("ClaudeTranslator", () => {
                 subtype: "error_during_execution",
                 error: {
                     message:
-                        "[AgentMux] no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in the Armory.",
+                        "[AgentMux] no credentials for claude: the bound account was deleted or is unresolvable. Bind an account for this provider in Connectors → Accounts.",
                 },
             });
             expect(events[0].type).toBe("error_result");
             expect((events[0] as any).code).toBe(0);
-            expect((events[0] as any).message).toContain("Bind an account for this provider in the Armory");
+            expect((events[0] as any).message).toContain("Bind an account for this provider in Connectors → Accounts");
         });
 
         it("surfaces a string-typed error field when result and error.message are absent", () => {

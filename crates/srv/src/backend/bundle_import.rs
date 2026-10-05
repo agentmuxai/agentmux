@@ -309,12 +309,10 @@ pub struct ParsedBundleImport {
     pub name: String,
     pub description: String,
     /// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3: harness +
-    /// vendor, carried through from the source bundle's `armory.json` when
-    /// present. Empty string when the manifest has no `provider`/`model`
-    /// field (older export predating this, or a bundle that was never
-    /// bound to an agent) — the RPC handler treats empty the same as "not
-    /// set yet," matching `check_provider_model_immutable`'s own
-    /// first-time-set-is-allowed semantics.
+    /// vendor, carried through from the manifest's `suggestedFor` (v0.3) or
+    /// top-level `provider`/`model` (v0.1–v0.2). Empty when it has neither
+    /// (an older export predating this, or a bundle made with no hint). A
+    /// hint only: it never sets an agent's provider.
     pub provider: String,
     pub model: String,
     pub instructions: String,
@@ -604,9 +602,39 @@ fn parse_instruction_component_paths(
     instructions_parts.join("\n\n---\n\n")
 }
 
+/// The manifest an ABF v0.3 archive carries
+/// (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §2.1).
+pub const MANIFEST_FILE: &str = "bundle.json";
+/// The manifest of ABF v0.1 and v0.2 archives, read forever.
+pub const LEGACY_MANIFEST_FILE: &str = "armory.json";
+/// The `$schema` an ABF v0.3 manifest names.
+pub const SCHEMA_V0_3: &str = "https://docs.agentmux.ai/schemas/agent-bundle/v0.3/bundle.schema.json";
+
+/// Which manifest file a set of archive paths carries: `bundle.json`, else
+/// the legacy `armory.json`.
+pub fn manifest_file_name(mut has: impl FnMut(&str) -> bool) -> Option<&'static str> {
+    [MANIFEST_FILE, LEGACY_MANIFEST_FILE].into_iter().find(|name| has(name))
+}
+
+/// The ABF format version a manifest declares through its `$schema`, or
+/// `None` when it names none this importer knows. The `version` field is
+/// the bundle's own content version, not this.
+pub fn abf_format_version(manifest: &Value) -> Option<&'static str> {
+    let schema = manifest.get("$schema")?.as_str()?;
+    if schema.contains("/agent-bundle/v0.3/") {
+        Some("0.3")
+    } else if schema.contains("/armory-bundle/v0.2/") {
+        Some("0.2")
+    } else if schema.contains("/armory-bundle/v0.1/") {
+        Some("0.1")
+    } else {
+        None
+    }
+}
+
 /// Parse and validate a bundle's files into [`ParsedBundleImport`].
-/// Structural failures (missing/malformed `armory.json`) reject the whole
-/// import — `Err` — since there is nothing safe to partially write.
+/// Structural failures (no manifest, `bundle.json` or `armory.json`, or a
+/// malformed one) reject the whole import — `Err` — since there is nothing safe to partially write.
 /// Per-entry problems (a missing referenced file, an unsafe path, a
 /// malformed SKILL.md) degrade to a warning and that entry is skipped —
 /// matches `bundle_export.rs`'s own philosophy, and lets a lossy import
@@ -633,11 +661,14 @@ pub fn parse_bundle_import_with_budget(
     // doc comment.
     let by_path = dedup_files_by_path(files, &mut warnings);
 
-    let manifest_raw = by_path
-        .get("armory.json")
-        .ok_or_else(|| "armory.json: missing from bundle".to_string())?;
+    let manifest_name = manifest_file_name(|name| by_path.contains_key(name))
+        .ok_or_else(|| format!("{MANIFEST_FILE}: missing from bundle (or {LEGACY_MANIFEST_FILE}, before ABF v0.3)"))?;
+    if manifest_name == MANIFEST_FILE && by_path.contains_key(LEGACY_MANIFEST_FILE) {
+        warnings.push(format!("{LEGACY_MANIFEST_FILE}: ignored; this bundle also has {MANIFEST_FILE}"));
+    }
+    let manifest_raw = by_path[manifest_name];
     let manifest: Value = serde_json::from_str(manifest_raw)
-        .map_err(|e| format!("armory.json: malformed JSON ({e})"))?;
+        .map_err(|e| format!("{manifest_name}: malformed JSON ({e})"))?;
 
     // Phase 3 spec §3.1, round 13: bound at the parse source, not at a
     // later response boundary — `name` is re-submitted verbatim as
@@ -652,7 +683,7 @@ pub fn parse_bundle_import_with_budget(
         .unwrap_or("imported-bundle");
     if raw_name.chars().count() > MAX_BUNDLE_NAME_CHARS {
         warnings.push(format!(
-            "armory.json: name exceeds {MAX_BUNDLE_NAME_CHARS} characters; truncated"
+            "{manifest_name}: name exceeds {MAX_BUNDLE_NAME_CHARS} characters; truncated"
         ));
     }
     let name = bound_bundle_name(raw_name);
@@ -661,32 +692,31 @@ pub fn parse_bundle_import_with_budget(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    // §7.4.3: both optional (older exports predate this) — `None`/
-    // non-string/absent all fall back to "not set," same as a fresh
-    // bundle that's never been bound to an agent.
-    let provider = manifest.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let model = manifest.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // Who the bundle was made for, a hint only: v0.3's `suggestedFor`
+    // (`vendor` is what `model` always held), or v0.1–v0.2's top-level
+    // `provider` / `model`. Absent or non-string reads as "not set."
+    let hint = |v03: &str, legacy: &str| {
+        manifest
+            .get("suggestedFor")
+            .and_then(|s| s.get(v03))
+            .or_else(|| manifest.get(legacy))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let provider = hint("provider", "provider");
+    let model = hint("vendor", "model");
 
     // §4.3.2: schema/version are recorded (via warnings, since ParsedBundleImport
     // has no dedicated field for them yet — no schema registry exists to
     // validate against) but never block the import.
     if manifest.get("$schema").is_none() {
-        warnings.push("armory.json: no $schema field present".to_string());
+        warnings.push(format!("{manifest_name}: no $schema field present"));
+    } else if abf_format_version(&manifest).is_none() {
+        warnings.push(format!("{manifest_name}: $schema names no ABF version this AgentMux knows; reading it anyway"));
     }
-    match manifest.get("version").and_then(|v| v.as_str()) {
-        // codex P2, PR #2379 round 5: a bare prefix match treated "0.10.0"
-        // and "0.1garbage" as recognized v0.1.x versions too — this
-        // warning is the only signal that potentially incompatible
-        // semantics are being accepted for an importer that deliberately
-        // proceeds with unknown versions anyway, so it must actually
-        // distinguish "0.1", "0.1.x" from anything merely starting with
-        // the same three characters.
-        Some(v) if v == "0.1" || v.starts_with("0.1.") => {}
-        Some(other) => warnings.push(format!(
-            "armory.json: version \"{other}\" is not a recognized ABF v0.1.x version; importing anyway"
-        )),
-        None => warnings.push("armory.json: no version field present".to_string()),
-    }
+    // `version` is the bundle's own content version, which says nothing
+    // about the format (that's `$schema`, above), so it's never checked.
 
     let components = manifest.get("components").and_then(|v| v.as_object());
 
@@ -1352,7 +1382,7 @@ pub fn unzip_bundle_import_with_budget(
 
     // First pass: collect every non-dir entry's raw name, to DETECT
     // whether every single one shares one common wrapping directory
-    // (`zip_bundle_export`'s convention: `<root_slug>/armory.json`, etc.)
+    // (`zip_bundle_export`'s convention: `<root_slug>/bundle.json`, etc.)
     // before deciding whether to strip a path component at all.
     //
     // reagent P1, PR #2379: the previous version unconditionally stripped
@@ -2265,36 +2295,68 @@ mod tests {
     }
 
     #[test]
-    fn treats_a_version_that_merely_starts_with_0_1_as_unrecognized() {
-        // codex P2, PR #2379 round 5: "0.10.0" and "0.1garbage" both start
-        // with "0.1" but are not the 0.1.x family the importer actually
-        // recognizes.
-        for bad_version in ["0.10.0", "0.1garbage"] {
-            let manifest = serde_json::to_string(&serde_json::json!({
-                "name": "test-bundle",
-                "version": bad_version,
-                "components": {},
-            })).unwrap();
-            let files = vec![file("armory.json", &manifest)];
-            let result = parse_bundle_import(&files).unwrap();
-            assert!(
-                result.warnings.iter().any(|w| w.contains("not a recognized")),
-                "expected a warning for version {bad_version:?}, got: {:?}",
-                result.warnings
-            );
+    fn reads_every_abf_version_and_its_hint() {
+        let v01 = serde_json::json!({
+            "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.1/bundle.schema.json",
+            "name": "a", "version": "0.1.0", "provider": "claude", "model": "anthropic",
+            "components": { "instructions": ["instructions/AGENTS.md"] },
+        });
+        let v02 = serde_json::json!({
+            "$schema": "https://docs.agentmux.ai/schemas/armory-bundle/v0.2/bundle.schema.json",
+            "name": "a", "version": "0.1.0", "provider": "codex", "model": null,
+            "components": { "instructions": { "default": ["instructions/AGENTS.md"] } },
+        });
+        let v03 = serde_json::json!({
+            "$schema": SCHEMA_V0_3,
+            "name": "a", "version": "3.1.0", "suggestedFor": { "provider": "gemini", "vendor": "google" },
+            "components": { "instructions": { "default": ["instructions/AGENTS.md"] } },
+        });
+        for (manifest_name, manifest, version, provider, model) in [
+            (LEGACY_MANIFEST_FILE, v01, "0.1", "claude", "anthropic"),
+            (LEGACY_MANIFEST_FILE, v02, "0.2", "codex", ""),
+            (MANIFEST_FILE, v03, "0.3", "gemini", "google"),
+        ] {
+            assert_eq!(abf_format_version(&manifest), Some(version));
+            let files = vec![
+                file(manifest_name, &manifest.to_string()),
+                file("instructions/AGENTS.md", "Be concise."),
+            ];
+            let r = parse_bundle_import(&files).unwrap();
+            assert_eq!((r.provider.as_str(), r.model.as_str()), (provider, model), "v{version}");
+            assert_eq!(r.instructions.trim(), "Be concise.", "v{version}");
+            assert!(r.warnings.is_empty(), "v{version}: {:?}", r.warnings);
         }
     }
 
     #[test]
-    fn recognizes_bare_0_1_with_no_patch_component() {
-        let manifest = serde_json::to_string(&serde_json::json!({
-            "name": "test-bundle",
-            "version": "0.1",
-            "components": {},
-        })).unwrap();
-        let files = vec![file("armory.json", &manifest)];
-        let result = parse_bundle_import(&files).unwrap();
-        assert!(result.warnings.iter().all(|w| !w.contains("not a recognized")));
+    fn bundle_json_wins_over_armory_json_with_a_warning() {
+        let manifest = |name: &str| serde_json::json!({ "$schema": SCHEMA_V0_3, "name": name, "components": {} }).to_string();
+        let r = parse_bundle_import(&[file(LEGACY_MANIFEST_FILE, &manifest("old")), file(MANIFEST_FILE, &manifest("new"))]).unwrap();
+        assert_eq!(r.name, "new");
+        assert!(r.warnings.iter().any(|w| w.contains("armory.json: ignored")), "{:?}", r.warnings);
+    }
+
+    #[test]
+    fn a_bundle_with_no_manifest_names_both_files() {
+        let err = parse_bundle_import(&[file("instructions/AGENTS.md", "x")]).unwrap_err();
+        assert!(err.contains("bundle.json") && err.contains("armory.json"), "{err}");
+    }
+
+    #[test]
+    fn the_content_version_never_warns() {
+        // `version` is the bundle's own; an exporter's "0.1.0" bumped to
+        // "2.0.0" by its author is not a format problem.
+        for version in ["0.1", "0.1.0", "0.10.0", "2.0.0", "not semver"] {
+            let manifest = serde_json::to_string(&serde_json::json!({
+                "$schema": SCHEMA_V0_3,
+                "name": "test-bundle",
+                "version": version,
+                "components": {},
+            }))
+            .unwrap();
+            let result = parse_bundle_import(&[file(MANIFEST_FILE, &manifest)]).unwrap();
+            assert!(result.warnings.is_empty(), "{version:?}: {:?}", result.warnings);
+        }
     }
 
     #[test]
@@ -2416,15 +2478,15 @@ mod tests {
     }
 
     #[test]
-    fn warns_on_unrecognized_version_but_does_not_fail() {
+    fn warns_on_an_unknown_schema_but_does_not_fail() {
         let manifest = serde_json::to_string(&serde_json::json!({
+            "$schema": "https://example.com/some-other-format/v9/bundle.schema.json",
             "name": "test-bundle",
-            "version": "2.0.0",
             "components": {},
-        })).unwrap();
-        let files = vec![file("armory.json", &manifest)];
-        let result = parse_bundle_import(&files).unwrap();
-        assert!(result.warnings.iter().any(|w| w.contains("version")));
+        }))
+        .unwrap();
+        let result = parse_bundle_import(&[file(MANIFEST_FILE, &manifest)]).unwrap();
+        assert!(result.warnings.iter().any(|w| w.contains("$schema names no ABF version")));
     }
 
     #[test]
@@ -2476,7 +2538,7 @@ mod tests {
 
         let (files, warnings) = unzip_bundle_import(&zip_bytes).unwrap();
         assert!(warnings.is_empty());
-        assert!(files.iter().any(|f| f.path == "armory.json"));
+        assert!(files.iter().any(|f| f.path == "bundle.json"));
         assert!(files.iter().any(|f| f.path == "instructions/AGENTS.md" && f.content == "Be helpful."));
 
         let parsed = parse_bundle_import(&files).unwrap();

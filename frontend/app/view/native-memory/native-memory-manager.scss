@@ -478,7 +478,7 @@
 // ── Filter bar — narrow panes (Codex/ReAgent, PR #2929 — three rounds) ──────
 // Panes go down to 128px in either dimension (MinNodeSizePx,
 // frontend/layout/lib/layoutResize.ts) — well below the app's existing
-// `armory` container breakpoints (767px/479px, armory-view.scss). At a 128px
+// `armory` container breakpoints (767px/479px, section-pane.scss). At a 128px
 // pane the grid-view's own padding + this bar's padding leaves roughly 86px
 // of content width — verified with a live Chromium harness at every round
 // below, not just arithmetic (see the PR discussion for each measurement).

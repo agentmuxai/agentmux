@@ -526,7 +526,10 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
     // through the agent's bound bundle, the same "gate vs. actual launch
     // can disagree" risk class #2592/#2596 fixed for the credential gate
     // and AgentLaunchModal. These pin the fix at each remaining live site.
-    describe("resolves through the bound bundle, not a drifted agent.provider (#2594)", () => {
+    // An agent with no provider of its own takes its bundle's
+    // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1); these pin that the
+    // picker resolves through that path (#2594).
+    describe("resolves the provider through resolveEffectiveLaunchProvider", () => {
         // Stale `.provider` column ("claude", not npm-installable) vs. the
         // REAL bundle provider ("codex", npm-installable + has a system
         // prereq) — chosen so the two providers behave differently enough
@@ -537,7 +540,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
             slug: "drift",
             name: "Drifted Template",
             is_seeded: 1,
-            provider: "claude",
+            provider: "",
             memory_id: "mem-drift",
         });
 
@@ -627,7 +630,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
 describe("AgentPicker — install check on mount", () => {
     it("checks each agent once and each provider CLI once, whatever order the answers arrive in", async () => {
         const agents = Array.from({ length: 40 }, (_, i) =>
-            baseDef({ id: `tpl-${i}`, slug: `t${i}`, name: `T${i}`, is_seeded: 1, memory_id: `mem-${i}` })
+            baseDef({ id: `tpl-${i}`, slug: `t${i}`, name: `T${i}`, is_seeded: 1, provider: "", memory_id: `mem-${i}` })
         );
         vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue(agents);
         // Every agent's bundle resolves to the npm-installable provider, one

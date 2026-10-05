@@ -117,6 +117,16 @@ cp target/release/agentmux-mcp "$STAGING_ROOT/usr/bin/tools/bin/agentmux-mcp"
 #         scripts/check-bundled-tools.sh fails CI if either tool is dropped.
 cp target/release/agentmux-bashwrap "$STAGING_ROOT/usr/bin/tools/bin/agentmux-bashwrap"
 
+# --- 3c. Remote helpers — agentmux-remote for every SSH host platform, since any
+#         AgentMux may connect to any host; srv uploads the matching one to a host
+#         for file browsing and durable sessions. usr/bin/tools/remote/<target>/.
+#         Spec: docs/specs/SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §9.1. ---
+bash scripts/build-remote-helpers.sh dist/remote
+if [ -d dist/remote ]; then
+    mkdir -p "$STAGING_ROOT/usr/bin/tools/remote"
+    cp -R dist/remote/. "$STAGING_ROOT/usr/bin/tools/remote/"
+fi
+
 # --- 4. CEF runtime (libcef.so, GL libs, paks, snapshots, sandbox) ---
 for f in libcef.so libEGL.so libGLESv2.so chrome-sandbox chrome_crashpad_handler \
          icudtl.dat snapshot_blob.bin v8_context_snapshot.bin \
