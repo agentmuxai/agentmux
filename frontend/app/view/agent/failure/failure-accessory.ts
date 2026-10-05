@@ -25,8 +25,8 @@ export interface FailureActions {
     loginAgain: () => void;
     /** Open a real terminal window so the browser OAuth can open, then poll for creds. */
     loginViaTerminal: () => void;
-    /** Open Armory → Accounts. */
-    openArmory: () => void;
+    /** Open Connectors → Accounts. */
+    openAccounts: () => void;
     /**
      * Bind an already-authenticated account (of this agent's provider) to
      * this agent, replacing the round-trip through the Armory. Receives the
@@ -76,7 +76,7 @@ export interface FailureViewState {
      * Already-authenticated accounts for this agent's provider that could be
      * bound in one click, excluding the account already linked here — see
      * `computeAccountBindCandidates` (bind-account-candidates.ts). Empty or
-     * omitted → the auth row shows "Armory → Accounts" as it always has;
+     * omitted → the auth row shows "Connectors → Accounts" as it did before Bind;
      * non-empty → it shows "Bind: <name>" (one candidate) or "Bind account"
      * (2+, opens a picker) instead. See
      * docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.1.
@@ -155,11 +155,9 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
         glyph: "↻", label: retryLabel, title: "Re-run the last turn", primary: true,
         disabled: view.retrying, onClick: on.retry,
     };
-    const openArmory: PaneRowAction = {
-        // Same "vault" FontAwesome icon as the widget bar's Armory entry
-        // (crates/srv/src/config/widgets.json) and the hamburger menu's
-        // Armory item, instead of a generic gear emoji.
-        icon: "vault", label: "Armory → Accounts", title: "Open Armory → Accounts", onClick: on.openArmory,
+    const openAccounts: PaneRowAction = {
+        // The Connectors pane's own icon (its widget and hamburger item).
+        icon: "plug", label: "Connectors → Accounts", title: "Open Connectors → Accounts", onClick: on.openAccounts,
     };
 
     const actions: PaneRowAction[] = [];
@@ -183,14 +181,14 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             // "Login via terminal" stays unconditionally — it's the only
             // working recovery for providers whose in-app OAuth can't
             // complete in-app (SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md
-            // §5.5). What "Bind account" replaces is "Armory → Accounts",
+            // §5.5). What "Bind account" replaces is "Connectors → Accounts",
             // and only when it actually has something to offer instead —
             // decided 2026-09-04, see the spec's §3 for the full rationale.
-            const armoryOrBind: PaneRowAction =
+            const accountsOrBind: PaneRowAction =
                 bindCandidates.length === 0
-                    ? openArmory
+                    ? openAccounts
                     : {
-                          icon: "vault",
+                          icon: "plug",
                           label: bindCandidates.length === 1 ? `Bind: ${bindCandidates[0].name}` : "Bind account",
                           title: "Bind an already-signed-in account to this agent",
                           onClick: on.bindAccount,
@@ -211,18 +209,18 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
                     onClick: on.loginAgain,
                 },
                 { glyph: "🖥", label: "Login via terminal", title: "Open a terminal window where the browser login can complete", onClick: on.loginViaTerminal },
-                armoryOrBind,
+                accountsOrBind,
             );
             break;
         }
         case "usage_limit":
-            actions.push({ ...openArmory, label: "Armory (switch / upgrade)", primary: true });
+            actions.push({ ...openAccounts, label: "Accounts (switch / upgrade)", primary: true });
             break;
         case "spawn_failure":
-            // Clear `icon` — this isn't an Armory action, so it must NOT
-            // inherit openArmory's vault icon (icon takes precedence over
+            // Clear `icon` — this isn't an account action, so it must NOT
+            // inherit openAccounts's plug icon (icon takes precedence over
             // glyph in PaneRow's render).
-            actions.push({ ...openArmory, icon: undefined, glyph: "🧩", label: "Provider setup", title: "Fix the provider install", primary: true });
+            actions.push({ ...openAccounts, icon: undefined, glyph: "🧩", label: "Provider setup", title: "Fix the provider install", primary: true });
             break;
         case "rate_limited":
         case "overloaded":

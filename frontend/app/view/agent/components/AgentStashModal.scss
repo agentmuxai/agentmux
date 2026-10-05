@@ -29,7 +29,7 @@
     height: 100%;
     min-width: 0;
     // Container-query context for .agent-stash-modal-tab below (a
-    // descendant) — same technique as armory-view.scss's .armory-container.
+    // descendant) — same technique as section-pane.scss's .armory-container.
     container-type: inline-size;
     container-name: agent-stash;
 }
@@ -55,7 +55,7 @@
     cursor: default;
 
     // Same icon treatment as the global Armory rail (bundle-manager-rail-item
-    // in armory-view.scss) — width-pinned, slightly dimmed.
+    // in section-pane.scss) — width-pinned, slightly dimmed.
     i {
         width: 16px;
         text-align: center;
@@ -78,7 +78,7 @@
 }
 
 // Narrow modal — icon-only tabs, same "hide the label, keep the icon"
-// compression armory-view.scss's rail does at its 767px breakpoint.
+// compression section-pane.scss's rail does at its 767px breakpoint.
 @container agent-stash (max-width: 560px) {
     .agent-stash-modal-tab span {
         display: none;

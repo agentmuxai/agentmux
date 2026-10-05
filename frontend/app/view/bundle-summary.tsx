@@ -12,8 +12,8 @@
 //
 // This panel is CRUD-free: it shows a short pointer explaining that
 // bundles are app-wide data managed in one place, plus a "Manage in
-// Identity & Memory" button that opens the Armory via
-// `openOrFocusPaneByView("armory")`.
+// Knowledge" button that opens Knowledge → Bundles (Connectors → Accounts
+// for identity bundles).
 //
 // Per-agent bundle resolution — DATA GAP, CLOSED (2026-08-15) for the one
 // live remaining consumer. `view: "identity"` blocks stopped rendering
@@ -29,7 +29,7 @@
 // definition-level, readonly-after-creation binding, not the
 // per-instance-launch `AgentInstance.memory_id` the original DATA GAP
 // note below was written against) and shows its name + provider inline,
-// with a "Edit in Identity & Memory" link into Armory. `agentId` absent
+// with an "Edit in Knowledge" link. `agentId` absent
 // (or resolution still in flight / failed) degrades to the original
 // context-free pointer-only form — unchanged for every OTHER caller of
 // this component and for legacy blocks with no agent context at all.
@@ -41,7 +41,7 @@
 
 import { createMemo, createResource, Show, type JSX } from "solid-js";
 
-import { openOrFocusPaneByView } from "@/app/store/global";
+import { openConnectors, openKnowledge } from "@/app/view/section-pane/panes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
@@ -112,8 +112,8 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 <p class="bundle-summary-body">
                     {sentenceLabel} are app-wide data, shared across every agent and
                     window. They are now created, edited, and deleted in one
-                    place — the <strong>Identity &amp; Memory</strong>{" "}
-                    manager, opened from the hamburger menu.
+                    place — {props.kind === "Identity" ? "Connectors → Accounts" : "Knowledge → Bundles"},
+                    opened from the widget bar or the hamburger menu.
                 </p>
                 <p class="bundle-summary-body bundle-summary-hint">
                     This settings tab no longer manages {lowerPlural}; open the
@@ -122,9 +122,9 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                 <button
                     type="button"
                     class="bundle-summary-btn"
-                    onClick={() => void openOrFocusPaneByView("armory")}
+                    onClick={() => void (props.kind === "Identity" ? openConnectors("accounts") : openKnowledge("bundles"))}
                 >
-                    {props.agentId && boundBundle() ? "Edit in Identity & Memory" : "Manage in Identity & Memory"}
+                    {props.agentId && boundBundle() ? "Edit in" : "Manage in"} {props.kind === "Identity" ? "Connectors" : "Knowledge"}
                 </button>
             </div>
         </div>

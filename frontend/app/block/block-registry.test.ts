@@ -16,6 +16,7 @@ import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } fr
 const VIEWS = [
     "term", "cpuplot", "sysinfo", "help", "launcher", "agent", "swarm", "editor", "browser",
     "memory", "media", "identity", "drone", "warden", "toolchain", "armory", "settings",
+    "connectors", "knowledge",
 ];
 
 const OLD_ICONS: Record<string, string> = {
@@ -35,11 +36,11 @@ const OLD_LABELS: Record<string, string> = {
 // So did the last five legacy views, whose pills fell back to "square" and
 // three of them to their lowercase view name.
 const NEW_ICONS: Record<string, string> = {
-    cpuplot: "chart-line", warden: "shield-halved", armory: "vault",
+    cpuplot: "chart-line", warden: "shield-halved", armory: "vault", connectors: "plug", knowledge: "book",
     launcher: "shapes", memory: "layer-group", identity: "user", toolchain: "wrench", settings: "cog",
 };
 const NEW_LABELS: Record<string, string> = {
-    cpuplot: "Sysinfo", armory: "Armory", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
+    cpuplot: "Sysinfo", armory: "Armory", connectors: "Connectors", knowledge: "Knowledge", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
 };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
@@ -83,7 +84,8 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(holders("hueBorder")).toEqual(["term"]);
         expect(holders("nativeSurface")).toEqual(["browser"]);
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
-        expect(holders("paneZoom")).toEqual(["agent", "armory", "editor", "swarm", "term", "warden"]);
+        // The Armory's zoom went to the two panes that replaced it.
+        expect(holders("paneZoom")).toEqual(["agent", "connectors", "editor", "knowledge", "swarm", "term", "warden"]);
         expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("term", "paneZoom")?.baseFontSize).toBeUndefined();
         expect(holders("acceptsInput")).toEqual(["term"]);

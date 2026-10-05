@@ -11,10 +11,12 @@
 
 import { armoryPaneTab } from "@/app/view/armory/armory";
 import { browserPaneTab } from "@/app/view/browser/browser";
+import { connectorsPaneTab } from "@/app/view/connectors/connectors";
 import { dronePaneTab } from "@/app/view/drone/drone";
 import { editorPaneTab } from "@/app/view/editor/editor";
 import { filesPaneTab } from "@/app/view/files/files";
 import { identityPaneTab } from "@/app/view/identity/identity-pane";
+import { knowledgePaneTab } from "@/app/view/knowledge/knowledge";
 import { launcherPaneTab } from "@/app/view/launcher/launcher";
 import { mediaPaneTab } from "@/app/view/media/media";
 import { memoryPaneTab } from "@/app/view/bundle/bundle";
@@ -54,7 +56,10 @@ const builtins = [
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c
     toolchainPaneTab, // native — Phase 2c
-    armoryPaneTab, // native — Phase 2c (keeps the "trust" alias)
+    connectorsPaneTab, // native (the Armory's Accounts and MCP servers)
+    knowledgePaneTab, // native (the rest of the Armory)
+    // Moves a saved Armory block (or "trust") onto one of the two above.
+    armoryPaneTab,
     settingsPaneTab, // native — Phase 2c
 ];
 const unregisterBuiltins = builtins.map(registerPaneTab);

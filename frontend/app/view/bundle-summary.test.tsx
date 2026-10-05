@@ -22,8 +22,9 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/global", () => ({
-    openOrFocusPaneByView: vi.fn(),
+vi.mock("@/app/view/section-pane/panes", () => ({
+    openConnectors: vi.fn(),
+    openKnowledge: vi.fn(),
 }));
 vi.mock("@/app/view/agent/components/AgentPicker", () => ({
     useAgentDefinitions: () => [() => agentsList, () => false],
@@ -43,7 +44,7 @@ describe("BundleSummaryPanel", () => {
 
     it("renders the generic pointer-only form when agentId is absent", () => {
         render(() => <BundleSummaryPanel kind="Bundle" />);
-        expect(screen.getByText(/Manage in Identity & Memory/)).toBeInTheDocument();
+        expect(screen.getByText(/Manage in Knowledge/)).toBeInTheDocument();
         expect(screen.queryByText("This agent's own bundle")).not.toBeInTheDocument();
     });
 
@@ -64,7 +65,7 @@ describe("BundleSummaryPanel", () => {
             expect(screen.getByText("Agent One — ABF")).toBeInTheDocument();
         });
         expect(getMemory).toHaveBeenCalledWith({}, { id: "mem-1" });
-        expect(screen.getByText(/Edit in Identity & Memory/)).toBeInTheDocument();
+        expect(screen.getByText(/Edit in Knowledge/)).toBeInTheDocument();
     });
 
     it("shows a hint when the agent has no bundle of its own yet", async () => {

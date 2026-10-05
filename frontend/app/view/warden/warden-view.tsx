@@ -24,13 +24,13 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
     const model = props.model;
     // Meta-backed on the model (warden-model.ts's sectionAtom) rather than a
     // local createSignal — so WardenViewModel.viewName can react to it, and
-    // the selected tab survives a block remount. Mirrors armory-view.tsx.
+    // the selected tab survives a block remount. Mirrors section-pane.tsx.
     const section = model.sectionAtom;
     const setSection = (id: WardenSection) =>
         model.setMeta({ "warden:section": id });
     let viewRef: HTMLDivElement | undefined;
 
-    // Ctrl+Wheel zoom — identical pipeline to Armory's (armory-view.tsx is
+    // Ctrl+Wheel zoom — identical pipeline to the section panes' (section-pane.tsx is
     // the direct precedent for this exact capture-phase-listener + CSS-zoom-
     // on-root shape).
     onMount(() => {

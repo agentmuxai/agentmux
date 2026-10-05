@@ -65,7 +65,7 @@ export const BundleImportSelectModalPanel = (
             <header class="modal-panel-header">
                 <h2 class="modal-panel-title">Import Bundle</h2>
                 <p class="modal-panel-description">
-                    Pick an Armory Bundle (<code>.abf</code>) file to see what's inside before importing.
+                    Pick an Agent Bundle Format (<code>.abf</code>) file to see what's inside before importing.
                 </p>
             </header>
             <div class="modal-panel-body bundle-import-select-body">

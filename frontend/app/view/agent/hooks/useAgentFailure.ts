@@ -135,15 +135,15 @@ export interface UseAgentFailureOptions {
      * succeeds does not work — see loginViaTerminal's own doc comment.
      */
     onLoginViaTerminal: (turnAttempted: boolean) => void;
-    /** Open Armory → Accounts. */
-    onOpenArmory: () => void;
+    /** Open Connectors → Accounts. */
+    onOpenAccounts: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
     onNewSession: () => void;
     /**
      * Already-authenticated accounts for this agent's provider that could be
      * bound in one click — see `computeAccountBindCandidates`
      * (bind-account-candidates.ts). Reactive: the row re-derives its
-     * "Bind: <name>" / "Bind account" vs. "Armory → Accounts" action every
+     * "Bind: <name>" / "Bind account" vs. "Connectors → Accounts" action every
      * time this changes. Optional so callers that haven't wired the account
      * cache yet (e.g. tests) fall back to the pre-existing Armory-only
      * behavior. See docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.
@@ -444,7 +444,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 loginAgain: () => opts.onLoginAgain(pf.turnAttempted ?? true),
                 // Same single-source forwarding as loginAgain above.
                 loginViaTerminal: () => opts.onLoginViaTerminal(pf.turnAttempted ?? true),
-                openArmory: opts.onOpenArmory,
+                openAccounts: opts.onOpenAccounts,
                 bindAccount: opts.onBindAccount ?? (() => {}),
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),

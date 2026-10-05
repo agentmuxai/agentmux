@@ -10,6 +10,7 @@ import { createSignal, type Accessor } from "solid-js";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 import { cleanupBlockAtomCache } from "./block-atom-cache";
 import { createBlock } from "./block-layout-actions";
+import { setBlockMeta } from "./block-meta";
 import { giveBlockFocus } from "./focusManager";
 
 const blockComponentModelMap = new Map<string, BlockComponentModel>();
@@ -185,9 +186,14 @@ export function refocusNode(blockId: string) {
 /**
  * Open or focus a pane by view type.
  * If a block with the given viewType already exists in the current tab's layout,
- * focus it. Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
+ * focus it, first merging `focusMeta` into its meta (a section to show, say).
+ * Otherwise create a new block using blockDef (defaults to `{ meta: { view: viewType } }`).
  */
-export async function openOrFocusPaneByView(viewType: string, blockDef?: BlockDef): Promise<void> {
+export async function openOrFocusPaneByView(
+    viewType: string,
+    blockDef?: BlockDef,
+    focusMeta?: MetaType
+): Promise<void> {
     const layoutModel = getLayoutModelForStaticTab();
     for (const bcm of blockComponentModelMap.values()) {
         if (bcm.viewModel?.viewType === viewType) {
@@ -196,6 +202,7 @@ export async function openOrFocusPaneByView(viewType: string, blockDef?: BlockDe
                 const node = layoutModel.getNodeByBlockId(blockId);
                 if (node?.id != null) {
                     // Block is in the active tab — focus it.
+                    if (focusMeta != null) await setBlockMeta(blockId, focusMeta);
                     layoutModel.focusNode(node.id);
                     giveBlockFocus(blockId);
                     return;

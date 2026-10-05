@@ -109,7 +109,7 @@ const mkUI = (onRetry: () => void) => {
         onRetry,
         onLoginAgain() {},
         onLoginViaTerminal() {},
-        onOpenArmory() {},
+        onOpenAccounts() {},
         onNewSession() {},
     });
     return { ui, model };
@@ -365,7 +365,7 @@ describe("useAgentFailure dormancy pause (SPEC_AGENT_PANE_TAB_KEEPALIVE_2026_09_
             onRetry,
             onLoginAgain() {},
             onLoginViaTerminal() {},
-            onOpenArmory() {},
+            onOpenAccounts() {},
             onNewSession() {},
         });
         return { ui, model };
@@ -453,7 +453,7 @@ describe("useAgentFailure — turnAttempted forwarding (PLAN_LOGIN_CTA_SURFACE_C
                 onRetry() {},
                 onLoginAgain: (t) => void seen.push(t),
                 onLoginViaTerminal() {},
-                onOpenArmory() {},
+                onOpenAccounts() {},
                 onNewSession() {},
             });
             ui.row()?.actions.find((a) => a.glyph === "🔑")?.onClick();
@@ -494,7 +494,7 @@ describe("useAgentFailure — turnAttempted forwarding (PLAN_LOGIN_CTA_SURFACE_C
                     onRetry() {},
                     onLoginAgain: (t) => void seen.push(t),
                     onLoginViaTerminal() {},
-                    onOpenArmory() {},
+                    onOpenAccounts() {},
                     onNewSession() {},
                 });
                 const action = ui.row()?.actions.find((a) => a.glyph === "🔑");
@@ -534,7 +534,7 @@ describe("useAgentFailure — Take over (live_elsewhere)", () => {
             onRetry() {},
             onLoginAgain() {},
             onLoginViaTerminal() {},
-            onOpenArmory() {},
+            onOpenAccounts() {},
             onNewSession() {},
             onTakeOver,
         });

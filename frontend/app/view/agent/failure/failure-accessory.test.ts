@@ -22,7 +22,7 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
     const _calls = {
-        retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, bindAccount: 0, newSession: 0, toggleDetails: 0,
+        retry: 0, loginAgain: 0, loginViaTerminal: 0, openAccounts: 0, bindAccount: 0, newSession: 0, toggleDetails: 0,
         copyError: 0, dismiss: 0, takeOver: 0,
     };
     return {
@@ -30,7 +30,7 @@ const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, nu
         retry: vi.fn(() => void _calls.retry++),
         loginAgain: vi.fn(() => void _calls.loginAgain++),
         loginViaTerminal: vi.fn(() => void _calls.loginViaTerminal++),
-        openArmory: vi.fn(() => void _calls.openArmory++),
+        openAccounts: vi.fn(() => void _calls.openAccounts++),
         bindAccount: vi.fn(() => void _calls.bindAccount++),
         newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
@@ -74,7 +74,7 @@ describe("failureToRow", () => {
     // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3).
     // The auth row no longer branches on `canSeed`, so there is ONE auth
     // action set for every provider, Claude included.
-    it("auth → 🔐 sigil, Login Again primary, terminal + Armory secondary, for every provider", () => {
+    it("auth → 🔐 sigil, Login Again primary, terminal + Connectors secondary, for every provider", () => {
         const on = mkActions();
         const row = failureToRow(mkFailure({ code: "auth", title: "Not authenticated" }), mkView(), on);
         expect(row.sigil).toBe("🔐");
@@ -91,10 +91,10 @@ describe("failureToRow", () => {
         terminal?.onClick();
         expect(on._calls.loginViaTerminal).toBe(1);
 
-        const trust = action(row, "Armory → Accounts");
+        const trust = action(row, "Connectors → Accounts");
         expect(trust).toBeTruthy();
         trust?.onClick();
-        expect(on._calls.openArmory).toBe(1);
+        expect(on._calls.openAccounts).toBe(1);
     });
 
     it("auth never offers a seed-from-personal-login action any more", () => {
@@ -104,9 +104,9 @@ describe("failureToRow", () => {
         expect(row.actions.some((a) => a.glyph === "🌐")).toBe(false);
     });
 
-    it("usage_limit → Armory is the primary action", () => {
+    it("usage_limit → Connectors → Accounts is the primary action", () => {
         const row = failureToRow(mkFailure({ code: "usage_limit" }), mkView(), mkActions());
-        const trust = action(row, "Armory (switch / upgrade)");
+        const trust = action(row, "Accounts (switch / upgrade)");
         expect(trust?.primary).toBe(true);
     });
 
@@ -286,7 +286,7 @@ describe("auth row: pre-launch vs post-turn (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATIO
             failureToRow(authFailure(), mkView({ turnAttempted }), mkActions())
                 .actions.map((a) => a.label);
         expect(labels(false)).toContain("Login via terminal");
-        expect(labels(false)).toContain("Armory → Accounts");
+        expect(labels(false)).toContain("Connectors → Accounts");
         expect(labels(true)).toEqual(
             labels(false).map((l) => (l === "Log in" ? "Login Again" : l)),
         );
@@ -308,32 +308,32 @@ describe("auth row: pre-launch vs post-turn (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATIO
     });
 });
 
-describe("auth row: bind-account vs Armory (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04)", () => {
+describe("auth row: bind-account vs Connectors → Accounts (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04)", () => {
     const authFailure = () =>
         mkFailure({ code: "auth", title: "Not authenticated", detail: "401", retryable: true });
 
-    it("shows Armory → Accounts and no bind action when there are zero candidates", () => {
+    it("shows Connectors → Accounts and no bind action when there are zero candidates", () => {
         const row = failureToRow(authFailure(), mkView({ bindCandidates: [] }), mkActions());
-        expect(action(row, "Armory → Accounts")).toBeTruthy();
-        expect(row.actions.some((a) => a.icon === "vault" && a.label !== "Armory → Accounts")).toBe(false);
+        expect(action(row, "Connectors → Accounts")).toBeTruthy();
+        expect(row.actions.some((a) => a.icon === "plug" && a.label !== "Connectors → Accounts")).toBe(false);
     });
 
-    it("shows Armory → Accounts when bindCandidates is omitted (default/back-compat)", () => {
+    it("shows Connectors → Accounts when bindCandidates is omitted (default/back-compat)", () => {
         const row = failureToRow(authFailure(), mkView(), mkActions());
-        expect(action(row, "Armory → Accounts")).toBeTruthy();
+        expect(action(row, "Connectors → Accounts")).toBeTruthy();
     });
 
-    it("replaces Armory → Accounts with a named Bind action for exactly one candidate", () => {
+    it("replaces Connectors → Accounts with a named Bind action for exactly one candidate", () => {
         const on = mkActions();
         const row = failureToRow(
             authFailure(),
             mkView({ bindCandidates: [{ id: "acct-1", name: "work-claude" }] }),
             on,
         );
-        expect(action(row, "Armory → Accounts")).toBeUndefined();
+        expect(action(row, "Connectors → Accounts")).toBeUndefined();
         const bind = action(row, "Bind: work-claude");
         expect(bind).toBeTruthy();
-        expect(bind?.icon).toBe("vault");
+        expect(bind?.icon).toBe("plug");
         bind?.onClick();
         expect(on._calls.bindAccount).toBe(1);
     });
@@ -350,7 +350,7 @@ describe("auth row: bind-account vs Armory (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_202
             }),
             on,
         );
-        expect(action(row, "Armory → Accounts")).toBeUndefined();
+        expect(action(row, "Connectors → Accounts")).toBeUndefined();
         expect(action(row, "Bind: work-claude")).toBeUndefined();
         const bind = action(row, "Bind account");
         expect(bind).toBeTruthy();
