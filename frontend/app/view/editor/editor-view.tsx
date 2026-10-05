@@ -5,7 +5,7 @@
 // Tree visibility toggled by the header chevron (model.treeExpandedAtom).
 // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
-import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { docTabKeyAction } from "@/app/doc-tabs/doc-tabs-controller";
@@ -33,6 +33,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import "./editor-view.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
+import { keybindingsVersion } from "@/app/keybindings/registry";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -206,6 +207,36 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // pane-wide setting, not per-tab, so a stale per-tab CodeMirror-state
     // snapshot (cmStates) must not be allowed to reintroduce an old value.
     const wordWrapCompartment = new Compartment();
+    // The Save keys come from the shortcut table and follow live changes to
+    // the user's keybindings (createEffect below), like word wrap does.
+    const saveKeysCompartment = new Compartment();
+
+    // Keys from the shortcut table (`editor:save`, `editor:saveAs`).
+    const saveKeymap = (): Extension =>
+        keymap.of([
+            ...codeMirrorKeys("editor:save").map((key) => ({
+                key,
+                run: () => {
+                    if (model.activeTabAtom()?.isScratch) {
+                        triggerSaveAs();
+                    } else {
+                        void model.saveFile();
+                    }
+                    return true;
+                },
+            })),
+            ...codeMirrorKeys("editor:saveAs").map((key) => ({
+                key,
+                run: () => {
+                    // Phase 1: Save As is only implemented for scratch tabs.
+                    // Don't swallow the key for non-scratch tabs so the OS
+                    // default (or a future handler) can still see it.
+                    if (!model.activeTabAtom()?.isScratch) return false;
+                    triggerSaveAs();
+                    return true;
+                },
+            })),
+        ]);
 
     const teardownLsp = async (): Promise<void> => {
         if (lspChangeDebounce) {
@@ -395,31 +426,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             }),
             // Ctrl+S → save; on scratch tabs triggers Save As instead.
             // Ctrl+Shift+S → Save As for scratch tabs only (Phase 1; non-scratch Save As is Phase 2).
-            // Keys from the shortcut table (`editor:save`, `editor:saveAs`).
-            keymap.of([
-                ...codeMirrorKeys("editor:save").map((key) => ({
-                    key,
-                    run: () => {
-                        if (model.activeTabAtom()?.isScratch) {
-                            triggerSaveAs();
-                        } else {
-                            void model.saveFile();
-                        }
-                        return true;
-                    },
-                })),
-                ...codeMirrorKeys("editor:saveAs").map((key) => ({
-                    key,
-                    run: () => {
-                        // Phase 1: Save As is only implemented for scratch tabs.
-                        // Don't swallow the key for non-scratch tabs so the OS
-                        // default (or a future handler) can still see it.
-                        if (!model.activeTabAtom()?.isScratch) return false;
-                        triggerSaveAs();
-                        return true;
-                    },
-                })),
-            ]),
+            saveKeysCompartment.of(saveKeymap()),
         ];
 
         if (readOnly) {
@@ -617,7 +624,10 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 // that time*, which may be stale if the user toggled it via
                 // another tab since.
                 cmView.dispatch({
-                    effects: wordWrapCompartment.reconfigure(model.wordWrapAtom() ? [EditorView.lineWrapping] : []),
+                    effects: [
+                        wordWrapCompartment.reconfigure(model.wordWrapAtom() ? [EditorView.lineWrapping] : []),
+                        saveKeysCompartment.reconfigure(saveKeymap()),
+                    ],
                 });
                 setLiveDoc(saved.doc.toString()); // seed preview from restored doc
                 // Re-wire LSP for the now-active file's content.
@@ -638,6 +648,15 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         if (!cmView) return;
         cmView.dispatch({ effects: wordWrapCompartment.reconfigure(wrap ? [EditorView.lineWrapping] : []) });
     });
+
+    // Follow live changes to the user's keybindings without rebuilding CodeMirror.
+    createEffect(
+        on(
+            keybindingsVersion,
+            () => cmView?.dispatch({ effects: saveKeysCompartment.reconfigure(saveKeymap()) }),
+            { defer: true }
+        )
+    );
 
     // Clear cached CodeMirror state when its tab closes, so re-opening
     // the same file later starts fresh (matches user expectation —

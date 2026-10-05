@@ -4,6 +4,7 @@
 // Resolves a key press to a command from the default table (defaults.ts),
 // given where focus is. Pure: the dispatcher supplies the context.
 
+import { createSignal } from "solid-js";
 import { DEFAULT_KEYBINDINGS, type KeyBindingRow, type KeyPane } from "./defaults";
 import { formatKey, matchKey, parseKey, sameKey, type KeyEventLike, type KeyPlatform, type KeySpec } from "./keys";
 
@@ -43,18 +44,154 @@ interface CompiledRow {
 
 const compiled = new Map<KeyPlatform, CompiledRow[]>();
 
+/** One entry of the `keybindings` setting (report §6.6). */
+export interface UserKeybinding {
+    key?: string;
+    /** A command id; `-command` unbinds it (just `key`, or every key when no key is given). */
+    command: string;
+    when?: string;
+    /** Limit to one platform; both when omitted. */
+    platform?: KeyPlatform;
+}
+
+let userBindings: UserKeybinding[] = [];
+
+/** Bumped whenever the user's keybindings change, so views that read the
+ *  table (help pane, CodeMirror keymaps) can follow. */
+const [keybindingsVersion, setKeybindingsVersion] = createSignal(0);
+export { keybindingsVersion };
+
+const TABLE_COMMANDS = new Set(DEFAULT_KEYBINDINGS.map((r) => r.command));
+
+/**
+ * Applies the `keybindings` setting. User keys come before the defaults, so
+ * they win. Returns a message for every entry that was skipped; a bad entry
+ * never breaks the defaults.
+ */
+export function setUserKeybindings(entries: unknown, isKnownCommand: (id: string) => boolean = () => false): string[] {
+    const warnings: string[] = [];
+    const ok: UserKeybinding[] = [];
+    for (const [i, raw] of (Array.isArray(entries) ? entries : []).entries()) {
+        const e = raw as UserKeybinding;
+        const where = `keybindings[${i}]`;
+        if (!e || typeof e.command !== "string" || !e.command.replace(/^-/, "")) {
+            warnings.push(`${where}: needs a "command"`);
+            continue;
+        }
+        const unbind = e.command.startsWith("-");
+        if (e.key != null && (typeof e.key !== "string" || !e.key.trim())) {
+            warnings.push(`${where}: "key" is empty`);
+            continue;
+        }
+        if (!unbind && e.key == null) {
+            warnings.push(`${where}: needs a "key" for ${e.command}`);
+            continue;
+        }
+        if (e.key && e.key.trim().split(/\s+/).length > 2) {
+            warnings.push(`${where}: "${e.key}": a chord is at most two keys`);
+            continue;
+        }
+        const id = e.command.replace(/^-/, "");
+        if (!TABLE_COMMANDS.has(id) && !isKnownCommand(id)) {
+            // A typo on a default key would otherwise win and run nothing.
+            warnings.push(`${where}: unknown command "${id}"`);
+            continue;
+        }
+        if (e.platform != null && e.platform !== "mac" && e.platform !== "other") {
+            warnings.push(`${where}: platform must be "mac" or "other"`);
+            continue;
+        }
+        try {
+            if (e.key) for (const p of ["mac", "other"] as const) e.key.trim().split(/\s+/).forEach((k) => parseKey(k, p));
+            validateWhen(e.when);
+        } catch (err) {
+            warnings.push(`${where}: ${(err as Error).message}`);
+            continue;
+        }
+        ok.push(e);
+    }
+    userBindings = ok;
+    compiled.clear();
+    setKeybindingsVersion((v) => v + 1);
+    return warnings;
+}
+
 function rowsFor(platform: KeyPlatform): CompiledRow[] {
     let rows = compiled.get(platform);
     if (!rows) {
         rows = [];
+        const mine = userBindings.filter((u) => u.platform == null || u.platform === platform);
+        // By parsed key, not text: "Ctrl+Tab" and "mod+t" unbind ctrl+Tab and meta+t.
+        const stepsOf = (key: string) => key.trim().split(/\s+/).map((s) => parseKey(s, platform));
+        const sameSteps = (a: KeySpec[], b: KeySpec[]) => a.length === b.length && a.every((k, i) => sameKey(k, b[i]));
+        const unbinds = mine
+            .filter((u) => u.command.startsWith("-"))
+            .map((u) => ({ command: u.command.slice(1), steps: u.key ? stepsOf(u.key) : null }));
+        const unbound = (command: string, steps: KeySpec[]) =>
+            unbinds.some((u) => u.command === command && (u.steps == null || sameSteps(u.steps, steps)));
+        // A command's first row is its main one (later rows add chords or scoped keys).
+        const byCommand = new Map<string, KeyBindingRow>();
+        for (const r of DEFAULT_KEYBINDINGS) if (!byCommand.has(r.command)) byCommand.set(r.command, r);
+        // In list order: an unbind removes the defaults and your own entries
+        // above it, so "unbind, then rebind elsewhere" works.
+        const userRows: CompiledRow[] = [];
+        for (const u of mine) {
+            if (u.command.startsWith("-")) {
+                const command = u.command.slice(1);
+                const steps = u.key ? stepsOf(u.key) : null;
+                for (let i = userRows.length - 1; i >= 0; i--) {
+                    const r = userRows[i];
+                    if (r.row.command === command && (steps == null || sameSteps(steps, r.steps))) userRows.splice(i, 1);
+                }
+                continue;
+            }
+            if (!u.key) continue;
+            const base = byCommand.get(u.command);
+            const row: KeyBindingRow = {
+                command: u.command,
+                label: base?.label ?? u.command,
+                category: base?.category ?? "General",
+                when: u.when,
+                // In a terminal: as its command's own rows do; always for a
+                // command the table doesn't have (you bound it on purpose) or
+                // when your `when` asks for the terminal.
+                skipShell: base ? base.skipShell || /(^|&&)\s*terminalFocus\s*($|&&)/.test(u.when ?? "") : true,
+                pane: base?.pane,
+                helpGroup: base?.helpGroup,
+            };
+            // One space between chord steps, whatever was typed: labels split on " ".
+            userRows.push({ row, source: u.key.trim().split(/\s+/).join(" "), steps: stepsOf(u.key) });
+        }
+        rows.push(...userRows);
         for (const row of DEFAULT_KEYBINDINGS) {
             for (const source of (platform === "mac" ? row.mac : row.other) ?? []) {
-                rows.push({ row, source, steps: source.split(" ").map((s) => parseKey(s, platform)) });
+                const steps = source.split(" ").map((s) => parseKey(s, platform));
+                if (unbound(row.command, steps)) continue;
+                rows.push({ row, source, steps });
             }
         }
         compiled.set(platform, rows);
     }
     return rows;
+}
+
+/** Every row as resolved for `platform`, user keys first (for the help pane). */
+export function effectiveRows(platform: KeyPlatform): { row: KeyBindingRow; source: string }[] {
+    return rowsFor(platform).map(({ row, source }) => ({ row, source }));
+}
+
+const WHEN_FLAGS = new Set(["textInputFocus", "terminalFocus", "docTabsHost"]);
+
+/** Throws on any term that isn't a known flag or a viewType comparison.
+ *  Checks every term: evalWhen stops at the first false one, so a bad flag
+ *  later in the clause would otherwise slip through and throw on a key press. */
+export function validateWhen(when: string | undefined): void {
+    if (!when) return;
+    for (const raw of when.split("&&")) {
+        const t = raw.trim();
+        if (/^viewType\s*(==|!=)\s*\S+$/.test(t)) continue;
+        if (!WHEN_FLAGS.has(t.replace(/^!/, ""))) throw new Error(`keybinding when: unknown context key "${t}"`);
+    }
 }
 
 /** `when` is `flag`, `!flag`, `viewType == x` or `viewType != x`, joined with `&&`. */
@@ -118,6 +255,24 @@ export function matchPaneKey(e: KeyEventLike, pane: KeyPane, platform: KeyPlatfo
 export function chordLeaderOf(e: KeyEventLike, platform: KeyPlatform): string | null {
     for (const c of rowsFor(platform)) {
         if (c.steps.length === 2 && matchKey(e, c.steps[0])) return c.source.split(" ")[0];
+    }
+    return null;
+}
+
+/** Where focus is when the host forwards a key from a browser pane. */
+const BROWSER_PANE_CONTEXT: KeyContext = { textInputFocus: false, terminalFocus: false, viewType: "browser", docTabsHost: false };
+
+/**
+ * The global command a single key forwarded from a browser pane runs in the
+ * effective table (user keys first), or null.
+ */
+export function commandForKey(source: string, platform: KeyPlatform): string | null {
+    const steps = source.trim().split(/\s+/).map((s) => parseKey(s, platform));
+    if (steps.length !== 1) return null;
+    for (const c of rowsFor(platform)) {
+        if (c.row.pane || c.steps.length !== 1 || !sameKey(c.steps[0], steps[0])) continue;
+        if (!evalWhen(c.row.when, BROWSER_PANE_CONTEXT)) continue;
+        return c.row.command;
     }
     return null;
 }

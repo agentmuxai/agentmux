@@ -10,6 +10,7 @@ import {
     getBlockComponentModel,
     getFocusedBlockId,
     openOrFocusPaneByView,
+    settingsAtom,
     replaceBlock,
     setIsTermMultiInput,
 } from "@/app/store/global";
@@ -36,6 +37,9 @@ import {
     switchTabLast,
     moveActiveTab,
 } from "./keymodel-nav";
+import { setUserKeybindings } from "@/app/keybindings/registry";
+import { createEffect, createRoot } from "solid-js";
+import { commandRegistry } from "./command-registry";
 
 function countTermBlocks(): number {
     return basicTermModels().length;
@@ -227,7 +231,20 @@ function deactivateSearch(): boolean {
     return false;
 }
 
-export { registerGlobalKeys };
+/** Applies the `keybindings` setting now and whenever it changes; an entry
+ *  that can't be used is skipped with a console warning (report §6.6). */
+function registerUserKeybindings(): void {
+    createRoot(() =>
+        createEffect(() => {
+            const known = (id: string) => keyCommands.has(id) || commandRegistry.get(id) != null;
+            for (const message of setUserKeybindings(settingsAtom()?.["keybindings"], known)) {
+                console.warn(`[keybindings] ${message}`);
+            }
+        })
+    );
+}
+
+export { registerGlobalKeys, registerUserKeybindings };
 
 export {
     appHandleKeyDown,

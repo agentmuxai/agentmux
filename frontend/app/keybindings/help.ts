@@ -4,8 +4,9 @@
 // The help pane's shortcut list, generated from the default table so it can't
 // drift from what the keys do.
 
-import { DEFAULT_KEYBINDINGS, type KeyBindingRow, type KeyCategory } from "./defaults";
+import type { KeyCategory } from "./defaults";
 import { formatKey, type KeyPlatform } from "./keys";
+import { effectiveRows } from "./registry";
 
 export interface HelpEntry {
     label: string;
@@ -35,15 +36,18 @@ export function compactKeys(labels: string[]): string {
     return `${prefix}${rest.join("/")}`;
 }
 
-function rowKeys(row: KeyBindingRow, platform: KeyPlatform): string[] {
-    return (platform === "mac" ? row.mac : row.other) ?? [];
-}
-
 export function helpSections(platform: KeyPlatform): HelpSection[] {
     const entries = new Map<string, { category: KeyCategory; entry: HelpEntry; groupKeys: string[] }>();
-    for (const row of DEFAULT_KEYBINDINGS) {
-        const keys = rowKeys(row, platform);
-        if (keys.length === 0 || row.devOnly) continue;
+    // Group the effective keys (user overrides first) back by row.
+    const byRow = new Map<object, { row: (typeof rowsList)[number]["row"]; keys: string[] }>();
+    const rowsList = effectiveRows(platform);
+    for (const { row, source } of rowsList) {
+        const e = byRow.get(row) ?? { row, keys: [] as string[] };
+        e.keys.push(source);
+        byRow.set(row, e);
+    }
+    for (const { row, keys } of byRow.values()) {
+        if (row.devOnly) continue;
         const id = row.helpGroup ?? row.command;
         let e = entries.get(id);
         if (!e) {

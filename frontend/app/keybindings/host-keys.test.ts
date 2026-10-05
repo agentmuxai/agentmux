@@ -32,7 +32,7 @@ describe("host-keys.json", () => {
 
     it("uses Windows virtual-key codes", () => {
         const newTab = hostKeys("other").find((k) => k.command === "tab:new");
-        expect(newTab).toEqual({ command: "tab:new", ctrl: true, shift: true, alt: false, meta: false, vk: 0x54 });
+        expect(newTab).toEqual({ command: "tab:new", source: "ctrl+shift+t", ctrl: true, shift: true, alt: false, meta: false, vk: 0x54 });
         const f6 = hostKeys("mac").find((k) => k.command === "pane:focus:next");
         expect(f6?.vk).toBe(0x75);
     });

@@ -432,8 +432,15 @@ A shortcut made of one character key (no modifier) must either be possible to tu
 
 **Still to do:**
 - Phase 4 (#4325): **done** for document tabs, the editor and the Files pane. They are `pane` rows in the table, matched by `matchPaneKey`. CodeMirror's Save keys are generated from it, and the help pane has Documents, Editor and Files sections. Global rows sharing a key are scoped away from that pane, and the conflict check proves it. The composer's keys (Enter, Esc, history arrows) are widget-internal and stay local.
-- Phase 5 (the host PR): **done for browser panes.** `host-keys.json` is generated from the table and pinned by `host-keys.test.ts`. `crates/cef` reads it, so a focused browser pane forwards app shortcuts to the app (`app-shortcut` event), consumed before the page sees them.
+- Phase 5 (#4326): **done for browser panes.** `host-keys.json` is generated from the table and pinned by `host-keys.test.ts`. `crates/cef` reads it, so a focused browser pane forwards app shortcuts to the app (`app-shortcut` event), consumed before the page sees them.
   - **What's forwarded:** window, tab and pane commands that skip the shell, plus the palette, Settings and the shortcuts sheet.
   - **Left out:** find and zoom, which a page has its own of; typing-scoped keys, because the host can't see whether the page has a text field focused (F6 still leaves the pane); chords.
   - **Decided against: macOS native menu key equivalents.** An NSMenu key equivalent takes the key before the web view sees it, so it would bypass the table's `when` rules: ⌘W would close the pane even in the Files pane, whose own ⌘W closes a folder tab. The menu keeps running commands by click (`menu:invoke`), and its items show no accelerators. The command palette and the help pane show every key instead.
-- Phase 6: a `keybindings` setting for user overrides, and the docs site's `keybindings.md` generated from the table.
+- Phase 6 (#4328): **done.**
+  - **A `keybindings` setting** (schema, TS type, `setUserKeybindings`), applied live:
+    - user keys come before the defaults, so they win;
+    - `-command` unbinds a command, every key or just one;
+    - optional `when` and `platform`;
+    - a bad entry is skipped with a console warning.
+  - **Overrides show everywhere:** the help pane, menus and palette read the effective rows.
+  - **`docs/keybindings.md`** is generated from the table and pinned by `doc.test.ts`. The docs site's `keybindings.md` takes the same content, in its own PR, merged once these keys ship in a release.
