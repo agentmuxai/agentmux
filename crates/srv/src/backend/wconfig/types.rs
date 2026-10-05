@@ -460,6 +460,15 @@ pub struct SettingsType {
     #[serde(rename = "messaging:whatsapp:tunnel_domain", default, skip_serializing_if = "String::is_empty")]
     pub messaging_whatsapp_tunnel_domain: String,
 
+    /// Per-connection settings: `settings.json` → `connections.<name>`
+    /// (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §4, decision 5;
+    /// SPEC_REMOTES_PANE_2026_10_05.md §4.3). Typed here so it reaches
+    /// `FullConfigType::connections`, which every per-connection reader uses
+    /// (`ConfigState::update_settings` copies it). Before this field the object
+    /// fell into `extra` and no connection setting ever took effect.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub connections: HashMap<String, ConnKeywords>,
+
     /// Catch-all for unknown/dynamic keys (e.g. `widget:hidden@defwidget@sysinfo`).
     /// These pass through serde unchanged so the frontend can access them as flat settings keys.
     #[serde(flatten, default, skip_serializing_if = "HashMap::is_empty")]
@@ -636,7 +645,24 @@ pub struct ConnKeywords {
     #[serde(rename = "conn:ignoresshconfig", default, skip_serializing_if = "Option::is_none")]
     pub conn_ignore_ssh_config: Option<bool>,
 
+    /// Installing AgentMux's helper on this host: `ask` (unset), `always` or
+    /// `never` (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+    #[serde(rename = "conn:helper", default, skip_serializing_if = "String::is_empty")]
+    pub conn_helper: String,
+
     // -- Display settings --
+    /// A nickname shown instead of the connection name (Remotes, the picker).
+    #[serde(rename = "display:name", default, skip_serializing_if = "String::is_empty")]
+    pub display_name: String,
+
+    /// A colour for the remote, `#rrggbb` (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
+    #[serde(rename = "display:color", default, skip_serializing_if = "String::is_empty")]
+    pub display_color: String,
+
+    /// Pinned to the top of Remotes and the picker.
+    #[serde(rename = "display:pinned", default, skip_serializing_if = "Option::is_none")]
+    pub display_pinned: Option<bool>,
+
     #[serde(rename = "display:hidden", default, skip_serializing_if = "Option::is_none")]
     pub display_hidden: Option<bool>,
 

@@ -22,6 +22,9 @@ use serde::{Deserialize, Serialize};
 pub const EVENT_BLOCK_CLOSE: &str = "blockclose";
 #[allow(dead_code)]
 pub const EVENT_CONN_CHANGE: &str = "connchange";
+/// The Remotes pane's list changed in a way `connchange` doesn't cover: a
+/// remote's settings, or a recent one forgotten (SPEC_REMOTES_PANE_2026_10_05.md §4.6).
+pub const EVENT_REMOTES_CHANGE: &str = "remoteschange";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 /// What an agent process was actually spawned with. See `agent_runtime.rs`.

@@ -58,10 +58,13 @@ impl ConfigState {
         *current = Arc::new(config);
     }
 
-    /// Update just the settings portion.
+    /// Update just the settings portion, and the per-connection settings that
+    /// live inside it (`settings.json` → `connections`): every
+    /// per-connection reader looks at `FullConfigType::connections`.
     pub fn update_settings(&self, settings: SettingsType) {
         let mut current = self.config.write().unwrap();
         let mut new_config = (**current).clone();
+        new_config.connections = settings.connections.clone();
         new_config.settings = settings;
         *current = Arc::new(new_config);
     }
@@ -89,5 +92,43 @@ impl ConfigState {
 impl Default for ConfigState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `settings.json` → `connections.<name>` reaches `FullConfigType::connections`,
+    /// which the per-connection readers use (durable default, theme, …). It used to
+    /// fall into `SettingsType::extra`, so no connection setting ever took effect.
+    #[test]
+    fn connection_settings_in_settings_json_reach_the_full_config() {
+        let settings: SettingsType = serde_json::from_value(serde_json::json!({
+            "term:theme": "default-dark",
+            "connections": {
+                "db1": { "term:durable": false, "display:name": "prod-db", "display:color": "#e5484d" }
+            }
+        }))
+        .unwrap();
+        assert!(!settings.extra.contains_key("connections"), "typed, not a catch-all key");
+
+        let state = ConfigState::new();
+        state.update_settings(settings);
+        let config = state.get_full_config();
+        let db1 = config.connections.get("db1").expect("db1's settings are loaded");
+        assert_eq!(db1.term_durable, Some(false));
+        assert_eq!(db1.display_name, "prod-db");
+        assert_eq!(db1.display_color, "#e5484d");
+    }
+
+    #[test]
+    fn removing_a_connection_from_settings_removes_its_settings() {
+        let state = ConfigState::new();
+        state.update_settings(
+            serde_json::from_value(serde_json::json!({ "connections": { "db1": { "display:pinned": true } } })).unwrap(),
+        );
+        state.update_settings(SettingsType::default());
+        assert!(state.get_full_config().connections.is_empty());
     }
 }

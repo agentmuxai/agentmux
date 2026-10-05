@@ -90,6 +90,17 @@ pub fn remember(agent: &str, connection: &str) -> std::io::Result<()> {
     )
 }
 
+/// Every "always" grant, as `(agent, connection)` (the Remotes pane lists them
+/// per host, SPEC_REMOTES_PANE_2026_10_05.md §4.10).
+pub fn all_in(config_home: &Path) -> Vec<(String, String)> {
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    read(&path_in(config_home))
+        .always
+        .into_iter()
+        .map(|g| (g.agent, g.connection))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -270,6 +270,35 @@ fn reload_and_broadcast(
 /// same broadcast-construction block verbatim as its own step 4, and
 /// `browser_start_page.rs`'s watcher needs the identical broadcast a third
 /// time. One shared function instead of a third copy.
+/// Change one connection's settings (`settings.json` → `connections.<name>`,
+/// SPEC_REMOTES_PANE_2026_10_05.md §4.3): a `null` value removes a key. Edits
+/// the raw `connections` object read from disk, so keys AgentMux doesn't know
+/// survive, then writes, updates the live config and broadcasts it, as
+/// `setconfig` does. Serialized, so two quick edits can't drop each other's.
+pub fn set_connection_values(
+    config_watcher: &Arc<ConfigState>,
+    event_bus: &Arc<EventBus>,
+    connection: &str,
+    values: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let settings_path = resolve_settings_dir().join(wconfig::SETTINGS_FILE);
+    let raw = wconfig::read_settings_raw_jsonc(&settings_path);
+    let mut connections = match raw.get("connections") {
+        Some(serde_json::Value::Object(map)) => map.clone(),
+        _ => serde_json::Map::new(),
+    };
+    crate::backend::remote::remotes::apply_connection_values(&mut connections, connection, values);
+    let mut keys = serde_json::Map::new();
+    keys.insert("connections".to_string(), serde_json::Value::Object(connections));
+    merge_settings_to_disk(keys.clone())?;
+    let merged = merge_settings_into_current(config_watcher, keys);
+    config_watcher.update_settings(merged);
+    broadcast_full_config(config_watcher, event_bus);
+    Ok(())
+}
+
 pub fn broadcast_full_config(config_watcher: &Arc<ConfigState>, event_bus: &Arc<EventBus>) {
     let config = config_watcher.get_full_config();
     let client_count = event_bus.connection_count();

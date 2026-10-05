@@ -107,6 +107,14 @@ fn update(
             data: serde_json::to_value(&updated).ok(),
         });
     }
+    // An SSH connection that reached `connected` joins the Remotes pane's Recent
+    // section (SPEC_REMOTES_PANE_2026_10_05.md §4.5); `connchange` above already
+    // tells the pane to refresh. Not in unit tests, which would write the file
+    // into whatever config dir the test process resolves.
+    #[cfg(not(test))]
+    if updated.connected {
+        super::remotes::record_recent(connection);
+    }
     updated
 }
 

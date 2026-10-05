@@ -15,6 +15,7 @@ pub mod conn;
 pub mod files;
 pub mod helper_hosts;
 pub mod helper_install;
+pub mod remotes;
 pub mod host;
 pub mod sessions;
 pub mod ssh;
