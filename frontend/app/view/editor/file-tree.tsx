@@ -23,6 +23,8 @@ interface FileTreeProps {
     /** Called on file row double-click — pins the tab. */
     onFileDblClick?: (path: string) => void;
     onToggleHidden: () => void;
+    /** Hides the file tree: the toolbar's first button. */
+    onHideTree?: () => void;
     /** Right-click on a node or empty tree background.
      *  path=null means the background was right-clicked. */
     onContextMenu?: (path: string | null, isDir: boolean, e: MouseEvent) => void;
@@ -60,6 +62,7 @@ export function FileTree(props: FileTreeProps): JSX.Element {
                 model={props.model}
                 showHidden={props.showHidden}
                 onToggleHidden={props.onToggleHidden}
+                onHideTree={props.onHideTree}
             />
             <div
                 class="file-tree-body"
@@ -86,11 +89,25 @@ interface FileTreeToolbarProps {
     model: FileTreeModel;
     showHidden: boolean;
     onToggleHidden: () => void;
+    onHideTree?: () => void;
 }
 
 function FileTreeToolbar(props: FileTreeToolbarProps): JSX.Element {
     return (
         <div class="file-tree-toolbar">
+            {/* The tree's own hide button; the editor's document bar has the
+                one that shows it again. */}
+            <Show when={props.onHideTree}>
+                <button
+                    type="button"
+                    class="file-tree-toolbar-btn"
+                    data-tip="Hide file tree"
+                    aria-label="Hide file tree"
+                    onClick={() => props.onHideTree?.()}
+                >
+                    <i class="fa fa-angles-left" />
+                </button>
+            </Show>
             <button
                 type="button"
                 class="file-tree-toolbar-btn"

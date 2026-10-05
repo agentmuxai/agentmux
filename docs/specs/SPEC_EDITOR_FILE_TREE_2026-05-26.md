@@ -12,7 +12,7 @@
 The Editor pane is **CodeMirror 6 + an empty-state path input** today. Users have to know (or paste) an absolute path to open anything. This spec adds:
 
 1. A **collapsible file-tree explorer** down the pane's left side, rooted at `$HOME`
-2. A **header toggle** (`📁` chevron) that expands/collapses the tree; default state **expanded**
+2. A **hide** button on the tree's own toolbar and a **show** button (`📁`) on the editor's document bar; default state **expanded**
 3. **Click-to-load** — clicking any file replaces the editor's current document
 4. A **research-backed proposal** for extension support — strong recommendation to ride CodeMirror 6's native extension model (curated, settings-toggleable) rather than reinvent VS Code's extension-host architecture
 
@@ -53,7 +53,7 @@ What's missing:
 
 1. **Discovery** — the operator can open the editor with no path and immediately see their files
 2. **Familiar** — file tree matches VS Code / GitHub web conventions (chevron expand/collapse, indent, type icons, single-click loads)
-3. **Reversible** — header toggle hides the tree to give CodeMirror the full pane width; preference persists per-pane in block meta
+3. **Reversible** — hiding the tree to give CodeMirror the full pane width; preference persists per-pane in block meta
 4. **No regressions** — the existing path-input + Ctrl+S + dirty state continue to work; clicking a file in the tree is *additive*, not a replacement
 
 ## Non-goals (this spec)
@@ -101,12 +101,23 @@ When the user clicks the header chevron, the tree column slides closed and the c
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Header toggle
+### Hiding and showing the tree
 
-Placed at the **left** end of the pane header (per the existing `viewText` slot), before any other items. Icon: `folder-tree` (FontAwesome). State:
+- **Hide:** the first button on the tree's toolbar (`angles-left`), before
+  show-hidden-files, collapse-all and refresh.
+- **Show:** while the tree is hidden, a button (`folder-tree`) leads the
+  editor's **document bar** (the row of document tabs above CodeMirror), fixed
+  before the tabs, which scroll beside it. The bar shows for it even with no
+  document open.
 
-- **Expanded** (default): icon shows `chevron-left` next to the folder; click collapses
-- **Collapsed**: icon shows `folder-tree` only; click expands
+Only one of the two is ever on screen. The pane header shows the editor's plain
+icon and does nothing on click.
+
+*Changed 2026-10-05:* the toggle used to be the pane header's icon (#1070).
+It belongs to the editor, not the pane: a pane's header holds the pane's tabs,
+and the editor's own controls sit on the editor's own bars.
+
+An editor on a remote host has no file tree, so neither button.
 
 Persisted to block meta as `editor:tree_expanded` (boolean). Default `true`. The setting is *per pane* — two editor panes in the same window can have independent tree states.
 

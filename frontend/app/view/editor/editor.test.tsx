@@ -11,7 +11,6 @@ vi.mock("./editor-model", () => ({
         constructor(public ctx: any) {}
         viewName = () => "notes.md";
         viewText = () => "~/notes";
-        viewIcon = () => ({ elemtype: "iconbutton", icon: "file-lines" });
         getBodyContextMenuItems = () => [{ label: "Copy Path" }];
         giveFocus = () => (calls.push("focus"), true);
         dispose = () => calls.push("dispose");
@@ -28,11 +27,14 @@ describe("editorPaneTab", () => {
         expect(editorPaneTab.capabilities).toEqual({ lifecycle: "keepAlive", paneZoom: { baseFontSize: 13 }, noPadding: true });
     });
 
-    it("hands the host its title, header text and icon, menu, focus and dispose", () => {
+    it("hands the host its title, header text, menu, focus and dispose", () => {
         const inst = editorPaneTab.create!({ blockId: "e1" } as any);
         expect(inst.liveTitle!().text).toBe("notes.md");
         expect(inst.headerText!()).toBe("~/notes");
-        expect(inst.headerIcon!()).toEqual({ elemtype: "iconbutton", icon: "file-lines" });
+        // The header shows the manifest's plain icon; the file tree's toggle
+        // is on the editor's own document bar.
+        expect(inst.headerIcon).toBeUndefined();
+        expect(editorPaneTab.icon).toBe("file-lines");
         expect(inst.contextMenu!()).toEqual([{ label: "Copy Path" }]);
         expect(inst.focus!()).toBe(true);
         inst.dispose!();

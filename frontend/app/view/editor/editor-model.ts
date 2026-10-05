@@ -118,7 +118,6 @@ export class EditorViewModel {
     // giveFocus() below is a no-op until the first build completes.
     cmViewRef: { current: EditorView | null } = { current: null };
 
-    viewIcon: Accessor<string | IconButtonDecl>;
     viewName: Accessor<string>;
     viewText: Accessor<string | HeaderElem[]>;
 
@@ -437,19 +436,6 @@ export class EditorViewModel {
                 const fp = this.filePathAtom();
                 if (!fp) return "Editor";
                 return this.dirtyAtom() ? `${fp} *` : fp;
-            }),
-        );
-
-        // Pane icon doubles as the file-tree expand/collapse toggle.
-        this.viewIcon = useBlockAtom(blockId, "editor-view-icon", () =>
-            createMemo<IconButtonDecl>(() => {
-                const expanded = this.treeExpandedAtom();
-                return {
-                    elemtype: "iconbutton",
-                    icon: expanded ? "folder-tree" : "folder",
-                    title: expanded ? "Hide file tree" : "Show file tree",
-                    click: () => void this.toggleTreeExpanded(),
-                };
             }),
         );
 

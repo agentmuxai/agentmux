@@ -22,7 +22,6 @@ export const editorPaneTab: PaneTabManifest = {
             component: () => <EditorViewComponent model={model} />,
             liveTitle: () => ({ text: model.viewName() }),
             headerText: () => model.viewText(),
-            headerIcon: () => model.viewIcon(),
             contextMenu: () => model.getBodyContextMenuItems(),
             focus: () => model.giveFocus(),
             dispose: () => model.dispose(),

@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Editor view — file-tree column on the left + CodeMirror on the right.
-// Tree visibility toggled by the header chevron (model.treeExpandedAtom).
+// Tree visibility (model.treeExpandedAtom): hidden by the first button on the
+// tree's toolbar, shown again by the button leading the document bar.
 // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 import { createEffect, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
@@ -696,7 +697,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 ))}
             </div>
             <Show when={!model.treeExpandedAtom()}>
-                <div class="editor-empty-hint">Open the file tree (chevron) to browse files.</div>
+                <div class="editor-empty-hint">Show the file tree (the folder button above) to browse files.</div>
             </Show>
         </div>
     );
@@ -872,6 +873,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 return "";
         }
     };
+    const showTreeButton = () => !model.treeExpandedAtom() && !model.connection();
+
     const statusChipKind = (): string => {
         const s = lspState();
         return s?.kind ?? "none";
@@ -899,6 +902,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                         onFileClick={(path) => void model.openFilePreview(path)}
                         onFileDblClick={(path) => void model.openFile(path)}
                         onToggleHidden={() => void model.toggleShowHidden()}
+                        onHideTree={() => void model.toggleTreeExpanded()}
                         onContextMenu={handleTreeContextMenu}
                         renamingPath={renamingPath()}
                         onRenameConfirm={(path, name) => void handleRenameConfirm(path, name)}
@@ -917,14 +921,30 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             </Show>
 
             <div class="editor-main-column">
-                <Show when={model.tabsAtom().length > 0}>
+                <Show when={showTreeButton() || model.tabsAtom().length > 0}>
                     <div class="editor-tab-strip-row">
-                        <EditorTabStrip
-                            model={model}
-                            saveAsTabId={saveAsTabId()}
-                            onSaveAsConfirm={(path) => void handleSaveAsConfirm(path)}
-                            onSaveAsCancel={() => setSaveAsTabId(null)}
-                        />
+                        {/* While the tree is hidden, the button that shows it
+                            leads the document bar (the tree's own toolbar hides
+                            it). An editor on a remote host has no tree. */}
+                        <Show when={showTreeButton()}>
+                            <button
+                                type="button"
+                                class="editor-tree-toggle"
+                                title="Show file tree"
+                                aria-label="Show file tree"
+                                onClick={() => void model.toggleTreeExpanded()}
+                            >
+                                <i class="fa fa-folder-tree" />
+                            </button>
+                        </Show>
+                        <Show when={model.tabsAtom().length > 0}>
+                            <EditorTabStrip
+                                model={model}
+                                saveAsTabId={saveAsTabId()}
+                                onSaveAsConfirm={(path) => void handleSaveAsConfirm(path)}
+                                onSaveAsCancel={() => setSaveAsTabId(null)}
+                            />
+                        </Show>
                     </div>
                 </Show>
 
