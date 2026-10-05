@@ -24,7 +24,7 @@ export function SwarmStatsPanel(props: { model: SwarmViewModel }): JSX.Element {
                 <div class="swarm-stats" data-open={props.model.statsOpenAtom() ? "" : undefined}>
                     <div class="swarm-stats-inner" inert={!props.model.statsOpenAtom()}>
                         <div class="swarm-stats-title">
-                            AgentMux's own model calls since its server started · {s().total}
+                            AgentMux's own model requests since its server started · {s().total}
                         </div>
                         {/* One grid for all rows so the counts line up; each row is
                             `display: contents`, so the hover sits on both cells. */}

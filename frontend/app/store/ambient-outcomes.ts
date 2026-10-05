@@ -54,6 +54,8 @@ export interface AmbientPurposeRow {
 
 export interface AmbientOutcomeSummary {
     rows: AmbientPurposeRow[];
+    /** Every request that ended, including those that never reached the model
+     *  (`empty_digest`, `not_run`, an early `superseded`): requests, not calls. */
     total: number;
     unhealthyCount: number;
 }

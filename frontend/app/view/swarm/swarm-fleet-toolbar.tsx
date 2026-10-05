@@ -182,7 +182,7 @@ export function FleetToolbar({
                             type="button"
                             classList={{ "swarm-fleet-btn": true, "swarm-fleet-btn--active": model.statsOpenAtom() }}
                             aria-expanded={model.statsOpenAtom()}
-                            title="Model calls AgentMux makes on its own (session titles, names, prompt suggestions), since its server started"
+                            title="Model requests AgentMux makes on its own (session titles, names, prompt suggestions), since its server started"
                             onClick={() => model.toggleStats()}
                         >
                             <i class="fa-solid fa-chart-simple" /> Stats
