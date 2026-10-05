@@ -1,6 +1,6 @@
 # SPEC: Wheel edge skid — a nested preview absorbs one wheel notch before the pane scrolls
 
-**Status:** implemented — 2026-10-04, in the PR that adds this file (`components/scroll-handoff.ts`)
+**Status:** implemented — #4335 (2026-10-04), in `components/scroll-handoff.ts`
 **Date:** 2026-09-27, revised 2026-10-04 against main before implementing (see §0)
 **Author:** Camper (agent, `~/.agentmux/agents/camper-0622h`), at operator request
 **Related:** `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` (the hand-off this spec
