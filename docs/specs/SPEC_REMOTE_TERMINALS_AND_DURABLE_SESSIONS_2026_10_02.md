@@ -1,7 +1,7 @@
 # SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan
 
 **Date:** 2026-10-02
-**Status:** active — P0 (connection model, status, the connection RPCs) merged in #4248; P1 (WSL terminals for panes, and `Shell`/`PtyShell` `connection` plus `ConnList` for agents) merged in #4253, Hangar and editor on WSL folders (through `\\wsl.localhost`) merged in #4257; P2 SSH terminal panes merged in #4264, ssh-config hosts in the picker and `ConnList` merged in #4265, the askpass bridge and agent access with per-host consent merged in #4266; P4 (durable sessions): the helper `agentmux-remote` merged in #4269; durable SSH panes, the helper's install and askpass for their prompts merged in #4280; sessions on a host (§7.6: the pane menu's "Sessions on <host>…") merged in #4287; durable on by default for hosts with the helper (§7.1) merged in #4292; still to do in P4: the agent `Shell` tool's `durable` and `RemoteSessions`. P3 (remote files): the helper's `serve --stdio` merged in #4291, srv's client and Hangar's operations on a host merged in #4293, Hangar and the editor on SSH hosts merged in #4294, and the agent tools `OpenFiles` and `OpenEditor` on a host (§8.1, with the user's consent per host) merged in #4295; copy and move between a host and this computer (or within a host) in PR #4296; still to do in P3: a host's folder watched, and media files on a host. P5 and P6 not started. The section 11 decisions were answered on 2026-10-02 (the recommendations, see 11.1).
+**Status:** active — P0 (connection model, status, the connection RPCs) merged in #4248; P1 (WSL terminals for panes, and `Shell`/`PtyShell` `connection` plus `ConnList` for agents) merged in #4253, Hangar and editor on WSL folders (through `\\wsl.localhost`) merged in #4257; P2 SSH terminal panes merged in #4264, ssh-config hosts in the picker and `ConnList` merged in #4265, the askpass bridge and agent access with per-host consent merged in #4266; P4 (durable sessions): the helper `agentmux-remote` merged in #4269; durable SSH panes, the helper's install and askpass for their prompts merged in #4280; sessions on a host (§7.6: the pane menu's "Sessions on <host>…") merged in #4287; durable on by default for hosts with the helper (§7.1) merged in #4292; still to do in P4: the agent `Shell` tool's `durable` and `RemoteSessions`. P3 (remote files): the helper's `serve --stdio` merged in #4291, srv's client and Hangar's operations on a host merged in #4293, Hangar and the editor on SSH hosts merged in #4294, and the agent tools `OpenFiles` and `OpenEditor` on a host (§8.1, with the user's consent per host) merged in #4295; copy and move between a host and this computer (or within a host) merged in #4296; still to do in P3: a host's folder watched, media files on a host, the per-host install question (`conn:helper`, §6.2), removing and pruning the helper (§6.2), carrying the helper builds in every package and the CI check that runs them (§9.1), and the agent file tools `RemoteRead`, `RemoteWrite`, `RemoteList`, `RemoteStat` (§8.1). Still to do from P2: the agent tools `ConnStatus` and `OpenTerminal` (§8.1). P5 and P6 not started. The section 11 decisions were answered on 2026-10-02 (the recommendations, see 11.1); decision 2 (ask before installing the helper) is not built yet (§6.2). Where the build differs from this plan, the section says so under **As built**; checked against `main` at `430e9fca0` on 2026-10-04.
 **Author:** AgentX (narko), at the owner's request ("lets get both remote terminals and durable sessions in, lets work first on that ... this would also need support across the 3 platforms")
 **Affects:** `crates/srv` (blockcontroller/shell, a new `remote/` module, fs_ops, wconfig, server/service), a new crate `crates/remote` (the remote helper), `crates/cef` (none expected), `frontend/app` (term view, block frame, conntypeahead, Hangar, settings), `Taskfile.yml` and `.github/workflows` (new build targets)
 **Builds on:** `docs/reports/REPORT_WAVETERM_FEATURE_GAP_2026_10_02.md` §2.10 (what Wave has), `docs/specs/SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md` (the `term` blockfile and offset replay a durable session plugs into), `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md` (why the last remote helper was removed, and what not to repeat)
@@ -45,7 +45,7 @@ Costs, and how they are handled:
 
 ### 3.2 A remote helper, installed per host, is required for files and durability; not for a plain remote shell
 
-A plain SSH terminal is `ssh -tt host` in a PTY and needs nothing installed remotely. Remote file browsing and durable sessions need a program on the remote side: `agentmux-remote` (§6). It is uploaded over SSH on first use (with the user's consent per host, §11.2), verified by hash, and versioned so a client and helper of different versions never talk past each other.
+A plain SSH terminal is `ssh -tt host` in a PTY and needs nothing installed remotely. Remote file browsing and durable sessions need a program on the remote side: `agentmux-remote` (§6). It is uploaded over SSH on first use (with the user's consent per host: §6.2, decided in §11 item 2), verified by hash, and versioned so a client and helper of different versions never talk past each other.
 
 The retired `wsh` (`SPEC_RETIRE_WSH_2026_04_12.md`) was removed because nothing used it, not because the idea failed. Its lessons apply directly: one binary with a narrow job, a version handshake, explicit install and reinstall, a size budget, and tests that exercise the deploy path.
 
@@ -60,7 +60,7 @@ WSL is a local VM. A WSL terminal is `wsl.exe -d <distro>` in a ConPTY. Its file
   - `term:theme`, `term:fontsize`, `term:fontfamily`: per-connection look (a red theme for production is the motivating case).
   - `cmd:env`, `cmd:initscript.{bash,zsh,fish,pwsh}`: environment and startup for shells on that connection.
   - `ssh:user`, `ssh:port`, `ssh:identityfile`, `ssh:proxyjump`, `ssh:binarypath`, `ssh:passwordsecretname` (with the Secrets work; until then a prompt).
-  - `conn:helper` (`ask` default, `always`, `never`), `term:durable` (§7.1).
+  - `conn:helper` (`ask` default, `always`, `never`; nothing reads it yet, §6.2), `term:durable` (§7.1).
 - **Listing.** The typeahead shows `local`, WSL distros, recent connections, connections configured in settings, and `Host` entries from `~/.ssh/config` (patterns without wildcards; `Include` followed one level). Listing is the only thing AgentMux parses ssh config for; connecting is always the system `ssh`.
 - **Status.** One `ConnStatus` per connection, `connecting | connected | disconnected | error`, with the last error, published as an event the existing `ConnStatusOverlay` already renders. `GetAllConnStatus`, `ConnList`, `WslList`, `ConnEnsure`, `ConnConnect` and `ConnDisconnect` get real handlers matching the frontend's existing calls.
 
@@ -98,7 +98,7 @@ WSL stops a distribution's VM after its idle timeout or on `wsl --shutdown`, and
 
 ### 6.1 What it is
 
-One small Rust binary (new crate `crates/remote`, target size under 4 MB stripped), with three jobs and nothing else:
+One small Rust binary (new crate `crates/remote`, target size under 4 MB stripped; measured at v0.59.9: 434 to 481 KB per build), with three jobs and nothing else:
 
 1. **`serve --stdio`**: a JSON-lines RPC over stdin/stdout for file operations: stat, list (paged), read (ranged), write (atomic replace), mkdir, rename, delete, and a watch for the open folder. Run as `ssh host -- agentmux-remote serve --stdio`, one per connection, kept open.
 2. **`daemon` and `attach`**: the durable session manager (§7).
@@ -109,11 +109,17 @@ It holds no credentials, opens no network port, and talks only to its own SSH ch
 ### 6.2 Install and versioning
 
 - Location: `~/.agentmux-remote/bin/<version>/agentmux-remote`, plus `~/.agentmux-remote/shell/` for integration scripts. A versioned path means two AgentMux versions can use one host without fighting, and an upgrade never replaces a binary a running daemon is executing.
-- Detect platform with `uname -sm`, pick the matching bundled build (§9.1), upload over the existing SSH connection (`ssh host -- 'umask 077; mkdir -p ... && cat > ....tmp' < binary`, then hash check, `chmod 700`, rename into place). No `scp`/`sftp` dependency on the remote.
+- Detect platform with `uname -sm`, pick the matching build carried in the package (§9.1), upload over the existing SSH connection (`ssh host -- 'umask 077; mkdir -p ... && cat > ....tmp' < binary`, then hash check, `chmod 700`, rename into place). No `scp`/`sftp` dependency on the remote.
 - Handshake on every `serve`/`attach`: protocol version must match, or the client installs its own version alongside.
-- **Consent:** first use on a host asks, in the pane, "Install AgentMux's helper on <host> for file browsing and durable sessions? (about 3 MB in ~/.agentmux-remote)", with "always for this host" and "never for this host" (`conn:helper`).
-- **Removal:** a "Remove helper from <host>" action and `muxsh conn uninstall <host>` delete `~/.agentmux-remote` after stopping its daemon.
-- Old versions are pruned on the host when no running session uses them.
+- **Consent:** first use on a host asks, in the pane, "Install AgentMux's helper on <host> for file browsing and durable sessions? (under 500 KB, in ~/.agentmux-remote)", with "always for this host" and "never for this host" (`conn:helper`). Not built yet (see As built).
+- **Removal:** a "Remove helper from <host>" action, in the pane menu and in Hangar for that host, deletes `~/.agentmux-remote` after stopping its daemon. There is no `muxsh conn uninstall`, for the reason §7.6 gives for having no `muxsh conn sessions`: it would run ssh to the host with the user's keys, and muxsh carries no agent identity for the §8.2 check. Not built yet.
+- Old versions are pruned on the host when no running session uses them. Not built yet.
+
+**As built (#4280, #4293).** Where the helper comes from and when it is installed differ from the plan above:
+- **Source.** srv takes the helper from, in order: the folder named by `AGENTMUX_REMOTE_HELPER_DIR` (a developer's own builds); a cache under its config directory (`remote-helper/`); or this version's GitHub release, `v<version>`, as the asset `agentmux-remote-<version>-<target>`, whose hash must match the release's `agentmux-remote-<version>-SHA256SUMS`. Packages carry no helper builds (§9.1), so a first install on any host needs github.com reachable.
+- **Version.** `<version>` is the crate version, so a local build of `main` uses the helper published with the release of the same version number, not a build of its own commit. The probe compares the helper's `version` line (version and protocol); if a local build's protocol differs from that release's, no matching helper can be installed until the next release, unless `AGENTMUX_REMOTE_HELPER_DIR` points at a matching build. The host folder is keyed by version only, so two builds of one version share it.
+- **When.** There is no install question yet and nothing reads `conn:helper`. The helper is installed the first time something on a host needs it: a durable pane (§7.1), or the host's files in Hangar or the editor, which includes an agent opening them after its §8.2 grant. A durable pane says "Installing AgentMux's helper on <host> (<size> KB, in ~/.agentmux-remote)…" while it does.
+- After the upload, the file's hash is checked on the host before it is made executable and moved into place, as planned.
 
 ### 6.3 Remote files
 
@@ -131,7 +137,7 @@ A Windows machine running OpenSSH Server can host plain SSH terminals from P2 (i
 
 ### 7.1 Turning it on
 
-`term:durable` on the block, then on the connection, then global; default **on** for SSH connections whose host has the helper (recommended, §11.4). Not applicable to local and WSL panes. The pane menu has "Make durable" / "Stop keeping alive".
+`term:durable` on the block, then on the connection, then global; default **on** for SSH connections whose host has the helper (§11 item 4, accepted in §11.1). Not applicable to local and WSL panes. The pane menu has "Make durable" / "Stop keeping alive".
 
 As built (`durable_ssh::wants`):
 - "Has the helper" means the helper has answered on that host before. srv records the canonical connection name in `remote-helper-hosts.json` under its config dir on every `Hello`, so a host becomes durable by default after its first durable pane.
@@ -195,6 +201,8 @@ New tools:
 
 Each is a thin layer over what the user's UI uses, so the two can never behave differently.
 
+**As built (2026-10-04):** `ConnList`, `connection` on `Shell` and `PtyShell` (and their companion tools), and `connection` on `OpenFiles` and `OpenEditor` exist. Not built yet: `durable` on `Shell`, and the tools `ConnStatus`, `OpenTerminal`, `RemoteRead`, `RemoteWrite`, `RemoteList`, `RemoteStat` and `RemoteSessions`. (`ConnStatus` exists as a srv RPC and event, not as an agent tool.)
+
 ### 8.2 Access rules
 
 An agent reaching another machine uses the **user's** SSH identity, so access is opt-in per host:
@@ -222,8 +230,14 @@ Each phase is one or more PRs, each with its own tests and docs. Client-side wor
 ### 9.1 Builds and packaging
 
 - New targets for the helper only: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` (built with `cargo-zigbuild` or `cross` on the Linux runner), `aarch64-apple-darwin` and `x86_64-apple-darwin` (on the macOS runner); `x86_64-pc-windows-msvc` from P6.
-- Every desktop package (Windows zip and installer, macOS app, Linux AppImage, deb, rpm) carries all helper builds under `tools/remote/<target>/agentmux-remote`, since any client may connect to any host. Budget: about 4 × 3 MB compressed; measured at P3 and recorded in the spec.
+- Every desktop package (Windows zip and installer, macOS app, Linux AppImage, deb, rpm) carries all helper builds under `tools/remote/<target>/agentmux-remote`, since any client may connect to any host. Budget: about 4 × 3 MB compressed; measured at v0.59.9: 434 to 481 KB per build, about 1.8 MB for all four uncompressed.
 - A CI check that each packaged helper runs `version` (in QEMU for arm64) so a broken cross-build cannot ship.
+
+**As built (#4280).** Neither item above is built:
+- The release workflow's `build-remote-helper` job builds the four targets (the musl ones with `cargo-zigbuild` on the Linux runner, both macOS ones on the macOS runner), and `publish` attaches them to the GitHub release as separate assets with a `SHA256SUMS`, which srv downloads (§6.2 As built). The desktop packages, built by their own jobs, carry none.
+- No CI step runs a built helper. The job is `continue-on-error`, so a release can ship without some or all of the helper builds; a first install on a host of a missing platform then fails (with "this release publishes no helper for <target>", or a download error when no helper was built at all). That is the opposite of "cannot ship" above; §11.2 asks which the plan should be.
+- PR CI builds and tests `agentmux-remote` on its Windows and Linux x86_64 (glibc) runners only (`cargo check`, `cargo test`), not the four release targets.
+- A local `task package` builds no helper at all (nothing in the Taskfile or the packaging scripts refers to it), so carrying the builds in local packages needs either local cross-builds or a fallback (§11.2).
 
 ## 10. Not in this plan
 
@@ -244,11 +258,23 @@ Each phase is one or more PRs, each with its own tests and docs. Client-side wor
 
 The owner accepted the recommendations: system OpenSSH (1); ask once per host before installing the helper, remembered (2); Linux x86_64/arm64 and macOS remote hosts from P3, Windows hosts in P6 (3); durable on by default for SSH connections that have the helper (4); connection settings in `settings.json` under `connections` (5).
 
+Decision 2 is not built yet: the helper is installed on first use without the question (§6.2 As built).
+
+### 11.2 Open decisions (2026-10-04)
+
+The build departed from §6.2 and §9.1 in how the helper reaches a host. Recorded here so the plan and the build agree again:
+
+1. **Where the helper comes from.** Recommended: carry the four builds in every CI-built package, as §9.1 plans; srv uses the packaged build first. Keep the release download only as a fallback, for local packages that cannot build every target, and say so in the pane when it is used.
+2. **A failed helper build.** Recommended: once the builds are packaged, a helper build that fails, or fails the `version` check, fails the release, as §9.1 says. Today the job is `continue-on-error`.
+3. **The install question.** Recommended: build decision 2 as decided, before the next release: ask in the host's own approval window (§5.3), which an agent cannot answer, so an agent's first file access on a host cannot install the helper without the user.
+4. **The host folder.** Recommended: key it by version and build, not version alone, so a local build and a release of one version never share a helper, and a local build whose protocol changed installs its own.
+
 ## 12. Risks
 
 - **OpenSSH version spread on Windows.** Older Windows builds ship OpenSSH without `SSH_ASKPASS_REQUIRE`; in-pane prompts are the fallback, and the minimum is checked at P2.
 - **Deploying a binary to servers.** Some environments forbid it (read-only home, `noexec` home). The helper falls back to `$XDG_RUNTIME_DIR` or refuses clearly; plain SSH terminals are unaffected.
-- **Package size.** Four helper builds in every package; measured and budgeted at P3.
+- **Package size.** Four helper builds in every package, once §9.1 is built: about 1.8 MB uncompressed, measured at v0.59.9.
+- **Reaching GitHub.** Until the builds are packaged (§11.2), a first install on a host needs github.com, so a machine that can't reach it gets no files or durable sessions on new hosts.
 - **Ring log size vs scrollback.** A session that prints more than the ring while detached loses the overflow; the pane says how much, never silently.
 - **Agents on remote machines.** An agent acting on a server with the user's SSH identity is powerful; §8.2 makes it opt-in per host and agent, keeps credentials away from agents, and logs every action.
 - **Two clients, one session.** Explicitly unsupported (§10); the daemon refuses a second attach to a session and offers "take over".
