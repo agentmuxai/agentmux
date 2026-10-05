@@ -55,6 +55,67 @@ $transcript-preview-max-height: calc(50vh / 3);
 // report). The box is capped at about 13 lines, and document-size headings
 // (2em / 1.5em with a rule) spent most of it on one "## Heading"; here they
 // are bold body-size labels. SPEC_TOOL_PREVIEW_CONTENT_FIRST_2026_09_26.md §3.4.
+// Command tokens (shell-highlight/tokenize.ts), shared by the Bash panel and
+// the peek popover. Colours come from each theme's terminal palette, so light
+// and dark themes both stay legible.
+@mixin shell-token-colors {
+    .sh-program {
+        color: var(--accent-color);
+    }
+    .sh-subcommand {
+        color: var(--term-cyan, var(--accent-color));
+    }
+    .sh-keyword,
+    .sh-heredoc-marker {
+        color: var(--term-magenta, var(--accent-color));
+    }
+    .sh-flag {
+        color: var(--term-blue, var(--info-color));
+    }
+    .sh-flag-value,
+    .sh-string {
+        color: var(--term-green, var(--success-color));
+    }
+    // A heredoc body of unknown language is plain text, not one long
+    // string; known languages are coloured below.
+    .sh-heredoc-body {
+        color: var(--main-text-color);
+    }
+    // Shiki-highlighted bodies (embedded-highlight.ts): each run
+    // carries both themes' colours; pick by the theme's polarity.
+    .sh-shiki span {
+        color: var(--shiki-dark);
+        font-style: var(--shiki-dark-font-style);
+        font-weight: var(--shiki-dark-font-weight);
+
+        [data-theme-polarity="light"] & {
+            color: var(--shiki-light);
+            font-style: var(--shiki-light-font-style);
+            font-weight: var(--shiki-light-font-weight);
+        }
+    }
+    .sh-variable,
+    .sh-env-assign,
+    .sh-number {
+        color: var(--term-yellow, var(--warning-color, var(--accent-color)));
+    }
+    .sh-substitution {
+        color: var(--term-magenta, var(--accent-color));
+    }
+    .sh-operator,
+    .sh-redirect,
+    .sh-punct {
+        color: var(--secondary-text-color);
+    }
+    .sh-url {
+        color: var(--link-color);
+    }
+    .sh-comment {
+        color: var(--grey-text-color, var(--secondary-text-color));
+        font-style: italic;
+    }
+}
+
 @mixin tool-preview-markdown {
     padding: 2px var(--space-1) 0;
     font-family: var(--font-sans);
@@ -374,6 +435,25 @@ $transcript-preview-max-height: calc(50vh / 3);
             // `[data-tool=…] .agent-tool-name` rules keep applying.
             .agent-tool-detail {
                 font-weight: 400;
+            }
+
+            // A Bash command in the row: the label keeps the tool's colour,
+            // the command reads in the text colour with only its program and
+            // punctuation picked out, so a list of rows stays calm. Colour
+            // only, nothing that changes width (spec §3.7).
+            .agent-shell-inline {
+                color: var(--main-text-color);
+
+                .sh-program {
+                    color: var(--accent-color);
+                }
+                .sh-flag,
+                .sh-operator,
+                .sh-redirect,
+                .sh-punct,
+                .sh-comment {
+                    color: var(--secondary-text-color);
+                }
             }
 
             // A reducer-set note on a status (e.g. "cleared via muxspect").
@@ -964,64 +1044,9 @@ $transcript-preview-max-height: calc(50vh / 3);
             }
         }
 
-        // Command tokens (shell-highlight/tokenize.ts). Colours come from each
-        // theme's terminal palette, so light and dark themes both stay legible.
+        // Command tokens: see the shell-token-colors mixin.
         .agent-shell-command {
-            .sh-program {
-                color: var(--accent-color);
-            }
-            .sh-subcommand {
-                color: var(--term-cyan, var(--accent-color));
-            }
-            .sh-keyword,
-            .sh-heredoc-marker {
-                color: var(--term-magenta, var(--accent-color));
-            }
-            .sh-flag {
-                color: var(--term-blue, var(--info-color));
-            }
-            .sh-flag-value,
-            .sh-string {
-                color: var(--term-green, var(--success-color));
-            }
-            // A heredoc body of unknown language is plain text, not one long
-            // string; known languages are coloured below.
-            .sh-heredoc-body {
-                color: var(--main-text-color);
-            }
-            // Shiki-highlighted bodies (embedded-highlight.ts): each run
-            // carries both themes' colours; pick by the theme's polarity.
-            .sh-shiki span {
-                color: var(--shiki-dark);
-                font-style: var(--shiki-dark-font-style);
-                font-weight: var(--shiki-dark-font-weight);
-
-                [data-theme-polarity="light"] & {
-                    color: var(--shiki-light);
-                    font-style: var(--shiki-light-font-style);
-                    font-weight: var(--shiki-light-font-weight);
-                }
-            }
-            .sh-variable,
-            .sh-env-assign,
-            .sh-number {
-                color: var(--term-yellow, var(--warning-color, var(--accent-color)));
-            }
-            .sh-substitution {
-                color: var(--term-magenta, var(--accent-color));
-            }
-            .sh-operator,
-            .sh-redirect,
-            .sh-punct {
-                color: var(--secondary-text-color);
-            }
-            .sh-url {
-                color: var(--link-color);
-            }
-            .sh-comment {
-                color: var(--grey-text-color, var(--secondary-text-color));
-                font-style: italic;
-            }
+            @include shell-token-colors;
         }
 
         .agent-bash-output {
@@ -2852,6 +2877,13 @@ $transcript-preview-max-height: calc(50vh / 3);
     // The tool's name in front of the argument ("Bash ls"): same colour,
     // bolder, like the row's label reads against its detail.
     .agent-node-peek-tooltip-tool { font-weight: 600; }
+
+    // A Bash command: the panel's token colours on the text colour, not the
+    // tool's colour.
+    .agent-shell-command {
+        color: var(--main-text-color);
+        @include shell-token-colors;
+    }
 
     // A persistent shell's row shows its command as `.agent-shell-header-cmd`
     // in the secondary text colour; the popover matches it.

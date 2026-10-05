@@ -1,6 +1,6 @@
 # SPEC: Robust highlighting for Bash tool panels in the agent pane
 
-**Status:** active. Steps 1-3 of §5 (POSIX tokenizer, sync render and theme, streaming header) shipped in #4314. Step 5's heredoc bodies are built (§3.2); its inline scripts, and steps 4, 6 and 7 (PowerShell and cmd tokenizers, output rendering, row highlighting and danger markers), remain.
+**Status:** active. Steps 1-3 of §5 (POSIX tokenizer, sync render and theme, streaming header) shipped in #4314. Step 5's heredoc bodies (§3.2) and step 7's collapsed row (§3.7, plus the peek popover) are built; step 5's inline scripts, step 7's danger markers, and steps 4 and 6 (PowerShell and cmd tokenizers, output rendering) remain.
 **Date:** 2026-10-04
 **Author:** AgentX
 **Requested by:** the repo owner ("when hovering over agent pane tools, we get
@@ -234,6 +234,14 @@ The one-line header's detail text uses the sync layer too (program in accent,
 flags dimmed, the rest default), single-line, ellipsis as today. It must not
 re-measure on hover; classes only, no layout-affecting differences (no bold
 shifting widths).
+
+Built as `ShellTokens` (the panel's token run without its `<pre>`). The row's
+"Bash" label keeps the tool colour; the command is in the text colour, with
+the program in accent and flags, operators, redirects and comments in the
+secondary colour. The row never highlights embedded bodies, so a transcript
+of rows never loads Shiki. The peek popover over the row shows the whole
+command with the panel's full palette, embedded bodies included, in the text
+colour rather than the tool colour.
 
 ### 3.8 Danger markers
 

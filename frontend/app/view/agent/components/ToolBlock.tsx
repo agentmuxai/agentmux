@@ -49,6 +49,7 @@ import type { ToolNode } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
+import { ShellTokens } from "./shell-highlight/ShellCommand";
 import { ToolBlockOverlay } from "./ToolBlockOverlay";
 import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
@@ -312,6 +313,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // (SPEC_AGENT_PANE_HOVER_CLOSE_FOCUS_REFINEMENTS_2026_09_23.md §1).
     const header = createMemo(() => toolHeaderParts(props.node));
     const cmdText = () => header().detail;
+    // A Bash command is shown with shell colours in the row and the popover
+    // (SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.7).
+    const isBash = () => props.node.tool.toLowerCase() === "bash";
     // The tool's name in front of its argument in the peek popover ("Bash ls",
     // "Read /a/b.ts"): the row shows an icon instead, so the popover names it.
     // MCP tools read "server · tool", not their raw mcp__server__tool name.
@@ -455,7 +459,14 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                 </Show>
                                 <Show when={header().detail}>
                                     {" "}
-                                    <span class="agent-tool-detail">{header().detail}</span>
+                                    <Show
+                                        when={isBash()}
+                                        fallback={<span class="agent-tool-detail">{header().detail}</span>}
+                                    >
+                                        <span class="agent-tool-detail agent-shell-inline">
+                                            <ShellTokens command={header().detail} />
+                                        </span>
+                                    </Show>
                                 </Show>
                             </span>
                         </Show>
@@ -528,7 +539,12 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     <PeekMetaRow time={peekTimeText()} tokens={peekEstimateText()} />
                     <Show when={cmdText()}>
                         <div class="agent-node-peek-tooltip-body" data-tool={props.node.tool.toLowerCase()}>
-                            <span class="agent-node-peek-tooltip-tool">{peekToolName()}</span> {cmdText()}
+                            <span class="agent-node-peek-tooltip-tool">{peekToolName()}</span>{" "}
+                            <Show when={isBash()} fallback={cmdText()}>
+                                <span class="agent-shell-command">
+                                    <ShellTokens command={cmdText()} embedded />
+                                </span>
+                            </Show>
                         </div>
                     </Show>
                 </PeekOverlay>

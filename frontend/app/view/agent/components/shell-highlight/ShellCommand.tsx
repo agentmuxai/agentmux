@@ -89,15 +89,44 @@ interface ShellCommandProps {
     class?: string;
 }
 
+/**
+ * A POSIX command's token spans with no wrapper, for inline use: the
+ * collapsed tool row and the peek popover. Any other flavor is plain text.
+ * `embedded` also highlights heredoc bodies in their own language; the row
+ * leaves it off, so a transcript of rows never loads Shiki.
+ */
+export const ShellTokens = (props: { command: string; embedded?: boolean }): JSX.Element => {
+    const command = () => props.command ?? "";
+    const posix = createMemo(() => detectShellFlavor(command()) === "posix");
+    const tokens = createMemo(() => (posix() ? tokensFor(command()) : []));
+    // Heredoc bodies with a known language, by start offset.
+    const bodies = createMemo(() =>
+        props.embedded
+            ? new Map(embeddedBodies(tokens(), command()).map((b) => [b.start, b.lang] as const))
+            : new Map<number, string>()
+    );
+    return (
+        <Show when={posix()} fallback={command()}>
+            <For each={tokens()}>
+                {(t) => {
+                    const lang = t.kind === "heredoc-body" ? bodies().get(t.start) : undefined;
+                    return lang ? (
+                        <EmbeddedBody text={command().slice(t.start, t.end)} lang={lang} />
+                    ) : (
+                        renderToken(command(), t)
+                    );
+                }}
+            </For>
+        </Show>
+    );
+};
+
+ShellTokens.displayName = "ShellTokens";
+
 export const ShellCommand = (props: ShellCommandProps): JSX.Element => {
     // A malformed tool call can arrive without a command.
     const command = () => props.command ?? "";
     const flavor = createMemo(() => detectShellFlavor(command()));
-    const tokens = createMemo(() => (flavor() === "posix" ? tokensFor(command()) : []));
-    // Heredoc bodies with a known language, by start offset.
-    const bodies = createMemo(
-        () => new Map(embeddedBodies(tokens(), command()).map((b) => [b.start, b.lang] as const))
-    );
     const cls = () => `agent-highlighted-code agent-shell-command${props.class ? ` ${props.class}` : ""}`;
 
     return (
@@ -110,16 +139,7 @@ export const ShellCommand = (props: ShellCommandProps): JSX.Element => {
             </Match>
             <Match when={true}>
                 <pre class={cls()}>
-                    <For each={tokens()}>
-                        {(t) => {
-                            const lang = t.kind === "heredoc-body" ? bodies().get(t.start) : undefined;
-                            return lang ? (
-                                <EmbeddedBody text={command().slice(t.start, t.end)} lang={lang} />
-                            ) : (
-                                renderToken(command(), t)
-                            );
-                        }}
-                    </For>
+                    <ShellTokens command={command()} embedded />
                 </pre>
             </Match>
         </Switch>
