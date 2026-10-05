@@ -49,7 +49,7 @@ const QuickTips = (): JSX.Element => {
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Header Icons</span>
                 </div>
-                <div class="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-3">
+                <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-3">
                     <div class="flex items-center gap-3 p-2 rounded-md hover:bg-hover transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-solid fa-sharp fa-window-maximize fa-fw" />
@@ -165,7 +165,7 @@ const QuickTips = (): JSX.Element => {
                     <div class="w-1 h-6 bg-accent-400 rounded-full" />
                     <span class="text-foreground">Need More Help?</span>
                 </div>
-                <div class="grid grid-cols-[repeat(auto-fill,minmax(15rem,1fr))] gap-2">
+                <div class="grid grid-cols-[repeat(auto-fit,minmax(min(15rem,100%),1fr))] gap-2">
                     <div class="flex items-center gap-3 p-3 rounded-md bg-panel hover:bg-highlightbg transition-colors">
                         <IconBox variant="secondary">
                             <i class="fa-brands fa-discord fa-fw" />
