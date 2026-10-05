@@ -57,13 +57,13 @@ The jekt gains a manifest, one entry per file, in send order:
 [{ "sha256": "2c17…", "name": "shortcuts.png", "size": 412345, "mime": "image/png" }]
 ```
 
-`name` is the base name only (no path), at most 128 characters after sanitising (§6.3).
+`name` is the base name only (no path), at most 128 characters after sanitising (§6.3). `sha256` is always the hash of the file's **plaintext** bytes. On the cloud tier each entry also carries `key`, the file's encryption key (§4.4).
 
 ### 3.3 Signing
 
-Every tier's signed material gains one field, the **manifest digest**: SHA-256 over the canonical manifest (entries in order, fields joined with `\u{1}`, entries with `\u{2}`). It is appended after `message` in each scheme, under a new version label, so a v1 receiver can never mistake a v2 signature for its own:
+Every tier's signed material gains one field, the **manifest digest**: SHA-256 over the canonical manifest (entries in order; each entry's fields `sha256, name, size, mime` and, on the cloud tier, `key`, joined with `\u{1}`; entries joined with `\u{2}`). It is appended after `message` in each scheme, and every v2 scheme starts with its own version label, so v1 and v2 material can never be confused: the message is free text and may contain `\u{1}`, so without a label a v1 message ending in `\u{1}<digest>` could reproduce a v2 input. v1 material can't start with a v2 label either, because its first field is the msgid, whose fixed format the receiver already enforces.
 
-- host HMAC: `…, message, files_digest`
+- host HMAC: `"amx-jekt-host-v2", …, message, files_digest`
 - cross-channel: `"amx-jekt-channel-v2", …, message, files_digest`
 - LAN: `…, message, files_digest`, under the label `"amx-jekt-lan-v2"`
 - WAN: `"amx-jekt-wan-v2", …, message, files_digest`
@@ -110,7 +110,7 @@ The relay can't carry large bodies, and shouldn't stream them through its own re
 4. When the receiver pulls the pending jekt, it asks `GET /reactive/blob/<sha256>?msgid=…` and gets a short-lived download URL, valid only for the target's own subscription. It downloads, checks the hash, ingests, and only then claims the message, so a failed download leaves the message to be retried.
 5. Blobs live as long as the message (30 minutes plus a grace period) and are deleted on claim or expiry.
 
-Every blob is encrypted before upload (AES-256-GCM, a random key per file), and the key travels in the manifest entry (`"key"`), inside the signed jekt. That protects against the storage being read on its own (a misconfigured bucket, a backup), not against the relay itself, which already sees message text (§7).
+Every blob is encrypted before upload (AES-256-GCM, a random key and nonce per file). The key travels in the manifest entry (`"key"`), which is part of the canonical entry and so covered by the signed manifest digest (§3.3). The receiver decrypts (the GCM tag rejects altered ciphertext), then checks the plaintext against `sha256`, the same check as on every other tier. That protects against the storage being read on its own (a misconfigured bucket, a backup), not against the relay itself, which already sees message text (§7).
 
 ### 4.5 Held messages
 
@@ -189,8 +189,8 @@ A later version can seal each file key to the receiver's public key (an X25519 k
 
 ## 9. Tests
 
-1. A text-only jekt's signatures are byte-identical to today's on every tier.
-2. A jekt with files verifies on each tier; changing one byte of a file, its name, the file order, or the message text fails verification.
+1. A text-only jekt's signatures are byte-identical to today's on every tier; a v1 message containing `\u{1}` followed by a digest never verifies as v2 (every v2 scheme is labelled).
+2. A jekt with files verifies on each tier; changing one byte of a file, its name, the file order, the message text, or (cloud) a file's key fails verification.
 3. A blob whose content doesn't match its hash is refused at upload and at promotion.
 4. A staged blob not named by a signed jekt within an hour is deleted; a verified sender over its staging quota is refused, and so is any upload once the global staging cap is reached.
 4a. LAN and host uploads without a valid signed upload intent are refused; inventing a sender name doesn't get past the per-sender quota.
