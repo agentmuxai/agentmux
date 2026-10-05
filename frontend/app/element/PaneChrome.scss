@@ -33,6 +33,20 @@
         flex-shrink: 0;
     }
 
+    // The remote's colour along the top edge, when the active tab is on a
+    // remote that has one (SPEC_REMOTES_PANE_2026_10_05.md §4.8).
+    &.pane-stack-remote-color::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: var(--pane-remote-color);
+        pointer-events: none;
+        z-index: var(--zindex-block-mask-inner);
+    }
+
     // Selection ring for the whole pane (header + content) — mirrors
     // `.agent-pane-stack`'s own `&::after` treatment exactly; see that
     // rule's comment (agent-view.scss) for the full reasoning (why a

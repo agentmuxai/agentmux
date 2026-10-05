@@ -197,6 +197,19 @@ describe("RemotesView", () => {
         expect(screen.queryByRole("button", { name: "Remove helper" })).toBeNull();
     });
 
+    it("expands the host another pane asked for, once", async () => {
+        rpc.RemotesListCommand.mockResolvedValue([remote("db1"), remote("web")]);
+        const setMeta = vi.fn(async () => {});
+        const model = new RemotesViewModel(
+            { blockId: "blk-1", meta: () => ({ "remotes:expand": "web" }) as MetaType, setMeta },
+            { subscribe: false }
+        );
+        await model.refresh();
+        render(() => <RemotesView model={model} />);
+        expect(model.expanded()).toBe("web");
+        expect(setMeta).toHaveBeenCalledWith({ "remotes:expand": null });
+    });
+
     it("offers Forget only for a recent connection", async () => {
         const { model } = await renderWith([]);
         const labels = (r: RemoteRecord) => rowMenu(model, r).filter((i) => i.type === "action").map((i) => i.label);
