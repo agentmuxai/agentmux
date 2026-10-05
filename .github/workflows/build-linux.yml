@@ -74,7 +74,7 @@ jobs:
       # token that expires in an hour. Scoped to agentmuxai/cef only -- the
       # private key can mint broader tokens, but this job only reads one
       # repo's releases, so that is all it gets.
-      # Proven equivalent in ci-app-token-smoke.yml before this swap.
+      # Proven equivalent before this swap by ci-app-token-smoke.yml (since removed).
       - name: Mint a short-lived token for agentmuxai/cef
         id: cef_token
         uses: actions/create-github-app-token@v1
