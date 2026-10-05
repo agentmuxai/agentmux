@@ -271,7 +271,7 @@ pub(super) fn bound_agent_has_native_memory(
         .unwrap_or(false)
 }
 
-/// Register `entries` under `components.<key>` in the export's `armory.json`.
+/// Register `entries` under `components.<key>` in the export's manifest (`bundle.json`).
 ///
 /// Takes JSON values rather than paths: most components are a list of archive
 /// paths, but `projectInstructions` carries an object per file, because a bare
@@ -295,13 +295,11 @@ pub(super) fn set_manifest_component(
     if entries.is_empty() {
         return Ok(());
     }
-    let manifest_idx = export
-        .files
-        .iter()
-        .position(|f| f.path == "armory.json")
-        .ok_or_else(|| "bundle export is missing armory.json".to_string())?;
+    let manifest_name = crate::backend::bundle_import::manifest_file_name(|n| export.files.iter().any(|f| f.path == n))
+        .ok_or_else(|| "bundle export has no manifest".to_string())?;
+    let manifest_idx = export.files.iter().position(|f| f.path == manifest_name).expect("found above");
     let mut manifest: serde_json::Value = serde_json::from_str(&export.files[manifest_idx].content)
-        .map_err(|e| format!("armory.json: {e}"))?;
+        .map_err(|e| format!("{manifest_name}: {e}"))?;
     manifest["components"][key] = json!(entries);
     export.files[manifest_idx].content =
         serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
@@ -326,7 +324,7 @@ pub(super) fn splice_history_component(
 }
 
 /// Splice native-memory files into an already-built bundle export's
-/// `armory.json` manifest and files list, adding `components.memory` (ABF
+/// `bundle.json` manifest and files list, adding `components.memory` (ABF
 /// v0.2 §2.3). Kept OUTSIDE `bundle_export.rs` deliberately — that
 /// module's `export_bundle()` is scoped to a bundle's own components
 /// (instructions/skills/MCP/accounts) with no concept of "agent" or

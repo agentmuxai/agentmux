@@ -360,7 +360,7 @@ pub(super) async fn bundle_export_for_agent_with_history_impl(
         all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
 
         // §3.5: the files above are in the archive; say so in the manifest too.
-        // Must happen before zipping — armory.json is zipped from export.files.
+        // Must happen before zipping — the manifest (bundle.json) is zipped from export.files.
         splice_history_component(&mut export, history_paths)
             .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
 

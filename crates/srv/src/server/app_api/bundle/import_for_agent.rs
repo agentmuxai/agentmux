@@ -338,11 +338,14 @@ pub(super) fn register_bundle_import_for_agent(engine: &Arc<WshRpcEngine>, state
 }
 
 /// Every `memory/*` path listed under `components.memory` in a parsed
-/// import's `armory.json` — mirrors how `components.instructions`/
+/// import's manifest (`bundle.json`, or `armory.json` before ABF v0.3) — mirrors how `components.instructions`/
 /// `components.skills` are read elsewhere in this file, kept local to
 /// `bundle.import_for_agent` since no other handler needs it.
 pub(super) fn resolved_memory_paths(files: &[crate::backend::bundle_import::BundleImportFile]) -> Vec<String> {
-    let Some(manifest_file) = files.iter().find(|f| f.path == "armory.json") else {
+    let Some(name) = crate::backend::bundle_import::manifest_file_name(|n| files.iter().any(|f| f.path == n)) else {
+        return Vec::new();
+    };
+    let Some(manifest_file) = files.iter().find(|f| f.path == name) else {
         return Vec::new();
     };
     let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&manifest_file.content) else {
