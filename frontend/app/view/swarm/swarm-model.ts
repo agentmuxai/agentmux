@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { RpcApi } from "@/app/store/rpc-api";
-import type { BackgroundTaskView, FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
+import type { BackgroundTaskView, FleetActionResult, FleetStagePlan } from "@/app/store/rpc-api";
+import type { AmbientOutcomes } from "@/app/store/ambient-outcomes";
 import {
     localFleetTargets,
     partitionTargets,
-    remoteCount,
     remoteFleetTargets,
     targetLabel,
     type FleetTargetInfo,
@@ -1002,11 +1002,14 @@ export class SwarmViewModel {
     fleetActionInFlightAtom: Accessor<boolean> = this._fleetActionInFlight[0];
     private setFleetActionInFlight: Setter<boolean> = this._fleetActionInFlight[1];
 
-    // Saved target groups (Ansible-inventory-group-style) — see
-    // db_agent_groups / fleet.group.* in the spec.
-    private _fleetGroups = createSignal<FleetGroup[]>([]);
-    fleetGroupsAtom: Accessor<FleetGroup[]> = this._fleetGroups[0];
-    private setFleetGroups: Setter<FleetGroup[]> = this._fleetGroups[1];
+    // The toolbar's Stats panel: outcomes of AgentMux's own model calls since
+    // srv started (ambient.outcomes; SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md 5.8).
+    private _ambientOutcomes = createSignal<AmbientOutcomes | null>(null);
+    ambientOutcomesAtom: Accessor<AmbientOutcomes | null> = this._ambientOutcomes[0];
+    private setAmbientOutcomes: Setter<AmbientOutcomes | null> = this._ambientOutcomes[1];
+    private _statsOpen = createSignal<boolean>(false);
+    statsOpenAtom: Accessor<boolean> = this._statsOpen[0];
+    private setStatsOpen: Setter<boolean> = this._statsOpen[1];
 
     private _loading = createSignal<boolean>(true);
     loadingAtom: Accessor<boolean> = this._loading[0];
@@ -1377,6 +1380,7 @@ export class SwarmViewModel {
         this.trackedBlocksPollTimer = setInterval(() => {
             void this.loadTrackedBlocks();
             void this.loadOtherInstances();
+            void this.loadAmbientOutcomes();
         }, SwarmViewModel.TRACKED_BLOCKS_POLL_MS);
 
         // term:osc_title / term:ambient_summary meta changes — force re-read
@@ -1394,7 +1398,7 @@ export class SwarmViewModel {
                 this.loadDispatches(),
                 this.loadShells(),
                 this.loadCrons(),
-                this.loadFleetGroups(),
+                this.loadAmbientOutcomes(),
                 this.loadBackgroundTasks(),
                 this.loadOtherInstances(),
             ]);
@@ -1707,22 +1711,8 @@ export class SwarmViewModel {
         ]);
     }
 
-    /** How many of the selected agents are on other instances. */
-    selectedRemoteCount(): number {
-        return remoteCount(this.selectedBlockIdsAtom(), remoteFleetTargets(remoteSections(this.otherInstancesAtom())));
-    }
-
     clearSelection(): void {
         this.setSelectedBlockIds(new Set<string>());
-    }
-
-    /** Replaces the current selection with a saved group's members — the
-     *  frontend resolves the group to concrete ids HERE, once, rather than
-     *  passing a group_id through to the action RPCs, so membership can't
-     *  drift between confirming a bulk action and it actually running
-     *  (spec §5.1). */
-    applyGroupAsSelection(group: FleetGroup): void {
-        this.setSelectedBlockIds(new Set(group.member_ids));
     }
 
     /** Non-destructive: executes immediately, no confirmation — see spec
@@ -1767,27 +1757,18 @@ export class SwarmViewModel {
         this.setLastFleetResult(null);
     }
 
-    async loadFleetGroups(): Promise<void> {
+    /** An older srv without `ambient.outcomes` leaves the Stats panel empty. */
+    async loadAmbientOutcomes(): Promise<void> {
         try {
-            const { groups } = await RpcApi.FleetGroupListCommand(TabRpcClient, {});
-            this.setFleetGroups(groups ?? []);
-        } catch (e) {
-            console.error("swarm: loadFleetGroups failed", e);
+            this.setAmbientOutcomes((await RpcApi.AmbientOutcomesCommand(TabRpcClient, {})) ?? null);
+        } catch {
+            // keep the last counts
         }
     }
 
-    async saveSelectionAsGroup(name: string): Promise<void> {
-        // A group stores block ids, and an agent on another machine has no durable
-        // one: the toolbar disables Save for such a selection, and this refuses it.
-        if (this.selectedRemoteCount() > 0) return;
-        const member_ids = Array.from(this.selectedBlockIdsAtom());
-        await RpcApi.FleetGroupCreateCommand(TabRpcClient, { name, member_ids });
-        await this.loadFleetGroups();
-    }
-
-    async deleteFleetGroup(id: string): Promise<void> {
-        await RpcApi.FleetGroupDeleteCommand(TabRpcClient, { id });
-        await this.loadFleetGroups();
+    toggleStats(): void {
+        this.setStatsOpen(!this.statsOpenAtom());
+        if (this.statsOpenAtom()) void this.loadAmbientOutcomes();
     }
 
     /** Retire (dismiss) a row — `rowKey` is `subagentRowKey(agent_id)` for

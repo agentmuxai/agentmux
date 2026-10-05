@@ -15,7 +15,6 @@ const rpc = vi.hoisted(() => ({
     broadcast: vi.fn(),
     stop: vi.fn(),
     other: vi.fn(),
-    groupCreate: vi.fn(),
 }));
 
 vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: vi.fn(() => () => {}) }));
@@ -28,7 +27,6 @@ vi.mock("@/app/store/rpc-api", () => ({
                 if (name === "FleetBroadcastCommand") return rpc.broadcast;
                 if (name === "FleetBulkStopCommand") return rpc.stop;
                 if (name === "SwarmOtherInstancesCommand") return rpc.other;
-                if (name === "FleetGroupCreateCommand") return rpc.groupCreate;
                 return async () => ({});
             },
         }
@@ -83,7 +81,6 @@ beforeEach(() => {
         aborted_early: false,
     }));
     rpc.other.mockReset();
-    rpc.groupCreate.mockReset().mockResolvedValue({});
 });
 
 afterEach(() => vi.useRealTimers());
@@ -153,12 +150,6 @@ describe("stop on a mixed selection", () => {
 });
 
 describe("selection", () => {
-    it("counts the selected agents that are on other instances", async () => {
-        const vm = await modelWith(both);
-        vm.setManySelected(["blk-a", LOAP, MANOZ], true);
-        expect(vm.selectedRemoteCount()).toBe(2);
-    });
-
     it("a machine's agents can be added and removed together", async () => {
         const vm = await modelWith(both);
         vm.setManySelected([MANOZ, OPAZ], true);
@@ -193,21 +184,5 @@ describe("selection", () => {
         rpc.other.mockResolvedValue({ ...both, hosts: [] });
         await vm.loadOtherInstances();
         expect([...vm.selectedBlockIdsAtom()]).toEqual(["blk-a", "blk-b"]);
-    });
-});
-
-describe("saved groups", () => {
-    it("refuses to save a selection that includes an agent on another instance", async () => {
-        const vm = await modelWith(both);
-        vm.setManySelected(["blk-a", LOAP], true);
-        await vm.saveSelectionAsGroup("mixed");
-        expect(rpc.groupCreate).not.toHaveBeenCalled();
-    });
-
-    it("still saves a local selection", async () => {
-        const vm = await modelWith(both);
-        vm.setManySelected(["blk-a", "blk-b"], true);
-        await vm.saveSelectionAsGroup("locals");
-        expect(rpc.groupCreate).toHaveBeenCalledWith({}, { name: "locals", member_ids: ["blk-a", "blk-b"] });
     });
 });

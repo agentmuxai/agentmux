@@ -31,6 +31,7 @@ import { questionCountdown } from "@/app/store/question-timer";
 import { remoteAgentKey } from "./swarm-fleet-targets";
 import { remoteSections, seenAgo } from "./swarm-remote";
 import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
+import { SwarmStatsPanel } from "./swarm-stats";
 import "./swarm-view.scss";
 import { readZoom } from "@/app/store/zoom-factor";
 
@@ -130,6 +131,7 @@ export function SwarmView(props: { model: SwarmViewModel; ctx: PaneTabHostContex
                     when this instance has none, and the toolbar is what acts on them. It
                     shows itself only when there is something to select or act on. */}
                 <FleetToolbar model={model} allBlockIds={() => tree().flatMap((n) => (n.blockId ? [n.blockId] : []))} />
+                <SwarmStatsPanel model={model} />
                 <FleetResultPanel model={model} />
                 <Show
                     when={tree().length > 0}

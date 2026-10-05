@@ -912,6 +912,12 @@
         color: var(--accent-color);
     }
 
+    // A toggle that is on (Stats with its panel open).
+    &--active {
+        border-color: var(--accent-color);
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+    }
+
     &--destructive {
         border-color: var(--error-color, #e5484d);
         color: var(--error-color, #e5484d);
@@ -938,99 +944,6 @@
     color: var(--main-text-color);
     font-size: 12px;
     padding: 4px 8px;
-}
-
-.swarm-fleet-group-picker {
-    position: relative;
-}
-
-.swarm-fleet-group-dropdown {
-    // Positioning (position/left/top/max-height/max-width) is inline,
-    // computed by `computeMenuPosition` and kept live via `autoUpdate` — see
-    // swarm-fleet-toolbar.tsx. Portaled to `document.body`, so this never
-    // sits inside `.swarm-view`'s `overflow: hidden` in the first place
-    // (the actual fix for the narrow-pane clipping bug; a fixed CSS anchor
-    // side alone can't handle every position a wrapped toolbar button can
-    // land on). Same pattern as flyoutmenu.tsx / popover-menu.tsx.
-    z-index: var(--z-flyout-menu);
-    min-width: 200px;
-    overflow-y: auto;
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
-    border-radius: 6px;
-    box-shadow: var(--shadow-modal, 0 4px 16px rgba(0, 0, 0, 0.4));
-    padding: 4px;
-}
-
-.swarm-fleet-group-dropdown-empty {
-    padding: 6px 8px;
-    font-size: 11px;
-    color: var(--secondary-text-color);
-}
-
-.swarm-fleet-group-dropdown-item {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-
-    &--action {
-        color: var(--accent-color);
-        font-weight: 500;
-    }
-}
-
-.swarm-fleet-group-dropdown-item-apply {
-    flex: 1;
-    text-align: left;
-    appearance: none;
-    border: none;
-    background: none;
-    color: var(--main-text-color);
-    font-size: 12px;
-    padding: 5px 6px;
-    border-radius: 4px;
-    cursor: pointer;
-
-    &:hover {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
-    }
-}
-
-.swarm-fleet-group-dropdown-item-count {
-    color: var(--secondary-text-color);
-}
-
-.swarm-fleet-group-dropdown-item-delete {
-    flex-shrink: 0;
-    appearance: none;
-    border: none;
-    background: none;
-    color: var(--secondary-text-color);
-    font-size: 10px;
-    padding: 4px 6px;
-    cursor: pointer;
-    border-radius: 4px;
-
-    &:hover {
-        color: var(--error-color, #e5484d);
-        background: rgba(229, 72, 77, 0.1);
-    }
-}
-
-.swarm-fleet-group-save-inline {
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-
-    input {
-        flex: 1;
-        background: var(--main-bg-color);
-        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
-        border-radius: 4px;
-        color: var(--main-text-color);
-        font-size: 12px;
-        padding: 4px 6px;
-    }
 }
 
 .swarm-fleet-confirm-target-list {
