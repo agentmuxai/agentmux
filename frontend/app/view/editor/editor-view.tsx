@@ -696,7 +696,8 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     </div>
                 ))}
             </div>
-            <Show when={!model.treeExpandedAtom()}>
+            {/* Only where the button is: an editor on a remote host has no tree. */}
+            <Show when={!model.treeExpandedAtom() && !model.connection()}>
                 <div class="editor-empty-hint">Show the file tree (the folder button above) to browse files.</div>
             </Show>
         </div>

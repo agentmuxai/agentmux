@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Editor pane: file-tree column on the left + CodeMirror on the right.
-// Tree column visibility toggled by the header chevron.
+// Tree column hidden by the first button on the tree's toolbar, shown again
+// by the button leading the document bar.
 // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 .editor-view {
