@@ -317,6 +317,22 @@
     > span {
         margin-right: 4px;
     }
+
+    ul {
+        margin: 4px 0 0;
+        padding: 0;
+        list-style: none;
+    }
+
+    li {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+    }
+}
+
+.remotes-agent-name {
+    color: var(--main-text-color);
 }
 
 // Add remote (§4.4).

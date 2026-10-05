@@ -209,6 +209,25 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         let app = app.clone();
         async move { test_remote(&app, &cmd.connection, &cmd.blockid).await }
     });
+    // Revoking only takes access away (the agent is asked again on its next
+    // use of the host), so it needs no question.
+    let broker = state.broker.clone();
+    engine.register_typed(COMMAND_REMOTE_AGENT_REVOKE, move |cmd: CommandRemoteAgentRevokeData, _ctx| {
+        let broker = broker.clone();
+        async move {
+            let name = match ConnTarget::parse(&cmd.connection)? {
+                t @ ConnTarget::Ssh(_) => t.name(),
+                _ => return Err(format!("{} is not an SSH host", one_line(&cmd.connection, 80))),
+            };
+            let revoked = crate::backend::remote::agent_access::revoke(&cmd.agent, &name)
+                .map_err(|e| format!("could not revoke {}'s access to {name}: {e}", one_line(&cmd.agent, 60)))?;
+            if revoked {
+                tracing::info!(agent = %one_line(&cmd.agent, 60), connection = %name, "agent ssh access: revoked");
+                remotes::publish_change(&broker);
+            }
+            Ok(())
+        }
+    });
     engine.register_typed(COMMAND_REMOTE_SSH_LOCATE, move |cmd: CommandRemoteSshLocateData, _ctx| async move {
         let found = tokio::task::spawn_blocking(move || {
             let (config, ssh_dir) = crate::backend::remote::ssh_config_edit::user_paths()?;
