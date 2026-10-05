@@ -36,7 +36,12 @@ export function remoteSuggestionScopes(
     return groupRemotes(records, typed)
         .map((g) => ({
             ...g,
-            records: g.section === "hidden" ? g.records.filter((r) => r.name === current) : g.records,
+            // A hidden remote shows when the pane is on it, or when its name
+            // is typed in full: typing a host's name always reaches it.
+            records:
+                g.section === "hidden"
+                    ? g.records.filter((r) => r.name === current || r.name === typed.trim())
+                    : g.records,
         }))
         .filter((g) => g.records.length > 0)
         .map((g) => ({

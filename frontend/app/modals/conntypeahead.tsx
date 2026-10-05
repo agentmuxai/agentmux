@@ -310,7 +310,9 @@ const ChangeConnectionBlockModal = ({
         const remoteScopes = remoteSuggestionScopes(remotes(), connSelected(), conn, (name) =>
             computeConnColorNum(connStatusMap.get(name))
         );
-        const remoteNames = remotes().map((r) => r.name);
+        // Only the remotes the picker shows: a hidden one left out must still
+        // offer "(New Connection)" for what was typed.
+        const remoteNames = remoteScopes.flatMap((s) => s.items.map((i) => i.value));
         let s3Suggestions: SuggestionConnectionScope = null;
         if (showS3()) {
             s3Suggestions = getS3Suggestions(

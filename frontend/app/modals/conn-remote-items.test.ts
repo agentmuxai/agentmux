@@ -59,5 +59,10 @@ describe("the picker's remote sections", () => {
         expect(remoteSuggestionScopes(records, "prod", undefined, () => 1).map((s) => s.headerText)).toEqual(["Pinned"]);
         const onHidden = remoteSuggestionScopes(records, "", "old", () => 1);
         expect(onHidden.at(-1)).toMatchObject({ headerText: "Hidden", items: [{ value: "old", current: true }] });
+        // A hidden remote's name typed in full reaches it; a part of it doesn't list it.
+        expect(remoteSuggestionScopes(records, "old", undefined, () => 1)).toMatchObject([
+            { headerText: "Hidden", items: [{ value: "old" }] },
+        ]);
+        expect(remoteSuggestionScopes(records, "ol", undefined, () => 1)).toEqual([]);
     });
 });
