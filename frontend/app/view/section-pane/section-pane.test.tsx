@@ -192,6 +192,16 @@ describe("a saved Armory block", () => {
         });
     });
 
+    it("shows its new pane until the block remounts as it", () => {
+        const { container, title } = mount(armoryPaneTab, { view: "trust", "armory:section": "mcp" });
+        expect(railLabels(container)).toEqual(["Accounts", "MCP servers"]);
+        expect(title()).toBe("Connectors · Accounts");
+        // The meta write lands: now the section follows.
+        setBlockMeta((m) => ({ ...m, view: "connectors", "connectors:section": "mcp" }));
+        expect(visiblePane(container)).toBe("mcp-manager");
+        expect(title()).toBe("Connectors · MCP servers");
+    });
+
     it("keeps the old Trust Center view id as an alias", () => {
         expect(armoryPaneTab.aliases).toEqual(["trust"]);
     });
