@@ -116,28 +116,49 @@ function delimiterOf(opener: string): string {
  */
 export function embeddedBodies(tokens: Token[], command: string): EmbeddedBody[] {
     const text = (t: Token) => command.slice(t.start, t.end);
-    const openers: number[] = [];
-    const bodies: number[] = [];
-    tokens.forEach((t, i) => {
-        if (t.kind === "heredoc-marker" && text(t).startsWith("<<")) openers.push(i);
-        else if (t.kind === "heredoc-body") bodies.push(i);
-    });
-
     const out: EmbeddedBody[] = [];
-    // The tokenizer emits bodies in the order their openers appeared.
-    bodies.forEach((bodyIdx, n) => {
-        const body = tokens[bodyIdx];
-        const openerIdx = openers[n];
-        const lang = openerIdx === undefined ? null : languageFor(tokens, openerIdx, text, text(body));
-        if (lang) out.push({ start: body.start, end: body.end, lang });
+    // Heredocs are read in the order their openers appeared: each body, and
+    // then its closing delimiter, belongs to the oldest one still open. An
+    // empty body has no token, only its closing delimiter, so pairing by
+    // count would hand the next body to the wrong opener.
+    const open: number[] = [];
+    tokens.forEach((t, i) => {
+        if (t.kind === "heredoc-marker") {
+            if (text(t).startsWith("<<")) open.push(i);
+            else open.shift();
+        } else if (t.kind === "heredoc-body" && open.length) {
+            const lang = languageFor(tokens, open[0], text, text(t), command);
+            if (lang) out.push({ start: t.start, end: t.end, lang });
+        }
     });
     return out;
 }
 
-function languageFor(tokens: Token[], openerIdx: number, text: (t: Token) => string, body: string): string | null {
-    // The simple command the opener belongs to: back to the previous separator.
+/** True when `s` holds a line break that isn't a `\` line continuation. */
+function hasLineBreak(s: string): boolean {
+    return /(^|[^\\])\n/.test(s);
+}
+
+function languageFor(
+    tokens: Token[],
+    openerIdx: number,
+    text: (t: Token) => string,
+    body: string,
+    command: string
+): string | null {
+    // The simple command the opener belongs to: back to the previous separator
+    // or line break. The tokenizer emits no token for a newline: it sits in a
+    // plain run or between tokens. One inside a quoted string doesn't count.
     let first = openerIdx;
-    while (first > 0 && !(tokens[first - 1].kind === "operator" && SEPARATORS.has(text(tokens[first - 1])))) first--;
+    while (first > 0) {
+        const prev = tokens[first - 1];
+        if (prev.kind === "operator" && SEPARATORS.has(text(prev))) break;
+        // A body or closing delimiter means an earlier line.
+        if (prev.kind === "heredoc-body" || (prev.kind === "heredoc-marker" && !text(prev).startsWith("<<"))) break;
+        if (hasLineBreak(command.slice(prev.end, tokens[first].start))) break;
+        if (prev.kind === "plain" && hasLineBreak(text(prev))) break;
+        first--;
+    }
     // ... and forward to the end of the opener's line or the next separator.
     let last = openerIdx;
     while (

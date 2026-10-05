@@ -53,6 +53,28 @@ describe("embeddedBodies", () => {
         expect(langs("cat > notes.txt <<'EOF'\nhello\nEOF")).toEqual([]);
     });
 
+    it("doesn't take a program from an earlier line as the enclosing one", () => {
+        expect(langs("git status\ncat <<'JSON'\n{}\nJSON")).toEqual(["json"]);
+        expect(langs("gh pr view 1\ncat > a.py <<'EOF'\nprint(1)\nEOF")).toEqual(["python"]);
+        // A `\` continuation is the same command.
+        expect(langs("git commit \\\n  -F - <<'MSG'\nfix: x\nMSG")).toEqual(["markdown"]);
+    });
+
+    it("pairs a body with its own opener after an empty heredoc", () => {
+        const cmd = "cat <<EOF\nEOF\npython - <<'PY'\nprint(1)\nPY";
+        const bodies = embeddedBodies(tokenizeShell(cmd).tokens, cmd);
+        expect(bodies.map((b) => [cmd.slice(b.start, b.end), b.lang])).toEqual([["print(1)\n", "python"]]);
+    });
+
+    it("finds the program for a second heredoc on the same line", () => {
+        expect(langs("python - <<'A' <<'B'\nx = 1\nA\ny = 2\nB")).toEqual(["python", "python"]);
+    });
+
+    it("pairs two heredocs on one line in order", () => {
+        const cmd = "diff <(python - <<'PY'\nprint(1)\nPY\n) <(cat <<'JSON'\n{}\nJSON\n)";
+        expect(langs(cmd)).toEqual(["python", "json"]);
+    });
+
     it("pairs each body with its own opener", () => {
         const cmd = "python - <<'PY'\nprint(1)\nPY\ncat > a.json <<'EOF'\n{}\nEOF";
         const bodies = embeddedBodies(tokenizeShell(cmd).tokens, cmd);
