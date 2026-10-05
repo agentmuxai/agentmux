@@ -175,13 +175,15 @@ fn read_first(paths: &[PathBuf], target: &str) -> Result<(Vec<u8>, String), Stri
 }
 
 /// Put this version's helper on `host` if it is not there (spec §6.2): probe
-/// the platform, get the matching build (checked against the release's
-/// hashes), upload it over ssh, check its hash there, move it in. `tag` names
+/// the platform (recorded under `connection` for the Remotes pane), get the
+/// matching build (checked against the release's hashes), upload it over
+/// ssh, check its hash there, move it in. `tag` names
 /// this install's own temp file (letters, digits, `-`, `_`), so two installs
 /// on one host never touch each other's upload. `announce` hears the size
 /// just before the upload, for whoever is waiting to say what is happening.
 pub async fn ensure<F, Fut>(
     host: &super::host::HostSsh,
+    connection: &str,
     tag: &str,
     announce: F,
 ) -> Result<(), String>
@@ -196,6 +198,8 @@ where
     };
     let version = env!("CARGO_PKG_VERSION");
     let probe = parse_probe(&run(probe_command(version), None).await?, version);
+    // The Remotes pane shows the host's platform (SPEC_REMOTES_PANE_2026_10_05.md §4.6).
+    super::helper_hosts::record_uname(connection, &probe.uname);
     if probe.installed {
         return Ok(());
     }

@@ -1004,7 +1004,7 @@ impl Run {
     /// Put this version's helper on the host (`helper_install::ensure`),
     /// saying so in the pane.
     async fn install_helper(&self) -> Result<(), String> {
-        crate::backend::remote::helper_install::ensure(&self.host, &self.session, |size| {
+        crate::backend::remote::helper_install::ensure(&self.host, &self.conn, &self.session, |size| {
             self.note_owned(format!(
                 "Installing AgentMux's helper on {} ({} KB, in ~/.agentmux-remote) so this pane can stay alive…",
                 self.conn,

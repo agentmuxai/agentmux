@@ -12,6 +12,7 @@
 
 use super::*;
 use crate::backend::mps::Broker;
+use crate::backend::remote::remotes;
 use crate::backend::remote::sessions;
 use crate::backend::remote::status::{self, state};
 use crate::backend::remote::ConnTarget;
@@ -122,6 +123,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     auth_key: &auth_key,
                 });
                 let list = sessions::list(&store, &conn, ask).await?;
+                // The Remotes pane shows the count without opening ssh itself.
+                remotes::note_sessions(&conn, list.len());
                 Ok(Some(serde_json::json!(list)))
             })
         }),
@@ -153,6 +156,44 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // The Remotes pane (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.6): its list,
+    // a remote's settings, and forgetting a recent one.
+    let config = state.config_watcher.clone();
+    engine.register_typed(COMMAND_REMOTES_LIST, move |_cmd: CommandRemotesListData, _ctx| {
+        let config = config.clone();
+        async move { Ok(remotes::list(config.get_full_config().connections.clone()).await) }
+    });
+    let (config, event_bus, broker) = (state.config_watcher.clone(), state.event_bus.clone(), state.broker.clone());
+    engine.register_typed(COMMAND_REMOTE_SET_CONFIG, move |cmd: CommandRemoteSetConfigData, _ctx| {
+        let (config, event_bus, broker) = (config.clone(), event_bus.clone(), broker.clone());
+        async move {
+            let name = remote_name(&cmd.connection)?;
+            crate::backend::config_watcher_fs::set_connection_values(&config, &event_bus, &name, &cmd.values)?;
+            remotes::publish_change(&broker);
+            Ok(())
+        }
+    });
+    let broker = state.broker.clone();
+    engine.register_typed(COMMAND_REMOTE_FORGET, move |cmd: CommandRemoteForgetData, _ctx| {
+        let broker = broker.clone();
+        async move {
+            let name = remote_name(&cmd.connection)?;
+            if remotes::forget_recent(&name).map_err(|e| format!("could not forget {name}: {e}"))? {
+                remotes::publish_change(&broker);
+            }
+            Ok(())
+        }
+    });
+}
+
+/// A connection the Remotes commands may act on: a WSL distribution or an SSH
+/// destination, never `local` or something `ConnTarget` refuses.
+fn remote_name(connection: &str) -> Result<String, String> {
+    match ConnTarget::parse(connection)? {
+        ConnTarget::Local => Err("local is not a remote".to_string()),
+        _ => Ok(connection.trim().to_string()),
+    }
 }
 
 /// The user's yes to ending session `id` on `conn`, asked in the window of

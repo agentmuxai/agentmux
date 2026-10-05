@@ -483,7 +483,7 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
         // (the grant lives until the install is done).
         Err((e, true)) => {
             let _install_grant = ask.and_then(|a| host.ask_user_in(a.block_id, &name, a.auth_key));
-            super::helper_install::ensure(&host, "files", |_| async {})
+            super::helper_install::ensure(&host, &name, "files", |_| async {})
                 .await
                 .map_err(|i| {
                     RemoteError::link(format!(
@@ -495,6 +495,8 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
         }
         Err((e, false)) => return Err(e),
     };
+    // The helper answered: the host has it (spec §7.1; Remotes shows it).
+    super::helper_hosts::remember(&name);
     *s = Some(files.clone());
     Ok(files)
 }
