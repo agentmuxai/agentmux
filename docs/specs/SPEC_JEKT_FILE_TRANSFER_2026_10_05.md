@@ -88,15 +88,17 @@ No copy. Sender and receiver share one attachment store; the jekt carries the ma
 
 Two instances on one machine have separate data folders and stores.
 
-- The sender asks `HEAD /agentmux/jekt/blob/<sha256>` on the receiver (loopback): `200` means the receiver already has it (an earlier send, or the same screenshot sent twice), so it is skipped.
-- Otherwise `PUT /agentmux/jekt/blob/<sha256>` streams the file. The receiver hashes as it writes and refuses on a mismatch, a size over the tier limit, or a full quota (§6.1).
+- The sender asks `HEAD /agentmux/jekt/blob/<sha256>` on the receiver (loopback). `200` means this receiver already holds that blob **from this same sender** (an earlier send of the same screenshot), so it is skipped. The answer is `404` for anything else, including blobs the receiver holds from other senders or from its own user, so the endpoint can't be used to probe what files a receiver has. The receiver keeps a per-sender index of the blobs it received from each sender for this.
+- Otherwise `PUT /agentmux/jekt/blob/<sha256>` streams the file. The receiver hashes as it writes and refuses on a mismatch, a size over the tier limit, or a full quota (§5).
 - Then the usual forward to `/agentmux/reactive/inject`, with the manifest.
 
-Authentication is the same as the inject on that hop (the peer's auth key from the registry entry, loopback only).
+Authentication is the same as the inject on that hop (the peer's auth key from the registry entry, loopback only), plus the signed upload intent of §4.3.
 
 ### 4.3 LAN
 
-The same `HEAD`/`PUT` endpoints, on the peer's LAN address, added to the routes a LAN peer may call with its `lan_key`. The LAN key is broadcast in the clear, so anyone on the LAN can stage a blob; the per-sender staging quota and the one-hour expiry bound that, and nothing staged is delivered without a signed jekt naming it. Transfers are plain HTTP, like LAN jekts today (§7).
+The same `HEAD`/`PUT` endpoints, on the peer's LAN address, added to the routes a LAN peer may call with its `lan_key`. The LAN key is broadcast in the clear, so it proves nothing about who is uploading. Every `HEAD` and `PUT` therefore carries a **signed upload intent**: the sender's LAN Ed25519 signature (the same per-agent key as its LAN jekts) over `"amx-jekt-blob-v1", source, target, sha256, size, ts`, in the headers `X-Jekt-Source` and `X-Jekt-Blob-Sig`. The receiver verifies it against the claimed sender's published LAN public key (as it does for a LAN jekt), refuses an unsigned or failing request, and charges the upload to that verified sender. So the per-sender quota can't be dodged by inventing names, and a peer that has no agent with a published key can't upload at all. The same intent is required on the host tier, signed with the host key or the cross-channel key.
+
+On top of the per-sender quota there is a **global staging cap** per receiver (§5), and the one-hour expiry; nothing staged is delivered without a signed jekt naming it. Transfers are plain HTTP, like LAN jekts today (§7).
 
 ### 4.4 Cloud relay
 
@@ -120,7 +122,8 @@ A jekt that is held because the target isn't running (`SPEC_DURABLE_JEKT_DELIVER
 |---|---|---|---|
 | Per file | 100 MB | 50 MB | 25 MB |
 | Per jekt | 10 files, 200 MB | 10 files, 100 MB | 10 files, 50 MB |
-| Receiver staging, per sender | 500 MB | 200 MB | n/a (relay side) |
+| Receiver staging, per verified sender | 500 MB | 200 MB | n/a (relay side) |
+| Receiver staging, all senders together | 1 GB | 1 GB | n/a |
 
 Settings keys follow the attachment store's (`jekt:files:maxfilemb`, …). The receiver's normal attachment limits (total store size, image dimensions, text extraction) still apply on ingest; a file the store would refuse is reported back as not delivered.
 
@@ -129,7 +132,7 @@ Settings keys follow the attachment store's (`jekt:files:maxfilemb`, …). The r
 ### 6.1 Checks before delivery
 
 The receiver delivers a jekt with files only when:
-1. its signature verifies (with `files_digest`) on that tier, or the tier's usual unverified rules apply (§6.4);
+1. it is not an active verification failure (§6.4): a jekt with a verified signature, or one whose tier has no proof to offer (`self-declared`, `network-claimed`), qualifies; one whose signature was present and failed does not;
 2. every manifest entry's blob is staged (or already in the store) and its SHA-256 matches;
 3. each file passes the store's ingest checks.
 
@@ -156,11 +159,15 @@ Names are reduced to a base name, control and path characters removed, and made 
 
 ### 6.4 Trust
 
-Files follow the jekt's trust and tier rules; they add nothing new to trust, and one thing to inspect:
+Files follow the jekt's trust and tier rules. One rule per kind of sender:
 
-- **Inline only from verified senders.** For persistent Claude, images and PDFs are passed inline only when the sender is verified on its tier (`host-verified`, `channel-verified`, `lan-verified`, `wan-verified`, `SIG=verified`). Otherwise they are listed by path only, so a file from an unproven sender isn't put in front of the model unasked.
-- **Sensitive-tier keywords apply to file text too.** The credential/destructive keyword scan that can force `TIER=sensitive` also runs over file names and the extracted text of documents.
-- **A failed signature** (`TRUST=unverified`, `SIG=invalid`, a failed LAN or WAN signature) delivers no files at all, only the marker noting they were withheld.
+| Sender | Files |
+|---|---|
+| **Verified** on its tier (`host-verified`, `channel-verified`, `lan-verified`, `wan-verified`, `SIG=verified`) | delivered; inline for persistent Claude |
+| **No proof available** (`self-declared`, `network-claimed`) | delivered and listed by path, never inlined, so a file from an unproven sender isn't put in front of the model unasked |
+| **Active verification failure** (`TRUST=unverified`, `SIG=invalid`, a LAN or WAN signature that was present and failed, a revoked instance) | withheld: none delivered, the marker says they were withheld |
+
+In addition, the credential/destructive keyword scan that can force `TIER=sensitive` also runs over file names and the extracted text of documents.
 
 ## 7. Confidentiality
 
@@ -185,12 +192,14 @@ A later version can seal each file key to the receiver's public key (an X25519 k
 1. A text-only jekt's signatures are byte-identical to today's on every tier.
 2. A jekt with files verifies on each tier; changing one byte of a file, its name, the file order, or the message text fails verification.
 3. A blob whose content doesn't match its hash is refused at upload and at promotion.
-4. A staged blob not named by a signed jekt within an hour is deleted; a sender over its staging quota is refused.
+4. A staged blob not named by a signed jekt within an hour is deleted; a verified sender over its staging quota is refused, and so is any upload once the global staging cap is reached.
+4a. LAN and host uploads without a valid signed upload intent are refused; inventing a sender name doesn't get past the per-sender quota.
+4b. `HEAD` answers 200 only for blobs received from the same sender; a blob the receiver holds from anyone else answers 404.
 5. Sending to a target without `files-v1` fails without sending anything.
 6. The same file sent twice moves once (`HEAD` answers 200).
 7. A held jekt keeps its files until delivery or expiry.
 8. Cloud: a failed download leaves the message pending; a download URL works only for the target's subscription; blobs disappear after claim and after expiry.
-9. Trust: inline blocks only from verified senders; a credential keyword in a document's text forces `TIER=sensitive`; a failed signature withholds every file.
+9. Trust, per §6.4's table: verified senders get files inline; `self-declared` and `network-claimed` senders get files listed but not inlined; an active verification failure withholds every file. A credential keyword in a document's text forces `TIER=sensitive`.
 10. Names with path separators, control characters or a misleading extension are sanitised; MIME comes from the content.
 
 ## 10. Open questions
