@@ -57,11 +57,11 @@ The jekt gains a manifest, one entry per file, in send order:
 [{ "sha256": "2c17…", "name": "shortcuts.png", "size": 412345, "mime": "image/png" }]
 ```
 
-`name` is the base name only (no path), at most 128 characters after sanitising (§6.3). `sha256` is always the hash of the file's **plaintext** bytes. On the cloud tier each entry also carries `key`, the file's encryption key (§4.4).
+`name` is the base name only (no path), at most 128 characters after sanitising (§6.3). `sha256` is always the hash of the file's **plaintext** bytes. On the cloud tier each entry also carries `key`, the file's encryption key, and `blob_id`, the relay's name for the uploaded ciphertext (§4.4).
 
 ### 3.3 Signing
 
-Every tier's signed material gains one field, the **manifest digest**: SHA-256 over the canonical manifest (entries in order; each entry's fields `sha256, name, size, mime` and, on the cloud tier, `key`, joined with `\u{1}`; entries joined with `\u{2}`). It is appended after `message` in each scheme, and every v2 scheme starts with its own version label, so v1 and v2 material can never be confused: the message is free text and may contain `\u{1}`, so without a label a v1 message ending in `\u{1}<digest>` could reproduce a v2 input. v1 material can't start with a v2 label either, because its first field is the msgid, whose fixed format the receiver already enforces.
+Every tier's signed material gains one field, the **manifest digest**: SHA-256 over the canonical manifest (entries in order; each entry's fields `sha256, name, size, mime` and, on the cloud tier, `key, blob_id`, joined with `\u{1}`; entries joined with `\u{2}`). It is appended after `message` in each scheme, and every v2 scheme starts with its own version label, so v1 and v2 material can never be confused: the message is free text and may contain `\u{1}`, so without a label a v1 message ending in `\u{1}<digest>` could reproduce a v2 input. v1 material can't start with a v2 label either, because its first field is the msgid, whose fixed format the receiver already enforces.
 
 - host HMAC: `"amx-jekt-host-v2", …, message, files_digest`
 - cross-channel: `"amx-jekt-channel-v2", …, message, files_digest`
@@ -96,7 +96,13 @@ Authentication is the same as the inject on that hop (the peer's auth key from t
 
 ### 4.3 LAN
 
-The same `HEAD`/`PUT` endpoints, on the peer's LAN address, added to the routes a LAN peer may call with its `lan_key`. The LAN key is broadcast in the clear, so it proves nothing about who is uploading. Every `HEAD` and `PUT` therefore carries a **signed upload intent**: the sender's LAN Ed25519 signature (the same per-agent key as its LAN jekts) over `"amx-jekt-blob-v1", source, target, sha256, size, ts`, in the headers `X-Jekt-Source` and `X-Jekt-Blob-Sig`. The receiver verifies it against the claimed sender's published LAN public key (as it does for a LAN jekt), refuses an unsigned or failing request, and charges the upload to that verified sender. So the per-sender quota can't be dodged by inventing names, and a peer that has no agent with a published key can't upload at all. The same intent is required on the host tier, signed with the host key or the cross-channel key.
+The same `HEAD`/`PUT` endpoints, on the peer's LAN address, added to the routes a LAN peer may call with its `lan_key`. The LAN key is broadcast in the clear, so it proves nothing about who is uploading. Every `HEAD` and `PUT` therefore carries a **signed upload intent**: the sender's LAN Ed25519 signature (the same per-agent key as its LAN jekts) over `"amx-jekt-blob-v1", method, source, target, sha256, size, ts`, in the headers `X-Jekt-Source` and `X-Jekt-Blob-Sig`. The receiver verifies it against the claimed sender's published LAN public key (as it does for a LAN jekt), refuses an unsigned or failing request, and charges the upload to that verified sender.
+
+An intent is fresh and single-use:
+- `ts` must be within **5 minutes** of the receiver's clock, either way; older or later intents are refused.
+- `method` (`HEAD` or `PUT`) is signed, so a `HEAD` intent can't be replayed as an upload.
+- The receiver remembers every `PUT` intent signature it accepted until that signature's 5-minute window has passed, and refuses a repeat. A captured upload therefore can't be replayed to use up the sender's quota.
+- A replayed `HEAD` needs no such record: it only tells the replayer whether this receiver holds a blob from that sender (§4.2), which the sender's own earlier request already did. So the per-sender quota can't be dodged by inventing names, and a peer that has no agent with a published key can't upload at all. The same intent is required on the host tier, signed with the host key or the cross-channel key.
 
 On top of the per-sender quota there is a **global staging cap** per receiver (§5), and the one-hour expiry; nothing staged is delivered without a signed jekt naming it. Transfers are plain HTTP, like LAN jekts today (§7).
 
@@ -104,13 +110,15 @@ On top of the per-sender quota there is a **global staging cap** per receiver (�
 
 The relay can't carry large bodies, and shouldn't stream them through its own request path. It gains a small blob interface (the client contract is defined here; the relay's storage is implemented in the cloud repository):
 
-1. `POST /reactive/blob` with the sender's account credentials and `{sha256, size, target_agent}` returns a short-lived upload URL (or `exists: true` if the relay already holds that blob for that target).
-2. The sender uploads the file to that URL.
-3. The sender sends the jekt as today, now carrying the manifest; the relay refuses a jekt whose manifest names a blob it doesn't hold.
-4. When the receiver pulls the pending jekt, it asks `GET /reactive/blob/<sha256>?msgid=…` and gets a short-lived download URL, valid only for the target's own subscription. It downloads, checks the hash, ingests, and only then claims the message, so a failed download leaves the message to be retried.
+1. `POST /reactive/blob` with the sender's account credentials and `{size, target_agent}` returns a new `blob_id` and a short-lived upload URL.
+2. The sender encrypts the file (below) and uploads the ciphertext to that URL.
+3. The sender sends the jekt as today, now carrying the manifest; on this tier each entry also has `blob_id`. The relay refuses a jekt whose manifest names a `blob_id` it doesn't hold for that sender and target.
+4. When the receiver pulls the pending jekt, it asks `GET /reactive/blob/<blob_id>?msgid=…` and gets a short-lived download URL, valid only for the target's own subscription. It downloads, decrypts, checks the hash, ingests, and only then claims the message, so a failed download leaves the message to be retried.
 5. Blobs live as long as the message (30 minutes plus a grace period) and are deleted on claim or expiry.
 
-Every blob is encrypted before upload (AES-256-GCM, a random key and nonce per file). The key travels in the manifest entry (`"key"`), which is part of the canonical entry and so covered by the signed manifest digest (§3.3). The receiver decrypts (the GCM tag rejects altered ciphertext), then checks the plaintext against `sha256`, the same check as on every other tier. That protects against the storage being read on its own (a misconfigured bucket, a backup), not against the relay itself, which already sees message text (§7).
+**No deduplication on this tier.** Every send encrypts the file under a fresh random key and uploads it again as a new `blob_id`. The relay never learns that two uploads are the same file, and the sender keeps no keys after the jekt is sent. Files on this tier are at most 25 MB and live 30 minutes, so the saving wouldn't be worth storing keys. (Test 6's "moves once" applies to the host and LAN tiers.)
+
+Every blob is encrypted before upload (AES-256-GCM, a random key and nonce per file and per send). The key travels in the manifest entry (`"key"`), which is part of the canonical entry and so covered by the signed manifest digest (§3.3), as is `blob_id`. The receiver decrypts (the GCM tag rejects altered ciphertext), then checks the plaintext against `sha256`, the same check as on every other tier. That protects against the storage being read on its own (a misconfigured bucket, a backup), not against the relay itself, which already sees message text (§7).
 
 ### 4.5 Held messages
 
@@ -190,13 +198,13 @@ A later version can seal each file key to the receiver's public key (an X25519 k
 ## 9. Tests
 
 1. A text-only jekt's signatures are byte-identical to today's on every tier; a v1 message containing `\u{1}` followed by a digest never verifies as v2 (every v2 scheme is labelled).
-2. A jekt with files verifies on each tier; changing one byte of a file, its name, the file order, the message text, or (cloud) a file's key fails verification.
+2. A jekt with files verifies on each tier; changing one byte of a file, its name, the file order, the message text, or (cloud) a file's key or `blob_id` fails verification.
 3. A blob whose content doesn't match its hash is refused at upload and at promotion.
 4. A staged blob not named by a signed jekt within an hour is deleted; a verified sender over its staging quota is refused, and so is any upload once the global staging cap is reached.
-4a. LAN and host uploads without a valid signed upload intent are refused; inventing a sender name doesn't get past the per-sender quota.
+4a. LAN and host uploads without a valid signed upload intent are refused; inventing a sender name doesn't get past the per-sender quota. An intent more than 5 minutes from the receiver's clock is refused, a `PUT` intent replayed within its window is refused, and a `HEAD` intent can't be used for a `PUT`.
 4b. `HEAD` answers 200 only for blobs received from the same sender; a blob the receiver holds from anyone else answers 404.
 5. Sending to a target without `files-v1` fails without sending anything.
-6. The same file sent twice moves once (`HEAD` answers 200).
+6. Host and LAN: the same file sent twice moves once (`HEAD` answers 200). Cloud: it is uploaded twice, under two keys and two `blob_id`s, and both jekts deliver it.
 7. A held jekt keeps its files until delivery or expiry.
 8. Cloud: a failed download leaves the message pending; a download URL works only for the target's subscription; blobs disappear after claim and after expiry.
 9. Trust, per §6.4's table: verified senders get files inline; `self-declared` and `network-claimed` senders get files listed but not inlined; an active verification failure withholds every file. A credential keyword in a document's text forces `TIER=sensitive`.
