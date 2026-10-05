@@ -129,7 +129,8 @@
     }
 
     &:hover .remotes-row-actions,
-    &:focus-visible .remotes-row-actions {
+    &:focus-visible .remotes-row-actions,
+    &:focus-within .remotes-row-actions {
         visibility: visible;
     }
 }

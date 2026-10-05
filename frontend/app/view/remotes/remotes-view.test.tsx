@@ -133,6 +133,28 @@ describe("RemotesView", () => {
         });
     });
 
+    it("leaves Enter on a quick button to the button, not the row", async () => {
+        const { model } = await renderWith([remote("db1")]);
+        const button = screen.getByRole("button", { name: "New terminal on db1" });
+        const ev = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+        button.dispatchEvent(ev);
+        expect(ev.defaultPrevented).toBe(false);
+        expect(model.expanded()).toBeNull();
+        fireEvent.keyDown(document.querySelector('[data-remote="db1"]')!, { key: "Enter" });
+        expect(model.expanded()).toBe("db1");
+    });
+
+    it("commits a nickname once when Enter is pressed", async () => {
+        await renderWith([remote("db1")]);
+        fireEvent.click(document.querySelector('[data-remote="db1"]')!);
+        const nick = screen.getByPlaceholderText("db1") as HTMLInputElement;
+        nick.focus();
+        nick.value = "prod-db";
+        fireEvent.keyDown(nick, { key: "Enter" });
+        await Promise.resolve();
+        expect(rpc.RemoteSetConfigCommand).toHaveBeenCalledTimes(1);
+    });
+
     it("shows a failed action instead of dropping it", async () => {
         await renderWith([remote("db1")]);
         rpc.RemoteSetConfigCommand.mockRejectedValue(new Error("invalid setting for db1"));

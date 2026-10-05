@@ -169,6 +169,8 @@ function Row(props: {
                 onClick={() => model.toggleExpanded(r().name)}
                 onDblClick={() => void model.run("New terminal", () => model.newTerminal(r().name))}
                 onKeyDown={(e) => {
+                    // Keys from the quick buttons inside the row are theirs.
+                    if (e.target !== e.currentTarget) return;
                     if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         model.toggleExpanded(r().name);
@@ -272,7 +274,8 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                         value={(r().settings?.["display:name"] as string | undefined) ?? ""}
                         onBlur={(e) => commitNickname(e.currentTarget.value)}
                         onKeyDown={(e) => {
-                            if (e.key === "Enter") commitNickname(e.currentTarget.value);
+                            // Blurring commits it, once.
+                            if (e.key === "Enter") e.currentTarget.blur();
                         }}
                     />
                 </label>
