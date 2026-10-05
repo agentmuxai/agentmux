@@ -2,7 +2,7 @@
 
 **Status:** implemented — #4335 (2026-10-04), in `components/scroll-handoff.ts`
 **Date:** 2026-09-27, revised 2026-10-04 against main before implementing (see §0)
-**Author:** Camper (agent, `~/.agentmux/agents/camper-0622h`), at operator request
+**Author:** Camper (agent), at operator request
 **Related:** `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` (the hand-off this spec
 amends), `SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md` §2 (the shared hand-off it builds
 on), `SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md` (pane follow / pin, must
