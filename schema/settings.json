@@ -214,6 +214,15 @@
           "maximum": 1024,
           "default": 120
         },
+        "conn:helper": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "always",
+            "never"
+          ],
+          "description": "Installing AgentMux's helper on an SSH host: ask first (the default), always, or never."
+        },
         "conn:*": {
           "type": "boolean"
         },

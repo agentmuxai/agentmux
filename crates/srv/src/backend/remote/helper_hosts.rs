@@ -159,9 +159,50 @@ pub fn record_uname(connection: &str, uname: &str) {
     }
 }
 
+/// The helper was removed from `connection`'s host: it is no longer a helper
+/// host, and no version is there. Its platform stays known.
+pub fn forget_helper_in(config_home: &Path, connection: &str) -> std::io::Result<()> {
+    let Some(name) = canonical(connection) else {
+        return Ok(());
+    };
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut hosts = read(&path_in(config_home));
+    let before = hosts.clone();
+    hosts.hosts.retain(|h| h != &name);
+    if let Some(info) = hosts.info.get_mut(&name) {
+        if !info.helper_version.is_empty() {
+            info.helper_version.clear();
+            info.seen_at_ms = now_ms();
+        }
+    }
+    if hosts == before {
+        return Ok(());
+    }
+    write(config_home, &hosts)
+}
+
+/// [`forget_helper_in`] under this instance's config dir.
+pub fn forget_helper(connection: &str) -> std::io::Result<()> {
+    forget_helper_in(&crate::backend::base::get_mux_config_dir(), connection)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_removed_helper_is_forgotten_but_the_platform_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        record_uname_in(dir.path(), "user@box", "Linux x86_64").unwrap();
+        remember_in(dir.path(), "user@box", "0.59.9").unwrap();
+        remember_in(dir.path(), "other@box", "0.59.9").unwrap();
+        forget_helper_in(dir.path(), " user@box ").unwrap();
+        assert!(!known_in(dir.path(), "user@box"));
+        assert!(known_in(dir.path(), "other@box"), "other hosts untouched");
+        let (_, info) = all_in(dir.path());
+        assert_eq!(info["user@box"].uname, "Linux x86_64");
+        assert_eq!(info["user@box"].helper_version, "");
+    }
 
     #[test]
     fn a_host_is_remembered_once_however_it_is_spelled() {

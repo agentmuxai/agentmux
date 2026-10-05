@@ -185,6 +185,100 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Ok(())
         }
     });
+    // Removing the helper ends the host's sessions, so it is the user's
+    // decision, made in the approval window, as ending one session is.
+    let app = state.clone();
+    engine.register_typed(COMMAND_REMOTE_HELPER_REMOVE, move |cmd: CommandRemoteHelperRemoveData, _ctx| {
+        let app = app.clone();
+        async move { remove_helper(&app, &cmd.connection, &cmd.blockid).await }
+    });
+}
+
+/// Remove AgentMux's helper from SSH host `connection` (Remotes, §4.9 of
+/// SPEC_REMOTES_PANE_2026_10_05.md), once the user confirms in the window of
+/// pane `block`, naming the sessions that will end.
+async fn remove_helper(state: &AppState, connection: &str, block: &str) -> Result<(), String> {
+    use crate::backend::remote::{files, helper_hosts, helper_install, host::HostSsh};
+    let name = match ConnTarget::parse(connection)? {
+        t @ ConnTarget::Ssh(_) => t.name(),
+        _ => return Err(format!("{} has no AgentMux helper to remove", one_line(connection, 80))),
+    };
+    if block.is_empty() {
+        return Err("removing the helper needs the pane asking, to ask the user in".into());
+    }
+    let ask = sessions::AskIn { block_id: block, auth_key: &state.auth_key };
+    let running = sessions::list(&state.mstore, &name, Some(ask)).await?;
+    let ends = match running.len() {
+        0 => "No sessions are running there.".to_string(),
+        1 => "The 1 session running there ends, with everything running in it.".to_string(),
+        n => format!("The {n} sessions running there end, with everything running in them."),
+    };
+    let question = serde_json::json!({
+        "kind": "consent",
+        "title": format!("Remove AgentMux's helper from {}", one_line(&name, 80)),
+        "message": format!(
+            "Remove AgentMux's helper from {}?\n\n{ends} It deletes ~/.agentmux-remote there; file browsing and terminals that survive disconnects need it installed again.",
+            one_line(&name, 80)
+        ),
+        "ok_label": "Remove",
+        "cancel_label": "Keep It",
+    });
+    let answer = ask_user(state, block, question).await?;
+    if !(answer.answered && answer.approve) {
+        return Err("kept: the user chose not to remove it".into());
+    }
+    let mut host = HostSsh::for_connection(&name)?;
+    let _grant = host.ask_user_in(block, &name, &state.auth_key);
+    let out = host
+        .run(&helper_install::remove_command(), None, std::time::Duration::from_secs(60))
+        .await?
+        .ok()?;
+    if out.trim() != "ok" {
+        return Err(format!("removing the helper from {name} did not finish ({})", one_line(&out, 200)));
+    }
+    files::close(&name).await;
+    if let Err(e) = helper_hosts::forget_helper(&name) {
+        tracing::warn!(connection = %name, error = %e, "could not forget the removed helper");
+    }
+    remotes::note_sessions(&name, 0);
+    remotes::publish_change(&state.broker);
+    tracing::info!(connection = %name, sessions = running.len(), "removed the helper");
+    Ok(())
+}
+
+/// Give the helper install its question (SPEC_REMOTES_PANE_2026_10_05.md
+/// §4.9): the approval window, and `conn:helper` from the settings.
+pub fn install_helper_consent(state: &AppState) {
+    use crate::backend::remote::helper_consent;
+    let app = state.clone();
+    let config = state.config_watcher.clone();
+    let (writer, event_bus, broker) = (state.config_watcher.clone(), state.event_bus.clone(), state.broker.clone());
+    helper_consent::install(helper_consent::Deps {
+        ask: Box::new(move |block, question| {
+            let app = app.clone();
+            Box::pin(async move {
+                let a = ask_user(&app, &block, question).await?;
+                Ok(helper_consent::Answer { answered: a.answered, approve: a.approve, remember: a.checkbox })
+            })
+        }),
+        settings: Box::new(move |connection| {
+            let full = config.get_full_config();
+            let host = full
+                .connections
+                .iter()
+                .find(|(name, _)| crate::backend::remote::conn::same_connection(name, connection))
+                .map(|(_, k)| k.conn_helper.clone())
+                .unwrap_or_default();
+            (host, full.settings.conn_helper.clone())
+        }),
+        remember: Box::new(move |connection, value| {
+            let mut values = serde_json::Map::new();
+            values.insert("conn:helper".into(), serde_json::json!(value));
+            crate::backend::config_watcher_fs::set_connection_values(&writer, &event_bus, connection, &values)?;
+            remotes::publish_change(&broker);
+            Ok(())
+        }),
+    });
 }
 
 /// A connection the Remotes commands may act on: a WSL distribution or an SSH

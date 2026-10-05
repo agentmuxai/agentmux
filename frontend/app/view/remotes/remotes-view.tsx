@@ -264,6 +264,9 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                 <Show when={r().sources.includes("recent")}>
                     <button onClick={run("Forget", () => model.forget(r().name))}>Forget</button>
                 </Show>
+                <Show when={r().helper.installed}>
+                    <button onClick={run("Remove helper", () => model.removeHelper(r().name))}>Remove helper</button>
+                </Show>
             </div>
             <div class="remotes-settings">
                 <label class="remotes-setting">
@@ -322,6 +325,20 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                             <option value="off">Off</option>
                         </select>
                     </label>
+                    <label class="remotes-setting">
+                        <span>Install the helper</span>
+                        <select
+                            value={(r().settings?.["conn:helper"] as string | undefined) || "ask"}
+                            onChange={(e) => {
+                                const v = e.currentTarget.value;
+                                void model.run("Install the helper", () => model.setHelperPolicy(r().name, v));
+                            }}
+                        >
+                            <option value="ask">As in Settings</option>
+                            <option value="always">Always</option>
+                            <option value="never">Never</option>
+                        </select>
+                    </label>
                 </Show>
             </div>
             <Show when={r().agents.length > 0}>
@@ -357,6 +374,7 @@ export function rowMenu(model: RemotesViewModel, r: RemoteRecord): ContextMenuIt
         isHidden(r) ? act("Unhide", () => model.setHidden(r.name, false)) : act("Hide", () => model.setHidden(r.name, true))
     );
     if (r.sources.includes("recent")) items.push(act("Forget", () => model.forget(r.name)));
+    if (r.helper.installed) items.push(act("Remove helper", () => model.removeHelper(r.name), { danger: true }));
     items.push({ type: "separator" });
     items.push({
         type: "action",

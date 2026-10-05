@@ -591,6 +591,10 @@ declare global {
     type ConnKeywords = {
         "conn:shellpath"?: string;
         "conn:ignoresshconfig"?: boolean;
+        "conn:helper"?: string;
+        "display:name"?: string;
+        "display:color"?: string;
+        "display:pinned"?: boolean;
         "display:hidden"?: boolean;
         "display:order"?: number;
         "term:*"?: boolean;
@@ -1137,6 +1141,7 @@ declare global {
         "telemetry:interval"?: number;
         "telemetry:numpoints"?: number;
         "conn:*"?: boolean;
+        "conn:helper"?: string;
         "conn:askbeforewshinstall"?: boolean;
         "conn:wshenabled"?: boolean;
         "network:lan_discovery"?: boolean;

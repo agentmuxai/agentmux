@@ -9,6 +9,7 @@ const rpc = vi.hoisted(() => ({
     RemotesListCommand: vi.fn(),
     RemoteSetConfigCommand: vi.fn(),
     RemoteForgetCommand: vi.fn(),
+    RemoteHelperRemoveCommand: vi.fn(),
     ConnConnectCommand: vi.fn(),
     ConnDisconnectCommand: vi.fn(),
 }));
@@ -29,7 +30,7 @@ function remote(name: string, over: Partial<RemoteRecord> = {}): RemoteRecord {
         sources: ["ssh_config"],
         status: { state: "disconnected", error: "" },
         platform: null,
-        helper: { state: "absent", version: "" },
+        helper: { state: "absent", version: "", installed: false },
         sessions: null,
         agents: [],
         settings: {},
@@ -59,12 +60,12 @@ describe("RemotesView", () => {
                 settings: { "display:name": "prod-db", "display:color": "#e5484d" },
                 status: { state: "connected", error: "" },
                 platform: { os: "linux", arch: "x86_64" },
-                helper: { state: "installed", version: "0.59.9" },
+                helper: { state: "installed", version: "0.59.9", installed: true },
                 sessions: 2,
                 agents: ["korp"],
             }),
             remote("me@box", { sources: ["recent"], last_used_ms: 5 }),
-            remote("Ubuntu", { kind: "wsl", sources: ["wsl"], helper: { state: "none", version: "" } }),
+            remote("Ubuntu", { kind: "wsl", sources: ["wsl"], helper: { state: "none", version: "", installed: false } }),
         ]);
         const headings = Array.from(document.querySelectorAll(".remotes-section-heading")).map((h) => h.textContent);
         expect(headings).toEqual(["SSH hosts", "Recent", "WSL"]);
@@ -161,6 +162,39 @@ describe("RemotesView", () => {
         fireEvent.click(document.querySelector('[data-remote="db1"]')!);
         fireEvent.click(screen.getByRole("button", { name: "Hide" }));
         expect(await screen.findByText("Hide failed: invalid setting for db1")).toBeTruthy();
+    });
+
+    it("sets the host's helper install answer, and Ask clears it", async () => {
+        await renderWith([remote("db1", { settings: { "conn:helper": "never" } })]);
+        fireEvent.click(document.querySelector('[data-remote="db1"]')!);
+        const select = screen.getByLabelText("Install the helper") as HTMLSelectElement;
+        expect(select.value).toBe("never");
+        fireEvent.change(select, { target: { value: "ask" } });
+        await Promise.resolve();
+        expect(rpc.RemoteSetConfigCommand).toHaveBeenCalledWith(expect.anything(), {
+            connection: "db1",
+            values: { "conn:helper": null },
+        });
+    });
+
+    it("removes the helper through srv, which asks the user; Keep It is not an error", async () => {
+        const { model } = await renderWith([remote("db1", { helper: { state: "installed", version: "0.59.9", installed: true } })]);
+        fireEvent.click(document.querySelector('[data-remote="db1"]')!);
+        rpc.RemoteHelperRemoveCommand.mockRejectedValueOnce(new Error("kept: the user chose not to remove it"));
+        fireEvent.click(screen.getByRole("button", { name: "Remove helper" }));
+        await new Promise((r) => setTimeout(r, 0));
+        expect(rpc.RemoteHelperRemoveCommand).toHaveBeenCalledWith(
+            expect.anything(),
+            { connection: "db1", blockid: "blk-1" },
+            expect.anything()
+        );
+        expect(model.notice()).toBe("");
+    });
+
+    it("offers Remove helper only where the helper is installed", async () => {
+        await renderWith([remote("db1")]);
+        fireEvent.click(document.querySelector('[data-remote="db1"]')!);
+        expect(screen.queryByRole("button", { name: "Remove helper" })).toBeNull();
     });
 
     it("offers Forget only for a recent connection", async () => {

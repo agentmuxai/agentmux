@@ -158,6 +158,23 @@ export class RemotesViewModel {
         await this.setSettings(name, { "term:durable": durable });
     }
 
+    /** `ask` (clears the key: the global setting applies), `always` or `never`. */
+    async setHelperPolicy(name: string, policy: string): Promise<void> {
+        await this.setSettings(name, { "conn:helper": policy === "ask" ? null : policy });
+    }
+
+    /** Remove the helper from the host; srv asks the user first, naming the sessions that end. */
+    async removeHelper(name: string): Promise<void> {
+        // The question waits up to two minutes for the user, and the removal runs over ssh.
+        try {
+            await RpcApi.RemoteHelperRemoveCommand(TabRpcClient, { connection: name, blockid: this.blockId }, { timeout: 240_000 });
+        } catch (e) {
+            // "Keep It" is the user's answer, not a failure.
+            if (!String(e instanceof Error ? e.message : e).includes("kept:")) throw e;
+        }
+        this.scheduleRefresh();
+    }
+
     async forget(name: string): Promise<void> {
         await RpcApi.RemoteForgetCommand(TabRpcClient, { connection: name });
         if (this.expanded() === name) this.setExpanded(null);

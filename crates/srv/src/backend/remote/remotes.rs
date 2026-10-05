@@ -307,7 +307,7 @@ pub fn build(inputs: &Inputs) -> Vec<RemoteRecord> {
             let info = inputs.host_info.get(&name);
             let platform = info.and_then(|i| platform_of(&i.uname));
             let helper = if kind == "wsl" {
-                RemoteHelper { state: "none".to_string(), version: String::new() }
+                RemoteHelper { state: "none".to_string(), version: String::new(), installed: false }
             } else {
                 let version = info.map(|i| i.helper_version.clone()).unwrap_or_default();
                 let state = if settings.is_some_and(|s| s.conn_helper == "never") {
@@ -321,8 +321,9 @@ pub fn build(inputs: &Inputs) -> Vec<RemoteRecord> {
                 } else {
                     "absent"
                 };
-                let version = if state == "installed" { version } else { String::new() };
-                RemoteHelper { state: state.to_string(), version }
+                let installed = inputs.helper_hosts.contains(&name);
+                let version = if installed { version } else { String::new() };
+                RemoteHelper { state: state.to_string(), version, installed }
             };
             let mut agents: Vec<String> = inputs
                 .grants
@@ -460,7 +461,7 @@ mod tests {
         };
         let db1 = &build(&inputs)[0];
         assert_eq!(db1.helper.state, "never");
-        assert!(db1.helper.version.is_empty());
+        assert!(db1.helper.installed, "Never stops new installs; the one there can still be removed");
     }
 
     #[test]

@@ -65,6 +65,10 @@ pub struct RemoteHelper {
     /// The AgentMux version whose helper last answered (when installed).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub version: String,
+    /// The helper is on the host, whatever `state` says (`never` stops new
+    /// installs, not one already there): Remove helper is offered on this.
+    #[serde(default)]
+    pub installed: bool,
 }
 
 /// `remotesetconfig`: change `connection`'s settings (`settings.json` →
@@ -82,4 +86,14 @@ pub struct CommandRemoteSetConfigData {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct CommandRemoteForgetData {
     pub connection: String,
+}
+
+/// `remotehelperremove`: remove AgentMux's helper from the SSH host
+/// `connection`, once the user confirms in the window of pane `blockid`
+/// (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandRemoteHelperRemoveData {
+    pub connection: String,
+    pub blockid: String,
 }

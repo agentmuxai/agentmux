@@ -243,6 +243,11 @@ pub struct SettingsType {
     #[serde(rename = "conn:*", default, skip_serializing_if = "is_false")]
     pub conn_clear: bool,
 
+    /// Installing AgentMux's helper on a host whose own `conn:helper` is
+    /// unset: `ask` (unset), `always` or `never` (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+    #[serde(rename = "conn:helper", default, skip_serializing_if = "String::is_empty")]
+    pub conn_helper: String,
+
     // -- Network settings --
     #[serde(rename = "network:lan_discovery", default, skip_serializing_if = "is_false")]
     pub network_lan_discovery: bool,

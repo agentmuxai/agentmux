@@ -21,7 +21,7 @@ function remote(name: string, over: Partial<RemoteRecord> = {}): RemoteRecord {
         sources: ["ssh_config"],
         status: { state: "disconnected", error: "" },
         platform: null,
-        helper: { state: "absent", version: "" },
+        helper: { state: "absent", version: "", installed: false },
         sessions: null,
         agents: [],
         settings: {},
@@ -90,9 +90,9 @@ describe("labels", () => {
         expect(platformLabel({ os: "linux", arch: "x86_64" })).toBe("Linux · x86_64");
         expect(platformLabel({ os: "macos", arch: "arm64" })).toBe("macOS · arm64");
         expect(platformLabel(null)).toBe("");
-        expect(helperLabel({ state: "installed", version: "0.59.9" })).toBe("Helper 0.59.9");
-        expect(helperLabel({ state: "never", version: "" })).toBe("Helper: never");
-        expect(helperLabel({ state: "none", version: "" })).toBe("");
+        expect(helperLabel({ state: "installed", version: "0.59.9", installed: true })).toBe("Helper 0.59.9");
+        expect(helperLabel({ state: "never", version: "", installed: false })).toBe("Helper: never");
+        expect(helperLabel({ state: "none", version: "", installed: false })).toBe("");
         expect(statusLabel({ state: "error", error: "timed out" })).toBe("Error: timed out");
         expect(statusLabel({ state: "connected", error: "" })).toBe("Connected");
         expect(plural(1, "session")).toBe("1 session");

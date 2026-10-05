@@ -59,6 +59,14 @@ export const TERMINAL_SETTINGS = {
         section: "terminal",
         keywords: ["durable", "ssh", "reconnect", "remote", "session", "term:durable"],
     },
+    helperInstall: {
+        id: "terminal.helper_install",
+        label: "Install the helper on new hosts",
+        description:
+            "Durable terminals and file browsing on an SSH host need AgentMux's small helper there. Ask before installing it, install it without asking, or never install it. Each host can override this in Remotes, and an agent's install is always asked about.",
+        section: "terminal",
+        keywords: ["helper", "install", "ssh", "remote", "agentmux-remote", "conn:helper"],
+    },
     bracketedPaste: {
         id: "terminal.bracketed_paste",
         label: "Bracketed paste",
@@ -223,8 +231,28 @@ export function TerminalSection(): JSX.Element {
                         }}
                     >
                         <option value="auto">On hosts that have the helper</option>
-                        <option value="on">Always (installs the helper)</option>
+                        <option value="on">Always (needs the helper)</option>
                         <option value="off">Never</option>
+                    </select>
+                }
+            />
+            <SettingRow
+                id={TERMINAL_SETTINGS.helperInstall.id}
+                label={TERMINAL_SETTINGS.helperInstall.label}
+                description={TERMINAL_SETTINGS.helperInstall.description}
+                control={
+                    <select
+                        class="setting-select"
+                        value={(s()["conn:helper"] as string | undefined) || "ask"}
+                        onChange={(e) => {
+                            const v = e.currentTarget.value;
+                            // "ask" clears the setting: asking is the default.
+                            set("conn:helper", v === "ask" ? null : v);
+                        }}
+                    >
+                        <option value="ask">Ask first</option>
+                        <option value="always">Always</option>
+                        <option value="never">Never</option>
                     </select>
                 }
             />

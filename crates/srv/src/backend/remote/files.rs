@@ -461,6 +461,16 @@ pub async fn close_idle(after: Duration) {
     }
 }
 
+/// Drop the connection to `conn`'s helper, if there is one (its ssh ends):
+/// the helper was removed from the host.
+pub async fn close(conn: &str) {
+    let Ok(name) = canonical(conn) else { return };
+    let slot = pool().lock().unwrap().get(&name).cloned();
+    if let Some(slot) = slot {
+        *slot.lock().await = None;
+    }
+}
+
 /// The open connection to `conn`'s helper, made (and the helper installed)
 /// if there is none. `ask`: where ssh's prompts go, if any are needed.
 pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFiles>, RemoteError> {
@@ -482,6 +492,13 @@ pub async fn connect(conn: &str, ask: Option<AskIn<'_>>) -> Result<Arc<RemoteFil
         // with ssh's prompts going to the user as for the connection itself
         // (the grant lives until the install is done).
         Err((e, true)) => {
+            super::helper_consent::allow_install(&name, ask.map(|a| a.block_id))
+                .await
+                .map_err(|why| {
+                    RemoteError::link(format!(
+                        "File browsing on {name} needs AgentMux's helper, which is not installed there: {why}."
+                    ))
+                })?;
             let _install_grant = ask.and_then(|a| host.ask_user_in(a.block_id, &name, a.auth_key));
             super::helper_install::ensure(&host, &name, "files", |_| async {})
                 .await
