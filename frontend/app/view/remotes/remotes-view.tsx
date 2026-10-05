@@ -264,7 +264,7 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                 <Show when={r().sources.includes("recent")}>
                     <button onClick={run("Forget", () => model.forget(r().name))}>Forget</button>
                 </Show>
-                <Show when={r().helper.state === "installed"}>
+                <Show when={r().helper.installed}>
                     <button onClick={run("Remove helper", () => model.removeHelper(r().name))}>Remove helper</button>
                 </Show>
             </div>
@@ -374,7 +374,7 @@ export function rowMenu(model: RemotesViewModel, r: RemoteRecord): ContextMenuIt
         isHidden(r) ? act("Unhide", () => model.setHidden(r.name, false)) : act("Hide", () => model.setHidden(r.name, true))
     );
     if (r.sources.includes("recent")) items.push(act("Forget", () => model.forget(r.name)));
-    if (r.helper.state === "installed") items.push(act("Remove helper", () => model.removeHelper(r.name), { danger: true }));
+    if (r.helper.installed) items.push(act("Remove helper", () => model.removeHelper(r.name), { danger: true }));
     items.push({ type: "separator" });
     items.push({
         type: "action",

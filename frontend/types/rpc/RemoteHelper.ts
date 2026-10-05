@@ -9,4 +9,9 @@ state: string,
 /**
  * The AgentMux version whose helper last answered (when installed).
  */
-version: string, };
+version: string, 
+/**
+ * The helper is on the host, whatever `state` says (`never` stops new
+ * installs, not one already there): Remove helper is offered on this.
+ */
+installed: boolean, };

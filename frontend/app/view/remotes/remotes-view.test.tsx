@@ -30,7 +30,7 @@ function remote(name: string, over: Partial<RemoteRecord> = {}): RemoteRecord {
         sources: ["ssh_config"],
         status: { state: "disconnected", error: "" },
         platform: null,
-        helper: { state: "absent", version: "" },
+        helper: { state: "absent", version: "", installed: false },
         sessions: null,
         agents: [],
         settings: {},
@@ -60,12 +60,12 @@ describe("RemotesView", () => {
                 settings: { "display:name": "prod-db", "display:color": "#e5484d" },
                 status: { state: "connected", error: "" },
                 platform: { os: "linux", arch: "x86_64" },
-                helper: { state: "installed", version: "0.59.9" },
+                helper: { state: "installed", version: "0.59.9", installed: true },
                 sessions: 2,
                 agents: ["korp"],
             }),
             remote("me@box", { sources: ["recent"], last_used_ms: 5 }),
-            remote("Ubuntu", { kind: "wsl", sources: ["wsl"], helper: { state: "none", version: "" } }),
+            remote("Ubuntu", { kind: "wsl", sources: ["wsl"], helper: { state: "none", version: "", installed: false } }),
         ]);
         const headings = Array.from(document.querySelectorAll(".remotes-section-heading")).map((h) => h.textContent);
         expect(headings).toEqual(["SSH hosts", "Recent", "WSL"]);
@@ -178,7 +178,7 @@ describe("RemotesView", () => {
     });
 
     it("removes the helper through srv, which asks the user; Keep It is not an error", async () => {
-        const { model } = await renderWith([remote("db1", { helper: { state: "installed", version: "0.59.9" } })]);
+        const { model } = await renderWith([remote("db1", { helper: { state: "installed", version: "0.59.9", installed: true } })]);
         fireEvent.click(document.querySelector('[data-remote="db1"]')!);
         rpc.RemoteHelperRemoveCommand.mockRejectedValueOnce(new Error("kept: the user chose not to remove it"));
         fireEvent.click(screen.getByRole("button", { name: "Remove helper" }));
