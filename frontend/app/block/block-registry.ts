@@ -20,6 +20,7 @@ import { knowledgePaneTab } from "@/app/view/knowledge/knowledge";
 import { launcherPaneTab } from "@/app/view/launcher/launcher";
 import { mediaPaneTab } from "@/app/view/media/media";
 import { memoryPaneTab } from "@/app/view/bundle/bundle";
+import { remotesPaneTab } from "@/app/view/remotes/remotes";
 import { settingsPaneTab } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
@@ -50,6 +51,7 @@ const builtins = [
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     launcherPaneTab, // native — Phase 2c (no header)
     swarmPaneTab, // native — Phase 2c
+    remotesPaneTab, // native (SPEC_REMOTES_PANE_2026_10_05.md)
     memoryPaneTab, // native — Phase 2c
     mediaPaneTab, // native — Phase 2c
     identityPaneTab, // native — Phase 2c

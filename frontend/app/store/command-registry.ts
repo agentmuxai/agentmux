@@ -156,6 +156,13 @@ export function registerDefaultCommands(): void {
         icon: "folder-open",
         execute: () => createBlock({ meta: { view: "files" } }),
     });
+    commandRegistry.register({
+        id: "open:remotes",
+        label: "Open Remotes",
+        category: "Open",
+        icon: "server",
+        execute: () => createBlock({ meta: { view: "remotes" } }),
+    });
 
     // ---- split ----
     commandRegistry.register({
