@@ -498,6 +498,7 @@ partial list.
 | [`SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23`](SPEC_ACCOUNT_EMAIL_IN_ARMORY_2026_09_23.md) | SPEC: show the provider account's email in the Armory |
 | [`SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24`](SPEC_AGENT_ACTIVITY_FLASH_SOUND_SYNC_2026_09_24.md) | Activity flash matches its sound: same strikes, same timing, same relative intensity |
 | [`SPEC_AGENT_ARCHITECTURE_2026_05_27`](SPEC_AGENT_ARCHITECTURE_2026_05_27.md) | SPEC: Agent data-model architecture — consolidation plan & status |
+| [`SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05`](SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md) | SPEC: Agent Bundle Format v0.3, and bundles that bind to any agent |
 | [`SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15`](SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md) | SPEC: Agent Control Protocol — fix AskUserQuestion (+ unblock tool-permission UI) and align muxbus delivery |
 | [`SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23`](SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md) | SPEC: agent identity is carried, never derived |
 | [`SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16`](SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md) | Canonical Agent Identity/History Persistence Protocol — Synthesis with Mandatory ABF |
