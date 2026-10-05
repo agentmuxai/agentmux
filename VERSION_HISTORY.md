@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.59.9 — 2026-10-04
+
+- fix(statusbar): the left group no longer wraps onto extra rows; the sideways-shift fix stays through overflow: clip
+- fix(tabbar): a blank drag square stays between the last tab and the widgets, so a full tab strip can still drag the window; the active tab scrolls into view
+- feat(armory): delete an account from its right-click menu; account details open in a panel under the row; deleting keeps conversation history and reports a login it couldn't remove
+- fix(keys): shortcuts stop firing over typing - a terminal keeps readline's Alt keys, Ctrl+P and Ctrl+[ (terminal clear on Windows/Linux moves from Alt+K to Ctrl+Shift+L); text fields keep word selection; a key a pane or the editor handled no longer also runs a global shortcut; Ctrl+Shift+K asks before replacing a pane
+- fix(keys): the numbered pane overlay shows again while Ctrl+Shift is held; removed dead keyboard code and the unused app:globalhotkey setting
+- feat(keys): one shortcut table drives every key, hint and menu. Windows/Linux: window, tab and pane shortcuts move from Alt to Ctrl+Shift (new tab Ctrl+Shift+T, close pane Ctrl+Shift+W, split Ctrl+Shift+D, palette Ctrl+Shift+P, tab N Ctrl+1-9), so Alt+letter reaches the shell. New: Settings Ctrl+, / Cmd+,, shortcuts sheet F1, next/previous pane F6 / Shift+F6, new agent pane. A terminal keeps every key except an explicit skip-list. The help pane, menus, palette and tooltips show the real keys for your platform.
+- feat(keys): new shortcuts - swap the focused pane with a neighbour (Ctrl+Alt+Shift+arrows), resize panes (Alt+Shift+arrows, Ctrl+Alt+Cmd+arrows on macOS), move a tab (Ctrl+Alt+Shift+PageUp/PageDown), rename the tab (F2), reset zoom on all panes (Ctrl+Shift+0), focus the agent message box (Ctrl+L / Cmd+L)
+- feat(keys): document-tab, editor and Files pane keys come from the shortcut table and show in the help pane; on macOS the editor's find is Cmd+F only (Ctrl+F is CodeMirror's cursor-right)
+- feat(keys): window, tab and pane shortcuts work while a browser pane has focus (the host forwards them from the shortcut table)
+- feat(keys): your own keyboard shortcuts - a keybindings setting adds, remaps or unbinds (-command) any shortcut, applied live and shown in the help pane and menus; docs/keybindings.md is generated from the shortcut table
+- ci: every PR must add a changeset (or carry the no-changeset label); a changeset check enforces it
+- test(srv): the subagent watcher tests remove their scratch folders in the home directory even when a test fails
+
 ## 0.59.8 — 2026-10-03
 
 - Every build now shares your logins: a new build, a rebuilt branch and task dev no longer start logged out. Your Claude, GitHub and other accounts, the cloud sign-in, Global Memory and native memory carry over, and the first shared start also brings across the Global Memory and native memory that earlier per-build channels kept to themselves. Set AGENTMUX_ISOLATED_AUTH=1 to test login from an empty store
