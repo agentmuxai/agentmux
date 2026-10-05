@@ -9,11 +9,18 @@
  * grammar until it has its own tokenizer; cmd renders as plain text.
  * The text is never altered: every span is a range of the original command.
  *
+ * A heredoc body whose language can be told (embedded.ts) is highlighted as
+ * that language: a shell body with the same tokenizer, on first paint; any
+ * other language by Shiki, after a plain first paint. Unknown bodies stay
+ * plain.
+ *
  * Spec: docs/specs/SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3
  */
 
-import { For, Match, Switch, createMemo, type JSX } from "solid-js";
+import { For, Match, Show, Switch, createMemo, createSignal, onCleanup, type JSX } from "solid-js";
 import { HighlightedCode } from "../HighlightedCode";
+import { SHELL_LANG, embeddedBodies } from "./embedded";
+import { cachedRuns, highlightBody } from "./embedded-highlight";
 import { detectShellFlavor } from "./flavor";
 import { MAX_TOKENIZE_CHARS, tokenizeShell, type Token } from "./tokenize";
 
@@ -40,6 +47,42 @@ function tokensFor(command: string): Token[] {
     return tokens;
 }
 
+/** One token of `source` as text or a class-coloured span. */
+function renderToken(source: string, t: Token): JSX.Element {
+    const text = source.slice(t.start, t.end);
+    return t.kind === "plain" ? text : <span class={`sh-${t.kind}`}>{text}</span>;
+}
+
+/** A heredoc body in a known language. Renders exactly `text`. */
+const EmbeddedBody = (props: { text: string; lang: string }): JSX.Element => {
+    // Each body token gets its own instance, so its text and language are fixed.
+    const { text, lang } = props;
+    if (lang === SHELL_LANG) {
+        return (
+            <span class="sh-embedded">
+                <For each={tokensFor(text)}>{(t) => renderToken(text, t)}</For>
+            </span>
+        );
+    }
+    const [runs, setRuns] = createSignal(cachedRuns(text, lang));
+    if (!runs()) {
+        let live = true;
+        onCleanup(() => (live = false));
+        void highlightBody(text, lang).then((r) => {
+            if (live && r) setRuns(r);
+        });
+    }
+    return (
+        <Show when={runs()} fallback={<span class="sh-heredoc-body">{text}</span>}>
+            {(r) => (
+                <span class="sh-embedded sh-shiki">
+                    <For each={r()}>{(run) => (run.style ? <span style={run.style}>{run.text}</span> : run.text)}</For>
+                </span>
+            )}
+        </Show>
+    );
+};
+
 interface ShellCommandProps {
     command: string;
     /** Extra CSS class applied to the outer <pre>. */
@@ -51,6 +94,10 @@ export const ShellCommand = (props: ShellCommandProps): JSX.Element => {
     const command = () => props.command ?? "";
     const flavor = createMemo(() => detectShellFlavor(command()));
     const tokens = createMemo(() => (flavor() === "posix" ? tokensFor(command()) : []));
+    // Heredoc bodies with a known language, by start offset.
+    const bodies = createMemo(
+        () => new Map(embeddedBodies(tokens(), command()).map((b) => [b.start, b.lang] as const))
+    );
     const cls = () => `agent-highlighted-code agent-shell-command${props.class ? ` ${props.class}` : ""}`;
 
     return (
@@ -65,8 +112,12 @@ export const ShellCommand = (props: ShellCommandProps): JSX.Element => {
                 <pre class={cls()}>
                     <For each={tokens()}>
                         {(t) => {
-                            const text = command().slice(t.start, t.end);
-                            return t.kind === "plain" ? text : <span class={`sh-${t.kind}`}>{text}</span>;
+                            const lang = t.kind === "heredoc-body" ? bodies().get(t.start) : undefined;
+                            return lang ? (
+                                <EmbeddedBody text={command().slice(t.start, t.end)} lang={lang} />
+                            ) : (
+                                renderToken(command(), t)
+                            );
                         }}
                     </For>
                 </pre>

@@ -981,9 +981,26 @@ $transcript-preview-max-height: calc(50vh / 3);
                 color: var(--term-blue, var(--info-color));
             }
             .sh-flag-value,
-            .sh-string,
-            .sh-heredoc-body {
+            .sh-string {
                 color: var(--term-green, var(--success-color));
+            }
+            // A heredoc body of unknown language is plain text, not one long
+            // string; known languages are coloured below.
+            .sh-heredoc-body {
+                color: var(--main-text-color);
+            }
+            // Shiki-highlighted bodies (embedded-highlight.ts): each run
+            // carries both themes' colours; pick by the theme's polarity.
+            .sh-shiki span {
+                color: var(--shiki-dark);
+                font-style: var(--shiki-dark-font-style);
+                font-weight: var(--shiki-dark-font-weight);
+
+                [data-theme-polarity="light"] & {
+                    color: var(--shiki-light);
+                    font-style: var(--shiki-light-font-style);
+                    font-weight: var(--shiki-light-font-weight);
+                }
             }
             .sh-variable,
             .sh-env-assign,
