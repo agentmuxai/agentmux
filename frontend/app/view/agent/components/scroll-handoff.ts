@@ -162,7 +162,8 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         const dir = e.deltaY < 0 ? -1 : 1;
         // 1 px slack: fractional layout at non-100% zoom leaves a true bottom
         // a hair short of scrollHeight.
-        const canSkid = opts.skidWhenFits === true || el.scrollHeight - el.clientHeight > 1;
+        const overflows = el.scrollHeight - el.clientHeight > 1;
+        const canSkid = opts.skidWhenFits === true || overflows;
         const atEdge = dir < 0 ? el.scrollTop <= 0 : el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
         const { state, action } = nextSkid(skids.get(pane) ?? SKID_IDLE, {
             box: el,
@@ -175,7 +176,10 @@ export function attachScrollHandoff(el: HTMLElement, opts: ScrollHandoffOptions 
         });
         skids.set(pane, state);
         if (action.kind === "absorb") {
-            // `contain` keeps the box's own edge from relaying, so nothing moves.
+            // `contain` keeps an overflowing box's edge from relaying, so nothing
+            // moves. A box that fits has nothing for `contain` to act on, so
+            // cancel the event there rather than trust the browser not to chain.
+            if (!overflows) e.preventDefault();
             flash(dir);
         } else if (action.kind === "forward") {
             if (action.absorbed) flash(dir);

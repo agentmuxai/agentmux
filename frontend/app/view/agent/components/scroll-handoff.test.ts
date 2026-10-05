@@ -144,12 +144,15 @@ describe("attachScrollHandoff", () => {
     it("with skidWhenFits (tool previews), a box that fits skids in either direction", () => {
         const fits = { scrollTop: 0, clientHeight: 200, scrollHeight: 200 };
         const s = setupWith({ skidWhenFits: true }, fits);
-        s.skid(s.box, 120);
+        // a box with no overflow cancels the absorbed notches itself
+        expect(s.wheel(s.box, 120)).toBe(true);
+        expect(s.wheel(s.box, 120)).toBe(true);
         expect(s.pane()).toBe(1000);
         expect(s.box.classList.contains("scroll-handoff-skid--bottom")).toBe(true);
         s.wheel(s.box, 120);
         expect(s.pane()).toBe(1120);
-        s.skid(s.box, -120); // reversing is a new arrival
+        expect(s.wheel(s.box, -120)).toBe(true); // reversing is a new arrival
+        expect(s.wheel(s.box, -120)).toBe(true);
         expect(s.pane()).toBe(1120);
         s.wheel(s.box, -120);
         expect(s.pane()).toBe(1000);
