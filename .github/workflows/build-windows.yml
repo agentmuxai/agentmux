@@ -196,11 +196,26 @@ jobs:
         run: bash scripts/verify-cef-version.sh "$CEF_RUNTIME_DIR_WINDOWS"
 
       # ── Build ─────────────────────────────────────────────────────────────
+      # ── Remote helpers ─────────────────────────────────────────────────────
+      # Every package carries agentmux-remote for all four SSH host platforms
+      # (scripts/build-remote-helpers.sh, called by the packager; spec
+      # SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §9.1).
+      # cargo-zigbuild cross-builds all four from this runner; setup-python gives
+      # a pip that installs zig without touching the system Python.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install zig and cargo-zigbuild (remote helpers)
+        shell: bash
+        run: |
+          python -m pip install ziglang==0.16.0
+          cargo install cargo-zigbuild --locked --version 0.23.4
+
       - name: Build portable (RELEASE_CHANNEL=stable, STRIP_MAPS=1)
         shell: bash
         run: |
           mkdir -p "$OUT"
-          STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh "$OUT"
+          REQUIRE_REMOTE_HELPERS=1 STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh "$OUT"
 
       - name: Build installer
         shell: pwsh

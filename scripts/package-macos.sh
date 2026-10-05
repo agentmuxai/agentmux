@@ -234,6 +234,28 @@ cp target/release/agentmux-mcp "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
 # CI if a packager drops either tool again.
 cp target/release/agentmux-bashwrap "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
 
+# Remote helpers — agentmux-remote for every SSH host platform, since any
+# AgentMux may connect to any host; srv uploads the matching one to a host for
+# file browsing and durable sessions (spec
+# SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md §9.1). The two macOS
+# builds are Mach-O code, so they go under Contents/MacOS (signed below, like the
+# other tools). The two Linux builds are not code to macOS, and a non-code file
+# under Contents/MacOS breaks the seal (see the frontend note below), so they go
+# under Contents/Resources/remote, where they are sealed as resources. srv looks
+# in both (helper_install::packaged_paths).
+bash scripts/build-remote-helpers.sh dist/remote
+if [ -d dist/remote ]; then
+    for d in dist/remote/*/; do
+        t="$(basename "$d")"
+        case "$t" in
+            *-apple-darwin) dest="$APP/Contents/MacOS/tools/remote/$t" ;;
+            *) dest="$APP/Contents/Resources/remote/$t" ;;
+        esac
+        mkdir -p "$dest"
+        cp "$d/agentmux-remote" "$dest/agentmux-remote"
+    done
+fi
+
 # Frontend is a tree of resource files (HTML/CSS/fonts), NOT code. codesign
 # only allows executables under Contents/MacOS/ — a resource dir there breaks
 # the bundle seal ("In subcomponent: …/frontend/…css"). So the real files live
@@ -465,6 +487,12 @@ done
 # hardened-runtime/notarization rejects it.
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-mcp"
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/tools/bin/agentmux-bashwrap"
+# The two macOS remote helpers are nested Mach-Os as well, signed the same way
+# (no entitlements: they run on a remote Mac, not in this app). The Linux builds
+# under Contents/Resources/remote are not code and are sealed as resources.
+for helper in "$APP"/Contents/MacOS/tools/remote/*/agentmux-remote; do
+    [ -f "$helper" ] && "${SIGN[@]}" "$helper"
+done
 # 5. Seal the .app bundle last. codesign signs the main executable
 #    (agentmux-launcher) as part of sealing; pass the entitlements so the
 #    launcher is hardened-runtime signed identically to the host.

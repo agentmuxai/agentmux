@@ -7,9 +7,11 @@
 //!
 //! 1. Probe the host over the pane's own ssh: `uname -sm`, and whether this
 //!    version's helper is already at `~/.agentmux-remote/bin/<version>/`.
-//! 2. Get the matching static build: a local cache, or this version's GitHub
-//!    release asset, checked against the release's SHA256SUMS. (A dev build
-//!    can point `AGENTMUX_REMOTE_HELPER_DIR` at its own builds.)
+//! 2. Get the matching static build from this package, which carries all four
+//!    (`tools/remote/<target>/`, spec §9.1; on macOS the Linux builds sit in
+//!    `Contents/Resources/remote/<target>/`). A developer can point
+//!    `AGENTMUX_REMOTE_HELPER_DIR` at their own builds
+//!    (`scripts/build-remote-helpers.sh` writes the same layout).
 //! 3. Upload it over that ssh (`cat >` a temp file in an owner-only folder;
 //!    no scp or sftp needed on the host), check its hash there, then
 //!    `chmod 700` and move it into place.
@@ -34,27 +36,36 @@ pub fn target_for(uname: &str) -> Option<&'static str> {
     })
 }
 
-/// The release asset name of a build: `agentmux-remote-<version>-<target>`.
+/// The flat name a build had as a release asset, `agentmux-remote-<version>-<target>`.
+/// Still accepted in `AGENTMUX_REMOTE_HELPER_DIR` beside the packaged layout.
 pub fn asset_name(version: &str, target: &str) -> String {
     format!("agentmux-remote-{version}-{target}")
 }
 
-fn sums_name(version: &str) -> String {
-    format!("agentmux-remote-{version}-SHA256SUMS")
+const HELPER_FILE: &str = "agentmux-remote";
+
+/// Where a package keeps the build for `target`, relative to srv's own folder
+/// (`exe_dir`): `tools/remote/<target>/` beside the other bundled tools, or, in
+/// a macOS app, `../Resources/remote/<target>/`, because the bundle seal only
+/// allows Mach-O code under `Contents/MacOS` and the Linux builds are data there.
+pub fn packaged_paths(exe_dir: &Path, target: &str) -> [PathBuf; 2] {
+    [
+        exe_dir.join("tools").join("remote").join(target).join(HELPER_FILE),
+        exe_dir.join("..").join("Resources").join("remote").join(target).join(HELPER_FILE),
+    ]
 }
 
-fn release_url(version: &str, name: &str) -> String {
-    format!("https://github.com/agentmuxai/agentmux/releases/download/v{version}/{name}")
-}
-
-/// The hash a SHA256SUMS file gives for `name`.
-pub fn hash_in_sums(sums: &str, name: &str) -> Option<String> {
-    sums.lines().find_map(|line| {
-        let (hash, file) = line.split_once(char::is_whitespace)?;
-        let file = file.trim().trim_start_matches('*');
-        (file == name && hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
-            .then(|| hash.to_ascii_lowercase())
-    })
+/// The paths to try for `target`, in order: `dev_dir`
+/// (`AGENTMUX_REMOTE_HELPER_DIR`) alone when it is set, else this package's.
+fn candidate_paths(dev_dir: Option<&Path>, exe_dir: Option<&Path>, version: &str, target: &str) -> Vec<PathBuf> {
+    match (dev_dir, exe_dir) {
+        (Some(dir), _) => vec![
+            dir.join(target).join(HELPER_FILE),
+            dir.join(asset_name(version, target)),
+        ],
+        (None, Some(exe_dir)) => packaged_paths(exe_dir, target).to_vec(),
+        (None, None) => Vec::new(),
+    }
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -135,63 +146,32 @@ pub fn parse_probe(out: &str, version: &str) -> Probe {
     Probe { uname, installed }
 }
 
-/// This version's build for `target`: from `AGENTMUX_REMOTE_HELPER_DIR` (a
-/// dev build), the cache under `cache_dir`, or the release, its hash checked
-/// against the release's SHA256SUMS before it is cached. Returns the bytes
-/// and their hash.
-pub async fn local_build(
-    version: &str,
-    target: &str,
-    cache_dir: &Path,
-    http: &reqwest::Client,
-) -> Result<(Vec<u8>, String), String> {
-    let name = asset_name(version, target);
-    if let Some(dir) = std::env::var_os("AGENTMUX_REMOTE_HELPER_DIR") {
-        let path = PathBuf::from(dir).join(&name);
-        let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let hash = sha256_hex(&bytes);
-        return Ok((bytes, hash));
-    }
-    let cached = cache_dir.join(&name);
-    let cached_hash = cache_dir.join(format!("{name}.sha256"));
-    if let (Ok(bytes), Ok(hash)) = (
-        std::fs::read(&cached),
-        std::fs::read_to_string(&cached_hash),
-    ) {
-        if sha256_hex(&bytes) == hash.trim() {
-            return Ok((bytes, hash.trim().to_string()));
+/// This version's build for `target`, and its hash: from
+/// `AGENTMUX_REMOTE_HELPER_DIR` when set (a developer's own builds), else from
+/// this package (spec §9.1). Nothing is downloaded.
+pub fn local_build(version: &str, target: &str) -> Result<(Vec<u8>, String), String> {
+    let dev_dir = std::env::var_os("AGENTMUX_REMOTE_HELPER_DIR").map(PathBuf::from);
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    read_first(&candidate_paths(dev_dir.as_deref(), exe_dir.as_deref(), version, target), target)
+}
+
+fn read_first(paths: &[PathBuf], target: &str) -> Result<(Vec<u8>, String), String> {
+    for path in paths {
+        if let Ok(bytes) = std::fs::read(path) {
+            let hash = sha256_hex(&bytes);
+            return Ok((bytes, hash));
         }
     }
-    let get = |url: String| async move {
-        let resp = http
-            .get(&url)
-            .timeout(std::time::Duration::from_secs(120))
-            .send()
-            .await
-            .map_err(|e| format!("could not download {url}: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("could not download {url}: HTTP {}", resp.status()));
-        }
-        resp.bytes()
-            .await
-            .map(|b| b.to_vec())
-            .map_err(|e| format!("could not download {url}: {e}"))
-    };
-    let sums = get(release_url(version, &sums_name(version))).await?;
-    let want = hash_in_sums(&String::from_utf8_lossy(&sums), &name)
-        .ok_or_else(|| format!("this release publishes no helper for {target}"))?;
-    let bytes = get(release_url(version, &name)).await?;
-    let got = sha256_hex(&bytes);
-    if got != want {
-        return Err(format!(
-            "the downloaded helper's hash is {got}, not the release's {want}"
-        ));
-    }
-    if std::fs::create_dir_all(cache_dir).is_ok() {
-        let _ = std::fs::write(&cached, &bytes);
-        let _ = std::fs::write(&cached_hash, &got);
-    }
-    Ok((bytes, got))
+    Err(format!(
+        "this AgentMux build doesn't include the helper for {target} (looked in {})",
+        paths
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    ))
 }
 
 /// Put this version's helper on `host` if it is not there (spec §6.2): probe
@@ -225,8 +205,7 @@ where
             probe.uname.trim()
         )
     })?;
-    let cache = crate::backend::base::get_mux_config_dir().join("remote-helper");
-    let (bytes, hash) = local_build(version, target, &cache, &reqwest::Client::new()).await?;
+    let (bytes, hash) = local_build(version, target)?;
     announce(bytes.len()).await;
     run(upload_command(version, tag), Some(bytes)).await?;
     let out = run(install_command(version, tag, &hash), None).await?;
@@ -260,23 +239,58 @@ mod tests {
         assert_eq!(target_for(""), None);
     }
 
+    fn put(path: &Path, bytes: &[u8]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+
     #[test]
-    fn a_sums_file_gives_each_builds_hash() {
-        let h = "a".repeat(64);
-        let sums = format!("{h}  agentmux-remote-0.59.8-x86_64-unknown-linux-musl\n{}  *agentmux-remote-0.59.8-aarch64-apple-darwin\n", "B".repeat(64));
-        assert_eq!(
-            hash_in_sums(&sums, "agentmux-remote-0.59.8-x86_64-unknown-linux-musl"),
-            Some(h)
-        );
-        assert_eq!(
-            hash_in_sums(&sums, "agentmux-remote-0.59.8-aarch64-apple-darwin"),
-            Some("b".repeat(64))
-        );
-        assert_eq!(
-            hash_in_sums(&sums, "agentmux-remote-0.59.8-x86_64-apple-darwin"),
-            None
-        );
-        assert_eq!(hash_in_sums("nothex  x", "x"), None);
+    fn a_package_carries_the_helper_beside_its_other_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe_dir = dir.path().join("runtime");
+        let t = "x86_64-unknown-linux-musl";
+        put(&exe_dir.join("tools").join("remote").join(t).join("agentmux-remote"), b"linux build");
+        let (bytes, hash) = read_first(&candidate_paths(None, Some(&exe_dir), "0.59.9", t), t).unwrap();
+        assert_eq!(bytes, b"linux build");
+        assert_eq!(hash, sha256_hex(b"linux build"));
+    }
+
+    #[test]
+    fn a_macos_app_keeps_the_linux_builds_in_its_resources() {
+        let dir = tempfile::tempdir().unwrap();
+        let contents = dir.path().join("AgentMux.app").join("Contents");
+        let exe_dir = contents.join("MacOS");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        let t = "aarch64-unknown-linux-musl";
+        put(&contents.join("Resources").join("remote").join(t).join("agentmux-remote"), b"arm build");
+        let (bytes, _) = read_first(&candidate_paths(None, Some(&exe_dir), "0.59.9", t), t).unwrap();
+        assert_eq!(bytes, b"arm build");
+    }
+
+    #[test]
+    fn a_developers_folder_wins_in_either_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe_dir = dir.path().join("runtime");
+        let dev = dir.path().join("dev");
+        let t = "x86_64-apple-darwin";
+        put(&exe_dir.join("tools").join("remote").join(t).join("agentmux-remote"), b"packaged");
+        put(&dev.join(t).join("agentmux-remote"), b"dev, script layout");
+        let (bytes, _) = read_first(&candidate_paths(Some(&dev), Some(&exe_dir), "0.59.9", t), t).unwrap();
+        assert_eq!(bytes, b"dev, script layout");
+
+        let flat = dir.path().join("flat");
+        put(&flat.join(asset_name("0.59.9", t)), b"dev, flat name");
+        let (bytes, _) = read_first(&candidate_paths(Some(&flat), Some(&exe_dir), "0.59.9", t), t).unwrap();
+        assert_eq!(bytes, b"dev, flat name");
+    }
+
+    #[test]
+    fn a_build_without_the_helper_says_so_and_downloads_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = "aarch64-apple-darwin";
+        let err = read_first(&candidate_paths(None, Some(dir.path()), "0.59.9", t), t).unwrap_err();
+        assert!(err.contains("doesn't include the helper for aarch64-apple-darwin"), "{err}");
+        assert!(!err.contains("http"), "{err}");
     }
 
     #[test]
