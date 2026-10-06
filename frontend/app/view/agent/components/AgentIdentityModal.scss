@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The inner AgentIdentityPanel content is fully styled by _identity-panel.scss.
-// This file handles the modal body wrapper plus the .agent-modal-footer /
-// .agent-modal-done-btn this panel uses (moved here from the deleted
-// AgentMemoryModal.scss placeholder when the native memory browser shipped).
+// This file handles the modal body wrapper plus the .agent-modal-footer this
+// panel uses (moved here from the deleted AgentMemoryModal.scss placeholder
+// when the native memory browser shipped). Its Done button is an element/ui
+// Button and needs no styles here.
 
 .agent-identity-modal-body {
     display: flex;
