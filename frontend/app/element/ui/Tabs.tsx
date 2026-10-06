@@ -12,7 +12,11 @@ export interface TabItem<T extends string = string> {
     id: T;
     label: string;
     icon?: string;
-    /** Tooltip text when only the icon shows. Defaults to the label. */
+    /**
+     * Hover text. A tab that sets its own always shows it (a description
+     * longer than the label); otherwise the label shows when only the icon
+     * does.
+     */
     tooltip?: string;
     /** Extra class on the tab, e.g. a standing highlight on one section. */
     class?: string;
@@ -85,7 +89,7 @@ export function Tabs<T extends string>(props: TabsProps<T>): JSX.Element {
                         <Tooltip
                             content={item.tooltip ?? item.label}
                             placement={orientation() === "vertical" ? "right" : "bottom"}
-                            disable={!props.iconOnly && props.tooltips !== "always"}
+                            disable={!props.iconOnly && props.tooltips !== "always" && !item.tooltip}
                             divClassName="ui-tooltip-anchor"
                         >
                             <button

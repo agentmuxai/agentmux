@@ -173,6 +173,15 @@ describe("Tabs", () => {
         expect(screen.getAllByText("Terminal")).toHaveLength(2);
     });
 
+    it("always shows a tab's own tooltip text, even with labels showing", async () => {
+        vi.useFakeTimers();
+        const described = [items[0], { ...items[1], tooltip: "Colours, fonts and density" }];
+        render(() => <Tabs items={described} value="general" onChange={() => {}} idPrefix="s" ariaLabel="Settings" />);
+        fireEvent.mouseEnter(screen.getByRole("tab", { name: "Appearance" }).parentElement!);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(screen.getByText("Colours, fonts and density")).toBeTruthy();
+    });
+
     it("has no tooltip by default while labels show", async () => {
         vi.useFakeTimers();
         render(() => <Tabs items={items} value="general" onChange={() => {}} idPrefix="s" ariaLabel="Settings" />);
