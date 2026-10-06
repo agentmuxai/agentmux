@@ -79,18 +79,9 @@
     }
 }
 
+// Buttons here are element/ui Buttons; these rules only place them.
 .bundle-primitive-section-btn {
     flex-shrink: 0;
-    padding: 2px var(--space-1-5);
-    font-size: var(--text-xs);
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color);
-    }
 }
 
 .bundle-primitive-section-caveat {
@@ -131,19 +122,4 @@
 
 .bundle-primitive-section-add-btn {
     align-self: flex-start;
-    padding: var(--space-1) var(--space-2);
-    font-size: var(--text-sm);
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--accent-color);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: default;
-    }
 }

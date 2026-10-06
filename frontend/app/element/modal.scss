@@ -13,6 +13,7 @@
 // Consumes design tokens from `theme.scss` (SPEC_DESIGN_SYSTEM_2026_04_23).
 
 @use "../mixins.scss";
+@use "./ui/line";
 
 // The mount node wraps ModalLayer's children and hosts the portalled
 // `<Modal>`. `container-type: inline-size` lets CSS `@container modal-
@@ -237,58 +238,22 @@
 // Only the preset uses these classes; other modals use the shared
 // <Button> component.
 
+// Footer buttons for panels that still render a raw `<button class="modal-btn">`.
+// They are drawn by the same line recipe as element/ui's Button
+// (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md): neutral by default,
+// accent for the confirm action, danger for a destructive one. New code
+// uses the Button component instead.
 .modal-btn {
-    padding: var(--space-1-5) var(--space-4);
-    font-size: var(--text-sm);
-    font-weight: var(--font-weight-medium);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
-    color: var(--main-text-color);
-    cursor: default;
-    transition: background var(--motion-fast), border-color var(--motion-fast), color var(--motion-fast);
-
-    &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
-        border-color: color-mix(in srgb, var(--border-color) 80%, var(--main-text-color));
-    }
-
-    &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
+    @include line.line-control;
+    @include line.tone(neutral);
 }
 
 .modal-btn--confirm {
-    background: var(--accent-color);
-    border-color: var(--accent-color);
-    color: var(--button-text-color);
-
-    &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
-        border-color: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
-    }
+    @include line.tone(accent);
 }
 
 .modal-btn--destructive {
-    background: var(--error-color);
-    border-color: var(--error-color);
-    /* stylelint-disable color-no-hex --
-       Pure white text on the red destructive button is intentional
-       for contrast; no semantic token currently maps to "always
-       white regardless of theme". */
-    color: #fff;
-
-    &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--error-color) 85%, #fff);
-        border-color: color-mix(in srgb, var(--error-color) 85%, #fff);
-    }
-    /* stylelint-enable color-no-hex */
+    @include line.tone(danger);
 }
 
 // ── Cancel nudge (spec §9) ───────────────────────────────────────────────────
