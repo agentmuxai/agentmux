@@ -330,6 +330,7 @@
 
     // Typography scale — size + weight + leading as independent tokens
     // plus composite role tokens for common text patterns.
+    --text-2xs:  10px; // dense chrome: composer strip, Stash drawer, compact controls
     --text-xs:   11px;
     --text-sm:   12px;
     --text-base: 13px;
@@ -440,6 +441,26 @@
     --cursor-resize-x:    ew-resize;   // horizontal dividers
     --cursor-resize-y:    ns-resize;   // vertical dividers
 
+    // Line-style controls (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md).
+    // A control shows state with its line, never a solid fill: at most a
+    // faint tint of its tone colour, `--ui-tint-rest` at rest and
+    // `--ui-tint-hover` on hover or when pressed.
+    --ui-line-accent: color-mix(in srgb, var(--accent-color) 35%, transparent);
+    --ui-line-danger: color-mix(in srgb, var(--error-color) 45%, transparent);
+    --ui-tint-rest:   6%;
+    --ui-tint-hover:  12%;
+
+    // Control density. `comfortable` is the default; `.ui-density-compact`
+    // below swaps in the composer strip's sizes. Components in
+    // frontend/app/element/ui/ read only these, never a size of their own.
+    --ui-font-size:   var(--text-sm);
+    --ui-font-weight: var(--font-weight-medium);
+    --ui-pad-y:       var(--space-1);
+    --ui-pad-x:       var(--space-3);
+    --ui-gap:         var(--space-1-5);
+    --ui-height:      26px;
+    --ui-icon-size:   12px;
+
     // Z-index hierarchy (canonical source — SPEC_DESIGN_SYSTEM §5.3).
     // Naming is aspirational; existing `--zindex-*` tokens higher in
     // this file stay valid and will be re-pointed or retired in a
@@ -458,6 +479,28 @@
     --z-modal:         9000;
     --z-flyout-menu:   9500;
     --z-context-menu:  10000;
+}
+
+// The two control densities. A class on any container (or on a control
+// itself) resets the `--ui-*` sizes for everything inside it.
+.ui-density-comfortable {
+    --ui-font-size:   var(--text-sm);
+    --ui-font-weight: var(--font-weight-medium);
+    --ui-pad-y:       var(--space-1);
+    --ui-pad-x:       var(--space-3);
+    --ui-gap:         var(--space-1-5);
+    --ui-height:      26px;
+    --ui-icon-size:   12px;
+}
+
+.ui-density-compact {
+    --ui-font-size:   var(--text-2xs);
+    --ui-font-weight: 600;
+    --ui-pad-y:       1px;
+    --ui-pad-x:       var(--space-1-5);
+    --ui-gap:         var(--space-1);
+    --ui-height:      18px;
+    --ui-icon-size:   10px;
 }
 
 // Native Wayland (#4011): no compositor fade exists, so the host fades the
