@@ -32,6 +32,13 @@ export const LIVE_FEED_DEFAULT_TURNS = Number.POSITIVE_INFINITY;
  */
 export const LIVE_FEED_MAX_FINISHED_BYTES = 1_000_000;
 /**
+ * Transcript bytes a pane restores when it opens (`tail_bytes`): about what
+ * the feed keeps, instead of a fixed line window that was ~5 MB on a
+ * streaming agent and rolled off right after the restore. Older turns page in
+ * by scrolling up.
+ */
+export const LIVE_FEED_RESTORE_BYTES = LIVE_FEED_MAX_FINISHED_BYTES;
+/**
  * And by rows: the layout keeps a position and height per row, so a budget of
  * many tiny rows is bounded too. At least one finished turn always stays.
  */

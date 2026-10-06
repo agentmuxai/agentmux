@@ -849,6 +849,15 @@ pub struct CommandBlockfileReadRangeData {
     #[serde(default)]
     #[ts(optional)]
     pub tail_turns: Option<u32>,
+    /// Return only the newest lines of the range that fit in `tail_bytes`
+    /// bytes (after `tail_turns`), starting at the first turn among them when
+    /// one begins there, and say where they start in `offset`. The agent
+    /// pane's restore asks for about what its live feed keeps, whatever the
+    /// line count (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5). The newest
+    /// line always comes back, however large.
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub tail_bytes: Option<u64>,
 }
 
 /// Response from blockfile:read_range.
@@ -881,7 +890,7 @@ pub struct BlockfileReadRangeResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub gen_mismatch: Option<bool>,
-    /// With `tail_turns`: the line number of `lines[0]` — the request's
+    /// With `tail_turns` or `tail_bytes`: the line number of `lines[0]` — the request's
     /// `offset` when nothing was trimmed. `lines` is contiguous from here.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional, type = "number")]

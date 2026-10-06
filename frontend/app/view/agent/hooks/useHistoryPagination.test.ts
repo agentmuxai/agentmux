@@ -354,7 +354,7 @@ describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGEN
             modts: Date.now() - 60_000,
         });
     };
-    const mount = (restoreTurns?: () => number | undefined) => {
+    const mount = (restoreTurns?: () => number | undefined, restoreBytes?: () => number | undefined) => {
         const model = makeMockModel();
         const pins: any[] = [];
         let hook!: ReturnType<typeof useHistoryPagination>;
@@ -368,6 +368,7 @@ describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGEN
                 log: () => {},
                 transcriptSettle: { settle: (pin: any) => pins.push(pin) } as any,
                 restoreTurns,
+                restoreBytes,
             });
         });
         return { model, pins, hook: () => hook };
@@ -419,6 +420,34 @@ describe("useHistoryPagination — restore only the live feed's turns (SPEC_AGEN
         await flush();
         const [, data] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0];
         expect(data).not.toHaveProperty("tail_turns");
+        expect(data).not.toHaveProperty("tail_bytes");
+    });
+
+    it("asks for the feed's bytes and continues from where the trimmed lines start", async () => {
+        sameBlockV2();
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
+            lines: ["{}", "{}"],
+            total: HWM,
+            offset: HWM - 2,
+            stream: "b:blk-1",
+            gen: "g1",
+        });
+        const { pins, hook } = mount(undefined, () => 1_000_000);
+        await flush();
+        const [, data] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0];
+        expect(data).toEqual(expect.objectContaining({ offset: 1000, limit: RESTORE_WINDOW_LINES, tail_bytes: 1_000_000 }));
+        expect(data).not.toHaveProperty("tail_turns");
+        expect(pins).toEqual([{ stream: "b:blk-1", gen: "g1", next: HWM }]);
+        expect(hook().historyOffset()).toBe(HWM - 2);
+    });
+
+    it("sends both limits when both are set", async () => {
+        sameBlockV2();
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({ lines: [], total: HWM });
+        mount(() => 3, () => 500_000);
+        await flush();
+        const [, data] = vi.mocked(RpcApi.BlockfileReadRangeCommand).mock.calls[0];
+        expect(data).toEqual(expect.objectContaining({ tail_turns: 3, tail_bytes: 500_000 }));
     });
 });
 

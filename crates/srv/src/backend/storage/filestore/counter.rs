@@ -337,6 +337,7 @@ const INIT_SCAN_WINDOW: i64 = 1 << 20;
 impl FileStore {
     /// The append behind `append_data_at` and [`Self::append_lines`]: writes
     /// the parts, the size and the counter in one transaction.
+    #[track_caller]
     pub(super) fn append_inner(
         &self,
         zone_id: &str,
@@ -505,6 +506,7 @@ impl FileStore {
     /// SAME transaction — one commit where the line and its stamp took two
     /// (Phase 5a-3: a transcript event now waits for its writes, so each
     /// commit is latency). No stamp when nothing was appended.
+    #[track_caller]
     pub fn append_lines_stamped(
         &self,
         zone_id: &str,
@@ -547,6 +549,7 @@ impl FileStore {
     /// unparseable. On a counted file, `first_line` is the first appended
     /// line's index and `lines - first_line` how many were appended.
     #[allow(dead_code)] // wired into the transcript writers in 5a-3
+    #[track_caller]
     pub fn append_lines(&self, zone_id: &str, name: &str, data: &[u8]) -> Result<AppendPos, StoreError> {
         let now = agentmux_common::time::now_ms();
         let (pos, new_size) = self.append_inner(zone_id, name, data, AppendMode::Lines, now)?;
@@ -559,8 +562,9 @@ impl FileStore {
 
     /// A file's size and epoch, from the database (never the cache).
     #[allow(dead_code)] // read by the transcript RPCs in 5a-3
+    #[track_caller]
     pub fn line_state(&self, zone_id: &str, name: &str) -> Result<Option<LineState>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         Ok(read_row(&conn, zone_id, name)?.map(|r| r.state()))
     }
 
@@ -574,6 +578,7 @@ impl FileStore {
     /// another writer started one first. Cost: one read of the file, once per
     /// epoch.
     #[allow(dead_code)] // called by the transcript RPCs in 5a-3
+    #[track_caller]
     pub fn init_line_counter(&self, zone_id: &str, name: &str) -> Result<Option<LineState>, StoreError> {
         match self.init_scan(zone_id, name)? {
             InitScan::Done(state) => Ok(state),
@@ -587,6 +592,7 @@ impl FileStore {
     /// epoch is returned uncounted. For read paths that must not pay a
     /// whole-file scan, but should see the generation an append by an older
     /// build didn't change.
+    #[track_caller]
     pub fn catch_up_line_counter(&self, zone_id: &str, name: &str) -> Result<Option<LineState>, StoreError> {
         // The scan decides on the row it reads under its own lock: a separate
         // check first could see an epoch behind, then a rewrite land before
@@ -606,6 +612,7 @@ impl FileStore {
     /// Phase 1 of [`Self::init_line_counter`]: the windowed scan — from byte 0,
     /// or, for an epoch that is only behind, from the start of its last open
     /// line.
+    #[track_caller]
     pub(super) fn init_scan(&self, zone_id: &str, name: &str) -> Result<InitScan, StoreError> {
         self.init_scan_from(zone_id, name, ScanFrom::Anywhere)
     }
@@ -613,9 +620,10 @@ impl FileStore {
     /// [`Self::init_scan`], or with [`ScanFrom::CatchUpOnly`] only an epoch
     /// that is behind is scanned; anything else is returned as it is,
     /// uncounted, without reading the file.
+    #[track_caller]
     pub(super) fn init_scan_from(&self, zone_id: &str, name: &str, from: ScanFrom) -> Result<InitScan, StoreError> {
         let (row, base, open) = {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.lock_conn();
             let Some(row) = read_row(&conn, zone_id, name)? else { return Ok(InitScan::Done(None)) };
             if row.counter().is_some() {
                 return Ok(InitScan::Done(Some(row.state())));
@@ -646,7 +654,7 @@ impl FileStore {
         while pos < scan_to {
             let len = INIT_SCAN_WINDOW.min(scan_to - pos);
             let chunk = {
-                let conn = self.conn.lock().unwrap();
+                let conn = self.lock_conn();
                 read_bytes_exact(&conn, zone_id, name, pos, len)?
             };
             // Bytes the file claims but doesn't store yet: not countable.
@@ -660,7 +668,7 @@ impl FileStore {
         }
         let fp_len = INIT_FINGERPRINT_BYTES.min(scan_to);
         let fingerprint = {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.lock_conn();
             read_bytes_exact(&conn, zone_id, name, scan_to - fp_len, fp_len)?
         };
         let Some(fingerprint) = fingerprint else { return Ok(InitScan::Done(None)) };
@@ -679,6 +687,7 @@ impl FileStore {
     /// Phase 2 of [`Self::init_line_counter`]: validate the scan against the
     /// row as it is now, count what was appended since, and start the epoch,
     /// all in one transaction.
+    #[track_caller]
     pub(super) fn init_finish(&self, zone_id: &str, name: &str, scan: ScanResult) -> Result<Option<LineState>, StoreError> {
         let ScanResult { scan_to, count, open, fingerprint, incarnation, rev, base, base_open } = scan;
         let fp_len = fingerprint.len() as i64;

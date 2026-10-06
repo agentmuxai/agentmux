@@ -18,4 +18,13 @@ expect_gen?: string,
  * (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5). A range holding fewer
  * turns comes back whole.
  */
-tail_turns?: number, };
+tail_turns?: number, 
+/**
+ * Return only the newest lines of the range that fit in `tail_bytes`
+ * bytes (after `tail_turns`), starting at the first turn among them when
+ * one begins there, and say where they start in `offset`. The agent
+ * pane's restore asks for about what its live feed keeps, whatever the
+ * line count (SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.5). The newest
+ * line always comes back, however large.
+ */
+tail_bytes?: number, };
