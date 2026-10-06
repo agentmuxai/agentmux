@@ -453,7 +453,7 @@ pub(crate) fn seed_launch(
                 cli_args.extend(["--effort".to_string(), effort.clone()]);
             }
         }
-        "codex" => {
+        "codex" | "antigravity" => {
             if flag_model.is_none() {
                 cli_args.extend(["--model".to_string(), model.clone()]);
             }
@@ -522,7 +522,13 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
     let have_effort = flag_value(&args, &["--effort"]).is_some();
     let model = have_model.clone().unwrap_or_else(|| {
         runtime("model")
-            .filter(|m| provider_id != "codex" || !is_claude_model(m))
+            .filter(|m| match provider_id {
+                "codex" => !is_claude_model(m),
+                // agy's own ids include `claude-sonnet-4-6`; only the bare
+                // Claude aliases, carried over from a Claude pane, are foreign.
+                "antigravity" => !matches!(m.as_str(), "opus" | "sonnet" | "haiku"),
+                _ => true,
+            })
             .unwrap_or_else(|| default_model.to_string())
     });
 
@@ -544,6 +550,11 @@ pub(crate) fn with_runtime_flags(meta: &MetaMapType, args: Vec<String>) -> Vec<S
                 let marker = out.iter().rposition(|a| a == "-").map(|i| out.remove(i));
                 out.extend(["--model".to_string(), model]);
                 out.extend(marker);
+            }
+        }
+        "antigravity" => {
+            if have_model.is_none() {
+                out.extend(["--model".to_string(), model]);
             }
         }
         _ => {}
@@ -1022,7 +1033,6 @@ mod tests {
             "gemini",
             "kimi",
             "qwen",
-            "antigravity",
             "openclaw",
             "copilot",
             "pi",
@@ -1182,10 +1192,33 @@ mod tests {
         );
     }
 
+    /// agy takes `--model` (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md).
+    /// A bare Claude alias left in a pane's runtime is not an agy model; agy's
+    /// own `claude-…` ids are.
+    #[test]
+    fn antigravity_gets_its_model_and_never_a_bare_claude_alias() {
+        let seeded = seed_launch("antigravity", s(&["--output-format", "stream-json"]), "");
+        assert_eq!(after(&seeded.cli_args, "--model").as_deref(), Some("gemini-3.8-flash-medium"));
+        assert_eq!(seeded.runtime.unwrap()["model"], "gemini-3.8-flash-medium");
+
+        let base = s(&["--output-format", "stream-json"]);
+        let model = |m: &str| {
+            let out = with_runtime_flags(&meta_with("antigravity", Some(json!({ "model": m }))), base.clone());
+            after(&out, "--model")
+        };
+        assert_eq!(model("gemini-3.1-pro-high").as_deref(), Some("gemini-3.1-pro-high"));
+        assert_eq!(model("claude-sonnet-4-6").as_deref(), Some("claude-sonnet-4-6"));
+        assert_eq!(model("sonnet").as_deref(), Some("gemini-3.8-flash-medium"));
+        // No --effort: agy has one (low/medium/high), but the runtime menu does
+        // not wire it for Antigravity yet.
+        let out = with_runtime_flags(&meta_with("antigravity", None), base.clone());
+        assert!(!out.iter().any(|a| a == "--effort"), "{out:?}");
+    }
+
     #[test]
     fn it_leaves_alone_what_it_cannot_judge() {
         // not wired, unknown, no provider recorded, and an empty argv
-        for provider in ["gemini", "kimi", "antigravity", "mystery", ""] {
+        for provider in ["gemini", "kimi", "mystery", ""] {
             let args = s(&["--yolo"]);
             assert_eq!(
                 with_runtime_flags(&meta_with(provider, None), args.clone()),

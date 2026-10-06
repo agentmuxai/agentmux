@@ -51,14 +51,14 @@ const count = (args: string[], flag: string) => args.filter((a) => a === flag).l
  *  kimi/gemini/qwen (`--yolo`) and codex (baked in); everything else falls into
  *  the Claude branch on every send. Whether each CLI tolerates the flag is
  *  unverified. Report §4 G1. */
-const KNOWN_STRAY_BYPASS_FLAG = new Set(["muxcode", "openclaw", "copilot", "pi", "antigravity"]);
+const KNOWN_STRAY_BYPASS_FLAG = new Set(["muxcode", "openclaw", "copilot", "pi"]);
 
 /** Providers whose catalog `--yolo` is stripped and not restored. Report §4 G1. */
-const KNOWN_YOLO_DROPPED = new Set(["antigravity"]);
+const KNOWN_YOLO_DROPPED = new Set<string>([]);
 
 /** Providers that list `models` but get no `--model` (menu offers a choice that
  *  is never applied). Report §4 G2. */
-const KNOWN_MODELS_NOT_APPLIED = new Set(["antigravity"]);
+const KNOWN_MODELS_NOT_APPLIED = new Set<string>([]);
 
 describe("pane args — every provider, every mode", () => {
     for (const p of providers) {

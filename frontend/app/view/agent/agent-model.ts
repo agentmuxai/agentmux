@@ -350,6 +350,7 @@ export class AgentViewModel {
                 "agent:resume_flag": provider.resumeFlag ?? "",
                 "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
                 "agent:session_id_field": provider.sessionIdField,
+                "agent:prompt_arg_flag": provider.promptArgFlag ?? "",
             });
 
             // Create SubprocessController (no-op start — waits for first message)
@@ -838,6 +839,7 @@ export class AgentViewModel {
                 "agent:resume_flag": provider.resumeFlag ?? "",
                 "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
                 "agent:session_id_field": provider.sessionIdField,
+                "agent:prompt_arg_flag": provider.promptArgFlag ?? "",
                 "agent:sessionid": continueSid,
                 "agent:runtime": runtimeConfig,
                 ...zoomMeta,

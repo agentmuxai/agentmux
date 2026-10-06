@@ -57,9 +57,14 @@ export interface ProviderDefinition {
     cliCommand: string;
     defaultArgs: string[];
     styledArgs: string[];        // CLI flags for JSON streaming mode (documentation; use launchArgs for actual invocation)
-    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "acp" | "raw";
-    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "acp";
-    authType: "oauth" | "api-key";
+    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp" | "raw";
+    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp";
+    // "oauth": a per-account login AgentMux isolates and binds to the agent
+    // (launch is blocked until an account is chosen). "api-key": a key from
+    // the identity bundle. "cli-managed": the CLI keeps its own sign-in for
+    // the whole machine (Antigravity's `agy`), so there is nothing to bind;
+    // the auth check still runs.
+    authType: "oauth" | "api-key" | "cli-managed";
     authCheckCommand: string[];  // e.g. ["auth", "status", "--json"]
     authLoginCommand: string[];  // e.g. ["auth", "login"]
     npmPackage: string;          // npm package name for local install
@@ -76,6 +81,11 @@ export interface ProviderDefinition {
     // Launch args — the complete CLI args for a single turn (replaces hardcoded ["-p", ...styledArgs])
     // The user message is written to subprocess stdin; these args put the CLI in non-interactive mode.
     launchArgs: string[];
+    // Set for a CLI that ignores stdin and takes the prompt as an argument
+    // (`agy -p <prompt>`): the flag that carries it. Written to pane meta as
+    // `agent:prompt_arg_flag`; mirrors `ProviderConfig::prompt_arg_flag` in
+    // crates/srv/src/backend/providers.rs.
+    promptArgFlag?: string;
     // Resume flag — how to pass a session ID for multi-turn continuity.
     // null means this provider does not support simple-flag resume (e.g. Codex uses a subcommand).
     resumeFlag: string | null;

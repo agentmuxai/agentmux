@@ -230,3 +230,37 @@ describe("buildRuntimeArgs", () => {
         });
     });
 });
+
+// agy's own flags (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md): no
+// --yolo or --permission-mode, and --model takes one of `agy models`' ids.
+describe("buildRuntimeArgs — antigravity", () => {
+    const base = getProvider("antigravity")!.launchArgs;
+    const run = (permissionMode: AgentRuntimeConfig["permissionMode"], model = "gemini-3.1-pro-high") =>
+        buildRuntimeArgs(base, { permissionMode, model, effort: "high" }, "antigravity");
+
+    it("maps each permission mode to agy's own flag", () => {
+        expect(run("bypass")).toEqual([
+            "--output-format", "stream-json", "--dangerously-skip-permissions", "--model", "gemini-3.1-pro-high",
+        ]);
+        expect(run("plan")).toEqual(["--output-format", "stream-json", "--mode", "plan", "--model", "gemini-3.1-pro-high"]);
+        expect(run("acceptEdits")).toContain("accept-edits");
+        // agy has no "auto"; it and "default" leave agy's own review mode.
+        for (const mode of ["default", "auto"] as const) {
+            const args = run(mode);
+            expect(args).not.toContain("--dangerously-skip-permissions");
+            expect(args).not.toContain("--mode");
+            expect(args).not.toContain("--permission-mode");
+        }
+    });
+
+    it("never passes a Claude alias or --effort to agy", () => {
+        const args = run("bypass", "sonnet");
+        expect(args[args.indexOf("--model") + 1]).toBe("gemini-3.8-flash-medium");
+        expect(args).not.toContain("--effort");
+    });
+
+    it("puts no prompt placeholder in the args: the backend appends -p <prompt>", () => {
+        expect(run("bypass")).not.toContain("-p");
+        expect(getProvider("antigravity")!.promptArgFlag).toBe("-p");
+    });
+});

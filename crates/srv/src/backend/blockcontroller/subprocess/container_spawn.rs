@@ -165,6 +165,15 @@ impl SubprocessController {
         base_cmd: Vec<String>,
         config: SubprocessSpawnConfig,
     ) -> Result<(), String> {
+        // The container path keeps the prompt out of argv on purpose (module
+        // doc: a pasted secret must not show in `ps`), so a provider that
+        // can only take its prompt as an argument doesn't run here.
+        if !config.prompt_arg_flag.is_empty() {
+            return Err(
+                "This agent's CLI takes its message on the command line, which the container runtime doesn't do. Run it on the host."
+                    .to_string(),
+            );
+        }
         if !self.try_lock_run() {
             let mut inner = self.inner.lock().unwrap();
             tracing::info!(

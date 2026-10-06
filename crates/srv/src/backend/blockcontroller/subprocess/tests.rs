@@ -123,6 +123,7 @@ fn test_subprocess_controller_concurrent_spawn_blocked() {
         resume_flag: String::new(),
         resume_strategy: "none".to_string(),
         session_id_field: "session_id".to_string(),
+        prompt_arg_flag: String::new(),
         message_id: None,
         session_id: None,
         instance_id: String::new(),
@@ -331,6 +332,7 @@ fn spawn_turn_preserves_session_id_in_queued_config() {
         resume_flag: "--resume".to_string(),
         resume_strategy: "flag".to_string(),
         session_id_field: "session_id".to_string(),
+        prompt_arg_flag: String::new(),
         message_id: None,
         session_id: Some("prior-sid".to_string()),
         instance_id: String::new(),
@@ -391,6 +393,7 @@ fn spawn_turn_refuses_when_lease_held_by_another_process() {
         resume_flag: String::new(),
         resume_strategy: "none".to_string(),
         session_id_field: "session_id".to_string(),
+        prompt_arg_flag: String::new(),
         message_id: None,
         session_id: None,
         instance_id: "instance-under-test".to_string(),
@@ -416,6 +419,7 @@ fn persists_user_record_only_for_clis_that_dont_echo_the_prompt() {
     assert!(persists_user_record("claude-stream-json"));
     assert!(persists_user_record("codex-json"));
     assert!(persists_user_record("kimi-stream-json"));
+    assert!(persists_user_record("agy-stream-json"));
     // Gemini's CLI writes the prompt into its own output: a second record
     // would show the message twice on replay.
     assert!(!persists_user_record("gemini-json"));

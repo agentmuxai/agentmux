@@ -816,14 +816,44 @@ async fn run_auth_check(
 /// A PATH-only provider's CLI: on PATH, else in the folder its own installer
 /// uses ([`crate::backend::providers::known_install_paths`]), which may not
 /// be on this process's PATH until AgentMux restarts.
+///
+/// A provider that takes its prompt on the command line
+/// (`ProviderConfig::prompt_arg_flag`) must run as the real executable: a
+/// `.cmd`/`.bat` wrapper is re-parsed by `cmd.exe`, where `&`, `|` or `%` in
+/// a prompt could turn into a command. For those the installer's own
+/// executable comes first, and a script wrapper on PATH is never used.
 pub(crate) async fn resolve_provider_cli_on_path(provider_id: &str, cli_command: &str) -> Option<String> {
+    let known = || {
+        crate::backend::providers::known_install_paths(provider_id)
+            .into_iter()
+            .find(|p| p.is_file())
+            .map(|p| p.to_string_lossy().into_owned())
+    };
+    let prompt_in_argv = crate::backend::providers::get_provider(provider_id)
+        .and_then(|p| p.prompt_arg_flag())
+        .is_some();
+    if prompt_in_argv {
+        if let Some(path) = known() {
+            return Some(path);
+        }
+        // Every match, not just the first: a `.cmd` shim ahead of the real
+        // executable on PATH must not hide it.
+        return resolve_cli_candidates_on_path(cli_command)
+            .await
+            .into_iter()
+            .find(|path| !is_script_wrapper(path));
+    }
     if let Some(path) = resolve_cli_on_path(cli_command).await {
         return Some(path);
     }
-    crate::backend::providers::known_install_paths(provider_id)
-        .into_iter()
-        .find(|p| p.is_file())
-        .map(|p| p.to_string_lossy().into_owned())
+    known()
+}
+
+/// Whether `path` is a Windows batch script (`.cmd`/`.bat`), which runs
+/// through `cmd.exe` and re-parses its arguments.
+fn is_script_wrapper(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".cmd") || lower.ends_with(".bat")
 }
 
 /// Resolve a CLI command on the system PATH.
@@ -843,6 +873,11 @@ pub(crate) async fn resolve_provider_cli_on_path(provider_id: &str, cli_command:
 /// Taking the raw first line would yield the extensionless entry, which
 /// `Command::new` cannot run on Windows without a shell.
 async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
+    resolve_cli_candidates_on_path(cli_command).await.into_iter().next()
+}
+
+/// Every spawnable match for `cli_command` on PATH that exists, in PATH order.
+async fn resolve_cli_candidates_on_path(cli_command: &str) -> Vec<String> {
     let which_result = if cfg!(windows) {
         let mut probe = tokio::process::Command::new("where");
         probe.arg(cli_command);
@@ -854,26 +889,31 @@ async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
     } else {
         tokio::process::Command::new("which").arg(cli_command).output().await
     };
-    if let Ok(out) = which_result {
-        if out.status.success() {
-            let stdout_str = String::from_utf8_lossy(&out.stdout);
-            #[cfg(windows)]
-            let path: &str = stdout_str
-                .lines()
-                .map(str::trim)
-                .find(|l| {
-                    let lo = l.to_lowercase();
-                    lo.ends_with(".exe") || lo.ends_with(".cmd") || lo.ends_with(".bat")
-                })
-                .unwrap_or("");
-            #[cfg(not(windows))]
-            let path: &str = stdout_str.lines().next().unwrap_or("").trim();
-            if !path.is_empty() && std::path::Path::new(path).exists() {
-                return Some(path.to_string());
-            }
-        }
+    match which_result {
+        Ok(out) if out.status.success() => spawnable_candidates(&String::from_utf8_lossy(&out.stdout), cfg!(windows))
+            .into_iter()
+            .filter(|p| std::path::Path::new(p).exists())
+            .collect(),
+        _ => Vec::new(),
     }
-    None
+}
+
+/// The lines of `where`/`which` output a spawn can use. On Windows that is
+/// the ones `make_cli_cmd` can run (.exe / .cmd / .bat), skipping e.g. the
+/// extensionless `npm` shell script; elsewhere `which` prints one path.
+fn spawnable_candidates(stdout: &str, windows: bool) -> Vec<String> {
+    let lines = stdout.lines().map(str::trim).filter(|l| !l.is_empty());
+    if windows {
+        lines
+            .filter(|l| {
+                let lo = l.to_lowercase();
+                lo.ends_with(".exe") || lo.ends_with(".cmd") || lo.ends_with(".bat")
+            })
+            .map(str::to_string)
+            .collect()
+    } else {
+        lines.take(1).map(str::to_string).collect()
+    }
 }
 
 /// The CLI notices one `ResolveCli` call can put in its pane
@@ -1012,6 +1052,33 @@ fn prune_result(
 
 #[cfg(test)]
 mod tests {
+
+    /// `where` lists every match; a `.cmd` shim first must not hide the
+    /// `.exe` after it, which the prompt-argument branch then picks.
+    #[test]
+    fn every_spawnable_match_is_kept_in_path_order() {
+        let out = [r"C:\Users\u\bin\agy", r"C:\Users\u\bin\agy.cmd", r"D:\tools\agy.exe", ""].join("\r\n");
+        assert_eq!(
+            super::spawnable_candidates(&out, true),
+            vec![r"C:\Users\u\bin\agy.cmd".to_string(), r"D:\tools\agy.exe".to_string()]
+        );
+        let first_real = super::spawnable_candidates(&out, true)
+            .into_iter()
+            .find(|p| !super::is_script_wrapper(p));
+        assert_eq!(first_real.as_deref(), Some(r"D:\tools\agy.exe"));
+        assert_eq!(super::spawnable_candidates("/usr/bin/agy\n", false), vec!["/usr/bin/agy".to_string()]);
+    }
+
+    /// A prompt passed through one of these is re-parsed by `cmd.exe`.
+    #[test]
+    fn batch_scripts_are_script_wrappers_and_executables_are_not() {
+        for p in [r"C:\Users\u\bin\agy.cmd", r"C:\x\AGY.CMD", r"C:\x\run.bat"] {
+            assert!(super::is_script_wrapper(p), "{p}");
+        }
+        for p in [r"C:\Users\u\AppData\Local\agy\bin\agy.exe", "/home/u/.local/bin/agy", r"C:\x\cmd\agy.exe"] {
+            assert!(!super::is_script_wrapper(p), "{p}");
+        }
+    }
     use super::*;
 
     fn resolve_cmd(block_id: &str, notice_block_id: Option<&str>) -> CommandResolveCliData {

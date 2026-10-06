@@ -211,6 +211,8 @@ pub fn default_model_for(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "claude" => Some("sonnet"),
         "codex" => Some("gpt-5.5"),
+        // One of the ids `agy models` lists (agy 1.1.11).
+        "antigravity" => Some("gemini-3.8-flash-medium"),
         _ => None,
     }
 }
@@ -237,6 +239,15 @@ impl ProviderConfig {
         } else {
             "none"
         }
+    }
+
+    /// The flag that passes the prompt as an argument, for a CLI that doesn't
+    /// read it from stdin: `agy` ignores stdin and needs `-p <prompt>`
+    /// (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md). `None`, the prompt
+    /// goes on stdin, for every other provider. Stored in pane meta as
+    /// `agent:prompt_arg_flag`; the frontend's `promptArgFlag` mirrors it.
+    pub fn prompt_arg_flag(&self) -> Option<&'static str> {
+        (self.id == "antigravity").then_some("-p")
     }
 }
 
@@ -678,29 +689,30 @@ static COPILOT: ProviderConfig = ProviderConfig {
     }],
 };
 
-// Antigravity (AGY) — Google's agentic coding CLI harness. Emits the same
-// stream-json NDJSON envelope as Gemini CLI (its sibling harness), so it
-// reuses the gemini translator (styled_output_format "gemini-json") rather
-// than a new one. No base_url_env_var — not independently verified to
-// support a custom-endpoint override (same "unset unless confirmed"
-// discipline as every other non-claude provider above).
+// Antigravity (AGY) — Google's agentic coding CLI harness. Its own
+// stream-json schema, prompt as an argument (`prompt_arg_flag`), and flags,
+// all checked against agy 1.1.11: SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md.
+// No base_url_env_var: a custom endpoint is not verified.
 static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     id: "antigravity",
     cli_command: "agy",
     controller_type: ControllerType::Subprocess,
     app_server: None,
-    launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
+    launch_args: &["--output-format", "stream-json", "--dangerously-skip-permissions"],
     persistent_launch_args: None,
-    resume_flag: Some("-r"),
-    session_id_field: "session_id",
-    styled_output_format: "gemini-json",
+    resume_flag: Some("--conversation"),
+    session_id_field: "conversation_id",
+    styled_output_format: "agy-stream-json",
     auth_config_dir_env_var: "ANTIGRAVITY_CONFIG_DIR",
     auth_dir_name: "antigravity",
     // Not OAuth-class -- never reaches ensure_history_link. Not covered
     // by SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md (added later);
     // None until independently verified rather than guessed.
     history_native_subdir: None,
-    auth_extra_env: &[("ANTIGRAVITY_FORCE_FILE_STORAGE", "true")],
+    // agy reads neither ANTIGRAVITY_FORCE_FILE_STORAGE nor
+    // ANTIGRAVITY_CONFIG_DIR (neither string is in agy.exe); it signs in once
+    // per machine. The frontend's `authType: "cli-managed"` binds no account.
+    auth_extra_env: &[],
     unset_env: &[],
     // Not on npm: `agy` is a native binary that Google's own installer
     // (https://antigravity.google/cli/install.ps1, and its `.sh` twin) puts
@@ -714,10 +726,9 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     base_url_env_var: None,
     supported_vendors: &["google"],
     // INFERRED, not independently doc-confirmed: Antigravity CLI's own
-    // settings live at ~/.gemini/antigravity-cli/settings.json — same
-    // ~/.gemini/ namespace root as Gemini CLI itself, consistent with this
-    // provider's own doc comment above (shares Gemini CLI's NDJSON
-    // schema). No explicit Antigravity docs page independently confirms
+    // settings live at ~/.gemini/antigravity-cli/settings.json — the same
+    // ~/.gemini/ namespace root as Gemini CLI itself (its output schema is
+    // its own, though). No explicit Antigravity docs page independently confirms
     // GEMINI.md context-file behavior. Flagged as a known gap. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
     startup_instructions_filename: Some("GEMINI.md"),
@@ -1120,14 +1131,22 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_is_subprocess_with_gemini_stream_json() {
+    fn antigravity_drives_the_real_agy_cli() {
         let p = get_provider("antigravity").unwrap();
         assert_eq!(p.controller_type, ControllerType::Subprocess);
         assert_eq!(p.controller_type_str(), "subprocess");
-        assert_eq!(p.styled_output_format, "gemini-json");
+        assert_eq!(p.styled_output_format, "agy-stream-json");
         assert_eq!(p.cli_command, "agy");
-        assert_eq!(p.session_id_field, "session_id");
-        assert_eq!(p.resume_flag, Some("-r"));
+        // Flags as agy 1.1.11 names them: no --yolo, no -r, no stdin prompt.
+        assert_eq!(p.launch_args, &["--output-format", "stream-json", "--dangerously-skip-permissions"]);
+        assert_eq!(p.session_id_field, "conversation_id");
+        assert_eq!(p.resume_flag, Some("--conversation"));
+        assert_eq!(p.resume_strategy_str(), "flag");
+        assert_eq!(p.prompt_arg_flag(), Some("-p"));
+        // Every other provider still reads its prompt from stdin.
+        for id in ["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "muxcode", "copilot"] {
+            assert_eq!(get_provider(id).unwrap().prompt_arg_flag(), None, "{id}");
+        }
         // Installed by Google's own script, not npm.
         assert!(p.npm_package.is_empty());
         assert!(p.pinned_version.is_empty());

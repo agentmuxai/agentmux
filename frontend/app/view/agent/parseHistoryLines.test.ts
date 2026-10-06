@@ -757,7 +757,7 @@ describe("user messages persisted for CLIs that don't echo them (spec §6.9)", (
     // Claude controller writes for stdin.
     const userRecord = (content: string) => JSON.stringify({ type: "user", message: { role: "user", content } });
 
-    it.each(["codex-json", "kimi-stream-json", "claude-stream-json"])(
+    it.each(["codex-json", "kimi-stream-json", "agy-stream-json", "claude-stream-json"])(
         "%s: replays the record as the user's message",
         (format) => {
             const { nodes } = parseHistoryLines([userRecord("fix the build")], format);
@@ -766,7 +766,7 @@ describe("user messages persisted for CLIs that don't echo them (spec §6.9)", (
         }
     );
 
-    it.each(["codex-json", "kimi-stream-json"])(
+    it.each(["codex-json", "kimi-stream-json", "agy-stream-json"])(
         "%s: a live translator doesn't render it (the pane already shows it)",
         async (format) => {
             const { createTranslator } = await import("./providers/translator-factory");

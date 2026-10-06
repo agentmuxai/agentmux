@@ -490,28 +490,34 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Node 20.6+: `engines` of @mariozechner/pi-coding-agent.
         systemPrereqs: [{ ...NODE_PREREQ, minVersion: "20.6.0" }, NPM_PREREQ],
     },
-    // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the
-    // same stream-json NDJSON envelope as Gemini CLI (its sibling
-    // harness), so it reuses the gemini translator (styledOutputFormat
-    // "gemini-json"). Mirrors crates/srv/src/backend/providers.rs
-    // `static ANTIGRAVITY`.
+    // Antigravity (AGY) — Google's agentic coding CLI harness. Checked against
+    // agy 1.1.11 (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md): its
+    // stream-json is its own schema, so it has its own translator
+    // (`agy-stream-json`); it ignores stdin and takes the prompt as `-p
+    // <prompt>` (`promptArgFlag`); auto-approve is
+    // `--dangerously-skip-permissions` and resume is `--conversation <id>`.
+    // Mirrors crates/srv/src/backend/providers.rs `static ANTIGRAVITY`.
     antigravity: {
         id: "antigravity",
         displayName: "Antigravity (AGY)",
         cliCommand: "agy",
         defaultArgs: [],
-        styledArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        styledArgs: ["--output-format", "stream-json", "--dangerously-skip-permissions"],
         outputFormat: "raw",
-        styledOutputFormat: "gemini-json",
-        authType: "oauth",
-        authCheckCommand: ["auth", "status"],
-        authLoginCommand: ["auth", "login"],
+        styledOutputFormat: "agy-stream-json",
+        // agy signs in once per machine (system keyring, else Google
+        // Sign-In) and reads no per-account config dir, so there is no
+        // account to bind. `agy models` needs a signed-in account; signing
+        // in is plain `agy`, which does it on first run. It has no `auth`
+        // subcommand.
+        authType: "cli-managed",
+        authCheckCommand: ["models"],
+        authLoginCommand: [],
         // Not on npm: `agy` is a native binary that Google's installer puts in
         // place and keeps up to date itself, so AgentMux can't install it.
         // Like kimi, launch finds it on PATH (or in the installer's folder,
         // `known_install_paths` in providers.rs) and otherwise shows the
-        // command below. The old `@google/antigravity-cli` package never
-        // existed, so every install of it failed.
+        // command below.
         npmPackage: "",
         pinnedVersion: "",
         docsUrl: "https://antigravity.google/",
@@ -520,20 +526,25 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "zap",
         authConfigDirEnvVar: "ANTIGRAVITY_CONFIG_DIR",
         authDirName: "antigravity",
-        authExtraEnv: { ANTIGRAVITY_FORCE_FILE_STORAGE: "true" },
         supportedVendors: ["google"],
         startupInstructionsFilename: "GEMINI.md",
-        launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
-        resumeFlag: "-r",
-        sessionIdField: "session_id",
+        launchArgs: ["--output-format", "stream-json", "--dangerously-skip-permissions"],
+        promptArgFlag: "-p",
+        resumeFlag: "--conversation",
+        sessionIdField: "conversation_id",
         controllerType: "subprocess",
         // A native binary: no Node.js or npm needed.
         systemPrereqs: [],
+        // From `agy models` (agy 1.1.11); the newest of each family.
         models: [
-            { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", default: true, description: "Fast, highly capable frontier model with 1M context" },
-            { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Deep reasoning and complex coding" },
-            { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", description: "Balanced performance and speed" },
-            { value: "gemini-2.0-flash-thinking", label: "Gemini 2.0 Flash Thinking", description: "Chain-of-thought agentic reasoning" },
+            { value: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)", default: true, description: "Fast frontier model, balanced reasoning" },
+            { value: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)", description: "Fast frontier model, more reasoning" },
+            { value: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)", description: "Fastest, least reasoning" },
+            { value: "gemini-3.1-pro-high", label: "Gemini 3.1 Pro (High)", description: "Deep reasoning and complex coding" },
+            { value: "gemini-3.1-pro-low", label: "Gemini 3.1 Pro (Low)", description: "Pro model, lighter reasoning" },
+            { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Thinking)", description: "Anthropic's Sonnet, served by Antigravity" },
+            { value: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 (Thinking)", description: "Anthropic's Opus, served by Antigravity" },
+            { value: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)", description: "OpenAI's open-weight model" },
         ],
     },
 };
