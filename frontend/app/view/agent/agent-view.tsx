@@ -76,6 +76,7 @@ import { SlashCommandPicker } from "./components/SlashCommandPicker";
 import { SlashHelpPanel } from "./components/SlashHelpPanel";
 import { usePaneReveal } from "./hooks/usePaneReveal";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
+import { LIVE_FEED_RESTORE_BYTES } from "./live-feed";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
 import { useFocusRepoll, useHeldMessageDelivery } from "./hooks/useTurnReconciliation";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
@@ -409,6 +410,8 @@ export const AgentPresentationView = ({
         // K + the turn in flight; Claude only. Read after this body runs.
         restoreTurns: () =>
             liveFeed.liveFeedOn() && outputFormat() === "claude-stream-json" && Number.isFinite(liveFeed.liveFeedTurns) ? liveFeed.liveFeedTurns + 1 : undefined,
+        // And about what the feed keeps by size, for every live-feed pane.
+        restoreBytes: () => (liveFeed.liveFeedOn() ? LIVE_FEED_RESTORE_BYTES : undefined),
         onHistoryReady: () => {
             historyReadyFn?.();
             // A pane opens with K turns, not the load window's worth (§6.9).

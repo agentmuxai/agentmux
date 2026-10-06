@@ -185,6 +185,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
                         trim_to_last_turns(&mut result, offset as u64, turns as usize);
                     }
+                    if let Some(bytes) = cmd.tail_bytes.filter(|b| *b > 0) {
+                        trim_to_tail_bytes(&mut result, offset as u64, bytes as usize);
+                    }
                     if gen_before.is_some() && gen_after == gen_before {
                         result.stream = Some(stream.clone());
                         result.gen = gen_before.clone();
@@ -457,6 +460,38 @@ fn trim_to_last_turns(result: &mut BlockfileReadRangeResult, first_line: u64, tu
     result.offset = Some(first_line + cut as u64);
 }
 
+/// `tail_bytes`: keep the newest lines that fit in `max_bytes` (the newest
+/// line always stays, however large; a line costs its length plus its
+/// newline), then move the start up to the first turn start among them, if
+/// there is one, so the pane doesn't open on the tail of a turn. Lines before
+/// `first_line` were already trimmed (`tail_turns`): `result.offset` wins.
+fn trim_to_tail_bytes(result: &mut BlockfileReadRangeResult, first_line: u64, max_bytes: usize) {
+    if result.gen_mismatch.is_some() {
+        return;
+    }
+    let first_line = result.offset.unwrap_or(first_line);
+    let mut cut = result.lines.len();
+    let mut kept = 0usize;
+    for (i, line) in result.lines.iter().enumerate().rev() {
+        let cost = line.len() + 1;
+        if cut < result.lines.len() && kept + cost > max_bytes {
+            break;
+        }
+        kept += cost;
+        cut = i;
+    }
+    if cut > 0 {
+        if let Some(turn) = result.lines[cut..].iter().position(|l| is_claude_turn_start(l)) {
+            cut += turn;
+        }
+        result.lines.drain(..cut);
+        if let Some(stamps) = result.stamps.as_mut() {
+            stamps.drain(..cut.min(stamps.len()));
+        }
+    }
+    result.offset = Some(first_line + cut as u64);
+}
+
 #[cfg(test)]
 mod tail_turns_tests {
     use super::*;
@@ -555,6 +590,86 @@ mod tail_turns_tests {
         assert_eq!(r.offset, None);
     }
 
+    fn lines_of(n: usize, len: usize) -> Vec<String> {
+        (0..n).map(|i| format!("{i:0len$}")).collect()
+    }
+
+    #[test]
+    fn keeps_the_newest_lines_that_fit_in_the_byte_budget() {
+        // Ten 9-byte lines cost 10 bytes each with their newline.
+        let mut r = BlockfileReadRangeResult {
+            lines: lines_of(10, 9),
+            total: 110,
+            stamps: Some((0..10).collect()),
+            ..Default::default()
+        };
+        trim_to_tail_bytes(&mut r, 100, 35);
+        assert_eq!(r.lines, lines_of(10, 9)[7..].to_vec());
+        assert_eq!(r.stamps, Some(vec![7, 8, 9]));
+        assert_eq!(r.offset, Some(107));
+        assert_eq!(r.total, 110, "total is the file's, untouched");
+    }
+
+    #[test]
+    fn a_range_within_the_budget_comes_back_whole() {
+        let mut r = BlockfileReadRangeResult { lines: lines_of(4, 9), total: 4, ..Default::default() };
+        trim_to_tail_bytes(&mut r, 0, 1_000);
+        assert_eq!(r.lines.len(), 4);
+        assert_eq!(r.offset, Some(0));
+    }
+
+    #[test]
+    fn the_newest_line_stays_even_over_the_budget() {
+        let mut r = BlockfileReadRangeResult {
+            lines: vec!["old".to_string(), "x".repeat(500)],
+            total: 2,
+            ..Default::default()
+        };
+        trim_to_tail_bytes(&mut r, 0, 10);
+        assert_eq!(r.lines, vec!["x".repeat(500)]);
+        assert_eq!(r.offset, Some(1));
+    }
+
+    #[test]
+    fn a_byte_cut_inside_a_turn_moves_up_to_the_next_turn_start() {
+        // The budget reaches back into turn two's deltas; the pane opens at
+        // turn three instead of on turn two's tail.
+        let lines = transcript();
+        let budget: usize = lines[5..].iter().map(|l| l.len() + 1).sum();
+        let mut r = BlockfileReadRangeResult { lines: lines.clone(), total: 9, ..Default::default() };
+        trim_to_tail_bytes(&mut r, 0, budget);
+        assert_eq!(r.lines, lines[6..].to_vec());
+        assert_eq!(r.offset, Some(6));
+    }
+
+    #[test]
+    fn with_no_turn_start_in_what_fits_the_byte_cut_stands() {
+        let lines = transcript();
+        let budget: usize = lines[7..].iter().map(|l| l.len() + 1).sum();
+        let mut r = BlockfileReadRangeResult { lines: lines.clone(), total: 9, ..Default::default() };
+        trim_to_tail_bytes(&mut r, 0, budget);
+        assert_eq!(r.lines, lines[7..].to_vec());
+        assert_eq!(r.offset, Some(7));
+    }
+
+    #[test]
+    fn the_byte_budget_applies_after_the_turn_trim() {
+        let lines = transcript();
+        let mut r = BlockfileReadRangeResult { lines: lines.clone(), total: 109, ..Default::default() };
+        trim_to_last_turns(&mut r, 100, 2); // lines [3..9) from line 103
+        let budget: usize = lines[6..].iter().map(|l| l.len() + 1).sum();
+        trim_to_tail_bytes(&mut r, 100, budget);
+        assert_eq!(r.lines, lines[6..].to_vec());
+        assert_eq!(r.offset, Some(106));
+    }
+
+    #[test]
+    fn a_generation_mismatch_is_left_alone_by_the_byte_trim() {
+        let mut r = BlockfileReadRangeResult { gen_mismatch: Some(true), ..Default::default() };
+        trim_to_tail_bytes(&mut r, 5, 10);
+        assert_eq!(r.offset, None);
+    }
+
     #[test]
     fn the_request_field_is_optional_on_the_wire() {
         let old: CommandBlockfileReadRangeData = serde_json::from_value(serde_json::json!({
@@ -562,11 +677,13 @@ mod tail_turns_tests {
         }))
         .unwrap();
         assert_eq!(old.tail_turns, None);
+        assert_eq!(old.tail_bytes, None);
         let new: CommandBlockfileReadRangeData = serde_json::from_value(serde_json::json!({
-            "block_id": "b", "filename": "output", "offset": 0, "limit": 10, "tail_turns": 7
+            "block_id": "b", "filename": "output", "offset": 0, "limit": 10, "tail_turns": 7, "tail_bytes": 1000000
         }))
         .unwrap();
         assert_eq!(new.tail_turns, Some(7));
+        assert_eq!(new.tail_bytes, Some(1_000_000));
         let wire = serde_json::to_value(BlockfileReadRangeResult::default()).unwrap();
         assert!(
             wire.get("offset").is_none(),
