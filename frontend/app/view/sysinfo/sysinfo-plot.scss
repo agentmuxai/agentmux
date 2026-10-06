@@ -1,0 +1,18 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Observable Plot's own rules for a chart, loaded once instead of as a
+// `<style>` inside every SVG it draws (see preparePlotSvg in sysinfo-plot.tsx).
+// The chart fills its container, a stretched grid item, so between throttled
+// redraws a resize stretches the last drawing rather than leaving a gap.
+.sysinfo-plot {
+    --plot-background: white;
+    display: block;
+    width: 100%;
+    height: 100%;
+
+    text,
+    tspan {
+        white-space: pre;
+    }
+}

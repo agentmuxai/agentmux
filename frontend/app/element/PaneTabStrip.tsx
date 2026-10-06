@@ -327,10 +327,16 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
         const el = stripRef;
         if (!el || !props.reserveDragHandle) return;
         const measure = () => setOverflowing(el.scrollWidth > el.clientWidth);
-        const ro = new ResizeObserver(measure);
+        // Read on the next frame, not in the observer callback: there, other
+        // observers have already written to the DOM, so each strip's read
+        // forced its own layout on every frame of a window drag.
+        let frame: number | undefined;
+        const ro = new ResizeObserver(() => {
+            if (frame == null) frame = requestAnimationFrame(() => { frame = undefined; measure(); });
+        });
         ro.observe(el);
         measure();
-        onCleanup(() => ro.disconnect());
+        onCleanup(() => { ro.disconnect(); if (frame != null) cancelAnimationFrame(frame); });
     });
 
     // Cross-pane drop-to-append (Phase 4, §3.4). A dwell-free hover flash —
