@@ -74,6 +74,7 @@ impl FileStore {
     /// Replace `name`'s content with `data` (creating the file if missing)
     /// and delete the files in `drop`, in one transaction. The new content
     /// starts a new counted epoch with a fresh `gen` (counter.rs).
+    #[track_caller]
     pub fn replace_file(&self, zone_id: &str, name: &str, data: &[u8], drop: &[&str]) -> Result<(), StoreError> {
         self.replace_inner(zone_id, name, data, None, drop, None).map(|_| ())
     }
@@ -82,6 +83,7 @@ impl FileStore {
     /// and merge `meta` into its metadata (a null value removes a key), in
     /// one transaction — so the metadata can describe the content without a
     /// window where it describes other content.
+    #[track_caller]
     pub fn put_file_with_meta(&self, zone_id: &str, name: &str, data: &[u8], meta: FileMeta) -> Result<(), StoreError> {
         self.replace_inner(zone_id, name, data, Some(meta), &[], None).map(|_| ())
     }
@@ -92,6 +94,7 @@ impl FileStore {
     /// replaced while it was being derived, nothing is written and this
     /// returns `false`. With `expected_gen` `None` (an uncounted `guard`, no
     /// generation to compare) it always writes.
+    #[track_caller]
     pub fn put_file_with_meta_if(
         &self,
         zone_id: &str,
@@ -106,6 +109,7 @@ impl FileStore {
 
     /// Delete several files of one zone in one transaction. Missing files
     /// are not an error.
+    #[track_caller]
     pub fn delete_files(&self, zone_id: &str, names: &[&str]) -> Result<(), StoreError> {
         self.write_txn(|tx| {
             for name in names {
@@ -118,6 +122,7 @@ impl FileStore {
         Ok(())
     }
 
+    #[track_caller]
     fn replace_inner(
         &self,
         zone_id: &str,
@@ -187,8 +192,9 @@ impl FileStore {
     /// (`line_state`). An error if any byte of the range isn't stored — a
     /// file mid-write by a build without transactions claims bytes before it
     /// holds them — so nothing is ever indexed or served as zeros.
+    #[track_caller]
     pub fn read_bytes_db(&self, zone_id: &str, name: &str, offset: i64, len: i64) -> Result<Vec<u8>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         super::counter::read_bytes_exact(&conn, zone_id, name, offset, len)?.ok_or_else(|| {
             StoreError::Other(format!("{zone_id}/{name}: bytes {offset}..{} not stored yet", offset + len))
         })
@@ -198,6 +204,7 @@ impl FileStore {
     /// database snapshot — for a decision and the reads it licenses (an
     /// index judged fresh, then its entries and the bytes they point at),
     /// which must not straddle another instance's replace (Codex on #3634).
+    #[track_caller]
     pub fn read_snapshot<T>(&self, f: impl FnOnce(&SnapshotReader<'_>) -> Result<T, StoreError>) -> Result<T, StoreError> {
         self.read_txn(|tx| f(&SnapshotReader { tx }))
     }
@@ -206,6 +213,7 @@ impl FileStore {
     /// ONE snapshot (Codex on #3634): `output`'s size and valid generation,
     /// and the derived file's size, its first `head` bytes (all of it when
     /// `head` is `None`) and its metadata. `None` when `output` doesn't exist.
+    #[track_caller]
     pub fn derived_snapshot(
         &self,
         zone_id: &str,
@@ -239,8 +247,9 @@ impl FileStore {
     }
 
     /// A file's metadata, read from the database rather than the cache.
+    #[track_caller]
     pub fn meta_db(&self, zone_id: &str, name: &str) -> Result<Option<FileMeta>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let meta: Option<String> = conn
             .query_row(
                 "SELECT meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
