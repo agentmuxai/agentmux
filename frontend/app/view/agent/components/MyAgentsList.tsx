@@ -68,6 +68,7 @@ import { resolveEffectiveVendor } from "../providers/catalog";
 import type { AgentSortOption } from "./AgentPickerFilterBar";
 import { RuntimeBadge } from "./RuntimeBadge";
 import type { OpenAgentLocation } from "../open-agent-panes";
+import { Button } from "@/app/element/ui";
 
 /** "type" sort groups Host before Sandbox (Container) before anything
  *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
@@ -274,23 +275,23 @@ const NamePrompt = (props: NamePromptProps): JSX.Element => (
                     });
                 }}
             />
-            <button
-                type="button"
+            <Button
+                tone="accent"
                 class="agent-fork-btn agent-fork-btn--primary"
                 disabled={props.loading || !props.value.trim()}
                 onClick={() => props.onSubmit()}
                 data-testid={props.submitTestid}
             >
                 {props.loading ? "…" : props.submitLabel}
-            </button>
-            <button
-                type="button"
+            </Button>
+            <Button
+                tone="quiet"
                 class="agent-fork-btn agent-fork-btn--ghost"
                 onClick={() => props.onCancel()}
                 aria-label="Cancel"
             >
                 ✕
-            </button>
+            </Button>
         </div>
         <Show when={props.error}>
             <span class="agent-fork-error">{props.error}</span>
@@ -1249,30 +1250,29 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 </Show>
                                                 <Show when={forkState().kind === "prompt"}>
                                                     <div class="agent-fork-prompt-actions">
-                                                        <button
-                                                            type="button"
+                                                        <Button
+                                                            tone="accent"
                                                             class="agent-fork-btn agent-fork-btn--primary"
                                                             onClick={() => handleOpenNewSession(row)}
                                                             data-testid="agent-fork-open-new"
                                                         >
                                                             Open new session
-                                                        </button>
-                                                        <button
-                                                            type="button"
+                                                        </Button>
+                                                        <Button
                                                             class="agent-fork-btn agent-fork-btn--secondary"
                                                             onClick={() => handleSwitchToExisting(row)}
                                                             data-testid="agent-fork-switch"
                                                         >
                                                             Switch to existing
-                                                        </button>
-                                                        <button
-                                                            type="button"
+                                                        </Button>
+                                                        <Button
+                                                            tone="quiet"
                                                             class="agent-fork-btn agent-fork-btn--ghost"
                                                             onClick={() => handleForkCancel(row.definition_id)}
                                                             aria-label="Cancel"
                                                         >
                                                             ✕
-                                                        </button>
+                                                        </Button>
                                                     </div>
                                                 </Show>
                                                 <Show

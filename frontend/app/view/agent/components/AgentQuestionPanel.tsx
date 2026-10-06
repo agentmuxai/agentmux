@@ -61,6 +61,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import type { AskUserQuestionAnswer, AskUserQuestionOption, AskUserQuestionRequest, ToolNode } from "../types";
 import "./AgentQuestionPanel.scss";
+import { Button } from "@/app/element/ui";
 
 /** Fallback when `agent:askquestiontimeoutms` is unset — see
  *  `autoTimeoutMs()` inside the component. Was a hardcoded constant per
@@ -551,28 +552,26 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                         </div>
 
                         <div class="agent-question-panel-actions">
-                            <button
-                                type="button"
+                            <Button
                                 class="agent-question-panel-btn agent-question-panel-btn--cancel"
                                 onClick={cancel}
                             >
                                 Cancel
-                            </button>
-                            <button
-                                type="button"
+                            </Button>
+                            <Button
                                 class="agent-question-panel-btn agent-question-panel-btn--recommended"
                                 onClick={acceptRecommended}
                             >
                                 Accept Recommended
-                            </button>
-                            <button
-                                type="button"
+                            </Button>
+                            <Button
+                                tone="accent"
                                 class="agent-question-panel-btn agent-question-panel-btn--submit"
                                 disabled={!allAnswered()}
                                 onClick={() => submit()}
                             >
                                 Submit answer
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 </>
