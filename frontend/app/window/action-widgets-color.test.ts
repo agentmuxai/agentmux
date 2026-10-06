@@ -4,7 +4,7 @@
 // SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.6: a top-bar widget icon is
 // tinted with its entry's color, else the color of the view it opens.
 
-import { createSignal } from "solid-js";
+import { createMemo, createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const [settings, setSettings] = createSignal<Record<string, unknown>>({});
@@ -54,6 +54,19 @@ describe("widgetEntryColor", () => {
         expect(widgetEntryColor(widget({}), "widgetTint")).toBe(paneRoleColor(120, undefined, true, "widgetTint"));
         setSettings({ "pane:colors": { "t-term": null } });
         expect(widgetEntryColor(widget({}), "widgetTint")).toBeUndefined();
+    });
+});
+
+describe("a widget registered late", () => {
+    it("tints its icon once its manifest arrives, without another settings change", () => {
+        createRoot((dispose) => {
+            const style = createMemo(() => widgetIconStyle(widget({ blockdef: { meta: { view: "t-late" } } } as Partial<WidgetConfigType>)));
+            expect(style()).toEqual({});
+            const unregisterLate = registerPaneTab({ apiVersion: 1, view: "t-late", label: "L", icon: "square", defaultHue: 120, create: () => ({}) as never });
+            expect(style()).toEqual({ "--widget-tint": paneRoleColor(120, undefined, false, "widgetTint") });
+            unregisterLate();
+            dispose();
+        });
     });
 });
 

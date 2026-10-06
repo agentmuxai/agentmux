@@ -168,7 +168,8 @@ export interface PaneTabManifest {
 
 const manifests = new Map<string, PaneTabManifest>();
 const aliasToView = new Map<string, string>();
-/** Bumped on every register and unregister, so `listPaneTabs()` is reactive. */
+/** Bumped on every register and unregister, so `listPaneTabs()` and
+ *  `getPaneTab()` are reactive. */
 const [registryVersion, setRegistryVersion] = createSignal(0);
 
 /** Registers a pane tab type. Returns its unregister function. Throws when the
@@ -211,7 +212,10 @@ export function resolvePaneTabView(view: string): string {
     return aliasToView.get(view) ?? view;
 }
 
+/** Reactive: a lookup made before a widget registers (widget-loader.ts loads
+ *  them late) runs again when it does. */
 export function getPaneTab(view: string | null | undefined): PaneTabManifest | undefined {
+    registryVersion();
     if (!view) return undefined;
     return manifests.get(resolvePaneTabView(view));
 }
