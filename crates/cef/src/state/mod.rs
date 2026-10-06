@@ -1510,6 +1510,13 @@ fn log_host_event(ev: &crate::reducer::HostEvent) {
             version,
             "[host-reducer] dequeue on empty queue — caller will fall back",
         ),
+        HostEvent::PendingWindowNotFound { label, version } => tracing::warn!(
+            target: "host-reducer",
+            event = "PendingWindowNotFound",
+            label = %label,
+            version,
+            "[host-reducer] no pending creation for this label — caller will fall back to the queue head",
+        ),
         // ── H.1 panes ────────────────────────────────────────────────────
         HostEvent::BrowserPaneCreateRequested { block_id, label, version } => tracing::info!(
             target: "host-reducer",

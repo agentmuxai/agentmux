@@ -131,9 +131,12 @@ wrap_task! {
                     },
                 );
 
+                // By label: the queue head may be another creation's entry.
                 let dequeue = || {
                     self.state.host_dispatch(
-                        crate::reducer::HostCommand::DequeuePendingWindowCreation,
+                        crate::reducer::HostCommand::TakePendingWindowCreation {
+                            label: self.label.clone(),
+                        },
                     );
                 };
 
@@ -159,7 +162,7 @@ wrap_task! {
                     }
                 };
 
-                let handler = crate::client::AgentMuxHandler::new_with_browser_pane(self.state.clone(), true);
+                let handler = crate::client::AgentMuxHandler::new_for_creation(self.state.clone(), true, &self.label);
                 let mut client = Some(crate::client::AgentMuxClient::new(handler, true, false));
 
                 let url_cef = CefString::from(self.url.as_str());
