@@ -154,7 +154,7 @@ export class RemotesViewModel {
         await RpcApi.ConnDisconnectCommand(TabRpcClient, name, { timeout: 5000 });
     }
 
-    /** The durable sessions on the host: the same list as a pane's "Sessions on <host>…". */
+    /** The durable sessions on the host (`showHostSessions`, hostSessions.ts). */
     async showSessions(name: string): Promise<void> {
         await showHostSessions(name, this.blockId);
         this.scheduleRefresh();

@@ -13,7 +13,7 @@ vi.mock("@/app/store/block-atom-cache", () => ({
     getSettingsKeyAtom: (key: string) => () => settings()[key],
 }));
 
-import { blockRoleColor, isLightThemeActive, resolvePaneIdentity, widgetHueFor } from "./pane-identity";
+import { blockRoleColor, isLightThemeActive, resolvePaneIdentity, widgetColorView, widgetHueFor } from "./pane-identity";
 import { paneRoleColor } from "./pane-color-scheme";
 import { registerPaneTab } from "./pane-tab-registry";
 
@@ -26,6 +26,7 @@ beforeEach(() => {
     unregister = [
         registerPaneTab({ apiVersion: 1, view: "t-term", aliases: ["t-old"], label: "T", icon: "terminal", defaultHue: 240, create }),
         registerPaneTab({ apiVersion: 1, view: "t-plain", label: "P", icon: "square", create }),
+        registerPaneTab({ apiVersion: 1, view: "t-legacy", legacyOf: "t-term", label: "L", icon: "square", create }),
     ];
 });
 afterEach(() => unregister.forEach((u) => u()));
@@ -65,6 +66,23 @@ describe("widgetHueFor", () => {
         expect(widgetHueFor("t-old")).toBe(240);
         setSettings({ "pane:colors": { "t-term": 60 } });
         expect(widgetHueFor("t-old")).toBe(60);
+    });
+
+    it("gives a legacy view the color of the view it stands in for", () => {
+        expect(widgetHueFor("t-legacy")).toBe(240);
+        setSettings({ "pane:colors": { "t-term": 60, "t-legacy": 300 } });
+        expect(widgetHueFor("t-legacy")).toBe(60);
+    });
+});
+
+describe("widgetColorView", () => {
+    it("is the canonical view, after aliases and legacyOf", () => {
+        expect(widgetColorView("t-term")).toBe("t-term");
+        expect(widgetColorView("t-old")).toBe("t-term");
+        expect(widgetColorView("t-legacy")).toBe("t-term");
+        expect(widgetColorView("t-unregistered")).toBe("t-unregistered");
+        expect(widgetColorView(undefined)).toBeUndefined();
+        expect(widgetColorView("")).toBeUndefined();
     });
 });
 

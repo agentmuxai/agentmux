@@ -56,7 +56,7 @@ export const TERMINAL_SETTINGS = {
         id: "terminal.durable_ssh",
         label: "Keep SSH sessions alive",
         description:
-            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. Each pane's menu can still turn it on or off.",
+            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. The Remotes pane can set it per host.",
         section: "terminal",
         keywords: ["durable", "ssh", "reconnect", "remote", "session", "term:durable"],
     },

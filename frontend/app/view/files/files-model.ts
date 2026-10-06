@@ -25,7 +25,7 @@ import type { FsGitState } from "@/types/rpc/FsGitState";
 import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
 import type { FsPlace } from "@/types/rpc/FsPlace";
 import { isMacOS, isWindows } from "@/util/platformutil";
-import { isSshConnection } from "@/app/view/term/termSettingsMenu";
+import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { isValidAgentColor, pickAgentColor } from "@/app/view/agent/agent-color";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { displayName, groupRemotes, remoteColor } from "@/app/view/remotes/remotes-sections";

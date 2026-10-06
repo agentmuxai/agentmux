@@ -3,6 +3,7 @@
 
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
+import { hueToActiveBorder, PANE_HUE_OPTIONS } from "@/app/block/pane-color-menu";
 import { Button, Field, IconButton, NumberInput, Switch, TextInput, useField } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -129,6 +130,38 @@ export function NumberControl(p: {
             value={p.value}
             onChange={p.onChange}
         />
+    );
+}
+
+/**
+ * Pick one of the Pane Color hues, or None: the same twelve swatches, in the
+ * same colors, as the pane header's Pane Color menu. `value` is the selected
+ * hue, `null` for None, `undefined` for nothing selected.
+ */
+export function HueSwatchRow(p: { value: number | null | undefined; onChange: (hue: number | null) => void; label: string }): JSX.Element {
+    return (
+        <div class="setting-hue-swatches" role="group" aria-label={p.label}>
+            <Button
+                class="setting-hue-swatch setting-hue-swatch--none"
+                icon="ban"
+                pressed={p.value === null}
+                aria-label="None"
+                title="None"
+                onClick={() => p.onChange(null)}
+            />
+            <For each={PANE_HUE_OPTIONS}>
+                {(opt) => (
+                    <Button
+                        class="setting-hue-swatch"
+                        style={{ "background-color": hueToActiveBorder(opt.hue) }}
+                        pressed={p.value === opt.hue}
+                        aria-label={opt.label}
+                        title={opt.label}
+                        onClick={() => p.onChange(opt.hue)}
+                    />
+                )}
+            </For>
+        </div>
     );
 }
 

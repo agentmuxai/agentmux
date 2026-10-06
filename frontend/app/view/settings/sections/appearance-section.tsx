@@ -8,6 +8,7 @@ import { settingsAtom } from "@/app/store/global";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import type { SettingsIndexEntry } from "../settings-model";
 import { NumberControl, SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { WidgetColorsSettings } from "./widget-colors";
 
 // ── Search index — one entry per row below, named-key so re-ordering rows
 // can't silently misalign an entry with the wrong row (see settings-model.ts's
@@ -98,6 +99,13 @@ export const APPEARANCE_SETTINGS = {
         description: "Backdrop blur, in pixels, applied to the other panes behind it",
         section: "appearance",
         keywords: ["background pane blur", "other panes blur", "window:magnifiedblockblursecondarypx"],
+    },
+    widgetColors: {
+        id: "appearance.widget_colors",
+        label: "Widget colors",
+        description: "The color of every pane of each widget type: its border, tabs and header. A pane's own Pane Color and an agent's color still win.",
+        section: "appearance",
+        keywords: ["color", "colour", "widget", "pane", "tab", "border", "pane:colors"],
     },
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -267,6 +275,12 @@ export function AppearanceSection(): JSX.Element {
                         onChange={(v) => set("window:magnifiedblockblursecondarypx", v)}
                     />
                 }
+            />
+            <SectionHeader label="Widget colors" />
+            <WidgetColorsSettings
+                id={APPEARANCE_SETTINGS.widgetColors.id}
+                label={APPEARANCE_SETTINGS.widgetColors.label}
+                description={APPEARANCE_SETTINGS.widgetColors.description}
             />
         </div>
     );

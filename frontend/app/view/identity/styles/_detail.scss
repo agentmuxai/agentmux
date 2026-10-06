@@ -88,32 +88,10 @@
 
 // ── Buttons ───────────────────────────────────────────────────────────────────
 
-.identity-btn {
-    padding: var(--space-1) var(--space-3);
-    font-size: 12px;
-    border-radius: 0;
-    border: 1px solid transparent;
-    cursor: default;
-    transition: opacity 0.1s;
-
-    &:hover { opacity: 0.85; }
-
-    &.identity-btn-primary {
-        background: var(--accent-color);
-        color: var(--button-text-color);
-        border-color: var(--accent-color);
-    }
-    &.identity-btn-secondary {
-        background: transparent;
-        color: var(--secondary-text-color);
-        border-color: var(--border-color);
-    }
-    &.identity-btn-danger {
-        background: transparent;
-        color: var(--error-color);
-        border-color: var(--error-color);
-        margin-left: auto;
-    }
+// The identity buttons are element/ui Buttons (primary accent, secondary
+// neutral, danger red line); this only places the danger one.
+.identity-btn.identity-btn-danger {
+    margin-left: auto;
 }
 
 // ── Panel under the row ─────────────────────────────────────────────────────

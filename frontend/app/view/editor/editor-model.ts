@@ -53,7 +53,7 @@ import { createEditorDropHook, openEmptyScratch } from "./editor-drop";
 import { openPendingFiles } from "./pending-open-files";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { readZoom } from "@/app/store/zoom-factor";
-import { isSshConnection } from "@/app/view/term/termSettingsMenu";
+import { isSshConnection } from "@/app/view/term/ssh-connection";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";

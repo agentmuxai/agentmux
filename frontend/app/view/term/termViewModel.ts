@@ -37,7 +37,6 @@ import { computeTheme, DefaultTermTheme, termViewName } from "./termutil";
 import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
 import { basicTermModels, termModels } from "./term-models";
-import { buildSettingsMenuItems } from "./termSettingsMenu";
 import { readZoom } from "@/app/store/zoom-factor";
 
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
@@ -443,10 +442,6 @@ class TermViewModel {
         return true;
     }
 
-    setTerminalTheme(themeName: string) {
-        void this.setMeta({ "term:theme": themeName });
-    }
-
     forceRestartController() {
         if (this.isRestarting()) return;
         this.triggerRestartAtom();
@@ -461,10 +456,6 @@ class TermViewModel {
             rtopts: { termsize: termsize },
         });
         prtn.catch((e) => console.log("error controller resync (force restart)", e));
-    }
-
-    getSettingsMenuItems(): ContextMenuItem[] {
-        return buildSettingsMenuItems(this);
     }
 }
 

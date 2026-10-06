@@ -30,6 +30,8 @@ vi.mock("@/app/store/global", () => ({
     settingsAtom: () => settings,
 }));
 vi.mock("@/app/menu/base-menus", () => ({ THEME_OPTIONS: [] }));
+// Has its own tests; it reads the pane registry and theme this file doesn't set up.
+vi.mock("./widget-colors", () => ({ WidgetColorsSettings: () => null }));
 
 import { AppearanceSection } from "./appearance-section";
 

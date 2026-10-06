@@ -154,6 +154,55 @@
     color: var(--secondary-text-color);
 }
 
+// ── Hue swatches and widget colors ──────────────────────────────────────────
+
+.setting-hue-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+// Doubled class: outranks the line-style button's own size and padding.
+.setting-hue-swatch.setting-hue-swatch {
+    --ui-height: 18px;
+    width: 18px;
+    padding: 0;
+
+    &[aria-pressed="true"] {
+        outline: 2px solid var(--main-text-color);
+        outline-offset: 1px;
+    }
+}
+
+.setting-hue-swatch--none.setting-hue-swatch--none i {
+    font-size: 0.65rem;
+}
+
+.setting-widget-color {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.setting-widget-color-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+// A pane-tab pill in the widget's color, as panes draw it.
+.setting-widget-color-preview {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 92px;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    border-bottom: 2px solid transparent;
+    font-size: 0.75rem;
+    background: var(--hover-bg-color);
+}
+
 // ── Slider ────────────────────────────────────────────────────────────────────
 
 .setting-slider {
