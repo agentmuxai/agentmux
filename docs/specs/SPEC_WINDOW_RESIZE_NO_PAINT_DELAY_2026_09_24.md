@@ -1,6 +1,6 @@
 # SPEC — Window resize repaints pane content every frame, with no settle delay
 
-**Status:** active — §4.1, §4.2 and §4.4 implemented; follow-ups F1–F3 open. The window-level lag this spec did not cover is in docs/analysis/ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md.
+**Status:** active — §4.1, §4.2 and §4.4 implemented in PR #4399; follow-ups F1–F3 open. The window-level lag this spec did not cover is in docs/analysis/ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md.
 **Date:** 2026-09-24
 **Author:** maricon
 **Related:**
