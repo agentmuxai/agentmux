@@ -130,6 +130,18 @@ describe("AcpTranslator — standard session/update", () => {
         ]);
     });
 
+    it("a tool call id reused in a later turn ends again", () => {
+        const t = new AcpTranslator();
+        t.translate(update({ sessionUpdate: "tool_call", toolCallId: "call_001", title: "Read", status: "pending" }));
+        expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "call_001", status: "completed" }))).toHaveLength(1);
+        t.translate({ jsonrpc: "2.0", id: 2, result: { stopReason: "end_turn" } });
+        t.translate(update({ sessionUpdate: "tool_call", toolCallId: "call_001", title: "Read", status: "pending" }));
+        expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "call_001", status: "completed" }))).toHaveLength(1);
+        // Even within a turn, a new tool_call frame for an ended id starts over.
+        t.translate(update({ sessionUpdate: "tool_call", toolCallId: "call_001", title: "Read", status: "pending" }));
+        expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "call_001", status: "completed" }))).toHaveLength(1);
+    });
+
     it("reset forgets ended calls", () => {
         const t = new AcpTranslator();
         t.translate(update({ sessionUpdate: "tool_call", toolCallId: "c5", title: "x", status: "completed" }));

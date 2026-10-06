@@ -45,9 +45,14 @@ export class AcpTranslator implements OutputTranslator {
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
 
-        // The `session/prompt` response: the turn is over.
+        // The `session/prompt` response: the turn is over, and with it every
+        // call it made (an agent may reuse ids such as `call_001` next turn).
         const stopReason = rawEvent.result?.stopReason;
-        if (typeof stopReason === "string") return [{ type: "session_end", stats: {} }];
+        if (typeof stopReason === "string") {
+            this.ended.clear();
+            this.calls.clear();
+            return [{ type: "session_end", stats: {} }];
+        }
 
         // The raw event may be the full JSON-RPC envelope or just the params.
         const params = rawEvent.params ?? rawEvent;
@@ -73,6 +78,8 @@ export class AcpTranslator implements OutputTranslator {
                 const toolId = typeof u.toolCallId === "string" && u.toolCallId ? u.toolCallId : `tool-${Date.now()}`;
                 const call = { name: toolName(u), named: givenName(u) != null, input: toolInput(u) };
                 this.calls.set(toolId, call);
+                // A new call frame starts a fresh lifecycle for its id.
+                this.ended.delete(toolId);
                 const events: StreamEvent[] = [this.tools.call(call.name, toolId, call.input)];
                 // An agent may report a call that has already finished.
                 const end = this.endIfDone(toolId, u);
