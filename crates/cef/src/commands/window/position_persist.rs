@@ -15,17 +15,16 @@
 // (crates/srv/src/server/service/window_mutate.rs) already existed to
 // write them — this file is the first caller of that RPC.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
+use std::time::Duration;
 
 use windows_sys::Win32::Foundation::HWND;
 
+use super::trailing_writer::TrailingWriter;
 use crate::state::AppState;
 
 /// Trailing-edge debounce for the srv position write-through, keyed by
-/// window label — same generation-counter shape as
-/// `transparency.rs::OPACITY_WRITE_DEBOUNCE_MS`, with its own map (not
-/// shared with opacity's) since the two properties change independently.
+/// window label, on one worker thread (`trailing_writer.rs`).
 ///
 /// Position changes arrive far more often than opacity changes (every
 /// `EVENT_OBJECT_LOCATIONCHANGE` during a drag, already smoothed to ~20Hz
@@ -37,30 +36,8 @@ use crate::state::AppState;
 /// intermediate pause.
 const POSITION_WRITE_DEBOUNCE_MS: u64 = 1500;
 
-fn position_write_generations() -> &'static Mutex<HashMap<String, u64>> {
-    static MAP: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
-    MAP.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Bump and return the new generation for `label`.
-fn next_position_write_generation(label: &str) -> u64 {
-    let mut m = position_write_generations()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let gen = m.entry(label.to_string()).or_insert(0);
-    *gen += 1;
-    *gen
-}
-
-/// True if `generation` is still the latest recorded generation for
-/// `label` — i.e. no newer position report for this label has arrived
-/// since this write was scheduled.
-fn is_current_position_write_generation(label: &str, generation: u64) -> bool {
-    let m = position_write_generations()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    m.get(label).copied() == Some(generation)
-}
+static POSITION_WRITER: TrailingWriter =
+    TrailingWriter::new("position", Duration::from_millis(POSITION_WRITE_DEBOUNCE_MS));
 
 /// Called from `wrr::win_event`'s `EVENT_OBJECT_LOCATIONCHANGE` handler on
 /// every already-20Hz-debounced real (non-pool-move) position report,
@@ -81,62 +58,9 @@ pub(crate) fn report_position_for_srv_writethrough(state: &Arc<AppState>, hwnd: 
         return;
     };
 
-    let generation = next_position_write_generation(&label);
     let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
     let auth_key = state.auth_key.lock().clone();
-    let debounce_label = label.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(POSITION_WRITE_DEBOUNCE_MS));
-        if !is_current_position_write_generation(&debounce_label, generation) {
-            // A newer report for this label superseded us during the
-            // sleep — this rect is stale, don't persist it.
-            return;
-        }
+    POSITION_WRITER.schedule(label, move || {
         crate::client::backend_set_window_pos_and_size(&web_endpoint, &auth_key, &window_id, rect);
     });
-}
-
-#[cfg(test)]
-mod position_debounce_tests {
-    use super::{is_current_position_write_generation, next_position_write_generation};
-
-    /// Simulates a rapid burst (a drag): only the LAST report's generation
-    /// should still be "current" once all bumps have happened — the same
-    /// scenario opacity's debounce guards against, applied to position.
-    #[test]
-    fn burst_only_the_last_generation_is_current() {
-        let label = "test-position-burst-only-last-wins";
-        let gens: Vec<u64> = (0..5).map(|_| next_position_write_generation(label)).collect();
-        for &g in &gens[..gens.len() - 1] {
-            assert!(
-                !is_current_position_write_generation(label, g),
-                "earlier generation {g} must be superseded after a burst"
-            );
-        }
-        assert!(
-            is_current_position_write_generation(label, *gens.last().unwrap()),
-            "the last generation in the burst must still be current"
-        );
-    }
-
-    /// A single, deliberate (non-burst) report must still be current.
-    #[test]
-    fn single_report_is_current() {
-        let label = "test-position-single-report-is-current";
-        let g = next_position_write_generation(label);
-        assert!(is_current_position_write_generation(label, g));
-    }
-
-    /// Generations are tracked independently per label — a burst on one
-    /// window must not supersede a pending write for a different window.
-    #[test]
-    fn generations_are_independent_per_label() {
-        let a = "test-position-independent-label-a";
-        let b = "test-position-independent-label-b";
-        let ga = next_position_write_generation(a);
-        let gb = next_position_write_generation(b);
-        next_position_write_generation(a);
-        assert!(!is_current_position_write_generation(a, ga));
-        assert!(is_current_position_write_generation(b, gb));
-    }
 }

@@ -333,6 +333,11 @@ function applySessionTick(): void {
         return;
     }
     const { model, snapshotRoot, snapshotWeights, startWidth, startHeight, lastEdge, lastShiftHeld } = session;
+    // Nothing to stage or undo: skip the size read, which forces a layout
+    // mid-frame (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §3.4).
+    if (!lastShiftHeld && !session.staged) {
+        return;
+    }
     const rect = model.getBoundingRect();
     const deltaX = rect.width - startWidth;
     const deltaY = rect.height - startHeight;

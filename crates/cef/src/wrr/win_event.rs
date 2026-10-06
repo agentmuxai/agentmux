@@ -863,12 +863,11 @@ unsafe extern "system" fn win_event_callback(
 
     let raw_hwnd = hwnd as u64;
 
-    // Phase B.9.1 — diagnostic. INFO-level for B.9.1 smoke;
-    // dial back to debug! once we've confirmed the chain is
-    // wired end-to-end. Volume is bounded by the OBJID_WINDOW
-    // + CHILDID_SELF + idProcess filters above; for normal use
-    // this fires at ~5-20/sec during user activity.
-    tracing::info!(
+    // Phase B.9.1 diagnostic, now trace-level: it fires for every
+    // position change of every window in the process, on the CEF UI
+    // thread, and at INFO it formatted a log line for each frame of a
+    // window drag (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §3.4).
+    tracing::trace!(
         target: "wrr",
         "[wrr] callback event=0x{:x} hwnd={:#x}",
         event, raw_hwnd
