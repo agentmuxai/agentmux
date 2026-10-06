@@ -2,10 +2,8 @@
     "buttons": {
         "frontend/app/block/BlockErrorBoundary.tsx": 3,
         "frontend/app/components/color-swatch-palette.tsx": 1,
-        "frontend/app/components/confirm-dialog.tsx": 2,
         "frontend/app/devtools/diag-panel.tsx": 1,
         "frontend/app/element/PaneTabStrip.tsx": 2,
-        "frontend/app/element/confirm-modal.tsx": 2,
         "frontend/app/element/iconbutton.tsx": 2,
         "frontend/app/element/install/InstallProgress.tsx": 1,
         "frontend/app/element/markdown-media.tsx": 3,
@@ -115,10 +113,6 @@
         "frontend/app/window/window-controls.win32.tsx": 3
     },
     "solidFills": [
-        "frontend/app/components/confirm-dialog.scss :: .confirm-btn--danger",
-        "frontend/app/element/button.scss :: .wave-button.solid.green",
-        "frontend/app/element/modal.scss :: .modal-btn--confirm",
-        "frontend/app/element/modal.scss :: .modal-btn--destructive",
         "frontend/app/statusbar/StatusBar.scss :: .status-bar-popover .status-bar-toggle input[type=\"checkbox\"]:checked",
         "frontend/app/statusbar/StatusBar.scss :: .status-bar-restart-btn",
         "frontend/app/statusbar/_instance-panel.scss :: .instance-panel-btn-primary",
@@ -151,7 +145,6 @@
     "radius": {
         "frontend/app/app.scss": 1,
         "frontend/app/block/block.scss": 5,
-        "frontend/app/components/confirm-dialog.scss": 2,
         "frontend/app/components/context-menu.scss": 1,
         "frontend/app/drag/drop-indicators.scss": 2,
         "frontend/app/element/PaneChrome.scss": 2,

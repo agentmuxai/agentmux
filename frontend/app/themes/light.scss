@@ -6,7 +6,7 @@
 //
 // Two polarity flips relative to every dark theme's convention, both
 // deliberate:
-//   1. --hover-bg-color / --highlight-bg-color / --button-grey-* / scrollbar
+//   1. --hover-bg-color / --highlight-bg-color / scrollbar
 //      thumbs use BLACK tints, not the dark themes' white tints — a
 //      lightening overlay on an already-light surface is invisible.
 //   2. Terminal ANSI colors are individually darkened/desaturated from the
@@ -73,12 +73,6 @@
     --success-text-color: var(--success-color);
     --warning-text-color: var(--warning-color);
 
-    --button-grey-bg: rgba(0, 0, 0, 0.04);
-    --button-grey-hover-bg: rgba(0, 0, 0, 0.08);
-    --button-grey-border-color: rgba(0, 0, 0, 0.15);
-    --button-green-bg: #1a7f37;
-    --button-red-bg: #d1242f;
-    --button-yellow-bg: #9a6700;
 
     --scrollbar-thumb-color: rgba(0, 0, 0, 0.25);
     --scrollbar-thumb-hover-color: rgba(0, 0, 0, 0.4);
