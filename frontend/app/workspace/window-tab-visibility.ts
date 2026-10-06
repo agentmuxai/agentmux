@@ -73,7 +73,16 @@ export function tabContainerVisibility(
      * skips the tab's paint, which `opacity: 0` alone did not
      * (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §7).
      */
-    leaving = false
+    leaving = false,
+    /**
+     * Skip this tab's layout for now, though it is kept laid out: the window is
+     * being resized, or the resize just ended and the tab hasn't caught up yet
+     * (workspace.tsx). Laying every hidden tab out on every frame of a resize
+     * starved the renderer
+     * (docs/analysis/ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md). Only
+     * a hidden tab is affected; the displayed one always lays out.
+     */
+    deferLayout = false
 ): TabContainerVisibility {
     const hiddenLaidOut = keepLaidOut && !displayed;
     if (hiddenLaidOut && leaving) {
@@ -87,7 +96,7 @@ export function tabContainerVisibility(
         };
     }
     return {
-        "content-visibility": keepLaidOut || displayed ? "visible" : "hidden",
+        "content-visibility": displayed || (keepLaidOut && !deferLayout) ? "visible" : "hidden",
         visibility: gated || hiddenLaidOut ? "hidden" : null,
         // A hidden-but-laid-out tab also gets opacity 0: content can keep
         // painting through `visibility: hidden` (a `visibility` transition,

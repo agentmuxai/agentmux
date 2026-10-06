@@ -9,11 +9,12 @@ import { debounce } from "throttle-debounce";
 // Ref object shape compatible with SolidJS refs { current: T | null }
 type RefObject<T> = { current: T | null };
 
-// Watches a ref element for size changes and calls the callback with the new rect.
-// Pass debounceMs of null to not debounce.
+// Watches a ref element for size changes and calls the callback with the new rect
+// and the observer entry (for its `borderBoxSize`, so a callback can read the
+// size without forcing a layout). Pass debounceMs of null to not debounce.
 export function useOnResize<T extends HTMLElement>(
     ref: RefObject<T> | null | undefined,
-    callback: (domRect: DOMRectReadOnly) => void,
+    callback: (domRect: DOMRectReadOnly, entry?: ResizeObserverEntry) => void,
     debounceMs: number = null
 ) {
     onMount(() => {
@@ -24,9 +25,9 @@ export function useOnResize<T extends HTMLElement>(
             for (const entry of entries) {
                 if (isFirst) {
                     isFirst = false;
-                    callback(entry.contentRect);
+                    callback(entry.contentRect, entry);
                 } else {
-                    cb(entry.contentRect);
+                    cb(entry.contentRect, entry);
                 }
             }
         });

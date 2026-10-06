@@ -5,6 +5,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import clsx from "clsx";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
+import { windowResizing } from "@/app/platform/window-resize";
 import type { JSX } from "solid-js";
 import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
@@ -88,7 +89,13 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     // update at the full sysinfo rate (cheap text DOM updates).
     const [plotData, setPlotData] = createSignal(model.dataAtom());
     onMount(() => {
-        const id = setInterval(() => setPlotData(model.dataAtom()), CHART_UPDATE_INTERVAL_MS);
+        // Skipped while the window is being resized: rebuilding the chart reads
+        // layout, which mid-resize forced the frame's whole layout early
+        // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §2.3). The next tick
+        // after the resize catches up.
+        const id = setInterval(() => {
+            if (!windowResizing()) setPlotData(model.dataAtom());
+        }, CHART_UPDATE_INTERVAL_MS);
         onCleanup(() => clearInterval(id));
     });
     // Sync immediately whenever the initial (or a reconnect-triggered) load
