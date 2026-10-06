@@ -125,6 +125,23 @@ impl PersistentSubprocessController {
     /// restarting or stopping) — so an automated sender can tell its caller
     /// the truth (MCP `SendMessage`).
     pub fn send_user_message_outcome(&self, message: String) -> Result<SendOutcome, String> {
+        self.send_user_message_outcome_from(message, None)
+    }
+
+    /// [`Self::send_user_message_outcome`], saying who the input is from (turn
+    /// provenance, SPEC_AGENT_SELF_QUIT §6.3) — the Swarm broadcast, which is
+    /// the user's own message (SPEC_SWARM_BROADCAST_AS_USER_MESSAGE §6 q2).
+    /// The label is applied only when this message is the only one written: a
+    /// backlog written with it was queued by automated senders, and a message
+    /// left queued (process starting, restarting or stopping) is written later
+    /// by the drain with whatever else is queued. Both stay unlabelled, as
+    /// every automated delivery is, so the label can never vouch for input
+    /// that isn't the user's.
+    pub fn send_user_message_outcome_from(
+        &self,
+        message: String,
+        origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+    ) -> Result<SendOutcome, String> {
         // Pre-turn fence — see `send_message`.
         self.fence_check()?;
         let json_str = Self::encode_user_message(&message);
@@ -176,7 +193,11 @@ impl PersistentSubprocessController {
             }
             // Marked under this same guard, so the turn state a concurrent
             // caller or the turn-end handler reads is never behind the write.
-            let was_active = (!written.is_empty()).then(|| self.mark_turn_active_locked());
+            // Only a fully successful write of this message alone: with a
+            // failure, the one entry written is an older queued one and this
+            // message was taken back (#4401).
+            let label = if failure.is_none() && written.len() == 1 { origin } else { None };
+            let was_active = (!written.is_empty()).then(|| self.mark_turn_active_locked_from(label));
             (written, was_active, !inner.deferred_deliveries.is_empty(), failure)
         };
 
@@ -222,6 +243,15 @@ impl PersistentSubprocessController {
     /// the pre-call value.
     fn mark_turn_active_locked(&self) -> bool {
         self.health_monitor.mark_turn_active_returning_was_active()
+    }
+
+    /// [`Self::mark_turn_active_locked`] with the input's provenance; `None`
+    /// is exactly the unlabelled mark.
+    fn mark_turn_active_locked_from(
+        &self,
+        origin: Option<crate::backend::blockcontroller::health::TurnInput>,
+    ) -> bool {
+        self.health_monitor.mark_turn_active_from(origin)
     }
 
     /// Whether a queued message must keep waiting rather than be written now.

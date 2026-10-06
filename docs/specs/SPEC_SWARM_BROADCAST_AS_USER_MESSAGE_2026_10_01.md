@@ -176,6 +176,9 @@ frontend that does not know the header still shows readable text.
 
 ### 4.6 Turn origin
 
+> **Superseded 2026-10-06 (owner decision, §6 q2): broadcast turns are `TurnOrigin::User`.** See
+> §10. The paragraphs below are the original reasoning, kept for the record.
+
 Broadcast turns are `TurnOrigin::Automated`, which is what that variant's doc comment already
 lists ("a jekt, cron, nudge, broadcast, loop"). `TurnOrigin` is what srv checks, not the text,
 and the only gate that reads it today is the self-quit gate (`sagas/self_quit.rs` refuses anything
@@ -212,13 +215,24 @@ capability, not just a label. See open question 2, which the owner has not answe
    the human operator** (§4.3).
 1. **Header wording and fields.** `[BROADCAST:FROM=user VIA=swarm TO=<agent> RECIPIENTS=<n> MSGID TS]`
    as above, or something plainer?
-2. **Self-quit by broadcast.** Keep `Automated` (safe, cannot quit a fleet by broadcast), or
-   promote to `User` (convenient, but forgeable by anything holding the pane key)?
-3. **Agents driving the UI.** The MCP server exposes `UIClick`, `UIQuery` and `UIScreenshot`. If
+2. ~~**Self-quit by broadcast.** Keep `Automated` (safe, cannot quit a fleet by broadcast), or
+   promote to `User` (convenient, but forgeable by anything holding the pane key)?~~
+   **Answered 2026-10-06: promote to `User`** ("broadcast has broad powers"). §10.
+3. ~~**Agents driving the UI.** The MCP server exposes `UIClick`, `UIQuery` and `UIScreenshot`. If
    `UIClick` can press the Broadcast button and type into its box, an agent could send a
    "message from the user" through the real UI. To verify before P2 (does it synthesize input
    events or real OS input, and does the composer see a difference). If it can, the broadcast
-   needs a human-gesture check or the header should say so.
+   needs a human-gesture check or the header should say so.~~
+   **Answered 2026-10-06: keep it blocked.** Checked in the code: `UIClick` is a real CDP mouse
+   event (`Input.dispatchMouseEvent`, so `isTrusted` and indistinguishable from a human click),
+   but it is scoped to the caller's own pane plus shared chrome (`__amq_allowed_for` in
+   `crates/cef/src/browser_api/scripts/query.js`). Swarm is its own pane (`view: "swarm"`), so an
+   agent cannot reach its Broadcast button. The owner chose to keep it that way: agents broadcast
+   through `FleetBroadcast`, signed jekts labelled with the sending agent.
+
+   The `CLAUDE.md` jekt-section paragraph proposed in #4176 (P4) is **not** applied (owner,
+   2026-10-06): the Operator Config entry `operator-config-swarm-broadcast` already carries the
+   guidance to every agent.
 4. **Single-pane sends from Swarm.** Does anything else in Swarm send a message the user typed
    (not a broadcast) through a jekt? If so it has the same fault and should use the same path.
 5. **Direct agent-to-user parity.** Should a one-target "send" in the broadcast box (selection of
@@ -263,3 +277,34 @@ capability, not just a label. See open question 2, which the owner has not answe
   PTY-based pane is refused with a per-target error, because typing prose into a shell prompt
   would run it as a command. So §4.4's "calls `run_agent_turn` directly" reads: only for the
   targets that need a turn started.
+
+## 10. Broadcast turns are the user's (2026-10-06)
+
+Owner decision on §6 q2: a broadcast has the user's powers, including authorizing an agent's
+self-quit. `BROADCAST_TURN_ORIGIN` is now `TurnOrigin::User`.
+
+**No new forgery power.** Anything that holds the pane key could already send any pane a plain
+`User` turn through `agent.input` (§2 finding 7, §4.2); a broadcast now carries exactly that
+label. The `[BROADCAST:` header is still written only by srv, and jekt bodies still cannot imitate
+it. `UIClick` still cannot press Broadcast (§6 q3).
+
+**Labelled on every path that tracks provenance.** A label on the constant alone would have
+covered only the targets that get a turn started (subprocess agents, persistent agents not yet
+spawned). A running persistent agent takes the broadcast through structured delivery, which
+marked the turn unlabelled, so the self-quit gate would have read it as unknown. Broadcast
+delivery now passes the label through `route_agent_message_from` →
+`deliver_agent_message_from` → `PersistentSubprocessController::send_user_message_outcome_from`.
+Jekts and every other automated sender keep the unlabelled forms, unchanged.
+
+| Target | Turn provenance from a broadcast |
+|---|---|
+| Persistent, idle | `User`, starts the turn (as typing would) |
+| Persistent, mid-turn | Absorbed as user input: a user turn stays untainted, any other turn is unchanged |
+| Persistent, written together with an older queued backlog | Unlabelled (unknown): the backlog came from automated senders |
+| Persistent, process starting, restarting or stopping (delivery deferred) | Unlabelled (unknown): the drain writes it with whatever else is queued |
+| Persistent not yet spawned, subprocess | `User`, via `run_agent_turn` |
+| ACP, App Server | No provenance, the same as a typed message to them today |
+
+The two unlabelled cases mean a broadcast's "then quit" is refused there, which is the safe
+direction. The self-quit gate's other rules still apply to a broadcast turn: it must be
+untainted, and the agent's quoted instruction must appear in the broadcast text.
