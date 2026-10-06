@@ -1,0 +1,118 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The line-style recipe every control in element/ui/ is built from
+// (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §3.3, §5.1). It is the
+// composer strip's Shell button generalised: state is carried by a 1px line
+// and the tone colour, plus at most a faint tint. No state ever fills solid.
+//
+// A tone is a set of four custom properties, so the base rules below are
+// written once and every tone, theme and density reuses them:
+//   --ui-fg            text colour at rest
+//   --ui-line          border colour at rest
+//   --ui-bg            background at rest
+//   --ui-tone          colour of the hover/pressed line and tint
+
+@use "../../mixins.scss";
+
+@mixin tone($tone) {
+    @if $tone == accent {
+        --ui-tone: var(--accent-color);
+        --ui-fg: var(--accent-color);
+        --ui-fg-hover: var(--accent-color);
+        --ui-line: var(--ui-line-accent);
+        --ui-line-hover: var(--accent-color);
+        --ui-bg: color-mix(in srgb, var(--accent-color) var(--ui-tint-rest), transparent);
+        font-weight: 600;
+    } @else if $tone == neutral {
+        --ui-tone: var(--accent-color);
+        --ui-fg: var(--secondary-text-color);
+        --ui-fg-hover: var(--main-text-color);
+        --ui-line: var(--border-color);
+        --ui-line-hover: color-mix(in srgb, var(--accent-color) 30%, transparent);
+        --ui-bg: transparent;
+    } @else if $tone == danger {
+        --ui-tone: var(--error-color);
+        --ui-fg: var(--error-color);
+        --ui-fg-hover: var(--error-color);
+        --ui-line: var(--ui-line-danger);
+        --ui-line-hover: var(--error-color);
+        --ui-bg: color-mix(in srgb, var(--error-color) var(--ui-tint-rest), transparent);
+    } @else if $tone == quiet {
+        --ui-tone: var(--main-text-color);
+        --ui-fg: var(--secondary-text-color);
+        --ui-fg-hover: var(--main-text-color);
+        --ui-line: transparent;
+        --ui-line-hover: var(--border-color);
+        --ui-bg: transparent;
+    } @else {
+        @error "unknown line-control tone: #{$tone}";
+    }
+}
+
+// Hover look. Neutral's hover line is a 30% accent, like the composer
+// strip's Compact button; accent and danger go to their full tone colour.
+// Quiet tints with main text rather than accent: an accent tint would be
+// too loud on a toolbar or close button.
+@mixin hover-look {
+    color: var(--ui-fg-hover);
+    border-color: var(--ui-line-hover);
+    background: color-mix(in srgb, var(--ui-tone) var(--ui-tint-hover), transparent);
+}
+
+// Pressed / selected look: the tone's full line, the hover tint, and a
+// second inset line so "on" reads as a heavier line rather than a fill.
+@mixin pressed-look {
+    color: var(--accent-color);
+    border-color: var(--accent-color);
+    background: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
+    box-shadow: inset 0 0 0 1px var(--accent-color);
+}
+
+@mixin line-control {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ui-gap);
+    box-sizing: border-box;
+    min-height: var(--ui-height);
+    padding: var(--ui-pad-y) var(--ui-pad-x);
+    font: inherit;
+    font-size: var(--ui-font-size);
+    font-weight: var(--ui-font-weight);
+    line-height: var(--leading-tight);
+    white-space: nowrap;
+    user-select: none;
+    color: var(--ui-fg);
+    background: var(--ui-bg);
+    border: 1px solid var(--ui-line);
+    border-radius: var(--radius-sm);
+    cursor: var(--cursor-interactive);
+    transition-property: color, background-color, border-color, box-shadow, opacity;
+    transition-duration: 80ms;
+    transition-timing-function: ease;
+
+    i {
+        font-size: var(--ui-icon-size);
+    }
+
+    &:hover:not(:disabled, [aria-disabled="true"]) {
+        @include hover-look;
+    }
+
+    &[aria-pressed="true"],
+    &[aria-checked="true"],
+    &[aria-selected="true"] {
+        @include pressed-look;
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+
+    &:disabled,
+    &[aria-disabled="true"] {
+        opacity: 0.4;
+        cursor: var(--cursor-disabled);
+    }
+}

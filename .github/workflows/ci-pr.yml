@@ -499,6 +499,12 @@ jobs:
       - name: No transition-all gate
         run: bash scripts/check-no-transition-all.sh
 
+      # Ratchet for the line-style component set: hand-rolled buttons, solid
+      # fills on controls, off-token corner radii and undefined CSS variables
+      # may only go down (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7).
+      - name: UI primitives ratchet
+        run: node scripts/check-ui-primitives.mjs
+
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
       # a stack that still NAMES a ligature font resolves against a

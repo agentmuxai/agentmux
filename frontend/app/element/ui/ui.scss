@@ -1,0 +1,374 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Styles for the line-style component set in element/ui/
+// (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5). Sizes come only
+// from the `--ui-*` density tokens in theme.scss, colours only from theme
+// tokens, and no control fills solid in any state.
+
+@use "../../mixins.scss";
+@use "./line";
+
+// ── Button / IconButton ─────────────────────────────────────────────────────
+
+.ui-button {
+    @include line.line-control;
+}
+
+.ui-tone-accent {
+    @include line.tone(accent);
+}
+
+.ui-tone-neutral {
+    @include line.tone(neutral);
+}
+
+.ui-tone-danger {
+    @include line.tone(danger);
+}
+
+.ui-tone-quiet {
+    @include line.tone(quiet);
+}
+
+.ui-icon-button {
+    width: var(--ui-height);
+    padding: 0;
+}
+
+// The Tooltip wrapper around an IconButton must not change its layout.
+.ui-tooltip-anchor {
+    display: inline-flex;
+}
+
+// ── SegmentedControl ────────────────────────────────────────────────────────
+
+.ui-segmented {
+    display: inline-flex;
+    align-items: stretch;
+}
+
+.ui-segmented-option {
+    @include line.line-control;
+    @include line.tone(neutral);
+    position: relative;
+
+    // Joined borders: each option overlaps its left neighbour's line, and
+    // the hovered or selected one is raised so its full line shows.
+    & + & {
+        margin-left: -1px;
+    }
+
+    &:hover,
+    &[aria-checked="true"],
+    &:focus-visible {
+        z-index: 1;
+    }
+}
+
+// ── Tabs ────────────────────────────────────────────────────────────────────
+// The Stash drawer's tabs, generalised. Selected = a 2px accent line, never a
+// fill: underneath when horizontal, on the leading edge when vertical.
+
+.ui-tabs {
+    display: flex;
+    gap: var(--space-0-5);
+    min-width: 0;
+}
+
+.ui-tabs--horizontal {
+    flex-direction: row;
+    align-items: stretch;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ui-tabs--vertical {
+    flex-direction: column;
+    padding: var(--space-2) 0;
+}
+
+.ui-tab {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    box-sizing: border-box;
+    padding: var(--space-2) var(--space-3);
+    font: inherit;
+    font-size: var(--ui-font-size);
+    font-weight: var(--ui-font-weight);
+    line-height: var(--leading-tight);
+    white-space: nowrap;
+    color: var(--secondary-text-color);
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: var(--cursor-interactive);
+    user-select: none;
+    transition-property: color, background-color, box-shadow;
+    transition-duration: 80ms;
+    transition-timing-function: ease;
+
+    i {
+        width: 16px;
+        text-align: center;
+        font-size: var(--ui-icon-size);
+        opacity: 0.8;
+    }
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+
+    &[aria-selected="true"] {
+        color: var(--main-text-color);
+
+        i {
+            opacity: 1;
+        }
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+}
+
+.ui-tabs--horizontal .ui-tab {
+    // Sit the underline on top of the tablist's own bottom line.
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+
+    &[aria-selected="true"] {
+        border-bottom-color: var(--accent-color);
+    }
+}
+
+.ui-tabs--vertical .ui-tab {
+    width: 100%;
+    justify-content: flex-start;
+
+    &:hover {
+        background: color-mix(in srgb, var(--main-text-color) var(--ui-tint-rest), transparent);
+    }
+
+    &[aria-selected="true"] {
+        box-shadow: inset 2px 0 0 var(--accent-color);
+    }
+}
+
+.ui-tabs--icon-only .ui-tab {
+    justify-content: center;
+
+    .ui-tab-label {
+        display: none;
+    }
+}
+
+// ── TabbedPane ──────────────────────────────────────────────────────────────
+
+.ui-tabbed-pane {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+}
+
+.ui-tabbed-pane--rail {
+    flex-direction: row;
+
+    > .ui-tabs {
+        flex: 0 0 auto;
+        width: 168px;
+        border-right: 1px solid var(--border-color);
+        overflow-y: auto;
+    }
+}
+
+.ui-tabbed-pane--rail-icons > .ui-tabs {
+    width: var(--space-12);
+}
+
+.ui-tabbed-pane--top {
+    flex-direction: column;
+
+    > .ui-tabs {
+        flex: 0 0 auto;
+        padding: 0 var(--space-2);
+    }
+}
+
+.ui-tabbed-pane-panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+}
+
+// ── Field ───────────────────────────────────────────────────────────────────
+
+.ui-field {
+    display: flex;
+    gap: var(--space-1-5) var(--space-4);
+    padding: var(--space-2) 0;
+}
+
+// Inline: text left, control right; wraps to stacked on its own when the
+// container is too narrow for both, without needing a container query.
+.ui-field--inline {
+    flex-wrap: wrap;
+    align-items: center;
+
+    > .ui-field-text {
+        flex: 1 1 200px;
+    }
+
+    > .ui-field-control {
+        flex: 0 1 auto;
+        align-items: flex-end;
+    }
+}
+
+.ui-field--stacked {
+    flex-direction: column;
+}
+
+.ui-field-text,
+.ui-field-control {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-width: 0;
+}
+
+.ui-field-label {
+    font-size: var(--text-sm);
+    font-weight: var(--font-weight-medium);
+    color: var(--main-text-color);
+}
+
+.ui-field-description,
+.ui-field-hint {
+    font-size: var(--text-xs);
+    line-height: var(--leading-normal);
+    color: var(--secondary-text-color);
+}
+
+.ui-field-error {
+    font-size: var(--text-xs);
+    color: var(--error-color);
+}
+
+// ── TextInput / NumberInput / Select ────────────────────────────────────────
+// A line input: transparent, 1px neutral line, accent line when focused.
+
+.ui-input {
+    box-sizing: border-box;
+    min-height: var(--ui-height);
+    padding: 0 var(--space-2);
+    font: inherit;
+    font-size: var(--ui-font-size);
+    color: var(--main-text-color);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    outline: none;
+    transition-property: border-color, box-shadow;
+    transition-duration: 80ms;
+    transition-timing-function: ease;
+
+    &::placeholder {
+        color: var(--secondary-text-color);
+        opacity: 0.7;
+    }
+
+    &:hover:not(:disabled, :focus) {
+        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+    }
+
+    &:focus {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 1px var(--accent-color);
+    }
+
+    &[aria-invalid="true"] {
+        border-color: var(--error-color);
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: var(--cursor-disabled);
+    }
+}
+
+select.ui-input {
+    cursor: var(--cursor-interactive);
+
+    option {
+        background: var(--modal-bg-color);
+        color: var(--main-text-color);
+    }
+}
+
+input.ui-input[type="number"] {
+    width: 9ch;
+}
+
+// ── Switch ──────────────────────────────────────────────────────────────────
+// A line switch: the track is an outline, never a solid bar. Off = neutral
+// line and a secondary-coloured thumb; on = accent line, tint and thumb.
+
+.ui-switch {
+    --ui-switch-h: calc(var(--ui-font-size) + 4px);
+    --ui-switch-w: calc(var(--ui-switch-h) * 2);
+    --ui-switch-thumb: calc(var(--ui-switch-h) - 6px);
+
+    position: relative;
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    width: var(--ui-switch-w);
+    height: var(--ui-switch-h);
+    padding: 0;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-full);
+    cursor: var(--cursor-interactive);
+    transition-property: background-color, border-color, box-shadow;
+    transition-duration: 80ms;
+    transition-timing-function: ease;
+
+    &:hover:not(:disabled) {
+        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+    }
+
+    &[aria-checked="true"] {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
+    }
+
+    &:focus-visible {
+        @include mixins.focus-ring;
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: var(--cursor-disabled);
+    }
+}
+
+.ui-switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: var(--ui-switch-thumb);
+    height: var(--ui-switch-thumb);
+    background: var(--secondary-text-color);
+    border-radius: var(--radius-full);
+    transition-property: transform, background-color;
+    transition-duration: 80ms;
+    transition-timing-function: ease;
+
+    .ui-switch[aria-checked="true"] & {
+        background: var(--accent-color);
+        transform: translateX(calc(var(--ui-switch-w) - var(--ui-switch-h)));
+    }
+}
