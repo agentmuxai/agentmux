@@ -131,8 +131,9 @@ export interface TabbedPaneProps<T extends string> {
 
 /**
  * A pane with section navigation and one panel. Wide: a rail with labels.
- * Narrower: an icon-only rail with tooltips. Narrowest: Stash-style tabs
- * along the top. One tablist throughout; only its layout changes.
+ * Narrower: an icon-only rail with tooltips. Narrowest: icon-only tabs
+ * spread along the top, Stash-style. One tablist throughout; only its
+ * layout changes.
  */
 export function TabbedPane<T extends string>(props: TabbedPaneProps<T>): JSX.Element {
     let root: HTMLDivElement | undefined;
@@ -156,7 +157,7 @@ export function TabbedPane<T extends string>(props: TabbedPaneProps<T>): JSX.Ele
                 value={props.value}
                 onChange={props.onChange}
                 orientation={layout() === "top" ? "horizontal" : "vertical"}
-                iconOnly={layout() === "rail-icons"}
+                iconOnly={layout() !== "rail"}
                 idPrefix={props.idPrefix}
                 ariaLabel={props.ariaLabel}
             />

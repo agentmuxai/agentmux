@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Select } from "@/app/element/ui";
 import { Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
@@ -259,14 +260,14 @@ export function SoundsSection(): JSX.Element {
                     label={SOUNDS_SETTINGS.toolTonesScope.label}
                     description={SOUNDS_SETTINGS.toolTonesScope.description}
                     control={
-                        <select
+                        <Select
                             class="setting-select"
                             value={(s()["notify:tooltones:scope"] as string) ?? "all"}
-                            onChange={(e) => set("notify:tooltones:scope", e.currentTarget.value)}
+                            onChange={(v) => set("notify:tooltones:scope", v)}
                         >
                             <option value="all">All panes</option>
                             <option value="focused">Focused pane only</option>
-                        </select>
+                        </Select>
                     }
                 />
             </Show>

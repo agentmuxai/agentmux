@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Select, TextInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
@@ -113,15 +114,15 @@ export function AppearanceSection(): JSX.Element {
                 label={APPEARANCE_SETTINGS.theme.label}
                 description={APPEARANCE_SETTINGS.theme.description}
                 control={
-                    <select
+                    <Select
                         class="setting-select"
                         value={(s()["window:theme"] as string) ?? "default"}
-                        onChange={(e) => set("window:theme", e.currentTarget.value)}
+                        onChange={(v) => set("window:theme", v)}
                     >
                         <For each={THEME_OPTIONS}>
                             {(t) => <option value={t.id}>{t.label}</option>}
                         </For>
-                    </select>
+                    </Select>
                 }
             />
             <SettingRow
@@ -206,7 +207,7 @@ export function AppearanceSection(): JSX.Element {
                 label={APPEARANCE_SETTINGS.bgColor.label}
                 description={APPEARANCE_SETTINGS.bgColor.description}
                 control={
-                    <input
+                    <TextInput
                         class="setting-text"
                         type="text"
                         value={(s()["window:bgcolor"] as string) ?? ""}

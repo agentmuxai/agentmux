@@ -86,6 +86,11 @@
 .ui-tabs--vertical {
     flex-direction: column;
     padding: var(--space-2) 0;
+
+    // Each tab sits in its tooltip's anchor; the anchor spans the rail.
+    > .ui-tooltip-anchor {
+        display: flex;
+    }
 }
 
 .ui-tab {
@@ -201,6 +206,16 @@
         flex: 0 0 auto;
         padding: 0 var(--space-2);
     }
+
+    // Icon-only tabs share the width, like the old narrow tab bars.
+    > .ui-tabs > .ui-tooltip-anchor {
+        flex: 1 1 0;
+        min-width: 0;
+
+        > .ui-tab {
+            flex: 1 1 auto;
+        }
+    }
 }
 
 .ui-tabbed-pane-panel {
@@ -315,7 +330,9 @@ select.ui-input {
     }
 }
 
-input.ui-input[type="number"] {
+// A default only: `:where()` keeps it at zero specificity, so a consumer's
+// width class wins.
+:where(input.ui-input[type="number"]) {
     width: 9ch;
 }
 

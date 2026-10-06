@@ -102,11 +102,7 @@
         "frontend/app/view/native-memory/native-memory-manager.tsx": 1,
         "frontend/app/view/remotes/remotes-view.tsx": 20,
         "frontend/app/view/section-pane/section-pane.tsx": 2,
-        "frontend/app/view/settings/sections/notifications-section.tsx": 1,
-        "frontend/app/view/settings/sections/recording-section.tsx": 2,
-        "frontend/app/view/settings/settings-controls.tsx": 6,
         "frontend/app/view/settings/settings-search-bar.tsx": 1,
-        "frontend/app/view/settings/settings-view.tsx": 4,
         "frontend/app/view/skill/skill-manager.tsx": 7,
         "frontend/app/view/swarm/swarm-fleet-toolbar.tsx": 8,
         "frontend/app/view/swarm/swarm-view.tsx": 5,
@@ -151,9 +147,7 @@
         "frontend/app/view/identity/styles/_detail.scss :: .identity-btn.identity-btn-primary",
         "frontend/app/view/memory-editor/memory-editor.scss :: .memory-editor-btn.is-primary",
         "frontend/app/view/memory-editor/memory-history.scss :: .native-memory-history-btn.native-memory-history-btn-primary",
-        "frontend/app/view/section-pane/section-pane.scss :: .bundle-manager-rail-item.is-active",
-        "frontend/app/view/settings/settings.scss :: .setting-toggle--on",
-        "frontend/app/view/settings/settings.scss :: .settings-rail-item.is-active"
+        "frontend/app/view/section-pane/section-pane.scss :: .bundle-manager-rail-item.is-active"
     ],
     "radius": {
         "frontend/app/app.scss": 1,
@@ -199,7 +193,6 @@
         "frontend/app/view/identity/styles/_form-overlay.scss": 2,
         "frontend/app/view/native-memory/native-memory-manager.scss": 4,
         "frontend/app/view/remotes/remotes-view.scss": 8,
-        "frontend/app/view/settings/settings.scss": 11,
         "frontend/app/view/ssh-approval/ssh-approval-window.scss": 1,
         "frontend/app/view/swarm/swarm-view.scss": 16,
         "frontend/app/view/toolchain/toolchain-view.scss": 7,
@@ -233,7 +226,6 @@
         "--shiki-light-font-weight",
         "--space-2-5",
         "--tertiary-text-color",
-        "--text-color",
-        "--toggle-off-bg"
+        "--text-color"
     ]
 }

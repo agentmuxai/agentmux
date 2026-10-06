@@ -1,376 +1,157 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+// Settings layout only. The navigation, rows and controls are the shared
+// line-style components in element/ui/ (TabbedPane, Field, Switch, Select,
+// TextInput, NumberInput, Button); this file sizes and spaces them.
+// SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §8, PR 2.
+
 .settings-view-container {
     width: 100%;
     height: 100%;
     container-type: inline-size;
     container-name: settings;
-}
 
-.settings-view {
-    display: flex;
-    flex-direction: row;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-}
-
-// ── Left rail ─────────────────────────────────────────────────────────────────
-
-.settings-rail {
-    flex: 0 0 160px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px;
-    border-right: 1px solid var(--border-color);
-    background: var(--panel-bg-color, var(--main-bg-color));
-    overflow-y: auto;
-}
-
-.settings-rail-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 10px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--main-text-color);
-    font-size: 13px;
-    text-align: left;
-    cursor: default;
-
-    i {
-        width: 16px;
-        text-align: center;
-        opacity: 0.7;
-    }
-
-    &:hover {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
-    }
-
-    &.is-active {
-        background: var(--accent-color);
-        color: var(--accent-text-color, #fff);
-
-        i {
-            opacity: 1;
-        }
+    // The panel holds the search bar, the section and the footer; only the
+    // section scrolls.
+    .ui-tabbed-pane-panel {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 }
-
-// ── Right content ─────────────────────────────────────────────────────────────
 
 .settings-body {
     flex: 1 1 auto;
     display: flex;
     flex-direction: column;
+    min-height: 0;
     overflow: hidden;
 }
 
 .settings-section-body {
     flex: 1 1 auto;
     overflow-y: auto;
-    padding: 12px 16px;
+    padding: var(--space-3) var(--space-4);
     display: flex;
     flex-direction: column;
-    gap: 2px;
 }
 
 .settings-subheader {
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    opacity: 0.45;
-    padding: 14px 4px 4px;
+    color: var(--secondary-text-color);
+    padding: var(--space-4) 0 var(--space-1);
 
     &:first-child {
-        padding-top: 4px;
+        padding-top: var(--space-1);
     }
 }
 
 // ── Config error banner ───────────────────────────────────────────────────────
 
 .settings-config-errors {
-    padding: 8px 16px;
-    background: rgba(219, 58, 58, 0.12);
-    border-bottom: 1px solid rgba(219, 58, 58, 0.3);
+    padding: var(--space-2) var(--space-4);
+    background: color-mix(in srgb, var(--error-color) var(--ui-tint-rest), transparent);
+    border-bottom: 1px solid var(--ui-line-danger);
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    font-size: 0.8rem;
+    gap: var(--space-1);
+    font-size: var(--text-sm);
 }
 
 .settings-config-error {
     display: flex;
     align-items: baseline;
-    gap: 6px;
-    color: var(--error-color, #f85149);
+    gap: var(--space-1-5);
+    color: var(--error-color);
 
     .mono {
-        font-family: monospace;
-        font-size: 0.75rem;
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
         opacity: 0.8;
     }
 }
 
 .settings-config-error-fix {
     align-self: flex-end;
-    margin-top: 4px;
-    font-size: 0.75rem;
-    padding: 2px 8px;
-    border: 1px solid var(--error-color, #f85149);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--error-color, #f85149);
-    cursor: default;
-
-    &:hover {
-        background: rgba(219, 58, 58, 0.12);
-    }
+    margin-top: var(--space-1);
 }
 
 // ── Setting rows ──────────────────────────────────────────────────────────────
+// Each row is a Field; the row is what search scrolls to and highlights.
 
 .setting-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 8px 4px;
-    border-bottom: 1px solid var(--border-color, rgba(127, 127, 127, 0.12));
+    border-bottom: 1px solid var(--border-color);
 
     &:last-of-type {
         border-bottom: none;
     }
 
     &--indent {
-        padding-left: 24px;
-        opacity: 0.9;
-    }
-
-    &--stacked {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 6px;
-
-        .setting-row-control {
-            align-self: stretch;
-        }
+        padding-left: var(--space-6);
     }
 }
 
-.setting-row-label {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-    flex: 1 1 auto;
-}
-
-.setting-row-name {
-    font-size: 0.875rem;
-    font-weight: 500;
-}
-
-.setting-row-desc {
-    font-size: 0.73rem;
-    opacity: 0.55;
-    line-height: 1.3;
-}
-
-.setting-row-control {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-}
-
-// ── Controls ──────────────────────────────────────────────────────────────────
+// ── Control widths ────────────────────────────────────────────────────────────
 
 .setting-select {
-    font-size: 0.82rem;
-    padding: 3px 6px;
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    border-radius: 4px;
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
-    color: inherit;
     min-width: 140px;
+}
 
-    &:focus {
-        outline: none;
-        border-color: var(--accent-color, rgba(88, 166, 255, 0.6));
-    }
+.setting-text {
+    width: 200px;
 }
 
 .setting-number {
     width: 64px;
-    font-size: 0.82rem;
-    padding: 3px 6px;
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    border-radius: 4px;
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
-    color: inherit;
     text-align: right;
 
     &--wide {
-        width: 88px;
-    }
-
-    &:focus {
-        outline: none;
-        border-color: var(--accent-color, rgba(88, 166, 255, 0.6));
+        width: 100px;
     }
 }
 
-.setting-text {
-    font-size: 0.82rem;
-    padding: 3px 8px;
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    border-radius: 4px;
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
-    color: inherit;
-    width: 200px;
-
-    &:focus {
-        outline: none;
-        border-color: var(--accent-color, rgba(88, 166, 255, 0.6));
-    }
-}
-
-// ── Key-value / string-array editors ─────────────────────────────────────────
+// ── Key-value editor ──────────────────────────────────────────────────────────
 
 .setting-kv-editor {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
     width: 100%;
 }
 
 .setting-kv-row {
     display: flex;
     align-items: center;
-    gap: 6px;
-
-    &--new {
-        opacity: 0.8;
-    }
+    gap: var(--space-1-5);
 }
 
 .setting-kv-key {
     flex: 0 0 160px;
-    width: auto;
-    font-family: monospace;
-
-    &:disabled {
-        opacity: 0.6;
-    }
+    font-family: var(--font-mono);
 }
 
 .setting-kv-val {
     flex: 1 1 auto;
-    width: auto;
+    min-width: 0;
 }
 
-.setting-kv-remove {
-    flex: 0 0 auto;
-    width: 24px;
-    height: 24px;
+// ── Masked key field ──────────────────────────────────────────────────────────
+
+.setting-masked-key,
+.setting-masked-key-actions {
     display: flex;
     align-items: center;
-    justify-content: center;
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    border-radius: 4px;
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-    opacity: 0.6;
-    font-size: 0.7rem;
-
-    &:hover {
-        opacity: 1;
-        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
-    }
-
-    &.setting-kv-add {
-        color: var(--accent-color);
-        opacity: 0.9;
-    }
-}
-
-// ── Toggle switch ─────────────────────────────────────────────────────────────
-
-.setting-toggle {
-    position: relative;
-    width: 36px;
-    height: 20px;
-    border: none;
-    border-radius: 10px;
-    background: var(--toggle-off-bg, rgba(127, 127, 127, 0.35));
-    cursor: default;
-    transition: background 0.15s;
-    padding: 0;
-
-    &--on {
-        background: var(--accent-color, #58a6ff);
-    }
-}
-
-.setting-toggle-thumb {
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #fff;
-    transition: transform 0.15s;
-
-    .setting-toggle--on & {
-        transform: translateX(16px);
-    }
-}
-
-// ── Masked key field ────────────────────────────────────────────────────────
-
-.setting-masked-key {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .setting-masked-key-dots {
-    font-family: monospace;
+    font-family: var(--font-mono);
     letter-spacing: 2px;
-    opacity: 0.8;
-}
-
-.setting-masked-key-btn {
-    flex: 0 0 auto;
-    padding: 3px 10px;
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    border-radius: 4px;
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-    font-size: 0.8rem;
-
-    &:hover:not(:disabled) {
-        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
-    }
-
-    &:disabled {
-        opacity: 0.4;
-    }
-
-    &--primary {
-        border-color: var(--accent-color, #58a6ff);
-        color: var(--accent-color, #58a6ff);
-    }
+    color: var(--secondary-text-color);
 }
 
 // ── Slider ────────────────────────────────────────────────────────────────────
@@ -378,93 +159,27 @@
 .setting-slider {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
 
     input[type="range"] {
         width: 120px;
-        accent-color: var(--accent-color, #58a6ff);
+        accent-color: var(--accent-color);
     }
 }
 
 .setting-slider-val {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     min-width: 28px;
     text-align: right;
-    opacity: 0.65;
+    color: var(--secondary-text-color);
 }
 
 // ── Footer ────────────────────────────────────────────────────────────────────
 
 .settings-footer {
     flex-shrink: 0;
-    padding: 8px 16px;
+    padding: var(--space-2) var(--space-4);
     border-top: 1px solid var(--border-color);
-}
-
-.settings-footer-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.78rem;
-    padding: 4px 10px;
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    border-radius: 4px;
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-    opacity: 0.7;
-
-    &:hover {
-        opacity: 1;
-        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
-    }
-}
-
-// ── Tab bar, top of pane (xs only) ────────────────────────────────────────────
-
-.settings-tab-bar {
-    display: none;
-    flex-direction: row;
-    align-items: stretch;
-    // Rendered at the TOP of the pane (see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md)
-    // — the hairline separates it from the content rendered below, not above.
-    border-bottom: 1px solid var(--border-color);
-    background: var(--panel-bg-color, var(--main-bg-color));
-    flex-shrink: 0;
-    overflow-x: auto;
-
-    button {
-        flex: 1;
-        min-width: 40px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 8px 2px;
-        border: none;
-        // Bottom edge, not top — the bar sits at the TOP of the pane now
-        // (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md), so the
-        // active-tab indicator should touch the content it's showing,
-        // rendered below, not the far edge away from it. codex P2, PR #2793.
-        border-bottom: 2px solid transparent;
-        background: transparent;
-        color: var(--main-text-color);
-        cursor: default;
-        opacity: 0.6;
-
-        i { font-size: 14px; }
-
-        &.is-active {
-            opacity: 1;
-            color: var(--accent-color);
-            border-bottom-color: var(--accent-color);
-        }
-
-        &:hover:not(.is-active) {
-            opacity: 0.85;
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
-        }
-    }
 }
 
 // ── Path field (Settings -> Recording) ───────────────────────────────────────
@@ -472,7 +187,7 @@
 .setting-path-field {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
 
     .setting-text {
         flex: 1 1 auto;
@@ -485,14 +200,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    opacity: 0.7;
+    color: var(--secondary-text-color);
 
     &--found {
-        color: var(--success-color, #3fb950);
+        color: var(--success-color);
     }
 
     &--not-found {
-        color: var(--error-color, #f85149);
+        color: var(--error-color);
     }
 }
 
@@ -501,98 +216,60 @@
 .setting-mic-test {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 0;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
 }
 
+// A level meter, not a control: the fill is the reading.
 .setting-mic-test-meter {
     flex: 1 1 auto;
     height: 8px;
-    border-radius: 4px;
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.15));
+    border: 1px solid var(--border-color);
     overflow: hidden;
 }
 
 .setting-mic-test-meter-fill {
     height: 100%;
-    background: var(--accent-color, #58a6ff);
+    background: var(--accent-color);
     transition: width 0.1s linear;
 }
 
 .setting-mic-test-result {
-    margin-top: 4px;
-    padding: 8px 10px;
-    border-radius: 4px;
-    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
-    font-size: 0.85rem;
+    margin-top: var(--space-1);
+    padding: var(--space-2);
+    border: 1px solid var(--border-color);
+    font-size: var(--text-sm);
 
     &--error {
-        color: var(--error-color, #f85149);
+        color: var(--error-color);
+        border-color: var(--ui-line-danger);
     }
 }
 
-// ── Responsive container queries ──────────────────────────────────────────────
+// ── Responsive ────────────────────────────────────────────────────────────────
+// The rail itself is TabbedPane's job; these only size the content.
 
-// lg: cap section body width for comfortable reading
+// Wide: cap the section width for comfortable reading.
 @container settings (min-width: 1024px) {
     .settings-section-body {
         max-width: 720px;
     }
 }
 
-// sm: icon-only left rail (48px)
-@container settings (max-width: 767px) {
-    .settings-rail {
-        flex: 0 0 48px;
-        padding: 8px 4px;
-
-        span { display: none; }
-    }
-
-    .settings-rail-item {
-        justify-content: center;
-        padding: 10px 0;
-
-        i { width: auto; }
-    }
-}
-
-// xs: top tab bar, stacked rows, full-width controls
+// Narrow: rows have already stacked (Field wraps on its own); let the
+// controls take the full width.
 @container settings (max-width: 479px) {
-    .settings-view {
-        flex-direction: column;
-    }
-
-    .settings-rail {
-        display: none;
-    }
-
-    .settings-tab-bar {
-        display: flex;
-    }
-
-    // Stack label above control
-    .setting-row {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 6px;
-    }
-
-    .setting-row-control {
-        align-self: stretch;
-    }
-
-    // Full-width controls
-    .setting-select {
-        width: 100%;
-        min-width: unset;
-    }
-
+    .setting-select,
     .setting-text {
         width: 100%;
+        min-width: 0;
     }
 
-    // Slider stretches to fill available space
+    .setting-row .ui-field-control {
+        flex: 1 1 100%;
+        align-items: stretch;
+    }
+
     .setting-slider {
         width: 100%;
 

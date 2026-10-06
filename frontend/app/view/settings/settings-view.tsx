@@ -3,6 +3,8 @@
 
 import { For, Match, Show, Switch, type JSX } from "solid-js";
 
+import { Button, TabbedPane, type TabItem } from "@/app/element/ui";
+
 import { fullConfigAtom } from "@/app/store/global";
 import { getApi } from "@/app/store/app-api";
 import { SETTINGS_SECTION_LABELS, type SettingsIndexEntry, type SettingsSection, type SettingsViewModel } from "./settings-model";
@@ -35,9 +37,9 @@ function ConfigErrorsBanner(): JSX.Element {
                         </div>
                     )}
                 </For>
-                <button class="settings-config-error-fix" onClick={() => void openRaw()}>
+                <Button tone="danger" class="settings-config-error-fix" onClick={() => void openRaw()}>
                     Fix in editor
-                </button>
+                </Button>
             </div>
         </Show>
     );
@@ -45,7 +47,7 @@ function ConfigErrorsBanner(): JSX.Element {
 
 // ── Rail ──────────────────────────────────────────────────────────────────────
 
-const RAIL: { id: SettingsSection; label: string; icon: string }[] = [
+const RAIL: TabItem<SettingsSection>[] = [
     { id: "appearance", label: SETTINGS_SECTION_LABELS.appearance, icon: "palette" },
     { id: "window",     label: SETTINGS_SECTION_LABELS.window,     icon: "table-cells" },
     { id: "terminal",   label: SETTINGS_SECTION_LABELS.terminal,   icon: "square-terminal" },
@@ -86,79 +88,47 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
 
     return (
         <div class="settings-view-container">
-        <div class="settings-view">
-            {/* Narrow-width fallback for .settings-rail below — rendered FIRST
-                (not last) so it sits at the top of the pane, not the bottom, at
-                the same breakpoint the rail hides. See
-                docs/specs/SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md. */}
-            <nav class="settings-tab-bar" aria-label="Settings section">
-                <For each={RAIL}>
-                    {(item) => (
-                        <button
-                            type="button"
-                            aria-label={item.label}
-                            classList={{ "is-active": section() === item.id }}
-                            aria-pressed={section() === item.id}
-                            onClick={() => setSection(item.id)}
-                        >
-                            <i class={`fa-solid fa-${item.icon}`} aria-hidden="true" />
-                        </button>
-                    )}
-                </For>
-            </nav>
-            <nav class="settings-rail" aria-label="Settings section">
-                <For each={RAIL}>
-                    {(item) => (
-                        <button
-                            type="button"
-                            class="settings-rail-item"
-                            classList={{ "is-active": section() === item.id }}
-                            aria-pressed={section() === item.id}
-                            onClick={() => setSection(item.id)}
-                        >
-                            <i class={`fa-solid fa-${item.icon}`} aria-hidden="true" />
-                            <span>{item.label}</span>
-                        </button>
-                    )}
-                </For>
-            </nav>
-            <div class="settings-body">
-                <SettingsSearchBar
-                    query={props.model.query}
-                    setQuery={props.model.setQuery}
-                    onSelectResult={handleSelectResult}
-                />
-                <ConfigErrorsBanner />
-                <Switch>
-                    <Match when={section() === "appearance"}>
-                        <AppearanceSection />
-                    </Match>
-                    <Match when={section() === "window"}>
-                        <WindowPanesSection />
-                    </Match>
-                    <Match when={section() === "terminal"}>
-                        <TerminalSection />
-                    </Match>
-                    <Match when={section() === "sounds"}>
-                        <SoundsSection />
-                    </Match>
-                    <Match when={section() === "notifications"}>
-                        <NotificationsSection />
-                    </Match>
-                    <Match when={section() === "recording"}>
-                        <RecordingSection />
-                    </Match>
-                    <Match when={section() === "advanced"}>
-                        <AdvancedSection />
-                    </Match>
-                </Switch>
-                <footer class="settings-footer">
-                    <button class="settings-footer-btn" onClick={() => void openRaw()}>
-                        <i class="fa-solid fa-file-code" /> Open raw settings.json
-                    </button>
-                </footer>
-            </div>
-        </div>
+            {/* One tablist: a rail when wide, icons only when narrower, tabs
+                along the top when narrow (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4).
+                It replaced a rail and a separate top tab bar, one hidden by CSS. */}
+            <TabbedPane items={RAIL} value={section()} onChange={setSection} idPrefix="settings" ariaLabel="Settings section">
+                <div class="settings-body">
+                    <SettingsSearchBar
+                        query={props.model.query}
+                        setQuery={props.model.setQuery}
+                        onSelectResult={handleSelectResult}
+                    />
+                    <ConfigErrorsBanner />
+                    <Switch>
+                        <Match when={section() === "appearance"}>
+                            <AppearanceSection />
+                        </Match>
+                        <Match when={section() === "window"}>
+                            <WindowPanesSection />
+                        </Match>
+                        <Match when={section() === "terminal"}>
+                            <TerminalSection />
+                        </Match>
+                        <Match when={section() === "sounds"}>
+                            <SoundsSection />
+                        </Match>
+                        <Match when={section() === "notifications"}>
+                            <NotificationsSection />
+                        </Match>
+                        <Match when={section() === "recording"}>
+                            <RecordingSection />
+                        </Match>
+                        <Match when={section() === "advanced"}>
+                            <AdvancedSection />
+                        </Match>
+                    </Switch>
+                    <footer class="settings-footer">
+                        <Button icon="file-code" onClick={() => void openRaw()}>
+                            Open raw settings.json
+                        </Button>
+                    </footer>
+                </div>
+            </TabbedPane>
         </div>
     );
 }

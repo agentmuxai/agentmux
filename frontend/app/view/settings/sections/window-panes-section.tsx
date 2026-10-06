@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { TextInput } from "@/app/element/ui";
 import { type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
@@ -63,7 +64,7 @@ export function WindowPanesSection(): JSX.Element {
                 label={WINDOW_SETTINGS.defaultNewBlock.label}
                 description={WINDOW_SETTINGS.defaultNewBlock.description}
                 control={
-                    <input
+                    <TextInput
                         class="setting-text"
                         type="text"
                         value={(s()["app:defaultnewblock"] as string) ?? ""}

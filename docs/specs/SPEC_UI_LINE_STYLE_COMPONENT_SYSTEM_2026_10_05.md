@@ -1,7 +1,7 @@
 # Spec: one line-style UI component set (buttons, tabs, menus, form controls)
 
 **Date:** 2026-10-05
-**Status:** active — PR 1 (tokens, components, CI ratchet) in PR #4365; the migrations in §8 follow.
+**Status:** active — PR 1 (tokens, components, CI ratchet) in PR #4365, PR 2 (Settings) in PR #4366; the other migrations in §8 follow.
 **Owner:** Agent4
 **Builds on:** `SPEC_DESIGN_SYSTEM_2026_04_23.md` (tokens and mixins, which landed), `SPEC_HARD_CORNERS_2026_05_26.md`, `SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md` (popup menus, still unbuilt)
 
@@ -241,7 +241,7 @@ All of them live in `frontend/app/element/ui/` and are exported from `index.ts`.
 | `Tabs`, `TabbedPane` | settings rail and tab bar, section-pane rail and tab bar, Warden, Stash tabs | See §5.4. |
 | `Menu` (later) | `.ctx-menu`, `.action-widget-more-item`, `.agent-row-menu` | See §5.5. Not part of PR 1. |
 | `Field` | `SettingRow`, `agent-new-bundle-modal-field`, launch-modal field rows | `label`, `description?`, `hint?`, `error?`, `layout="inline"\|"stacked"`. Inline fields stack below a container width, as `.setting-row` does today. Wires `id` and `aria-describedby`. |
-| `TextInput`, `NumberInput`, `Select` | `.setting-text/-number/-select`, `.agent-new-bundle-modal-input`, `.agent-launch-modal-*` selects | Line input: 1px `--border-color`, transparent background, `--ui-*` sizing. On focus the border turns accent. `NumberInput` keeps `NumberControl`'s debounced commit. |
+| `TextInput`, `NumberInput`, `Select` | `.setting-text/-number/-select`, `.agent-new-bundle-modal-input`, `.agent-launch-modal-*` selects | Line input: 1px `--border-color`, transparent background, `--ui-*` sizing. On focus the border turns accent. `NumberInput` keeps `NumberControl`'s debounced commit. `Select` takes `options` or native `<option>` children. A `TextInput` marked `detached` doesn't take its `Field`'s id, for one of several inputs in a field (a key/value row). |
 | `Switch` | `.setting-toggle`, the status-bar checkbox (`StatusBar.scss:373`) | Line switch: track with a 1px line and `--radius-full`. **Off:** neutral line, secondary-coloured thumb. **On:** accent line, 12% tint, accent thumb. No solid track. `role="switch"`. |
 | `Slider`, `RadioGroup`, `MaskedKeyField`, `KeyValueEditor`, `SectionHeader` | the existing settings controls, launch-modal radios | Moved from `settings-controls.tsx`, restyled to L1–L6. |
 
@@ -290,7 +290,7 @@ A modal footer becomes `[Cancel: neutral] [Create: accent]`, and the "Close tab"
 - **One DOM.** `TabbedPane` renders a single `role="tablist"` and changes only its layout with its own width:
   - a rail with labels at `collapseBelow` (768px) and wider;
   - an icon-only rail below that;
-  - Stash-style top tabs below `topBelow` (480px).
+  - icon-only tabs spread along the top, Stash-style, below `topBelow` (480px), as the old narrow tab bars were.
 
   These are today's Settings and section-pane breakpoints; today both render two `<nav>`s and hide one with CSS. The width comes from a `ResizeObserver` rather than a container query, so `aria-orientation` and the arrow keys always match what is on screen.
 - **Icon-only mode.** Labels hide and each tab gets a `Tooltip` plus an `aria-label`, so it keeps a name. Today's 48px Settings rail has neither.
@@ -395,7 +395,7 @@ Each step is one PR, and each can be checked in a `task dev` window before mergi
 | PR | Scope | Visible change |
 |---|---|---|
 | 1 | Tokens (§5.2), `element/ui/` primitives with unit tests, the `line-control` mixin, the CI gate at its current baseline. No consumers yet. **Built.** | none |
-| 2 | **Settings** onto `Tabs` (`orientation="auto"`), `Field`, `Switch`, `Select`, `TextInput`, `NumberInput`, `Button`. `settings-controls.tsx` becomes a thin re-export; most of `settings.scss` (605 lines) is deleted. | Settings: line rail, line switch, square corners, consistent buttons |
+| 2 | **Settings** onto `Tabs` (`orientation="auto"`), `Field`, `Switch`, `Select`, `TextInput`, `NumberInput`, `Button`. `settings-controls.tsx` becomes a thin re-export; most of `settings.scss` (605 lines) is deleted. | Settings: line rail, line switch, square corners, consistent buttons. **Built.** |
 | 3 | **New-agent modals** (Launch, Create from template, New bundle) onto `Field`, `Select`, `SegmentedControl` (Continue/New) and `Button` (Cancel `neutral`, Create `accent`). The "+" and empty-state buttons become `IconButton` and `Button`. | new-agent modals |
 | 4 | **`<Button>` and `ConfirmModal`** rebuilt per §5.6. All 55 `<Button>`s and 14 confirm dialogs ("Close tab" included) go to the line style; the lime hover goes. Delete `components/confirm-dialog.*` if its callers can use `ConfirmModal`. | app-wide |
 | 5 | **Section-pane, Warden and Stash** onto `Tabs`; delete the Warden copy and the unused tab CSS. | Connectors and Knowledge rails lose the solid fill |

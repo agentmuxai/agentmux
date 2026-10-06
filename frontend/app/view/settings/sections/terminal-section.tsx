@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Select, TextInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 
 import { fullConfigAtom, settingsAtom } from "@/app/store/global";
@@ -152,7 +153,7 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.fontFamily.label}
                 description={TERMINAL_SETTINGS.fontFamily.description}
                 control={
-                    <input
+                    <TextInput
                         class="setting-text"
                         type="text"
                         value={(s()["term:fontfamily"] as string) ?? ""}
@@ -166,16 +167,16 @@ export function TerminalSection(): JSX.Element {
                     id={TERMINAL_SETTINGS.terminalTheme.id}
                     label={TERMINAL_SETTINGS.terminalTheme.label}
                     control={
-                        <select
+                        <Select
                             class="setting-select"
                             value={(s()["term:theme"] as string) ?? ""}
-                            onChange={(e) => set("term:theme", e.currentTarget.value || null)}
+                            onChange={(v) => set("term:theme", v || null)}
                         >
                             <option value="">Default</option>
                             <For each={termThemes()}>
                                 {([key, theme]) => <option value={key}>{theme["display:name"] ?? key}</option>}
                             </For>
-                        </select>
+                        </Select>
                     }
                 />
             </Show>
@@ -219,13 +220,12 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.durableSsh.label}
                 description={TERMINAL_SETTINGS.durableSsh.description}
                 control={
-                    <select
+                    <Select
                         class="setting-select"
                         value={
                             s()["term:durable"] === true ? "on" : s()["term:durable"] === false ? "off" : "auto"
                         }
-                        onChange={(e) => {
-                            const v = e.currentTarget.value;
+                        onChange={(v) => {
                             // "auto" clears the setting: srv's default applies.
                             set("term:durable", v === "on" ? true : v === "off" ? false : null);
                         }}
@@ -233,7 +233,7 @@ export function TerminalSection(): JSX.Element {
                         <option value="auto">On hosts that have the helper</option>
                         <option value="on">Always (needs the helper)</option>
                         <option value="off">Never</option>
-                    </select>
+                    </Select>
                 }
             />
             <SettingRow
@@ -241,11 +241,10 @@ export function TerminalSection(): JSX.Element {
                 label={TERMINAL_SETTINGS.helperInstall.label}
                 description={TERMINAL_SETTINGS.helperInstall.description}
                 control={
-                    <select
+                    <Select
                         class="setting-select"
                         value={(s()["conn:helper"] as string | undefined) || "ask"}
-                        onChange={(e) => {
-                            const v = e.currentTarget.value;
+                        onChange={(v) => {
                             // "ask" clears the setting: asking is the default.
                             set("conn:helper", v === "ask" ? null : v);
                         }}
@@ -253,7 +252,7 @@ export function TerminalSection(): JSX.Element {
                         <option value="ask">Ask first</option>
                         <option value="always">Always</option>
                         <option value="never">Never</option>
-                    </select>
+                    </Select>
                 }
             />
             <SettingRow

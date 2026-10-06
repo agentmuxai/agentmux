@@ -88,6 +88,6 @@ describe("Appearance — SettingRow ids for search scroll-to-result", () => {
         const { APPEARANCE_SETTINGS } = await import("./appearance-section");
         const el = document.getElementById(`setting-${APPEARANCE_SETTINGS.theme.id}`);
         expect(el).not.toBeNull();
-        expect(el?.querySelector(".setting-row-name")?.textContent).toBe("Theme");
+        expect(el?.querySelector(".ui-field-label")?.textContent).toBe("Theme");
     });
 });
