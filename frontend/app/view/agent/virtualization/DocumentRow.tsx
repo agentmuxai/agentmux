@@ -32,6 +32,7 @@ import { cliNoticeText } from "../cli-notice";
 import type { ContextDeliveryNode, DocumentNode, DocumentState, HistoryLinkNode, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { compactionCardTokens } from "../compact-boundary";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
@@ -399,7 +400,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                                 </span>
                             </div>
                             <div class="agent-context-compacted-detail">
-                                Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens{durationLabel}
+                                Earlier history summarized · {compactionCardTokens(n, fmt)}{durationLabel}
                             </div>
                             <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
                                 <div class="agent-node-peek-tooltip-meta">{timeText()}</div>

@@ -483,7 +483,19 @@ export interface ContextCompactedNode {
     type: "context_compacted";
     id: string;
     tokensBefore: number;
+    /**
+     * For a real boundary, the CLI's `post_tokens`: the SUMMARY's size only, not
+     * the system prompt and tools every call carries (CLI 2.1.288: 1,417, with
+     * the next call's prompt at 39,490). For the heuristic, the next call's
+     * whole prompt.
+     */
     tokensAfter: number;
+    /**
+     * The context's real size after a real compaction: the next main-agent
+     * call's whole prompt. Filled in when that call reports (live and in
+     * history replay); absent until then.
+     */
+    contextAfter?: number;
     timestamp: number;
     source: "real" | "heuristic";
     trigger?: "manual" | "auto";

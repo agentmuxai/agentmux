@@ -210,6 +210,29 @@ describe("parseHistoryLines", () => {
         expect(parseHistoryLines([messageStart("msg_1", { input_tokens: 5 }), unparsed], "claude-stream-json").lastContext).toBeNull();
     });
 
+    it("fills a compaction card's real size from the next call, not post_tokens", () => {
+        const boundary = JSON.stringify({
+            type: "system",
+            subtype: "compact_boundary",
+            compact_metadata: { trigger: "manual", pre_tokens: 40_697, post_tokens: 1_417, duration_ms: 6_448 },
+            timestamp: "2026-09-24T10:00:00Z",
+        });
+        const card = (lines: string[]) =>
+            parseHistoryLines(lines, "claude-stream-json").nodes.find((n) => n.type === "context_compacted") as
+                | { tokensAfter: number; contextAfter?: number }
+                | undefined;
+        const before = messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 40_672 });
+        // Not yet: the summary's size only, and no real size.
+        expect(card([before, boundary])).toMatchObject({ tokensAfter: 1_417 });
+        expect(card([before, boundary])?.contextAfter).toBeUndefined();
+        // The next call reports the real size; only the first one counts.
+        const next = messageStart("msg_2", { input_tokens: 2, cache_read_input_tokens: 39_488 });
+        const later = messageStart("msg_3", { input_tokens: 2, cache_read_input_tokens: 52_000 });
+        expect(card([before, boundary, next, later])).toMatchObject({ tokensAfter: 1_417, contextAfter: 39_490 });
+        // A fresh session's first call belongs to another conversation.
+        expect(card([before, boundary, freshOutcome(), next])?.contextAfter).toBeUndefined();
+    });
+
     it("reads no context from a provider whose stream isn't Claude Code's", () => {
         const lines = [messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 40_000 })];
         expect(parseHistoryLines(lines, "gemini-json").lastContext).toBeNull();

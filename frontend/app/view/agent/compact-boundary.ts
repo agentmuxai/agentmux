@@ -118,3 +118,23 @@ export function contextCompactedLiveTimestamp(frameTimestamp: string | null | un
     const parsed = typeof frameTimestamp === "string" ? Date.parse(frameTimestamp) : NaN;
     return Number.isNaN(parsed) ? Date.now() : parsed;
 }
+
+/**
+ * The token part of a "context compacted" card. A real boundary's `post_tokens`
+ * is the summary's size, not the context's: the system prompt and tools are
+ * re-sent with every call (CLI 2.1.288: summary 1,417, next prompt 39,490). So
+ * the card shows the context before and the real size after once the next
+ * call reports it (`contextAfter`), and until then says what `post_tokens` is.
+ * The heuristic's after-size already is the next call's whole prompt.
+ * docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md §9.1.
+ */
+export function compactionCardTokens(
+    n: { tokensBefore: number; tokensAfter: number; contextAfter?: number; source: "real" | "heuristic" },
+    fmt: (n: number) => string,
+): string {
+    if (n.source === "heuristic") return `${fmt(n.tokensBefore)} → ${fmt(n.tokensAfter)} tokens`;
+    if (n.contextAfter != null) {
+        return `${fmt(n.tokensBefore)} → ${fmt(n.contextAfter)} tokens · summary ${fmt(n.tokensAfter)}`;
+    }
+    return `${fmt(n.tokensBefore)} tokens summarized to ${fmt(n.tokensAfter)}`;
+}
