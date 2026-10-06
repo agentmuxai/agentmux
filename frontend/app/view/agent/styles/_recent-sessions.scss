@@ -108,13 +108,52 @@
         // single scroll boundary for the whole picker now.
     }
 
+    // The tile. The `<li>` is the grid item AND the visible box — it owns the
+    // border, background and hover — so the grid's `align-items: stretch`
+    // stretches the thing the user sees. (The border used to live on the
+    // button inside it, which kept its content height while the `<li>` was
+    // stretched to the tallest tile in the row; the chevron and the panels
+    // were positioned against the `<li>` and so landed below the visible tile.
+    // docs/reports/REPORT_MY_AGENTS_TILE_ACTIONS_ALIGNMENT_2026_10_05.md.)
+    //
+    //   [icon] [body ............................]
+    //   [icon] [timestamps ................] [v]       ← footer row
+    //
+    // The body takes the row's leftover height (`1fr`), so the footer sits at
+    // the bottom of every tile whatever the content height: nothing here is
+    // positioned with absolute offsets. The panels are not in this box at all
+    // (they float in `AnchoredPopover`, below).
     .agent-recent-sessions-row {
         margin: 0;
-        // Anchors .agent-recent-sessions-menu-toggle, .agent-row-menu and
-        // .agent-fork-prompt below (all absolutely positioned) — see their
-        // own comments.
+        // Anchors the open button's stretched ::after (see
+        // .agent-recent-sessions-entry).
         position: relative;
-        transition: filter 0.15s ease, opacity 0.15s ease;
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-rows: 1fr auto;
+        column-gap: var(--space-3);
+        row-gap: var(--space-1);
+        padding: 14px var(--space-2) 8px 16px;
+        border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
+        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
+        border-radius: 0;
+        color: var(--main-text-color);
+        // Not `all`: that also animates the inherited `visibility` that hides
+        // window and pane tabs, so this would pop in a frame late when shown
+        // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
+        transition: filter 0.15s ease, opacity 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+
+        &:hover {
+            border-color: var(--accent-color);
+            background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+        }
+
+        // The open button is the tile's keyboard target; the ring goes on the
+        // tile it stands for.
+        &:has(.agent-recent-sessions-entry:focus-visible) {
+            outline: 2px solid var(--accent-color);
+            outline-offset: 1px;
+        }
     }
 
     // Delete exit animation ("poof") + surviving-row reflow ("rubbery
@@ -135,7 +174,7 @@
         // absolutely positioned at the same visual spot it already
         // occupied (the standard FLIP-list technique).
         position: absolute;
-        z-index: 4; // above ordinary rows, below .is-expanded's 5
+        z-index: 4; // above ordinary rows
         pointer-events: none;
         animation: agent-row-poof var(--motion-spring) forwards;
     }
@@ -178,7 +217,8 @@
     // `transition: filter …, opacity …`, and that blur/dim would snap
     // instead of animate for as long as the move is in flight.
     .agent-recent-sessions-row.agent-row-move {
-        transition: transform var(--motion-spring), filter 0.15s ease, opacity 0.15s ease;
+        transition: transform var(--motion-spring), filter 0.15s ease, opacity 0.15s ease, border-color 0.15s ease,
+            background-color 0.15s ease;
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -200,12 +240,8 @@
     // Spotlight effect while a row is EXPANDED — its actions menu, rename
     // input, or duplicate/fork prompt showing. Every OTHER tile blurs and
     // dims (and stops accepting clicks, so you can't act on a dimmed row
-    // by accident). `.agent-recent-sessions-list` is a CSS GRID (see
-    // above) — an in-flow panel growing one tile's height would resize
-    // that whole grid row and visibly shove every tile sharing it
-    // downward, which is what taking BOTH `.agent-row-menu` and
-    // `.agent-fork-prompt` out of flow (position: absolute) avoids; this
-    // blur rule is the second half of the same request.
+    // by accident). The panels themselves float in `AnchoredPopover`
+    // (portaled), so they neither resize the grid nor sit under a neighbour.
     //
     // Keyed on "expanded", not "menu open": Rename and Duplicate close the
     // menu on their way to opening a panel, so keying on the menu dropped
@@ -216,57 +252,52 @@
         pointer-events: none;
     }
 
-    // The expanded row stays sharp and rises above its now-blurred
-    // neighbours so its overlaid panel never renders underneath an
-    // adjacent tile — and so the panel keeps pointer events while those
-    // neighbours have them switched off.
-    .agent-recent-sessions-row.is-expanded {
-        z-index: 5;
-    }
-
+    // The one control that opens the agent. It wraps only the name; its ::after
+    // stretches over the whole tile (the "stretched button" pattern), so a
+    // click anywhere on the tile opens the agent while the rest of the tile is
+    // plain text and the chevron stays a separate control. The button is not
+    // positioned itself, so the ::after is sized against the tile (the `<li>`).
     .agent-recent-sessions-entry {
-        display: flex;
-        align-items: flex-start;
-        gap: var(--space-3);
-        // Right padding reserves room for .agent-recent-sessions-menu-toggle
-        // (absolutely positioned, bottom-right, outside normal flow) so the
-        // timestamps row's own text never runs underneath it.
-        padding: 14px 40px 14px 16px;
-        width: 100%;
-        border: 1px solid color-mix(in srgb, var(--border-color) 80%, transparent);
-        background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
-        border-radius: 0;
-        cursor: default;
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+        padding: 0;
+        border: none;
+        background: none;
         text-align: left;
-        color: var(--main-text-color);
+        color: inherit;
         font-family: inherit;
-        // Not `all`: that also animates the inherited `visibility` that hides
-        // window and pane tabs, so this would pop in a frame late when shown
-        // (docs/analysis/ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md §3).
-        transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
-        transition-duration: 0.15s;
+        cursor: default;
 
-        &:hover {
-            border-color: var(--accent-color);
-            background: color-mix(in srgb, var(--accent-color) 6%, transparent);
-        }
-
-        &:focus-visible {
-            outline: 2px solid var(--accent-color);
-            outline-offset: 1px;
+        &::after {
+            content: "";
+            position: absolute;
+            // Out to the border, so the tile's own edge is clickable too.
+            inset: -1px;
         }
     }
 
+    // The icon spans the body and the footer row.
     .agent-recent-sessions-icon {
-        flex-shrink: 0;
+        grid-column: 1;
+        grid-row: 1 / span 2;
+        align-self: start;
         margin-top: 2px;
     }
 
+    // Spans past the chevron's column: the chevron lives in the footer row only.
     .agent-recent-sessions-body {
+        grid-column: 2 / span 2;
+        grid-row: 1;
+        // A grid item paints as its own stacking context, in DOM order. The
+        // open button's stretched ::after lives inside this one, so without a
+        // z-index here the later footer items (timestamps) would paint over it
+        // and swallow clicks. The chevron's own z-index of 1 comes later in DOM
+        // order, so it still sits above.
+        z-index: 1;
         display: flex;
         flex-direction: column;
         gap: 4px;
-        flex: 1;
         min-width: 0;
     }
 
@@ -279,18 +310,19 @@
 
     .agent-recent-sessions-name {
         font-size: 15px;
+        // A block inside the open button (which is the flex item), so the
+        // ellipsis has a box to clip against.
+        display: block;
         font-weight: 600;
         color: var(--main-text-color);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         // Was `flex-shrink: 0; max-width: 60%` when the account/identity
-        // name shared this row via `flex: 1` — now that it has its own
-        // line below (`.agent-recent-sessions-account`), line1 only holds
-        // the name + two small fixed-width badges, so the name can grow to
-        // fill the remaining space instead of being capped.
-        flex: 1;
-        min-width: 0;
+        // name shared this row — now that it has its own line below
+        // (`.agent-recent-sessions-account`), line1 only holds the name + two
+        // small fixed-width badges, so the name can grow to fill the
+        // remaining space instead of being capped.
     }
 
     // Account/identity name — own full-width line under line1, not
@@ -339,11 +371,15 @@
         // Numeric "12 messages" stays inline with timestamp.
     }
 
+    // The footer row's left half. The chevron is its right half.
     .agent-recent-sessions-timestamps {
+        grid-column: 2;
+        grid-row: 2;
+        align-self: center;
         display: flex;
         flex-wrap: wrap;
         gap: var(--space-1) var(--space-3);
-        margin-top: 2px;
+        min-width: 0;
     }
 
     .agent-recent-sessions-ts {
@@ -377,21 +413,27 @@
         flex-shrink: 0;
         align-self: center;
         box-shadow: 0 0 4px rgba(52, 211, 153, 0.5);
+        // Above the open button's stretched ::after, so its tooltip (where the
+        // agent is open) still shows.
+        position: relative;
+        z-index: 1;
     }
 
-    .agent-recent-sessions-entry--active {
+    .agent-recent-sessions-row--active {
         border-color: color-mix(in srgb, #34d399 40%, var(--border-color));
         background: color-mix(in srgb, #34d399 4%, transparent);
     }
 
-    // Row actions menu — chevron toggle + inline expand panel.
+    // Row actions menu — chevron toggle. The right half of the footer row; it
+    // sits in the grid like the timestamps beside it, with no absolute offsets.
     // docs/specs/SPEC_AGENT_DELETE_2026_09_16.md §4.1/§4.2.
     .agent-recent-sessions-menu-toggle {
-        position: absolute;
-        // Bottom-right, not top-right — top-right overlaps the HOST/SANDBOX
-        // RuntimeBadge rendered inline on .agent-recent-sessions-line1.
-        bottom: var(--space-2);
-        right: 10px;
+        grid-column: 3;
+        grid-row: 2;
+        align-self: center;
+        // Above the open button's stretched ::after, so it stays its own control.
+        position: relative;
+        z-index: 1;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -429,221 +471,218 @@
             outline-offset: 1px;
         }
     }
+}
 
-    .agent-row-menu {
-        // Overlays the row(s) below it instead of pushing them down — out
-        // of normal flow entirely, so it has no effect on the grid track's
-        // height (see .agent-recent-sessions-row's own comment above).
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        z-index: 1;
-        display: flex;
-        flex-direction: column;
-        border: 1px solid var(--border-color);
-        border-top: none;
-        // `--panel-bg-color`/`--main-bg-color` are deliberately translucent
-        // app-wide (the window-opacity feature) — wrong choice for a
-        // floating overlay that needs to read as solid over a blurred row
-        // behind it. `--modal-bg-color` is the token this codebase already
-        // uses for exactly that (context-menu.scss's `.ctx-menu`) — a real
-        // opaque color per theme, not an alpha-blended one.
-        background: var(--modal-bg-color);
-        box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
+// ---------------------------------------------------------------------------
+// Panels. Rendered through `AnchoredPopover`, which portals to `document.body`,
+// so these rules are OUTSIDE the `.agent-view` wrapper above: a portaled panel
+// is not a descendant of it. They used to be absolutely positioned inside the
+// tile's `<li>`, which is what put them under the tallest tile of the row.
+// ---------------------------------------------------------------------------
+
+// Text of a portaled panel. `.agent-view` sets these and the panels no longer
+// inherit them, so without this they would fall back to the app's sans body font.
+@mixin agent-panel-text {
+    color: var(--main-text-color);
+    font-family: var(--font-mono);
+    font-size: var(--font-agent-size);
+    line-height: 1.35;
+}
+
+// Row actions menu — the popover body.
+.agent-row-menu {
+    @include agent-panel-text;
+    min-width: 180px;
+    border: 1px solid var(--border-color);
+    // `--panel-bg-color`/`--main-bg-color` are deliberately translucent
+    // app-wide (the window-opacity feature) — wrong choice for a floating
+    // panel that needs to read as solid over the page behind it.
+    // `--modal-bg-color` is the token this codebase already uses for exactly
+    // that (context-menu.scss's `.ctx-menu`) — a real opaque color per theme.
+    background: var(--modal-bg-color);
+    box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
+}
+
+.agent-row-menu-items {
+    display: flex;
+    flex-direction: column;
+}
+
+.agent-row-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) 10px;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    text-align: left;
+    color: var(--main-text-color);
+    background: transparent;
+    border: none;
+    cursor: default;
+
+    i {
+        width: 14px;
+        text-align: center;
+        opacity: 0.8;
     }
 
-    .agent-row-menu-item {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-2) 10px;
-        font-size: var(--text-sm);
-        font-family: inherit;
-        text-align: left;
+    &:hover {
+        background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: -2px;
+    }
+}
+
+// Visually separated + red — "the destructive one goes at the end."
+.agent-row-menu-item--danger {
+    color: var(--error-color);
+    border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+
+    &:hover {
+        background: color-mix(in srgb, var(--error-color) 10%, transparent);
+    }
+}
+
+// Rename / Duplicate / fork prompt — the popover body, anchored below the tile.
+// Same opaque-backdrop reasoning as `.agent-row-menu`; the accent tint keeps it
+// distinct from the actions menu.
+.agent-fork-prompt {
+    @include agent-panel-text;
+    width: 360px;
+    max-width: 90vw;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    padding: var(--space-2) 10px;
+    border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
+    background: color-mix(in srgb, var(--accent-color) 6%, var(--modal-bg-color));
+    box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
+}
+
+.agent-fork-prompt-msg {
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+    line-height: 1.4;
+}
+
+.agent-fork-prompt-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+// Base fork button
+.agent-fork-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px 10px;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    border-radius: 0;
+    border: 1px solid transparent;
+    cursor: default;
+    transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+    white-space: nowrap;
+
+    &:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--accent-color);
+        outline-offset: 1px;
+    }
+}
+
+.agent-fork-btn--primary {
+    background: var(--accent-color);
+    color: var(--button-color, #fff);
+    border-color: var(--accent-color);
+
+    &:not(:disabled):hover {
+        background: color-mix(in srgb, var(--accent-color) 85%, #fff);
+    }
+}
+
+.agent-fork-btn--secondary {
+    background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
+    color: var(--main-text-color);
+    border-color: var(--border-color);
+
+    &:not(:disabled):hover {
+        background: color-mix(in srgb, var(--main-text-color) 14%, transparent);
+    }
+}
+
+.agent-fork-btn--ghost {
+    background: transparent;
+    color: var(--secondary-text-color);
+    border-color: transparent;
+    padding: 3px 6px;
+
+    &:not(:disabled):hover {
         color: var(--main-text-color);
-        background: transparent;
-        border: none;
-        cursor: default;
-
-        i {
-            width: 14px;
-            text-align: center;
-            opacity: 0.8;
-        }
-
-        &:hover {
-            background: color-mix(in srgb, var(--main-text-color) 6%, transparent);
-        }
-
-        &:focus-visible {
-            outline: 2px solid var(--accent-color);
-            outline-offset: -2px;
-        }
-    }
-
-    // Visually separated + red — "the destructive one goes at the end."
-    .agent-row-menu-item--danger {
-        color: var(--error-color);
-        border-top: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
-
-        &:hover {
-            background: color-mix(in srgb, var(--error-color) 10%, transparent);
-        }
-    }
-
-    // Rename / Duplicate / fork prompt — overlaid below the row button,
-    // NOT in flow. Same treatment as `.agent-row-menu` above and for the
-    // same two reasons: `.agent-recent-sessions-list` is a CSS grid, so an
-    // in-flow panel growing one tile's height shoves every tile sharing
-    // that grid row downward; and the panel floats over rows the spotlight
-    // has blurred, which needs an opaque backdrop rather than the
-    // deliberately-translucent app background tokens.
-    //
-    // This used to be in flow, which is why clicking Rename or Duplicate
-    // "reverted to the offset behavior" — the menu overlaid, then the panel
-    // it opened pushed instead.
-    .agent-fork-prompt {
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        z-index: 1;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        padding: var(--space-2) 10px;
-        border: 1px solid color-mix(in srgb, var(--accent-color) 50%, var(--border-color));
-        border-top: none;
-        // Keeps the accent tint that distinguishes this from the actions
-        // menu, but mixed into an OPAQUE base (`--modal-bg-color`) instead
-        // of `transparent` — see `.agent-row-menu`'s own note on why the
-        // panel-/main-bg tokens are the wrong choice for a floating layer.
-        background: color-mix(in srgb, var(--accent-color) 6%, var(--modal-bg-color));
-        box-shadow: 0 4px 10px color-mix(in srgb, black 20%, transparent);
-    }
-
-    .agent-fork-prompt-msg {
-        font-size: var(--text-sm);
-        color: var(--secondary-text-color);
-        line-height: 1.4;
-    }
-
-    .agent-fork-prompt-actions {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-    }
-
-    // Base fork button
-    .agent-fork-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 3px 10px;
-        font-size: var(--text-sm);
-        font-family: inherit;
-        border-radius: 0;
-        border: 1px solid transparent;
-        cursor: default;
-        transition: background 0.12s, border-color 0.12s, opacity 0.12s;
-        white-space: nowrap;
-
-        &:disabled {
-            opacity: 0.45;
-            cursor: not-allowed;
-        }
-
-        &:focus-visible {
-            outline: 2px solid var(--accent-color);
-            outline-offset: 1px;
-        }
-    }
-
-    .agent-fork-btn--primary {
-        background: var(--accent-color);
-        color: var(--button-color, #fff);
-        border-color: var(--accent-color);
-
-        &:not(:disabled):hover {
-            background: color-mix(in srgb, var(--accent-color) 85%, #fff);
-        }
-    }
-
-    .agent-fork-btn--secondary {
         background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-        color: var(--main-text-color);
-        border-color: var(--border-color);
+    }
+}
 
-        &:not(:disabled):hover {
-            background: color-mix(in srgb, var(--main-text-color) 14%, transparent);
-        }
+// Naming sub-section
+.agent-fork-naming {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.agent-fork-label {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--secondary-text-color);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.agent-fork-input-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.agent-fork-input {
+    flex: 1;
+    min-width: 0;
+    height: 28px;
+    padding: 0 var(--space-2);
+    font-size: 13px;
+    font-family: inherit;
+    color: var(--main-text-color);
+    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    outline: none;
+
+    &::placeholder {
+        color: color-mix(in srgb, var(--secondary-text-color) 60%, transparent);
     }
 
-    .agent-fork-btn--ghost {
-        background: transparent;
-        color: var(--secondary-text-color);
-        border-color: transparent;
-        padding: 3px 6px;
-
-        &:not(:disabled):hover {
-            color: var(--main-text-color);
-            background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-        }
+    &:focus {
+        border-color: color-mix(in srgb, var(--accent-color) 70%, transparent);
+        background: color-mix(in srgb, var(--accent-color) 4%, transparent);
     }
 
-    // Naming sub-section
-    .agent-fork-naming {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
+}
 
-    .agent-fork-label {
-        font-size: var(--text-xs);
-        font-weight: 600;
-        color: var(--secondary-text-color);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-    }
-
-    .agent-fork-input-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-    }
-
-    .agent-fork-input {
-        flex: 1;
-        min-width: 0;
-        height: 28px;
-        padding: 0 var(--space-2);
-        font-size: 13px;
-        font-family: inherit;
-        color: var(--main-text-color);
-        background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
-        border: 1px solid var(--border-color);
-        border-radius: 0;
-        outline: none;
-
-        &::placeholder {
-            color: color-mix(in srgb, var(--secondary-text-color) 60%, transparent);
-        }
-
-        &:focus {
-            border-color: color-mix(in srgb, var(--accent-color) 70%, transparent);
-            background: color-mix(in srgb, var(--accent-color) 4%, transparent);
-        }
-
-        &:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-    }
-
-    .agent-fork-error {
-        font-size: var(--text-xs);
-        color: var(--error-color, #f87171);
-    }
+.agent-fork-error {
+    font-size: var(--text-xs);
+    color: var(--error-color, #f87171);
 }
