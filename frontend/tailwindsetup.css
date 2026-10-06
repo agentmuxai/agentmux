@@ -4,6 +4,13 @@
 @import "tailwindcss";
 @source "../node_modules/streamdown/dist/index.js";
 
+/* Nothing uses `.container`, but Tailwind generates it because the word
+   "container" is in so many scanned files. Its five width media queries were
+   the app's only ones, and each time a window resize crossed 640, 768, 1024,
+   1280 or 1536 px the page's fonts were invalidated and the whole visible tab
+   relaid out, ~40 ms (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §11). */
+@source not inline("container");
+
 @theme {
     --color-background: rgb(34, 34, 34);
     --color-foreground: #f7f7f7;
