@@ -82,8 +82,8 @@ describe("planRollOff", () => {
         expect(planRollOff(nodes, { keepTurns: LIVE_FEED_DEFAULT_TURNS, maxFinishedBytes: 1_000_000, visibleIds: none, pinned: true })).toBeNull();
     });
 
-    it("defaults to a 5 MB budget and a 20,000-row cap", () => {
-        expect(LIVE_FEED_MAX_FINISHED_BYTES).toBe(5_000_000);
+    it("defaults to a 1 MB budget and a 20,000-row cap", () => {
+        expect(LIVE_FEED_MAX_FINISHED_BYTES).toBe(1_000_000);
         expect(LIVE_FEED_MAX_ROWS).toBe(20_000);
     });
 
