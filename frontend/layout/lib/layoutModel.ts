@@ -728,8 +728,17 @@ export class LayoutModel {
         updateTreeImpl(this, balanceTree);
     }
 
+    /**
+     * The container's size as its ResizeObserver reported it, while
+     * `onContainerResize` runs. `getBoundingRect` returns it instead of calling
+     * `getBoundingClientRect()`, which after another window tab's layout writes
+     * in the same callback batch forced a full-document layout per tab per
+     * frame (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §3.2).
+     */
+    private observedContainerSize: Dimensions | undefined = undefined;
+
     getBoundingRect: () => Dimensions = () => {
-        return getBoundingRectImpl(this);
+        return this.observedContainerSize ?? getBoundingRectImpl(this);
     };
 
     /**
@@ -913,8 +922,14 @@ export class LayoutModel {
     /**
      * Callback that is invoked when the TileLayout container is being resized.
      */
-    onContainerResize = () => {
-        onContainerResizeImpl(this);
+    onContainerResize = (_rect?: DOMRectReadOnly, entry?: ResizeObserverEntry) => {
+        const box = entry?.borderBoxSize?.[0];
+        this.observedContainerSize = box ? { top: 0, left: 0, width: box.inlineSize, height: box.blockSize } : undefined;
+        try {
+            onContainerResizeImpl(this);
+        } finally {
+            this.observedContainerSize = undefined;
+        }
     };
 
     /**
