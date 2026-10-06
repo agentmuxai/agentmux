@@ -101,11 +101,6 @@
             filter: blur(8px);
         }
 
-        &.resizing {
-            border: 1px solid var(--accent-color);
-            backdrop-filter: blur(8px);
-        }
-
         .tile-leaf {
             overflow: clip; // not scrollable either — see .tile-node
             // Containing block for Block's own loading cover — `<PaneLoadingCover>`

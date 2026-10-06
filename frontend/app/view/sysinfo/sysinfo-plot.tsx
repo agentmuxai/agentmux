@@ -54,31 +54,17 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
 
     onMount(() => {
         if (!containerRef) return;
-        let resizeTimer: ReturnType<typeof setTimeout> | null = null;
-        let hasFirstSize = false;
+        // Every tick applies the new size, as the first one always did: a
+        // trailing timer here held the chart at its old size for a whole window
+        // drag (SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.2). The
+        // gradient id is fixed per instance and the same SVG is updated in place.
         const rszObs = new ResizeObserver((entries) => {
-            if (!hasFirstSize) {
-                // First event after mount: apply immediately for instant first paint.
-                // Subsequent events during dock/undock animations are debounced to
-                // prevent overlapping SVGs from sharing the same gradient id.
-                hasFirstSize = true;
-                for (const entry of entries) {
-                    setPlotWidth(entry.contentRect.width);
-                    setPlotHeight(entry.contentRect.height);
-                }
-                return;
-            }
-            if (resizeTimer) clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => {
-                for (const entry of entries) {
-                    setPlotWidth(entry.contentRect.width);
-                    setPlotHeight(entry.contentRect.height);
-                }
-            }, 150);
+            const rect = entries[entries.length - 1].contentRect;
+            setPlotWidth(rect.width);
+            setPlotHeight(rect.height);
         });
         rszObs.observe(containerRef);
         onCleanup(() => {
-            if (resizeTimer) clearTimeout(resizeTimer);
             rszObs.disconnect();
         });
     });

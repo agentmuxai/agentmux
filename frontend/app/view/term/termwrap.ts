@@ -19,7 +19,8 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import * as TermTypes from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
 import debug from "debug";
-import { debounce } from "throttle-debounce";
+import { debounce, throttle } from "throttle-debounce";
+import { LARGE_BUFFER_COLS_THROTTLE_MS, liveRefit, PTY_RESIZE_DEBOUNCE_MS } from "./term-resize-policy";
 import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
 import { FitAddon } from "@xterm/addon-fit";
 import { registeredAgentsByBlock, unregisterAgent } from "./termagent";
@@ -85,8 +86,13 @@ export class TermWrap {
     // so a chunk landing in that window isn't rendered (and counted into
     // ptyOffset) twice. See SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md §2.1.
     heldData: { data: Uint8Array; offset?: number }[];
-    handleResize_debounced: () => void;
     hasResized: boolean;
+    // Live-resize state (handleResizeLive, term-resize-policy.ts): the column
+    // refit throttle for a long buffer, the pending PTY size message, and the
+    // size the PTY last heard so an unchanged size isn't sent again.
+    private refitColsThrottled: ReturnType<typeof throttle>;
+    private ptySizeTimer: ReturnType<typeof setTimeout> | null = null;
+    private lastSentTermSize: TermSize | null = null;
     multiInputCallback: (data: string) => void;
     sendDataHandler: (data: string) => void;
     onSearchResultsDidChange?: (result: { resultIndex: number; resultCount: number }) => void;
@@ -129,7 +135,12 @@ export class TermWrap {
         this.mainFileSubject = null;
         this.heldData = [];
         this.hasResized = false;
-        this.handleResize_debounced = debounce(50, this.handleResize.bind(this));
+        this.refitColsThrottled = throttle(LARGE_BUFFER_COLS_THROTTLE_MS, () => {
+            if (this.disposed) return;
+            const dims = this.proposeFit();
+            if (dims) this.applyFit(dims);
+            this.schedulePtySize();
+        });
 
         // Create terminal and load addons
         // scrollOnUserInput: false — prevents scroll-to-bottom on keystrokes, letting the user
@@ -510,6 +521,8 @@ export class TermWrap {
     // ── Phase 3: RUNNING ───────────────────────────────────────────────
 
     dispose() {
+        if (this.ptySizeTimer != null) this.flushPtySize();
+        this.refitColsThrottled?.cancel?.();
         if (this.wedgeTimer != null) {
             clearInterval(this.wedgeTimer);
             this.wedgeTimer = null;
@@ -704,25 +717,69 @@ export class TermWrap {
         return prtn;
     }
 
+    /** Refit now and tell the PTY now. For discrete changes: zoom, font size, init. */
     handleResize() {
         const oldRows = this.terminal.rows;
         const oldCols = this.terminal.cols;
         this.customFit();
         if (oldRows !== this.terminal.rows || oldCols !== this.terminal.cols) {
-            this.sendTermSize();
+            this.flushPtySize();
         }
         dlog("resize", `${this.terminal.rows}x${this.terminal.cols}`, `${oldRows}x${oldCols}`);
+    }
+
+    /**
+     * Follow a live resize (ResizeObserver during a window or splitter drag):
+     * refit the grid this frame — a column change on a long buffer through a
+     * ~100 ms throttle — and tell the PTY once the size settles
+     * (term-resize-policy.ts; SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.1).
+     */
+    handleResizeLive() {
+        if (this.disposed) return;
+        const dims = this.proposeFit();
+        if (!dims) return;
+        const current = { cols: this.terminal.cols, rows: this.terminal.rows };
+        const mode = liveRefit(dims, current, this.terminal.buffer.normal.length);
+        if (mode === "now") this.applyFit(dims);
+        else if (mode === "throttle") this.refitColsThrottled();
+        this.schedulePtySize();
+    }
+
+    /** Send the PTY its size once the resize settles (trailing). */
+    private schedulePtySize() {
+        if (this.ptySizeTimer != null) clearTimeout(this.ptySizeTimer);
+        this.ptySizeTimer = setTimeout(() => {
+            this.ptySizeTimer = null;
+            this.flushPtySize();
+        }, PTY_RESIZE_DEBOUNCE_MS);
+    }
+
+    /** Send the PTY its current size now, if it differs from what it last heard. */
+    private flushPtySize() {
+        if (this.ptySizeTimer != null) {
+            clearTimeout(this.ptySizeTimer);
+            this.ptySizeTimer = null;
+        }
+        const size = { rows: this.terminal.rows, cols: this.terminal.cols };
+        if (this.lastSentTermSize?.rows === size.rows && this.lastSentTermSize?.cols === size.cols) return;
+        this.sendTermSize();
     }
 
     // ── Private helpers ────────────────────────────────────────────────
 
     private customFit() {
+        const dims = this.proposeFit();
+        if (dims) this.applyFit(dims);
+    }
+
+    /** The grid size that fits the container now, or null when it can't be measured. */
+    private proposeFit(): { cols: number; rows: number } | null {
         const dims = this.fitAddon.proposeDimensions();
         // proposeDimensions can return {cols: NaN, rows: NaN} when the DOM cell measurement
         // fails (font not loaded, hidden container, zero pixel dimensions). The truthy check
         // alone doesn't catch this because the object exists — NaN < N is always false,
         // so it propagates through to terminal.resize() and corrupts the rendered grid.
-        if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return;
+        if (!dims || !Number.isFinite(dims.cols) || !Number.isFinite(dims.rows)) return null;
         const core = (this.terminal as any)._core;
         const cellWidth: number = core?._renderService?.dimensions?.css?.cell?.width ?? 0;
         if (cellWidth > 0 && this.connectElem) {
@@ -740,8 +797,13 @@ export class TermWrap {
             const availPx = this.connectElem.clientWidth - padX; // perf:allow-layout-read — resize/fit path, not per-keystroke
             dims.cols = Math.max(2, Math.floor(availPx / cellWidth));
         }
+        return { cols: dims.cols, rows: dims.rows };
+    }
+
+    /** Resize the grid to `dims` if it differs. */
+    private applyFit(dims: { cols: number; rows: number }) {
         if (this.terminal.rows !== dims.rows || this.terminal.cols !== dims.cols) {
-            core?._renderService?.clear?.();
+            (this.terminal as any)._core?._renderService?.clear?.();
             this.terminal.resize(dims.cols, dims.rows);
         }
     }
@@ -839,6 +901,7 @@ export class TermWrap {
      */
     private sendTermSize(override?: TermSize) {
         const termSize: TermSize = override ?? { rows: this.terminal.rows, cols: this.terminal.cols };
+        this.lastSentTermSize = termSize;
         const wsCommand: SetBlockTermSizeWSCommand = {
             wscommand: "setblocktermsize",
             blockid: this.blockId,
