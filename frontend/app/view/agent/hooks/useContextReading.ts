@@ -13,7 +13,7 @@
  * docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md.
  */
 
-import { createEffect, createMemo, on, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 
 import {
     contextReadingFromMeta,
@@ -23,6 +23,15 @@ import {
     type ContextReading,
 } from "@/app/store/agent-pane-state/context-reading";
 import { setBlockMeta } from "@/app/store/block-meta";
+import {
+    autoCompactPoint,
+    parseAutoCompactReport,
+    type AutoCompactPoint,
+    type AutoCompactReport,
+} from "@/app/store/agent-pane-state/auto-compact";
+import * as MOS from "@/app/store/mos";
+import { muxEventSubscribe } from "@/app/store/mps";
+import { WpsEvent } from "@/app/store/mps-events";
 
 import { getRuntimeConfig } from "../buildRuntimeArgs";
 import { PROVIDER_FLAGS_META_KEY } from "../launch-args";
@@ -33,6 +42,8 @@ export interface ContextMeter {
     reading: Accessor<ContextReading | null>;
     /** Where its numbers come from, for the tooltip and popover. */
     note: Accessor<string | undefined>;
+    /** Where auto-compaction happens for the reading (auto-compact.ts). */
+    autoCompact: Accessor<AutoCompactPoint | null>;
 }
 
 export interface ContextMeterOptions {
@@ -128,5 +139,23 @@ export function useContextReading(
         ),
     );
 
-    return { reading, note };
+    // The CLI's own auto-compact point (`agentcontextusage`, persisted, so a
+    // pane that mounts late still gets the latest).
+    const [report, setReport] = createSignal<AutoCompactReport | null>(null);
+    onMount(() => {
+        const unsub = muxEventSubscribe({
+            eventType: WpsEvent.AgentContextUsage,
+            scope: MOS.makeORef("block", blockId),
+            handler: (event) => {
+                const parsed = parseAutoCompactReport((event as { data?: unknown })?.data);
+                if (parsed) setReport(parsed);
+            },
+        });
+        onCleanup(() => unsub?.());
+    });
+    const autoCompact = createMemo(() => autoCompactPoint(reading(), report()), null, {
+        equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+    });
+
+    return { reading, note, autoCompact };
 }

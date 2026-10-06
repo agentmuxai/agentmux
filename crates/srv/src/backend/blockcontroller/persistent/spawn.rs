@@ -486,9 +486,13 @@ impl PersistentSubprocessController {
             // process reads such requests from stdin. An answer is folded into
             // the `agentruntime` event (the stdout reader, `stdout_reader.rs`).
             inner.settings_readback = spawn_args.iter().any(|a| a == "--permission-prompt-tool");
+            inner.context_usage = None;
             if inner.settings_readback {
                 if let Some(tx) = inner.stdin_tx.as_ref() {
                     let _ = tx.try_send(crate::backend::agent_runtime::settings_request_line());
+                    // And where it will auto-compact (agent_context_usage.rs),
+                    // answered before the first message too.
+                    let _ = tx.try_send(crate::backend::agent_context_usage::context_usage_request_line());
                 }
             }
         }

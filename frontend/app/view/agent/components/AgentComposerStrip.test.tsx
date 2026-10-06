@@ -100,6 +100,34 @@ describe("AgentComposerStrip — the context reading and where it comes from", (
     });
 });
 
+describe("AgentComposerStrip — the CLI's own auto-compact point", () => {
+    it("counts down to the threshold the CLI reports, and says so", () => {
+        // CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000: the CLI compacts at 267k, not 967k.
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                contextTokens={210_000}
+                contextWindow={1_000_000}
+                autoCompact={{ kind: "at", tokens: 267_000, source: "reported" }}
+            />
+        ));
+        expect(screen.getByText(/~57k to auto-compact/)).toBeInTheDocument();
+        const reading = screen.getByRole("button", { name: "210k / 1.0m" });
+        expect(reading.getAttribute("title")).toMatch(/Auto-compacts at 267,000 tokens \(≈57,000 tokens left\), as the CLI reports it\./);
+        expect(reading.className).toMatch(/agent-composer-strip-ctx--high/);
+    });
+
+    it("shows no countdown when auto-compaction is off, and bands against the window", () => {
+        render(() => (
+            <AgentComposerStrip {...baseProps} contextTokens={900_000} contextWindow={1_000_000} autoCompact={{ kind: "off" }} />
+        ));
+        expect(screen.queryByText(/to auto-compact/)).toBeNull();
+        const reading = screen.getByRole("button", { name: "900k / 1.0m" });
+        expect(reading.getAttribute("title")).toMatch(/Auto-compaction is off for this session/);
+        expect(reading.className).toMatch(/agent-composer-strip-ctx--critical/);
+    });
+});
+
 describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
     it("renders no countdown text when the window is unknown", () => {
         render(() => (

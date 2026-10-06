@@ -8,6 +8,14 @@ import type { ContextReading } from "@/app/store/agent-pane-state/context-readin
 
 const setBlockMeta = vi.hoisted(() => vi.fn<(blockId: string, meta: Record<string, unknown>) => Promise<void>>(async () => {}));
 vi.mock("@/app/store/block-meta", () => ({ setBlockMeta }));
+// The `agentcontextusage` subscription: the test plays srv's part.
+const usageHandlers = vi.hoisted(() => [] as ((event: unknown) => void)[]);
+vi.mock("@/app/store/mps", () => ({
+    muxEventSubscribe: (sub: { eventType: string; handler: (event: unknown) => void }) => {
+        if (sub.eventType === "agentcontextusage") usageHandlers.push(sub.handler);
+        return () => {};
+    },
+}));
 
 import { useContextReading } from "./useContextReading";
 
@@ -34,6 +42,7 @@ describe("useContextReading", () => {
     let onModelSwitched: ReturnType<typeof vi.fn<(model: string) => void>>;
 
     beforeEach(() => {
+        usageHandlers.length = 0;
         setBlockMeta.mockReset();
         setBlockMeta.mockImplementation(async () => {});
         onModelSwitched = vi.fn<(model: string) => void>();
@@ -186,5 +195,16 @@ describe("useContextReading", () => {
         expect(onModelSwitched).not.toHaveBeenCalled();
         setMeta({ "agent:runtime": { model: "haiku" } } as MetaType);
         expect(onModelSwitched).toHaveBeenCalledExactlyOnceWith("haiku");
+    });
+
+    it("counts down to the CLI's reported auto-compact point once srv publishes it", () => {
+        const { meter } = mount(live());
+        expect(meter.autoCompact()).toEqual({ kind: "at", tokens: 967_000, source: "assumed" });
+        for (const h of usageHandlers) {
+            h({ data: { model: "claude-sonnet-5-5", auto_compact_window: 300_000, auto_compact_threshold: 267_000, auto_compact_enabled: true } });
+        }
+        expect(meter.autoCompact()).toEqual({ kind: "at", tokens: 267_000, source: "reported" });
+        for (const h of usageHandlers) h({ data: { model: "claude-sonnet-5-5", auto_compact_enabled: false } });
+        expect(meter.autoCompact()).toEqual({ kind: "off" });
     });
 });

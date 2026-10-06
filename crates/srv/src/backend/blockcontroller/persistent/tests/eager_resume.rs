@@ -576,6 +576,71 @@ async fn the_controller_records_the_runtime_its_process_was_spawned_with() {
     assert_eq!(c.inner.lock().unwrap().spawn_runtime, None);
 }
 
+// The context meter counts down to where the CLI really auto-compacts. A
+// control-protocol process is asked `get_context_usage` at spawn, and its
+// answer is published as `agentcontextusage` (agent_context_usage.rs). The
+// stub answers the way CLI 2.1.288 does under CLAUDE_CODE_AUTO_COMPACT_WINDOW.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_control_protocol_process_is_asked_where_it_auto_compacts() {
+    if !has_node() {
+        eprintln!("eager_resume_tests: `node` not on PATH — skipping");
+        return;
+    }
+    let stub = std::env::temp_dir().join(format!("agentmux-ctxusage-{}.js", uuid::Uuid::new_v4()));
+    std::fs::write(
+        &stub,
+        r#"const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
+out({ type: "system", subtype: "init", session_id: "s" });
+require("readline").createInterface({ input: process.stdin }).on("line", (l) => {
+  let m; try { m = JSON.parse(l); } catch { return; }
+  if (m.type === "control_request" && m.request && m.request.subtype === "get_context_usage") {
+    out({ type: "control_response", response: { subtype: "success", request_id: m.request_id, response: {
+      model: "claude-sonnet-5-5", maxTokens: 300000, rawMaxTokens: 300000, autoCompactThreshold: 267000,
+      isAutoCompactEnabled: true, autocompactSource: "env", totalTokens: 37475 } } });
+  }
+});
+setInterval(() => {}, 1000);"#,
+    )
+    .unwrap();
+    let meta = {
+        let mut m = meta_with_session(
+            "sid-to-resume",
+            &[stub.to_string_lossy().as_ref(), "--permission-prompt-tool", "stdio", "--permission-mode", "default"],
+        );
+        m.insert("agentProvider".to_string(), serde_json::json!("claude"));
+        m
+    };
+    let store = make_store();
+    let broker = Arc::new(crate::backend::mps::Broker::new());
+    let c = PersistentSubprocessController::new(
+        "tab".to_string(),
+        "blk-ctxusage".to_string(),
+        Some(broker.clone()),
+        None,
+        None,
+        None,
+    )
+    .with_identity_stores(Some(store.clone()), Some(store.clone()), "key".to_string());
+    let c = PersistentSubprocessController { mstore: Some(store), ..c };
+    let _kill_on_drop = KillOnDrop(&c);
+    Controller::start(&c, meta, None, false).unwrap();
+    assert!(wait_for_spawn(&c).await, "expected a real process to spawn");
+
+    let latest = || {
+        broker
+            .read_event_history(crate::backend::mps::EVENT_AGENT_CONTEXT_USAGE, "block:blk-ctxusage", 5)
+            .last()
+            .and_then(|e| e.data.clone())
+    };
+    wait_until("the agentcontextusage event", || latest().is_some()).await;
+    let data = latest().unwrap();
+    assert_eq!(data["model"], "claude-sonnet-5-5", "{data}");
+    assert_eq!(data["auto_compact_threshold"], 267_000, "{data}");
+    assert_eq!(data["auto_compact_window"], 300_000, "{data}");
+    assert_eq!(data["auto_compact_enabled"], true, "{data}");
+    assert!(c.inner.lock().unwrap().context_usage.is_some(), "kept, so an unchanged answer isn't re-published");
+}
+
 /// A persistent controller wired to a real broker, running a stub that stays up
 /// (`exit_after_ms: None`) or exits on its own. Returns the broker to read the
 /// published `agentruntime` history from.

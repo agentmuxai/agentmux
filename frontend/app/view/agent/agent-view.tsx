@@ -305,7 +305,7 @@ export const AgentPresentationView = ({
 
     // The context meter: validated reading, its provenance note, and the
     // Swarm's meta mirror (hooks/useContextReading.ts).
-    const { reading: contextReading, note: contextNote } = useContextReading(model.blockId, () => paneModel.state.context, {
+    const { reading: contextReading, note: contextNote, autoCompact } = useContextReading(model.blockId, () => paneModel.state.context, {
         ready: () => paneModel.state.initPhase.kind === "InitReady",
         meta: () => block()?.meta,
         onModelSwitched: (m) => paneModel.dispatchPane({ type: "ContextModelSwitched", model: m }, "system"),
@@ -1409,6 +1409,7 @@ export const AgentPresentationView = ({
                 contextTokens={contextReading()?.tokens ?? null}
                 contextWindow={contextReading()?.window ?? undefined}
                 contextNote={contextNote()}
+                autoCompact={autoCompact()}
                 lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
                 authEmail={authEmail()}

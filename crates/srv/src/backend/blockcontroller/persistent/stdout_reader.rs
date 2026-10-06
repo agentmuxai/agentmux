@@ -98,6 +98,29 @@ impl PersistentSubprocessController {
                 // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
                 if let Some(kind) = parsed.get("type").and_then(|v| v.as_str()) {
                     if kind == "control_request" || kind == "control_response" {
+                        // The answer to our `get_context_usage`: where this
+                        // process auto-compacts. Ignored from a replaced
+                        // process; re-published only when it changed.
+                        if let Some(usage) =
+                            crate::backend::agent_context_usage::context_usage_from_control_response(&parsed)
+                        {
+                            let changed = {
+                                let mut g = inner_read.lock().unwrap();
+                                if g.spawn_generation == my_generation_read && g.context_usage.as_ref() != Some(&usage) {
+                                    g.context_usage = Some(usage.clone());
+                                    true
+                                } else {
+                                    false
+                                }
+                            };
+                            if let (true, Some(broker)) = (changed, broker_read.as_ref()) {
+                                crate::backend::agent_context_usage::publish_agent_context_usage(
+                                    broker,
+                                    &block_id_read,
+                                    &usage,
+                                );
+                            }
+                        }
                         // The answer to our `get_settings`: what the CLI
                         // really runs. Ignored from a replaced process.
                         if let Some(eff) = crate::backend::agent_runtime::effective_from_control_response(&parsed) {
@@ -214,6 +237,12 @@ impl PersistentSubprocessController {
                         let ask = inner_read.lock().unwrap().settings_readback;
                         if ask {
                             Self::push_stdin(&inner_read, crate::backend::agent_runtime::settings_request_line());
+                            // The threshold moves with the model (a fallback
+                            // model, a /model switch applied in place).
+                            Self::push_stdin(
+                                &inner_read,
+                                crate::backend::agent_context_usage::context_usage_request_line(),
+                            );
                         }
                     }
                     if deferred_restart {

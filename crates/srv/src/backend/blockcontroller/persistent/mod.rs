@@ -351,8 +351,13 @@ struct PersistentInner {
     /// until it answers, for a CLI that cannot, and when no process runs.
     effective_runtime: Option<crate::backend::agent_runtime::EffectiveRuntime>,
     /// Whether the running process takes control requests, so it is asked
-    /// `get_settings` (set at spawn: a control-protocol launch).
+    /// `get_settings` and `get_context_usage` (set at spawn: a
+    /// control-protocol launch).
     settings_readback: bool,
+    /// The last `get_context_usage` answer published for the current process,
+    /// so an unchanged answer at each turn boundary isn't re-broadcast.
+    /// Cleared at spawn.
+    context_usage: Option<crate::backend::agent_context_usage::AgentContextUsage>,
     /// A kill has been requested for the current process (`request_stop_on`).
     /// `stdin_tx` stays live until it actually exits. Writing an automated
     /// message then would put it into the dying process and lose it (codex
@@ -1180,6 +1185,7 @@ impl PersistentSubprocessController {
                 spawn_runtime: None,
                 effective_runtime: None,
                 settings_readback: false,
+                context_usage: None,
                 stop_pending: false,
                 config_restart_generation: None,
                 restart_spawn_for: None,
