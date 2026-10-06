@@ -154,6 +154,63 @@
     color: var(--secondary-text-color);
 }
 
+// ── Hue swatches and widget colors ──────────────────────────────────────────
+
+.setting-hue-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.setting-hue-swatch {
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
+    border-radius: 4px;
+    cursor: default;
+
+    &--none {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: transparent;
+        color: var(--main-text-color);
+        font-size: 0.65rem;
+        opacity: 0.7;
+    }
+
+    &--selected {
+        outline: 2px solid var(--main-text-color);
+        outline-offset: 1px;
+    }
+}
+
+.setting-widget-color {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.setting-widget-color-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+// A pane-tab pill in the widget's color, as panes draw it.
+.setting-widget-color-preview {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 92px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border-bottom: 2px solid transparent;
+    font-size: 0.75rem;
+    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
+}
+
 // ── Slider ────────────────────────────────────────────────────────────────────
 
 .setting-slider {

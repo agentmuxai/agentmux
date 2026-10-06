@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
-import { paneTabCapability } from "@/app/block/pane-tab-registry";
+import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Button } from "@/app/element/button";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
@@ -39,8 +39,8 @@ import { partitionHeaderElems } from "./header-elems";
 import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
 import { resolveContextMenuRegion } from "./context-menu-region";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
-import { hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
-import { blockRoleColor, isLightThemeActive, type PaneIdentityOptions } from "./pane-identity";
+import { applyHueToAllPanes, hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import { blockRoleColor, isLightThemeActive, widgetColorView, type PaneIdentityOptions } from "./pane-identity";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -151,7 +151,7 @@ export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
  * — see showJsContextMenu). The current color is marked with a checkmark;
  * "Default" clears it.
  */
-function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
+export function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
     const currentHue = blockData?.meta?.["frame:hue"];
     // Only real agent panes have an identity color to persist into — see
     // setHue's own doc comment for why "Default" never passes this.
@@ -170,6 +170,18 @@ function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
             click: () => setHue(blockData.oid, hue, agentId),
         })),
     ];
+    // Spec §3.7. Not on agent panes: their pick is the agent's own color, and
+    // widget colors don't apply to an agent with one.
+    const widgetView = widgetColorView(blockData?.meta?.view);
+    if (typeof currentHue === "number" && widgetView && !agentId) {
+        colorItems.push(
+            { type: "separator" as const },
+            {
+                label: `Use for all ${paneTabLabelFor(widgetView)} panes`,
+                click: () => applyHueToAllPanes(blockData.oid, widgetView, currentHue),
+            }
+        );
+    }
     // Leading separator (not trailing): the caller may append a view-settings
     // group that also starts with a separator. A trailing separator here would
     // collide with it and render two consecutive dividers for views that

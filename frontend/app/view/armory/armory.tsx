@@ -21,7 +21,8 @@ export const armoryPaneTab: PaneTabManifest = {
     aliases: ["trust"],
     label: "Armory",
     icon: "vault",
-    defaultHue: 330,
+    // Or Knowledge, by the section it was saved on: create() moves the block.
+    legacyOf: "connectors",
     capabilities: { paneZoom: {} },
     create: (ctx) => {
         const patch = armoryMigrationPatch(ctx.meta() as Record<string, unknown>);

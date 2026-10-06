@@ -20,7 +20,7 @@
 import type { PaneTabDescriptor } from "@/app/element/pane-tab-model";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import type { NodeModel } from "@/layout/index";
-import type { Accessor, JSX } from "solid-js";
+import { createSignal, type Accessor, type JSX } from "solid-js";
 
 /** What a view type declares instead of shared code checking its name
  *  (Pane Tab contract Phase 5, spec §2.4 #5). Every field is optional; the
@@ -149,6 +149,10 @@ export interface PaneTabManifest {
      *  is drawn in it, unless the user set another in `pane:colors`
      *  (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.1). None: neutral. */
     defaultHue?: number;
+    /** Set on a manifest kept only so blocks saved under an old view name still
+     *  load: the view it stands in for. It takes that view's color and isn't
+     *  offered as a widget of its own (Settings doesn't list it). */
+    legacyOf?: string;
     capabilities?: PaneTabCapabilities;
     /** How a block of this view becomes a tab pill, beyond label and icon. */
     tab?: PaneTabDescriptor;
@@ -164,6 +168,8 @@ export interface PaneTabManifest {
 
 const manifests = new Map<string, PaneTabManifest>();
 const aliasToView = new Map<string, string>();
+/** Bumped on every register and unregister, so `listPaneTabs()` is reactive. */
+const [registryVersion, setRegistryVersion] = createSignal(0);
 
 /** Registers a pane tab type. Returns its unregister function. Throws when the
  *  view or one of its aliases is already taken — a silent overwrite would let
@@ -181,13 +187,22 @@ export function registerPaneTab(manifest: PaneTabManifest): () => void {
     }
     manifests.set(manifest.view, manifest);
     for (const alias of manifest.aliases ?? []) aliasToView.set(alias, manifest.view);
+    setRegistryVersion((v) => v + 1);
     return () => {
         if (manifests.get(manifest.view) !== manifest) return;
         manifests.delete(manifest.view);
         for (const alias of manifest.aliases ?? []) {
             if (aliasToView.get(alias) === manifest.view) aliasToView.delete(alias);
         }
+        setRegistryVersion((v) => v + 1);
     };
+}
+
+/** Every registered pane tab type, in registration order. Reactive: a widget
+ *  registered later (widget-loader.ts) shows up. */
+export function listPaneTabs(): PaneTabManifest[] {
+    registryVersion();
+    return [...manifests.values()];
 }
 
 /** The canonical view for a `meta.view` value: an alias maps to its view,

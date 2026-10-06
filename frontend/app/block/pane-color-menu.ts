@@ -4,6 +4,7 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 
 export interface PaneHueOption {
     label: string;
@@ -77,4 +78,27 @@ export function setHue(blockId: string, hue: number | null, agentId?: string): v
             content: hueToAgentIdentityColor(hue),
         });
     }
+}
+
+/**
+ * Set the color of every pane of a widget type, the `pane:colors` setting
+ * (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.4). `view` is the key from
+ * `widgetColorView`. A hue sets it, `null` gives the widget no color, and
+ * `undefined` returns it to its built-in color. The last key removed deletes
+ * the setting.
+ */
+export function setWidgetHue(view: string, hue: number | null | undefined): void {
+    const next: Record<string, number | null> = { ...getSettingsKeyAtom("pane:colors")() };
+    if (hue === undefined) delete next[view];
+    else next[view] = hue;
+    // A null value deletes the key on disk; SettingsType has no null.
+    const data: Record<string, unknown> = { "pane:colors": Object.keys(next).length > 0 ? next : null };
+    void RpcApi.SetConfigCommand(TabRpcClient, data as SettingsType);
+}
+
+/** "Use for all <Label> panes": this pane's pick becomes its widget's color,
+ *  and the pane goes back to following it (spec §3.7). */
+export function applyHueToAllPanes(blockId: string, view: string, hue: number): void {
+    setWidgetHue(view, hue);
+    setHue(blockId, null);
 }

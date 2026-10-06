@@ -3,6 +3,7 @@
 
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
+import { hueToActiveBorder, PANE_HUE_OPTIONS } from "@/app/block/pane-color-menu";
 import { Button, Field, IconButton, NumberInput, Switch, TextInput, useField } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -129,6 +130,43 @@ export function NumberControl(p: {
             value={p.value}
             onChange={p.onChange}
         />
+    );
+}
+
+/**
+ * Pick one of the Pane Color hues, or None: the same twelve swatches, in the
+ * same colors, as the pane header's Pane Color menu. `value` is the selected
+ * hue, `null` for None, `undefined` for nothing selected.
+ */
+export function HueSwatchRow(p: { value: number | null | undefined; onChange: (hue: number | null) => void; label: string }): JSX.Element {
+    return (
+        <div class="setting-hue-swatches" role="group" aria-label={p.label}>
+            <button
+                type="button"
+                class="setting-hue-swatch setting-hue-swatch--none"
+                classList={{ "setting-hue-swatch--selected": p.value === null }}
+                aria-pressed={p.value === null}
+                aria-label="None"
+                title="None"
+                onClick={() => p.onChange(null)}
+            >
+                <i class="fa-solid fa-ban" />
+            </button>
+            <For each={PANE_HUE_OPTIONS}>
+                {(opt) => (
+                    <button
+                        type="button"
+                        class="setting-hue-swatch"
+                        classList={{ "setting-hue-swatch--selected": p.value === opt.hue }}
+                        style={{ "background-color": hueToActiveBorder(opt.hue) }}
+                        aria-pressed={p.value === opt.hue}
+                        aria-label={opt.label}
+                        title={opt.label}
+                        onClick={() => p.onChange(opt.hue)}
+                    />
+                )}
+            </For>
+        </div>
     );
 }
 
