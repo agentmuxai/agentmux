@@ -17,7 +17,7 @@
         }
     },
     "defwidget@swarm": {
-        "display:order": 4,
+        "display:order": 2,
         "display:pinned": true,
         "icon": "bee",
         "label": "Swarm",
@@ -55,7 +55,7 @@
         }
     },
     "defwidget@files": {
-        "display:order": 5,
+        "display:order": 4,
         "display:pinned": true,
         "icon": "folder-open",
         "label": "Hangar",
@@ -250,7 +250,7 @@
         }
     },
     "defwidget@connectors": {
-        "display:order": 2,
+        "display:order": 5,
         "display:pinned": true,
         "icon": "plug",
         "label": "Connectors",

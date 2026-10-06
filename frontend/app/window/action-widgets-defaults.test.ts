@@ -31,10 +31,10 @@ describe("the default widget bar", () => {
     it("pins eleven widgets, in the operator's order", () => {
         expect(getPinnedKeys({}, wmap)).toEqual([
             "agent",
-            "connectors",
-            "knowledge",
             "swarm",
+            "knowledge",
             "files",
+            "connectors",
             "terminal",
             "editor",
             "browser",
