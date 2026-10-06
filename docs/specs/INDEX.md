@@ -306,6 +306,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30`](SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md) | SPEC — Composer strip: two-line wrap when the pane narrows |
 | [`SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10`](SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10.md) | SPEC: Copy Button Silently Failing (Three Stacked Bugs) |
 | [`SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30`](SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30.md) | Move the Rust crates under `crates/`, with a merge freeze and a rebase plan |
+| [`SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06`](SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06.md) | Spec: The new-agent Name field starts empty, with ghost text |
 | [`SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07`](SPEC_CTRL_SHIFT_SCROLL_ZOOM_ALL_PANES_2026_09_07.md) | Spec: Ctrl+Shift+Scroll zooms every pane in the window at once |
 | [`SPEC_DEV_ENV_ISOLATION`](SPEC_DEV_ENV_ISOLATION.md) | Dev-Build Environment Isolation |
 | [`SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19`](SPEC_DEV_INSTANCE_ISOLATION_DIAGNOSTICS_2026_09_19.md) | SPEC: Fix misleading guidance when a second `task dev` instance collides |

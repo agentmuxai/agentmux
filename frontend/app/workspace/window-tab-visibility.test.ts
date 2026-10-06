@@ -60,6 +60,25 @@ describe("tabContainerVisibility", () => {
         expect(tabContainerVisibility(false, false, false, true)).toEqual(tabContainerVisibility(false, false, false));
     });
 
+    // ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md: during a window resize a
+    // hidden tab kept laid out skips layout, and is still hidden the same way.
+    it("skips a hidden laid-out tab's layout while layout is deferred", () => {
+        expect(tabContainerVisibility(false, true, false, false, true)).toEqual({
+            ...tabContainerVisibility(false, true, false),
+            "content-visibility": "hidden",
+        });
+    });
+
+    it("never defers the displayed tab's layout", () => {
+        for (const keep of [false, true]) {
+            expect(tabContainerVisibility(true, keep, false, false, true)["content-visibility"]).toBe("visible");
+        }
+    });
+
+    it("changes nothing when inactive tabs aren't kept laid out", () => {
+        expect(tabContainerVisibility(false, false, false, false, true)).toEqual(tabContainerVisibility(false, false, false));
+    });
+
     it("lets the reveal gate hide the displayed tab in both modes", () => {
         for (const keep of [false, true]) {
             const v = tabContainerVisibility(true, keep, true);
