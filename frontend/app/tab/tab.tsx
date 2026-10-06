@@ -12,6 +12,8 @@ import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
 import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
 import { flashElement, onActivityFlash } from "@/app/notification/activity-flash";
+import { paneRoleColor } from "../block/pane-color-scheme";
+import { isLightThemeActive } from "../block/pane-identity";
 import { ObjectService } from "../store/services";
 import { makeORef, useMuxObjectValue } from "../store/mos";
 import { measureTabWidth } from "./tab-measure";
@@ -27,6 +29,17 @@ import { renameRequest } from "./tab-rename-request";
 // palette — see docs/specs/SPEC_TAB_COLOR_DESATURATION_2026_08_13.md for
 // why the two must not share one source (editing this must never affect
 // pane borders).
+// The stored hex only names a hue. The tab is drawn in the pane-tab pill tones
+// for that hue (pane-color-scheme.ts), so a window tab and a pane tab of one
+// colour read as the same family in dark and light themes.
+export function windowTabToneVars(hex: string, isLightTheme: boolean): Record<string, string> | undefined {
+    const bg = paneRoleColor(undefined, hex, isLightTheme, "pill");
+    const bgActive = paneRoleColor(undefined, hex, isLightTheme, "pillActive");
+    const underline = paneRoleColor(undefined, hex, isLightTheme, "identity");
+    if (!bg || !bgActive || !underline) return undefined;
+    return { "--tab-bg": bg, "--tab-bg-active": bgActive, "--tab-underline": underline };
+}
+
 export const TAB_COLORS: { name: string; hex: string }[] = [
     { name: "Red",     hex: "#c22a2a" },
     { name: "Orange",  hex: "#b75e20" },
@@ -130,6 +143,10 @@ function Tab(props: TabProps): JSX.Element {
     let loadedRef = false;
 
     const tabColor = (): string | undefined | null => tabData()?.meta?.["tab:color"] as string | undefined | null;
+    const tabTone = () => {
+        const hex = tabColor();
+        return hex ? windowTabToneVars(hex, isLightThemeActive()) : undefined;
+    };
 
     createEffect(() => {
         const name = tabData()?.name;
@@ -288,9 +305,9 @@ function Tab(props: TabProps): JSX.Element {
                     dragging: props.isDragging,
                     "before-active": props.isBeforeActive,
                     "new-tab": props.isNew,
-                    "tab-colored": !!tabColor(),
+                    "tab-colored": !!tabTone(),
                 })}
-                style={tabColor() ? ({ "--tab-color": tabColor() } as JSX.CSSProperties) : undefined}
+                style={tabTone() as JSX.CSSProperties | undefined}
                 onClick={props.onSelect}
                 onContextMenu={handleContextMenu}
                 data-tab-id={props.id}
