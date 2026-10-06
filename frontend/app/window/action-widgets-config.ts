@@ -27,12 +27,26 @@ import type { JSX } from "solid-js";
  * groups are nested (out of scope — see
  * SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md §2).
  */
+export function getGroupedChildKeys(wmap: Record<string, WidgetConfigType>): Set<string> {
+    const grouped = new Set<string>();
+    for (const w of Object.values(wmap ?? {})) {
+        for (const child of w.children ?? []) grouped.add(child);
+    }
+    return grouped;
+}
+
 /** A widget entry's color for `role`: its own `color` (a messenger's brand,
  *  though it opens a browser), else the color of the view it opens
- *  (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.6). */
+ *  (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.6). An entry color the
+ *  palette can't read (any CSS color but `#rrggbb`) is used as written at
+ *  full strength, and gives way to the view's color for the other roles. */
 export function widgetEntryColor(widget: WidgetConfigType, role: PaneColorRole): string | undefined {
     const isLight = isLightThemeActive();
-    if (widget.color) return paneRoleColor(undefined, widget.color, isLight, role);
+    if (widget.color) {
+        const color = paneRoleColor(undefined, widget.color, isLight, role);
+        if (color) return color;
+        if (role === "identity") return widget.color;
+    }
     return widgetRoleColor(widget.blockdef?.meta?.view, isLight, role);
 }
 
@@ -40,14 +54,6 @@ export function widgetEntryColor(widget: WidgetConfigType, role: PaneColorRole):
 export function widgetIconStyle(widget: WidgetConfigType): JSX.CSSProperties {
     const tint = widgetEntryColor(widget, "widgetTint");
     return tint ? { "--widget-tint": tint } : {};
-}
-
-export function getGroupedChildKeys(wmap: Record<string, WidgetConfigType>): Set<string> {
-    const grouped = new Set<string>();
-    for (const w of Object.values(wmap ?? {})) {
-        for (const child of w.children ?? []) grouped.add(child);
-    }
-    return grouped;
 }
 
 /** True if `shortName` is individually pinned via widget:pinned — i.e. promoted out of its parent group. */

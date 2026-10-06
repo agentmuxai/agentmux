@@ -35,6 +35,13 @@ describe("widgetEntryColor", () => {
         expect(widgetEntryColor(widget({ color: "#5865f2" }), "widgetTint")).toBe(paneRoleColor(undefined, "#5865f2", false, "widgetTint"));
     });
 
+    it("keeps an entry color the palette can't read: as written at full strength, else the view's color", () => {
+        for (const color of ["red", "#f00", "rgb(255, 0, 0)"]) {
+            expect(widgetEntryColor(widget({ color }), "identity")).toBe(color);
+            expect(widgetEntryColor(widget({ color }), "widgetTint")).toBe(paneRoleColor(240, undefined, false, "widgetTint"));
+        }
+    });
+
     it("has none for an entry that opens no colored view", () => {
         expect(widgetEntryColor(widget({ blockdef: { meta: { view: "t-none" } } } as Partial<WidgetConfigType>), "widgetTint")).toBeUndefined();
         expect(widgetEntryColor(widget({ blockdef: undefined } as Partial<WidgetConfigType>), "widgetTint")).toBeUndefined();
