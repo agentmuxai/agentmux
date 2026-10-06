@@ -34,6 +34,47 @@ pub const CACHE_TTL_SECS: u64 = 60;
 /// When this is exceeded, LRU eviction removes the oldest entries first.
 pub const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
+/// Waiting this long for the connection, or holding it this long, is logged
+/// with the call site (`FileStore::lock_conn`).
+const SLOW_CONN: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// The store's connection, held: logs on drop when it was held for
+/// `SLOW_CONN` or longer, naming where it was taken. Every store operation in
+/// the process waits for this one lock — on the global transcript store, every
+/// agent's appends and every pane's history reads — so a long hold stalls
+/// them all (REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
+pub(crate) struct TimedConn<'a> {
+    guard: std::sync::MutexGuard<'a, Connection>,
+    site: &'static std::panic::Location<'static>,
+    got: std::time::Instant,
+}
+
+impl std::ops::Deref for TimedConn<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.guard
+    }
+}
+
+impl std::ops::DerefMut for TimedConn<'_> {
+    fn deref_mut(&mut self) -> &mut Connection {
+        &mut self.guard
+    }
+}
+
+impl Drop for TimedConn<'_> {
+    fn drop(&mut self) {
+        let held = self.got.elapsed();
+        if held >= SLOW_CONN {
+            tracing::warn!(
+                site = %self.site,
+                held_ms = held.as_millis() as u64,
+                "filestore: connection held a long time"
+            );
+        }
+    }
+}
+
 /// SQLite-backed file storage with write-through cache.
 pub struct FileStore {
     pub(super) conn: Mutex<Connection>,
@@ -97,6 +138,21 @@ impl FileStore {
         Ok(store)
     }
 
+    /// The connection, logging a wait or a hold of `SLOW_CONN` or more with
+    /// the caller's location. `#[track_caller]` on the store methods that take
+    /// it carries the site out to the code that called the store.
+    #[track_caller]
+    pub(crate) fn lock_conn(&self) -> TimedConn<'_> {
+        let site = std::panic::Location::caller();
+        let asked = std::time::Instant::now();
+        let guard = self.conn.lock().unwrap();
+        let waited = asked.elapsed();
+        if waited >= SLOW_CONN {
+            tracing::warn!(site = %site, waited_ms = waited.as_millis() as u64, "filestore: slow to get the connection");
+        }
+        TimedConn { guard, site, got: std::time::Instant::now() }
+    }
+
     /// Raw connection access for tests that need to force a specific
     /// failure mode (e.g. dropping a table) — mirrors `Store::conn()`.
     pub(crate) fn conn(&self) -> &Mutex<Connection> {
@@ -106,11 +162,9 @@ impl FileStore {
     /// Run `PRAGMA wal_checkpoint(TRUNCATE)` on the filestore connection.
     /// Same semantics as `Store::checkpoint` — 5s busy_timeout, partial
     /// truncate on contention is safe.
+    #[track_caller]
     pub fn checkpoint(&self) -> Result<(), StoreError> {
-        self.conn
-            .lock()
-            .unwrap()
-            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+        self.lock_conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         Ok(())
     }
 
@@ -178,11 +232,12 @@ impl FileStore {
     /// the state `f` writes on top of; `busy_timeout` makes another process
     /// wait rather than fail. Callers update the in-process cache only after
     /// this returns `Ok`.
+    #[track_caller]
     pub(super) fn write_txn<T>(
         &self,
         f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let out = f(&tx)?;
         tx.commit()?;
@@ -193,11 +248,12 @@ impl FileStore {
     /// one consistent snapshot of the database, however other connections
     /// write meanwhile. For a decision that combines several reads (a size, a
     /// header, a label) that must describe the same moment.
+    #[track_caller]
     pub(super) fn read_txn<T>(
         &self,
         f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.lock_conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
         let out = f(&tx)?;
         tx.commit()?;
@@ -259,6 +315,7 @@ impl FileStore {
 
     /// Create a new file. Fails if file already exists.
     #[allow(dead_code)]
+    #[track_caller]
     pub fn make_file(
         &self,
         zone_id: &str,
@@ -325,6 +382,7 @@ impl FileStore {
 
     /// Delete a file and all its data parts.
     #[allow(dead_code)]
+    #[track_caller]
     pub fn delete_file(&self, zone_id: &str, name: &str) -> Result<(), StoreError> {
         self.write_txn(|tx| {
             tx.execute(
@@ -351,6 +409,7 @@ impl FileStore {
 
     /// Delete all files in a zone.
     #[allow(dead_code)]
+    #[track_caller]
     pub fn delete_zone(&self, zone_id: &str) -> Result<(), StoreError> {
         // The names (for cache cleanup) and both deletes in one transaction,
         // so a file another process creates meanwhile is either deleted and
@@ -388,6 +447,7 @@ impl FileStore {
     }
 
     /// Get file metadata. Returns None if file doesn't exist.
+    #[track_caller]
     pub fn stat(&self, zone_id: &str, name: &str) -> Result<Option<MuxFile>, StoreError> {
         // Check cache first
         let key = (zone_id.to_string(), name.to_string());
@@ -400,7 +460,7 @@ impl FileStore {
         }
 
         // Load from DB
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let result = conn.query_row(
             "SELECT zoneid, name, size, createdts, modts, opts, meta FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
             params![zone_id, name],
@@ -475,6 +535,7 @@ impl FileStore {
     }
 
     /// Write (replace) entire file contents.
+    #[track_caller]
     pub fn write_file(
         &self,
         zone_id: &str,
@@ -529,6 +590,7 @@ impl FileStore {
     }
 
     /// Read entire file contents.
+    #[track_caller]
     pub fn read_file(&self, zone_id: &str, name: &str) -> Result<Option<Vec<u8>>, StoreError> {
         // Get file metadata
         let file = match self.stat(zone_id, name)? {
@@ -546,7 +608,7 @@ impl FileStore {
         let start_part = (start_idx / PART_DATA_SIZE as i64) as i32;
 
         // Load parts from DB
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare(
             "SELECT partidx, data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 ORDER BY partidx",
         )?;
@@ -658,6 +720,7 @@ impl FileStore {
 
     /// Write metadata. If `merge` is true, only specified keys are updated;
     /// otherwise the entire metadata map is replaced.
+    #[track_caller]
     pub fn write_meta(
         &self,
         zone_id: &str,
@@ -720,8 +783,9 @@ impl FileStore {
 
     /// List all files in a zone.
     #[allow(dead_code)]
+    #[track_caller]
     pub fn list_files(&self, zone_id: &str) -> Result<Vec<MuxFile>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare(
             "SELECT zoneid, name, size, createdts, modts, opts, meta FROM db_wave_file WHERE zoneid = ?1",
         )?;
@@ -746,8 +810,9 @@ impl FileStore {
     /// Zone IDs that start with `prefix`, in no particular order. A range scan
     /// on the primary key, so it costs the number of matches, not the size of
     /// the store (`get_all_zone_ids` walks every file row).
+    #[track_caller]
     pub fn zone_ids_with_prefix(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare_cached(
             "SELECT DISTINCT zoneid FROM db_wave_file \
              WHERE zoneid >= ?1 AND zoneid < ?2",
@@ -761,8 +826,9 @@ impl FileStore {
 
     /// Get all zone IDs that have files.
     #[allow(dead_code)]
+    #[track_caller]
     pub fn get_all_zone_ids(&self) -> Result<Vec<String>, StoreError> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let mut stmt = conn.prepare("SELECT DISTINCT zoneid FROM db_wave_file")?;
         let rows = stmt.query_map([], |row| row.get(0))?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -772,6 +838,7 @@ impl FileStore {
     /// Flush dirty cache entries to the database and evict stale clean entries.
     /// Returns (files_flushed, parts_flushed).
     #[allow(dead_code)]
+    #[track_caller]
     pub fn flush_cache(&self) -> Result<(usize, usize), StoreError> {
         let ttl_ms = (CACHE_TTL_SECS * 1000) as i64;
         let now = agentmux_common::time::now_ms();

@@ -105,6 +105,7 @@ impl FileStore {
     /// `f` runs with this store's connection locked: it must not call any
     /// other `FileStore` method (the lock isn't reentrant — that deadlocks).
     /// Use the [`ZoneTxn`] it is given.
+    #[track_caller]
     pub fn zone_txn<T>(
         &self,
         zone_id: &str,
@@ -126,6 +127,7 @@ impl FileStore {
     /// Read several files of one zone as one consistent snapshot, sized from
     /// the database — never from this process's cache, which another
     /// process's write leaves stale.
+    #[track_caller]
     pub fn read_files_consistent(&self, zone_id: &str, names: &[&str]) -> Result<Vec<Option<Vec<u8>>>, StoreError> {
         self.read_txn(|tx| names.iter().map(|name| read_in(tx, zone_id, name)).collect())
     }
