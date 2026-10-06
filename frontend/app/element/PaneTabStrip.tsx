@@ -756,7 +756,7 @@ function PaneTabStripItem<T>(props: PaneTabStripItemProps<T>): JSX.Element {
     // (SPEC_PANE_HEADER_TAIL_COLOR_2026_09_21.md §2.2). Read via a CSS
     // custom property rather than a direct inline `background-color` so the
     // stylesheet keeps control of precedence across the resting / hover /
-    // active rules, same pattern as tab.tsx's `--tab-color`.
+    // active rules, same pattern as tab.tsx's `--tab-bg` / `--tab-bg-active` / `--tab-underline`.
     const colorStyle = (): JSX.CSSProperties => {
         const c = props.getColor?.(props.tab);
         if (!c) return {};
