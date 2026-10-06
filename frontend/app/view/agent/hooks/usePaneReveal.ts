@@ -67,9 +67,10 @@ export function usePaneReveal(opts: {
     // entirely once the fade transition has had time to finish, instead of
     // leaving an invisible-but-present pointer-events:none div forever.
     // One readiness authority for this pane — see
-    // docs/specs/SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md. Phase 1 changes no
+    // docs/specs/SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md. Phase 1 changed no
     // behaviour: the same two conditions gate the reveal, the fade still runs for
-    // 220ms, and the overlay still unmounts after it. What changes is that "may the
+    // 220ms, and the overlay still unmounts after it. Since 2026-10-05 the reveal
+    // is also bounded at AGENT_REVEAL_TIMEOUT_MS, whether or not both have reported. What changes is that "may the
     // pane appear" is now ONE stated decision instead of several components each
     // deciding independently — a prerequisite for collapsing the four overlapping
     // loading indicators (two were measured on screen at once) in later phases.
@@ -166,6 +167,11 @@ export function usePaneReveal(opts: {
         // safety timeout so a launch path that never calls setLaunchPhase (a
         // future code path, a test double) can't leave the pane stuck behind
         // the spinner forever — worse than the flicker this exists to fix.
+        // Since 2026-10-05 the pane's own reveal bound (AGENT_REVEAL_TIMEOUT_MS,
+        // 1.5 s) comes first, so on a launch still resolving the CLI or
+        // checking auth at 1.5 s the auth panel can pop in after the reveal.
+        // Accepted: the owner chose an open that shows at once over one that
+        // waits out the launch flow.
         const [authPhaseTimedOut, setAuthPhaseTimedOut] = createSignal(false);
         let authPhaseSafetyTimeout: ReturnType<typeof setTimeout> | undefined;
         onMount(() => {

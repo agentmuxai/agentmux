@@ -49,6 +49,7 @@ vi.mock("@/app/store/rpc-api", async (orig) => {
 import { AgentFooter } from "./AgentFooter";
 import type { AgentViewModel } from "../agent-model";
 import { getAttachmentDraft } from "../attachments/attachment-draft";
+import { dispatch as dispatchPaneCommand, registerPane, unregisterPane } from "@/app/store/agent-pane-state-store";
 
 afterEach(() => cleanup());
 
@@ -63,7 +64,7 @@ function setup(onSendMessage = vi.fn()) {
     } as unknown as AgentViewModel;
     render(() => <AgentFooter agentName="Test" viewModel={vm} onSendMessage={onSendMessage} />);
     const ta = screen.getByPlaceholderText(/Send message to/) as HTMLTextAreaElement;
-    return { ta, onSendMessage, draft: getAttachmentDraft(blockId) };
+    return { ta, onSendMessage, draft: getAttachmentDraft(blockId), blockId };
 }
 
 const ID = "e".repeat(64);
@@ -107,6 +108,26 @@ describe("AgentFooter with attachments", () => {
         ta.focus();
         enter(ta);
         expect(onSendMessage).toHaveBeenCalledWith("", [{ id: ID, name: "shot.png" }]);
+    });
+
+    it("keeps the message while the conversation is still loading, and says so", async () => {
+        const { ta, onSendMessage, blockId } = setup();
+        registerPane(blockId, "agent-1"); // a pane starts InitPending
+        try {
+            const user = userEvent.setup();
+            await user.click(ta);
+            await user.type(ta, "hello");
+            enter(ta);
+            expect(onSendMessage).not.toHaveBeenCalled();
+            expect(screen.getByRole("status").textContent).toMatch(/Waiting for the conversation to load/);
+            expect(ta.value).toBe("hello");
+            // Once the history is in, the same message sends.
+            dispatchPaneCommand(blockId, { type: "InitReady", at: Date.now() }, "system");
+            enter(ta);
+            expect(onSendMessage).toHaveBeenCalledWith("hello");
+        } finally {
+            unregisterPane(blockId);
+        }
     });
 
     it("waits while an image is still processing, and says so", async () => {
