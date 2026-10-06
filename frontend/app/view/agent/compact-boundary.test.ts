@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { compactionCardTokens, parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 
 // Shared by useAgentStream.ts (live) and parseHistoryLines.ts (replay) —
 // Codex P1, PR #2378 round 2: this used to be inlined only in the live
@@ -231,5 +231,17 @@ describe("contextCompactedLiveTimestamp", () => {
         const after = Date.now();
         expect(result).toBeGreaterThanOrEqual(before);
         expect(result).toBeLessThanOrEqual(after);
+    });
+});
+
+describe("compactionCardTokens", () => {
+    const fmt = (n: number) => `${n}`;
+    it("a real card says post_tokens is the summary until the next call reports the real size", () => {
+        const n = { tokensBefore: 40_697, tokensAfter: 1_417, source: "real" as const };
+        expect(compactionCardTokens(n, fmt)).toBe("40697 tokens summarized to 1417");
+        expect(compactionCardTokens({ ...n, contextAfter: 39_490 }, fmt)).toBe("40697 → 39490 tokens · summary 1417");
+    });
+    it("a heuristic card keeps before → after (its after is a real prompt)", () => {
+        expect(compactionCardTokens({ tokensBefore: 60_000, tokensAfter: 4_000, source: "heuristic" }, fmt)).toBe("60000 → 4000 tokens");
     });
 });

@@ -94,12 +94,15 @@ const SHARED_ZONE_POLL_MS = 5_000;
  * carries all three, "heuristic" carries only `source`. See
  * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
  */
-function pushContextCompactedNodes(
+export function pushContextCompactedNodes(
     paneEvents: AgentPaneEvent[] | undefined,
     queue: StreamFlushQueue,
     hasNodeId: (id: string) => boolean,
     addNodeId: (id: string) => void,
-): void {
+): ContextCompactedNode | null {
+    // The last real card pushed: its `contextAfter` is filled in by the next
+    // main-agent call (`fillCompactionCard`).
+    let realCard: ContextCompactedNode | null = null;
     for (const ev of paneEvents ?? []) {
         if (ev.type !== "context-compacted") continue;
         // Codex P2, PR #2378 round 7 (id) / round 12 (timestamp + shared
@@ -140,8 +143,17 @@ function pushContextCompactedNodes(
             addNodeId(compactNode.id);
             queue.pushNewNode(compactNode);
             queue.scheduleFlush();
+            if (compactNode.source === "real") realCard = compactNode;
         }
     }
+    return realCard;
+}
+
+/** `card` with the context's real size after it — the first main-agent call
+ *  since the boundary — queued as an in-place update. */
+export function fillCompactionCard(card: ContextCompactedNode, contextAfter: number, queue: StreamFlushQueue): void {
+    queue.pushUpdatedNode({ ...card, contextAfter });
+    queue.scheduleFlush();
 }
 
 interface UseAgentStreamOpts {
@@ -290,6 +302,8 @@ export function useAgentStream({
     // message_start and again by its assistant frame(s) (main-agent-usage.ts),
     // and must count once.
     let lastUsageMessageId: string | undefined;
+    // A real compaction card still waiting for the context's size after it.
+    let awaitingCompactionSize: ContextCompactedNode | null = null;
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
@@ -503,6 +517,7 @@ export function useAgentStream({
                 // size; without this, its smaller reading would also look
                 // like a compaction to the TokensIn heuristic.
                 model.dispatchPane({ type: "ContextInvalidated", reason: "transcript_replaced" });
+                awaitingCompactionSize = null;
                 return;
             }
             const events = model.dispatchDoc({
@@ -639,7 +654,10 @@ export function useAgentStream({
                             frameTimestamp: compactBoundary.frameTimestamp,
                             boundaryUuid: compactBoundary.uuid,
                         });
-                        pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                        {
+                            const card = pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                            if (card) awaitingCompactionSize = card;
+                        }
                         // Fire-and-forget: trigger() handles its own
                         // fetch/send failures internally (never throws) and
                         // its own re-entrancy guard, so nothing here needs
@@ -711,6 +729,7 @@ export function useAgentStream({
                                 // The meter's reading measured the conversation
                                 // that is now gone.
                                 model.dispatchPane({ type: "ContextInvalidated", reason: "fresh_session" });
+                                awaitingCompactionSize = null;
                                 void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
                             }
                         }
@@ -797,6 +816,10 @@ export function useAgentStream({
                     const sameCall = usage?.kind === "in" && usage.messageId != null && usage.messageId === lastUsageMessageId;
                     if (usage?.kind === "in" && !sameCall) {
                         lastUsageMessageId = usage.messageId;
+                        if (awaitingCompactionSize) {
+                            fillCompactionCard(awaitingCompactionSize, usage.input, queue);
+                            awaitingCompactionSize = null;
+                        }
                         // message.model is the resolved model id (e.g.
                         // "claude-opus-4-8") — the reading is measured on it
                         // and its window resolved for it (context-reading.ts).

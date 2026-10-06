@@ -251,8 +251,20 @@ describe("DocumentRow — compaction nodes", () => {
         renderRow(realCompactedNode());
         expect(screen.getByText(/context compacted/i)).toBeInTheDocument();
         expect(screen.getByText(/you ran \/compact/i)).toBeInTheDocument();
-        expect(screen.getByText(/100k → 5\.0k tokens/i)).toBeInTheDocument();
+        // post_tokens is the summary's size, not the context's: said so until
+        // the next call reports the real size.
+        expect(screen.getByText(/100k tokens summarized to 5\.0k/i)).toBeInTheDocument();
         expect(screen.getByText(/took 12\.3s/i)).toBeInTheDocument();
+    });
+
+    it("real context_compacted shows the real size after once the next call reported it", () => {
+        renderRow({ ...realCompactedNode(), contextAfter: 39_490 });
+        expect(screen.getByText(/100k → 39k tokens · summary 5\.0k/i)).toBeInTheDocument();
+    });
+
+    it("heuristic context_compacted keeps before → after", () => {
+        renderRow(heuristicCompactedNode());
+        expect(screen.getByText(/60k → 4\.0k tokens/i)).toBeInTheDocument();
     });
 
     it("real context_compacted with auto trigger shows the auto-compacted label", () => {

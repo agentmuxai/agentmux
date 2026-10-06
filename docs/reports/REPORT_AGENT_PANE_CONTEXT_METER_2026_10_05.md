@@ -262,7 +262,6 @@ A report that an accepted prompt contradicts emits `context-window-refuted`, log
 ### 9.8 Not done
 
 - **Live check in a dev build.** A throwaway Claude pane with no agent definition (so nothing is written to the host-wide agent registry) could not start. The pane's sign-in gate held every send, because no identity is bound to an ad-hoc agent id.
-- **The "context compacted" card** still prints `pre → post_tokens` (for example 40.7k → 1.4k). That is honest about the messages but not the context size; it could take the next call's prompt instead.
 - **Other providers' windows** (§7 question 2) are unchanged, except that no provider constant is shown any more.
 
 ### 9.9 Follow-up: the CLI's own auto-compact point
@@ -270,3 +269,7 @@ A report that an accepted prompt contradicts emits `context-window-refuted`, log
 srv asks a control-protocol process `get_context_usage` (`detail: "summary"`, answered locally) at spawn and at every turn boundary, next to `get_settings`, and publishes the answer as the persisted per-pane `agentcontextusage` event (`crates/srv/src/backend/agent_context_usage.rs`): the model, the auto-compact window, the threshold (absent when off) and whether auto-compaction is on. An unchanged answer is not re-published; one from a replaced process is ignored.
 
 The pane (`store/agent-pane-state/auto-compact.ts`, subscribed in `useContextReading`) uses the reported threshold when the report is for the reading's model (compared without case, a `[1m]` suffix or a date stamp). When the CLI says auto-compaction is off, it shows no countdown and bands against the window. Until the CLI has answered, it assumes window − 33K, and the tooltip says which. The CLI's reported threshold ignores `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (probed), so with that override the real point is earlier than shown.
+
+### 9.10 Follow-up: the compaction card's real size
+
+The "context compacted" card printed `pre_tokens → post_tokens` (e.g. 40.7k → 1.4k), but `post_tokens` is the summary's size only (§9.1). A real card now gets `contextAfter`, the first main-agent call's prompt after the boundary. That comes from the live stream (an in-place update of the card) and from history replay (a `fresh` session in between leaves it unset; a resumed one keeps it). The card reads "40.7k → 39k tokens · summary 1.4k", and until that call it reads "40.7k tokens summarized to 1.4k". The heuristic card is unchanged: its after-size already is a call's prompt. Code: `compactionCardTokens` (compact-boundary.ts), `fillCompactionCard` (useAgentStream.ts), `HistoryParser.awaitingCompactionSize`.
