@@ -13,6 +13,7 @@ import { setWidgetHue } from "@/app/block/pane-color-menu";
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
 import { isLightThemeActive, widgetHueFor } from "@/app/block/pane-identity";
 import { listPaneTabs, type PaneTabManifest } from "@/app/block/pane-tab-registry";
+import { Button } from "@/app/element/ui";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { makeIconClass } from "@/util/util";
 import { HueSwatchRow, set, SettingRow } from "../settings-controls";
@@ -29,9 +30,7 @@ export function WidgetColorsSettings(p: { id: string; label: string; description
                 description={p.description}
                 control={
                     <Show when={Object.keys(chosen() ?? {}).length > 0}>
-                        <button type="button" class="setting-masked-key-btn" onClick={() => set("pane:colors", null)}>
-                            Reset all
-                        </button>
+                        <Button onClick={() => set("pane:colors", null)}>Reset all</Button>
                     </Show>
                 }
             />
@@ -66,15 +65,13 @@ function WidgetColorRow(p: { manifest: PaneTabManifest }): JSX.Element {
                         {p.manifest.label}
                     </span>
                     <HueSwatchRow label={`${p.manifest.label} color`} value={selected()} onChange={pick} />
-                    <button
-                        type="button"
-                        class="setting-masked-key-btn"
+                    <Button
                         // Kept in the layout when hidden, so the swatches don't shift.
                         style={{ visibility: stored() === undefined ? "hidden" : "visible" }}
                         onClick={() => setWidgetHue(view(), undefined)}
                     >
                         Reset
-                    </button>
+                    </Button>
                 </div>
             }
         />
