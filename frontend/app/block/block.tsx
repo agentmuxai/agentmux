@@ -610,14 +610,19 @@ function Block(props: BlockProps): JSX.Element {
         // While the pane is still assembling the initial cover is already up;
         // the controller owns the screen until it reaches `live`.
         if (readiness.phase() !== "live") return;
-        clearTimeout(reCoverFade);
-        clearTimeout(reCoverBound);
         if (!settled) {
+            clearTimeout(reCoverFade);
+            clearTimeout(reCoverBound);
             setReCoverPhase("assembling"); // re-covered, opaque, no fade in
             reCoverBound = setTimeout(fadeReCover, PANE_REVEAL_BOUND_MS);
             return;
         }
-        if (untrack(reCoverPhase) !== "assembling") return; // nothing to fade out
+        clearTimeout(reCoverBound);
+        // Already fading (the bound fired) or gone: leave its fade timer to
+        // finish the job — cancelling it would strand the cover at
+        // "revealing".
+        if (untrack(reCoverPhase) !== "assembling") return;
+        clearTimeout(reCoverFade);
         fadeReCover();
     });
 

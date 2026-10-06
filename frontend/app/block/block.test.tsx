@@ -561,6 +561,24 @@ describe("Block — backfill outstanding from the very start", () => {
         }
     });
 
+    it("a backfill settling during the bound's fade still lets the cover go", async () => {
+        vi.useFakeTimers();
+        try {
+            setBackfillSettled(false);
+            setBlockView("b-slowfill4", "agent");
+            const Block = await loadBlock();
+            render(() => <Block nodeModel={makeNodeModel({ blockId: "b-slowfill4" })} preview={false} />);
+            vi.advanceTimersByTime(PANE_REVEAL_BOUND_MS); // the bound fires: fading
+            expect(covers()[0].classList.contains("is-fading")).toBe(true);
+            vi.advanceTimersByTime(50);
+            setBackfillSettled(true); // settles inside the 200 ms fade
+            vi.advanceTimersByTime(1000);
+            expect(covers().length).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it("starts fading only once that first backfill finally settles", async () => {
         setBackfillSettled(false);
         setBlockView("b-slowfill2", "agent");
