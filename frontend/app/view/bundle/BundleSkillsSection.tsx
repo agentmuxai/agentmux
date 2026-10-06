@@ -12,6 +12,7 @@ import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { BundleSkillModel } from "./bundle-skill-model";
 import "./BundlePrimitiveSection.scss";
+import { Button } from "@/app/element/ui";
 
 interface BundleSkillsSectionProps {
     bundleId: string;
@@ -60,23 +61,23 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
                                     when={skill.bound_to_bundle}
                                     fallback={
                                         <Show when={skill.is_global}>
-                                            <button
-                                                type="button"
+                                            <Button
+                                                density="compact"
                                                 class="bundle-primitive-section-btn"
                                                 onClick={() => void model.bind(skill.id)}
                                             >
                                                 Bind
-                                            </button>
+                                            </Button>
                                         </Show>
                                     }
                                 >
-                                    <button
-                                        type="button"
+                                    <Button
+                                        density="compact"
                                         class="bundle-primitive-section-btn"
                                         onClick={() => void model.unbind(skill.id)}
                                     >
                                         {skill.is_global ? "Unbind" : "Remove"}
-                                    </button>
+                                    </Button>
                                 </Show>
                             </li>
                         )}
@@ -105,13 +106,14 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
                     onInput={(e) => setNewContent(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
                 />
-                <button
+                <Button
                     type="submit"
+                    tone="accent"
                     class="bundle-primitive-section-add-btn"
                     disabled={model.addingAtom() || !newName().trim()}
                 >
                     {model.addingAtom() ? "Adding…" : "+ Add private skill"}
-                </button>
+                </Button>
             </form>
         </div>
     );

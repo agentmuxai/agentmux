@@ -31,6 +31,7 @@ import { BundleSkillsSection } from "./BundleSkillsSection";
 
 import "./bundle-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
+import { Button } from "@/app/element/ui";
 
 interface BundleManagerBodyProps {
     model: BundleViewModel;
@@ -158,12 +159,12 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                 <div class="bundle-view-error">{model.errorAtom()}</div>
             </Show>
             <div class="bundle-view-rail-header">
-                <button class="bundle-view-new-btn" onClick={handleNew}>
-                    + New Bundle
-                </button>
-                <button class="bundle-view-new-btn" onClick={handleImportBundle}>
+                <Button tone="accent" icon="plus" class="bundle-view-new-btn" onClick={handleNew}>
+                    New Bundle
+                </Button>
+                <Button class="bundle-view-new-btn" onClick={handleImportBundle}>
                     Import Bundle
-                </button>
+                </Button>
             </div>
             <ul class="bundle-view-list">
                 <For each={model.bundlesAtom()}>
@@ -231,18 +232,19 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                 </dl>
                                 <Show when={!memory().is_blank}>
                                     <div class="bundle-view-actions">
-                                        <button
+                                        <Button
                                             class="bundle-view-edit-btn"
                                             onClick={() => model.startEdit(memory())}
                                         >
                                             Edit
-                                        </button>
-                                        <button
+                                        </Button>
+                                        <Button
+                                            tone="danger"
                                             class="bundle-view-delete-btn"
                                             onClick={() => handleDelete(memory().id)}
                                         >
                                             Delete
-                                        </button>
+                                        </Button>
                                     </div>
                                     {/* MCP servers / skills are managed live via
                                         their own bind/unbind + upsert-for-bundle
@@ -381,30 +383,29 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     content="Structurally checks this draft: unknown provider keys, unsafe or colliding context-file paths, and malformed JSON in the fields not yet editable here. Advisory only — never blocks Save."
                                     placement="top"
                                 >
-                                    <button
-                                        type="button"
+                                    <Button
                                         class="bundle-view-validate-btn"
                                         onClick={handleValidate}
                                         disabled={model.validatingAtom() || model.savingAtom() || !draft().name.trim()}
                                     >
                                         {model.validatingAtom() ? "Validating…" : "Validate"}
-                                    </button>
+                                    </Button>
                                 </Tooltip>
-                                <button
-                                    type="button"
+                                <Button
                                     class="bundle-view-cancel-btn"
                                     onClick={handleCancel}
                                     disabled={model.savingAtom()}
                                 >
                                     Cancel
-                                </button>
-                                <button
+                                </Button>
+                                <Button
                                     type="submit"
+                                    tone="accent"
                                     class="bundle-view-save-btn"
                                     disabled={model.savingAtom() || !draft().name.trim()}
                                 >
                                     {model.savingAtom() ? "Saving…" : "Save"}
-                                </button>
+                                </Button>
                             </div>
 
                             {/* Structural ABF validation results (bundle.validate) —

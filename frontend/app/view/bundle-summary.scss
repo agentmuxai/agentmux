@@ -58,18 +58,9 @@
         margin: 0;
     }
 
+    // An element/ui Button (accent); this only spaces it.
     .bundle-summary-btn {
-        margin-top: 4px;
-        padding: 7px 16px;
-        background: var(--accent-color);
-        color: var(--accent-text-color, #fff);
-        border: none;
-        border-radius: 0;
-        cursor: default;
-        font-size: 13px;
-
-        &:hover {
-            filter: brightness(1.1);
-        }
+        margin-top: var(--space-1);
+        align-self: flex-start;
     }
 }

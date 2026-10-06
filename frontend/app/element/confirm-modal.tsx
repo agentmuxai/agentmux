@@ -4,11 +4,12 @@
 import { Component, JSX, Show, createSignal } from "solid-js";
 
 import { Modal, type ModalScope } from "./modal";
+import { Button } from "./ui";
 import { ModalBody, ModalFooter, ModalHeader } from "./modal-parts";
 
 // ── ConfirmModal preset ──────────────────────────────────────────────────────
-// Common "title + body + Cancel / Confirm" pattern. `destructive` flips
-// the confirm button colour to red and routes initial focus to Cancel
+// Common "title + body + Cancel / Confirm" pattern. `destructive` makes
+// the confirm button the `danger` line tone and routes initial focus to Cancel
 // so a stray Enter doesn't delete the thing the user was about to
 // double-check. Composes around `Modal` — no new primitive concepts.
 //
@@ -25,7 +26,7 @@ export interface ConfirmModalProps {
     children?: JSX.Element;
     confirmLabel?: string;             // default "OK"
     cancelLabel?: string;              // default "Cancel"
-    /** Destructive confirmation — red button + initial focus on Cancel. */
+    /** Destructive confirmation — red line button + initial focus on Cancel. */
     destructive?: boolean;
     onConfirm: () => void | Promise<void>;
     onCancel: () => void;
@@ -60,24 +61,21 @@ export const ConfirmModal: Component<ConfirmModalProps> = (props) => {
                 <ModalBody>{props.children}</ModalBody>
             </Show>
             <ModalFooter>
-                <button
+                <Button
                     ref={cancelBtnRef}
-                    type="button"
-                    class="modal-btn modal-btn--cancel"
                     data-modal-dismiss
                     onClick={() => { if (!pending()) props.onCancel(); }}
                     disabled={pending()}
                 >
                     {props.cancelLabel ?? "Cancel"}
-                </button>
-                <button
-                    type="button"
-                    class={`modal-btn modal-btn--confirm${props.destructive ? " modal-btn--destructive" : ""}`}
+                </Button>
+                <Button
+                    tone={props.destructive ? "danger" : "accent"}
+                    busy={pending()}
                     onClick={() => void handleConfirm()}
-                    disabled={pending()}
                 >
-                    {pending() ? "…" : (props.confirmLabel ?? "OK")}
-                </button>
+                    {props.confirmLabel ?? "OK"}
+                </Button>
             </ModalFooter>
         </Modal>
     );
