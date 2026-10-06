@@ -287,6 +287,31 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
         expect(screen.queryByText("Other Agent")).toBeNull();
     });
 
+    it("typing an exact agent name lists the names that contain it, not near-misses (agentx must not list agenty)", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "agentx" }),
+            makeRow({ instance_id: "b", instance_name: "agenty" }),
+            makeRow({ instance_id: "c", instance_name: "agentxx" }),
+        ]));
+        const [nameFilter] = createSignal("agentx");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        await screen.findAllByTestId("agent-my-agents-entry");
+        const shown = [...document.querySelectorAll(".agent-recent-sessions-name")].map((e) => e.textContent);
+        expect(shown.sort()).toEqual(["agentx", "agentxx"]);
+    });
+
+    it("still tolerates a typo when no name contains the query", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "agenty" }),
+            makeRow({ instance_id: "b", instance_name: "Maks" }),
+        ]));
+        const [nameFilter] = createSignal("agentz");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+        expect(screen.getByText("agenty")).toBeInTheDocument();
+    });
+
     it("falls back to definition_name when instance_name doesn't match but definition_name does", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
             makeRow({ instance_id: "a", instance_name: "", definition_name: "Claude Code" }),
