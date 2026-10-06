@@ -8,15 +8,12 @@
 @use "styles/composer-strip";
 @use "styles/stash-drawer";
 @use "styles/slash";
-@use "styles/setup-wizard";
 @use "styles/tool-overlay-portal";
 @use "styles/identity-panel";
 @use "styles/launch-modal-body";
 @use "styles/import-modal-body";
 @use "styles/picker-delete-error";
 @use "styles/card-info-popover";
-@use "styles/retry-empty";
-@use "styles/focused-overlay";
 @use "styles/search";
 @use "styles/disconnected-banner";
 @use "styles/fork-provider-fallback-banner";
@@ -25,7 +22,6 @@
 @use "styles/recent-sessions";
 @use "styles/control-bar";
 @use "styles/session";
-@use "styles/connection-status";
 @use "styles/document";
 @use "styles/header-controls";
 @use "styles/pending-footer";

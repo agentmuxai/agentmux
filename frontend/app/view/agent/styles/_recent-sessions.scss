@@ -576,62 +576,8 @@
     flex-wrap: wrap;
 }
 
-// Base fork button
-.agent-fork-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 3px 10px;
-    font-size: var(--text-sm);
-    font-family: inherit;
-    border-radius: 0;
-    border: 1px solid transparent;
-    cursor: default;
-    transition: background 0.12s, border-color 0.12s, opacity 0.12s;
-    white-space: nowrap;
-
-    &:disabled {
-        opacity: 0.45;
-        cursor: not-allowed;
-    }
-
-    &:focus-visible {
-        outline: 2px solid var(--accent-color);
-        outline-offset: 1px;
-    }
-}
-
-.agent-fork-btn--primary {
-    background: var(--accent-color);
-    color: var(--button-color, #fff);
-    border-color: var(--accent-color);
-
-    &:not(:disabled):hover {
-        background: color-mix(in srgb, var(--accent-color) 85%, #fff);
-    }
-}
-
-.agent-fork-btn--secondary {
-    background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-    color: var(--main-text-color);
-    border-color: var(--border-color);
-
-    &:not(:disabled):hover {
-        background: color-mix(in srgb, var(--main-text-color) 14%, transparent);
-    }
-}
-
-.agent-fork-btn--ghost {
-    background: transparent;
-    color: var(--secondary-text-color);
-    border-color: transparent;
-    padding: 3px 6px;
-
-    &:not(:disabled):hover {
-        color: var(--main-text-color);
-        background: color-mix(in srgb, var(--main-text-color) 8%, transparent);
-    }
-}
+// The fork actions are element/ui Buttons: primary accent, secondary
+// neutral, ghost quiet.
 
 // Naming sub-section
 .agent-fork-naming {

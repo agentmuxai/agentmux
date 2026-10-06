@@ -31,24 +31,7 @@
     color: var(--main-text-color);
 }
 
-.remotes-icon-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 26px;
-    height: 26px;
-    padding: 0;
-    border: none;
-    border-radius: var(--radius-md, 4px);
-    background: transparent;
-    color: var(--secondary-text-color);
-    cursor: pointer;
-
-    &:hover {
-        background: var(--hover-bg-color);
-        color: var(--main-text-color);
-    }
-}
+// Row actions are element/ui IconButtons.
 
 .remotes-error,
 .remotes-notice {
@@ -68,14 +51,6 @@
     justify-content: space-between;
     color: var(--warning-text-color, var(--warning-color));
     background: var(--panel-bg-alt);
-}
-
-.remotes-link {
-    border: none;
-    background: none;
-    color: var(--link-color, var(--accent-color));
-    cursor: pointer;
-    padding: 0;
 }
 
 .remotes-list {
@@ -336,22 +311,7 @@
 }
 
 // Add remote (§4.4).
-.remotes-add-button {
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-    padding: 3px 10px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md, 4px);
-    background: var(--main-bg-color);
-    color: var(--main-text-color);
-    white-space: nowrap;
-    cursor: pointer;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-}
+// "Add remote" and the inline Dismiss / Revoke links are element/ui Buttons.
 
 .remotes-add {
     display: flex;
