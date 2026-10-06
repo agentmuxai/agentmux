@@ -147,6 +147,9 @@ export class HistoryParser {
     /** The main agent's model as of the last call seen, across boundaries —
      *  a compaction's reading is measured on it. */
     private lastModel: string | null = null;
+    /** A real compaction card replayed above whose `contextAfter` the next
+     *  main-agent call fills in. */
+    private awaitingCompactionSize: ContextCompactedNode | null = null;
     /** The stream carries Claude Code's per-call usage (`readsMainAgentUsage`). */
     private readonly readsUsage: boolean;
     /** Context windows the lines' `result` frames reported
@@ -237,6 +240,11 @@ export class HistoryParser {
                 const usage = mainAgentUsage(rawEvent);
                 if (usage?.kind === "in") {
                     if (usage.model) this.lastModel = usage.model;
+                    if (this.awaitingCompactionSize) {
+                        const card = { ...this.awaitingCompactionSize, contextAfter: usage.input };
+                        put(card, indexById.get(card.id));
+                        this.awaitingCompactionSize = null;
+                    }
                     this.lastContext = { tokens: usage.input, model: this.lastModel, at: stampFor(lineIdx) ?? null };
                 }
                 const windows = reportedContextWindowsFromResult(rawEvent);
@@ -304,6 +312,7 @@ export class HistoryParser {
                         durationMs: data.durationMs,
                     };
                     put(node, indexById.get(node.id));
+                    this.awaitingCompactionSize = node;
                 }
                 continue;
             }
@@ -337,6 +346,10 @@ export class HistoryParser {
                 // AFTER the first post-resume exchange — as a divider row it
                 // announces a non-event in the wrong place. The line stays in
                 if (data && data.outcome === "fresh") {
+                    // The next call belongs to the fresh conversation, not to a
+                    // compaction card above this boundary (a resumed one
+                    // continues the same conversation, so its call still does).
+                    this.awaitingCompactionSize = null;
                     // Usage seen before this boundary belongs to the old
                     // session, which the fresh model has none of; only
                     // post-boundary usage may seed the meter (#2507).
