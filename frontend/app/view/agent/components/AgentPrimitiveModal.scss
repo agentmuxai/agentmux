@@ -227,39 +227,5 @@
     margin-top: var(--space-2);
 }
 
-.agent-primitive-modal-btn {
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--text-sm);
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: default;
-    }
-
-    &.agent-primitive-modal-btn-primary {
-        background: var(--accent-color);
-        color: var(--button-text-color);
-        border-color: var(--accent-color);
-
-        &:hover:not(:disabled) {
-            opacity: 0.85;
-        }
-    }
-
-    &.agent-primitive-modal-btn-danger {
-        color: var(--error-color);
-        border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
-
-        &:hover:not(:disabled) {
-            background: color-mix(in srgb, var(--error-color) 10%, transparent);
-        }
-    }
-}
+// The footer buttons are element/ui Buttons: primary accent, danger a red
+// line, the rest neutral.

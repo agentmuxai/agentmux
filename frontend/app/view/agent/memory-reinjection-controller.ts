@@ -13,8 +13,8 @@
  * thin as possible on top of this.
  *
  * State-machine correctness (turnPhase/busy-vs-idle) is deliberately NOT
- * reimplemented here — `dispatchTurnStart`/`dispatchTurnReset` are expected
- * to be the real `TurnStart`/`TurnReset` reducer commands, reused exactly
+ * reimplemented here — `dispatchTurnStart`/`dispatchTurnStartFailed` are expected
+ * to be the real `TurnStart`/`TurnStartFailed` reducer commands, reused exactly
  * as-is. Only the RENDERING is different, which is this module's actual
  * job — that and the DELIVERY path, which bypasses the normal pending-zone
  * (`sendRpc` is expected to be the raw `RpcApi.AgentInputCommand` call, not
@@ -122,8 +122,9 @@ export interface MemoryReinjectionControllerOpts {
     compose?: (reason: ReinjectionReason) => Promise<ComposedDelivery | null>;
     /** Starts real turn-state bookkeeping — expected to be the actual `TurnStart` dispatch, reused unmodified, called ONLY with `HIDDEN_TURN_PLACEHOLDER_CONTENT` and `hidden: true` (the controller enforces this — the caller's implementation should just forward both args verbatim). */
     dispatchTurnStart: (content: string, hidden: boolean) => void;
-    /** Reverts turn-state bookkeeping on a send failure — expected to be the actual `TurnReset` dispatch. */
-    dispatchTurnReset: () => void;
+    /** Reverts turn-state bookkeeping on a send failure — expected to be the actual `TurnStartFailed` dispatch
+     *  (phase only: a failed send must not wipe the pane's context reading or session totals, #2318). */
+    dispatchTurnStartFailed: () => void;
     /**
      * Asks the sidecar whether this fallback should deliver (`true`) or stand
      * down because Claude Code's `SessionStart` hook already delivered the
@@ -322,7 +323,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
             // "Working…" for a turn the backend never received).
             hiding = false;
             pendingNode = null;
-            opts.dispatchTurnReset();
+            opts.dispatchTurnStartFailed();
         }
     }
 

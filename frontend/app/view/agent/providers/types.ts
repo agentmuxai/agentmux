@@ -114,12 +114,11 @@ export interface ProviderDefinition {
      *  the user launches the agent so we can show install links
      *  instead of letting the CLI fail with cryptic stderr. */
     systemPrereqs?: SystemPrereq[];
-    /**
-     * The model's maximum input token capacity (context window size).
-     * Used by the composer strip to render a context-fill progress bar.
-     * Omit for providers whose context window is unknown or variable.
-     */
-    contextWindow?: number;
+    // No `contextWindow`: a window belongs to a model (and its session
+    // configuration), not a provider. The context meter takes it from the
+    // CLI's own report, else the model-name table, else shows it as unknown
+    // (store/agent-pane-state/context-reading.ts). A provider-wide constant
+    // put "200k" under every Claude model, Sonnet 5.5's 1M included.
     /**
      * AgentMux-side model choices for this provider's `--model` flag. Drives the
      * `/model` slash command (and, for Claude, the control-bar dropdown). Mark one

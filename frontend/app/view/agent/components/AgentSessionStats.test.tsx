@@ -84,6 +84,47 @@ describe("AgentSessionStats", () => {
         expect(panel).toHaveTextContent("46k out");
     });
 
+    it("labels the token totals as processed, not context, and says why on hover", async () => {
+        // Each call re-sends the conversation, so these totals run far ahead
+        // of the context (REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md §5).
+        render(() => (
+            <AgentSessionStats
+                {...baseProps}
+                contextTokens={104_000}
+                contextWindow={200_000}
+                sessionTotals={{ input_tokens: 17_000_000, output_tokens: 46_000 }}
+            />
+        ));
+        const panel = await openPanel();
+        expect(panel).toHaveTextContent("Processed");
+        expect(panel).not.toHaveTextContent("Tokens");
+        const value = screen.getByText(/17m in/);
+        expect(value.getAttribute("title")).toMatch(/re-sends the conversation/);
+    });
+
+    it("shows where the context numbers come from", async () => {
+        render(() => (
+            <AgentSessionStats
+                {...baseProps}
+                contextTokens={104_000}
+                contextWindow={200_000}
+                contextNote="Window reported by the CLI for claude-sonnet-5-5."
+            />
+        ));
+        const panel = await openPanel();
+        expect(panel).toHaveTextContent("Window reported by the CLI for claude-sonnet-5-5.");
+    });
+
+    it("shows the context alone, marked, when the window is unknown", async () => {
+        render(() => (
+            <AgentSessionStats {...baseProps} label="104k ctx" contextTokens={104_000} contextWindow={undefined} />
+        ));
+        await userEvent.click(screen.getByRole("button", { name: /104k ctx/ }));
+        const panel = await screen.findByRole("dialog", { name: /session stats/i });
+        expect(panel).toHaveTextContent("104k (window unknown)");
+        expect(panel).not.toHaveTextContent("%)");
+    });
+
     it("renders an em dash, not $0, when the provider reports no cost", async () => {
         render(() => (
             <AgentSessionStats

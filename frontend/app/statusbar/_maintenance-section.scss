@@ -79,26 +79,9 @@
 
 // ── Buttons ──────────────────────────────────────────────────────────────────
 
+// element/ui Buttons at compact density (primary accent).
 .maintenance-btn {
     flex: 0 0 auto;
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--main-text-color);
-    padding: 1px 8px;
-    border-radius: 0;
-    font-size: 11px;
-    cursor: default;
-    white-space: nowrap;
-
-    &:hover { background: var(--hover-bg-color); }
-
-    &--primary {
-        background: var(--accent-color);
-        border-color: var(--accent-color);
-        color: var(--button-text-color);
-        font-weight: 600;
-        &:hover { filter: brightness(1.1); }
-    }
 }
 
 // ── Migration stage block ────────────────────────────────────────────────────

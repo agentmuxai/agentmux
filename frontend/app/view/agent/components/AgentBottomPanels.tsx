@@ -6,6 +6,7 @@
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { isStopping } from "@/app/store/agent-pane-state/types";
+import { plausibleReading } from "@/app/store/agent-pane-state/context-reading";
 import { Show, type Accessor, type ComponentProps } from "solid-js";
 import type { UseAgentFailureResult } from "../hooks/useAgentFailure";
 import type { UseAgentControllerStatus } from "../hooks/useAgentControllerStatus";
@@ -246,7 +247,7 @@ export const AgentBottomPanels = (props: {
                         return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
                     })()}
                     compacting={props.paneModel.state.compacting}
-                    compactionContextTokens={props.paneModel.state.lastContextTokens}
+                    compactionContextTokens={plausibleReading(props.paneModel.state.context)?.tokens ?? null}
                     compactionModel={compactionModelKey(props.block()?.meta, props.paneModel.state.lastContextModel)}
                     reconnecting={props.paneModel.state.reconnecting}
                 />

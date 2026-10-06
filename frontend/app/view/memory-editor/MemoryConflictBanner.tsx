@@ -16,6 +16,7 @@
 import { createSignal, For, Show, type JSX } from "solid-js";
 import { diffLineClass, diffLines, lineDiff } from "./line-diff";
 import type { MemoryDraftModel } from "./memory-draft-model";
+import { Button } from "@/app/element/ui";
 
 interface MemoryConflictBannerProps<T> {
     model: MemoryDraftModel<T>;
@@ -57,17 +58,18 @@ export function MemoryConflictBanner<T>(props: MemoryConflictBannerProps<T>): JS
                 <div class="memory-conflict-banner" role="alert" data-testid="memory-conflict-banner">
                     <span>{message()} Your draft is kept.</span>
                     <div class="memory-conflict-banner-actions">
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
                             class="memory-editor-btn"
-                            classList={{ "is-active": showDiff() }}
+                            pressed={showDiff()}
                             disabled={conflict().current === undefined}
                             onClick={() => setShowDiff(!showDiff())}
                         >
                             View change
-                        </button>
-                        <button
-                            type="button"
+                        </Button>
+                        <Button
+                            density="compact"
+                            tone="accent"
                             class="memory-editor-btn is-primary"
                             onClick={() => {
                                 setShowDiff(false);
@@ -75,20 +77,21 @@ export function MemoryConflictBanner<T>(props: MemoryConflictBannerProps<T>): JS
                             }}
                         >
                             Keep editing
-                        </button>
+                        </Button>
                         <Show when={props.canRecreate !== false || conflict().current !== null}>
-                            <button
-                                type="button"
+                            <Button
+                                density="compact"
                                 class="memory-editor-btn"
                                 disabled={conflict().current === undefined || props.model.savingAtom()}
                                 title="Replace the saved version with your draft"
                                 onClick={() => void props.model.overwrite()}
                             >
                                 Save anyway
-                            </button>
+                            </Button>
                         </Show>
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
+                            tone="danger"
                             class="memory-editor-btn is-danger"
                             onClick={() => {
                                 props.model.discard();
@@ -96,7 +99,7 @@ export function MemoryConflictBanner<T>(props: MemoryConflictBannerProps<T>): JS
                             }}
                         >
                             Discard my edits
-                        </button>
+                        </Button>
                     </div>
                     <Show when={showDiff()}>
                         <pre class="memory-conflict-banner-diff" data-testid="memory-conflict-diff">

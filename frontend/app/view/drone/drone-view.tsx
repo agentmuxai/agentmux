@@ -13,6 +13,7 @@ import type { DroneViewModel } from "./drone-model";
 import type { BlockKind, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
+import { Button } from "@/app/element/ui";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -81,20 +82,21 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
                         </For>
                     </select>
                 </Show>
-                <button class="drone-btn" onClick={() => m.newDrone()}>
+                <Button class="drone-btn" onClick={() => m.newDrone()}>
                     New
-                </button>
-                <button class="drone-btn" onClick={() => void m.save()}>
+                </Button>
+                <Button class="drone-btn" onClick={() => void m.save()}>
                     Save
-                </button>
-                <button
+                </Button>
+                <Button
+                    tone="accent"
                     class="drone-btn drone-btn--primary"
                     disabled={!validation().ok || m.runningAtom()}
                     title={validation().errors.join(" · ")}
                     onClick={() => void m.run()}
                 >
                     {m.runningAtom() ? "Running…" : "▶ Run"}
-                </button>
+                </Button>
             </div>
 
             <Show when={m.errorAtom()}>
@@ -835,21 +837,23 @@ const VariablesEditor = (p: {
                             onContextMenu={showTextInputContextMenu}
                             placeholder="value"
                         />
-                        <button
+                        <Button
+                            density="compact"
                             class="drone-btn drone-btn--small nodrag"
                             onClick={() => p.onChange(p.entries.filter((_, idx) => idx !== i()))}
                         >
                             ×
-                        </button>
+                        </Button>
                     </div>
                 )}
             </For>
-            <button
+            <Button
+                density="compact"
                 class="drone-btn drone-btn--small nodrag"
                 onClick={() => p.onChange([...p.entries, { name: "", value: "" }])}
             >
                 + Add
-            </button>
+            </Button>
         </div>
     );
 };

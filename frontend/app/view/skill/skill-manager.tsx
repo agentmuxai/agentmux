@@ -15,6 +15,7 @@ import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { SkillCatalogModel } from "./skill-model";
 import "../agent/components/AgentPrimitiveModal.scss";
+import { Button } from "@/app/element/ui";
 
 export const SkillManager = (): JSX.Element => {
     const model = new SkillCatalogModel();
@@ -109,27 +110,28 @@ export const SkillManager = (): JSX.Element => {
                                                     {(agent) => <option value={agent.id}>{agent.name}</option>}
                                                 </For>
                                             </select>
-                                            <button
+                                            <Button
                                                 class="agent-primitive-modal-btn"
                                                 disabled={!model.bindAgentIdAtom()}
                                                 onClick={() => void model.bindToAgent(skill().id, model.bindAgentIdAtom())}
                                             >
                                                 Bind
-                                            </button>
+                                            </Button>
                                         </div>
                                         <div class="agent-primitive-modal-actions">
-                                            <button
+                                            <Button
+                                                tone="danger"
                                                 class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"
                                                 onClick={() => void model.deleteSkill(skill().id)}
                                             >
                                                 Delete
-                                            </button>
-                                            <button
+                                            </Button>
+                                            <Button
                                                 class="agent-primitive-modal-btn"
                                                 onClick={() => model.startEdit(skill())}
                                             >
                                                 Edit
-                                            </button>
+                                            </Button>
                                         </div>
                                     </div>
                                 )}
@@ -189,21 +191,21 @@ export const SkillManager = (): JSX.Element => {
                                     spellcheck={false}
                                 />
                                 <div class="agent-primitive-modal-actions">
-                                    <button
-                                        type="button"
+                                    <Button
                                         class="agent-primitive-modal-btn"
                                         onClick={() => model.cancelDraft()}
                                         disabled={model.savingAtom()}
                                     >
                                         Cancel
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                         type="submit"
+                                        tone="accent"
                                         class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
                                         disabled={model.savingAtom() || !draft().name.trim()}
                                     >
                                         {model.savingAtom() ? "Saving…" : "Save"}
-                                    </button>
+                                    </Button>
                                 </div>
                             </form>
                         )}
