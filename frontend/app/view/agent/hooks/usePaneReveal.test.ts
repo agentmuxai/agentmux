@@ -3,7 +3,8 @@
 
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { usePaneReveal } from "./usePaneReveal";
+import { historyStillLoading } from "../components/HistoryLoadingRow";
+import { AGENT_REVEAL_TIMEOUT_MS, usePaneReveal } from "./usePaneReveal";
 
 /** Manual settle + frame queues, so each step of the paint wait is explicit. */
 function manualDeps() {
@@ -76,15 +77,33 @@ describe("usePaneReveal", () => {
         r.dispose();
     });
 
-    it("stops holding for the launch flow after 3s, so a pane can't stay covered forever", () => {
+    it("stops holding for the launch flow at the reveal bound, so a pane can't stay covered", () => {
         const r = mount(null);
         r.reveal.startPaintWait();
         r.settle();
         r.nextFrame();
         r.nextFrame();
         expect(r.reveal.readiness.phase()).toBe("assembling");
-        vi.advanceTimersByTime(3000);
+        vi.advanceTimersByTime(AGENT_REVEAL_TIMEOUT_MS);
         expect(r.reveal.readiness.phase()).toBe("revealing");
+        r.dispose();
+    });
+
+    it("shows the pane at the reveal bound while the history is still loading, and says so", () => {
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        const r = mount();
+        vi.advanceTimersByTime(AGENT_REVEAL_TIMEOUT_MS - 1);
+        expect(r.reveal.readiness.phase()).toBe("assembling");
+        expect(historyStillLoading(r.reveal.readiness)).toBe(false);
+        vi.advanceTimersByTime(1);
+        expect(r.reveal.readiness.phase()).toBe("revealing");
+        expect(historyStillLoading(r.reveal.readiness)).toBe(true);
+        // The history arrives and paints: the loading row goes.
+        r.reveal.startPaintWait();
+        r.settle();
+        r.nextFrame();
+        r.nextFrame();
+        expect(historyStillLoading(r.reveal.readiness)).toBe(false);
         r.dispose();
     });
 });

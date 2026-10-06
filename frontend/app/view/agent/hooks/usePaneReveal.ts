@@ -29,6 +29,12 @@ const defaultDeps: PaneRevealDeps = {
     cancelFrame: (id) => cancelAnimationFrame(id),
 };
 
+/**
+ * The longest an agent pane stays behind its loading cover. Most opens
+ * reveal before this, once their history has painted.
+ */
+export const AGENT_REVEAL_TIMEOUT_MS = 1500;
+
 export interface PaneReveal {
     readiness: PaneReadiness;
     /** History has been dispatched: wait for it to actually paint, then release the history gate. */
@@ -81,6 +87,12 @@ export function usePaneReveal(opts: {
         label: `block:${opts.blockId}`,
         holdFor: opts.blockId,
         hidden: () => !windowTabDisplayed(),
+        // Opening an agent should feel instant: past this bound the pane shows
+        // with the composer usable and "Loading conversation…" over the
+        // transcript (HistoryLoadingRow) instead of a cover that stayed up for
+        // as long as the history read took — 17 s in one open of a
+        // long-running agent (owner's call, 2026-10-05).
+        revealTimeoutMs: AGENT_REVEAL_TIMEOUT_MS,
     });
     const releaseHistoryGate = readiness.gate("history");
     const releaseAuthGate = readiness.gate("auth");
