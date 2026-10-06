@@ -106,9 +106,9 @@ mod tests {
         assert_eq!(app_window_navigation("http://localhost:5300/#x", &dev), Allow);
     }
 
-    // ReAgent P1 on #4410: `task run` points a packaged build's main window
-    // at Vite with `--url`, and a dev build with a bundled frontend loads its
-    // main window from the IPC server, while secondary windows use the other.
+    // `task run` points a packaged build's main window at Vite with `--url`,
+    // and a dev build with a bundled frontend loads its main window from the
+    // IPC server, while secondary windows use the other (#4410).
     #[test]
     fn a_main_window_loaded_from_another_frontend_origin_still_works() {
         let both = origins(&["http://127.0.0.1:62876", "http://localhost:5173"]);
