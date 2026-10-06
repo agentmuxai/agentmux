@@ -31,6 +31,7 @@ import {
     resolveFloatingPaneName,
     resolveWindowName,
 } from "@/util/window-title";
+import { Button } from "@/app/element/ui";
 
 interface InstancePanelProps {
     /** The status bar's version chip. */
@@ -647,20 +648,19 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             </div>
             <div class="instance-panel-divider" />
             <div class="instance-panel-footer">
-                <button
-                    type="button"
+                <Button
+                    tone="accent"
                     class="instance-panel-btn instance-panel-btn-primary"
                     onClick={handleOpenNewWindow}
                 >
                     + Open another window
-                </button>
-                <button
-                    type="button"
+                </Button>
+                <Button
                     class="instance-panel-btn"
                     onClick={props.onClose}
                 >
                     Close
-                </button>
+                </Button>
             </div>
         </AnchoredPopover>
     );

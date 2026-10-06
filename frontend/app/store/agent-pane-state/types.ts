@@ -25,6 +25,7 @@
  */
 
 import type { PendingMessage } from "../../view/agent/state";
+import type { ContextReading, ContextSource, ContextWindowMap, ReportedContextWindows } from "./context-reading";
 import type {
     SessionStats,
     StreamingState,
@@ -360,24 +361,39 @@ export interface AgentPaneState {
      */
     stashOpen: boolean;
     /**
-     * Input-token count from the most recent message_start — the full
-     * context fill sent to the model on that turn. Unlike `turnTokens`,
-     * this field is NOT cleared at TurnEnd so the context-window bar
-     * stays visible between turns showing the last known fill level.
-     * Cleared only when the pane is created (initialState) or on an
-     * explicit TurnReset (session wipe).
+     * The context meter's reading: tokens in context, the model's window, and
+     * where each came from — see store/agent-pane-state/context-reading.ts.
+     * Set by `TokensIn` (live) and `ReconcileContextFromHistory` (the
+     * restored transcript, only while `contextSeedable`). Unlike `turnTokens`
+     * it is NOT cleared at TurnEnd, so the meter shows the last known fill
+     * between turns. Cleared on TurnReset (session wipe), ContextInvalidated
+     * (the conversation was replaced) and CompactionBoundary (it no longer
+     * measures anything until the next call). Displays read it through
+     * `plausibleReading`, never directly.
      */
-    lastContextTokens: number | null;
+    context: ContextReading | null;
     /**
-     * Learned context-window size for the current model — seeded from the
-     * resolved model id on the first TokensIn and upgraded if observed context
-     * ever exceeds it (Sonnet-1M detection). NOT a per-provider constant.
-     * Null until a recognised model is seen; the view falls back to the
-     * provider's static window. See store/agent-pane-state/context-window.ts.
+     * True until something more current than the restored transcript has
+     * spoken: a live reading, an invalidation, a compaction or a reset.
+     * `ReconcileContextFromHistory` seeds only while it holds — `context`
+     * being null can't tell "nothing yet" from "invalidated while history was
+     * still loading", and seeding the latter restores a dead conversation.
      */
-    lastContextWindow: number | null;
-    /** Resolved model id that produced `lastContextWindow` — used to re-seed the
-     *  window when the user switches models mid-session (`/model`). */
+    contextSeedable: boolean;
+    /**
+     * Context windows Claude Code reported in `result.modelUsage`, per model
+     * id. They outrank the model-name table for any reading on that model, and
+     * outlive TurnReset: a model's window is a fact about the model.
+     */
+    reportedContextWindows: ReportedContextWindows;
+    /**
+     * Context windows proven per model by an accepted prompt larger than the
+     * window we had (context-reading.ts `learnedWindowsAfter`). Outlive
+     * TurnReset for the same reason as `reportedContextWindows`.
+     */
+    learnedContextWindows: ContextWindowMap;
+    /** Resolved model id of the main agent's latest reply (`message.model`).
+     *  The Runtime menu shows it; the context reading is measured on it. */
     lastContextModel: string | null;
     /**
      * Active classified failure for this pane, or `null`. Set by
@@ -462,8 +478,10 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentToolArg: null,
     turnTokens: null,
     pendingCompactTurn: false,
-    lastContextTokens: null,
-    lastContextWindow: null,
+    context: null,
+    contextSeedable: true,
+    reportedContextWindows: {},
+    learnedContextWindows: {},
     lastContextModel: null,
     pending: [],
     initPhase: { kind: "InitPending" },
@@ -611,18 +629,50 @@ export type AgentPaneCommand =
      */
     | { type: "ReconcileTurnActive"; at: number; active: boolean }
     /**
-     * Mount-time reconciliation: history replay found a `session_end` stats
-     * payload from before this pane went live (the resumed conversation's
-     * last turn — or, if resume silently failed, whatever short session
-     * replaced it). Seeds `lastContextTokens` so the composer strip's
-     * context-fill bar shows a real number immediately instead of sitting
-     * blank until the first live `TokensIn`. No-ops if a live `TokensIn`
-     * already arrived first (mirrors `ReconcileTurnActive`'s
-     * only-if-still-default guard) — a historical snapshot must never
-     * clobber real-time data. See
-     * docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md.
+     * Mount-time reconciliation: history replay found the main agent's last
+     * API call from before this pane went live (`HistoryParser.lastContext`
+     * — that call's whole prompt and model, never a `result`'s turn total).
+     * Seeds `context` so the meter shows a real number immediately instead of
+     * sitting blank until the first live `TokensIn`. Seeds only while
+     * `contextSeedable` (no live reading, invalidation, compaction or reset
+     * yet) — a historical snapshot must never clobber real-time data. An
+     * implausible seed is refused (`context-reading-rejected`). `tokens` is
+     * absent when the restored window holds no main-agent call.
+     * `reportedWindows` (the history's own `result.modelUsage` windows) merge
+     * UNDER any reported live, either way.
+     * See docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md
+     * and docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md.
      */
-    | { type: "ReconcileContextFromHistory"; tokens: number }
+    | {
+          type: "ReconcileContextFromHistory";
+          tokens?: number | null;
+          model?: string | null;
+          /** When that call was received (unix ms), if the line was stamped. */
+          at?: number | null;
+          reportedWindows?: ReportedContextWindows | null;
+      }
+    /**
+     * A `result` frame reported context windows (`modelUsage[*].contextWindow`).
+     * Recorded per model; the current reading's window is re-resolved.
+     */
+    | { type: "ContextWindowsReported"; windows: ReportedContextWindows }
+    /**
+     * The conversation the reading measured is gone — a `fresh` session
+     * replaced it, or the transcript was archived or restored. Clears
+     * `context` (and ends `contextSeedable`), so the next call's reading isn't
+     * read as a compaction by the `TokensIn` heuristic and a late history
+     * seed can't bring the old conversation back.
+     */
+    | { type: "ContextInvalidated"; reason: "fresh_session" | "transcript_replaced" }
+    /**
+     * The pane's model setting changed (`/model`, the model menu). The
+     * conversation, and so the reading's tokens, carry over; the window is
+     * the new model's, known only when its first reply reports it, so the
+     * reading's window becomes unknown until then. `model` is the setting's
+     * value (often a family alias, e.g. `sonnet`, which doesn't say its
+     * window).
+     */
+    | { type: "ContextModelSwitched"; model: string }
     /**
      * User pressed send — turn becomes active. Also clears stale
      * sessionStats from the previous turn.
@@ -679,8 +729,9 @@ export type AgentPaneCommand =
      * Revert an OPTIMISTIC `TurnStart` when the turn never actually began —
      * the initiating send's own RPC call failed synchronously (no
      * controller registered, the identity spawn gate blocked it, a plain
-     * network rejection). Phase-only: unlike `TurnReset`, this must NOT
-     * touch `sessionStats`/`sessionTotals`/`lastContextTokens` — those
+     * network rejection), or the input was a slash/bang command handled
+     * locally. Phase-only: unlike `TurnReset`, this must NOT
+     * touch `sessionStats`/`sessionTotals`/`context` — those
      * accumulate across a pane's whole lifetime, and a transient send
      * failure on an agent with prior completed turns must not wipe that
      * history (reagent/codex P2 on PR #2318 — `TurnReset` was reused here
@@ -838,7 +889,7 @@ export type AgentPaneCommand =
      * (translated 1:1 from Claude Code's stream-json `system` frame —
      * exact data, not inferred). Clears `compacting`, records
      * `lastCompactionBoundaryAt` (dedup guard for the `TokensIn`
-     * heuristic), and reconciles `lastContextTokens` to `postTokens` so
+     * heuristic), and reconciles `context` to `postTokens` so
      * the context-fill bar reflects the real post-compaction size
      * immediately rather than waiting for the next `TokensIn`.
      */
@@ -985,10 +1036,31 @@ export type AgentPaneEvent =
      */
     | { type: "turn-inactive-reconciled"; at: number }
     /**
-     * `ReconcileContextFromHistory` seeded `lastContextTokens` from a
-     * historical `session_end` at mount. Surfaced for diagnostics only.
+     * `ReconcileContextFromHistory` seeded `context` from the restored
+     * transcript's last main-agent call at mount. Surfaced for diagnostics only.
      */
     | { type: "context-reconciled-at-mount"; tokens: number }
+    /**
+     * A reading that can't be true (more tokens than its window, or than any
+     * known window with none) was refused or will not display. Logged by the
+     * pane store; the meter shows nothing rather than a wrong number. See
+     * context-reading.ts `implausibleReason`.
+     */
+    | {
+          type: "context-reading-rejected";
+          tokens: number;
+          window: number | null;
+          model: string | null;
+          source: ContextSource;
+          reason: string;
+      }
+    /**
+     * An accepted prompt was larger than the window Claude Code reported for
+     * its model, so the reported window can't be right; the meter uses the
+     * next known tier above the prompt instead. Logged once per model by the
+     * pane store. context-reading.ts `refutedReportedWindow`.
+     */
+    | { type: "context-window-refuted"; model: string; reported: number; tokens: number; window: number }
     | {
           /**
            * A turn finished and the phase transitioned to `Done`. Since
@@ -1211,7 +1283,7 @@ export const SUBMIT_TIMEOUT_MS = 30_000;
  * Suppression window for the `TokensIn` ≥50%-drop compaction heuristic
  * after a REAL `CompactionBoundary` event landed. Claude Code's
  * `compact_boundary` frame precedes the next turn's `message_start` in
- * the same stream, so `lastContextTokens` is normally already
+ * the same stream, so `context` is normally already
  * reconciled to `postTokens` before the heuristic's next check runs —
  * this window is a defensive backstop against any ordering surprise or
  * a `postTokens` that doesn't closely match the next observed

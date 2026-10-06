@@ -22,6 +22,8 @@ import { isMuxBusSessionOk, muxbusNeedsSignInAgain } from "@/app/view/accounts/m
 import { isLinux, isMacOS } from "@/util/platformutil";
 import QRCode from "qrcode";
 
+import { Switch } from "@/app/element/ui";
+
 type HostInfo = {
     hostname: string;
     os: string;
@@ -195,19 +197,18 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                 <div class="status-bar-popover-divider" />
                 <div class="status-bar-popover-row">
                     <span class="status-bar-popover-label">LAN discovery</span>
-                    <label
+                    <span
                         class="status-bar-toggle"
                         data-tip={props.lanDiscoveryEnabled() ? "Disable" : "Enable (may prompt Windows Firewall)"}
                         style={{ "margin-left": "auto" }}
                     >
-                        <input
-                            type="checkbox"
+                        <Switch
+                            density="compact"
+                            ariaLabel="LAN discovery"
                             checked={props.lanDiscoveryEnabled()}
-                            onChange={(e) =>
-                                props.onLanToggle((e.target as HTMLInputElement).checked)
-                            }
+                            onChange={(on) => props.onLanToggle(on)}
                         />
-                    </label>
+                    </span>
                 </div>
                 <Show when={props.lanDiscoveryError()}>
                     <div

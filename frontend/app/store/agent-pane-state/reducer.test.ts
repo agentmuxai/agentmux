@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { turnAddedInput } from "./turn-contribution";
+import { plausibleReading, type ContextReading } from "./context-reading";
 import {
     AgentPaneState,
     initialState,
@@ -26,6 +27,17 @@ const streaming = (atMs = 100) => {
 };
 
 const mk = () => initialState("test-agent");
+/** A state whose context reading is `tokens`, measured live (no model). */
+const liveReading = (tokens: number, extra: Partial<ContextReading> = {}): ContextReading => ({
+    tokens,
+    model: null,
+    window: null,
+    windowSource: null,
+    source: "live",
+    at: 1,
+    switchedTo: null,
+    ...extra,
+});
 /**
  * Convenience: bring a fresh state up to the "ready + subscribed" baseline
  * that most turn-related tests assume. Issue #728 introduced an init-phase
@@ -188,20 +200,93 @@ describe("agent-pane-state reducer", () => {
     });
 
     describe("ReconcileContextFromHistory (mount-time reconciliation)", () => {
-        it("seeds lastContextTokens from a fresh (never-set) pane", () => {
+        it("seeds the context reading from a fresh (never-set) pane", () => {
             const start = mk();
-            expect(start.lastContextTokens).toBe(null);
+            expect(start.context).toBe(null);
             const r = update(start, { type: "ReconcileContextFromHistory", tokens: 4200 });
-            expect(r.state.lastContextTokens).toBe(4200);
+            expect(r.state.context).toMatchObject({ tokens: 4200, source: "history" });
             expect(r.events[0]).toMatchObject({ type: "context-reconciled-at-mount", tokens: 4200 });
+        });
+
+        it("resolves the window for the history's model at mount — 1M for Sonnet 5.5, not 200K", () => {
+            // The owner's report: a freshly opened Sonnet 5.5 pane read "/ 200k"
+            // because nothing resolved a window before the first live call.
+            const r = update(mk(), {
+                type: "ReconcileContextFromHistory",
+                tokens: 300_000,
+                model: "claude-sonnet-5-5",
+                at: 1_700_000_000_000,
+            });
+            expect(r.state.context).toEqual({
+                tokens: 300_000,
+                model: "claude-sonnet-5-5",
+                window: 1_000_000,
+                windowSource: "model",
+                source: "history",
+                at: 1_700_000_000_000,
+                switchedTo: null,
+            });
+            expect(r.state.lastContextModel).toBe("claude-sonnet-5-5");
+        });
+
+        it("prefers a window the history's result frames reported over the model table", () => {
+            const r = update(mk(), {
+                type: "ReconcileContextFromHistory",
+                tokens: 300_000,
+                model: "claude-sonnet-4-6",
+                reportedWindows: { "claude-sonnet-4-6": 1_000_000 },
+            });
+            expect(r.state.context).toMatchObject({ window: 1_000_000, windowSource: "reported" });
+            expect(r.state.reportedContextWindows).toEqual({ "claude-sonnet-4-6": 1_000_000 });
+        });
+
+        it("refuses a seed larger than its window (a turn total, the 17m bug) and says why", () => {
+            const r = update(mk(), {
+                type: "ReconcileContextFromHistory",
+                tokens: 17_000_000,
+                model: "claude-sonnet-5-5",
+            });
+            expect(r.state.context).toBeNull();
+            expect(r.events).toEqual([
+                {
+                    type: "context-reading-rejected",
+                    tokens: 17_000_000,
+                    window: 1_000_000,
+                    model: "claude-sonnet-5-5",
+                    source: "history",
+                    reason: "tokens exceed the window",
+                },
+            ]);
+        });
+
+        it("refuses a seed above every known window when the model is unknown", () => {
+            const r = update(mk(), { type: "ReconcileContextFromHistory", tokens: 17_000_000 });
+            expect(r.state.context).toBeNull();
+            expect(r.events[0]).toMatchObject({ type: "context-reading-rejected", reason: "tokens exceed every known window" });
         });
 
         it("does not override a value a live TokensIn already set", () => {
             const s0 = update(mk(), { type: "TokensIn", input: 900, model: "claude-sonnet-5" }).state;
-            expect(s0.lastContextTokens).toBe(900);
+            expect(s0.context?.tokens).toBe(900);
             const r = update(s0, { type: "ReconcileContextFromHistory", tokens: 4200 });
             expect(r.state).toBe(s0);
             expect(r.events).toEqual([]);
+        });
+
+        it("still merges the history's reported windows under a live reading, live entries winning", () => {
+            let s = update(mk(), { type: "ContextWindowsReported", windows: { "claude-opus-5-5": 1_000_000 } }).state;
+            s = update(s, { type: "TokensIn", input: 900, model: "claude-sonnet-4-6" }).state;
+            expect(s.context).toMatchObject({ window: 200_000, windowSource: "model" });
+            const r = update(s, {
+                type: "ReconcileContextFromHistory",
+                tokens: 4200,
+                reportedWindows: { "claude-sonnet-4-6": 1_000_000, "claude-opus-5-5": 500_000 },
+            });
+            expect(r.state.context).toMatchObject({ tokens: 900, window: 1_000_000, windowSource: "reported" });
+            expect(r.state.reportedContextWindows).toEqual({
+                "claude-sonnet-4-6": 1_000_000,
+                "claude-opus-5-5": 1_000_000,
+            });
         });
 
         it("does not override an earlier reconciliation either (first-wins)", () => {
@@ -421,7 +506,7 @@ describe("agent-pane-state reducer", () => {
     // size, not what the turn added. The per-turn figure is the context's
     // growth across the turn.
     describe("Tokens: what the turn added, not the context it re-sent", () => {
-        const withContext = (ctx: number) => ({ ...mk(), lastContextTokens: ctx });
+        const withContext = (ctx: number) => ({ ...mk(), context: liveReading(ctx) });
 
         it("the baseline is the previous turn's last context size", () => {
             const s0 = update(withContext(40_000), { type: "TokensIn", input: 41_500 }).state;
@@ -434,8 +519,8 @@ describe("agent-pane-state reducer", () => {
             s = update(s, { type: "TokensOut", output: 200 }).state;
             s = update(s, { type: "TokensIn", input: 44_000 }).state;
             s = update(s, { type: "TokensOut", output: 90 }).state;
-            // lastContextTokens has moved on to 44_000, the baseline must not.
-            expect(s.lastContextTokens).toBe(44_000);
+            // The reading has moved on to 44_000, the baseline must not.
+            expect(s.context?.tokens).toBe(44_000);
             expect(s.turnTokens?.contextBaseline).toBe(40_000);
             expect(turnAddedInput(s.turnTokens)).toBe(4_000);
         });
@@ -451,6 +536,12 @@ describe("agent-pane-state reducer", () => {
             expect(turnAddedInput(s.turnTokens)).toBe(0);
         });
 
+        it("a reading restored from history is a baseline like a live one (it is the same quantity now)", () => {
+            const seeded = update(mk(), { type: "ReconcileContextFromHistory", tokens: 40_000 }).state;
+            const s = update(seeded, { type: "TokensIn", input: 41_500 }).state;
+            expect(s.turnTokens?.contextBaseline).toBe(40_000);
+        });
+
         it("is undefined when a provider reported no live usage", () => {
             expect(turnAddedInput(null)).toBeUndefined();
             expect(turnAddedInput({ input: 5, contextBaseline: undefined })).toBeUndefined();
@@ -458,7 +549,7 @@ describe("agent-pane-state reducer", () => {
 
         it("TurnEnd records the contribution next to the (re-sent) result total", () => {
             const s0 = ready(100);
-            const s1 = update({ ...s0, lastContextTokens: 40_000 }, { type: "TurnStart", at: 110 }).state;
+            const s1 = update({ ...s0, context: liveReading(40_000) }, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "TokensIn", input: 41_000 }).state;
             const s3 = update(s2, { type: "TokensIn", input: 43_000 }).state;
             const r = update(s3, {
@@ -475,10 +566,253 @@ describe("agent-pane-state reducer", () => {
 
         it("sessionTotals still add up the raw input (the cost/context accounting is unchanged)", () => {
             const s0 = ready(100);
-            const s1 = update({ ...s0, lastContextTokens: 40_000 }, { type: "TurnStart", at: 110 }).state;
+            const s1 = update({ ...s0, context: liveReading(40_000) }, { type: "TurnStart", at: 110 }).state;
             const s2 = update(s1, { type: "TokensIn", input: 41_000 }).state;
             const r = update(s2, { type: "TurnEnd", stats: { input_tokens: 82_000, output_tokens: 10 } as any });
             expect(r.state.sessionTotals?.input_tokens).toBe(82_000);
+        });
+    });
+
+    // docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md — one
+    // reading with its provenance; the window reported by the CLI wins.
+    describe("Context reading", () => {
+        it("a live call on Sonnet 5.5 reads 1M from the model table before anything is reported", () => {
+            const s = update(mk(), { type: "TokensIn", input: 120_000, model: "claude-sonnet-5-5" }, 500).state;
+            expect(s.context).toEqual({
+                tokens: 120_000,
+                model: "claude-sonnet-5-5",
+                window: 1_000_000,
+                windowSource: "model",
+                source: "live",
+                at: 500,
+                switchedTo: null,
+            });
+            expect(s.lastContextModel).toBe("claude-sonnet-5-5");
+        });
+
+        it("a window the CLI reports replaces the table's, for the current reading and later ones", () => {
+            let s = update(mk(), { type: "TokensIn", input: 120_000, model: "claude-sonnet-4-6" }).state;
+            expect(s.context).toMatchObject({ window: 200_000, windowSource: "model" });
+            s = update(s, { type: "ContextWindowsReported", windows: { "claude-sonnet-4-6": 1_000_000 } }).state;
+            expect(s.context).toMatchObject({ window: 1_000_000, windowSource: "reported" });
+            s = update(s, { type: "TokensIn", input: 130_000, model: "claude-sonnet-4-6" }).state;
+            expect(s.context).toMatchObject({ tokens: 130_000, window: 1_000_000, windowSource: "reported" });
+        });
+
+        it("a subagent model's reported window doesn't touch a reading on another model", () => {
+            let s = update(mk(), { type: "TokensIn", input: 120_000, model: "claude-sonnet-5-5" }).state;
+            const before = s.context;
+            s = update(s, { type: "ContextWindowsReported", windows: { "claude-haiku-4-5": 200_000 } }).state;
+            expect(s.context).toBe(before);
+            expect(s.reportedContextWindows).toEqual({ "claude-haiku-4-5": 200_000 });
+        });
+
+        it("re-reporting the same windows is a no-op (same state)", () => {
+            const s = update(mk(), { type: "ContextWindowsReported", windows: { "claude-sonnet-5-5": 1_000_000 } }).state;
+            const r = update(s, { type: "ContextWindowsReported", windows: { "claude-sonnet-5-5": 1_000_000 } });
+            expect(r.state).toBe(s);
+        });
+
+        it("Sonnet 4.x learns 1M from a prompt above 200K, and keeps it on the same model", () => {
+            let s = update(mk(), { type: "TokensIn", input: 250_000, model: "claude-sonnet-4-6" }).state;
+            expect(s.context).toMatchObject({ window: 1_000_000, windowSource: "learned" });
+            s = update(s, { type: "TokensIn", input: 20_000, model: "claude-sonnet-4-6" }).state;
+            expect(s.context).toMatchObject({ window: 1_000_000, windowSource: "learned" });
+        });
+
+        it("a model switch re-resolves the window (Opus 1M → Haiku 200K)", () => {
+            let s = update(mk(), { type: "TokensIn", input: 300_000, model: "claude-opus-5-5" }).state;
+            s = update(s, { type: "TokensIn", input: 50_000, model: "claude-haiku-4-5" }).state;
+            expect(s.context).toMatchObject({ window: 200_000, windowSource: "model", model: "claude-haiku-4-5" });
+        });
+
+        it("an unknown model has an unknown window, never a provider constant", () => {
+            const s = update(mk(), { type: "TokensIn", input: 50_000, model: "some-future-model" }).state;
+            expect(s.context).toMatchObject({ window: null, windowSource: null });
+        });
+
+        it("a call that omits the model is measured on the last one seen", () => {
+            let s = update(mk(), { type: "TokensIn", input: 50_000, model: "claude-sonnet-5-5" }).state;
+            s = update(s, { type: "TokensIn", input: 51_000 }).state;
+            expect(s.context).toMatchObject({ model: "claude-sonnet-5-5", window: 1_000_000 });
+        });
+
+        it("a live reading that can't be true is kept but reported once per dispatch, and is no baseline", () => {
+            const r = update(mk(), { type: "TokensIn", input: 2_000_000, model: "claude-haiku-4-5" });
+            expect(r.events).toContainEqual({
+                type: "context-reading-rejected",
+                tokens: 2_000_000,
+                window: 200_000,
+                model: "claude-haiku-4-5",
+                source: "live",
+                reason: "tokens exceed the window",
+            });
+            const next = update(r.state, { type: "TokensIn", input: 10_000, model: "claude-haiku-4-5" });
+            expect(next.events.filter((e) => e.type === "context-compacted")).toEqual([]);
+        });
+
+        it("ContextInvalidated clears the reading (a fresh session replaced the conversation)", () => {
+            const s = update(mk(), { type: "TokensIn", input: 300_000, model: "claude-sonnet-5-5" }).state;
+            const r = update(s, { type: "ContextInvalidated", reason: "fresh_session" });
+            expect(r.state.context).toBeNull();
+            // ...so the fresh session's small first call is not a "compaction".
+            const next = update(r.state, { type: "TokensIn", input: 20_000, model: "claude-sonnet-5-5" });
+            expect(next.events.filter((e) => e.type === "context-compacted")).toEqual([]);
+            expect(update(r.state, { type: "ContextInvalidated", reason: "fresh_session" }).state).toBe(r.state);
+        });
+
+        it("TurnReset clears the reading but keeps the reported windows", () => {
+            let s = update(mk(), { type: "ContextWindowsReported", windows: { "claude-sonnet-5-5": 1_000_000 } }).state;
+            s = update(s, { type: "TokensIn", input: 300_000, model: "claude-sonnet-5-5" }).state;
+            s = update(s, { type: "TurnReset" }).state;
+            expect(s.context).toBeNull();
+            expect(s.reportedContextWindows).toEqual({ "claude-sonnet-5-5": 1_000_000 });
+        });
+
+        it("TurnStartFailed (a locally handled /command) keeps the reading and the session totals", () => {
+            const s0 = ready(100);
+            const s1 = update({ ...s0, context: liveReading(40_000), sessionTotals: { input_tokens: 9 } as any }, { type: "TurnStart", at: 110 }).state;
+            const r = update(s1, { type: "TurnStartFailed" });
+            expect(r.state.context?.tokens).toBe(40_000);
+            expect(r.state.sessionTotals).toEqual({ input_tokens: 9 });
+            expect(r.state.turnPhase.kind).toBe("Idle");
+        });
+
+        it("a compaction clears the reading until the next call: post_tokens is not the context size", () => {
+            // CLI 2.1.288: a /compact reported post_tokens 1,417 (the summary
+            // messages); the next call's prompt was 39,490 (system prompt and
+            // tools included).
+            let s = update(mk(), { type: "TokensIn", input: 40_673, model: "claude-sonnet-5-5" }, 40).state;
+            s = update(s, { type: "CompactionBoundary", trigger: "manual", preTokens: 40_697, postTokens: 1_417, durationMs: 1, at: 50 }, 50).state;
+            expect(s.context).toBeNull();
+            const r = update(s, { type: "TokensIn", input: 39_490, model: "claude-sonnet-5-5" }, 60);
+            expect(r.state.context).toMatchObject({ tokens: 39_490, window: 1_000_000, source: "live" });
+            // No "before" to compare against, so no heuristic card on top of the real one.
+            expect(r.events.some((e) => e.type === "context-compacted")).toBe(false);
+        });
+
+        it("a late boundary leaves a reading taken after it", () => {
+            let s = update(mk(), { type: "TokensIn", input: 39_490, model: "claude-sonnet-5-5" }, 2_000).state;
+            s = update(
+                s,
+                {
+                    type: "CompactionBoundary",
+                    trigger: "auto",
+                    preTokens: 900_000,
+                    postTokens: 30_000,
+                    durationMs: 1,
+                    at: 2_100,
+                    frameTimestamp: new Date(1_500).toISOString(),
+                },
+                2_100,
+            ).state;
+            expect(s.context).toMatchObject({ tokens: 39_490, source: "live" });
+        });
+
+        it("a history seed can't bring back a conversation invalidated while history was loading", () => {
+            // The live `fresh` outcome is drained before the restored window
+            // seeds (useHistoryPagination settles, then seeds).
+            let s = update(mk(), { type: "ContextInvalidated", reason: "fresh_session" }).state;
+            expect(s.contextSeedable).toBe(false);
+            const r = update(s, { type: "ReconcileContextFromHistory", tokens: 300_000, model: "claude-sonnet-5-5" });
+            expect(r.state.context).toBeNull();
+            expect(r.events).toEqual([]);
+            // Same after a reset or a compaction.
+            s = update(mk(), { type: "TurnReset" }).state;
+            expect(update(s, { type: "ReconcileContextFromHistory", tokens: 300_000 }).state.context).toBeNull();
+            s = update(mk(), { type: "CompactionBoundary", trigger: "auto", preTokens: 9, postTokens: 1, durationMs: 1, at: 5 }).state;
+            expect(update(s, { type: "ReconcileContextFromHistory", tokens: 300_000 }).state.context).toBeNull();
+        });
+
+        it("a seed lands once; a second restore doesn't replace it", () => {
+            let s = update(mk(), { type: "ReconcileContextFromHistory", tokens: 300_000, model: "claude-sonnet-5-5" }).state;
+            s = update(s, { type: "ReconcileContextFromHistory", tokens: 5_000, model: "claude-sonnet-5-5" }).state;
+            expect(s.context?.tokens).toBe(300_000);
+        });
+
+        it("history windows merge under live ones, with or without a reading to seed", () => {
+            let s = update(mk(), { type: "ContextWindowsReported", windows: { "claude-sonnet-4-6": 1_000_000 } }).state;
+            s = update(s, {
+                type: "ReconcileContextFromHistory",
+                tokens: null,
+                reportedWindows: { "claude-sonnet-4-6": 200_000, "claude-haiku-4-5": 200_000 },
+            }).state;
+            expect(s.reportedContextWindows).toEqual({ "claude-sonnet-4-6": 1_000_000, "claude-haiku-4-5": 200_000 });
+            expect(s.context).toBeNull();
+            // Still seedable: a window-only restore measured nothing.
+            expect(s.contextSeedable).toBe(true);
+        });
+
+        it("an accepted prompt larger than the reported window refutes it, once, and the reading stays shown", () => {
+            let s = update(mk(), { type: "ContextWindowsReported", windows: { "claude-sonnet-4-6": 200_000 } }).state;
+            let r = update(s, { type: "TokensIn", input: 250_000, model: "claude-sonnet-4-6" });
+            expect(r.state.context).toMatchObject({ tokens: 250_000, window: 1_000_000, windowSource: "learned" });
+            expect(plausibleReading(r.state.context)).not.toBeNull();
+            expect(r.events).toContainEqual({
+                type: "context-window-refuted",
+                model: "claude-sonnet-4-6",
+                reported: 200_000,
+                tokens: 250_000,
+                window: 1_000_000,
+            });
+            s = r.state;
+            r = update(s, { type: "TokensIn", input: 260_000, model: "claude-sonnet-4-6" });
+            expect(r.events.some((e) => e.type === "context-window-refuted")).toBe(false);
+            // A small prompt later keeps the proven window.
+            r = update(r.state, { type: "TokensIn", input: 20_000, model: "claude-sonnet-4-6" });
+            expect(r.state.context).toMatchObject({ window: 1_000_000, windowSource: "learned" });
+        });
+
+        it("a learned window outlives TurnReset (B7)", () => {
+            let s = update(mk(), { type: "TokensIn", input: 400_000, model: "claude-sonnet-4-6" }).state;
+            expect(s.context?.window).toBe(1_000_000);
+            s = update(s, { type: "TurnReset" }).state;
+            s = update(s, { type: "TokensIn", input: 150_000, model: "claude-sonnet-4-6" }).state;
+            expect(s.context).toMatchObject({ tokens: 150_000, window: 1_000_000, windowSource: "learned" });
+        });
+
+        it("says so when a reading the meter showed turns implausible, once", () => {
+            // A reading outside every tier with an unknown window is shown...
+            let s = update(mk(), { type: "TokensIn", input: 900_000, model: "some-model" }).state;
+            expect(plausibleReading(s.context)).not.toBeNull();
+            // ...until the CLI reports a smaller window for it.
+            const r = update(s, { type: "ContextWindowsReported", windows: { "some-model": 128_000 } });
+            expect(plausibleReading(r.state.context)).toBeNull();
+            expect(r.events).toContainEqual(expect.objectContaining({ type: "context-reading-rejected", reason: "tokens exceed the window" }));
+            // A further call that stays impossible is not news.
+            s = r.state;
+            const again = update(s, { type: "TokensIn", input: 950_000, model: "some-model" });
+            expect(again.events.some((e) => e.type === "context-reading-rejected")).toBe(false);
+        });
+
+        it("a model switch blanks the window until the new model replies, and keeps the tokens", () => {
+            let s = update(mk(), { type: "TokensIn", input: 300_000, model: "claude-sonnet-5-5" }).state;
+            s = update(s, { type: "ContextModelSwitched", model: "haiku" }).state;
+            expect(s.context).toMatchObject({ tokens: 300_000, window: null, windowSource: null, switchedTo: "haiku" });
+            // A late report about the old model doesn't bring its window back.
+            s = update(s, { type: "ContextWindowsReported", windows: { "claude-sonnet-5-5": 1_000_000 } }).state;
+            expect(s.context?.window).toBeNull();
+            // The new model's first reply resolves its own window.
+            s = update(s, { type: "TokensIn", input: 120_000, model: "claude-haiku-4-5" }).state;
+            expect(s.context).toMatchObject({ tokens: 120_000, window: 200_000, switchedTo: null });
+        });
+
+        it("switching back to the reading's own model restores its window", () => {
+            let s = update(mk(), { type: "TokensIn", input: 300_000, model: "claude-sonnet-5-5" }).state;
+            s = update(s, { type: "ContextModelSwitched", model: "haiku" }).state;
+            s = update(s, { type: "ContextModelSwitched", model: "claude-sonnet-5-5" }).state;
+            expect(s.context).toMatchObject({ window: 1_000_000, windowSource: "model", switchedTo: null });
+            // No reading, nothing to switch.
+            expect(update(mk(), { type: "ContextModelSwitched", model: "haiku" }).state.context).toBeNull();
+        });
+
+        it("archive/restore invalidates like a fresh session", () => {
+            const s = update(mk(), { type: "TokensIn", input: 300_000, model: "claude-sonnet-5-5" }).state;
+            const r = update(s, { type: "ContextInvalidated", reason: "transcript_replaced" });
+            expect(r.state.context).toBeNull();
+            // The new conversation's first call isn't a "compaction".
+            const next = update(r.state, { type: "TokensIn", input: 20_000, model: "claude-sonnet-5-5" });
+            expect(next.events.some((e) => e.type === "context-compacted")).toBe(false);
         });
     });
 
@@ -805,7 +1139,7 @@ describe("agent-pane-state reducer", () => {
         });
 
         describe("CompactionBoundary", () => {
-            it("clears compacting, records lastCompactionBoundaryAt, and reconciles lastContextTokens", () => {
+            it("clears compacting, records lastCompactionBoundaryAt, and clears the context reading", () => {
                 const s0 = update(streaming(100), {
                     type: "CompactionStarted",
                     trigger: "manual",
@@ -821,7 +1155,8 @@ describe("agent-pane-state reducer", () => {
                 }, 300);
                 expect(r.state.compacting).toBeNull();
                 expect(r.state.lastCompactionBoundaryAt).toBe(300);
-                expect(r.state.lastContextTokens).toBe(5_000);
+                expect(r.state.context).toBeNull();
+                expect(r.state.contextSeedable).toBe(false);
                 expect(r.events).toEqual([
                     {
                         type: "context-compacted",
@@ -844,7 +1179,7 @@ describe("agent-pane-state reducer", () => {
                     at: 100,
                 });
                 expect(r.state.compacting).toBeNull();
-                expect(r.state.lastContextTokens).toBe(2_000);
+                expect(r.state.context).toBeNull();
                 expect(r.events[0]).toMatchObject({ type: "context-compacted", source: "real", trigger: "auto" });
             });
 
@@ -882,7 +1217,7 @@ describe("agent-pane-state reducer", () => {
                     expect(r.state.pendingCompactTurn).toBe(false);
                     // The existing compaction bookkeeping still runs unchanged.
                     expect(r.state.compacting).toBeNull();
-                    expect(r.state.lastContextTokens).toBe(2_000);
+                    expect(r.state.context).toBeNull();
                 });
 
                 it("does NOT end an AUTO-triggered compaction's turn — auto-compaction happens transparently mid-turn", () => {
@@ -958,6 +1293,25 @@ describe("agent-pane-state reducer", () => {
                 });
             });
 
+            it("never compares against a reading restored from history (the false 'compacted 17m → 300k' card)", () => {
+                // A seed describes a session this process didn't watch: it may
+                // have been resumed, replaced or compacted since. Only readings
+                // this process measured are a "before".
+                const seeded = update(mk(), { type: "ReconcileContextFromHistory", tokens: 800_000 }, 100).state;
+                const r = update(seeded, { type: "TokensIn", input: 60_000 }, 200);
+                expect(r.events.filter((e) => e.type === "context-compacted")).toEqual([]);
+                expect(r.state.context).toMatchObject({ tokens: 60_000, source: "live" });
+            });
+
+            it("after a compaction the next call is the baseline; a later drop from it is measured", () => {
+                let s = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
+                s = update(s, { type: "CompactionBoundary", trigger: "auto", preTokens: 50_000, postTokens: 4_000, durationMs: 1, at: 150 }, 150).state;
+                s = update(s, { type: "TokensIn", input: 40_000 }, 200).state;
+                // Outside the suppression window, a later ≥50% drop is a compaction.
+                const r = update(s, { type: "TokensIn", input: 1_000 }, 400_000);
+                expect(r.events).toContainEqual({ type: "context-compacted", tokensBefore: 40_000, tokensAfter: 1_000, source: "heuristic" });
+            });
+
             it("suppresses the heuristic shortly after a real CompactionBoundary landed", () => {
                 const s0 = update(mk(), { type: "TokensIn", input: 50_000 }, 100).state;
                 const s1 = update(s0, {
@@ -970,10 +1324,10 @@ describe("agent-pane-state reducer", () => {
                 }, 150).state;
                 // Next turn's TokensIn shows the post-compaction fill growing
                 // back up but still nowhere near the ORIGINAL 50k baseline —
-                // since lastContextTokens is now 3_000 (reconciled by the
-                // boundary), this wouldn't even trip the ≥50% heuristic on
-                // its own, but the suppression guard is the belt-and-braces
-                // check under test here regardless.
+                // the boundary cleared the reading, so there is no "before"
+                // and this couldn't trip the ≥50% heuristic on its own, but
+                // the suppression guard is the belt-and-braces check under
+                // test here regardless.
                 const r = update(s1, { type: "TokensIn", input: 20_000 }, 200);
                 const compactionEvents = r.events.filter((e) => e.type === "context-compacted");
                 expect(compactionEvents).toEqual([]);
@@ -1175,15 +1529,15 @@ describe("agent-pane-state reducer", () => {
                 // completion time (frameTimestamp: 500), not the frontend
                 // receipt time (at: 1_500) -- see codex round 10.
                 expect(r.state.lastCompactionBoundaryAt).toBe(500);
-                // lastContextTokens is NOT overwritten with this older
+                // The context reading is NOT overwritten with this older
                 // boundary's postTokens -- the newer N+1 compaction is
                 // confirmed still active, so showing its stale 3_000
                 // reading would be a regression from whatever context-fill
                 // value was live before it (reagent P2, round 11).
-                expect(r.state.lastContextTokens).toBe(null);
+                expect(r.state.context).toBe(null);
             });
 
-            it("preserves the pre-existing lastContextTokens (not just null) against a stale delayed boundary (reagent P2, round 11)", () => {
+            it("preserves the pre-existing reading (not just null) against a stale delayed boundary (reagent P2, round 11)", () => {
                 // A real, live context-fill value (8_000) is already
                 // established before the delayed older boundary shows up,
                 // so this proves the fix preserves whatever was actually
@@ -1204,7 +1558,7 @@ describe("agent-pane-state reducer", () => {
                     frameTimestamp: new Date(500).toISOString(),
                 }, 1_500);
                 expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 1_000 });
-                expect(r.state.lastContextTokens).toBe(8_000);
+                expect(r.state.context?.tokens).toBe(8_000);
             });
 
             it("DOES clear compacting when the boundary's frameTimestamp is at or after the current compaction's start", () => {

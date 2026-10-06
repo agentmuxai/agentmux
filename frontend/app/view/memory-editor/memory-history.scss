@@ -140,32 +140,7 @@
     white-space: nowrap;
 }
 
-.native-memory-history-btn {
-    padding: var(--space-1) var(--space-2);
-    font-size: var(--text-xs);
-    border: 1px solid var(--border-color);
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-    }
-
-    &.native-memory-history-btn-primary {
-        background: var(--accent-color);
-        color: var(--button-text-color);
-        border-color: var(--accent-color);
-
-        &:hover:not(:disabled) {
-            opacity: 0.85;
-        }
-    }
-}
+// The history buttons are element/ui Buttons at compact density.
 
 .native-memory-history-diff {
     display: flex;

@@ -32,6 +32,7 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "hooks/useLiveFeedRollOff.ts",
     "hooks/useTurnReconciliation.ts",
     "hooks/turn-confirmation.ts",
+    "hooks/useContextReading.ts",
 ];
 
 /**

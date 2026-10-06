@@ -20,6 +20,42 @@ vi.mock("./memory-reinjection-controller", async (importOriginal) => {
 // each test line is JSON-stringified StreamEvent.
 const line = (event: object): string => JSON.stringify(event);
 
+type Usage = { input_tokens: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+/** A main-agent API call's `message_start`, as Claude Code streams it. */
+const messageStart = (id: string, usage: Usage, model = "claude-sonnet-5-5"): string =>
+    JSON.stringify({
+        type: "stream_event",
+        event: { type: "message_start", message: { id, model, role: "assistant", content: [], usage } },
+        parent_tool_use_id: null,
+    });
+/** The same call's `assistant` frame (no content, so it adds no node). */
+const assistantCall = (id: string, usage: Usage, model = "claude-sonnet-5-5"): string =>
+    JSON.stringify({
+        type: "assistant",
+        message: { id, model, role: "assistant", content: [], usage: { ...usage, output_tokens: 4 } },
+        parent_tool_use_id: null,
+    });
+/** A turn's `result`: usage summed over its calls, and the window CLI 2.1.288 reports. */
+const resultFrame = (summedInput: number): string =>
+    JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        num_turns: 3,
+        result: "ok",
+        usage: { input_tokens: 6, cache_creation_input_tokens: 0, cache_read_input_tokens: summedInput - 6, output_tokens: 36 },
+        modelUsage: { "claude-sonnet-5-5": { contextWindow: 1_000_000, maxOutputTokens: 128_000 } },
+    });
+const freshOutcome = (): string =>
+    JSON.stringify({
+        type: "system",
+        subtype: "agentmux_session_outcome",
+        outcome: "fresh",
+        attempted_sid: "sid-1",
+        actual_sid: null,
+        timestamp: "2026-08-10T08:00:00Z",
+    });
+
 describe("parseHistoryLines", () => {
     it("merges same-id tool_call → tool_result so the tool ends success, not stuck running", () => {
         // Codex P1 on PR #1104: the previous "first-wins by id" rule
@@ -88,75 +124,118 @@ describe("parseHistoryLines", () => {
         expect((nodes[0] as any).content).toBe("real text");
     });
 
-    it("surfaces the last session_end stats without emitting a node for it", () => {
+    it("a turn's session_end emits no node and is never read as the context size", () => {
+        // A `result`'s usage sums every API call of the turn. Seeding the
+        // context meter from it showed "17m" on a freshly opened pane
+        // (REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md §2).
         const lines = [
             line({ type: "text", content: "hi" }),
-            line({ type: "session_end", stats: { input_tokens: 111, output_tokens: 22 } }),
+            line({ type: "session_end", stats: { input_tokens: 17_000_000, output_tokens: 22 } }),
         ];
-        const { nodes, lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
+        const { nodes, lastContext } = parseHistoryLines(lines, "claude-stream-json");
         expect(nodes).toHaveLength(1);
-        expect(lastSessionStats).toEqual({ input_tokens: 111, output_tokens: 22 });
+        expect(lastContext).toBeNull();
     });
 
-    it("returns null lastSessionStats when no session_end is present", () => {
+    it("returns a null lastContext when no main-agent call is present", () => {
         const lines = [line({ type: "text", content: "hi" })];
-        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
-        expect(lastSessionStats).toBeNull();
+        const { lastContext, reportedContextWindows } = parseHistoryLines(lines, "claude-stream-json");
+        expect(lastContext).toBeNull();
+        expect(reportedContextWindows).toEqual({});
     });
 
-    it("resets lastSessionStats at a fresh session boundary (codex P2 on PR #2507)", () => {
-        // Window shape: [old result -> fresh boundary -> no new result].
-        // The old session's usage must NOT hydrate the fresh session's
-        // context-fill bar — the fresh model has none of those tokens.
+    it("seeds from the main agent's LAST call — its whole prompt — not the turn's result total", () => {
+        // The shape of a real three-call turn on CLI 2.1.288: each call's
+        // prompt by message_start (and again by its assistant frame), then a
+        // result whose usage is the three prompts summed (130,499).
         const lines = [
-            line({ type: "text", content: "old turn" }),
-            line({ type: "session_end", stats: { input_tokens: 900, output_tokens: 90 } }),
+            messageStart("msg_1", { input_tokens: 2, cache_creation_input_tokens: 31_490, cache_read_input_tokens: 11_884 }),
+            assistantCall("msg_1", { input_tokens: 2, cache_creation_input_tokens: 31_490, cache_read_input_tokens: 11_884 }),
+            messageStart("msg_2", { input_tokens: 2, cache_creation_input_tokens: 124, cache_read_input_tokens: 43_374 }),
+            messageStart("msg_3", { input_tokens: 2, cache_creation_input_tokens: 123, cache_read_input_tokens: 43_498 }),
+            resultFrame(130_499),
+        ];
+        const stamps = lines.map((_, i) => 1_790_000_000_000 + i);
+        const { lastContext, reportedContextWindows } = parseHistoryLines(lines, "claude-stream-json", undefined, stamps);
+        expect(lastContext).toEqual({ tokens: 43_623, model: "claude-sonnet-5-5", at: 1_790_000_000_003 });
+        expect(reportedContextWindows).toEqual({ "claude-sonnet-5-5": 1_000_000 });
+    });
+
+    it("reads a call from its assistant frame alone (a transcript without stream events)", () => {
+        const lines = [assistantCall("msg_9", { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 80_000 })];
+        expect(parseHistoryLines(lines, "claude-stream-json").lastContext).toEqual({
+            tokens: 80_005,
+            model: "claude-sonnet-5-5",
+            at: null,
+        });
+    });
+
+    it("ignores a subagent's calls: they have their own context and model", () => {
+        const lines = [
+            messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 300_000 }),
+            JSON.stringify({ ...JSON.parse(messageStart("msg_s", { input_tokens: 1, cache_read_input_tokens: 9_000 }, "claude-haiku-4-5")), parent_tool_use_id: "toolu_sub" }),
+        ];
+        expect(parseHistoryLines(lines, "claude-stream-json").lastContext).toMatchObject({
+            tokens: 300_001,
+            model: "claude-sonnet-5-5",
+        });
+    });
+
+    it("ignores Claude Code's own zero-usage <synthetic> assistant frames", () => {
+        const lines = [
+            messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 300_000 }),
             JSON.stringify({
-                type: "system",
-                subtype: "agentmux_session_outcome",
-                outcome: "fresh",
-                attempted_sid: "sid-1",
-                actual_sid: null,
-                timestamp: "2026-08-10T08:00:00Z",
+                type: "assistant",
+                message: { id: "msg_x", model: "<synthetic>", role: "assistant", content: [], usage: { input_tokens: 0, output_tokens: 0 } },
             }),
+        ];
+        expect(parseHistoryLines(lines, "claude-stream-json").lastContext?.tokens).toBe(300_001);
+    });
+
+    it("after a compaction boundary there is no context until the next call: post_tokens is not the size", () => {
+        // CLI 2.1.288: post_tokens counts the summary messages only (1,417);
+        // the next call's prompt, system prompt and tools included, was 39,490.
+        const boundary = JSON.stringify({
+            type: "system",
+            subtype: "compact_boundary",
+            compact_metadata: { trigger: "manual", pre_tokens: 40_697, post_tokens: 1_417, duration_ms: 6_448 },
+            timestamp: "2026-09-24T10:00:00Z",
+        });
+        const upToBoundary = [messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 40_672 }), boundary];
+        expect(parseHistoryLines(upToBoundary, "claude-stream-json").lastContext).toBeNull();
+        const andACall = [...upToBoundary, messageStart("msg_2", { input_tokens: 2, cache_read_input_tokens: 39_488 })];
+        expect(parseHistoryLines(andACall, "claude-stream-json").lastContext?.tokens).toBe(39_490);
+        // A boundary whose metadata doesn't parse is still a boundary.
+        const unparsed = JSON.stringify({ type: "system", subtype: "compact_boundary" });
+        expect(parseHistoryLines([messageStart("msg_1", { input_tokens: 5 }), unparsed], "claude-stream-json").lastContext).toBeNull();
+    });
+
+    it("reads no context from a provider whose stream isn't Claude Code's", () => {
+        const lines = [messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 40_000 })];
+        expect(parseHistoryLines(lines, "gemini-json").lastContext).toBeNull();
+        expect(parseHistoryLines(lines, "codex-json").lastContext).toBeNull();
+    });
+
+    it("resets the context at a fresh session boundary (codex P2 on PR #2507)", () => {
+        // Window shape: [old call -> fresh boundary -> no new call].
+        // The old session's usage must NOT hydrate the fresh session's
+        // meter — the fresh model has none of those tokens.
+        const lines = [
+            messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 400_000 }),
+            line({ type: "text", content: "old turn" }),
+            freshOutcome(),
             line({ type: "text", content: "new turn" }),
         ];
-        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
-        expect(lastSessionStats).toBeNull();
+        expect(parseHistoryLines(lines, "claude-stream-json").lastContext).toBeNull();
     });
 
     it("post-boundary usage still hydrates after a fresh boundary", () => {
         const lines = [
-            line({ type: "session_end", stats: { input_tokens: 900, output_tokens: 90 } }),
-            JSON.stringify({
-                type: "system",
-                subtype: "agentmux_session_outcome",
-                outcome: "fresh",
-                attempted_sid: "sid-1",
-                actual_sid: null,
-                timestamp: "2026-08-10T08:00:00Z",
-            }),
-            line({ type: "session_end", stats: { input_tokens: 40, output_tokens: 4 } }),
+            messageStart("msg_1", { input_tokens: 1, cache_read_input_tokens: 400_000 }),
+            freshOutcome(),
+            messageStart("msg_2", { input_tokens: 40, cache_read_input_tokens: 0 }),
         ];
-        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
-        expect(lastSessionStats).toEqual({ input_tokens: 40, output_tokens: 4 });
-    });
-
-    it("does not let a later empty-stats session_end clobber real historical stats", () => {
-        // reagent P1 on PR #2059: Claude's persistent-mode controller emits a
-        // session_end with stats: {} after EVERY plain-text turn (the per-turn
-        // boundary marker) — the real usage-bearing `result` event only fires
-        // at process teardown, which can be much earlier in the window. The
-        // chronologically-last session_end here is the empty turn-boundary
-        // marker; the real stats from the earlier turn must still win.
-        const lines = [
-            line({ type: "text", content: "turn one" }),
-            line({ type: "session_end", stats: { input_tokens: 500, output_tokens: 50 } }),
-            line({ type: "text", content: "turn two" }),
-            line({ type: "session_end", stats: {} }),
-        ];
-        const { lastSessionStats } = parseHistoryLines(lines, "claude-stream-json");
-        expect(lastSessionStats).toEqual({ input_tokens: 500, output_tokens: 50 });
+        expect(parseHistoryLines(lines, "claude-stream-json").lastContext?.tokens).toBe(40);
     });
 
     // §4.4 of SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
@@ -576,6 +655,7 @@ describe("HistoryParser (resumable parseHistoryLines)", () => {
         line({ type: "tool_call", tool: "Read", id: "tool-a", params: { file_path: "a.ts" } }),
         line({ type: "text", content: "while it reads" }),
         line({ type: "tool_result", tool: "Read", id: "tool-a", status: "success", duration: 0.2 }),
+        messageStart("msg_a", { input_tokens: 3, cache_read_input_tokens: 1_000 }),
         line({ type: "session_end", stats: { input_tokens: 120, output_tokens: 12 } }),
         JSON.stringify({
             type: "system",
@@ -600,6 +680,8 @@ describe("HistoryParser (resumable parseHistoryLines)", () => {
         line({ type: "tool_call", tool: "Bash", id: "tool-b", params: { command: "ls" } }),
         line({ type: "tool_result", tool: "Bash", id: "tool-b", status: "success", duration: 0.1 }),
         line({ type: "text", content: "done" }),
+        messageStart("msg_b", { input_tokens: 3, cache_read_input_tokens: 2_000 }),
+        resultFrame(4_000),
         line({ type: "session_end", stats: { input_tokens: 300, output_tokens: 30 } }),
     ];
     const stamps = transcript.map((_, i) => 1_790_000_000_000 + i * 1000);
@@ -621,7 +703,8 @@ describe("HistoryParser (resumable parseHistoryLines)", () => {
         for (let cut = 0; cut <= transcript.length; cut++) {
             const parser = feedInChunks([cut]);
             expect(parser.nodes, `cut at ${cut}`).toEqual(whole.nodes);
-            expect(parser.lastSessionStats, `cut at ${cut}`).toEqual(whole.lastSessionStats);
+            expect(parser.lastContext, `cut at ${cut}`).toEqual(whole.lastContext);
+            expect(parser.reportedContextWindows, `cut at ${cut}`).toEqual(whole.reportedContextWindows);
         }
     });
 

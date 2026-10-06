@@ -59,6 +59,47 @@ describe("AgentComposerStrip — no centered stats zone content (SPEC_COMPOSER_S
     });
 });
 
+describe("AgentComposerStrip — the context reading and where it comes from", () => {
+    it("a provider with no context reading still gets the session popover once a turn reported totals", () => {
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                providerId="codex"
+                contextTokens={null}
+                sessionTotals={{ input_tokens: 90_000, output_tokens: 3_000 }}
+            />
+        ));
+        expect(screen.getByRole("button", { name: "session" })).toBeTruthy();
+    });
+
+    it("no reading and no totals on another provider: no slot", () => {
+        render(() => <AgentComposerStrip {...baseProps} providerId="codex" contextTokens={null} />);
+        expect(screen.queryByRole("button", { name: "session" })).toBeNull();
+    });
+
+    it("shows tokens over the window, with the provenance note in the tooltip", () => {
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                contextTokens={300_000}
+                contextWindow={1_000_000}
+                contextNote="Window reported by the CLI for claude-sonnet-5-5."
+            />
+        ));
+        const reading = screen.getByRole("button", { name: "300k / 1.0m" });
+        expect(reading.getAttribute("title")).toMatch(/Context window: 300,000 \/ 1,000,000 tokens/);
+        expect(reading.getAttribute("title")).toMatch(/Window reported by the CLI for claude-sonnet-5-5\.$/);
+    });
+
+    it("shows the tokens alone, still with the note, when the window is unknown", () => {
+        render(() => (
+            <AgentComposerStrip {...baseProps} contextTokens={300_000} contextWindow={undefined} contextNote="Window not known for some-model." />
+        ));
+        const reading = screen.getByRole("button", { name: "300k ctx" });
+        expect(reading.getAttribute("title")).toBe("Context: 300,000 tokens\nWindow not known for some-model.");
+    });
+});
+
 describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
     it("renders no countdown text when the window is unknown", () => {
         render(() => (

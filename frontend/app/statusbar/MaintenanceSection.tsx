@@ -5,6 +5,7 @@ import { atoms, getApi } from "@/store/global";
 import { WpsEvent } from "@/store/mps-events";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./_maintenance-section.scss";
+import { Button } from "@/app/element/ui";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -209,13 +210,14 @@ export const MaintenanceSection = (): JSX.Element => {
                         <span class="maintenance-row-text">
                             {updaterVersion() ? `v${updaterVersion()} available` : "Update available"}
                         </span>
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
+                            tone="accent"
                             class="maintenance-btn maintenance-btn--primary"
                             onClick={handleInstallUpdate}
                         >
                             Download
-                        </button>
+                        </Button>
                     </Show>
                     <Show when={updaterStatus() === "downloading"}>
                         <span class="maintenance-icon maintenance-icon--working">↓</span>
@@ -226,13 +228,14 @@ export const MaintenanceSection = (): JSX.Element => {
                         <span class="maintenance-row-text">
                             {updaterVersion() ? `v${updaterVersion()} ready` : "Ready to install"}
                         </span>
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
+                            tone="accent"
                             class="maintenance-btn maintenance-btn--primary"
                             onClick={handleInstallUpdate}
                         >
                             Restart
-                        </button>
+                        </Button>
                     </Show>
                     <Show when={updaterStatus() === "error"}>
                         <span class="maintenance-icon maintenance-icon--error">✗</span>
@@ -250,13 +253,14 @@ export const MaintenanceSection = (): JSX.Element => {
                             (migState() as Extract<MigState, {kind: "idle"}>).pendingCount !== 1 ? "s" : ""
                         } pending
                     </span>
-                    <button
-                        type="button"
+                    <Button
+                        density="compact"
+                        tone="accent"
                         class="maintenance-btn maintenance-btn--primary"
                         onClick={handleRunMigrations}
                     >
                         Run
-                    </button>
+                    </Button>
                 </div>
             </Show>
 
@@ -306,13 +310,14 @@ export const MaintenanceSection = (): JSX.Element => {
                         )}
                     </For>
                     <Show when={migState().kind === "failed"}>
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
+                            tone="accent"
                             class="maintenance-btn maintenance-btn--primary maintenance-retry-btn"
                             onClick={handleRunMigrations}
                         >
                             Retry
-                        </button>
+                        </Button>
                     </Show>
                 </div>
             </Show>
@@ -349,13 +354,13 @@ export const MaintenanceSection = (): JSX.Element => {
                             ? `last run: ${fmtDate((vacState() as Extract<VacState, {kind: "idle"}>).lastRunMs!)}`
                             : "not run"}
                     </span>
-                    <button
-                        type="button"
+                    <Button
+                        density="compact"
                         class="maintenance-btn"
                         onClick={handleRunVacuum}
                     >
                         Run
-                    </button>
+                    </Button>
                 </Show>
                 <Show when={vacState().kind === "running"}>
                     <span class="maintenance-icon maintenance-icon--working maintenance-pulse">·</span>
@@ -370,7 +375,7 @@ export const MaintenanceSection = (): JSX.Element => {
                             ? "nothing to clean"
                             : `${(vacState() as Extract<VacState, {kind: "done"}>).rowsDeleted} rows removed`}
                     </span>
-                    <button type="button" class="maintenance-btn" onClick={handleRunVacuum}>Run</button>
+                    <Button density="compact" class="maintenance-btn" onClick={handleRunVacuum}>Run</Button>
                 </Show>
             </div>
         </>
