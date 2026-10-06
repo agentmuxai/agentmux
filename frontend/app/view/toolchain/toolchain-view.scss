@@ -239,7 +239,9 @@
 
 // Link-style actions are quiet element/ui Buttons.
 
-.toolchain-link-btn--install-now {
+// "or install it now" is an accent Button on its own line. The doubled class
+// outranks .ui-button whatever order the stylesheets load in.
+.ui-button.toolchain-link-btn--install-now {
     display: flex;
-    padding-left: 0;
+    width: fit-content;
 }
