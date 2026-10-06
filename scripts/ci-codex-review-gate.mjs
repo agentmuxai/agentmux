@@ -58,13 +58,12 @@ export const TRIGGER_AUTHOR = "a5af";
 // ReAgent's GitHub App, the only author whose quota-skip marker counts.
 export const SKIP_AUTHOR = "reagentx-workflow[bot]";
 
-// Dependency bots. ReAgent never reviews their PRs (reagent lambdas/trust.py:
-// they are not trusted authors, and their bodies carry upstream release
-// notes), so it never asks Codex, and the gate would wait forever. A pure
-// version bump is a manifest and lockfile diff Codex has little to say about,
-// so such a PR passes without Codex; the required approving review and CI
-// still apply. Only while every commit is the bot's own: once anyone else
-// pushes to the branch (a code fix for a breaking bump), it needs Codex.
+// Dependency bots. ReAgent doesn't review their PRs, so it never asks Codex,
+// and the gate would wait forever. A pure version bump is a manifest and
+// lockfile diff Codex has little to say about, so such a PR passes without
+// Codex; the required approving review and CI still apply. Only while every
+// commit is the bot's own: once anyone else pushes to the branch (a code fix
+// for a breaking bump), it needs Codex.
 export const DEPENDENCY_BOTS = new Set(["dependabot[bot]", "renovate[bot]"]);
 // GitHub's own committer for commits an App makes through the API.
 const GITHUB_COMMITTER = "web-flow";
