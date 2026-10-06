@@ -1,7 +1,7 @@
 # Window resize: why AgentMux shows grey before the new size paints, and what it takes to keep up like Chrome
 
 **Date:** 2026-10-06
-**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R2, R3 and the System Info half of R6 shipped first (§9); R4, R5 and the rest of R6 in #4398 and #4399; R8 and the agent-pane tab in §10 and §11. R7 is open.
+**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R2, R3 and the System Info half of R6 shipped first (§9); R4, R5 and the rest of R6 in #4398 and #4399; R8 and the agent-pane tab in §10 and §11; a fast drag and the terminals in §12, where R7 is measured and found unnecessary.
 **Author:** Agent4
 **Trigger:** Repo owner, 2026-10-06: *"in chrome, if I resize the app window the paint is always tight against the window edge, but in agentmux there is a long delay lag where a grey placeholder appears before the paint makes it. We did work on removing this, I believe there was some sort of debounce. Is that still there? We want the resize of window to make the contents repaint seamlessly, ultra-high performance. ID any bottlenecks in the path."* Later: *"i dragged around in your dev instance, it's definitely an improvement"*.
 **Related:** `SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` (proposed, never implemented; its delays are re-checked in §4), `ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md` and `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` (where `window:keepinactivetabslaidout` came from), `SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`.
@@ -277,3 +277,29 @@ The two long frames left after §10 came at the same window widths in every run.
 | After §11 | 96–97 | 16.7 / 16.7 / 16.8–33.4 / 16.8–33.4 ms | 0 |
 
 **For future CSS:** a viewport-width media query (including Tailwind's `sm:`, `md:`, `lg:`, `xl:` and `2xl:` variants, none of which the app uses today) brings this cost back at each of its widths. Size-dependent styling belongs in container queries, which the panes already use.
+
+## 12. Results: a fast drag, and how far the page trails the edge
+
+The repo owner pointed out that the stepped resize above moves the edge slowly: 10 px a frame, about 625 px/s, over 400 px. A drag that shows the lag is faster and longer. This section uses **50 px a frame (about 3,000 px/s) over 1,500 px**, on a mixed tab: agent list, CPU chart, Swarm and four terminals.
+
+**How far the page trails the edge.** Frame counts don't show this, so the dev window was given a 6 px `#FF00FF` bar fixed to the page's right edge. The window was then captured with `PrintWindow(…, PW_RENDERFULLCONTENT)` 12 ms after each 50 px grow step, and the bar's distance from the window's right edge measured. `PrintWindow` captures the window's own content, so it isn't affected by other windows on top. (An earlier attempt used screen captures; another window covered the dev window, so those numbers were wrong and were withdrawn.) Each capture takes about 35 ms, so these steps run about every 35 ms, not 16.
+
+**Before:** 68 frames, p90 33 ms, and the page received 25 of the 60 sizes. The page was one step (49 px) behind the edge in most samples, and two steps (99 px) in up to 30%. A trace showed why. Frames alternated between quick ones with no terminal refits and slow ones (35–64 ms) averaging 5.4 refits: all four terminals refitting together, some twice (the live refit and the long-buffer column throttle). Most of each refit is xterm's WebGL `handleResize`, which reallocates the canvas. Chromium resizes a WebGL drawing buffer synchronously (`CheckFramebufferStatus`, `CommandBufferHelper::Finish`), so each refit also waits on the GPU process.
+
+**The fix:** `liveRefits` in `term-resize-policy.ts`, one scheduler for every terminal's live refit.
+- At most `LIVE_REFITS_PER_FRAME` (2) terminals refit in a frame; the rest wait for the next frames in arrival order.
+- A terminal has one waiting refit at most: a newer request replaces it, keeping its place.
+- A refit is measured when it runs, so a terminal that waited still gets that frame's size.
+- The long-buffer column throttle goes through it too, so one terminal never refits twice in a frame.
+- With four terminals, each refits every second frame during a drag. The PTY still hears the size once the drag settles.
+
+**Measured**, the same fast drag on the same tab, three runs each:
+
+| | Frames | Frame gap p50 / p90 / max | Sizes received (of 60) | Page behind the edge |
+|---|---|---|---|---|
+| Before | 68 | 16.7 / 33.3 / 33.4 ms | 25 | 1 step, or 2 in up to 30% of samples |
+| After | 79 | 16.7 / 16.7 / 16.8 ms | 34–35 | 1 step in every sample |
+
+One step behind is the floor for a page: the new size needs one frame to render. Removing even that would take the native window holding its new size back until the renderer's frame is ready, which is a host-side change for a separate investigation.
+
+**R7, measured properly.** In those captures the uncovered strip at the window edge was `#222222`, the page's own `--main-bg-color`, in 59 of 60 samples, and black once. So the fill during a resize is already the app's background, and setting the window's background from the theme (R7) wouldn't change what's seen.

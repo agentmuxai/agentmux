@@ -20,7 +20,7 @@ import * as TermTypes from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
 import debug from "debug";
 import { debounce, throttle } from "throttle-debounce";
-import { LARGE_BUFFER_COLS_THROTTLE_MS, liveRefit, PTY_RESIZE_DEBOUNCE_MS } from "./term-resize-policy";
+import { LARGE_BUFFER_COLS_THROTTLE_MS, liveRefit, liveRefits, PTY_RESIZE_DEBOUNCE_MS } from "./term-resize-policy";
 import { FilePathLinkProvider, makeFilePathHandler } from "./filelinkprovider";
 import { FitAddon } from "@xterm/addon-fit";
 import { registeredAgentsByBlock, unregisterAgent } from "./termagent";
@@ -136,10 +136,12 @@ export class TermWrap {
         this.heldData = [];
         this.hasResized = false;
         this.refitColsThrottled = throttle(LARGE_BUFFER_COLS_THROTTLE_MS, () => {
-            if (this.disposed) return;
-            const dims = this.proposeFit();
-            if (dims) this.applyFit(dims);
-            this.schedulePtySize();
+            liveRefits.schedule(this, () => {
+                if (this.disposed) return;
+                const dims = this.proposeFit();
+                if (dims) this.applyFit(dims);
+                this.schedulePtySize();
+            });
         });
 
         // Create terminal and load addons
@@ -523,6 +525,7 @@ export class TermWrap {
     dispose() {
         if (this.ptySizeTimer != null) this.flushPtySize();
         this.refitColsThrottled?.cancel?.();
+        liveRefits.cancel(this);
         if (this.wedgeTimer != null) {
             clearInterval(this.wedgeTimer);
             this.wedgeTimer = null;
@@ -730,11 +733,19 @@ export class TermWrap {
 
     /**
      * Follow a live resize (ResizeObserver during a window or splitter drag):
-     * refit the grid this frame — a column change on a long buffer through a
-     * ~100 ms throttle — and tell the PTY once the size settles
+     * refit the grid this frame, or a later one when other terminals already
+     * used this frame's refits (`liveRefits`) — a column change on a long buffer
+     * through a ~100 ms throttle — and tell the PTY once the size settles
      * (term-resize-policy.ts; SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.1).
      */
     handleResizeLive() {
+        if (this.disposed) return;
+        liveRefits.schedule(this, this.refitLive);
+        this.schedulePtySize();
+    }
+
+    /** One live refit, run by `liveRefits` this frame or a later one, measured then. */
+    private refitLive = () => {
         if (this.disposed) return;
         const dims = this.proposeFit();
         if (!dims) return;
@@ -742,8 +753,8 @@ export class TermWrap {
         const mode = liveRefit(dims, current, this.terminal.buffer.normal.length);
         if (mode === "now") this.applyFit(dims);
         else if (mode === "throttle") this.refitColsThrottled();
-        this.schedulePtySize();
-    }
+        if (mode !== "none") this.schedulePtySize();
+    };
 
     /** Send the PTY its size once the resize settles (trailing). */
     private schedulePtySize() {
