@@ -140,8 +140,7 @@ export class HistoryParser {
      * main-agent API call — read the same way as live (`mainAgentUsage`:
      * `message_start` or `assistant`, subagents' lines ignored). Reset to null
      * at a compaction (the next call reports the new size) and at a `fresh`
-     * session boundary
-     * (codex P2 on PR #2507): the fresh model has none of the old session's
+     * session boundary (#2507): the fresh model has none of the old session's
      * tokens, so only post-boundary usage may seed the meter.
      */
     lastContext: HistoryContext | null = null;
@@ -338,13 +337,9 @@ export class HistoryParser {
                 // AFTER the first post-resume exchange — as a divider row it
                 // announces a non-event in the wrong place. The line stays in
                 if (data && data.outcome === "fresh") {
-                    // codex P2 on PR #2507: usage seen BEFORE this boundary
-                    // belongs to the old session — the fresh model has none
-                    // of those tokens in context. Without this reset, a
-                    // restore window shaped [old call → fresh boundary → no
-                    // new call yet] hydrates the context meter
-                    // (`ReconcileContextFromHistory`) with the dead session's
-                    // count. Only post-boundary usage may seed it.
+                    // Usage seen before this boundary belongs to the old
+                    // session, which the fresh model has none of; only
+                    // post-boundary usage may seed the meter (#2507).
                     this.lastContext = null;
                 }
                 if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {

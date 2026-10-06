@@ -3,7 +3,7 @@
 **Date:** 2026-10-05
 **Author:** agent2
 **Trigger:** Repo owner, 2026-10-05: a freshly started agent pane's composer strip read `17m / 200k`. 17m is impossible, and Sonnet 5.5 has a 1M window, not 200k. "We may need a deep rethink."
-**Status:** analysed at `origin/main` 6943d5fd5 (v0.59.10 era); P0–P3 implemented together and reviewed, see §9.
+**Status:** implemented — analysed at `origin/main` 6943d5fd5 (v0.59.10 era); P0–P3 implemented together and reviewed, see §9.
 **Related:** `SPEC_CONTEXT_VISIBILITY_2026_06_17.md` (the meter's design), `REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md`, `PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md` (introduced the hydration path), `REPORT_AGENT_RUNTIME_STATE_RECONCILIATION_2026_09_30.md` (§3.6 on `modelUsage`).
 
 ---

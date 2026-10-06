@@ -1575,16 +1575,11 @@ export function update(
                 // back to `command.at` when frameTimestamp is unparseable,
                 // same as preservesNewerCompaction above.
                 lastCompactionBoundaryAt: Number.isNaN(boundaryAt) ? command.at : boundaryAt,
-                // The reading measured the conversation before this
-                // compaction, so it no longer holds; the meter shows none
-                // until the next call reports the real size. `postTokens` is
-                // NOT that size: it counts only the summary messages, not the
-                // system prompt and tools every call carries (CLI 2.1.288: a
-                // /compact reported post_tokens 1,417; the next call's prompt
-                // was 39,490). Kept when this boundary is an OLDER compaction
-                // finishing after a newer one started (reagent P2 on PR #2378
-                // round 11, gated like `compacting` above), or when the
-                // reading already postdates the boundary.
+                // The reading measured the pre-compaction conversation: none
+                // until the next call. `postTokens` is not the new size (summary
+                // messages only, no system prompt or tools; see context-reading.ts).
+                // Kept for an older compaction finishing late, gated like
+                // `compacting` (#2378), or a reading taken after the boundary.
                 context:
                     preservesNewerCompaction || readingPostdates(state.context, Number.isNaN(boundaryAt) ? command.at : boundaryAt)
                         ? state.context

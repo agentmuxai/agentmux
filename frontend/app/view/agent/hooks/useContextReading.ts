@@ -92,17 +92,10 @@ export function useContextReading(
     // only that nothing has been read, not that the persisted one is wrong.
     let mirrored = false;
 
-    // Mirror the reading to block meta so the Swarm view can read it without
-    // access to per-pane in-memory signals — the displayable reading only.
-    // Fires when the reading changes (once per API call while a turn runs).
-    // A reading is written whenever there is one; a null only once the
-    // history restore has settled or after this pane wrote a reading — a
-    // mount-time null would wipe the persisted reading the Swarm shows (and
-    // a failed restore would never write it back). The legacy bare
-    // `term:ctx-tokens` is cleared: it held whatever the pane once computed,
-    // including history seeds that were turn totals, and the Swarm no longer
-    // reads it. Meta is read untracked: this effect writes it, and must not
-    // re-run on its own write.
+    // Mirror the displayable reading to block meta for the Swarm. A null only
+    // after the restore completed or this pane wrote a reading: a mount-time
+    // null would wipe the persisted one. Clears the legacy `term:ctx-tokens`.
+    // Meta is read untracked so the effect doesn't re-run on its own write.
     createEffect(
         on([reading, opts.ready], ([r, ready]) => {
             if (r == null && !ready && !mirrored) return;
