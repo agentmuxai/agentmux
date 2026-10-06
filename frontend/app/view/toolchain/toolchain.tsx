@@ -13,6 +13,7 @@ export const toolchainPaneTab: PaneTabManifest = {
     view: "toolchain",
     label: "Toolchain",
     icon: "wrench",
+    defaultHue: 210,
     create: () => ({
         component: () => <ToolchainView />,
         liveTitle: () => ({ text: "Toolchain" }),

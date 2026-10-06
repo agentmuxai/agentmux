@@ -37,6 +37,7 @@
 
 import { getFileSubject } from "@/app/store/mps";
 import { getObjectValue, makeORef } from "@/app/store/mos";
+import { blockRoleColor, isLightThemeActive } from "@/app/block/pane-identity";
 import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
@@ -223,10 +224,9 @@ interface UseAgentStreamOpts {
 /**
  * Subscribe to subprocess output and parse it into styled DocumentNodes.
  */
-/** The colour an agent pane is drawn in (its focused border), if set. */
+/** The colour an agent pane is drawn in (its focused border), if it has one. */
 function agentColorOf(blockId: string): string | undefined {
-    const c = getObjectValue<Block>(makeORef("block", blockId))?.meta?.["frame:activebordercolor"];
-    return typeof c === "string" ? c : undefined;
+    return blockRoleColor(getObjectValue<Block>(makeORef("block", blockId))?.meta, isLightThemeActive(), "identity");
 }
 
 export function useAgentStream({

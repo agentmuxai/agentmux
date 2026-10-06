@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import "./block-registry";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
+import { PANE_HUE_OPTIONS } from "./pane-color-menu";
 import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } from "./pane-tab-registry";
 
 const VIEWS = [
@@ -100,5 +101,20 @@ describe("built-in pane tabs (block-registry.ts)", () => {
     it("carries the term and agent tab descriptors", () => {
         expect(getPaneTab("term")?.tab?.label).toBeTypeOf("function");
         expect(getPaneTab("agent")?.tab?.label).toBeTypeOf("function");
+    });
+});
+
+// SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.3: every built-in widget has
+// a color, and it is one of the Pane Color swatches, so the user can pick it
+// back after trying another.
+describe("built-in widget colors", () => {
+    const swatches = new Set(PANE_HUE_OPTIONS.map((o) => o.hue));
+    it.each([...VIEWS, "files", "remotes"])("%s has a default hue from the Pane Color palette", (view) => {
+        expect(swatches.has(getPaneTab(view)?.defaultHue as number)).toBe(true);
+    });
+
+    it("gives the most used widgets distinct colors", () => {
+        const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "media", "help", "launcher", "remotes", "memory"];
+        expect(new Set(common.map((v) => getPaneTab(v)?.defaultHue)).size).toBe(common.length);
     });
 });

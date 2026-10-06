@@ -23,6 +23,7 @@ export const helpPaneTab: PaneTabManifest = {
     view: "help",
     label: "Help",
     icon: "circle-question",
+    defaultHue: 90,
     create: () => ({ component: HelpView }),
 };
 

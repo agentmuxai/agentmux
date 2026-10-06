@@ -76,7 +76,14 @@ vi.mock("@/app/block/blockframe", () => ({
     // Meta-driven for the same reason as the two above: headerTailBg's whole
     // job is to compare these resolved values across tabs, so a fixed stub
     // would make every pane look single-colored and pass vacuously.
-    computeBlockColorBg: (meta: any) => (meta?.["frame:hue"] != null ? `color-${meta["frame:hue"]}` : undefined),
+    // `test:widgethue` stands in for a widget-type color (pane-identity.ts):
+    // counted unless the caller asks for identities only.
+    computeBlockColorBg: (meta: any, _light: boolean, opts?: { widget?: boolean }) =>
+        meta?.["frame:hue"] != null
+            ? `color-${meta["frame:hue"]}`
+            : opts?.widget !== false && meta?.["test:widgethue"] != null
+              ? `color-w${meta["test:widgethue"]}`
+              : undefined,
     // Takes no meta at all — that is the fix. Any test asserting this value
     // is asserting "the tail cannot vary with the active tab".
     computeMixedPaneHeaderBg: () => "mixed-default",
@@ -443,6 +450,22 @@ describe("renderPaneChromeShell — header tail color", () => {
         setObjectValue("block:b2", { meta: {} });
         setObjectValue("block:b3", { meta: { "frame:hue": 20 } });
         expect(tailBgAcrossEveryActiveTab(["b1", "b2", "b3"])).toEqual(["mixed-default", "mixed-default", "mixed-default"]);
+    });
+
+    // SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.8: a widget-type color
+    // is not an identity, so it never competes with an agent's tint.
+    it("a tab colored only by its widget type does not compete with an identity", () => {
+        setObjectValue("block:b1", { meta: { "frame:hue": 10 } });
+        setObjectValue("block:b2", { meta: { "test:widgethue": 240 } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["color-10", "color-10"]);
+    });
+
+    it("tabs sharing one widget color send no override; two widget colors are neutral", () => {
+        setObjectValue("block:b1", { meta: { "test:widgethue": 240 } });
+        setObjectValue("block:b2", { meta: { "test:widgethue": 240 } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual([undefined, undefined]);
+        setObjectValue("block:b2", { meta: { "test:widgethue": 60 } });
+        expect(tailBgAcrossEveryActiveTab(["b1", "b2"])).toEqual(["mixed-default", "mixed-default"]);
     });
 
     it("two of three tabs agreeing is not agreement", () => {

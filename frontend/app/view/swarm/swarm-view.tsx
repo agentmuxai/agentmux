@@ -11,8 +11,8 @@ import AnsiLine from "@/element/ansiline";
 import { callBackendService } from "@/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MOS, atoms, getSettingsKeyAtom } from "@/app/store/global";
-import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
+import { MOS, atoms } from "@/app/store/global";
+import { isLightThemeActive } from "@/app/block/pane-identity";
 import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
@@ -361,18 +361,15 @@ export function AgentRow({
     );
     const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
     // The agent's own pane-tab color — same source PaneChrome's `tabColors`
-    // memo reads for the tab underline (hue-aware: an explicit `frame:hue`
-    // override wins, else `frame:activebordercolor`), so the Swarm row's
+    // memo reads for the tab underline (pane-identity.ts: the pane's pick,
+    // else its agent color, else its widget color), so the Swarm row's
     // selected border and hover border always match that agent's actual pane
     // tab (the unselected pane border, for hover) instead of a fixed theme accent
     // (SPEC_SWARM_ROW_AGENT_COLOR_AND_SELECT_TO_FOCUS_2026_09_25.md §2.1-2.2).
     const blockMeta = createMemo(() =>
         node.blockId ? MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", node.blockId))()?.meta : undefined
     );
-    const rowColors = createMemo(() => {
-        const themeId = getSettingsKeyAtom("window:theme")();
-        return swarmRowColors(blockMeta(), typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId));
-    });
+    const rowColors = createMemo(() => swarmRowColors(blockMeta(), isLightThemeActive()));
     // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
     // below (reagent P1 on PR #2862). Left in the bucket, an agent whose only
     // active work was a promoted Bash/sleep call had `hasChildren() === false`

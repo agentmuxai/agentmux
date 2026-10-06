@@ -24,6 +24,7 @@ export const filesPaneTab: PaneTabManifest = {
     view: "files",
     label: "Hangar",
     icon: "folder-open",
+    defaultHue: 180,
     capabilities: { lifecycle: "keepAlive", noPadding: true },
     // A Hangar tab added with the pane's "+" starts in the folder the tab in
     // front shows, as a terminal's new tab starts in its directory.
