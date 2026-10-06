@@ -1,5 +1,42 @@
 # AgentMux Version History
 
+## 0.59.11 — 2026-10-06
+
+- fix(statusbar): the version panel no longer shows a MuxBus row or Sign in button; sign-in stays in the network panel
+- Bash tool calls are no longer one block of green. In the hover panel, a heredoc's body is coloured in its own language (TypeScript written with cat > a.ts, Python read by python -, commit messages as Markdown, and so on), and a body of unknown language shows as plain text. The collapsed row and its hover popover colour the command too. A hover popover wider than its pane now spills over the side with more window: to the right for a pane at the left edge, to the left for one at the right edge, and evenly for a pane in the middle.
+- The editor's file tree is hidden from its own toolbar (a new first button) and shown again from the start of the document bar; the pane header's icon no longer toggles it.
+- Example paths in tests and docs use a placeholder username instead of a real local account name.
+- Tearing a pane off into its own window no longer sometimes opens a blank white window. Two pre-loaded windows created at the same moment could swap identities, so the tear-off showed one window and sent the pane to the other.
+- My Agents tiles: the actions chevron and its panels now sit on their own tile whatever the tile's height
+- Agent pane: the context meter shows the real context size and the model's real window. A freshly opened pane could show "17m / 200k"; it now reads the last API call's prompt against the window Claude Code reports (1M for Sonnet 5.5). After a compaction the meter waits for the next reply instead of showing a far-too-small number, a model switch blanks the window until the new model replies, and the meter no longer resets after a slash command, an archive/restore or a failed memory reinjection.
+- Every pane type now has its own default color (Terminal blue, Browser amber, Editor violet, ...), used for its border, tab pill and header tint until you pick one; pane:colors in settings.json changes a type's color
+- Agent picker filter: typing an agent's name lists the names that contain it first; near-misses only appear when nothing matches
+- Top-bar widget icons and Launcher tiles now carry a faint tint of their widget type's color, and follow it when you change it
+- Settings → Appearance has a new Widget colors section for choosing the pane color of each widget type, or none. A pane's Pane Color menu can also apply its color to every pane of that widget type.
+- The agent pane keeps about 1 MB of finished conversation (was 5 MB) before older turns move to History, so panes stay lighter and open faster
+- A fresh agent session no longer gets its memory a second time after its first turn, with a notice wrongly saying its context was just reset.
+- Added a shared set of outline-style buttons, tabs and form controls that the app's panes and dialogs will move onto, replacing their solid-colour buttons.
+- Settings now uses outline-style buttons, switches and inputs instead of solid colour blocks, with one section list that turns into icons, then top tabs, as the pane narrows.
+- The new-agent dialogs now mark the main action (Create or Launch) as an accent outline and Cancel as a neutral one, instead of two identical solid buttons.
+- Buttons across the app, including the Close tab and other confirm dialogs, are now outlines in the theme's colours instead of solid blocks with a lime-green hover.
+- The backend logs where a slow history read spent its time, and which code held the transcript store's lock for a long time, so a stalled agent open can be traced
+- Connectors, Knowledge and Warden now mark the open section with a thin accent line instead of a solid block, matching Settings and the agent pane's Stash tabs.
+- Opening an agent reads about 1 MB of its conversation instead of the last 10,000 lines (about 5 MB on a busy agent), so long-running agents open faster; older turns still load by scrolling up
+- An agent pane shows within 1.5 s of opening even while its conversation is still loading, with the composer usable and a Loading conversation note over the transcript
+- Bundles' New, Save, Edit, Delete and bind buttons are now outlines instead of solid colour blocks.
+- The Shell button's open state, the fork buttons, the question panel's Submit and the agent identity dialog's Done button are now outlines instead of solid colour blocks.
+- Buttons in Connectors' account forms and sign-in panels are now outlines instead of solid colour blocks.
+- Memory editor, memory history, Personal Memory, MCP and Skills buttons are now outlines instead of solid colour blocks.
+- The status bar's Restart, Instance panel and Maintenance buttons, the LAN discovery switch and Drone's buttons are now outlines instead of solid colour blocks.
+- The top bar now starts Agent, Swarm, Knowledge, Hangar, Connectors. Swarm moves up to sit next to Agent.
+- The Files toolbar and the Remotes pane now use the same outline buttons as the rest of the app, with square corners.
+- Toolchain, the Swarm fleet toolbar and the editor's Preview / Source / Split switch now use the app's shared outline controls.
+- A terminal pane's header menu now ends at Pane Color. The old terminal items below it are gone (theme, font size, zoom, transparency, restart, startup and debug options); a host's durable-session setting and its sessions list are in the Remotes pane.
+- Opening an agent no longer stalls for many seconds when its new session starts writing during the history read; updating the conversation index appends new entries instead of rewriting it, so opens of long-running agents are faster
+- Agent pane: the context meter counts down to where Claude Code actually auto-compacts, as the CLI reports it (honouring CLAUDE_CODE_AUTO_COMPACT_WINDOW and similar settings), and shows no countdown when auto-compaction is off
+- Opening an agent from the picker goes straight to the logo and then the conversation; the picker's text no longer fades out on top of it
+- A reopened agent whose subagent backfill is still running shows within 1.5 s too, instead of staying covered until the backfill finishes
+
 ## 0.59.10 — 2026-10-05
 
 - feat(swarm): a Stats button in the Swarm toolbar opens a panel with the outcomes of AgentMux's own model calls (titles, names, suggestions); the unused Groups picker and the Instance panel's Titles row are removed
