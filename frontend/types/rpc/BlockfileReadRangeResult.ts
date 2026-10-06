@@ -24,7 +24,7 @@ stream?: string, gen?: string,
  */
 gen_mismatch?: boolean, 
 /**
- * With `tail_turns`: the line number of `lines[0]` — the request's
+ * With `tail_turns` or `tail_bytes`: the line number of `lines[0]` — the request's
  * `offset` when nothing was trimmed. `lines` is contiguous from here.
  */
 offset?: number, };

@@ -110,6 +110,12 @@ export interface UseHistoryPaginationOptions {
      * restore reads. Undefined: the whole window.
      */
     restoreTurns?: () => number | undefined;
+    /**
+     * Restore at most this many transcript bytes from the window's end
+     * (`tail_bytes`; applied after `restoreTurns`). Called once, when the
+     * restore reads. Undefined: no byte limit.
+     */
+    restoreBytes?: () => number | undefined;
 }
 
 export interface UseHistoryPagination {
@@ -366,17 +372,20 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         }
                         const windowStart = Math.max(0, hwm - RESTORE_WINDOW_LINES);
                         const tailTurns = opts.restoreTurns?.();
+                        const tailBytes = opts.restoreBytes?.();
                         const rangeResp = await RpcApi.BlockfileReadRangeCommand(TabRpcClient, {
                             block_id: opts.blockId,
                             filename: "output",
                             offset: windowStart,
                             limit: hwm - windowStart,
                             ...(tailTurns ? { tail_turns: tailTurns } : {}),
+                            ...(tailBytes ? { tail_bytes: tailBytes } : {}),
                         }, { timeout: 30_000 });
                         if (!mounted) return;
                         // Where the returned lines start: the backend trims to
-                        // the last `tail_turns` turns and says where they begin
-                        // (an older srv ignores the field and returns the window).
+                        // the last `tail_turns` turns and to `tail_bytes`, and
+                        // says where they begin (an older srv ignores both
+                        // fields and returns the window).
                         const readStart = typeof rangeResp.offset === "number" ? rangeResp.offset : windowStart;
                         markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
                         const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, readStart));
