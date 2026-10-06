@@ -49,6 +49,7 @@ import "./files.scss";
 import { openRemotesInPane } from "@/app/view/remotes/open-remotes";
 import { paneCommandFor, shortcutFor } from "@/app/keybindings";
 import { isEditableTarget } from "@/util/focusutil";
+import { Button, IconButton } from "@/app/element/ui";
 
 export const ROW_HEIGHT = 24;
 /** A grid tile's box (thumbnail and a two-line name). */
@@ -781,15 +782,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     return (
         <div class="files-view" onContextMenu={(e) => e.preventDefault()} onKeyDown={onPaneKeyDown}>
             <div class="files-toolbar">
-                <button type="button" class="files-tool" title={`Back (${shortcutFor("files:back")})`} disabled={!model.canBack()} onClick={() => model.goBack()}>
-                    <i class="fa fa-arrow-left" />
-                </button>
-                <button type="button" class="files-tool" title={`Forward (${shortcutFor("files:forward")})`} disabled={!model.canForward()} onClick={() => model.goForward()}>
-                    <i class="fa fa-arrow-right" />
-                </button>
-                <button type="button" class="files-tool" title={`Up (${shortcutFor("files:up")})`} disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()}>
-                    <i class="fa fa-arrow-up" />
-                </button>
+                <IconButton icon="arrow-left" label={`Back (${shortcutFor("files:back")})`} class="files-tool" disabled={!model.canBack()} onClick={() => model.goBack()} />
+                <IconButton icon="arrow-right" label={`Forward (${shortcutFor("files:forward")})`} class="files-tool" disabled={!model.canForward()} onClick={() => model.goForward()} />
+                <IconButton icon="arrow-up" label={`Up (${shortcutFor("files:up")})`} class="files-tool" disabled={crumbsOf(model.path()).length < 2} onClick={() => model.goUp()} />
                 <Show
                     when={!editingPath()}
                     fallback={
@@ -853,58 +848,17 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         }}
                     />
                 </Show>
-                <button type="button" class="files-tool" title={`Filter (${shortcutFor("files:filter")})`} onClick={openFilter}>
-                    <i class="fa fa-filter" />
-                </button>
-                <button type="button" class="files-tool" title="New folder" onClick={() => void model.createNew("dir")}>
-                    <i class="fa fa-folder-plus" />
-                </button>
-                <button
-                    type="button"
-                    class="files-tool"
-                    classList={{ "files-tool-on": model.showHidden() }}
-                    title={model.showHidden() ? "Hide hidden files" : "Show hidden files"}
-                    aria-pressed={model.showHidden()}
-                    onClick={() => model.toggleHidden()}
-                >
-                    <i class={`fa ${model.showHidden() ? "fa-eye" : "fa-eye-slash"}`} />
-                </button>
-                <button type="button" class="files-tool" title="Refresh (F5)" onClick={() => model.refresh()}>
-                    <i class="fa fa-arrows-rotate" />
-                </button>
-                <button
-                    type="button"
-                    class="files-tool"
-                    classList={{ "files-tool-on": model.showSidebar() }}
-                    title={model.showSidebar() ? "Hide Places" : "Show Places"}
-                    aria-pressed={model.showSidebar()}
-                    onClick={() => model.toggleSidebar()}
-                >
-                    <i class="fa fa-table-columns" />
-                </button>
-                <button
-                    type="button"
-                    class="files-tool"
-                    title={grid() ? "Show as a list" : "Show as thumbnails"}
-                    aria-pressed={grid()}
-                    onClick={() => {
+                <IconButton icon="filter" label={`Filter (${shortcutFor("files:filter")})`} class="files-tool" onClick={openFilter} />
+                <IconButton icon="folder-plus" label="New folder" class="files-tool" onClick={() => void model.createNew("dir")} />
+                <IconButton icon={model.showHidden() ? "eye" : "eye-slash"} label={model.showHidden() ? "Hide hidden files" : "Show hidden files"} pressed={model.showHidden()} class="files-tool" onClick={() => model.toggleHidden()} />
+                <IconButton icon="arrows-rotate" label="Refresh (F5)" class="files-tool" onClick={() => model.refresh()} />
+                <IconButton icon="table-columns" label={model.showSidebar() ? "Hide Places" : "Show Places"} pressed={model.showSidebar()} class="files-tool" onClick={() => model.toggleSidebar()} />
+                <IconButton icon={grid() ? "list" : "table-cells-large"} label={grid() ? "Show as a list" : "Show as thumbnails"} pressed={grid()} class="files-tool" onClick={() => {
                         model.toggleViewMode();
                         if (listEl) listEl.scrollTop = 0;
                         setScrollTop(0);
-                    }}
-                >
-                    <i class={`fa ${grid() ? "fa-list" : "fa-table-cells-large"}`} />
-                </button>
-                <button
-                    type="button"
-                    class="files-tool"
-                    classList={{ "files-tool-on": model.showPreview() }}
-                    title={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"}
-                    aria-pressed={model.showPreview()}
-                    onClick={() => model.togglePreview()}
-                >
-                    <i class="fa fa-eye" />
-                </button>
+                    }} />
+                <IconButton icon="eye" label={model.showPreview() ? "Hide preview (Space)" : "Show preview (Space)"} pressed={model.showPreview()} class="files-tool" onClick={() => model.togglePreview()} />
             </div>
 
             <div class="files-body">
@@ -1049,9 +1003,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                     macOS will ask to let AgentMux open your {placeLabel(model.path())} folder. That's so it can show
                                     what's inside. It asks again after each AgentMux update.
                                 </p>
-                                <button type="button" class="files-button" onClick={() => void model.navigate(model.path(), { push: false, consented: true })}>
+                                <Button class="files-button" onClick={() => void model.navigate(model.path(), { push: false, consented: true })}>
                                     Open {placeLabel(model.path())}
-                                </button>
+                                </Button>
                             </div>
                         </Match>
                         <Match when={model.phase() === "loading"}>
@@ -1066,9 +1020,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         <Match when={model.phase() === "error"}>
                             <div class="files-notice files-notice-error" role="alert">
                                 <p>{errorMessage(model.error()?.kind, model.error()?.message, placeLabel(model.path()))}</p>
-                                <button type="button" class="files-button" onClick={() => model.refresh()}>
+                                <Button class="files-button" onClick={() => model.refresh()}>
                                     Try again
-                                </button>
+                                </Button>
                             </div>
                         </Match>
                         <Match when={model.phase() === "ready" && entries().length === 0 && !model.partial()}>
@@ -1172,9 +1126,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                 style={{ width: `${op.total_bytes > 0 ? Math.floor((op.done_bytes / op.total_bytes) * 100) : op.total_items > 0 ? Math.floor((op.done_items / op.total_items) * 100) : 0}%` }}
                             />
                         </span>
-                        <button type="button" class="files-status-undo" onClick={() => void model.ops.cancel(op.op_id)}>
+                        <Button tone="quiet" class="files-status-undo" onClick={() => void model.ops.cancel(op.op_id)}>
                             Cancel
-                        </button>
+                        </Button>
                     </div>
                 )}
             </For>
@@ -1201,9 +1155,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                         <span classList={{ "files-status-error": msg().tone === "error" }}>
                             {msg().text}
                             <Show when={msg().undo}>
-                                <button type="button" class="files-status-undo" onClick={() => void model.undo()}>
+                                <Button tone="quiet" class="files-status-undo" onClick={() => void model.undo()}>
                                     Undo
-                                </button>
+                                </Button>
                             </Show>
                         </span>
                     )}
@@ -1577,18 +1531,18 @@ function ConflictDialog(props: {
                         </label>
                     </div>
                     <div class="files-conflict-actions">
-                        <button ref={first} type="button" class="files-button" onClick={() => props.onResolve("keep_both", all())}>
+                        <Button ref={first} class="files-button" onClick={() => props.onResolve("keep_both", all())}>
                             Keep both
-                        </button>
-                        <button type="button" class="files-button" onClick={() => props.onResolve("skip", all())}>
+                        </Button>
+                        <Button class="files-button" onClick={() => props.onResolve("skip", all())}>
                             Skip
-                        </button>
-                        <button type="button" class="files-button files-button-danger" onClick={() => props.onResolve("replace", all())}>
+                        </Button>
+                        <Button tone="danger" class="files-button files-button-danger" onClick={() => props.onResolve("replace", all())}>
                             Replace
-                        </button>
-                        <button type="button" class="files-button" onClick={props.onCancel}>
+                        </Button>
+                        <Button class="files-button" onClick={props.onCancel}>
                             Stop
-                        </button>
+                        </Button>
                     </div>
                 </div>
             </div>

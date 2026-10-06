@@ -204,7 +204,7 @@ describe("the Files pane: listing", () => {
     it("shows hidden files when asked, and remembers it in the block", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.click(v.container.querySelector('[title="Show hidden files"]')!);
+        fireEvent.click(v.container.querySelector('[aria-label="Show hidden files"]')!);
         await waitFor(() => expect(v.names()).toContain(".env"));
         expect(v.meta()["files:hidden"]).toBe(true);
     });
@@ -498,7 +498,7 @@ describe("the Files pane: operations", () => {
         h.state.dirs.set(HOME, [d("New folder")]);
         const v = mount();
         await waitFor(() => expect(v.names()).toEqual(["New folder"]));
-        fireEvent.click(v.container.querySelector('[title="New folder"]')!);
+        fireEvent.click(v.container.querySelector('[aria-label="New folder"]')!);
         await waitFor(() =>
             expect(h.rpc.FsCreateCommand).toHaveBeenCalledWith(expect.anything(), { parent: HOME, name: "New folder (2)", kind: "dir" })
         );
@@ -985,14 +985,14 @@ describe("the Files pane: grid view (§5.2)", () => {
         h.state.dirs.set(HOME, [d("src"), f("a.png", { size: 10 }), f("b.txt"), f("huge.png", { size: 999_999_999 })]);
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
-        fireEvent.click(v.container.querySelector('[title="Show as thumbnails"]')!);
+        fireEvent.click(v.container.querySelector('[aria-label="Show as thumbnails"]')!);
         expect(v.meta()["files:view"]).toBe("grid");
         await waitFor(() => expect(tiles(v)).toEqual(["src", "a.png", "b.txt", "huge.png"]));
         await waitFor(() => expect(v.container.querySelectorAll(".files-tile-thumb")).toHaveLength(1));
         // Too big to fetch for a thumbnail: an icon.
         expect(media.blob).toHaveBeenCalledTimes(1);
         expect(media.blob.mock.calls[0][0]).toBe(`${HOME}\\a.png`);
-        fireEvent.click(v.container.querySelector('[title="Show as a list"]')!);
+        fireEvent.click(v.container.querySelector('[aria-label="Show as a list"]')!);
         await waitFor(() => expect(v.container.querySelector(".files-grid")).toBeNull());
         expect(v.meta()["files:view"]).toBeUndefined();
     });
@@ -1231,9 +1231,9 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
     it("Refresh, F5 and New folder don't list a gated folder (ReAgent on #4201)", async () => {
         const v = mount({ "files:path": "/Users/a/Documents" });
         await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
-        fireEvent.click(v.container.querySelector('[title="Refresh (F5)"]')!);
+        fireEvent.click(v.container.querySelector('[aria-label="Refresh (F5)"]')!);
         fireEvent.keyDown(v.list(), { key: "F5" });
-        fireEvent.click(v.container.querySelector('[title="New folder"]')!);
+        fireEvent.click(v.container.querySelector('[aria-label="New folder"]')!);
         await new Promise((r) => setTimeout(r, 20));
         expect(h.rpc.FsListCommand).not.toHaveBeenCalled();
         expect(h.rpc.FsCreateCommand).not.toHaveBeenCalled();

@@ -55,6 +55,7 @@ import {
 } from "@/app/view/identity/identity-model";
 import { AgentIdentityPanel } from "./AgentIdentityPanel";
 import type { AgentDefinition, AgentDefinitionUpdateInput } from "@/app/store/rpc-api";
+import { Button } from "@/app/element/ui";
 
 interface AgentIdentityModalPanelProps {
     agent: AgentDefinition;
@@ -110,13 +111,14 @@ export const AgentIdentityModalPanel = (props: AgentIdentityModalPanelProps): JS
                 onUpdate={handleUpdate}
             />
             <div class="agent-modal-footer">
-                <button
+                <Button
+                    tone="accent"
                     class="agent-modal-done-btn"
                     data-modal-dismiss
                     onClick={props.onClose}
                 >
                     Done
-                </button>
+                </Button>
             </div>
         </div>
     );
