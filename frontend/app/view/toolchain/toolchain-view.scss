@@ -235,41 +235,9 @@
 
 // ── Buttons ───────────────────────────────────────────────────────────
 
-.toolchain-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 0.8rem;
-    padding: 4px 10px;
-    border-radius: var(--radius-md, 6px);
-    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
-    background: var(--button-bg, transparent);
-    cursor: default;
+// Toolchain actions are element/ui Buttons (neutral, ghost ones quiet).
 
-    &:hover {
-        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.12));
-    }
-    &--ghost {
-        border-color: transparent;
-    }
-}
-
-.toolchain-link-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.8rem;
-    padding: 4px 6px;
-    border: none;
-    background: transparent;
-    color: var(--link-color, #58a6ff);
-    cursor: default;
-    border-radius: 4px;
-
-    &:hover {
-        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.12));
-    }
-}
+// Link-style actions are quiet element/ui Buttons.
 
 .toolchain-link-btn--install-now {
     display: flex;

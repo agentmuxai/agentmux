@@ -23,7 +23,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { settingsAtom } from "@/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { userIsTypingElsewhereIn } from "./editor-focus-guard";
-import type { EditorViewModel } from "./editor-model";
+import type { EditorMode, EditorViewModel } from "./editor-model";
+import { SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
@@ -950,28 +951,18 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 </Show>
 
                 <Show when={isMarkdown() && model.tabsAtom().length > 0}>
-                    <div class="editor-mode-toolbar" role="group" aria-label="View mode">
-                        <button
-                            type="button"
-                            class="editor-mode-btn"
-                            classList={{ active: model.editorMode() === "preview" }}
-                            onClick={() => model.setEditorMode("preview")}
-                            title={`Rendered preview (${keyLabel("mod+shift+v")})`}
-                        >Preview</button>
-                        <button
-                            type="button"
-                            class="editor-mode-btn"
-                            classList={{ active: model.editorMode() === "source" }}
-                            onClick={() => model.setEditorMode("source")}
-                            title="Source editor"
-                        >Source</button>
-                        <button
-                            type="button"
-                            class="editor-mode-btn"
-                            classList={{ active: model.editorMode() === "split" }}
-                            onClick={() => model.setEditorMode("split")}
-                            title="Split view"
-                        >Split</button>
+                    <div class="editor-mode-toolbar">
+                        <SegmentedControl<EditorMode>
+                            density="compact"
+                            ariaLabel="View mode"
+                            options={[
+                                { value: "preview", label: "Preview", title: `Rendered preview (${keyLabel("mod+shift+v")})` },
+                                { value: "source", label: "Source", title: "Source editor" },
+                                { value: "split", label: "Split", title: "Split view" },
+                            ]}
+                            value={model.editorMode()}
+                            onChange={(mode) => model.setEditorMode(mode)}
+                        />
                     </div>
                 </Show>
 

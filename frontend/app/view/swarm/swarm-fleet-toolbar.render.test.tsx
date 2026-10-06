@@ -90,7 +90,7 @@ describe("FleetToolbar — Stats", () => {
         fireEvent.click(stats);
         expect(model.toggleStats).toHaveBeenCalled();
         expect(stats.getAttribute("aria-expanded")).toBe("true");
-        expect(stats.classList.contains("swarm-fleet-btn--active")).toBe(true);
+        expect(stats.getAttribute("aria-pressed")).toBe("true");
         expect(container.querySelector(".swarm-stats-failing")).toBeNull();
     });
 

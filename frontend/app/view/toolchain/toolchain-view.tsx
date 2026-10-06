@@ -16,6 +16,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import { CliDiskSpace } from "./CliDiskSpace";
 import "./toolchain-view.scss";
+import { Button } from "@/app/element/ui";
 
 // ── Port/localStorage helpers (unchanged from modal) ─────────────────────────
 
@@ -433,9 +434,9 @@ export function ToolchainView(): JSX.Element {
                 <Show when={!row.loading && !row.found && row.installCommand}>
                     <div class="toolchain-row-cmd">
                         <code>{row.installCommand}</code>
-                        <button class="toolchain-link-btn" onClick={() => copy(row.installCommand)} title="Copy">
+                        <Button tone="quiet" class="toolchain-link-btn" onClick={() => copy(row.installCommand)} title="Copy">
                             <i class="fa-solid fa-copy" />
-                        </button>
+                        </Button>
                     </div>
                 </Show>
                 <Show
@@ -444,13 +445,13 @@ export function ToolchainView(): JSX.Element {
                         SYSTEM_INSTALLABLE_IDS.has(row.id) && !unavailableInstalls().has(row.id)
                     }
                 >
-                    <button
-                        type="button"
+                    <Button
+                        tone="accent"
                         class="toolchain-link-btn toolchain-link-btn--install-now"
                         onClick={() => toggleInstallPanel(row.id)}
                     >
                         or install it now
-                    </button>
+                    </Button>
                     <Show when={expandedInstalls().has(row.id)}>
                         <SystemToolInstallInline
                             toolId={row.id}
@@ -466,14 +467,14 @@ export function ToolchainView(): JSX.Element {
             </div>
             <div class="toolchain-row-actions">
                 <Show when={!row.loading && !row.found && row.installUrl}>
-                    <button class="toolchain-btn" onClick={() => open(row.installUrl)}>
+                    <Button class="toolchain-btn" onClick={() => open(row.installUrl)}>
                         Install <i class="fa-solid fa-arrow-up-right-from-square" />
-                    </button>
+                    </Button>
                 </Show>
                 <Show when={row.docsUrl}>
-                    <button class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
+                    <Button tone="quiet" class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
                         <i class="fa-solid fa-book" />
-                    </button>
+                    </Button>
                 </Show>
             </div>
         </div>
@@ -482,10 +483,11 @@ export function ToolchainView(): JSX.Element {
     return (
         <div class="toolchain-view">
             <div class="toolchain-view-header">
-                <button class="toolchain-btn toolchain-btn--ghost" onClick={refresh}>
+                <Button tone="quiet" class="toolchain-btn toolchain-btn--ghost" onClick={refresh}>
                     <i class="fa-solid fa-rotate" /> Refresh
-                </button>
-                <button
+                </Button>
+                <Button
+                    tone="quiet"
                     class="toolchain-btn toolchain-btn--ghost"
                     onClick={() => void checkLatestVersions()}
                     disabled={latestLoading()}
@@ -493,7 +495,7 @@ export function ToolchainView(): JSX.Element {
                 >
                     <i class={`fa-solid ${latestLoading() ? "fa-spinner fa-spin" : "fa-arrow-up"}`} />
                     {latestLoading() ? " Checking…" : " Check latest versions"}
-                </button>
+                </Button>
                 {/* The one-glance answer to "am I behind?" — counts only what
                     the user can act on. A pin trailing upstream is ours and is
                     deliberately excluded, so this never nags about something
@@ -525,9 +527,9 @@ export function ToolchainView(): JSX.Element {
                                         {pathSourceLabel(e().pathSource)}
                                     </span>
                                 </div>
-                                <button class="toolchain-link-btn toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
+                                <Button tone="quiet" class="toolchain-link-btn toolchain-path-toggle" onClick={() => setShowPath((v) => !v)}>
                                     {showPath() ? "Hide" : "Show"} effective PATH
-                                </button>
+                                </Button>
                                 <Show when={showPath()}>
                                     <pre class="toolchain-path-dump">
                                         {e().path.split(e().os === "windows" ? ";" : ":").join("\n")}
@@ -603,24 +605,24 @@ export function ToolchainView(): JSX.Element {
                                             }}
                                         />
                                         <Show when={row.customPort !== undefined}>
-                                            <button class="toolchain-link-btn" title="Reset to default port"
+                                            <Button tone="quiet" class="toolchain-link-btn" title="Reset to default port"
                                                 onClick={() => { setWrows(i(), { customPort: undefined, cliLoading: true, cliFound: false, healthLoading: false, running: false }); saveWidgetPort(row.id, undefined); void probeWidget(i()); }}>
                                                 <i class="fa-solid fa-rotate-left" />
-                                            </button>
+                                            </Button>
                                         </Show>
                                     </div>
                                 </div>
                                 <div class="toolchain-row-actions">
                                     <Show when={row.running}>
-                                        <button class="toolchain-btn"
+                                        <Button class="toolchain-btn"
                                             onClick={() => void createBlock({ meta: { view: "browser", url: `http://127.0.0.1:${row.customPort ?? row.defaultPort}${row.embedPath}`, "frame:title": row.label } })}>
                                             Open Pane <i class="fa-solid fa-arrow-up-right-from-square" />
-                                        </button>
+                                        </Button>
                                     </Show>
                                     <Show when={row.docsUrl}>
-                                        <button class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
+                                        <Button tone="quiet" class="toolchain-link-btn" onClick={() => open(row.docsUrl)} title="Docs">
                                             <i class="fa-solid fa-book" />
-                                        </button>
+                                        </Button>
                                     </Show>
                                 </div>
                             </div>
