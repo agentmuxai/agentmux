@@ -9,7 +9,7 @@ import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const openLink = vi.fn();
-const createBlock = vi.fn(() => Promise.resolve("block-1"));
+const createBlock = vi.fn((..._args: unknown[]) => Promise.resolve("block-1"));
 const listeners = new Map<string, (payload: unknown) => void>();
 vi.mock("@/app/store/global", () => ({
     openLink: (...a: unknown[]) => openLink(...a),

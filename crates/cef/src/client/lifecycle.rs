@@ -851,16 +851,6 @@ impl AgentMuxHandler {
         true // cancel the top-level popup creation
     }
 
-    /// The frontend's origin, or None when it isn't known (no IPC port yet, or
-    /// the frontend's assets are missing): then nothing is decided from it.
-    fn frontend_base(&self) -> Option<String> {
-        let port = self.resolved_ipc_port();
-        if port == 0 {
-            return None;
-        }
-        crate::commands::window::resolve_frontend_base_url(port).ok()
-    }
-
     /// An app window's main frame shows only the frontend
     /// (`app_navigation.rs`): another website opens in the system browser
     /// instead of replacing the app, a local file is refused. Subframes are
@@ -878,7 +868,7 @@ impl AgentMuxHandler {
             .map(|r| CefString::from(&r.url()).to_string())
             .unwrap_or_default();
         use super::app_navigation::{app_window_navigation, AppWindowNavigation};
-        match app_window_navigation(&url, self.frontend_base().as_deref()) {
+        match app_window_navigation(&url, &self.frontend_origins()) {
             AppWindowNavigation::Allow => 0,
             AppWindowNavigation::OpenInSystemBrowser => {
                 match crate::commands::platform::open_url_in_default_browser(&url) {
@@ -909,7 +899,7 @@ impl AgentMuxHandler {
             return 0;
         }
         let url = target_url.map(|s| s.to_string()).unwrap_or_default();
-        if !super::app_navigation::opens_in_browser_pane(&url, self.frontend_base().as_deref()) {
+        if !super::app_navigation::opens_in_browser_pane(&url, &self.frontend_origins()) {
             tracing::info!(url = %url, "app window: ignored a new-tab request for a non-web link");
             return 1;
         }

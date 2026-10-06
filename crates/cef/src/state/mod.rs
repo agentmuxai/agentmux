@@ -306,6 +306,13 @@ pub struct AppState {
     /// Verified on every IPC request to prevent unauthorized local access.
     pub ipc_token: String,
 
+    /// The origin the main window's frontend loads from: its `--url` switch,
+    /// or the bundled or dev frontend (app/mod.rs). It can differ from
+    /// `resolve_frontend_base_url`'s, e.g. `task run` pointing a packaged
+    /// build at Vite, so an app window may show either
+    /// (client/app_navigation.rs).
+    pub main_frontend_origin: Mutex<Option<String>>,
+
     // Phase H.2.e (PR #4) — `pub browsers: Mutex<HashMap<String, Browser>>`
     // deleted. Authoritative storage is now `HostState.browsers` (the host
     // reducer's map). Read access goes through `AppState::get_browser`,
@@ -744,6 +751,7 @@ impl Default for AppState {
             cli_login_cred_baseline: Mutex::new(None),
             ipc_port: Mutex::new(0),
             ipc_token: uuid::Uuid::new_v4().to_string(),
+            main_frontend_origin: Mutex::new(None),
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             approval_windows: Mutex::new(std::collections::HashSet::new()),

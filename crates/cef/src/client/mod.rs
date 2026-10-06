@@ -50,7 +50,7 @@ const MEMORY_PAUSE_BUDGET: usize = 5;
 const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 
 pub(crate) mod creation_labels;
-mod app_navigation;
+pub(crate) mod app_navigation;
 mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;
@@ -247,6 +247,26 @@ impl AgentMuxHandler {
     /// handler building a `…:0` URL from a stale local port).
     fn resolved_ipc_port(&self) -> u16 {
         *self.state.ipc_port.lock()
+    }
+
+    /// The origins an app window's frontend may be on: the one secondary
+    /// windows are built from (`resolve_frontend_base_url`, once the IPC port
+    /// is known) and the one the main window was actually loaded from. Empty
+    /// when neither is known: then nothing is decided from them.
+    fn frontend_origins(&self) -> Vec<String> {
+        let mut origins = Vec::new();
+        let port = self.resolved_ipc_port();
+        if port != 0 {
+            if let Ok(base) = crate::commands::window::resolve_frontend_base_url(port) {
+                origins.push(base);
+            }
+        }
+        if let Some(main) = self.state.main_frontend_origin.lock().clone() {
+            if !origins.contains(&main) {
+                origins.push(main);
+            }
+        }
+        origins
     }
 
     /// Reverse-lookup this browser's window label from the reducer's browsers

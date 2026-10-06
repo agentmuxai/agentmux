@@ -705,8 +705,7 @@ impl AgentMuxHandler {
         // Only the frontend's own pages get the creds, in every window: an
         // app window that somehow loaded another site, or a browser pane on a
         // remote one, gets nothing (app_navigation.rs).
-        let frontend_base = crate::commands::window::resolve_frontend_base_url(ipc_port).ok();
-        let should_inject = super::app_navigation::injects_ipc_credentials(&frame_url, frontend_base.as_deref());
+        let should_inject = super::app_navigation::injects_ipc_credentials(&frame_url, &self.frontend_origins());
         if should_inject {
             let ipc_token = &self.state.ipc_token;
             let js = format!(

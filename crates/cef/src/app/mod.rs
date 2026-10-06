@@ -1150,6 +1150,7 @@ wrap_browser_process_handler! {
             } else {
                 base_url
             };
+            *self.state.main_frontend_origin.lock() = crate::client::app_navigation::url_origin(&base_url);
 
             // Append IPC port, token, and transparency hint as URL query parameters
             // so the frontend can detect CEF mode and set the initial --window-opacity
