@@ -16,6 +16,7 @@ import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { openConnectors } from "@/app/view/section-pane/panes";
 import { AgentMcpModel } from "../agent-mcp-model";
 import "./AgentPrimitiveModal.scss";
+import { Button } from "@/app/element/ui";
 
 interface AgentMcpModalProps {
     agentId: string;
@@ -102,20 +103,21 @@ export const AgentMcpModal = (props: AgentMcpModalProps): JSX.Element => {
                             <Show
                                 when={server().bound_to_agent}
                                 fallback={
-                                    <button
+                                    <Button
+                                        tone="accent"
                                         class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
                                         onClick={() => void model.bind(server().id)}
                                     >
                                         Bind
-                                    </button>
+                                    </Button>
                                 }
                             >
-                                <button
+                                <Button
                                     class="agent-primitive-modal-btn"
                                     onClick={() => void model.unbind(server().id)}
                                 >
                                     Unbind
-                                </button>
+                                </Button>
                             </Show>
                         </div>
                     </div>

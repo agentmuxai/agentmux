@@ -18,6 +18,7 @@ import { findPreloadEntryByName } from "./mcp-preload-catalog";
 import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "@/app/store/mcp-capabilities";
 import "../agent/components/AgentPrimitiveModal.scss";
 import "./mcp-status-pill.scss";
+import { Button } from "@/app/element/ui";
 
 const STATUS_LABEL: Record<McpCapabilityStatus, string> = {
     unknown: "Not checked",
@@ -148,27 +149,28 @@ export const McpManager = (): JSX.Element => {
                                                     {(agent) => <option value={agent.id}>{agent.name}</option>}
                                                 </For>
                                             </select>
-                                            <button
+                                            <Button
                                                 class="agent-primitive-modal-btn"
                                                 disabled={!model.bindAgentIdAtom()}
                                                 onClick={() => void model.bindToAgent(server().id, model.bindAgentIdAtom())}
                                             >
                                                 Bind
-                                            </button>
+                                            </Button>
                                         </div>
                                         <div class="agent-primitive-modal-actions">
-                                            <button
+                                            <Button
+                                                tone="danger"
                                                 class="agent-primitive-modal-btn agent-primitive-modal-btn-danger"
                                                 onClick={() => void model.deleteServer(server().id)}
                                             >
                                                 Delete
-                                            </button>
-                                            <button
+                                            </Button>
+                                            <Button
                                                 class="agent-primitive-modal-btn"
                                                 onClick={() => model.startEdit(server())}
                                             >
                                                 Edit
-                                            </button>
+                                            </Button>
                                         </div>
                                     </div>
                                 )}
@@ -209,21 +211,21 @@ export const McpManager = (): JSX.Element => {
                                     spellcheck={false}
                                 />
                                 <div class="agent-primitive-modal-actions">
-                                    <button
-                                        type="button"
+                                    <Button
                                         class="agent-primitive-modal-btn"
                                         onClick={() => model.cancelDraft()}
                                         disabled={model.savingAtom()}
                                     >
                                         Cancel
-                                    </button>
-                                    <button
+                                    </Button>
+                                    <Button
                                         type="submit"
+                                        tone="accent"
                                         class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
                                         disabled={model.savingAtom() || !draft().name.trim()}
                                     >
                                         {model.savingAtom() ? "Saving…" : "Save"}
-                                    </button>
+                                    </Button>
                                 </div>
                             </form>
                         )}
