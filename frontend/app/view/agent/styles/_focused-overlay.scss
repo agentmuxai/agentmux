@@ -24,12 +24,6 @@
         background: var(--panel-bg-color, var(--main-bg-color));
         border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         overflow: hidden;
-
-        // Reuse agent-card-settings-panel styles inside this panel.
-        .agent-card-settings-panel {
-            flex: 1;
-            overflow: hidden;
-        }
     }
 
     .agent-focused-panel-header {

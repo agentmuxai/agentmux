@@ -1,22 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Warden rail/pane chrome — same structure as section-pane.scss, ported for
-// consistency (Warden is the "active governance" counterpart to Connectors'
-// and Knowledge's resource management). Deliberately does NOT redefine .bundle-manager-rail/
-// -rail-item/-section/-pane/-tab-bar — those base rules live only in
-// section-pane.scss and are reused here by class-name convention, matching
-// how the AccountsManager/SkillManager/McpManager inside those panes already
-// reuse them without a local import (section-pane.scss's own doc comment).
-// This is safe because block-registry.ts statically imports every view's
-// barrel (including Connectors' and Knowledge's) up front, so section-pane.scss is always part
-// of the bundle by the time any pane renders — not because these classes
-// are Warden-local. Only the responsive breakpoints below are duplicated
-// (query names must differ per @container name), everything else is a
-// deliberate shared-by-convention reuse, not an oversight.
+// Warden pane layout. The navigation is element/ui's TabbedPane, the same
+// component as Connectors and Knowledge (section-pane.tsx); it replaced a
+// hand copy of their rail and top tab bar. The section panes reuse
+// section-pane.scss's `.bundle-manager-section` / `-pane` rules by class
+// name, which is safe because block-registry.ts imports every view's barrel
+// up front, so section-pane.scss is always loaded.
 
-// Container wrapper — carries container-type so that .warden-view (a
-// descendant) can be targeted by @container warden queries. A container
+// Container wrapper — carries container-type so the managers inside can
+// answer @container warden queries. A container
 // element cannot respond to its own container query, only its descendants
 // can.
 //
@@ -36,12 +29,13 @@
 }
 
 .warden-view {
-    display: flex;
-    flex-direction: row;
     width: 100%;
     height: 100%;
     overflow: hidden;
 }
+
+// The navigation is element/ui's TabbedPane, as in section-pane; its panel
+// reuses section-pane.scss's `.bundle-manager-section` / `-pane` rules.
 
 // Note: shared manager-content classes (.warden-manager-summary,
 // .warden-section-stub, .warden-manager-body/-error/-table/-mono/-dim/
@@ -53,44 +47,3 @@
 // explicitly (reagent P2, PR #2553 — some managers imported the shared
 // chrome stylesheet and some silently relied on it loading transitively via
 // a sibling import; fixed by requiring the explicit import everywhere).
-
-// ── Responsive container queries ─────────────────────────────────────────────
-// Identical breakpoints to section-pane.scss's @container armory rules —
-// query name swapped to warden, everything else verbatim.
-
-// sm: compress outer rail to icon-only (48px)
-@container warden (max-width: 767px) {
-    .bundle-manager-rail {
-        flex: 0 0 48px;
-        padding: 8px 4px;
-
-        span { display: none; }
-    }
-
-    .bundle-manager-rail-item {
-        justify-content: center;
-        padding: 10px 0;
-
-        i { width: auto; }
-    }
-}
-
-// xs: hide rail, show the top tab bar, switch to column layout
-@container warden (max-width: 479px) {
-    .warden-view {
-        flex-direction: column;
-    }
-
-    .bundle-manager-rail {
-        display: none;
-    }
-
-    .bundle-manager-tab-bar {
-        display: flex;
-    }
-
-    .bundle-manager-section {
-        flex: 1 1 auto;
-        min-height: 0;
-    }
-}

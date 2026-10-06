@@ -28,59 +28,22 @@
     width: 100%;
     height: 100%;
     min-width: 0;
-    // Container-query context for .agent-stash-modal-tab below (a
+    // Container-query context for the tab labels below (a
     // descendant) — same technique as section-pane.scss's .armory-container.
     container-type: inline-size;
     container-name: agent-stash;
 }
 
+// The tabs are element/ui's Tabs; this only places the tablist.
 .agent-stash-modal-tabs {
-    display: flex;
-    gap: var(--space-1);
     padding: var(--space-2) var(--space-4) 0;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.agent-stash-modal-tab {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-2) var(--space-3);
-    font-size: var(--text-sm);
-    font-weight: var(--font-weight-medium);
-    color: var(--secondary-text-color);
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    cursor: default;
-
-    // Same icon treatment as the global Armory rail (bundle-manager-rail-item
-    // in section-pane.scss) — width-pinned, slightly dimmed.
-    i {
-        width: 16px;
-        text-align: center;
-        opacity: 0.8;
-    }
-
-    &:hover:not(.is-active) {
-        color: var(--main-text-color);
-    }
-
-    &.is-active {
-        color: var(--main-text-color);
-        border-bottom-color: var(--accent-color);
-    }
-
-    &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
-    }
 }
 
 // Narrow modal — icon-only tabs, same "hide the label, keep the icon"
-// compression section-pane.scss's rail does at its 767px breakpoint.
+// compression the section panes' rail does when narrow. Each tab keeps its
+// label as its accessible name (Tabs always sets aria-label).
 @container agent-stash (max-width: 560px) {
-    .agent-stash-modal-tab span {
+    .agent-stash-modal-tabs .ui-tab-label {
         display: none;
     }
 }

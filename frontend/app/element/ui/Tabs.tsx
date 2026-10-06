@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { createSignal, For, type JSX, onCleanup, onMount, Show } from "solid-js";
+import { createSignal, createUniqueId, For, type JSX, onCleanup, onMount, Show } from "solid-js";
 import { Tooltip } from "../tooltip";
 import { densityClass, rovingTarget, UiIcon, type UiDensity } from "./shared";
 
@@ -14,6 +14,8 @@ export interface TabItem<T extends string = string> {
     icon?: string;
     /** Tooltip text when only the icon shows. Defaults to the label. */
     tooltip?: string;
+    /** Extra class on the tab, e.g. a standing highlight on one section. */
+    class?: string;
 }
 
 export function tabId(idPrefix: string, id: string): string {
@@ -85,10 +87,10 @@ export function Tabs<T extends string>(props: TabsProps<T>): JSX.Element {
                                 type="button"
                                 role="tab"
                                 id={tabId(props.idPrefix, item.id)}
-                                class="ui-tab"
+                                class={clsx("ui-tab", item.class)}
                                 aria-selected={selected() ? "true" : "false"}
                                 aria-controls={tabPanelId(props.idPrefix)}
-                                aria-label={props.iconOnly ? item.label : undefined}
+                                aria-label={item.label}
                                 tabIndex={selected() ? 0 : -1}
                                 onClick={() => props.onChange(item.id)}
                                 onKeyDown={(e) => onKeyDown(e, i())}
@@ -117,7 +119,8 @@ export interface TabbedPaneProps<T extends string> {
     items: TabItem<T>[];
     value: T;
     onChange: (id: T) => void;
-    idPrefix: string;
+    /** Prefix for the tab and panel ids. Generated when omitted, so two open copies of a pane can't share ids. */
+    idPrefix?: string;
     ariaLabel: string;
     density?: UiDensity;
     /** Width below which the rail shows icons only. Default 768. */
@@ -125,6 +128,8 @@ export interface TabbedPaneProps<T extends string> {
     /** Width below which the rail becomes tabs along the top. Default 480. */
     topBelow?: number;
     class?: string;
+    /** Extra class on the panel that holds the content. */
+    panelClass?: string;
     /** The selected section's content. */
     children: JSX.Element;
 }
@@ -137,6 +142,8 @@ export interface TabbedPaneProps<T extends string> {
  */
 export function TabbedPane<T extends string>(props: TabbedPaneProps<T>): JSX.Element {
     let root: HTMLDivElement | undefined;
+    const generatedPrefix = `ui-tabs-${createUniqueId()}`;
+    const idPrefix = () => props.idPrefix ?? generatedPrefix;
     const [layout, setLayout] = createSignal<TabbedPaneLayout>("rail");
 
     onMount(() => {
@@ -158,14 +165,14 @@ export function TabbedPane<T extends string>(props: TabbedPaneProps<T>): JSX.Ele
                 onChange={props.onChange}
                 orientation={layout() === "top" ? "horizontal" : "vertical"}
                 iconOnly={layout() !== "rail"}
-                idPrefix={props.idPrefix}
+                idPrefix={idPrefix()}
                 ariaLabel={props.ariaLabel}
             />
             <div
-                class="ui-tabbed-pane-panel"
+                class={clsx("ui-tabbed-pane-panel", props.panelClass)}
                 role="tabpanel"
-                id={tabPanelId(props.idPrefix)}
-                aria-labelledby={tabId(props.idPrefix, props.value)}
+                id={tabPanelId(idPrefix())}
+                aria-labelledby={tabId(idPrefix(), props.value)}
             >
                 {props.children}
             </div>

@@ -7,7 +7,7 @@
  * Internet, Audit, Supervisor).
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -62,8 +62,8 @@ describe("WardenView rail", () => {
 
     it("orders the rail as Host, LAN, Internet, Audit, Supervisor", () => {
         renderWarden();
-        const rail = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-rail" });
-        const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
+        const rail = screen.getByRole("tablist", { name: "Warden section" });
+        const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
         expect(labels).toEqual(["Host", "LAN", "Internet", "Audit", "Supervisor"]);
     });
 
@@ -79,11 +79,7 @@ describe("WardenView rail", () => {
 
     it("clicking a rail item switches the active/visible pane without unmounting others", () => {
         renderWarden();
-        const rail = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-rail" });
-        const auditButton = Array.from(rail.querySelectorAll("button")).find((b) =>
-            b.textContent?.includes("Audit")
-        ) as HTMLButtonElement;
-        auditButton.click();
+        screen.getByRole("tab", { name: "Audit" }).click();
 
         const auditPane = screen.getByTestId("audit-manager").closest(".bundle-manager-pane");
         expect(auditPane?.classList.contains("is-hidden")).toBe(false);
@@ -128,34 +124,29 @@ describe("WardenView pane title", () => {
 
     it("clicking a rail item writes warden:section through the host context and updates viewName()", () => {
         const { model } = renderWarden();
-        const rail = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-rail" });
-        const auditButton = Array.from(rail.querySelectorAll("button")).find((b) =>
-            b.textContent?.includes("Audit")
-        ) as HTMLButtonElement;
-        auditButton.click();
+        screen.getByRole("tab", { name: "Audit" }).click();
         expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "audit" });
         expect(model.viewName()).toBe("Audit");
         const auditPane = screen.getByTestId("audit-manager").closest(".bundle-manager-pane");
         expect(auditPane?.classList.contains("is-hidden")).toBe(false);
     });
 
-    it("clicking a tab-bar item writes warden:section through the host context and updates viewName()", () => {
+    it("selecting a section from the keyboard writes warden:section and updates viewName()", () => {
         const { model } = renderWarden();
-        const tabBar = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-tab-bar" });
-        const supervisorButton = Array.from(tabBar.querySelectorAll("button")).find((b) =>
-            b.textContent?.includes("Supervisor")
-        ) as HTMLButtonElement;
-        supervisorButton.click();
+        fireEvent.keyDown(screen.getByRole("tab", { name: "Host" }), { key: "End" });
         expect(setMetaMock).toHaveBeenCalledWith({ "warden:section": "supervisor" });
         expect(model.viewName()).toBe("Supervisor");
     });
 
     // SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md
-    it("renders the tab-bar before the content section, so it sits at the top of the pane", () => {
+    // One tablist that is a rail or top tabs by width; it precedes the content,
+    // so at narrow widths it sits at the top of the pane.
+    it("renders one tablist, before the content section", () => {
         renderWarden();
-        const tabBar = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-tab-bar" });
+        expect(screen.getAllByRole("tablist")).toHaveLength(1);
+        const tablist = screen.getByRole("tablist", { name: "Warden section" });
         const section = document.querySelector(".bundle-manager-section");
-        expect(tabBar.compareDocumentPosition(section as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(tablist.compareDocumentPosition(section as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("viewName() reflects a pre-seeded warden:section meta value", () => {
