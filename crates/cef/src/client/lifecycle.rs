@@ -851,6 +851,85 @@ impl AgentMuxHandler {
         true // cancel the top-level popup creation
     }
 
+    /// The frontend's origin, or None when it isn't known (no IPC port yet, or
+    /// the frontend's assets are missing): then nothing is decided from it.
+    fn frontend_base(&self) -> Option<String> {
+        let port = self.resolved_ipc_port();
+        if port == 0 {
+            return None;
+        }
+        crate::commands::window::resolve_frontend_base_url(port).ok()
+    }
+
+    /// An app window's main frame shows only the frontend
+    /// (`app_navigation.rs`): another website opens in the system browser
+    /// instead of replacing the app, a local file is refused. Subframes are
+    /// left alone. Returns 1 to cancel.
+    fn guard_app_window_navigation(
+        &self,
+        frame: Option<&mut Frame>,
+        request: Option<&mut Request>,
+    ) -> ::std::os::raw::c_int {
+        if !frame.as_ref().is_some_and(|f| f.is_main() == 1) {
+            return 0;
+        }
+        let url = request
+            .as_ref()
+            .map(|r| CefString::from(&r.url()).to_string())
+            .unwrap_or_default();
+        use super::app_navigation::{app_window_navigation, AppWindowNavigation};
+        match app_window_navigation(&url, self.frontend_base().as_deref()) {
+            AppWindowNavigation::Allow => 0,
+            AppWindowNavigation::OpenInSystemBrowser => {
+                match crate::commands::platform::open_url_in_default_browser(&url) {
+                    Ok(()) => tracing::info!(url = %url, "app window: opened the link in the system browser instead of leaving the app"),
+                    Err(e) => tracing::warn!(url = %url, error = %e, "app window: stayed on the app; the system browser could not open the link"),
+                }
+                1
+            }
+            AppWindowNavigation::Cancel => {
+                tracing::warn!(url = %url, "app window: refused a navigation away from the app");
+                1
+            }
+        }
+    }
+
+    /// RequestHandler::on_open_url_from_tab: a link to open in a new tab, which
+    /// is what a middle-click asks for. CEF's default is to load it in this
+    /// browser's own top-level frame, which for an app window would replace
+    /// the app. So an app window asks its frontend to open the page in a new
+    /// browser pane instead, falling back to the system browser, and never
+    /// navigates. Browser panes are unchanged. Returns 1 to cancel.
+    pub(crate) fn on_open_url_from_tab(
+        &mut self,
+        browser: Option<&mut Browser>,
+        target_url: Option<&CefString>,
+    ) -> ::std::os::raw::c_int {
+        if self.is_browser_pane {
+            return 0;
+        }
+        let url = target_url.map(|s| s.to_string()).unwrap_or_default();
+        if !super::app_navigation::opens_in_browser_pane(&url, self.frontend_base().as_deref()) {
+            tracing::info!(url = %url, "app window: ignored a new-tab request for a non-web link");
+            return 1;
+        }
+        let label = browser.and_then(|b| self.window_label_for(b));
+        let delivered = label.as_deref().is_some_and(|label| {
+            crate::events::emit_event_to_window(
+                &self.state,
+                label,
+                "open-link-in-pane",
+                &serde_json::json!({ "url": url }),
+            )
+        });
+        if delivered {
+            tracing::info!(url = %url, "app window: new-tab link sent to the frontend to open in a browser pane");
+        } else if let Err(e) = crate::commands::platform::open_url_in_default_browser(&url) {
+            tracing::warn!(url = %url, error = %e, "app window: new-tab link could not be opened");
+        }
+        1
+    }
+
     /// External-protocol guard (RequestHandler::on_before_browse). Returns 1 to
     /// CANCEL the navigation, 0 to allow.
     ///
@@ -861,9 +940,8 @@ impl AgentMuxHandler {
     /// **UAC** prompt. We never want embedded web content — a browser pane
     /// loading arbitrary sites especially — to reach an OS protocol handler
     /// this way (see the report). For panes we cancel any navigation whose
-    /// scheme isn't web-ish (`is_disallowed_pane_nav_scheme`). The main app
-    /// client is served from loopback http and is left unrestricted so no
-    /// internal (devtools/app) navigation regresses.
+    /// scheme isn't web-ish (`is_disallowed_pane_nav_scheme`). An app window's
+    /// main frame is kept on the frontend instead (`guard_app_window_navigation`).
     pub(crate) fn on_before_browse(
         &mut self,
         browser: Option<&mut Browser>,
@@ -873,7 +951,7 @@ impl AgentMuxHandler {
         is_redirect: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int {
         if !self.is_browser_pane {
-            return 0; // main app client — never gated
+            return self.guard_app_window_navigation(frame, request);
         }
         let url = request
             .as_ref()

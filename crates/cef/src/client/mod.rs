@@ -50,6 +50,7 @@ const MEMORY_PAUSE_BUDGET: usize = 5;
 const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 
 pub(crate) mod creation_labels;
+mod app_navigation;
 mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;

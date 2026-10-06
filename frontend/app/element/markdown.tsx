@@ -51,7 +51,7 @@ import RemarkFlexibleToc, { TocItem } from "remark-flexible-toc";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
-import { openLink } from "../store/global";
+import { onLinkAuxClick, onLinkClick } from "./link-open";
 import { rehypeLinkify } from "./rehype-linkify";
 import { Code, CodeBlock } from "./markdown-codeblock";
 import { MarkdownImg, type MarkdownMediaOpts, MuxBlock } from "./markdown-media";
@@ -93,17 +93,26 @@ const Link = ({
     setFocusedHeading: (href: string) => void;
 }) => {
     const onClick = (e: MouseEvent) => {
-        e.preventDefault();
         const href = (props as any).href as string;
-        if (!href) return;
-        if (href.startsWith("#")) {
+        if (href?.startsWith("#")) {
+            e.preventDefault();
             setFocusedHeading(href);
+        } else if (href) {
+            onLinkClick(e, href);
         } else {
-            openLink(href);
+            e.preventDefault();
         }
     };
+    const onAuxClick = (e: MouseEvent) => {
+        const href = (props as any).href as string;
+        if (!href || href.startsWith("#")) {
+            if (e.button === 1) e.preventDefault();
+            return;
+        }
+        onLinkAuxClick(e, href);
+    };
     return (
-        <a href={(props as any).href} onClick={onClick}>
+        <a href={(props as any).href} onClick={onClick} onAuxClick={onAuxClick}>
             {(props as any).children}
         </a>
     );
