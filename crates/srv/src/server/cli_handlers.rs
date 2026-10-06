@@ -816,14 +816,41 @@ async fn run_auth_check(
 /// A PATH-only provider's CLI: on PATH, else in the folder its own installer
 /// uses ([`crate::backend::providers::known_install_paths`]), which may not
 /// be on this process's PATH until AgentMux restarts.
+///
+/// A provider that takes its prompt on the command line
+/// (`ProviderConfig::prompt_arg_flag`) must run as the real executable: a
+/// `.cmd`/`.bat` wrapper is re-parsed by `cmd.exe`, where `&`, `|` or `%` in
+/// a prompt could turn into a command. For those the installer's own
+/// executable comes first, and a script wrapper on PATH is never used.
 pub(crate) async fn resolve_provider_cli_on_path(provider_id: &str, cli_command: &str) -> Option<String> {
+    let known = || {
+        crate::backend::providers::known_install_paths(provider_id)
+            .into_iter()
+            .find(|p| p.is_file())
+            .map(|p| p.to_string_lossy().into_owned())
+    };
+    let prompt_in_argv = crate::backend::providers::get_provider(provider_id)
+        .and_then(|p| p.prompt_arg_flag())
+        .is_some();
+    if prompt_in_argv {
+        if let Some(path) = known() {
+            return Some(path);
+        }
+        return resolve_cli_on_path(cli_command)
+            .await
+            .filter(|path| !is_script_wrapper(path));
+    }
     if let Some(path) = resolve_cli_on_path(cli_command).await {
         return Some(path);
     }
-    crate::backend::providers::known_install_paths(provider_id)
-        .into_iter()
-        .find(|p| p.is_file())
-        .map(|p| p.to_string_lossy().into_owned())
+    known()
+}
+
+/// Whether `path` is a Windows batch script (`.cmd`/`.bat`), which runs
+/// through `cmd.exe` and re-parses its arguments.
+fn is_script_wrapper(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".cmd") || lower.ends_with(".bat")
 }
 
 /// Resolve a CLI command on the system PATH.
@@ -1012,6 +1039,17 @@ fn prune_result(
 
 #[cfg(test)]
 mod tests {
+
+    /// A prompt passed through one of these is re-parsed by `cmd.exe`.
+    #[test]
+    fn batch_scripts_are_script_wrappers_and_executables_are_not() {
+        for p in [r"C:\Users\u\bin\agy.cmd", r"C:\x\AGY.CMD", r"C:\x\run.bat"] {
+            assert!(super::is_script_wrapper(p), "{p}");
+        }
+        for p in [r"C:\Users\u\AppData\Local\agy\bin\agy.exe", "/home/u/.local/bin/agy", r"C:\x\cmd\agy.exe"] {
+            assert!(!super::is_script_wrapper(p), "{p}");
+        }
+    }
     use super::*;
 
     fn resolve_cmd(block_id: &str, notice_block_id: Option<&str>) -> CommandResolveCliData {

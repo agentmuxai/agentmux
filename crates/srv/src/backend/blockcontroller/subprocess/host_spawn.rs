@@ -25,7 +25,10 @@ use crate::backend::blockcontroller::{
 };
 use crate::backend::mps;
 
-use super::{argv::build_turn_argv, SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
+use super::{
+    argv::{append_prompt_arg, build_turn_argv},
+    SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT,
+};
 
 impl SubprocessController {
     /// Spawn a single turn of the agent CLI.
@@ -67,12 +70,19 @@ impl SubprocessController {
         // Build continuation argv before claiming the lease or acknowledging
         // the message. A malformed provider configuration must fail as an
         // unstarted turn, not strand the pane in an accepted/running state.
+        let prompt_in_argv = !config.prompt_arg_flag.is_empty();
         let args = match build_turn_argv(
             &config.cli_args,
             &config.resume_strategy,
             &config.resume_flag,
             session_id_hint.as_deref(),
-        ) {
+        )
+        .and_then(|mut args| {
+            if prompt_in_argv {
+                append_prompt_arg(&mut args, &config.prompt_arg_flag, &config.message)?;
+            }
+            Ok(args)
+        }) {
             Ok(args) => args,
             Err(error) => {
                 self.unlock_run();
@@ -270,6 +280,12 @@ impl SubprocessController {
                 use std::io::Write;
                 let _keep_alive = stdin; // prevent Tokio ChildStdin drop
                 let mut pipe = raw_handle;
+                if prompt_in_argv {
+                    // The prompt went on the command line; stdin just closes.
+                    std::mem::forget(pipe);
+                    user_record.write(&message);
+                    return;
+                }
                 let payload = format!("{}\n", message);
                 if let Err(e) = pipe.write_all(payload.as_bytes()) {
                     tracing::warn!(block_id = %block_id_stdin, "subprocess stdin write error: {}", e);

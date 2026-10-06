@@ -1034,6 +1034,9 @@ pub async fn run_agent_turn(
                 "flag"
             },
         );
+        // Antigravity takes its prompt as `-p <prompt>`, not on stdin.
+        let prompt_arg_flag =
+            crate::backend::obj::meta_get_string(&block.meta, "agent:prompt_arg_flag", "");
         // Picker reattach: the frontend writes the prior
         // block's session id here when launching with
         // `continueOfInstanceId`. spawn_turn hydrates its
@@ -1188,6 +1191,7 @@ pub async fn run_agent_turn(
                 message: message,
                 resume_flag,
                 resume_strategy,
+                prompt_arg_flag,
                 session_id_field,
                 message_id: message_id,
                 session_id: if persisted_session_id.is_empty() {
@@ -1208,6 +1212,7 @@ pub async fn run_agent_turn(
                 message: message,
                 resume_flag,
                 resume_strategy,
+                prompt_arg_flag,
                 session_id_field,
                 message_id: message_id,
                 session_id: if persisted_session_id.is_empty() {
@@ -1367,6 +1372,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     message: cmd.message,
                     resume_flag: "--resume".to_string(),
                     resume_strategy: "flag".to_string(),
+                    prompt_arg_flag: String::new(),
                     session_id_field: "session_id".to_string(),
                     message_id: None,
                     // Direct-spawn legacy command — caller doesn't

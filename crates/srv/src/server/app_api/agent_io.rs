@@ -475,6 +475,8 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             "flag"
                         },
                     );
+                    let prompt_arg_flag =
+                        obj::meta_get_string(&block.meta, "agent:prompt_arg_flag", "");
                     // Picker reattach (parallel of the websocket-path
                     // logic): hydrate the persisted session id from
                     // block meta so spawn_turn appends --resume <sid>
@@ -565,6 +567,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             message: cmd.message,
                             resume_flag,
                             resume_strategy,
+                            prompt_arg_flag,
                             session_id_field,
                             message_id: None,
                             session_id: if persisted_session_id.is_empty() {
@@ -585,6 +588,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             message: cmd.message,
                             resume_flag,
                             resume_strategy,
+                            prompt_arg_flag,
                             session_id_field,
                             message_id: None,
                             session_id: if persisted_session_id.is_empty() {
