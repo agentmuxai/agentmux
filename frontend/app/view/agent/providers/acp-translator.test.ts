@@ -99,6 +99,23 @@ describe("AcpTranslator — standard session/update", () => {
         }
     });
 
+    it("an update that fills in the input or a better title re-emits the same call", () => {
+        const t = new AcpTranslator();
+        t.translate(update({ sessionUpdate: "tool_call", toolCallId: "c6", title: "Read", kind: "read", status: "pending" }));
+        // The input arrives later: the same call again, so the parser upgrades it in place.
+        const upd = t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", status: "in_progress", rawInput: { path: "a.ts" } }));
+        expect(upd).toEqual([{ type: "tool_call", tool: "Read", id: "c6", params: { path: "a.ts" } }]);
+        // A better title, keeping the input already known.
+        const renamed = t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", title: "Read a.ts" }));
+        expect(renamed).toEqual([{ type: "tool_call", tool: "Read a.ts", id: "c6", params: { path: "a.ts" } }]);
+        // Nothing new: nothing re-emitted.
+        expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", status: "in_progress" }))).toEqual([]);
+        // The end is named by what was learned.
+        const [end] = t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", status: "completed" }));
+        expect(end).toMatchObject({ type: "tool_result", id: "c6", status: "success" });
+        expect(JSON.stringify(end)).toContain("Read a.ts");
+    });
+
     it("reset forgets ended calls", () => {
         const t = new AcpTranslator();
         t.translate(update({ sessionUpdate: "tool_call", toolCallId: "c5", title: "x", status: "completed" }));

@@ -16,8 +16,11 @@ import { ToolCorrelator, wrapOutput } from "./tool-correlation";
  *   agent_message_chunk  — `content` is a ContentBlock (`{type: "text", text}`)
  *   agent_thought_chunk  — reasoning, same shape
  *   tool_call            — `toolCallId`, `title`, `kind`, `status`, `rawInput`, …
- *   tool_call_update     — the same call later; `completed` / `failed` ends it,
- *                          with `content` (text, diff, terminal) and/or `rawOutput`
+ *   tool_call_update     — the same call later: may fill in `rawInput`, `title`
+ *                          or `kind` (re-emitted as the same call, which the
+ *                          parser upgrades in place); `completed` / `failed`
+ *                          ends it, with `content` (text, diff, terminal)
+ *                          and/or `rawOutput`
  *   plan, usage_update, available_commands_update, current_mode_update,
  *   user_message_chunk   — not rendered
  *
@@ -34,6 +37,9 @@ export class AcpTranslator implements OutputTranslator {
     // Tool calls already ended, so a repeated `completed` update (or one after
     // a `tool_call` that arrived already complete) doesn't end it twice.
     private ended = new Set<string>();
+    // Each open call's name and input as known so far: an update may carry
+    // the input (often empty at first) or a better title later.
+    private calls = new Map<string, { name: string; input: Record<string, any> }>();
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -64,8 +70,9 @@ export class AcpTranslator implements OutputTranslator {
             }
             case "tool_call": {
                 const toolId = typeof u.toolCallId === "string" && u.toolCallId ? u.toolCallId : `tool-${Date.now()}`;
-                const name = toolName(u);
-                const events: StreamEvent[] = [this.tools.call(name, toolId, toolInput(u))];
+                const call = { name: toolName(u), input: toolInput(u) };
+                this.calls.set(toolId, call);
+                const events: StreamEvent[] = [this.tools.call(call.name, toolId, call.input)];
                 // An agent may report a call that has already finished.
                 const end = this.endIfDone(toolId, u);
                 if (end) events.push(end);
@@ -74,8 +81,22 @@ export class AcpTranslator implements OutputTranslator {
             case "tool_call_update": {
                 const toolId = typeof u.toolCallId === "string" ? u.toolCallId : "";
                 if (!toolId) return [];
+                const events: StreamEvent[] = [];
+                // New input or a new name: the same call again, upgraded in place.
+                const known = this.calls.get(toolId);
+                if (known && !this.ended.has(toolId)) {
+                    const hasName = [u.name, u.title, u.kind].some((v) => typeof v === "string" && v);
+                    const name = hasName ? toolName(u) : known.name;
+                    const input = Object.keys(toolInput(u)).length > 0 ? toolInput(u) : known.input;
+                    if (name !== known.name || input !== known.input) {
+                        const call = { name, input };
+                        this.calls.set(toolId, call);
+                        events.push(this.tools.call(call.name, toolId, call.input));
+                    }
+                }
                 const end = this.endIfDone(toolId, u);
-                return end ? [end] : [];
+                if (end) events.push(end);
+                return events;
             }
             default:
                 return [];
@@ -87,12 +108,9 @@ export class AcpTranslator implements OutputTranslator {
         if (u.status !== "completed" && u.status !== "failed") return null;
         if (this.ended.has(toolId)) return null;
         this.ended.add(toolId);
-        return this.tools.result(
-            toolId,
-            u.status === "failed" ? "failed" : "success",
-            wrapOutput(toolOutput(u)),
-            toolName(u),
-        );
+        const name = this.calls.get(toolId)?.name ?? toolName(u);
+        this.calls.delete(toolId);
+        return this.tools.result(toolId, u.status === "failed" ? "failed" : "success", wrapOutput(toolOutput(u)), name);
     }
 
     /** The flat shape the first version expected (`params.type`). */
@@ -128,6 +146,7 @@ export class AcpTranslator implements OutputTranslator {
     reset(): void {
         this.tools.reset();
         this.ended.clear();
+        this.calls.clear();
     }
 }
 
