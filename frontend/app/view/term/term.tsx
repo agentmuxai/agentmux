@@ -519,7 +519,6 @@ export const terminalPaneTab: PaneTabManifest = {
             // A terminal running a command (`controller: "cmd"`) has no
             // connection button.
             manageConnection: () => model.manageConnection(),
-            settingsMenu: () => model.getSettingsMenuItems(),
             voice: () => model.voiceHandle(),
             search: () => model.searchAtoms,
             selection: () => model.getSelection(),

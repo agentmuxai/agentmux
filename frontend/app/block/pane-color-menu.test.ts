@@ -5,19 +5,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const setMetaCommand = vi.fn().mockResolvedValue(undefined);
 const setAgentContentCommand = vi.fn().mockResolvedValue(undefined);
+const setConfigCommand = vi.fn().mockResolvedValue(undefined);
+let paneColors: Record<string, number | null> | undefined;
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         SetMetaCommand: (...args: unknown[]) => setMetaCommand(...args),
         SetAgentContentCommand: (...args: unknown[]) => setAgentContentCommand(...args),
+        SetConfigCommand: (...args: unknown[]) => setConfigCommand(...args),
     },
+}));
+vi.mock("@/app/store/block-atom-cache", () => ({
+    getSettingsKeyAtom: (key: string) => () => (key === "pane:colors" ? paneColors : undefined),
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/global", () => ({
     MOS: { makeORef: (t: string, id: string) => `${t}:${id}` },
 }));
 
-import { hueToActiveBorder, hueToAgentIdentityColor, setHue } from "./pane-color-menu";
+import { applyHueToAllPanes, hueToActiveBorder, hueToAgentIdentityColor, setHue, setWidgetHue } from "./pane-color-menu";
 import { contrastRatio, paneRoleColor } from "./pane-color-scheme";
 
 describe("hueToAgentIdentityColor", () => {
@@ -116,5 +122,51 @@ describe("setHue", () => {
             { oref: "block:block-1", meta: { "frame:hue": null } },
         );
         expect(setAgentContentCommand).not.toHaveBeenCalled();
+    });
+});
+
+// SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.4 and §3.7.
+describe("setWidgetHue", () => {
+    beforeEach(() => {
+        setConfigCommand.mockClear();
+        paneColors = undefined;
+    });
+    const written = () => setConfigCommand.mock.calls.at(-1)?.[1];
+
+    it("adds a widget's color to the others already set", () => {
+        paneColors = { browser: 90 };
+        setWidgetHue("term", 120);
+        expect(written()).toEqual({ "pane:colors": { browser: 90, term: 120 } });
+    });
+
+    it("writes null for None, which is not the same as unset", () => {
+        setWidgetHue("term", null);
+        expect(written()).toEqual({ "pane:colors": { term: null } });
+    });
+
+    it("removes the key on undefined, returning the widget to its built-in color", () => {
+        paneColors = { browser: 90, term: 120 };
+        setWidgetHue("term", undefined);
+        expect(written()).toEqual({ "pane:colors": { browser: 90 } });
+    });
+
+    it("deletes the whole setting when the last key goes", () => {
+        paneColors = { term: 120 };
+        setWidgetHue("term", undefined);
+        expect(written()).toEqual({ "pane:colors": null });
+    });
+});
+
+describe("applyHueToAllPanes", () => {
+    beforeEach(() => {
+        setConfigCommand.mockClear();
+        setMetaCommand.mockClear();
+        paneColors = undefined;
+    });
+
+    it("makes the pick the widget's color and clears the pane's own pick", () => {
+        applyHueToAllPanes("block-1", "term", 270);
+        expect(setConfigCommand).toHaveBeenCalledWith({}, { "pane:colors": { term: 270 } });
+        expect(setMetaCommand).toHaveBeenCalledWith({}, { oref: "block:block-1", meta: { "frame:hue": null } });
     });
 });

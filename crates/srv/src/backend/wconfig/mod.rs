@@ -619,6 +619,25 @@ mod tests {
         assert_eq!(first, second, "merge_into_template should be idempotent");
     }
 
+    /// `pane:colors` (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.4) has no
+    /// typed field: it rides in `extra`. A `null` entry means "no color for this
+    /// widget", unlike a missing key, so it must survive the write to disk and
+    /// the read back.
+    #[test]
+    fn test_pane_colors_round_trip_keeps_null_entries() {
+        let colors = serde_json::json!({"term": 120, "agent": null});
+        let mut settings = serde_json::Map::new();
+        settings.insert("pane:colors".to_string(), colors.clone());
+
+        let written = merge_into_template(SETTINGS_TEMPLATE, &settings);
+        assert!(!written.contains("// -- User Overrides --"), "written in place, on the template's line");
+        let read_back = parse_jsonc_to_map(&written);
+        assert_eq!(read_back.get("pane:colors"), Some(&colors));
+
+        let typed: SettingsType = serde_json::from_value(serde_json::Value::Object(read_back)).unwrap();
+        assert_eq!(serde_json::to_value(&typed).unwrap()["pane:colors"], colors);
+    }
+
     #[test]
     fn test_merge_into_template_preserves_indentation() {
         let template = "{\n        // \"deep:key\":   42,\n}\n";

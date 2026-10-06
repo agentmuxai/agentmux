@@ -1,6 +1,6 @@
 # SPEC: a default color for every widget type, set per widget in Settings
 
-**Status:** active. PR #4362 (§7 PR 1) built the color lookup, the built-in colors and the header-tail rule. PR 2 (Settings, menu) and PR 3 (top bar) are next. §8 records the decisions taken.
+**Status:** active. PR #4362 (§7 PR 1) built the color lookup, the built-in colors and the header-tail rule. §7 PR 2 built the Settings section and the menu entry. PR 3 (top bar) is next. §8 records the decisions taken.
 **Date:** 2026-10-05
 **Author:** Agent3
 
@@ -100,10 +100,12 @@ The hues were drawn with a seeded shuffle. The first twelve views (the most used
 | `toolchain` | Toolchain | Sky | 210 |
 | `connectors` | Connectors | Chartreuse | 90 |
 | `knowledge` | Knowledge | Emerald | 150 |
-| `armory` | Armory | Pink | 330 |
+| `armory` | Armory | (Connectors) | — |
 | `settings` | Settings | Crimson | 0 |
 
 The draw gave Agent Crimson, which can read as "error", and Swarm Coral. They were swapped (§8 D4): Agent is Coral, close to today's agent `#cc785c`, and the twelve most-used widgets keep twelve distinct colors. Settings drew Coral alongside Swarm and moved with it to Crimson. `block-registry.test.ts` checks that every built-in has a color from the palette and that the twelve are distinct.
+
+Two built-in views are legacy shells, kept only so saved blocks still load: `cpuplot` (an old name for Sysinfo) and `armory` (rewrites its block to Connectors or Knowledge as it loads). Their manifests carry `legacyOf`, the view they stand in for, instead of a color: they take that view's color and setting, and Settings doesn't list them (§3.5). `widgetColorView(view)` (pane-identity.ts) gives the `pane:colors` key for any view, after aliases and `legacyOf`.
 
 A manifest without `defaultHue` (a third-party widget that declares none) gets **no** default and stays neutral, as today. Hashing the view name to a hue was considered and rejected: a color nobody chose, which changes if the widget is renamed.
 
@@ -114,16 +116,19 @@ A manifest without `defaultHue` (a third-party widget that declares none) gets *
 - A number (0–360) overrides the built-in default (tier 3).
 - `null` means "no color for this widget": the user switched the default off, and the pane falls back to neutral. This is different from "not set", which falls through to tier 4.
 - Removing a key returns that widget to its built-in default.
-- Backend: no new field. `SettingsType`'s flattened `extra` map already carries keys it doesn't name (as `window:theme` is), and `merge_settings_to_disk` writes them. Typed in `frontend/types/srv-types.d.ts` and `schema/settings.json` (an object of `number | null` in 0–360).
+- Backend: no new field. `SettingsType`'s flattened `extra` map already carries keys it doesn't name (as `window:theme` is), and `merge_settings_to_disk` writes them. A top-level `null` deletes the key there; the `null`s inside the map are kept. Typed in `frontend/types/srv-types.d.ts` and `schema/settings.json` (an object of `number | null` in 0–360), with a commented line in `settings-template.jsonc` so it is written in place.
+- One writer, `setWidgetHue(view, hue)` in `pane-color-menu.ts`: a hue sets the key, `null` writes None, `undefined` removes it. When the last key goes it deletes the setting.
 - Hue, not hex, on purpose: it is what `frame:hue` already stores and what the OKLCH tokens consume, so a custom color gets the same per-theme normalisation as a preset (best-practices report P7).
 
 ### 3.5 Settings: "Widget colors"
 
 A new subsection in **Appearance** (`view/settings/sections/appearance-section.tsx`), indexed in `settings-index.ts` with keywords *color, colour, widget, pane, tab, border*.
 
-- **One row per registered widget**, generated from the registry, so a new or third-party widget appears without editing Settings. Each row shows the widget's icon and label, a swatch row (the 12 hues plus **None**), and **Reset** when the value differs from the built-in default.
-- **A live preview chip** per row, a pill painted with `blockRoleColor(..., "pill")` and its underline, so the user sees the real result in the current theme.
-- **Reset all** at the top deletes `pane:colors`.
+- **One row per registered widget**, from `listPaneTabs()` (pane-tab-registry.ts, reactive), so a widget registered later appears without editing Settings. Legacy views (`legacyOf`, §3.3) are left out. Each row shows the widget's label, a swatch row (the 12 hues plus **None**), and **Reset** when the user has set a color for it.
+- **The selected swatch** is the user's color, else the built-in one (None for a widget without one). Picking the built-in color stores nothing, so the widget keeps following it.
+- **A live preview chip** per row: the widget's icon and label on a pill painted with `paneRoleColor(widgetHueFor(view), ..., "pill")` and its `identity` underline, so the user sees the real result in the current theme.
+- **Reset all** at the top, shown when anything is set, deletes `pane:colors`.
+- Built in `view/settings/sections/widget-colors.tsx` (`WidgetColorsSettings`), at the end of Appearance.
 - **Writes** use `set("pane:colors", next)`, the same path `cmd:env` uses.
 - **Shared picker.** The swatch row is a component, `HueSwatchRow` (§4.1 item 4). The Pane Color menu builds its entries from the same `PANE_HUE_OPTIONS` and swatch function, so the two pickers can't drift.
 
@@ -143,7 +148,8 @@ A new subsection in **Appearance** (`view/settings/sections/appearance-section.t
 
 The header's Pane Color submenu gets one entry: **Use for all Terminal panes**, with the label taken from the manifest.
 
-- It writes the pane's current hue to `pane:colors[view]` and clears this pane's `frame:hue`, so the pane now follows the widget color.
+- It writes the pane's current hue to `pane:colors[view]` and clears this pane's `frame:hue`, so the pane now follows the widget color (`applyHueToAllPanes`, pane-color-menu.ts).
+- It shows only when the pane has its own pick: without one, the pane already shows its widget's color.
 - This is how "the user changes the pane tab color" reaches the top-bar widget (§1 item 3) without making every pick global: a plain pick still recolors only that pane.
 - **Default** in the same menu clears `frame:hue` as today, which now means "follow this widget's color".
 - On agent panes the entry is hidden: a pick there also saves the agent's identity color (`ui:color`), and widget colors don't apply to agents with an identity.
@@ -195,11 +201,11 @@ Rule: **only tiers 1 and 2 count as identities in the tail rule.**
 | Area | Files |
 |---|---|
 | Resolver and tokens | `block/pane-identity.ts` (`resolvePaneIdentity`, `blockRoleColor`), `block/pane-color-scheme.ts` (`widgetTint` token, PR 3), `block/pane-color-menu.ts` (aliases removed) |
-| Registry | `block/pane-tab-registry.ts` (`defaultHue`), each built-in manifest (the §3.3 values), `block/pane-identity.ts` (`widgetHueFor()`) |
+| Registry | `block/pane-tab-registry.ts` (`defaultHue`, `legacyOf`, `listPaneTabs`), each built-in manifest (the §3.3 values), `block/pane-identity.ts` (`widgetHueFor()`, `widgetColorView()`) |
 | Readers | `block/blockframe.tsx`, `element/PaneChrome.tsx` (tail rule §3.8), `element/PaneTabStrip.tsx`, `view/swarm/swarm-row-colors.ts`, `view/agent/useAgentStream.ts` |
-| Menu | `block/blockframe.tsx` `buildPaneColorSubmenu` (§3.7) |
+| Menu | `block/blockframe.tsx` `buildPaneColorSubmenu` (§3.7), `block/pane-color-menu.ts` (`setWidgetHue`, `applyHueToAllPanes`) |
 | Top bar | `window/action-widgets.tsx`, `window/action-widgets.scss`, `view/launcher/launcher.tsx` |
-| Settings | `view/settings/sections/appearance-section.tsx`, `settings-index.ts`, `settings-controls.tsx` (`HueSwatchRow`) |
+| Settings | `view/settings/sections/appearance-section.tsx` (search entry), `view/settings/sections/widget-colors.tsx`, `settings-controls.tsx` (`HueSwatchRow`) |
 | Config | `crates/srv/src/backend/wconfig/types.rs`, `frontend/types/srv-types.d.ts`, `schema/settings.json`, `settings-template.jsonc`, `crates/srv/src/config/widgets.json` (built-in `color` removed) |
 | Theme check | `isLightThemeActive()` in `block/pane-identity.ts` |
 
@@ -217,7 +223,7 @@ Rule: **only tiers 1 and 2 count as identities in the tail rule.**
 ## 7. Delivery
 
 1. **PR 1, resolver and defaults (built):** §3.1–3.3 and §3.8, `frame:hue` and `pane:colors` typed (§4.2 H), `isLightThemeActive`. Every pane gets its default color; the setting can be edited in `settings.json` but has no UI yet.
-2. **PR 2, Settings and menu:** §3.4, §3.5, §3.7.
+2. **PR 2, Settings and menu (built):** §3.4, §3.5, §3.7, and `legacyOf` for `cpuplot` and `armory` (§3.3).
 3. **PR 3, top bar:** §3.6, the `widgetTint` token, Launcher, `widgets.json` cleanup.
 
 PR 1 alone changes the look of every uncolored pane, so it could also ship behind PR 2's setting with "None" as each widget's starting value. §8 D3 decides.

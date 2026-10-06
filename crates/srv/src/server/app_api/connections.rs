@@ -105,7 +105,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // A host's durable sessions, for the pane menu's "Sessions on <host>"
+    // A host's durable sessions, for the Remotes pane's "Sessions…"
     // (spec §7.6). Listing runs one fixed, read-only command over ssh, as the
     // UI's other connection calls do. Ending one is the user's decision,
     // made in the host's own window (`ask_user`): anything holding srv's

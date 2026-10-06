@@ -11,7 +11,7 @@
 import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
 import { paneRoleColor, type PaneColorRole } from "./pane-color-scheme";
-import { getPaneTab } from "./pane-tab-registry";
+import { getPaneTab, type PaneTabManifest } from "./pane-tab-registry";
 
 /** `pick`: the pane's own "Pane Color". `agent`: the agent's identity color.
  *  `widget`: the color of the pane's widget type (Settings, else built-in). */
@@ -31,16 +31,28 @@ export interface PaneIdentityOptions {
     widget?: boolean;
 }
 
+/** The manifest whose color a view uses: its own, or for a legacy view the
+ *  one it stands in for (`legacyOf`). */
+function colorManifest(view: string | null | undefined): PaneTabManifest | undefined {
+    const manifest = getPaneTab(view);
+    return manifest?.legacyOf ? getPaneTab(manifest.legacyOf) : manifest;
+}
+
+/** The `pane:colors` key a view's color is stored under: its canonical view,
+ *  after aliases and `legacyOf`. */
+export function widgetColorView(view: string | null | undefined): string | undefined {
+    return colorManifest(view)?.view ?? (view || undefined);
+}
+
 /** The color of a widget type: the user's `pane:colors` entry, else the
  *  manifest's `defaultHue`. Undefined when it has none, or the user set `null`. */
 export function widgetHueFor(view: string | null | undefined): number | undefined {
-    const manifest = getPaneTab(view);
-    const key = manifest?.view ?? view;
+    const key = widgetColorView(view);
     if (!key) return undefined;
     const chosen = getSettingsKeyAtom("pane:colors")()?.[key];
     if (chosen === null) return undefined;
     if (typeof chosen === "number") return chosen;
-    return manifest?.defaultHue;
+    return colorManifest(view)?.defaultHue;
 }
 
 /** The highest-precedence color source of a block: its own pick, then its

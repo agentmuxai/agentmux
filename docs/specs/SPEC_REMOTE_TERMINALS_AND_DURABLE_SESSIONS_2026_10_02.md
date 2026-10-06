@@ -141,7 +141,7 @@ A Windows machine running OpenSSH Server can host plain SSH terminals from P2 (i
 
 As built (`durable_ssh::wants`):
 - "Has the helper" means the helper has answered on that host before. srv records the canonical connection name in `remote-helper-hosts.json` under its config dir on every `Hello`, so a host becomes durable by default after its first durable pane.
-- The pane menu's "Keep Session Alive (durable)" checkbox shows what the controller is running (`durable` in its runtime status). Turning it off stores an explicit `false`, so no default turns it back on.
+- (Removed 2026-10-05 at the operator's request, with the rest of the terminal's header menu items below Pane Color: the per-pane checkbox and "Sessions on <host>…". A host's setting and sessions are in the Remotes pane, `SPEC_REMOTES_PANE_2026_10_05.md`.) The pane menu's "Keep Session Alive (durable)" checkbox showed what the controller is running (`durable` in its runtime status). Turning it off stores an explicit `false`, so no default turns it back on.
 - Settings, Terminal, "Keep SSH sessions alive" sets the global value: on hosts that have the helper (unset), always (which installs the helper on any host), or never.
 
 ### 7.2 How it works

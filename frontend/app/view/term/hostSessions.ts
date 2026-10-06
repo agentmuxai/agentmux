@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// "Sessions on <host>" (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md
+// The Remotes pane's "Sessions…" (SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md
 // §7.6): the durable sessions AgentMux's helper holds on an SSH host, so a
 // session no pane holds any more (an orphan) can be opened again or ended.
 

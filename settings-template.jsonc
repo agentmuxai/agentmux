@@ -42,6 +42,11 @@
     // "window:maxtabcachesize":   10,
     // "window:disablehardwareacceleration": false,
 
+    // -- Pane colors --
+    // Color per widget type, keyed by view ("term", "agent", ...): a hue 0-360,
+    // or null for none. Remove a key to return to the built-in color.
+    // "pane:colors":              {},
+
     // -- Startup --
     // Suppress the splash screen. Applies at the NEXT launch: the launcher
     // reads this before the app itself is running.
