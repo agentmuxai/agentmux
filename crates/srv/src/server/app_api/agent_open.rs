@@ -821,16 +821,10 @@ async fn open_agent_inner(
                 // in the container — passing it as docker-exec argv[0] would fail
                 // with "no such file or directory". Container turns use this.
                 meta.insert("agent:container_command".to_string(), json!(provider.cli_command));
-                // Derive output format from provider ID (matches frontend providers/index.ts)
-                let output_format = match provider.id {
-                    "claude" => "claude-stream-json",
-                    "codex" => "codex-json",
-                    "gemini" => "gemini-json",
-                    // Qwen Code is a Gemini-CLI fork → same stream-json schema.
-                    "qwen" => "gemini-json",
-                    "kimi" => "kimi-stream-json",
-                    _ => "claude-stream-json",
-                };
+                // The provider registry's own format (mirrors the frontend
+                // catalog's `styledOutputFormat`). A local copy of the mapping
+                // here had drifted: it sent Antigravity to the Claude format.
+                let output_format = provider.styled_output_format;
                 meta.insert("agentOutputFormat".to_string(), json!(output_format));
                 meta.insert("controller".to_string(), json!(controller_type));
                 meta.insert("cmd".to_string(), json!(&resolved_cli_path));

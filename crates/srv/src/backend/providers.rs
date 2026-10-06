@@ -408,15 +408,21 @@ static QWEN: ProviderConfig = ProviderConfig {
     controller_type: ControllerType::Subprocess,
     app_server: None,
     // -p: non-interactive; --output-format stream-json: NDJSON events;
-    // --yolo: auto-approve all tools. Mirrors GEMINI (its upstream).
-    launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
+    // --include-partial-messages: Claude-style stream_event deltas, which is
+    // where the Claude translator reads reply text; --yolo: auto-approve all
+    // tools.
+    launch_args: &["--output-format", "stream-json", "--include-partial-messages", "--yolo", "-p", ""],
     persistent_launch_args: None,
     // Docs mention --resume <id>/--continue but it's unconfirmed for the
     // headless stream-json path; multi-turn re-runs like Codex/Kimi (None).
     resume_flag: None,
     session_id_field: "session_id",
-    // Gemini-CLI fork → same stream-json schema; reuse the gemini translator.
-    styled_output_format: "gemini-json",
+    // A Gemini-CLI fork, but its stream-json is Claude Code's shape
+    // (system/assistant/user/result frames; verified on 0.24.0), not Gemini's,
+    // so it is read by the Claude translator under its own name. Its usage
+    // counts cached tokens inside input_tokens, unlike Claude's, so the context
+    // meter does not read it (main-agent-usage.ts `readsMainAgentUsage`).
+    styled_output_format: "qwen-stream-json",
     // QWEN_HOME relocates the config/credentials dir (default ~/.qwen),
     // the Qwen analogue of GEMINI_CLI_HOME — gives per-agent auth isolation.
     auth_config_dir_env_var: "QWEN_HOME",
@@ -1133,6 +1139,17 @@ mod tests {
         assert!(p.pinned_version.is_empty());
         assert_eq!(p.supported_vendors, &["google"]);
         assert!(p.base_url_env_var.is_none());
+    }
+
+    #[test]
+    fn qwen_streams_claude_shaped_frames_under_its_own_format() {
+        // Qwen Code is a Gemini-CLI fork, but its stream-json is Claude Code's
+        // frame shape (verified on 0.24.0), and its reply text arrives only as
+        // partial-message deltas.
+        let p = get_provider("qwen").unwrap();
+        assert_eq!(p.styled_output_format, "qwen-stream-json");
+        assert!(p.launch_args.contains(&"--include-partial-messages"));
+        assert!(crate::backend::blockcontroller::subprocess::persists_user_record(p.styled_output_format));
     }
 
     #[test]

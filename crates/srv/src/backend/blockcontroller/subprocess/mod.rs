@@ -436,7 +436,7 @@ impl Controller for SubprocessController {
 pub(crate) fn persists_user_record(output_format: &str) -> bool {
     matches!(
         output_format,
-        "claude-stream-json" | "codex-json" | "kimi-stream-json"
+        "claude-stream-json" | "codex-json" | "kimi-stream-json" | "qwen-stream-json"
     )
 }
 

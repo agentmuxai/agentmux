@@ -419,6 +419,8 @@ fn persists_user_record_only_for_clis_that_dont_echo_the_prompt() {
     // Gemini's CLI writes the prompt into its own output: a second record
     // would show the message twice on replay.
     assert!(!persists_user_record("gemini-json"));
+    // Qwen's headless stream echoes only subagent prompts, never the user's.
+    assert!(persists_user_record("qwen-stream-json"));
     assert!(!persists_user_record("acp"));
     assert!(!persists_user_record(""));
 }
