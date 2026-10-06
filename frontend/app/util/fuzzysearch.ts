@@ -50,3 +50,35 @@ export function fuzzySearch<T>(items: T[], query: string, options: IFuseOptions<
     const fuse = new Fuse(items, { ...DEFAULT_FUZZY_OPTIONS, ...options });
     return fuse.search(q).map((r) => r.item);
 }
+
+/**
+ * Search where what the user typed counts first. Names that contain `query`
+ * (case-insensitive) are returned, best first: the exact name, then names that
+ * start with it, then names with it at a word start, then the rest, each group
+ * in `items` order. Only when no name contains it does this fall back to
+ * `fuzzySearch`, so a typo still finds something.
+ *
+ * `fuzzySearch` alone treats "agentx" as close enough to "agenty", which is
+ * right for a command palette and wrong for a list the user is narrowing by a
+ * name they know. Returns `items` unchanged for a blank query.
+ */
+export function literalFirstSearch<T>(
+    items: T[],
+    query: string,
+    text: (item: T) => string,
+    fuzzyOptions: IFuseOptions<T>
+): T[] {
+    const q = query.trim();
+    if (!q) return items;
+    const needle = q.toLowerCase();
+    const hits: { item: T; rank: number; index: number }[] = [];
+    items.forEach((item, index) => {
+        const haystack = text(item).toLowerCase();
+        const at = haystack.indexOf(needle);
+        if (at < 0) return;
+        const rank = haystack === needle ? 0 : at === 0 ? 1 : /[\s\-_.]/.test(haystack[at - 1]) ? 2 : 3;
+        hits.push({ item, rank, index });
+    });
+    if (hits.length > 0) return hits.sort((a, b) => a.rank - b.rank || a.index - b.index).map((h) => h.item);
+    return fuzzySearch(items, q, fuzzyOptions);
+}
