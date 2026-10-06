@@ -193,7 +193,10 @@ impl PersistentSubprocessController {
             }
             // Marked under this same guard, so the turn state a concurrent
             // caller or the turn-end handler reads is never behind the write.
-            let label = if written.len() == 1 { origin } else { None };
+            // Only a fully successful write of this message alone: with a
+            // failure, the one entry written is an older queued one and this
+            // message was taken back (ReAgent P1 on #4401).
+            let label = if failure.is_none() && written.len() == 1 { origin } else { None };
             let was_active = (!written.is_empty()).then(|| self.mark_turn_active_locked_from(label));
             (written, was_active, !inner.deferred_deliveries.is_empty(), failure)
         };

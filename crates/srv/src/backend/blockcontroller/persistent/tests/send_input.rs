@@ -3889,6 +3889,24 @@ async fn a_labelled_structured_delivery_written_with_a_backlog_is_unlabelled() {
     assert_eq!(c.turn_provenance(), None, "an unlabelled start is unknown");
 }
 
+/// ReAgent P1 on #4401: an older queued message is written, then this one's
+/// own write fails and it is taken back. The turn was started by the older
+/// (automated) message, so it must stay unknown, not become the user's.
+#[tokio::test]
+async fn a_labelled_delivery_whose_own_write_fails_after_a_backlog_is_unlabelled() {
+    use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+    use crate::backend::blockcontroller::Controller;
+    let c = controller();
+    let (tx, mut rx) = mpsc::channel::<String>(1); // room for exactly one write
+    c.inner.lock().unwrap().stdin_tx = Some(tx);
+    enqueue_deferred(&c, "an older jekt");
+    let input = TurnInput { origin: TurnOrigin::User, text: "then quit".into() };
+    assert!(c.send_user_message_outcome_from("then quit".to_string(), Some(input)).is_err());
+    assert!(rx.try_recv().unwrap().contains("an older jekt"), "the backlog was written");
+    assert!(c.health_monitor.is_active_turn(), "the older message started a turn");
+    assert_eq!(c.turn_provenance(), None, "a turn the user's message didn't start is unknown");
+}
+
 /// The unlabelled form — every jekt — is unchanged: an idle start is unknown.
 #[tokio::test]
 async fn an_unlabelled_structured_delivery_still_starts_an_unknown_turn() {
