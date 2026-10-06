@@ -312,15 +312,15 @@ The widget bar shows the operator's own pinned list when they've set one (`widge
 `crates/srv/src/config/widgets.json` (`display:pinned`, ordered by `display:order`). Today
 those defaults pin four: Agent, Swarm, Armory, Sysinfo.
 
-**New default (operator, 2026-10-05):** eleven pinned, in this order; everything else goes in More:
+**New default (operator, 2026-10-05):** eleven pinned, in this order; everything else goes in More. (Reordered later the same day at the operator's request: Swarm second, Connectors after Hangar. Shipped with the widget default colors work, `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` §7 PR 3.)
 
 | # | Widget | Key | Today |
 |---|---|---|---|
 | 1 | Agent | `defwidget@agent` | pinned |
-| 2 | **Connectors** | `defwidget@connectors` (new) | replaces Armory |
+| 2 | Swarm | `defwidget@swarm` | pinned |
 | 3 | **Knowledge** | `defwidget@knowledge` (new) | replaces Armory |
-| 4 | Swarm | `defwidget@swarm` | pinned |
-| 5 | Hangar | `defwidget@files` | in More |
+| 4 | Hangar | `defwidget@files` | in More |
+| 5 | **Connectors** | `defwidget@connectors` (new) | replaces Armory |
 | 6 | Terminal | `defwidget@terminal` | in More |
 | 7 | Editor | `defwidget@editor` | in More |
 | 8 | Browser | `defwidget@browser` | in More |

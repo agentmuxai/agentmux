@@ -27,7 +27,7 @@ import {
 import { makeIconClass } from "@/util/util";
 import { autoUpdate, type Placement } from "@floating-ui/dom";
 import { createSignal, For, onCleanup, type JSX } from "solid-js";
-import { getChildWidgets, handleWidgetSelect } from "./action-widgets-config";
+import { getChildWidgets, handleWidgetSelect, widgetIconStyle } from "./action-widgets-config";
 
 const PinnedWidgetFlyout = (props: {
     widget: WidgetConfigType;
@@ -131,7 +131,7 @@ const PinnedWidgetFlyout = (props: {
                         onClick={() => handleItemClick(widget)}
                         onContextMenu={(e) => handleItemContextMenu(e, key)}
                     >
-                        <span class="action-widget-more-item-icon widget-icon">
+                        <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>
                             <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
                         </span>
                         <span class="action-widget-more-item-label">{widget.label}</span>

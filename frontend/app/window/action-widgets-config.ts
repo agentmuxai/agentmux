@@ -14,6 +14,9 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, openOrFocusPaneByView } from "@/store/global";
 import { fireAndForget } from "@/util/util";
+import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
+import { paneRoleColor, type PaneColorRole } from "@/app/block/pane-color-scheme";
+import type { JSX } from "solid-js";
 
 /**
  * Short-names (no "defwidget@" prefix) that appear in some widget's
@@ -30,6 +33,27 @@ export function getGroupedChildKeys(wmap: Record<string, WidgetConfigType>): Set
         for (const child of w.children ?? []) grouped.add(child);
     }
     return grouped;
+}
+
+/** A widget entry's color for `role`: its own `color` (a messenger's brand,
+ *  though it opens a browser), else the color of the view it opens
+ *  (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.6). An entry color the
+ *  palette can't read (any CSS color but `#rrggbb`) is used as written at
+ *  full strength, and gives way to the view's color for the other roles. */
+export function widgetEntryColor(widget: WidgetConfigType, role: PaneColorRole): string | undefined {
+    const isLight = isLightThemeActive();
+    if (widget.color) {
+        const color = paneRoleColor(undefined, widget.color, isLight, role);
+        if (color) return color;
+        if (role === "identity") return widget.color;
+    }
+    return widgetRoleColor(widget.blockdef?.meta?.view, isLight, role);
+}
+
+/** A top-bar widget icon's style: the entry's color, faintly. */
+export function widgetIconStyle(widget: WidgetConfigType): JSX.CSSProperties {
+    const tint = widgetEntryColor(widget, "widgetTint");
+    return tint ? { "--widget-tint": tint } : {};
 }
 
 /** True if `shortName` is individually pinned via widget:pinned — i.e. promoted out of its parent group. */

@@ -12,7 +12,8 @@
 // the hover-brighten is suppressed — row-hover background is enough; an
 // icon color flicker on every menu-row hover reads as noisy.
 .widget-icon {
-    color: var(--widget-icon-color);
+    // --widget-tint: the widget type's color, faintly (widgetIconStyle).
+    color: var(--widget-tint, var(--widget-icon-color));
     transition: color 120ms ease;
 }
 
