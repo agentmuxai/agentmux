@@ -27,6 +27,7 @@ import {
 } from "@/store/tab-reveal";
 import { switchIntentTabId } from "@/store/tab-actions";
 import { markLoadedTabsShownWhenSettled } from "@/app/tab/tab-content-settled";
+import { drainWhenIdle, installWindowResizeTracking, windowResizing } from "@/app/platform/window-resize";
 import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, untrack } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -203,6 +204,38 @@ function WorkspaceElem(): JSX.Element {
         return [...(w.pinnedtabids ?? []), ...(w.tabids ?? [])];
     });
 
+    // Hidden tabs kept laid out skip layout while the window is being resized,
+    // so each frame of a resize lays out only the displayed tab, then catch up
+    // one per idle period once it settles instead of all in one long frame
+    // (window-resize.ts; ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md).
+    installWindowResizeTracking();
+    const [relayoutPending, setRelayoutPending] = createSignal<ReadonlySet<string>>(new Set());
+    let cancelRelayoutDrain: (() => void) | null = null;
+    onCleanup(() => cancelRelayoutDrain?.());
+    createEffect(
+        on(
+            windowResizing,
+            (now) => {
+                cancelRelayoutDrain?.();
+                cancelRelayoutDrain = null;
+                if (now) {
+                    setRelayoutPending(new Set(untrack(allTabIds)));
+                    return;
+                }
+                cancelRelayoutDrain = drainWhenIdle(() => {
+                    const pending = relayoutPending();
+                    const [next] = pending;
+                    if (next == null) return false;
+                    const rest = new Set(pending);
+                    rest.delete(next);
+                    setRelayoutPending(rest);
+                    return rest.size > 0;
+                });
+            },
+            { defer: true }
+        )
+    );
+
     // The tabs this window loaded with count as shown once each one's content
     // has settled (markLoadedTabsShownWhenSettled), so the first switch to
     // each is as clean as any later one. Once, when the tab list first arrives: a tab arriving
@@ -253,7 +286,8 @@ function WorkspaceElem(): JSX.Element {
                                         tid === displayTabId(),
                                         keepLaidOut(),
                                         gateHides(tid),
-                                        tid === leavingTabId()
+                                        tid === leavingTabId(),
+                                        relayoutPending().has(tid)
                                     ),
                                 );
                                 return (
