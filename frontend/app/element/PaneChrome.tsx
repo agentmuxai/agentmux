@@ -29,8 +29,8 @@ import {
     computeMixedPaneHeaderBg,
 } from "@/app/block/blockframe";
 import { getPaneTab, paneTabCapability, resolvePaneTabView } from "@/app/block/pane-tab-registry";
-import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
-import { atoms, getSettingsKeyAtom, MOS, pushNotification } from "@/app/store/global";
+import { isLightThemeActive } from "@/app/block/pane-identity";
+import { atoms, MOS, pushNotification } from "@/app/store/global";
 import { remoteDisplay } from "@/app/store/remote-display";
 import { readSwarmSummary } from "@/app/store/activitySummary";
 import { ErrorBoundary } from "@/element/errorboundary";
@@ -74,8 +74,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         () => remoteDisplay(atoms.fullConfigAtom()?.connections, activeBlockData()?.meta?.connection)?.color
     );
     const ringBorderColor = createMemo(() => {
-        const themeId = getSettingsKeyAtom("window:theme")();
-        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const isLightTheme = isLightThemeActive();
         return computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, isLightTheme);
     });
 
@@ -170,8 +169,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // underline collapses to one shared color (reagent P1, PR #3484 — back
     // when a tab-level override tier still existed).
     const tabColors = createMemo(() => {
-        const themeId = getSettingsKeyAtom("window:theme")();
-        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const isLightTheme = isLightThemeActive();
         const colors = new Map<string, PaneTabColors>();
         for (const blockId of tabIds()) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
@@ -211,8 +209,7 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     // keeps every tab-set-aware decision in one place and leaves every
     // non-PaneChrome BlockFrame consumer untouched by construction.
     const headerTailBg = createMemo(() => {
-        const themeId = getSettingsKeyAtom("window:theme")();
-        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const isLightTheme = isLightThemeActive();
         const ids = tabIds();
         // Compare the RESOLVED background strings, not the meta that
         // produced them: two blocks that land on the same rendered color
@@ -247,11 +244,15 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
         // tabs is about that agent: its tail keeps that agent's tint whichever
         // tab is selected. Stable, so it never moves on a tab switch. Two or
         // more identities have no single colour to be about → neutral.
+        // Only a pick or an agent colour is an identity here: a tab coloured
+        // just by its widget type counts as uncoloured, or every utility tab
+        // would now compete with the agent
+        // (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.8).
         const identities = new Set<string>();
         let anyUncoloured = false;
         for (const blockId of ids) {
             const meta = MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta;
-            const bg = computeBlockColorBg(meta, isLightTheme);
+            const bg = computeBlockColorBg(meta, isLightTheme, { widget: false });
             if (bg) identities.add(bg);
             else anyUncoloured = true;
         }

@@ -25,6 +25,7 @@ export const memoryPaneTab: PaneTabManifest = {
     view: "memory",
     label: "Memory",
     icon: "layer-group",
+    defaultHue: 150,
     create: (ctx) => ({
         component: () => <BundleView agentId={() => ctx.meta()?.["agentId"] as string | undefined} />,
         liveTitle: () => ({ text: memoryTitle(ctx.meta()) }),

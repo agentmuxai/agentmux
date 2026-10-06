@@ -21,6 +21,7 @@ export const armoryPaneTab: PaneTabManifest = {
     aliases: ["trust"],
     label: "Armory",
     icon: "vault",
+    defaultHue: 330,
     capabilities: { paneZoom: {} },
     create: (ctx) => {
         const patch = armoryMigrationPatch(ctx.meta() as Record<string, unknown>);

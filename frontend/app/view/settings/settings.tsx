@@ -14,6 +14,7 @@ export const settingsPaneTab: PaneTabManifest = {
     view: "settings",
     label: "Settings",
     icon: "cog",
+    defaultHue: 0,
     create: () => {
         const model = new SettingsViewModel();
         return {

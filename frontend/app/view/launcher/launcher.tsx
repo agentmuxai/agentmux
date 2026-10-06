@@ -354,6 +354,7 @@ export const launcherPaneTab: PaneTabManifest = {
     view: "launcher",
     label: "Launcher",
     icon: "shapes",
+    defaultHue: 330,
     capabilities: { header: "none" },
     create: (ctx) => {
         const model = new LauncherViewModel(ctx.blockId);

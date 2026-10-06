@@ -51,6 +51,7 @@ export const knowledgePaneTab: PaneTabManifest = {
     view: KNOWLEDGE_VIEW,
     label: "Knowledge",
     icon: "book",
+    defaultHue: 150,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     create: (ctx) => {
