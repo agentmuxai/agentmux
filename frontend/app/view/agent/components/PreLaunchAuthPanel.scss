@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Layout for the pre-launch OAuth panel inside AgentLaunchModal.
-// Button colors / hover / focus all inherit from `.wave-button.green.solid`
-// (see element/button.scss) — this file only handles panel layout, the
+// Button colors / hover / focus come from the shared line-style Button
+// (element/ui) — this file only handles panel layout, the
 // inline-icon row inside the button, and the surrounding banner / hint copy.
 
 .pre-launch-auth-panel {
