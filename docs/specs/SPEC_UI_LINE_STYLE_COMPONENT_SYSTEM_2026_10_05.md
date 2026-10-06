@@ -1,7 +1,7 @@
 # Spec: one line-style UI component set (buttons, tabs, menus, form controls)
 
 **Date:** 2026-10-05
-**Status:** active — PR 1 (tokens, components, CI ratchet) in PR #4365; the migrations in §8 follow.
+**Status:** active — PR 1 (tokens, components, CI ratchet) in PR #4365, PR 2 (Settings) in PR #4366; the other migrations in §8 follow.
 **Owner:** Agent4
 **Builds on:** `SPEC_DESIGN_SYSTEM_2026_04_23.md` (tokens and mixins, which landed), `SPEC_HARD_CORNERS_2026_05_26.md`, `SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md` (popup menus, still unbuilt)
 
@@ -395,7 +395,7 @@ Each step is one PR, and each can be checked in a `task dev` window before mergi
 | PR | Scope | Visible change |
 |---|---|---|
 | 1 | Tokens (§5.2), `element/ui/` primitives with unit tests, the `line-control` mixin, the CI gate at its current baseline. No consumers yet. **Built.** | none |
-| 2 | **Settings** onto `Tabs` (`orientation="auto"`), `Field`, `Switch`, `Select`, `TextInput`, `NumberInput`, `Button`. `settings-controls.tsx` becomes a thin re-export; most of `settings.scss` (605 lines) is deleted. | Settings: line rail, line switch, square corners, consistent buttons |
+| 2 | **Settings** onto `Tabs` (`orientation="auto"`), `Field`, `Switch`, `Select`, `TextInput`, `NumberInput`, `Button`. `settings-controls.tsx` becomes a thin re-export; most of `settings.scss` (605 lines) is deleted. | Settings: line rail, line switch, square corners, consistent buttons. **Built.** |
 | 3 | **New-agent modals** (Launch, Create from template, New bundle) onto `Field`, `Select`, `SegmentedControl` (Continue/New) and `Button` (Cancel `neutral`, Create `accent`). The "+" and empty-state buttons become `IconButton` and `Button`. | new-agent modals |
 | 4 | **`<Button>` and `ConfirmModal`** rebuilt per §5.6. All 55 `<Button>`s and 14 confirm dialogs ("Close tab" included) go to the line style; the lime hover goes. Delete `components/confirm-dialog.*` if its callers can use `ConfirmModal`. | app-wide |
 | 5 | **Section-pane, Warden and Stash** onto `Tabs`; delete the Warden copy and the unused tab CSS. | Connectors and Knowledge rails lose the solid fill |
