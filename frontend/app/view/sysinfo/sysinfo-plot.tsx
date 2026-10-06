@@ -5,7 +5,7 @@ import * as Plot from "@observablehq/plot";
 import dayjs from "dayjs";
 import * as htl from "htl";
 import type { JSX } from "solid-js";
-import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { batch, createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { throttle } from "throttle-debounce";
 
 import "./sysinfo-plot.scss";
@@ -83,9 +83,12 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         // a new SVG each time. So a drag redraws at most every
         // CHART_RESIZE_REDRAW_MS, first and last size included, and the drawn
         // SVG stretches to the pane in between (see the effect below).
+        // One batch, so the chart effect runs once for both dimensions.
         const resize = throttle(CHART_RESIZE_REDRAW_MS, (width: number, height: number) => {
-            setPlotWidth(width);
-            setPlotHeight(height);
+            batch(() => {
+                setPlotWidth(width);
+                setPlotHeight(height);
+            });
         });
         const rszObs = new ResizeObserver((entries) => {
             const rect = entries[entries.length - 1].contentRect;
