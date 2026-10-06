@@ -26,7 +26,7 @@ use crate::backend::blockcontroller::{
 use crate::backend::mps;
 
 use super::{
-    argv::{append_prompt_arg, build_turn_argv},
+    argv::{append_prompt_arg, args_for_log, build_turn_argv},
     SubprocessController, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT,
 };
 
@@ -214,7 +214,7 @@ impl SubprocessController {
             block_id = %self.block_id,
             pid = pid,
             cmd = %config.cli_command,
-            args = ?args,
+            args = ?args_for_log(&args, prompt_in_argv),
             "subprocess spawned"
         );
 

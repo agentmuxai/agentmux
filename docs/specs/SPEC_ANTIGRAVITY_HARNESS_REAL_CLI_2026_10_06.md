@@ -1,6 +1,6 @@
 # Spec: Make the Antigravity harness drive the real `agy` CLI
 
-**Status:** proposed
+**Status:** implemented (#4407)
 **Date:** 2026-10-06
 **Author:** Camper
 

@@ -57,6 +57,19 @@ pub(super) fn append_prompt_arg(args: &mut Vec<String>, flag: &str, prompt: &str
     Ok(())
 }
 
+/// `args` as they may be logged: the prompt [`append_prompt_arg`] put last is
+/// replaced by its length. On stdin the prompt never reached a log; on the
+/// command line it must not either (#4407).
+pub(super) fn args_for_log(args: &[String], prompt_in_argv: bool) -> Vec<String> {
+    let mut out = args.to_vec();
+    if prompt_in_argv {
+        if let Some(prompt) = out.last_mut() {
+            *prompt = format!("<prompt: {} chars>", prompt.chars().count());
+        }
+    }
+    out
+}
+
 fn build_legacy_argv(
     base: &[String],
     resume_flag: &str,
@@ -257,7 +270,18 @@ fn build_codex_argv(base: &[String], session_id: Option<&str>) -> Result<Vec<Str
 
 #[cfg(test)]
 mod prompt_arg_tests {
-    use super::{append_prompt_arg, build_turn_argv, MAX_PROMPT_ARG_UNITS};
+    use super::{append_prompt_arg, args_for_log, build_turn_argv, MAX_PROMPT_ARG_UNITS};
+
+    #[test]
+    fn the_logged_args_never_carry_the_prompt() {
+        let mut args = strings(&["--output-format", "stream-json"]);
+        append_prompt_arg(&mut args, "-p", "my token is abc123").unwrap();
+        let logged = args_for_log(&args, true);
+        assert_eq!(logged, strings(&["--output-format", "stream-json", "-p", "<prompt: 18 chars>"]));
+        assert!(!logged.iter().any(|a| a.contains("abc123")));
+        // A stdin provider's args hold no prompt and are logged as they are.
+        assert_eq!(args_for_log(&strings(&["-p", "--verbose"]), false), strings(&["-p", "--verbose"]));
+    }
 
     fn strings(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
