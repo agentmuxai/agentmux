@@ -3,20 +3,13 @@
 
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 1).
 
-import { atoms } from "@/app/store/global";
 import { ModalLayer } from "@/element/ModalLayer";
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import type { AgentViewModel } from "./agent-model";
 import { AgentPresentationView } from "./agent-view";
 import { AgentPicker } from "./components/AgentPicker";
 import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
 import { HISTORY_TAB_FOR_META_KEY } from "./open-history-tab";
-
-// Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
-// the AgentPicker->AgentPresentationView cross-fade (AgentBlockContent,
-// below) reuses the same visual timing so the two fades feel like one brand
-// moment rather than two differently-tuned animations back to back.
-const PICKER_FADE_OUT_MS = 200;
 
 /**
  * Content half of the agent pane — becomes `AgentViewModel.viewComponent`.
@@ -46,64 +39,14 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
     // content in place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
     const isHistoryTab = () => !!block()?.meta?.[HISTORY_TAB_FOR_META_KEY];
 
-    // Cross-fade AgentPicker -> AgentPresentationView instead of an instant
-    // hard cut when this SAME block gains an agentId in place (launching an
-    // agent from a blank "+" tab's picker — no block-stack mutation, no
-    // node remount, so PR #2761's leaf reveal gate never covers this
-    // transition at all). SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
-    // §2.3/§4 Option B.
-    //
-    // Same stuck-visible race as block.tsx's ready()-gate (see
-    // docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md):
-    // seeding `pickerVisible` from `!agentId()` read once at construction,
-    // then relying on `on(agentId, ..., {defer: true})`'s first (swallowed)
-    // run to treat "agentId already set" as "nothing to do," is two
-    // different reads of `agentId()` taken at two different times. If
-    // `agentId()` resolves in the gap between them, the seed is never
-    // corrected. Fixed the same way: the first observation and the seed
-    // are now the same read, inside the same effect.
-    const [pickerVisible, setPickerVisible] = createSignal(true);
-    const [pickerFadingOut, setPickerFadingOut] = createSignal(false);
-    let pickerFadeRaf: number | undefined;
-    let pickerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
-    let pickerGateInitialized = false;
-    onCleanup(() => {
-        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
-        clearTimeout(pickerFadeTimeout);
-    });
-    createEffect(() => {
-        const id = agentId();
-        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
-        clearTimeout(pickerFadeTimeout);
-        if (!pickerGateInitialized) {
-            // First observation of `agentId()` for this mount: reflect it
-            // directly, no fade — there's nothing painted yet to fade from
-            // either way.
-            pickerGateInitialized = true;
-            setPickerVisible(!id);
-            setPickerFadingOut(false);
-            return;
-        }
-        if (id) {
-            if (!pickerVisible()) return; // already past the transition
-            // One rAF so the picker paints at full opacity at least once
-            // before the fade starts — flipping straight to the
-            // "is-fading" class in this same tick would apply opacity:0
-            // on the very first paint, with nothing to visibly transition
-            // from.
-            pickerFadeRaf = requestAnimationFrame(() => setPickerFadingOut(true));
-            pickerFadeTimeout = setTimeout(() => {
-                setPickerVisible(false);
-                setPickerFadingOut(false);
-            }, PICKER_FADE_OUT_MS);
-        } else {
-            // Lost the agentId (not a normal path, but stay correct) —
-            // show the picker again immediately, no fade needed going
-            // this direction.
-            setPickerFadingOut(false);
-            setPickerVisible(true);
-        }
-    });
+    // Launching an agent from this pane's picker swaps the picker out at once.
+    // AgentPresentationView mounts behind its own opaque loading cover (the
+    // logo), which then fades to the conversation: logo, then final content.
+    // The picker used to cross-fade out on top of it for 200 ms instead, so
+    // the picker's text showed through and dissolved into the logo, a flash
+    // of text the owner asked to remove (2026-10-05). That fade was added
+    // against a hard cut to a blank pane (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+    // §2.3), before the presentation view had its own cover from its first frame.
 
     // ReAgent P2 on SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md's
     // PR: owned by the model (one useAgentDefinitions() subscription per
@@ -127,25 +70,8 @@ export const AgentBlockContent = ({ model }: { model: AgentViewModel }): JSX.Ele
                                 progressBarMount={model.progressBarMount}
                             />
                         </Show>
-                        {/* Cross-fades out on top of AgentPresentationView
-                            once agentId() is set, instead of the two Shows
-                            above hard-swapping instantly — see
-                            pickerVisible/pickerFadingOut above.
-                            SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3. */}
-                        <Show when={pickerVisible()}>
-                            <div
-                                class="agent-picker-host"
-                                classList={{
-                                    // Applied the instant agentId() is set
-                                    // (same render as AgentPresentationView
-                                    // appearing) so this never sits in
-                                    // normal flow alongside it, even for
-                                    // one frame.
-                                    "is-overlay": !!agentId(),
-                                    "is-fading": pickerFadingOut(),
-                                    "is-reduced-motion": atoms.prefersReducedMotionAtom(),
-                                }}
-                            >
+                        <Show when={!agentId()}>
+                            <div class="agent-picker-host">
                                 <AgentPicker model={model} />
                             </div>
                         </Show>
