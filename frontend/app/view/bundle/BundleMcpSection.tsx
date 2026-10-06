@@ -26,6 +26,7 @@ import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { BundleMcpModel } from "./bundle-mcp-model";
 import "./BundlePrimitiveSection.scss";
+import { Button } from "@/app/element/ui";
 
 interface BundleMcpSectionProps {
     bundleId: string;
@@ -75,23 +76,23 @@ export const BundleMcpSection = (props: BundleMcpSectionProps): JSX.Element => {
                                     when={server.bound_to_bundle}
                                     fallback={
                                         <Show when={server.is_global}>
-                                            <button
-                                                type="button"
+                                            <Button
+                                                density="compact"
                                                 class="bundle-primitive-section-btn"
                                                 onClick={() => void model.bind(server.id)}
                                             >
                                                 Bind
-                                            </button>
+                                            </Button>
                                         </Show>
                                     }
                                 >
-                                    <button
-                                        type="button"
+                                    <Button
+                                        density="compact"
                                         class="bundle-primitive-section-btn"
                                         onClick={() => void model.unbind(server.id)}
                                     >
                                         {server.is_global ? "Unbind" : "Remove"}
-                                    </button>
+                                    </Button>
                                 </Show>
                             </li>
                         )}
@@ -120,13 +121,14 @@ export const BundleMcpSection = (props: BundleMcpSectionProps): JSX.Element => {
                     onInput={(e) => setNewConfig(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
                 />
-                <button
+                <Button
                     type="submit"
+                    tone="accent"
                     class="bundle-primitive-section-add-btn"
                     disabled={model.addingAtom() || !newName().trim()}
                 >
                     {model.addingAtom() ? "Adding…" : "+ Add private server"}
-                </button>
+                </Button>
             </form>
         </div>
     );
