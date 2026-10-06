@@ -1,6 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
@@ -53,5 +55,17 @@ describe("the live compaction card", () => {
         const { queue, added } = fakeQueue();
         expect(pushContextCompactedNodes([realEvent], queue, () => true, () => {})).toBeNull();
         expect(added).toHaveLength(0);
+    });
+});
+
+describe("the fill is not hidden by a memory re-injection turn", () => {
+    // After a compaction the first main-agent call is often the hidden
+    // re-injection turn's, and the hiding queue drops every update while it
+    // runs. The card was shown before that turn, so its fill goes through the
+    // raw queue (#4405).
+    it("fills through rawQueue, not the hiding queue", () => {
+        const src = readFileSync(join(process.cwd(), "frontend/app/view/agent/useAgentStream.ts"), "utf8");
+        expect(src).toMatch(/fillCompactionCard\(awaitingCompactionSize, usage\.input, rawQueue\)/);
+        expect(src).not.toMatch(/fillCompactionCard\([^)]*, queue\)/);
     });
 });

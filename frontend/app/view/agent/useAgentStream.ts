@@ -817,7 +817,11 @@ export function useAgentStream({
                     if (usage?.kind === "in" && !sameCall) {
                         lastUsageMessageId = usage.messageId;
                         if (awaitingCompactionSize) {
-                            fillCompactionCard(awaitingCompactionSize, usage.input, queue);
+                            // Through the raw queue: the first call after a
+                            // compaction is often the hidden memory
+                            // re-injection turn's, whose own nodes the hiding
+                            // queue drops; the card was shown before it.
+                            fillCompactionCard(awaitingCompactionSize, usage.input, rawQueue);
                             awaitingCompactionSize = null;
                         }
                         // message.model is the resolved model id (e.g.
