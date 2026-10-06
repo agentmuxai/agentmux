@@ -54,13 +54,13 @@ An agent pane keeps its own identity (tier 2), so different agents still look di
 Built in `block/pane-identity.ts` (`pane-color-scheme.ts` stays pure color math). As shipped, the identity carries the source's own value, a hue or the agent's hex, and the role colors stay `paneRoleColor`'s job:
 
 ```ts
-/** Where a pane's color comes from, for its tab dot, Swarm and tests. */
-export type PaneHueSource = "pick" | "agent" | "widget-setting" | "widget-default";
+/** Where a pane's color comes from: its own pick, its agent, or its widget type. */
+export type PaneHueSource = "pick" | "agent" | "widget";
 
 export interface PaneIdentity {
     hslHue?: number;        // a pick or a widget color, on the Pane Color scale
     hex?: string;           // the agent's identity color
-    source: PaneHueSource;  // "pick" | "agent" | "widget"
+    source: PaneHueSource;
 }
 
 export function widgetHueFor(view): number | undefined;          // tiers 3–4
