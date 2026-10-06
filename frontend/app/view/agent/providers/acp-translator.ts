@@ -39,7 +39,8 @@ export class AcpTranslator implements OutputTranslator {
     private ended = new Set<string>();
     // Each open call's name and input as known so far: an update may carry
     // the input (often empty at first) or a better title later.
-    private calls = new Map<string, { name: string; input: Record<string, any> }>();
+    // `named`: the name came from the call's own `name`/`title`, not its `kind`.
+    private calls = new Map<string, { name: string; named: boolean; input: Record<string, any> }>();
 
     translate(rawEvent: any): StreamEvent[] {
         if (!rawEvent || typeof rawEvent !== "object") return [];
@@ -70,7 +71,7 @@ export class AcpTranslator implements OutputTranslator {
             }
             case "tool_call": {
                 const toolId = typeof u.toolCallId === "string" && u.toolCallId ? u.toolCallId : `tool-${Date.now()}`;
-                const call = { name: toolName(u), input: toolInput(u) };
+                const call = { name: toolName(u), named: givenName(u) != null, input: toolInput(u) };
                 this.calls.set(toolId, call);
                 const events: StreamEvent[] = [this.tools.call(call.name, toolId, call.input)];
                 // An agent may report a call that has already finished.
@@ -85,12 +86,16 @@ export class AcpTranslator implements OutputTranslator {
                 // New input or a new name: the same call again, upgraded in place.
                 const known = this.calls.get(toolId);
                 if (known && !this.ended.has(toolId)) {
-                    const hasName = [u.name, u.title, u.kind].some((v) => typeof v === "string" && v);
-                    const name = hasName ? toolName(u) : known.name;
+                    // A real name or title wins; a bare `kind` ("read") only
+                    // stands in while the call has no real name yet.
+                    const given = givenName(u);
+                    const kind = typeof u.kind === "string" && u.kind ? u.kind : null;
+                    const name = given ?? (!known.named && kind ? kind : known.name);
+                    const named = known.named || given != null;
                     const input = Object.keys(toolInput(u)).length > 0 ? toolInput(u) : known.input;
                     // By content: each frame parses to a fresh object.
                     if (name !== known.name || JSON.stringify(input) !== JSON.stringify(known.input)) {
-                        const call = { name, input };
+                        const call = { name, named, input };
                         this.calls.set(toolId, call);
                         events.push(this.tools.call(call.name, toolId, call.input));
                     }
@@ -156,6 +161,14 @@ function blockText(block: any): string {
     if (typeof block === "string") return block;
     if (block && typeof block === "object" && block.type === "text" && typeof block.text === "string") return block.text;
     return "";
+}
+
+/** A tool call's own `name` or `title`, if it carries one. */
+function givenName(u: any): string | null {
+    for (const v of [u.name, u.title]) {
+        if (typeof v === "string" && v) return v;
+    }
+    return null;
 }
 
 /** A tool call's display name: its `name`, else its `title`, else its `kind`. */
