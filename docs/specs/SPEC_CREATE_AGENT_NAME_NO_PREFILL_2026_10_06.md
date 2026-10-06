@@ -1,6 +1,6 @@
 # Spec: The new-agent Name field starts empty, with ghost text
 
-**Status:** proposed
+**Status:** implemented (#4397)
 **Date:** 2026-10-06
 **Author:** Camper
 
