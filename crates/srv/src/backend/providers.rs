@@ -784,10 +784,6 @@ pub fn resolve_provider_alias(id: &str) -> &'static str {
     })
 }
 
-/// Look up a provider by canonical ID or alias.
-///
-/// Returns `None` when the ID (and any resolved alias) does not match a known
-/// provider.
 /// Where a PATH-only provider's own installer puts its CLI, for the case
 /// where that folder is not on this process's PATH yet. Antigravity's
 /// installer adds its folder to the user's PATH, but an AgentMux that is
@@ -822,6 +818,10 @@ fn antigravity_install_paths(
     }
 }
 
+/// Look up a provider by canonical ID or alias.
+///
+/// Returns `None` when the ID (and any resolved alias) does not match a known
+/// provider.
 pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
     // Direct lookup first.
     if let Some(p) = REGISTRY.get(id) {
