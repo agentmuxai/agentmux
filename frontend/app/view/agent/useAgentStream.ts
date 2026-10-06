@@ -333,11 +333,12 @@ export function useAgentStream({
         // Claude Code's SessionStart hook now delivers the same memory at a
         // session start and after a compaction; this fallback fires only when
         // the hook didn't (SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2).
-        claimFallback: (reason, boundaryUuid) =>
+        claimFallback: (reason, boundaryUuid, eventAtMs) =>
             MemoryDeliveryApi.ClaimFallbackCommand(TabRpcClient, {
                 block_id: blockId,
                 reason,
                 ...(boundaryUuid ? { boundary_uuid: boundaryUuid } : {}),
+                ...(eventAtMs !== undefined ? { event_at_ms: eventAtMs } : {}),
             }).then((r) => r.deliver),
         // Reuses the REAL TurnStart/TurnReset commands unmodified — a hidden
         // reinjection is a completely genuine turn state-machine-wise; only
