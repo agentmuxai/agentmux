@@ -48,6 +48,7 @@ import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 
 import "./bundle-summary.scss";
+import { Button } from "@/app/element/ui";
 
 interface BundleSummaryPanelProps {
     /** "Identity" | "Bundle" — drives the heading + copy. */
@@ -119,13 +120,13 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
                     This settings tab no longer manages {lowerPlural}; open the
                     manager to make changes.
                 </p>
-                <button
-                    type="button"
+                <Button
+                    tone="accent"
                     class="bundle-summary-btn"
                     onClick={() => void (props.kind === "Identity" ? openConnectors("accounts") : openKnowledge("bundles"))}
                 >
                     {props.agentId && boundBundle() ? "Edit in" : "Manage in"} {props.kind === "Identity" ? "Connectors" : "Knowledge"}
-                </button>
+                </Button>
             </div>
         </div>
     );
