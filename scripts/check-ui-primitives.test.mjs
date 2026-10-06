@@ -12,6 +12,7 @@ import {
     countButtons,
     declarations,
     parseCatFileBatch,
+    pickBase,
     resolveSelector,
     solidFills,
     stripComments,
@@ -151,5 +152,19 @@ describe("parseCatFileBatch", () => {
             Buffer.from(`def456 blob ${Buffer.byteLength(b)}\n${b}\n`),
         ]);
         expect(parseCatFileBatch(out)).toEqual([a, null, b]);
+    });
+});
+
+describe("pickBase", () => {
+    it("uses the merge-base on a pull request", () => {
+        expect(pickBase("mb", "head", "parent")).toBe("mb");
+    });
+
+    it("uses the previous commit on a push to the base branch, where the merge-base is HEAD", () => {
+        expect(pickBase("head", "head", "parent")).toBe("parent");
+    });
+
+    it("has nothing to compare against for a root commit", () => {
+        expect(pickBase("head", "head", null)).toBeNull();
     });
 });

@@ -301,11 +301,26 @@ function git(args, input) {
 /** The commit to compare against, or null when it can't be resolved (shallow clone, no remote). */
 function baseCommit() {
     const branch = process.env.GITHUB_BASE_REF || "main";
+    const rev = (ref) => {
+        const r = git(["rev-parse", "--verify", "--quiet", ref]);
+        return r.status === 0 ? r.stdout.toString().trim() : null;
+    };
     for (const ref of [`origin/${branch}`, branch]) {
         const mb = git(["merge-base", "HEAD", ref]);
-        if (mb.status === 0) return mb.stdout.toString().trim();
+        if (mb.status === 0) return pickBase(mb.stdout.toString().trim(), rev("HEAD"), rev("HEAD^"));
     }
     return null;
+}
+
+/**
+ * The commit to compare against, given the merge-base with the base branch.
+ * On a pull request that is where the branch left main. On a push to main
+ * itself the merge-base is HEAD, which would compare the tree with itself and
+ * never fail, so the previous commit (HEAD's first parent) is used instead.
+ */
+export function pickBase(mergeBase, head, parent) {
+    if (mergeBase !== head) return mergeBase;
+    return parent;
 }
 
 /** Parse `git cat-file --batch` output into the contents of each blob, in order. */
