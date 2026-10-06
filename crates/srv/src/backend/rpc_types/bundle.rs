@@ -143,6 +143,13 @@ pub struct CommandMemoryDeliveryClaimFallbackData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub boundary_uuid: Option<String>,
+    /// A fresh session's time, ms since the epoch: its
+    /// `agentmux_session_outcome` frame's `timestamp`, which srv wrote. The
+    /// hook's delivery for that session then counts however late the claim
+    /// comes, as it does for a fallback deferred behind a long first turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub event_at_ms: Option<i64>,
 }
 
 /// Reply to `memorydelivery:claim_fallback`: `false` when Claude Code's

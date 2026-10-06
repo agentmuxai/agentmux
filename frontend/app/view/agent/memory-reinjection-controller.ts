@@ -136,9 +136,12 @@ export interface MemoryReinjectionControllerOpts {
      *
      * A compaction is claimed when its boundary arrives, with the boundary's
      * `uuid` (srv answers `false` unless this block's own CLI wrote it); a
-     * fresh session when it is about to fire.
+     * fresh session when it is about to fire, with `eventAtMs`, its
+     * session-outcome frame's time. That fire is often only after the
+     * session's first turn, long after the hook delivered; the time lets srv
+     * still match the hook's delivery to this session.
      */
-    claimFallback?: (reason: ReinjectionReason, boundaryUuid?: string) => Promise<boolean>;
+    claimFallback?: (reason: ReinjectionReason, boundaryUuid?: string, eventAtMs?: number) => Promise<boolean>;
 }
 
 export interface MemoryReinjectionController {
@@ -209,8 +212,11 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         return true;
     }
 
-    function claim(reason: ReinjectionReason, boundaryUuid: string | null): Promise<boolean> {
-        return opts.claimFallback!(reason, boundaryUuid ?? undefined).catch(() => true);
+    function claim(t: DeferredTrigger): Promise<boolean> {
+        // Only a fresh session's frame is srv's own, so only it dates the claim.
+        const at = t.reason === "fresh_session" && t.frameTimestamp ? Date.parse(t.frameTimestamp) : NaN;
+        const eventAtMs = Number.isNaN(at) ? undefined : at;
+        return opts.claimFallback!(t.reason, t.boundaryUuid ?? undefined, eventAtMs).catch(() => true);
     }
 
     /**
@@ -283,7 +289,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // a skip must never strand the pane busy). A claim is only made when
         // the fallback is really about to fire, never while deferred.
         if (opts.claimFallback && !t.claimed) {
-            if (!(await claim(t.reason, t.boundaryUuid))) return;
+            if (!(await claim(t))) return;
             // The claim was a round trip too: a real turn may have started.
             if (opts.isPaneWorking()) {
                 deferred = { ...t, claimed: true };
@@ -334,7 +340,7 @@ export function createMemoryReinjectionController(opts: MemoryReinjectionControl
         // hook delivered moments ago, inside srv's claim window. Claimed at
         // the end of a long turn, that window has passed and both would send.
         if (reason === "compaction" && opts.claimFallback) {
-            if (!(await claim(reason, boundaryUuid))) return;
+            if (!(await claim(t))) return;
             t.claimed = true;
             if (hiding || deferred !== undefined) return;
         }

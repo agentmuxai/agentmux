@@ -113,7 +113,15 @@ pub(crate) struct StartupDetail {
 /// How long a claim on one event (a session start, a compaction) holds: the
 /// hook and the frontend's fallback for the same event arrive within
 /// seconds of each other, and one block has no two such events that close.
+/// Not for a fallback that waited behind a turn: a dated claim
+/// ([`DeliveryState::claim_event`]) covers that.
 const CLAIM_WINDOW_MS: i64 = 60_000;
+
+/// A fresh session's `agentmux_session_outcome` frame can be written just
+/// after the respawn it reports (`retry_after_resume_failure`), so a hook
+/// delivery composed up to this long before the frame is still that
+/// session's.
+const EVENT_SLACK_MS: i64 = 10_000;
 
 /// How long the fallback waits for a hook delivery still in flight, and how
 /// often it looks. A hook that never finishes must not leave the agent with
@@ -139,6 +147,10 @@ struct DeliveryState {
     /// Which block's CLI wrote each compaction boundary, and when: (`uuid`,
     /// block, ms), oldest first.
     boundary_origins: VecDeque<(String, String, i64)>,
+    /// The newest hook delivery each (block, reason) finished: when it was
+    /// composed. Unlike `deliveries` it isn't pruned, so a fallback deferred
+    /// behind a long turn still finds it. One entry per block and reason.
+    completed: HashMap<(String, Reason), i64>,
 }
 
 /// What the fallback's claim found.
@@ -224,6 +236,27 @@ impl DeliveryState {
             }
         }
         self.claim_fallback(block_id, reason, now, since)
+    }
+
+    /// A claim dated by its event: a fresh session, at its
+    /// `agentmux_session_outcome` frame's `timestamp` (srv's own clock). A
+    /// hook delivery composed after the event and finished is that event's
+    /// however long ago, so a fallback deferred behind the session's first
+    /// turn stands down even past [`CLAIM_WINDOW_MS`]. One from before it
+    /// was an earlier session's and doesn't count.
+    fn claim_event(&mut self, block_id: &str, reason: Reason, event_at: i64, now: i64) -> FallbackClaim {
+        let since = event_at.saturating_sub(EVENT_SLACK_MS);
+        let hook_finished = self.completed.get(&(block_id.to_string(), reason)).is_some_and(|at| *at > since);
+        if hook_finished && !self.fallback_claimed(block_id, reason) {
+            return FallbackClaim::Skip;
+        }
+        self.claim_fallback(block_id, reason, now, since)
+    }
+
+    /// The hook finished a delivery: its notice went out.
+    fn note_completed(&mut self, key: &DeliveryKey, created_ms: i64) {
+        let at = self.completed.entry((key.block_id.clone(), key.reason)).or_insert(created_ms);
+        *at = (*at).max(created_ms);
     }
 
     /// The fallback gave up waiting for the hook: it delivers, and the hook's
@@ -343,7 +376,9 @@ fn send_partless_notice(state: &AppState, key: &DeliveryKey) {
         match st.deliveries.get_mut(key) {
             Some(d) if d.parts.is_empty() && !d.notice_sent && !d.entries.is_empty() => {
                 d.notice_sent = true;
-                notice_frame(key, d)
+                let (frame, created_ms) = (notice_frame(key, d), d.created_ms);
+                st.note_completed(key, created_ms);
+                frame
             }
             _ => return,
         }
@@ -368,7 +403,11 @@ pub(crate) async fn handle_session_start_ack(State(state): State<AppState>, Json
     let key = DeliveryKey { block_id: req.block_id.clone(), session_id: req.session_id.clone(), reason };
     let notice = {
         let mut st = state_lock();
-        st.deliveries.get_mut(&key).and_then(|d| acknowledge(d, req.part).then(|| notice_frame(&key, d)))
+        let done = st.deliveries.get_mut(&key).and_then(|d| acknowledge(d, req.part).then(|| (notice_frame(&key, d), d.created_ms)));
+        done.map(|(frame, created_ms)| {
+            st.note_completed(&key, created_ms);
+            frame
+        })
     };
     let complete = notice.is_some();
     if let Some(frame) = notice {
@@ -403,8 +442,10 @@ fn reason_for_fallback(reason: &str) -> Option<Reason> {
 /// (`false`). Waits out a hook delivery still in flight for up to
 /// [`PENDING_WAIT`], then lets the fallback deliver, so a hook that died
 /// part-way never leaves the agent without its memory. With a
-/// `boundary_uuid`, only the block whose CLI compacted can deliver.
-pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: Option<&str>) -> bool {
+/// `boundary_uuid`, only the block whose CLI compacted can deliver. With
+/// `event_at_ms` (a fresh session's time), the hook's delivery for that
+/// session counts however late the claim comes.
+pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: Option<&str>, event_at_ms: Option<i64>) -> bool {
     let Some(reason) = reason_for_fallback(reason) else { return true };
     let deadline = tokio::time::Instant::now() + PENDING_WAIT;
     let boundary_uuid = boundary_uuid.filter(|u| !u.is_empty());
@@ -413,7 +454,10 @@ pub(crate) async fn claim_fallback(block_id: &str, reason: &str, boundary_uuid: 
         let claim = {
             let mut st = state_lock();
             st.prune(now);
-            st.claim_boundary(block_id, reason, boundary_uuid, now)
+            match (boundary_uuid, event_at_ms) {
+                (None, Some(event_at)) => st.claim_event(block_id, reason, event_at, now),
+                _ => st.claim_boundary(block_id, reason, boundary_uuid, now),
+            }
         };
         match claim {
             FallbackClaim::Deliver => return true,
@@ -445,7 +489,7 @@ pub(crate) fn register_memory_delivery_handlers(
     engine.register_typed(
         COMMAND_MEMORY_DELIVERY_CLAIM_FALLBACK,
         |req: CommandMemoryDeliveryClaimFallbackData, _ctx| async move {
-            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason, req.boundary_uuid.as_deref()).await })
+            Ok::<_, String>(MemoryDeliveryClaimFallbackResult { deliver: claim_fallback(&req.block_id, &req.reason, req.boundary_uuid.as_deref(), req.event_at_ms).await })
         },
     );
     let state = state.clone();
@@ -937,6 +981,65 @@ mod tests {
         assert!(st.fallback_claimed("b", Reason::Startup));
         let d = st.deliveries.values_mut().next().unwrap();
         assert!(!acknowledge(d, 1), "a late ack after the takeover adds no second notice");
+    }
+
+    fn startup_key(block: &str) -> DeliveryKey {
+        DeliveryKey { block_id: block.into(), session_id: "s".into(), reason: Reason::Startup }
+    }
+
+    #[test]
+    fn a_fresh_session_claimed_after_a_long_first_turn_still_finds_its_hook_delivery() {
+        // The hook delivered a second after the fresh-session frame; the
+        // fallback waited out a 95 s first turn, past the claim window, and the
+        // delivery itself has been pruned.
+        let event_at = NOW;
+        let mut st = DeliveryState::default();
+        st.note_completed(&startup_key("b"), event_at + 1_000);
+        let later = event_at + 95_000;
+        st.prune(later);
+        assert_eq!(st.claim_event("b", Reason::Startup, event_at, later), FallbackClaim::Skip);
+        assert!(!st.fallback_claimed("b", Reason::Startup));
+        // Undated, the same claim delivers a duplicate, as it used to.
+        assert_eq!(st.claim_fallback("b", Reason::Startup, later, i64::MIN), FallbackClaim::Deliver);
+    }
+
+    #[test]
+    fn an_earlier_sessions_hook_delivery_does_not_cover_a_new_fresh_session() {
+        let mut st = DeliveryState::default();
+        st.note_completed(&startup_key("b"), NOW);
+        let event_at = NOW + EVENT_SLACK_MS + 1;
+        assert_eq!(st.claim_event("b", Reason::Startup, event_at, event_at + 1_000), FallbackClaim::Deliver);
+        assert!(st.fallback_claimed("b", Reason::Startup), "the new session's hook now stands down");
+    }
+
+    #[test]
+    fn a_hook_delivery_just_before_its_sessions_frame_still_counts() {
+        let mut st = DeliveryState::default();
+        st.note_completed(&startup_key("b"), NOW);
+        assert_eq!(st.claim_event("b", Reason::Startup, NOW + EVENT_SLACK_MS - 1, NOW + 120_000), FallbackClaim::Skip);
+    }
+
+    #[test]
+    fn a_dated_claim_waits_for_a_hook_delivery_in_flight() {
+        let mut st = state_with_hook_delivery("b", Reason::Startup, false);
+        let created = st.deliveries.values().next().unwrap().created_ms;
+        assert_eq!(st.claim_event("b", Reason::Startup, created - 1_000, NOW), FallbackClaim::Pending);
+    }
+
+    #[test]
+    fn a_dated_claim_is_per_block_and_reason() {
+        let mut st = DeliveryState::default();
+        st.note_completed(&startup_key("b"), NOW);
+        assert_eq!(st.claim_event("other", Reason::Startup, NOW, NOW), FallbackClaim::Deliver);
+        assert_eq!(st.claim_event("b", Reason::Compact, NOW, NOW), FallbackClaim::Deliver);
+    }
+
+    #[test]
+    fn completion_keeps_the_newest_delivery() {
+        let mut st = DeliveryState::default();
+        st.note_completed(&startup_key("b"), NOW);
+        st.note_completed(&startup_key("b"), NOW - 5);
+        assert_eq!(st.completed.get(&("b".to_string(), Reason::Startup)), Some(&NOW));
     }
 
     #[test]

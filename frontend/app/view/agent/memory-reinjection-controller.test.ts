@@ -366,7 +366,7 @@ describe("createMemoryReinjectionController — pane becomes busy DURING the fet
 // SessionStart hook delivers memory, this fallback asks before it fires.
 describe("createMemoryReinjectionController — claimFallback (the SessionStart hook may have delivered)", () => {
     function withClaim(
-        claimFallback: (reason: "compaction" | "fresh_session", boundaryUuid?: string) => Promise<boolean>,
+        claimFallback: (reason: "compaction" | "fresh_session", boundaryUuid?: string, eventAtMs?: number) => Promise<boolean>,
         busy: () => boolean = () => false,
     ) {
         const dispatchTurnStart = vi.fn<(content: string, hidden: boolean) => void>();
@@ -420,6 +420,31 @@ describe("createMemoryReinjectionController — claimFallback (the SessionStart 
         controller.maybeFireDeferred();
         await vi.waitFor(() => expect(sendRpc).toHaveBeenCalledTimes(1));
         expect(claim).toHaveBeenCalledTimes(1);
+    });
+
+    it("a fresh session deferred behind a turn claims with its frame's time, and stands down if the hook delivered", async () => {
+        let busy = true;
+        const { controller, claim, sendRpc, dispatchTurnStart } = withClaim(async () => false, () => busy);
+        await controller.trigger("2026-10-06T02:03:46.121Z", "fresh_session");
+        busy = false;
+        controller.maybeFireDeferred();
+        await vi.waitFor(() => expect(claim).toHaveBeenCalledTimes(1));
+        expect(claim).toHaveBeenCalledWith("fresh_session", undefined, Date.parse("2026-10-06T02:03:46.121Z"));
+        expect(sendRpc).not.toHaveBeenCalled();
+        expect(dispatchTurnStart).not.toHaveBeenCalled();
+        expect(controller.isHiding()).toBe(false);
+    });
+
+    it("a fresh session without a readable frame time claims undated", async () => {
+        const { controller, claim } = withClaim(async () => true);
+        await controller.trigger("not a time", "fresh_session");
+        expect(claim).toHaveBeenCalledWith("fresh_session", undefined, undefined);
+    });
+
+    it("a compaction never sends a time: its frame is the CLI's, not srv's", async () => {
+        const { controller, claim } = withClaim(async () => true);
+        await controller.trigger("2026-10-06T02:03:46.121Z", "compaction", "u1");
+        expect(claim).toHaveBeenCalledWith("compaction", "u1", undefined);
     });
 
     it("defers instead of firing if a real turn started during the claim round trip", async () => {
@@ -520,7 +545,7 @@ describe("createMemoryReinjectionController — compaction claimed at the bounda
         const { controller, claim, sendRpc, endTurn } = make(true, true);
         await controller.trigger(null, "compaction", UUID);
         expect(claim).toHaveBeenCalledTimes(1);
-        expect(claim).toHaveBeenCalledWith("compaction", UUID);
+        expect(claim).toHaveBeenCalledWith("compaction", UUID, undefined);
         expect(sendRpc).not.toHaveBeenCalled();
         endTurn();
         await vi.waitFor(() => expect(sendRpc).toHaveBeenCalledTimes(1));
