@@ -99,3 +99,22 @@ export function formatExactTime(ms: number): string {
     const s = String(d.getSeconds()).padStart(2, "0");
     return `${h}:${m}:${s} ${h24 < 12 ? "AM" : "PM"}`;
 }
+
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * Absolute UTC timestamp, 24-hour, zero-padded hour — "Jan 3, 2019 08:12 UTC".
+ *
+ * Used for the build time in the Instance panel. It was local time with AM/PM
+ * and the local zone's short name ("Jan 3, 2019 8:12AM PDT") until
+ * 2026-10-06, when the operator asked for UTC and a 24-hour clock: a build
+ * stamp is compared across machines and against CI logs, which are UTC.
+ * Built from the UTC getters rather than `toLocaleString`, so the output
+ * doesn't vary with the runtime's locale data.
+ */
+export function formatUtcTimestamp(ms: number): string {
+    const d = new Date(ms);
+    const hh = String(d.getUTCHours()).padStart(2, "0");
+    const mm = String(d.getUTCMinutes()).padStart(2, "0");
+    return `${MONTHS_SHORT[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()} ${hh}:${mm} UTC`;
+}

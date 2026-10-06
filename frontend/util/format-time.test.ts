@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { formatElapsedClock, formatElapsedCompact, formatExactTime, formatTimeAgo } from "./format-time";
+import { formatElapsedClock, formatElapsedCompact, formatExactTime, formatTimeAgo, formatUtcTimestamp } from "./format-time";
 
 describe("formatElapsedCompact", () => {
     it("renders seconds only under a minute", () => {
@@ -101,5 +101,30 @@ describe("formatExactTime", () => {
     it("does not zero-pad the hour", () => {
         const d = new Date(2026, 0, 1, 15, 4, 5);
         expect(formatExactTime(d.getTime())).toBe("3:04:05 PM");
+    });
+});
+
+describe("formatUtcTimestamp", () => {
+    it("renders the UTC date and a 24-hour time", () => {
+        expect(formatUtcTimestamp(Date.UTC(2026, 9, 6, 15, 4, 59))).toBe("Oct 6, 2026 15:04 UTC");
+    });
+    it("zero-pads the hour and minute", () => {
+        expect(formatUtcTimestamp(Date.UTC(2019, 0, 3, 8, 2))).toBe("Jan 3, 2019 08:02 UTC");
+    });
+    it("midnight is 00:00, not 12 AM", () => {
+        expect(formatUtcTimestamp(Date.UTC(2026, 11, 31, 0, 0))).toBe("Dec 31, 2026 00:00 UTC");
+    });
+    it("ignores the machine's time zone", () => {
+        const saved = process.env.TZ;
+        try {
+            // Tokyo is UTC+9: locally this instant is already 08:30 on Mar 1.
+            process.env.TZ = "Asia/Tokyo";
+            const ms = Date.UTC(2026, 1, 28, 23, 30);
+            expect(new Date(ms).getHours()).toBe(8); // the zone really is in effect
+            expect(formatUtcTimestamp(ms)).toBe("Feb 28, 2026 23:30 UTC");
+        } finally {
+            if (saved === undefined) delete process.env.TZ;
+            else process.env.TZ = saved;
+        }
     });
 });
