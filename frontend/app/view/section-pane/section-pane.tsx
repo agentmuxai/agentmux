@@ -12,7 +12,7 @@
 import { createMemo, For, onCleanup, onMount, type Accessor, type JSX } from "solid-js";
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
-import { Tooltip } from "@/app/element/tooltip";
+import { TabbedPane } from "@/app/element/ui";
 import { readZoom } from "@/app/store/zoom-factor";
 import "./section-pane.scss";
 
@@ -96,46 +96,25 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
     });
 
     return (
-        // The container carries container-type, so .armory-view inside it can
+        // The container carries container-type, so the managers inside can
         // answer the `armory` container queries; an element can't answer its own.
         <div class="armory-container">
             <div class="armory-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
-                {/* The narrow-width stand-in for the rail, first so it sits at the
-                    top (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md). */}
-                <nav class="bundle-manager-tab-bar" aria-label={model.spec.ariaLabel}>
-                    <For each={sections}>
-                        {(item) => (
-                            <button
-                                type="button"
-                                classList={{ "is-active": section() === item.id, "is-abf-highlight": !!item.highlight }}
-                                aria-pressed={section() === item.id}
-                                onClick={() => model.selectSection(item.id)}
-                            >
-                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                                <span>{item.label}</span>
-                            </button>
-                        )}
-                    </For>
-                </nav>
-                <nav class="bundle-manager-rail" aria-label={model.spec.ariaLabel}>
-                    <For each={sections}>
-                        {(item) => (
-                            <Tooltip content={item.tooltip ?? item.label} placement="right">
-                                <button
-                                    type="button"
-                                    class="bundle-manager-rail-item"
-                                    classList={{ "is-active": section() === item.id, "is-abf-highlight": !!item.highlight }}
-                                    aria-pressed={section() === item.id}
-                                    onClick={() => model.selectSection(item.id)}
-                                >
-                                    <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                                    <span>{item.label}</span>
-                                </button>
-                            </Tooltip>
-                        )}
-                    </For>
-                </nav>
-                <div class="bundle-manager-section">
+                {/* One tablist: a rail, an icon-only rail, or tabs along the top,
+                    by width (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
+                <TabbedPane
+                    items={sections.map((item) => ({
+                        id: item.id,
+                        label: item.label,
+                        icon: item.icon,
+                        tooltip: item.tooltip,
+                        class: item.highlight ? "is-abf-highlight" : undefined,
+                    }))}
+                    value={section()}
+                    onChange={(id) => model.selectSection(id)}
+                    ariaLabel={model.spec.ariaLabel}
+                    panelClass="bundle-manager-section"
+                >
                     {/* Every section stays mounted, so switching is instant and never
                         refetches; the managers keep themselves current from MPS
                         `*:changed` events. */}
@@ -146,7 +125,7 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
                             </div>
                         )}
                     </For>
-                </div>
+                </TabbedPane>
             </div>
         </div>
     );

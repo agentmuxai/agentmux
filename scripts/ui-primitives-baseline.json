@@ -50,7 +50,6 @@
         "frontend/app/view/agent/components/AgentSessionStats.tsx": 4,
         "frontend/app/view/agent/components/AgentSkillsModal.tsx": 3,
         "frontend/app/view/agent/components/AgentStartupModal.tsx": 1,
-        "frontend/app/view/agent/components/AgentStashModal.tsx": 1,
         "frontend/app/view/agent/components/BtwOverlay.tsx": 1,
         "frontend/app/view/agent/components/HiddenTemplatesSection.tsx": 2,
         "frontend/app/view/agent/components/MarkdownBlock.tsx": 1,
@@ -86,13 +85,11 @@
         "frontend/app/view/native-memory/MemoryTile.tsx": 1,
         "frontend/app/view/native-memory/native-memory-manager.tsx": 1,
         "frontend/app/view/remotes/remotes-view.tsx": 14,
-        "frontend/app/view/section-pane/section-pane.tsx": 2,
         "frontend/app/view/settings/settings-search-bar.tsx": 1,
         "frontend/app/view/skill/skill-manager.tsx": 2,
         "frontend/app/view/swarm/swarm-fleet-toolbar.tsx": 1,
         "frontend/app/view/swarm/swarm-view.tsx": 5,
         "frontend/app/view/warden-host/warden-host-manager.tsx": 1,
-        "frontend/app/view/warden/warden-view.tsx": 2,
         "frontend/app/window/hamburger-menu.tsx": 1,
         "frontend/app/window/pane-media-capture-indicator.tsx": 1,
         "frontend/app/window/window-controls.darwin.tsx": 3,
@@ -102,8 +99,7 @@
         "frontend/app/view/identity/identity-pane-view.scss :: .identity-pane .identity-pane-new-btn",
         "frontend/app/view/identity/identity-pane-view.scss :: .identity-pane .identity-pane-reconnect-btn:hover",
         "frontend/app/view/identity/identity-pane-view.scss :: .identity-pane .identity-pane-save-btn",
-        "frontend/app/view/identity/styles/_detail.scss :: .identity-btn.identity-btn-primary",
-        "frontend/app/view/section-pane/section-pane.scss :: .bundle-manager-rail-item.is-active"
+        "frontend/app/view/identity/styles/_detail.scss :: .identity-btn.identity-btn-primary"
     ],
     "radius": {
         "frontend/app/app.scss": 1,

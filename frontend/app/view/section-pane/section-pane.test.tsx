@@ -65,7 +65,7 @@ function mount(manifest: PaneTabManifest, meta: Record<string, unknown> = {}) {
 }
 
 function railLabels(container: HTMLElement): string[] {
-    return Array.from(container.querySelectorAll(".bundle-manager-rail-item span")).map((s) => s.textContent ?? "");
+    return Array.from(container.querySelectorAll('[role="tab"] .ui-tab-label')).map((s) => s.textContent ?? "");
 }
 
 function visiblePane(container: HTMLElement): string | null {
@@ -100,7 +100,7 @@ describe("Connectors pane", () => {
 
     it("clicking a section writes connectors:section and shows it", () => {
         const { container, title } = mount(connectorsPaneTab);
-        fireEvent.click(screen.getAllByRole("button", { name: /MCP servers/ })[0]);
+        fireEvent.click(screen.getByRole("tab", { name: "MCP servers" }));
         expect(setMetaMock).toHaveBeenCalledWith({ "connectors:section": "mcp" });
         expect(visiblePane(container)).toBe("mcp-manager");
         expect(title()).toBe("Connectors · MCP servers");
@@ -130,24 +130,30 @@ describe("Knowledge pane", () => {
         expect(container.querySelectorAll(".bundle-manager-section > .bundle-manager-pane.is-hidden")).toHaveLength(3);
     });
 
-    it("clicking a tab-bar item writes knowledge:section", () => {
+    it("clicking a tab writes knowledge:section", () => {
         const { container } = mount(knowledgePaneTab);
-        const skills = container.querySelectorAll(".bundle-manager-tab-bar button")[2] as HTMLElement;
-        fireEvent.click(skills);
+        fireEvent.click(screen.getByRole("tab", { name: "Skills" }));
         expect(setMetaMock).toHaveBeenCalledWith({ "knowledge:section": "skills" });
         expect(visiblePane(container)).toBe("skill-manager");
     });
 
-    it("renders the tab bar before the sections, so it sits at the top of the pane", () => {
+    // One tablist (element/ui TabbedPane) that is a rail or top tabs by width,
+    // instead of a rail plus a hidden tab bar. It still precedes the sections,
+    // so at narrow widths it sits at the top of the pane
+    // (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md).
+    it("renders one tablist, before the sections", () => {
         const { container } = mount(knowledgePaneTab);
-        const view = container.querySelector(".armory-view")!;
-        expect(view.firstElementChild?.classList.contains("bundle-manager-tab-bar")).toBe(true);
+        expect(screen.getAllByRole("tablist")).toHaveLength(1);
+        const tablist = screen.getByRole("tablist", { name: "Knowledge section" });
+        const panel = container.querySelector(".bundle-manager-section")!;
+        expect(panel.getAttribute("role")).toBe("tabpanel");
+        expect(tablist.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it("highlights only Bundles, in both the rail and the tab bar", () => {
+    it("highlights only Bundles", () => {
         const { container } = mount(knowledgePaneTab);
         const highlighted = Array.from(container.querySelectorAll(".is-abf-highlight")).map((el) => el.textContent);
-        expect(highlighted).toEqual(["Bundles", "Bundles"]);
+        expect(highlighted).toEqual(["Bundles"]);
     });
 });
 

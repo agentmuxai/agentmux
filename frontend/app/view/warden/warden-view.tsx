@@ -1,9 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { For, onCleanup, onMount, type JSX } from "solid-js";
+import { onCleanup, onMount, type JSX } from "solid-js";
 
-import { Tooltip } from "@/app/element/tooltip";
+import { TabbedPane, type TabItem } from "@/app/element/ui";
 import { WardenHostManager } from "@/app/view/warden-host/warden-host-manager";
 import { WardenLanManager } from "@/app/view/warden-lan/warden-lan-manager";
 import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-stub";
@@ -12,7 +12,7 @@ import { WardenSupervisorManager } from "@/app/view/warden-supervisor/warden-sup
 import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
 
-const RAIL: { id: WardenSection; label: string; icon: string }[] = [
+const RAIL: TabItem<WardenSection>[] = [
     { id: "host",       label: WARDEN_SECTION_LABELS.host,       icon: "server" },
     { id: "lan",        label: WARDEN_SECTION_LABELS.lan,        icon: "network-wired" },
     { id: "internet",   label: WARDEN_SECTION_LABELS.internet,   icon: "globe" },
@@ -52,49 +52,14 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
     });
 
     return (
-        // warden-container carries container-type so that .warden-view (a
-        // descendant) can be targeted by @container warden queries. A
+        // warden-container carries container-type so the managers inside can
+        // answer @container warden queries. A
         // container element cannot respond to its own container query.
         <div class="warden-container">
             <div class="warden-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
-                {/* Narrow-width fallback for .bundle-manager-rail below — rendered
-                    FIRST (not last) so it sits at the top of the pane, not the
-                    bottom, at the same breakpoint the rail hides. See
-                    docs/specs/SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md. */}
-                <nav class="bundle-manager-tab-bar" aria-label="Warden section">
-                    <For each={RAIL}>
-                        {(item) => (
-                            <button
-                                type="button"
-                                classList={{ "is-active": section() === item.id }}
-                                aria-pressed={section() === item.id}
-                                onClick={() => setSection(item.id)}
-                            >
-                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                                <span>{item.label}</span>
-                            </button>
-                        )}
-                    </For>
-                </nav>
-                <nav class="bundle-manager-rail" aria-label="Warden section">
-                    <For each={RAIL}>
-                        {(item) => (
-                            <Tooltip content={item.label} placement="right">
-                                <button
-                                    type="button"
-                                    class="bundle-manager-rail-item"
-                                    classList={{ "is-active": section() === item.id }}
-                                    aria-pressed={section() === item.id}
-                                    onClick={() => setSection(item.id)}
-                                >
-                                    <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                                    <span>{item.label}</span>
-                                </button>
-                            </Tooltip>
-                        )}
-                    </For>
-                </nav>
-                <div class="bundle-manager-section">
+                {/* One tablist: a rail, an icon-only rail, or tabs along the top,
+                    by width (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
+                <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Warden section" panelClass="bundle-manager-section">
                     {/*
                      * All five sections stay mounted — toggling is instant
                      * and never re-fetches. Host/LAN/Audit each own their
@@ -115,7 +80,7 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "supervisor" }}>
                         <WardenSupervisorManager />
                     </div>
-                </div>
+                </TabbedPane>
             </div>
         </div>
     );

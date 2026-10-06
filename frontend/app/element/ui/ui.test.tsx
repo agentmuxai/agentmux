@@ -163,6 +163,33 @@ describe("Tabs", () => {
         expect(value()).toBe("general");
     });
 
+    it("shows the tooltip on hover with tooltips=always, even with labels showing", async () => {
+        vi.useFakeTimers();
+        render(() => (
+            <Tabs items={items} value="general" onChange={() => {}} tooltips="always" idPrefix="s" ariaLabel="Settings" />
+        ));
+        fireEvent.mouseEnter(screen.getByRole("tab", { name: "Terminal" }).parentElement!);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(screen.getAllByText("Terminal")).toHaveLength(2);
+    });
+
+    it("always shows a tab's own tooltip text, even with labels showing", async () => {
+        vi.useFakeTimers();
+        const described = [items[0], { ...items[1], tooltip: "Colours, fonts and density" }];
+        render(() => <Tabs items={described} value="general" onChange={() => {}} idPrefix="s" ariaLabel="Settings" />);
+        fireEvent.mouseEnter(screen.getByRole("tab", { name: "Appearance" }).parentElement!);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(screen.getByText("Colours, fonts and density")).toBeTruthy();
+    });
+
+    it("has no tooltip by default while labels show", async () => {
+        vi.useFakeTimers();
+        render(() => <Tabs items={items} value="general" onChange={() => {}} idPrefix="s" ariaLabel="Settings" />);
+        fireEvent.mouseEnter(screen.getByRole("tab", { name: "Terminal" }).parentElement!);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(screen.getAllByText("Terminal")).toHaveLength(1);
+    });
+
     it("keeps each tab's name when only icons show", () => {
         render(() => (
             <Tabs items={items} value="general" onChange={() => {}} iconOnly idPrefix="s" ariaLabel="Settings" />
