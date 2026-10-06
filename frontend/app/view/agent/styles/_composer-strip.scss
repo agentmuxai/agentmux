@@ -348,10 +348,12 @@
         outline-offset: 1px;
     }
 
+    // Open: the pressed line look, not a solid fill
+    // (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §9 decision 1).
     &--active {
-        color: var(--main-bg-color);
         border-color: var(--accent-color);
-        background: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) var(--ui-tint-hover), transparent);
+        box-shadow: inset 0 0 0 1px var(--accent-color);
     }
 }
 
