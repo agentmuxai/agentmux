@@ -154,6 +154,12 @@
     &[aria-selected="true"] {
         box-shadow: inset 2px 0 0 var(--accent-color);
     }
+
+    // Roving focus means the focused tab is always the selected one, so the
+    // focus ring has to sit alongside the leading-edge line, not replace it.
+    &[aria-selected="true"]:focus-visible {
+        box-shadow: inset 2px 0 0 var(--accent-color), var(--shadow-focus-ring);
+    }
 }
 
 .ui-tabs--icon-only .ui-tab {

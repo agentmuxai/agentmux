@@ -96,7 +96,9 @@
         font-size: var(--ui-icon-size);
     }
 
-    &:hover:not(:disabled, [aria-disabled="true"]) {
+    // Hover leaves a pressed control alone: `:not()` takes its most specific
+    // argument, so a hover rule that matched it would outrank the pressed look.
+    &:hover:not(:disabled, [aria-disabled="true"], [aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
         @include hover-look;
     }
 
@@ -108,6 +110,11 @@
 
     &:focus-visible {
         @include mixins.focus-ring;
+    }
+
+    // Both are box-shadows, so a focused pressed control needs them combined.
+    &:focus-visible:is([aria-pressed="true"], [aria-checked="true"], [aria-selected="true"]) {
+        box-shadow: inset 0 0 0 1px var(--accent-color), var(--shadow-focus-ring);
     }
 
     &:disabled,
