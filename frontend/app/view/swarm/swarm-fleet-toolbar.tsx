@@ -10,6 +10,7 @@ import { summarizeAmbientOutcomes } from "@/app/store/ambient-outcomes";
 import { remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm-fleet-targets";
 import type { SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
+import { Button } from "@/app/element/ui";
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -96,14 +97,13 @@ export function FleetToolbar({
                     count — it's how a selection gets started OR cleared in
                     one click, not an action that requires one first. */}
                 <Show when={allBlockIds().length > 0}>
-                    <button
-                        type="button"
+                    <Button
                         class="swarm-fleet-btn"
                         onClick={() => (allSelected() ? model.clearSelection() : model.selectAll(allBlockIds()))}
                     >
                         <i class={allSelected() ? "fa-solid fa-square-check" : "fa-sharp fa-regular fa-square"} />{" "}
                         {allSelected() ? "Select none" : "Select all"}
-                    </button>
+                    </Button>
                 </Show>
 
                 {/* Never "act on selected" without stating the concrete count
@@ -133,29 +133,28 @@ export function FleetToolbar({
                                     }}
                                     autofocus
                                 />
-                                <button
-                                    type="button"
+                                <Button
+                                    tone="accent"
                                     class="swarm-fleet-btn swarm-fleet-btn--primary"
                                     disabled={!broadcastText().trim() || model.fleetActionInFlightAtom()}
                                     onClick={() => void sendBroadcast()}
                                 >
                                     Send
-                                </button>
-                                <button type="button" class="swarm-fleet-btn" onClick={() => { setBroadcastOpen(false); setBroadcastText(""); }}>
+                                </Button>
+                                <Button class="swarm-fleet-btn" onClick={() => { setBroadcastOpen(false); setBroadcastText(""); }}>
                                     Cancel
-                                </button>
+                                </Button>
                             </div>
                         }
                     >
-                        <button
-                            type="button"
+                        <Button
                             class="swarm-fleet-btn"
                             disabled={reachable("broadcast") === 0}
                             title={reachable("broadcast") === 0 ? NOTHING_REACHABLE : undefined}
                             onClick={() => setBroadcastOpen(true)}
                         >
                             <i class="fa-solid fa-tower-broadcast" /> Broadcast
-                        </button>
+                        </Button>
                     </Show>
 
                     {/* Hidden while the broadcast composer is open — two
@@ -164,39 +163,40 @@ export function FleetToolbar({
                         already covers the "changed my mind" path once this
                         reappears (Cancel closes the composer, not Stop). */}
                     <Show when={!broadcastOpen()}>
-                        <button
-                            type="button"
+                        <Button
+                            tone="danger"
                             class="swarm-fleet-btn swarm-fleet-btn--destructive"
                             disabled={model.fleetActionInFlightAtom() || reachable("stop") === 0}
                             title={reachable("stop") === 0 ? NOTHING_REACHABLE : undefined}
                             onClick={() => setStopConfirmOpen(true)}
                         >
                             <i class="fa-solid fa-stop" /> Stop {reachable("stop")}
-                        </button>
+                        </Button>
                     </Show>
                 </Show>
 
                 <Show when={stats()}>
                     {(st) => (
-                        <button
-                            type="button"
-                            classList={{ "swarm-fleet-btn": true, "swarm-fleet-btn--active": model.statsOpenAtom() }}
+                        <Button
+                            class="swarm-fleet-btn"
+                            icon="chart-simple"
+                            pressed={model.statsOpenAtom()}
                             aria-expanded={model.statsOpenAtom()}
                             title="Model requests AgentMux makes on its own (session titles, names, prompt suggestions), since its server started"
                             onClick={() => model.toggleStats()}
                         >
-                            <i class="fa-solid fa-chart-simple" /> Stats
+                            Stats
                             <Show when={st().unhealthyCount > 0}>
                                 <span class="swarm-stats-failing">{st().unhealthyCount} failing</span>
                             </Show>
-                        </button>
+                        </Button>
                     )}
                 </Show>
 
                 <Show when={count() > 0}>
-                    <button type="button" class="swarm-fleet-btn swarm-fleet-toolbar-clear" onClick={() => model.clearSelection()}>
+                    <Button class="swarm-fleet-btn swarm-fleet-toolbar-clear" onClick={() => model.clearSelection()}>
                         Clear
-                    </button>
+                    </Button>
                 </Show>
             </div>
 

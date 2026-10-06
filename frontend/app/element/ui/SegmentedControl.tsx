@@ -15,6 +15,8 @@ export interface SegmentedOption<T extends string> {
     /** Hide the label and show only the icon; the label stays the accessible name. */
     iconOnly?: boolean;
     disabled?: boolean;
+    /** Hover text, e.g. the option's keyboard shortcut. */
+    title?: string;
 }
 
 export interface SegmentedControlProps<T extends string> {
@@ -69,6 +71,7 @@ export function SegmentedControl<T extends string>(props: SegmentedControlProps<
                         class="ui-segmented-option"
                         aria-checked={option.value === props.value ? "true" : "false"}
                         aria-label={option.iconOnly ? option.label : undefined}
+                        title={option.title}
                         tabIndex={i() === tabStop() ? 0 : -1}
                         disabled={isDisabled(i())}
                         onClick={() => props.onChange(option.value)}

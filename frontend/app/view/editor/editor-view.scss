@@ -533,25 +533,8 @@
     background: var(--secondary-bg-color, var(--block-bg-color));
 }
 
-.editor-mode-btn {
-    padding: 1px 8px;
-    font-size: 11px;
-    border: none;
-    border-radius: 3px;
-    background: transparent;
-    color: var(--secondary-text-color);
-    cursor: pointer;
-    user-select: none;
-
-    &.active {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.1));
-        color: var(--main-text-color);
-    }
-
-    &:hover:not(.active) {
-        color: var(--main-text-color);
-    }
-}
+// The modes are an element/ui SegmentedControl (compact); the toolbar row
+// above only places it.
 
 // ── Markdown live preview panel ───────────────────────────────────────
 // preview mode: CodeMirror hidden, preview pane fills full height.
