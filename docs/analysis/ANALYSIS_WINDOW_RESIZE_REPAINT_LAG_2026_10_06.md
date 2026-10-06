@@ -1,7 +1,7 @@
 # Window resize: why AgentMux shows grey before the new size paints, and what it takes to keep up like Chrome
 
 **Date:** 2026-10-06
-**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R2, R3 and the System Info half of R6 shipped first (§9); R4, R5 and the rest of R6 in #4398 and #4399; R8 and the agent-pane tab in §10 and §11; a fast drag and the terminals in §12, where R7 is measured and found unnecessary.
+**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R2, R3 and the System Info half of R6 shipped first (§9); R4, R5 and the rest of R6 in #4398 and #4399; R8 and the agent-pane tab in §10 and §11; a fast drag and the terminals in §12, where R7 is measured and found unnecessary; the host ruled out and the agent list in §13.
 **Author:** Agent4
 **Trigger:** Repo owner, 2026-10-06: *"in chrome, if I resize the app window the paint is always tight against the window edge, but in agentmux there is a long delay lag where a grey placeholder appears before the paint makes it. We did work on removing this, I believe there was some sort of debounce. Is that still there? We want the resize of window to make the contents repaint seamlessly, ultra-high performance. ID any bottlenecks in the path."* Later: *"i dragged around in your dev instance, it's definitely an improvement"*.
 **Related:** `SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` (proposed, never implemented; its delays are re-checked in §4), `ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md` and `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` (where `window:keepinactivetabslaidout` came from), `SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`.
@@ -303,3 +303,27 @@ The repo owner pointed out that the stepped resize above moves the edge slowly: 
 One step behind is the floor for a page: the new size needs one frame to render. Removing even that would take the native window holding its new size back until the renderer's frame is ready, which is a host-side change for a separate investigation.
 
 **R7, measured properly.** In those captures the uncovered strip at the window edge was `#222222`, the page's own `--main-bg-color`, in 59 of 60 samples, and black once. So the fill during a resize is already the app's background, and setting the window's background from the theme (R7) wouldn't change what's seen.
+
+## 13. The real page is the floor, and where an agent-pane frame goes now
+
+**Is the one-frame trail the host's?** No. The §12 probe was run three ways. Chrome showing a trivial page (`#222` plus the edge bar) had its page at the edge in 27–29 of 30 steps. AgentMux showing the same trivial page (loaded into the dev window with CDP `Page.navigate`) had it at the edge in **30 of 30**, and its `SetWindowPos` returned faster (4.0 ms against Chrome's 9.1 ms). So the host, CEF and Chromium's resize path keep up. The trail with the real app is the time the page takes to produce a frame at the new size. Roughly 10 ms or less lands at the edge; 15 ms or more lands a frame late.
+
+**An agent-pane tab's busy frame during a fast drag** (Tab 1: five agent panes plus System Info charts) averaged **17.9 ms**:
+
+| Phase | ms per busy frame |
+|---|---|
+| Paint | 8.2 |
+| ResizeObserver callbacks | 5.0 |
+| Layout | 4.1 |
+| Pre-paint | 2.6 |
+| Layerize | 1.4 |
+| Style | 1.1 |
+
+**Fixed here: the agent list's row measuring.** `AgentDocumentVirtualList`'s measure ResizeObserver read one row's height, then dispatched `RowMeasured` for it, before reading the next. Each dispatch rebuilt the whole prefix sum and repositioned the rows, so the next row's read forced a layout. Each also copied the pane's whole heights `Map`. Now the callback reads every height first, then dispatches one `RowsMeasured`. The reducer applies the rows in order under `RowMeasured`'s rules (same drops, same events, same no-op identity) with one `Map` copy, and the store recomputes the layout once. The callback's own time per drag went from 48 ms to about 11 ms. That's about 1 ms per busy frame: worthwhile, but not the large share.
+
+**Next: paint.** Grouped by the layer painted, during the same drag:
+- **The `body` layer: 108 ms over 20 frames, 5.4 ms each.** `body { transform: translateZ(0) }` (`app.scss`) makes it a compositor layer holding everything outside the panes: tab bar, pane headers, status bar.
+- **The tile nodes:** each pane's own layer, the widest about 1.9 ms per frame.
+- **The `#document` root: 2.2 ms per paint, 53 paints.** That's more paints than resize frames, so it also repaints in frames with no resize.
+
+Cutting paint, the largest remaining phase, means changing what gets its own layer and what repaints on a size change. That needs its own measured pass.

@@ -78,6 +78,44 @@ function setExpansion(
     };
 }
 
+/**
+ * Apply row measurements in order, each under the same rules:
+ * - Drop a measurement for an id not in the current document. A late
+ *   ResizeObserver callback for an already-removed row would otherwise write
+ *   a height back that survives the next prune (it'd re-enter with a stale
+ *   measurement) (#1236).
+ * - Drop a NaN/Infinity/non-positive height: it would poison every position
+ *   downstream (INV-1).
+ * - An unchanged height is a no-op; nothing changed returns the SAME state.
+ * `heights` is copied once however many rows changed, so a batch costs one
+ * copy and the store one relayout (RowsMeasured).
+ */
+function measureRows(
+    state: AgentPaneLayoutState,
+    rows: ReadonlyArray<{ nodeId: string; state: ExpansionState; cssPx: number }>,
+): ReducerResult {
+    let heights: Map<string, RowHeight> | null = null;
+    let cur = state;
+    const events: AgentPaneLayoutEvent[] = [];
+    for (const row of rows) {
+        if (!state.idSet.has(row.nodeId)) {
+            events.push({ type: "command-dropped", reason: "measure-unknown-id" });
+            continue;
+        }
+        if (!isValidPx(row.cssPx)) {
+            events.push({ type: "command-dropped", reason: "invalid-measure-px" });
+            continue;
+        }
+        if (cur.heights.get(row.nodeId)?.[row.state] === row.cssPx) continue;
+        const delta = row.cssPx - layoutHeightFor(cur, row.nodeId, row.state);
+        heights ??= new Map(state.heights);
+        heights.set(row.nodeId, { ...heights.get(row.nodeId), [row.state]: row.cssPx });
+        cur = { ...state, heights };
+        events.push({ type: "row-measured", nodeId: row.nodeId, state: row.state, delta });
+    }
+    return { state: cur, events };
+}
+
 /** Write one (nodeId, state) slot into a height-ish map immutably. */
 function withSlot(
     map: ReadonlyMap<string, RowHeight>,
@@ -174,50 +212,11 @@ export function update(
             return setExpansion(state, command.nodeId, { open: false });
         }
 
-        case "RowMeasured": {
-            // Drop measurements for ids not in the current document: a late
-            // ResizeObserver callback for an already-removed row would otherwise
-            // write a height back that survives the next prune (it'd re-enter
-            // with a stale measurement). reagent P2 on #1236.
-            if (!state.idSet.has(command.nodeId)) {
-                return {
-                    state,
-                    events: [{ type: "command-dropped", reason: "measure-unknown-id" }],
-                };
-            }
-            // Guard the prefix-sum: a NaN/Infinity/negative height would
-            // poison every position downstream (INV-1). Drop, don't store.
-            if (!isValidPx(command.cssPx)) {
-                return {
-                    state,
-                    events: [{ type: "command-dropped", reason: "invalid-measure-px" }],
-                };
-            }
-            const prev = state.heights.get(command.nodeId)?.[command.state];
-            if (prev === command.cssPx) return { state, events: [] };
-            const delta =
-                command.cssPx -
-                layoutHeightFor(state, command.nodeId, command.state);
-            return {
-                state: {
-                    ...state,
-                    heights: withSlot(
-                        state.heights,
-                        command.nodeId,
-                        command.state,
-                        command.cssPx,
-                    ),
-                },
-                events: [
-                    {
-                        type: "row-measured",
-                        nodeId: command.nodeId,
-                        state: command.state,
-                        delta,
-                    },
-                ],
-            };
-        }
+        case "RowMeasured":
+            return measureRows(state, [command]);
+
+        case "RowsMeasured":
+            return measureRows(state, command.rows);
 
         case "EstimateSet": {
             if (!state.idSet.has(command.nodeId)) {

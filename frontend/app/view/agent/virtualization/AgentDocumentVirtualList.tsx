@@ -1536,6 +1536,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // stay in unzoomed CSS px (INV-2/3). Rows observe on mount, unobserve on
     // unmount (the Key child's onCleanup).
     const elNodeId = new WeakMap<Element, string>();
+    // Every height is read first, then all of them go in one RowsMeasured.
+    // Dispatching a RowMeasured after each read re-laid out the rows, so the
+    // next row's read forced a layout, and each dispatch rebuilt the whole
+    // prefix sum: per row that rewrapped, every frame of a window drag
+    // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §13).
     const measureRO = typeof ResizeObserver !== "undefined"
         ? new ResizeObserver((entries) => {
             const blockId = props.blockId;
@@ -1543,10 +1548,15 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const zoom = props.zoomFactor?.() ?? 1;
             const snap = snapshotLayout(blockId);
             const nodes = nodeById();
+            const rows: { nodeId: string; state: ExpansionState; cssPx: number }[] = [];
             for (const entry of entries) {
                 const nodeId = elNodeId.get(entry.target);
                 if (!nodeId) continue;
                 const cssPx = entry.target.getBoundingClientRect().height / (zoom || 1); // perf:allow-layout-read — measure ResizeObserver callback (layout clean)
+                rows.push({ nodeId, state: inFlowState(snap?.expansion.get(nodeId)), cssPx });
+            }
+            if (rows.length === 0) return;
+            for (const { nodeId, cssPx } of rows) {
                 const node = nodes.get(nodeId);
                 if (node) {
                     agentPerfStore.recordEstimatorMeasurement(
@@ -1555,13 +1565,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         cssPx,
                     );
                 }
-                dispatchLayoutIfRegistered(blockId, {
-                    type: "RowMeasured",
-                    nodeId,
-                    state: inFlowState(snap?.expansion.get(nodeId)),
-                    cssPx,
-                });
             }
+            dispatchLayoutIfRegistered(blockId, { type: "RowsMeasured", rows });
         })
         : undefined;
     onCleanup(() => measureRO?.disconnect());
