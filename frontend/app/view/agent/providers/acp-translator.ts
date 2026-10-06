@@ -88,7 +88,8 @@ export class AcpTranslator implements OutputTranslator {
                     const hasName = [u.name, u.title, u.kind].some((v) => typeof v === "string" && v);
                     const name = hasName ? toolName(u) : known.name;
                     const input = Object.keys(toolInput(u)).length > 0 ? toolInput(u) : known.input;
-                    if (name !== known.name || input !== known.input) {
+                    // By content: each frame parses to a fresh object.
+                    if (name !== known.name || JSON.stringify(input) !== JSON.stringify(known.input)) {
                         const call = { name, input };
                         this.calls.set(toolId, call);
                         events.push(this.tools.call(call.name, toolId, call.input));

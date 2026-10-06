@@ -108,8 +108,9 @@ describe("AcpTranslator — standard session/update", () => {
         // A better title, keeping the input already known.
         const renamed = t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", title: "Read a.ts" }));
         expect(renamed).toEqual([{ type: "tool_call", tool: "Read a.ts", id: "c6", params: { path: "a.ts" } }]);
-        // Nothing new: nothing re-emitted.
+        // Nothing new: nothing re-emitted, including the same input repeated.
         expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", status: "in_progress" }))).toEqual([]);
+        expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", rawInput: { path: "a.ts" } }))).toEqual([]);
         // The end is named by what was learned.
         const [end] = t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c6", status: "completed" }));
         expect(end).toMatchObject({ type: "tool_result", id: "c6", status: "success" });
