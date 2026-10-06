@@ -1,6 +1,6 @@
 # SPEC: a default color for every widget type, set per widget in Settings
 
-**Status:** active. PR 1 (§7) is built: the color lookup, the built-in colors and the header-tail rule. PR 2 (Settings, menu) and PR 3 (top bar) are next. §8 records the decisions taken.
+**Status:** active. PR #4362 (§7 PR 1) built the color lookup, the built-in colors and the header-tail rule. PR 2 (Settings, menu) and PR 3 (top bar) are next. §8 records the decisions taken.
 **Date:** 2026-10-05
 **Author:** Agent3
 
