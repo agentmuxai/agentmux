@@ -37,24 +37,9 @@
     font-size: var(--text-xs);
 }
 
+// Inputs and selects are element/ui's TextInput / Select; this only sizes them.
 .agent-new-bundle-modal-input {
     width: 100%;
-    padding: var(--space-1-5) var(--space-2);
-    font-size: var(--text-sm);
-    color: var(--main-text-color);
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    outline: none;
-
-    &:focus {
-        border-color: var(--accent-color);
-        box-shadow: 0 0 0 1px var(--accent-color);
-    }
-
-    &::placeholder {
-        color: color-mix(in srgb, var(--secondary-text-color) 80%, transparent);
-    }
 }
 
 .agent-new-bundle-modal-textarea {

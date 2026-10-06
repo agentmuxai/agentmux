@@ -15,7 +15,7 @@
 
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
-import { Button } from "@/element/button";
+import { Button, IconButton, SegmentedControl, Select, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
@@ -495,29 +495,28 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         (SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A). When this
                         definition has past instances the modal opens in
                         Continue mode: the dropdown picks which instance to
-                        resume (pre-fills + locks name/identity/memory) and a
-                        toggle drops to the full New-agent form. No past
-                        instances ⇒ no toggle, New is the only path. */}
+                        resume (pre-fills + locks name/identity/memory); the
+                        segmented control above it switches to the full
+                        New-agent form. No past instances ⇒ no control, New
+                        is the only path. */}
                     <Show when={(namedAgents() ?? []).length > 0}>
-                        <Show
-                            when={viewMode() === "continue"}
-                            fallback={
-                                <button
-                                    type="button"
-                                    class="agent-launch-modal-mode-toggle"
-                                    onClick={enterContinueMode}
-                                    disabled={submitting()}
-                                >
-                                    ↩ Continue an existing agent
-                                </button>
-                            }
-                        >
+                        <SegmentedControl
+                            class="agent-launch-modal-mode"
+                            ariaLabel="Continue or start new"
+                            options={[
+                                { value: "continue", label: "Continue an existing agent", disabled: submitting() },
+                                { value: "new", label: "Start a new agent", disabled: submitting() },
+                            ]}
+                            value={viewMode()}
+                            onChange={(mode) => (mode === "continue" ? enterContinueMode() : enterNewMode())}
+                        />
+                        <Show when={viewMode() === "continue"}>
                             <label class="agent-launch-modal-field">
-                                <span class="agent-launch-modal-label">Continue an existing agent</span>
-                                <select
+                                <span class="agent-launch-modal-label">Which agent</span>
+                                <Select
                                     class="agent-launch-modal-input"
                                     value={continueOfId()}
-                                    onChange={(e) => handleContinueSelect(e.currentTarget.value)}
+                                    onChange={(v) => handleContinueSelect(v)}
                                     disabled={submitting()}
                                     aria-label="Continue an existing agent"
                                 >
@@ -538,20 +537,12 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                             );
                                         }}
                                     </For>
-                                </select>
+                                </Select>
                                 <span class="agent-launch-modal-hint">
                                     Picks up where the agent left off — same files,
                                     same identity, same memory.
                                 </span>
                             </label>
-                            <button
-                                type="button"
-                                class="agent-launch-modal-mode-toggle"
-                                onClick={enterNewMode}
-                                disabled={submitting()}
-                            >
-                                + Start a new agent instead
-                            </button>
                         </Show>
                     </Show>
 
@@ -559,7 +550,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         <span class="agent-launch-modal-label">
                             {isContinue() ? "Agent name" : "Give this agent a name"}
                         </span>
-                        <input
+                        <TextInput
                             class="agent-launch-modal-input"
                             type="text"
                             maxLength={64}
@@ -653,8 +644,8 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             <Show
                                 when={hasAccountsForProvider()}
                                 fallback={
-                                    <button
-                                        type="button"
+                                    <Button
+                                        icon="plus"
                                         class="agent-launch-modal-bundle-empty-btn"
                                         onClick={handleAddAccount}
                                         disabled={
@@ -668,14 +659,14 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                                 : "Coming soon"
                                         }
                                     >
-                                        + Add {provider()?.displayName ?? "account"}...
-                                    </button>
+                                        Add {provider()?.displayName ?? "account"}...
+                                    </Button>
                                 }
                             >
-                                <select
+                                <Select
                                     class="agent-launch-modal-input"
                                     value={accountId()}
-                                    onChange={(e) => setAccountId(e.currentTarget.value)}
+                                    onChange={(v) => setAccountId(v)}
                                     disabled={submitting() || continueLocksIdentity()}
                                     aria-label="Account"
                                 >
@@ -689,25 +680,15 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                             </option>
                                         )}
                                     </For>
-                                </select>
-                                <button
-                                    type="button"
+                                </Select>
+                                <IconButton
+                                    icon="plus"
+                                    tone="neutral"
                                     class="agent-launch-modal-bundle-new-btn"
                                     onClick={handleAddAccount}
-                                    disabled={
-                                        submitting() ||
-                                        continueLocksIdentity() ||
-                                        !props.onRequestAddAccount
-                                    }
-                                    title={
-                                        props.onRequestAddAccount
-                                            ? `Add ${provider()?.displayName ?? "account"}...`
-                                            : "Coming soon"
-                                    }
-                                    aria-label="Add account"
-                                >
-                                    +
-                                </button>
+                                    disabled={submitting() || continueLocksIdentity() || !props.onRequestAddAccount}
+                                    label={props.onRequestAddAccount ? `Add ${provider()?.displayName ?? "account"}...` : "Coming soon"}
+                                />
                             </Show>
                         </div>
 
@@ -730,8 +711,8 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             <Show
                                 when={hasUserBundles()}
                                 fallback={
-                                    <button
-                                        type="button"
+                                    <Button
+                                        icon="plus"
                                         class="agent-launch-modal-bundle-empty-btn"
                                         onClick={handleNewBundle}
                                         disabled={
@@ -745,14 +726,14 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                                 : "Coming soon"
                                         }
                                     >
-                                        + New bundle...
-                                    </button>
+                                        New bundle...
+                                    </Button>
                                 }
                             >
-                                <select
+                                <Select
                                     class="agent-launch-modal-input"
                                     value={bundleId()}
-                                    onChange={(e) => setBundleId(e.currentTarget.value)}
+                                    onChange={(v) => setBundleId(v)}
                                     disabled={submitting() || continueLocksBundle()}
                                     aria-label="Bundle"
                                 >
@@ -767,25 +748,15 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                             <option value={memory.id}>{memory.name}</option>
                                         )}
                                     </For>
-                                </select>
-                                <button
-                                    type="button"
+                                </Select>
+                                <IconButton
+                                    icon="plus"
+                                    tone="neutral"
                                     class="agent-launch-modal-bundle-new-btn"
                                     onClick={handleNewBundle}
-                                    disabled={
-                                        submitting() ||
-                                        continueLocksBundle() ||
-                                        !props.onRequestNewBundle
-                                    }
-                                    title={
-                                        props.onRequestNewBundle
-                                            ? "New bundle..."
-                                            : "Coming soon"
-                                    }
-                                    aria-label="New bundle"
-                                >
-                                    +
-                                </button>
+                                    disabled={submitting() || continueLocksBundle() || !props.onRequestNewBundle}
+                                    label={props.onRequestNewBundle ? "New bundle..." : "Coming soon"}
+                                />
                             </Show>
                         </div>
                     </fieldset>
@@ -835,7 +806,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                 classList={{ "agent-launch-modal-field--disabled": runtime() !== "container" }}
                             >
                                 <span class="agent-launch-modal-label">Override sandbox base</span>
-                                <input
+                                <TextInput
                                     class="agent-launch-modal-input"
                                     type="text"
                                     placeholder={catalog()?.containerImage ?? ""}
@@ -865,7 +836,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                 <Button onClick={props.onCancel} disabled={submitting()} data-modal-dismiss>
                     Cancel
                 </Button>
-                <Button onClick={() => void handleSubmit()} disabled={!canSubmit()}>
+                <Button tone="accent" busy={submitting()} onClick={() => void handleSubmit()} disabled={!canSubmit()}>
                     {submitting()
                         ? isContinue() ? "Continuing…" : "Launching…"
                         : isContinue() ? "Continue" : "Launch"}
