@@ -80,7 +80,11 @@
     flex-direction: row;
     align-items: stretch;
     overflow-x: auto;
-    border-bottom: 1px solid var(--border-color);
+    overflow-y: hidden;
+    // The bottom line is an inset shadow, not a border: the selected tab's
+    // underline paints over it without a negative margin, which would make
+    // the row overflow vertically and show a scrollbar.
+    box-shadow: inset 0 -1px 0 var(--border-color);
 }
 
 .ui-tabs--vertical {
@@ -139,8 +143,6 @@
 }
 
 .ui-tabs--horizontal .ui-tab {
-    // Sit the underline on top of the tablist's own bottom line.
-    margin-bottom: -1px;
     border-bottom: 2px solid transparent;
 
     &[aria-selected="true"] {
