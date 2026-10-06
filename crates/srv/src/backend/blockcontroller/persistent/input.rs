@@ -195,7 +195,7 @@ impl PersistentSubprocessController {
             // caller or the turn-end handler reads is never behind the write.
             // Only a fully successful write of this message alone: with a
             // failure, the one entry written is an older queued one and this
-            // message was taken back (ReAgent P1 on #4401).
+            // message was taken back (#4401).
             let label = if failure.is_none() && written.len() == 1 { origin } else { None };
             let was_active = (!written.is_empty()).then(|| self.mark_turn_active_locked_from(label));
             (written, was_active, !inner.deferred_deliveries.is_empty(), failure)

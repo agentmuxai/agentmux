@@ -3889,7 +3889,7 @@ async fn a_labelled_structured_delivery_written_with_a_backlog_is_unlabelled() {
     assert_eq!(c.turn_provenance(), None, "an unlabelled start is unknown");
 }
 
-/// ReAgent P1 on #4401: an older queued message is written, then this one's
+/// (#4401) An older queued message is written, then this one's
 /// own write fails and it is taken back. The turn was started by the older
 /// (automated) message, so it must stay unknown, not become the user's.
 #[tokio::test]
