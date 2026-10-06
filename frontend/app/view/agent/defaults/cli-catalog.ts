@@ -77,11 +77,13 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "gemini",
         displayName: "Gemini CLI",
         icon: "⚡",
-        blurb: "Google's coding agent",
+        // Since 2026-06-18 Gemini CLI no longer serves personal Google
+        // accounts (free, AI Pro, Ultra); Antigravity replaced it for those.
+        blurb: "Google's coding agent, with a Gemini API key",
         primaryContextFile: "GEMINI.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Uses your Google account.",
+            "Google's coding agent. Very large context window — it can look at a lot of code at once. Defaults to reading + planning before it writes anything, so it's a safer pick when you're still deciding what to change. Needs a paid Gemini API key or a company Gemini Code Assist licence: since June 2026 it no longer works with a personal Google account. For that, pick Antigravity.",
         hostSupported: true,
         // No container image built yet — host-only until agentmux/gemini ships.
         containerSupported: false,
@@ -94,7 +96,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         primaryContextFile: "AGENTS.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:
-            "Google's agentic coding CLI harness — a sibling to Gemini CLI, sharing its stream-json output. Emphasizes high-throughput agentic task execution with native skill discovery and subagent support. Uses your Google account.",
+            "Google's agentic coding CLI harness, which replaced Gemini CLI for personal Google accounts in June 2026. Emphasizes high-throughput agentic task execution with native skill discovery and subagent support. Uses your Google account. Installed with Google's own installer, not by AgentMux.",
         hostSupported: true,
         // No container image built yet — host-only until agentmux/antigravity ships.
         containerSupported: false,
@@ -130,7 +132,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         provider: "pi",
         displayName: "Pi",
         icon: "π",
-        blurb: "Plandex's multi-provider agent",
+        blurb: "Minimal multi-provider coding agent",
         primaryContextFile: "AGENTS.md or CLAUDE.md",
         mcpSupport: "stdio+http",
         popoverMarkdown:

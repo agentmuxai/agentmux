@@ -90,7 +90,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Step 2: Not in versioned dir — check system PATH for non-npm CLIs.
                 if cmd.npm_package.is_empty() {
-                    if let Some(path) = resolve_cli_on_path(&cmd.cli_command).await {
+                    if let Some(path) = resolve_provider_cli_on_path(&cmd.provider_id, &cmd.cli_command).await {
                         let version = get_cli_version(&path).await;
                         tracing::info!(
                             path = %path, version = %version,
@@ -813,6 +813,19 @@ async fn run_auth_check(
 // token) now surfaces honestly as a failed validation plus an actionable auth
 // card, and is fixed by logging in for THIS channel.
 
+/// A PATH-only provider's CLI: on PATH, else in the folder its own installer
+/// uses ([`crate::backend::providers::known_install_paths`]), which may not
+/// be on this process's PATH until AgentMux restarts.
+pub(crate) async fn resolve_provider_cli_on_path(provider_id: &str, cli_command: &str) -> Option<String> {
+    if let Some(path) = resolve_cli_on_path(cli_command).await {
+        return Some(path);
+    }
+    crate::backend::providers::known_install_paths(provider_id)
+        .into_iter()
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
 /// Resolve a CLI command on the system PATH.
 ///
 /// Uses `where` on Windows and `which` on Unix. Returns the absolute path
@@ -829,7 +842,7 @@ async fn run_auth_check(
 /// line whose extension `make_cli_cmd` can actually spawn (.exe / .cmd / .bat).
 /// Taking the raw first line would yield the extensionless entry, which
 /// `Command::new` cannot run on Windows without a shell.
-pub(crate) async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
+async fn resolve_cli_on_path(cli_command: &str) -> Option<String> {
     let which_result = if cfg!(windows) {
         let mut probe = tokio::process::Command::new("where");
         probe.arg(cli_command);

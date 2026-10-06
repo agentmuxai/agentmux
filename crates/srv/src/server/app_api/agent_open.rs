@@ -503,7 +503,7 @@ async fn open_agent_inner(
                     // This is used for Python-based CLIs like Kimi that are not
                     // distributed on npm.
                     if provider.npm_package.is_empty() {
-                        if let Some(path) = resolve_cli_on_path(provider.cli_command).await {
+                        if let Some(path) = resolve_provider_cli_on_path(provider.id, provider.cli_command).await {
                             resolved_cli_path = path;
                         }
                     }

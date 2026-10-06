@@ -97,7 +97,10 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "moonshot") return { html: moonshotSvg };
         if (p === "openclaw") return { html: openclawColorSvg };
         if (p === "aws") return { html: awsSvg };
-        if (p === "pi" || p === "plandex") return { png: plandexUrl };
+        // Plandex only: Pi (pi-coding-agent) is a different project, and
+        // showing Plandex's mark on it named the wrong product. Pi falls
+        // through to the letter mark below.
+        if (p === "plandex") return { png: plandexUrl };
 
         if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 

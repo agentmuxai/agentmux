@@ -21,7 +21,8 @@ export const GIT_PREREQ: SystemPrereq = {
     },
 };
 
-/** Shared Node.js prereq. Every provider below except kimi (pip-based) is
+/** Shared Node.js prereq. Every provider below except kimi (pip-based) and
+ *  antigravity (a native binary from Google's own installer) is
  *  installed via `npm install -g <npmPackage>` (AgentInstallModal ->
  *  install.start -> `Command::new("npm.cmd"/"npm")`, agentmux-srv's
  *  install_handlers.rs) — on a machine with no Node.js/npm, that spawn
@@ -155,7 +156,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Claude Code calls `git` at session-start (issue
         // anthropics/claude-code#29898). Without git the CLI fails
         // with `Error: Git is required but was not found.`.
-        systemPrereqs: [GIT_PREREQ, NODE_PREREQ, NPM_PREREQ],
+        // Node 22+: `engines` of @anthropic-ai/claude-code. Older Node installs
+        // fine and then fails at launch, so check it up front.
+        systemPrereqs: [GIT_PREREQ, { ...NODE_PREREQ, minVersion: "22.0.0" }, NPM_PREREQ],
         // Labels carry the concrete version the pinned CLI (see `pinnedVersion`)
         // currently resolves each family alias to — curated, kept in sync on a
         // pin bump (SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG Part B). The `value`
@@ -287,7 +290,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "-r",
         sessionIdField: "session_id",
         controllerType: "subprocess",
-        systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
+        // Node 20+: `engines` of @google/gemini-cli.
+        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "20.0.0" }, NPM_PREREQ],
     },
     // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
     // Same stream-json headless surface → reuses the gemini translator
@@ -327,7 +331,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "session_id",
         controllerType: "subprocess",
-        systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
+        // Node 22+: `engines` of @qwen-code/qwen-code.
+        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "22.0.0" }, NPM_PREREQ],
     },
     // OpenClaw — model-agnostic personal AI assistant from openclaw.ai.
     // We launch its `openclaw acp` bridge: speaks ACP over stdio (our
@@ -482,7 +487,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
-        systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
+        // Node 20.6+: `engines` of @mariozechner/pi-coding-agent.
+        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "20.6.0" }, NPM_PREREQ],
     },
     // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the
     // same stream-json NDJSON envelope as Gemini CLI (its sibling
@@ -500,11 +506,17 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authType: "oauth",
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth", "login"],
-        npmPackage: "@google/antigravity-cli",
-        pinnedVersion: "1.0.0",
-        docsUrl: "https://ai.google.dev/antigravity",
-        windowsInstallCommand: "npm install -g @google/antigravity-cli",
-        unixInstallCommand: "npm install -g @google/antigravity-cli",
+        // Not on npm: `agy` is a native binary that Google's installer puts in
+        // place and keeps up to date itself, so AgentMux can't install it.
+        // Like kimi, launch finds it on PATH (or in the installer's folder,
+        // `known_install_paths` in providers.rs) and otherwise shows the
+        // command below. The old `@google/antigravity-cli` package never
+        // existed, so every install of it failed.
+        npmPackage: "",
+        pinnedVersion: "",
+        docsUrl: "https://antigravity.google/",
+        windowsInstallCommand: "irm https://antigravity.google/cli/install.ps1 | iex",
+        unixInstallCommand: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         icon: "zap",
         authConfigDirEnvVar: "ANTIGRAVITY_CONFIG_DIR",
         authDirName: "antigravity",
@@ -515,7 +527,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "-r",
         sessionIdField: "session_id",
         controllerType: "subprocess",
-        systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
+        // A native binary: no Node.js or npm needed.
+        systemPrereqs: [],
         models: [
             { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", default: true, description: "Fast, highly capable frontier model with 1M context" },
             { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Deep reasoning and complex coding" },

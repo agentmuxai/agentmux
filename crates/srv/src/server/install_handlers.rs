@@ -541,6 +541,24 @@ fn spawn_install_task(
         use tokio::process::Command;
 
         let scope = format!("install:{}", session_id);
+        // The last lines npm printed, for the log when an install fails: the
+        // dialog shows the whole output, but nothing else kept it, so a failed
+        // install left no trace of why (only `install.start` was logged).
+        let tail: Arc<Mutex<std::collections::VecDeque<String>>> = Arc::default();
+        let log_done = |ok: bool, error: Option<&str>| {
+            if ok {
+                tracing::info!(session_id = %session_id, provider_id = %provider_id, "install.done");
+            } else {
+                let tail = tail.lock().iter().cloned().collect::<Vec<_>>().join(" | ");
+                tracing::warn!(
+                    session_id = %session_id,
+                    provider_id = %provider_id,
+                    error = error.unwrap_or(""),
+                    npm_tail = %tail,
+                    "install.failed"
+                );
+            }
+        };
         let emit_line = |broker: &Broker, line: String, stream: &'static str| {
             let event = MuxEvent {
                 event: "install_chunk".to_string(),
@@ -560,6 +578,7 @@ fn spawn_install_task(
         // the wire-format `AgentMuxError` object so the frontend can
         // render a friendly `<ErrorBanner />`.
         let emit_done = |broker: &Broker, ok: bool, error: Option<String>| {
+            log_done(ok, error.as_deref());
             let event = MuxEvent {
                 event: "install_chunk".to_string(),
                 scopes: vec![scope.clone()],
@@ -575,6 +594,7 @@ fn spawn_install_task(
             broker.publish(event);
         };
         let emit_done_typed = |broker: &Broker, err: agentmux_common::AgentMuxError| {
+            log_done(false, Some(&err.to_string()));
             let event = MuxEvent {
                 event: "install_chunk".to_string(),
                 scopes: vec![scope.clone()],
@@ -764,9 +784,11 @@ fn spawn_install_task(
         let broker_out = broker.clone();
         let session_out = session_id.clone();
         let scope_out = scope.clone();
+        let tail_out = tail.clone();
         let stdout_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                push_tail(&tail_out, &line);
                 let event = MuxEvent {
                     event: "install_chunk".to_string(),
                     scopes: vec![scope_out.clone()],
@@ -785,9 +807,11 @@ fn spawn_install_task(
         let broker_err = broker.clone();
         let session_err = session_id.clone();
         let scope_err = scope.clone();
+        let tail_err = tail.clone();
         let stderr_task = tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
+                push_tail(&tail_err, &line);
                 let event = MuxEvent {
                     event: "install_chunk".to_string(),
                     scopes: vec![scope_err.clone()],
@@ -875,9 +899,35 @@ fn spawn_install_task(
     });
 }
 
+/// How many lines of npm output a failed install logs.
+const INSTALL_LOG_TAIL_LINES: usize = 20;
+
+fn push_tail(tail: &Mutex<std::collections::VecDeque<String>>, line: &str) {
+    let mut tail = tail.lock();
+    if tail.len() == INSTALL_LOG_TAIL_LINES {
+        tail.pop_front();
+    }
+    tail.push_back(line.to_string());
+}
+
 #[cfg(test)]
 mod tests {
     use super::{find_on_path, is_safe_cli_command, is_safe_provider_id};
+
+    #[test]
+    fn the_log_keeps_only_the_last_lines_of_npm_output() {
+        let tail = parking_lot::Mutex::new(std::collections::VecDeque::new());
+        for i in 0..(super::INSTALL_LOG_TAIL_LINES + 5) {
+            super::push_tail(&tail, &format!("line {i}"));
+        }
+        let tail = tail.lock();
+        assert_eq!(tail.len(), super::INSTALL_LOG_TAIL_LINES);
+        assert_eq!(tail.front().map(String::as_str), Some("line 5"));
+        assert_eq!(
+            tail.back().cloned(),
+            Some(format!("line {}", super::INSTALL_LOG_TAIL_LINES + 4))
+        );
+    }
 
     /// The lookup is in-process: a PATH holding only the tool (no `which`
     /// binary anywhere on it) still finds it. Codex P2 on #3891.

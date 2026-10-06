@@ -42,9 +42,21 @@ describe("prereq-check", () => {
         expect(needsProbe(NODE_PREREQ, { found: true })).toBe(false);
     });
 
-    it("pins OpenClaw's Node minimum to 24.16.0 and leaves other providers unversioned", () => {
+    // Each minimum is the `engines.node` of the provider's pinned npm
+    // package: older Node installs it fine and then fails at launch.
+    it("pins each provider's Node minimum to its package's engines", () => {
         const node = (id: string) => PROVIDERS[id]?.systemPrereqs?.find((p) => p.tool === "node");
         expect(node("openclaw")?.minVersion).toBe("24.16.0");
-        expect(node("claude")?.minVersion).toBeUndefined();
+        expect(node("claude")?.minVersion).toBe("22.0.0");
+        expect(node("qwen")?.minVersion).toBe("22.0.0");
+        expect(node("gemini")?.minVersion).toBe("20.0.0");
+        expect(node("pi")?.minVersion).toBe("20.6.0");
+        // Codex declares Node 16+, older than any Node npm still supports.
+        expect(node("codex")?.minVersion).toBeUndefined();
+    });
+
+    // A native binary from Google's own installer: no Node needed.
+    it("asks for no Node or npm for Antigravity", () => {
+        expect(PROVIDERS.antigravity?.systemPrereqs).toEqual([]);
     });
 });

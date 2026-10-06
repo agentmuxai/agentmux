@@ -702,8 +702,15 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     history_native_subdir: None,
     auth_extra_env: &[("ANTIGRAVITY_FORCE_FILE_STORAGE", "true")],
     unset_env: &[],
-    npm_package: "@google/antigravity-cli",
-    pinned_version: "1.0.0",
+    // Not on npm: `agy` is a native binary that Google's own installer
+    // (https://antigravity.google/cli/install.ps1, and its `.sh` twin) puts
+    // in place and then keeps up to date itself. The old
+    // `@google/antigravity-cli` pin never existed, so every install of it
+    // failed. With no package this is a PATH CLI like Kimi: launch finds it
+    // on PATH or in the installer's own folder (`known_install_paths`), else
+    // shows the install command.
+    npm_package: "",
+    pinned_version: "",
     base_url_env_var: None,
     supported_vendors: &["google"],
     // INFERRED, not independently doc-confirmed: Antigravity CLI's own
@@ -781,6 +788,40 @@ pub fn resolve_provider_alias(id: &str) -> &'static str {
 ///
 /// Returns `None` when the ID (and any resolved alias) does not match a known
 /// provider.
+/// Where a PATH-only provider's own installer puts its CLI, for the case
+/// where that folder is not on this process's PATH yet. Antigravity's
+/// installer adds its folder to the user's PATH, but an AgentMux that is
+/// already running keeps the PATH it started with, so without this the CLI
+/// would read as missing until AgentMux restarts.
+pub fn known_install_paths(provider_id: &str) -> Vec<std::path::PathBuf> {
+    match resolve_provider_alias(provider_id) {
+        "antigravity" => antigravity_install_paths(
+            std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from),
+            dirs::home_dir(),
+        ),
+        _ => Vec::new(),
+    }
+}
+
+/// `%LOCALAPPDATA%\agy\bin\agy.exe` on Windows and `~/.local/bin/agy`
+/// elsewhere: the default `TARGET_DIR` of Google's installers,
+/// https://antigravity.google/cli/install.ps1 and the `.sh` one beside it.
+fn antigravity_install_paths(
+    local_app_data: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+) -> Vec<std::path::PathBuf> {
+    if cfg!(windows) {
+        local_app_data
+            .map(|d| d.join("agy").join("bin").join("agy.exe"))
+            .into_iter()
+            .collect()
+    } else {
+        home.map(|h| h.join(".local").join("bin").join("agy"))
+            .into_iter()
+            .collect()
+    }
+}
+
 pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
     // Direct lookup first.
     if let Some(p) = REGISTRY.get(id) {
@@ -1087,7 +1128,9 @@ mod tests {
         assert_eq!(p.cli_command, "agy");
         assert_eq!(p.session_id_field, "session_id");
         assert_eq!(p.resume_flag, Some("-r"));
-        assert_eq!(p.npm_package, "@google/antigravity-cli");
+        // Installed by Google's own script, not npm.
+        assert!(p.npm_package.is_empty());
+        assert!(p.pinned_version.is_empty());
         assert_eq!(p.supported_vendors, &["google"]);
         assert!(p.base_url_env_var.is_none());
     }
@@ -1104,6 +1147,26 @@ mod tests {
         assert_eq!(p.npm_package, "@agentmuxai/muxcode");
         assert_eq!(p.launch_args, &["run", "-p"]);
         assert!(p.persistent_launch_args.is_none());
+    }
+
+    /// The installer's default folder, so a fresh `agy` install is found
+    /// before AgentMux restarts and picks up the new PATH.
+    #[test]
+    fn antigravity_is_found_where_its_installer_puts_it() {
+        let paths = super::antigravity_install_paths(
+            Some(std::path::PathBuf::from("LAD")),
+            Some(std::path::PathBuf::from("HOME")),
+        );
+        let expected = if cfg!(windows) {
+            std::path::Path::new("LAD").join("agy").join("bin").join("agy.exe")
+        } else {
+            std::path::Path::new("HOME").join(".local").join("bin").join("agy")
+        };
+        assert_eq!(paths, vec![expected]);
+        assert!(super::antigravity_install_paths(None, None).is_empty());
+        // Every other provider either installs through npm or relies on PATH.
+        assert!(known_install_paths("kimi").is_empty());
+        assert!(known_install_paths("claude").is_empty());
     }
 
     #[test]
