@@ -161,7 +161,8 @@ describe("pickBase", () => {
     });
 
     it("uses the previous commit on a push to the base branch, where the merge-base is HEAD", () => {
-        expect(pickBase("head", "head", "parent")).toBe("parent");
+        // `previous` is the push's `before` commit when CI provides it, else HEAD^.
+        expect(pickBase("head", "head", "before")).toBe("before");
     });
 
     it("has nothing to compare against for a root commit", () => {

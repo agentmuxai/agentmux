@@ -305,9 +305,12 @@ function baseCommit() {
         const r = git(["rev-parse", "--verify", "--quiet", ref]);
         return r.status === 0 ? r.stdout.toString().trim() : null;
     };
+    // Set by ci-pr.yml on a push: the commit the branch pointed to before it.
+    const before = process.env.UI_RATCHET_BEFORE?.trim();
+    const pushedFrom = before && !/^0+$/.test(before) ? rev(`${before}^{commit}`) : null;
     for (const ref of [`origin/${branch}`, branch]) {
         const mb = git(["merge-base", "HEAD", ref]);
-        if (mb.status === 0) return pickBase(mb.stdout.toString().trim(), rev("HEAD"), rev("HEAD^"));
+        if (mb.status === 0) return pickBase(mb.stdout.toString().trim(), rev("HEAD"), pushedFrom ?? rev("HEAD^"));
     }
     return null;
 }
@@ -316,11 +319,12 @@ function baseCommit() {
  * The commit to compare against, given the merge-base with the base branch.
  * On a pull request that is where the branch left main. On a push to main
  * itself the merge-base is HEAD, which would compare the tree with itself and
- * never fail, so the previous commit (HEAD's first parent) is used instead.
+ * never fail, so `previous` is used instead: the push event's `before` commit,
+ * which covers every commit in the push, or failing that HEAD's first parent.
  */
-export function pickBase(mergeBase, head, parent) {
+export function pickBase(mergeBase, head, previous) {
     if (mergeBase !== head) return mergeBase;
-    return parent;
+    return previous;
 }
 
 /** Parse `git cat-file --batch` output into the contents of each blob, in order. */
