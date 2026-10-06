@@ -1,7 +1,7 @@
 # REPORT: Opening an agent can stall for ~17 s on the history read
 
 **Date:** 2026-10-05
-**Status:** root cause found (§2a) and fixed; instrumentation (#4371), 1 MB restore (#4373), bounded reveal (#4374) and the race fix with append-only index extension (§2a) landed or in review.
+**Status:** analysis — root cause found (§2a) and fixed; instrumentation (#4371), 1 MB restore (#4373), bounded reveal (#4374) and the race fix with append-only index extension (§2a) landed or in review.
 **Verified against:** `agentmux` `main` @ `742cb2ff5`. Logs from the retained instances on one Windows host (v0.58.2 → v0.59.10); measurements against a running v0.59.10 backend and the local transcript store, read-only.
 **Related:**
 - `SPEC_AGENT_OPEN_LATENCY_2026_09_27.md` (F6: the logs can't tell where an open's time goes; §5 acceptance: first row ≤ 300 ms);
