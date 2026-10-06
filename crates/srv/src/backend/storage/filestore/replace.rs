@@ -53,6 +53,70 @@ impl SnapshotReader<'_> {
     }
 }
 
+/// Write `data` at byte `offset` of a file's stored parts, inside `tx`,
+/// reading and rewriting only the parts the range touches. A part shorter
+/// than the range is extended (with zeros up to `offset`, which callers
+/// never leave as a gap). Leaves the file's recorded size to the caller.
+fn patch_range_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, name: &str, offset: i64, data: &[u8]) -> Result<(), StoreError> {
+    if data.is_empty() {
+        return Ok(());
+    }
+    let pds = super::core::PART_DATA_SIZE as i64;
+    let end = offset + data.len() as i64;
+    for idx in (offset / pds)..=((end - 1) / pds) {
+        let part_start = idx * pds;
+        let mut part: Vec<u8> = tx
+            .query_row(
+                "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                params![zone_id, name, idx as i32],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or_default();
+        let from = offset.max(part_start);
+        let to = end.min(part_start + pds);
+        let (lo, hi) = ((from - part_start) as usize, (to - part_start) as usize);
+        if part.len() < hi {
+            part.resize(hi, 0);
+        }
+        part[lo..hi].copy_from_slice(&data[(from - offset) as usize..(to - offset) as usize]);
+        tx.execute(
+            "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+            params![zone_id, name, idx as i32, part],
+        )?;
+    }
+    Ok(())
+}
+
+/// Drop a file's stored bytes from `new_size` on, inside `tx`.
+fn truncate_parts_in(tx: &rusqlite::Transaction<'_>, zone_id: &str, name: &str, new_size: i64) -> Result<(), StoreError> {
+    let pds = super::core::PART_DATA_SIZE as i64;
+    let keep_parts = (new_size + pds - 1) / pds;
+    tx.execute(
+        "DELETE FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx >= ?3",
+        params![zone_id, name, keep_parts as i32],
+    )?;
+    let in_last = (new_size % pds) as usize;
+    if in_last > 0 {
+        let last = (keep_parts - 1) as i32;
+        let part: Option<Vec<u8>> = tx
+            .query_row(
+                "SELECT data FROM db_file_data WHERE zoneid = ?1 AND name = ?2 AND partidx = ?3",
+                params![zone_id, name, last],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(mut part) = part.filter(|p| p.len() > in_last) {
+            part.truncate(in_last);
+            tx.execute(
+                "REPLACE INTO db_file_data (zoneid, name, partidx, data) VALUES (?1, ?2, ?3, ?4)",
+                params![zone_id, name, last, part],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 /// See [`FileStore::derived_snapshot`].
 #[derive(Debug, Clone)]
 pub struct DerivedSnapshot {
@@ -105,6 +169,64 @@ impl FileStore {
         expected_gen: Option<&str>,
     ) -> Result<bool, StoreError> {
         self.replace_inner(zone_id, name, data, Some(meta), &[], Some((guard, expected_gen)))
+    }
+
+    /// Patch a file derived from `guard` (an index of it) in place, in one
+    /// transaction: write `head` at offset 0 and `tail` at `tail_at`, the file
+    /// ending where `tail` does — only if `guard` is still generation
+    /// `expected_gen` and `name` is still `expected_size` bytes, the state the
+    /// patch was computed from. Otherwise nothing is written and this returns
+    /// `false`. Only the parts the two ranges touch are written: extending
+    /// `output.idx` used to rewrite all of it (15 MB for a 1.9 M-line
+    /// transcript) for every few lines appended.
+    #[track_caller]
+    #[allow(clippy::too_many_arguments)]
+    pub fn patch_derived_if(
+        &self,
+        zone_id: &str,
+        name: &str,
+        head: &[u8],
+        tail_at: i64,
+        tail: &[u8],
+        guard: &str,
+        expected_gen: &str,
+        expected_size: i64,
+    ) -> Result<bool, StoreError> {
+        if tail_at < head.len() as i64 {
+            return Err(StoreError::Other(format!("{zone_id}/{name}: patch tail at {tail_at} overlaps its head")));
+        }
+        let now = agentmux_common::time::now_ms();
+        let written = self.write_txn(|tx| {
+            let current = super::counter::read_row(tx, zone_id, guard)?.and_then(|r| r.counter()).map(|(gen, _)| gen);
+            if current.as_deref() != Some(expected_gen) {
+                return Ok(false);
+            }
+            let size: Option<i64> = tx
+                .query_row(
+                    "SELECT size FROM db_wave_file WHERE zoneid = ?1 AND name = ?2",
+                    params![zone_id, name],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if size != Some(expected_size) || tail_at > expected_size {
+                return Ok(false);
+            }
+            patch_range_in(tx, zone_id, name, 0, head)?;
+            patch_range_in(tx, zone_id, name, tail_at, tail)?;
+            let new_size = tail_at + tail.len() as i64;
+            if new_size < expected_size {
+                truncate_parts_in(tx, zone_id, name, new_size)?;
+            }
+            tx.execute(
+                "UPDATE db_wave_file SET size = ?1, modts = ?2 WHERE zoneid = ?3 AND name = ?4",
+                params![new_size, now, zone_id, name],
+            )?;
+            Ok(true)
+        })?;
+        if written {
+            self.forget_cached(zone_id, &[name]);
+        }
+        Ok(written)
     }
 
     /// Delete several files of one zone in one transaction. Missing files
