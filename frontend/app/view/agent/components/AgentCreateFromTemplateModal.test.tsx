@@ -537,7 +537,10 @@ describe("AgentCreateFromTemplateModalPanel", () => {
     // for it (antigravity: providers/catalog.ts, 4-entry models list, no
     // --model branch) — offering a picker there would let the user pick
     // a model that's silently discarded at launch.
-    it("hides the model picker for a provider whose models list has no --model wiring at launch (antigravity)", async () => {
+    // Antigravity's models are `agy models`' ids, and buildRuntimeArgs passes
+    // the one picked as --model (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md),
+    // so the picker is offered and its default is what gets submitted.
+    it("offers agy's own models for antigravity, defaulting to the catalog's default", async () => {
         const antigravityTemplate = { ...template, provider: "antigravity" } as AgentDefinition;
         const onSubmit = vi.fn().mockResolvedValue(undefined);
         render(() => (
@@ -552,12 +555,14 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         await flush();
         await flush();
 
-        expect(screen.queryByTestId("create-from-template-model-select")).toBeNull();
+        const select = screen.getByTestId("create-from-template-model-select") as HTMLSelectElement;
+        expect(select.value).toBe("gemini-3.8-flash-medium");
+        expect(Array.from(select.options).map((o) => o.value)).toContain("gemini-3.1-pro-high");
 
         const submit = screen.getByTestId("create-from-template-submit");
         fireEvent.click(submit);
         await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-        expect(onSubmit.mock.calls[0][0].model).toBe("");
+        expect(onSubmit.mock.calls[0][0].model).toBe("gemini-3.8-flash-medium");
     });
 
     // ReAgent P1 on PR #2618: the model list must read through

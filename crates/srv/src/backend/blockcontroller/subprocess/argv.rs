@@ -36,6 +36,40 @@ pub(super) fn build_turn_argv(
     }
 }
 
+/// The longest prompt [`append_prompt_arg`] passes on the command line.
+/// Windows caps a whole command line at 32,767 UTF-16 units; this leaves room
+/// for the executable path and the provider's own flags.
+pub(super) const MAX_PROMPT_ARG_UNITS: usize = 30_000;
+
+/// For a provider that takes its prompt as an argument rather than on stdin
+/// (Antigravity: `agy -p <prompt>`), append `<flag> <prompt>` last, after
+/// any resume flag. A prompt too long for the command line is refused, never
+/// truncated: a cut-off prompt would run as something the user didn't send.
+pub(super) fn append_prompt_arg(args: &mut Vec<String>, flag: &str, prompt: &str) -> Result<(), String> {
+    let units = prompt.encode_utf16().count();
+    if units > MAX_PROMPT_ARG_UNITS {
+        return Err(format!(
+            "This message is too long for this agent's CLI, which takes it on the command line: {units} characters, over the {MAX_PROMPT_ARG_UNITS} limit. Shorten it, or attach the long part as a file."
+        ));
+    }
+    args.push(flag.to_string());
+    args.push(prompt.to_string());
+    Ok(())
+}
+
+/// `args` as they may be logged: the prompt [`append_prompt_arg`] put last is
+/// replaced by its length. On stdin the prompt never reached a log; on the
+/// command line it must not either (#4407).
+pub(super) fn args_for_log(args: &[String], prompt_in_argv: bool) -> Vec<String> {
+    let mut out = args.to_vec();
+    if prompt_in_argv {
+        if let Some(prompt) = out.last_mut() {
+            *prompt = format!("<prompt: {} chars>", prompt.chars().count());
+        }
+    }
+    out
+}
+
 fn build_legacy_argv(
     base: &[String],
     resume_flag: &str,
@@ -232,6 +266,47 @@ fn build_codex_argv(base: &[String], session_id: Option<&str>) -> Result<Vec<Str
     }
     argv.push("-".to_string());
     Ok(argv)
+}
+
+#[cfg(test)]
+mod prompt_arg_tests {
+    use super::{append_prompt_arg, args_for_log, build_turn_argv, MAX_PROMPT_ARG_UNITS};
+
+    #[test]
+    fn the_logged_args_never_carry_the_prompt() {
+        let mut args = strings(&["--output-format", "stream-json"]);
+        append_prompt_arg(&mut args, "-p", "my token is abc123").unwrap();
+        let logged = args_for_log(&args, true);
+        assert_eq!(logged, strings(&["--output-format", "stream-json", "-p", "<prompt: 18 chars>"]));
+        assert!(!logged.iter().any(|a| a.contains("abc123")));
+        // A stdin provider's args hold no prompt and are logged as they are.
+        assert_eq!(args_for_log(&strings(&["-p", "--verbose"]), false), strings(&["-p", "--verbose"]));
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_prompt_goes_last_after_the_resume_flag() {
+        let base = strings(&["--output-format", "stream-json"]);
+        let mut args = build_turn_argv(&base, "flag", "--conversation", Some("c1")).unwrap();
+        append_prompt_arg(&mut args, "-p", "hello & \"bye\"").unwrap();
+        assert_eq!(
+            args,
+            strings(&["--output-format", "stream-json", "--conversation", "c1", "-p", "hello & \"bye\""])
+        );
+    }
+
+    #[test]
+    fn a_prompt_too_long_for_the_command_line_is_refused_not_cut() {
+        let mut args = Vec::new();
+        assert!(append_prompt_arg(&mut args, "-p", &"x".repeat(MAX_PROMPT_ARG_UNITS)).is_ok());
+        let mut args = Vec::new();
+        let err = append_prompt_arg(&mut args, "-p", &"x".repeat(MAX_PROMPT_ARG_UNITS + 1)).unwrap_err();
+        assert!(err.contains("too long"), "{err}");
+        assert!(args.is_empty(), "nothing is appended for a refused prompt");
+    }
 }
 
 #[cfg(test)]

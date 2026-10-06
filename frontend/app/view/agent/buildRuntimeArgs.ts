@@ -130,6 +130,16 @@ export function buildRuntimeArgs(
         if (config.permissionMode !== "default") {
             args.push("--yolo");
         }
+    } else if (providerId === "antigravity") {
+        // agy's own names (agy 1.1.11): bypass is --dangerously-skip-permissions,
+        // plan and accept-edits are --mode values. It has no "auto"; that and
+        // "default" leave agy's own review mode, so nothing is added.
+        const agyFlags: Partial<Record<PermissionMode, string[]>> = {
+            bypass: ["--dangerously-skip-permissions"],
+            acceptEdits: ["--mode", "accept-edits"],
+            plan: ["--mode", "plan"],
+        };
+        args.push(...(agyFlags[config.permissionMode] ?? []));
     } else if (providerId !== "codex") {
         // A control-protocol agent must never be handed
         // `--dangerously-skip-permissions` — see CONTROL_PROTOCOL_FLAG. `bypass`
@@ -164,6 +174,17 @@ export function buildRuntimeArgs(
     // model; otherwise the provider default. (A pane carried over from before
     // per-provider models may still have a Claude model like "opus" stored —
     // never pass that to codex.)
+    // Antigravity: one of `agy models`' ids. A model stored from another
+    // provider (a Claude alias like "sonnet") isn't one, so it falls back to
+    // the catalog default, as codex does.
+    if (providerId === "antigravity") {
+        const agyModels = getProvider("antigravity")?.models ?? [];
+        const picked = agyModels.find((m) => m.value === config.model)?.value;
+        const fallback = agyModels.find((m) => m.default)?.value;
+        const model = picked ?? fallback;
+        if (model) args.push("--model", model);
+    }
+
     if (providerId === "codex") {
         const codexModels = getProvider("codex")?.models ?? [];
         const picked = codexModels.find((m) => m.value === config.model)?.value;
@@ -192,7 +213,7 @@ export function buildRuntimeArgs(
  * exists to close.
  */
 export function providerSupportsModelFlag(providerId: string | undefined): boolean {
-    return !providerId || providerId === "claude" || providerId === "codex";
+    return !providerId || providerId === "claude" || providerId === "codex" || providerId === "antigravity";
 }
 
 /**

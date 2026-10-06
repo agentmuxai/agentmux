@@ -203,11 +203,13 @@ describe("settings and providers", () => {
 
     it("rolls off only for providers whose transcript holds the user's messages", () => {
         // Both Claude controllers write the user's message to the transcript;
-        // so does the per-turn subprocess controller for Codex and Kimi.
+        // so does the per-turn subprocess controller for Codex, Kimi and
+        // Antigravity.
         expect(liveFeedSupported("claude-stream-json")).toBe(true);
         expect(liveFeedSupported("gemini-json")).toBe(true);
         expect(liveFeedSupported("codex-json")).toBe(true);
         expect(liveFeedSupported("kimi-stream-json")).toBe(true);
+        expect(liveFeedSupported("agy-stream-json")).toBe(true);
         expect(liveFeedSupported("acp")).toBe(false);
         // The Codex app-server controller keeps codex-json but never writes
         // the user's message to the transcript.

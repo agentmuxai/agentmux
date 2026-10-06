@@ -85,6 +85,10 @@ pub struct SubprocessSpawnConfig {
     /// Empty preserves compatibility with blocks created before this metadata
     /// existed by inferring `flag` from a non-empty `resume_flag`.
     pub resume_strategy: String,
+    /// When non-empty, the flag that passes the prompt as an argument
+    /// (`agy -p <prompt>`) instead of on stdin; stdin then gets nothing.
+    /// From `agent:prompt_arg_flag`, see `ProviderConfig::prompt_arg_flag`.
+    pub prompt_arg_flag: String,
     /// JSON field name in the CLI's init event that contains the session/thread ID.
     /// e.g. "session_id" (Claude/Gemini) or "thread_id" (Codex).
     pub session_id_field: String,
@@ -436,7 +440,8 @@ impl Controller for SubprocessController {
 pub(crate) fn persists_user_record(output_format: &str) -> bool {
     matches!(
         output_format,
-        "claude-stream-json" | "codex-json" | "kimi-stream-json" | "qwen-stream-json"
+        // agy-stream-json: `agy` doesn't echo the prompt either.
+        "claude-stream-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "qwen-stream-json"
     )
 }
 

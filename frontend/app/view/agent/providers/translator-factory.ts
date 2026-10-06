@@ -7,6 +7,7 @@ import { GeminiTranslator } from "./gemini-translator";
 import { CodexTranslator } from "./codex-translator";
 import { AcpTranslator } from "./acp-translator";
 import { KimiTranslator } from "./kimi-translator";
+import { AgyTranslator } from "./agy-translator";
 
 /**
  * Create an OutputTranslator for the given output format.
@@ -29,6 +30,8 @@ export function createTranslator(outputFormat: string, opts: { replay?: boolean 
             return new CodexTranslator({ replay: opts.replay });
         case "kimi-stream-json":
             return new KimiTranslator({ replay: opts.replay });
+        case "agy-stream-json":
+            return new AgyTranslator({ replay: opts.replay });
         case "acp":
             return new AcpTranslator();
         default:
