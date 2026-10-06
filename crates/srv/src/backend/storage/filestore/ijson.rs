@@ -25,6 +25,7 @@ impl FileStore {
     const IJSON_LOW_RATIO: f64 = 1.0;
 
     /// Append an IJson command to a file. Triggers compaction if thresholds are exceeded.
+    #[track_caller]
     pub fn append_ijson(
         &self,
         zone_id: &str,
@@ -82,6 +83,7 @@ impl FileStore {
 
     /// Compact an IJson file: apply all incremental commands to build compacted state,
     /// then replace file contents with the compacted result.
+    #[track_caller]
     pub fn compact_ijson(
         &self,
         zone_id: &str,

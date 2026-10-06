@@ -146,6 +146,8 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
 
                 tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, offset = cmd.offset, limit = cmd.limit, "blockfile:read_range");
+                let started = std::time::Instant::now();
+                let mut clock = ReadRangeClock::default();
 
                 let limit = cmd.limit.min(10_000) as usize;
                 let offset = cmd.offset as usize;
@@ -162,6 +164,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     None => format!("b:{}", cmd.block_id),
                 };
                 let (filestore, read_block) = source.unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
+                clock.source_ms = ms_since(started);
 
                 // Generation (Phase 5a-3): read before and after the lines. A
                 // replace always mints a new one, so the same value on both
@@ -169,7 +172,9 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // does the response name it. `expect_gen` turns any other
                 // outcome into `gen_mismatch` instead of lines of another file.
                 let transcript = cmd.filename == crate::backend::agent_session::OUTPUT_FILE;
+                let lap = std::time::Instant::now();
                 let gen_before = if transcript { db_generation(&filestore, &read_block).await } else { None };
+                clock.gen_before_ms = ms_since(lap);
                 let mismatch = |gen: Option<String>| BlockfileReadRangeResult {
                     stream: Some(stream.clone()),
                     gen,
@@ -222,10 +227,15 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // is blocking file I/O as well — none of it may occupy a
                     // Tokio runtime worker. The closure body is unchanged; only
                     // where it runs is.
+                    let idx_clock = std::sync::Arc::new(std::sync::Mutex::new(IndexClock::default()));
                     let idx_result: Option<BlockfileReadRangeResult> = {
                         let filestore = filestore.clone();
                         let read_block = read_block.clone();
+                        let idx_clock = idx_clock.clone();
+                        let spawned = std::time::Instant::now();
                         let compute = move || -> Option<BlockfileReadRangeResult> {
+                        idx_clock.lock().unwrap().queued_ms = ms_since(spawned);
+                        let run = std::time::Instant::now();
                         let out_stat = filestore.stat(&read_block, "output").ok()??;
                         if out_stat.opts.circular {
                             return None; // circular files: fall back to slow path
@@ -248,10 +258,14 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
                             Some(read) => read,
                             None => {
-                                extend_output_idx(&filestore, &read_block)?;
+                                let extend = std::time::Instant::now();
+                                let extended = extend_output_idx(&filestore, &read_block);
+                                idx_clock.lock().unwrap().extend_ms = Some(ms_since(extend));
+                                extended?;
                                 read_via_index(&filestore, &read_block, offset as u64, limit as u64)?
                             }
                         };
+                        idx_clock.lock().unwrap().run_ms = ms_since(run);
                         let total_lines = read.total;
 
                         // Empty result cases — answered from the index, no output read.
@@ -290,16 +304,14 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             }
                         }
                     };
+                    clock.index = Some(std::mem::take(&mut *idx_clock.lock().unwrap()));
                     if let Some(result) = idx_result {
-                        tracing::debug!(
-                            block_id = %cmd.block_id,
-                            offset,
-                            limit,
-                            lines = result.lines.len(),
-                            "blockfile:read_range via output.idx fast path"
-                        );
+                        let lap = std::time::Instant::now();
                         let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
-                        return Ok(finish(result, gen_after));
+                        clock.gen_after_ms = ms_since(lap);
+                        let result = finish(result, gen_after);
+                        clock.log_done(&cmd.block_id, offset, limit, "index", started, &result);
+                        return Ok(result);
                     }
                 }
 
@@ -384,11 +396,91 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     all_lines[clamped_offset..clamped_end].to_vec()
                 };
 
+                let lap = std::time::Instant::now();
                 let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
-                Ok(finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after))
+                clock.gen_after_ms = ms_since(lap);
+                let result = finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after);
+                clock.log_done(&cmd.block_id, offset, limit, "whole_file", started, &result);
+                Ok(result)
             }
         },
     );
+}
+
+fn ms_since(t: std::time::Instant) -> u64 {
+    t.elapsed().as_millis() as u64
+}
+
+/// A `blockfile:read_range` call this slow is logged as a warning, with where
+/// its time went.
+const SLOW_READ_RANGE_MS: u64 = 1_000;
+
+/// Where a `blockfile:read_range` call spent its time. Two pane opens waited
+/// about 17 s on this call while the log recorded only when it started
+/// (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md); with
+/// `filestore: connection held a long time`, this names the step that waited.
+#[derive(Default)]
+struct ReadRangeClock {
+    /// Choosing the store (the block's, or the agent's zone).
+    source_ms: u64,
+    /// `output`'s generation, read before the lines.
+    gen_before_ms: u64,
+    /// The `output.idx` read on the blocking pool, when it ran.
+    index: Option<IndexClock>,
+    /// `output`'s generation, read after the lines.
+    gen_after_ms: u64,
+}
+
+#[derive(Default)]
+struct IndexClock {
+    /// Waiting for a blocking-pool thread.
+    queued_ms: u64,
+    /// Bringing `output.idx` up to date, when the first read found it stale.
+    extend_ms: Option<u64>,
+    /// The whole read on that thread, `extend_ms` included.
+    run_ms: u64,
+}
+
+impl ReadRangeClock {
+    fn log_done(
+        &self,
+        block_id: &str,
+        offset: usize,
+        limit: usize,
+        path: &str,
+        started: std::time::Instant,
+        result: &BlockfileReadRangeResult,
+    ) {
+        let total_ms = ms_since(started);
+        let bytes: usize = result.lines.iter().map(String::len).sum();
+        let (queued_ms, extend_ms, run_ms) =
+            self.index.as_ref().map_or((0, None, 0), |i| (i.queued_ms, i.extend_ms, i.run_ms));
+        macro_rules! done {
+            ($level:ident, $msg:literal) => {
+                tracing::$level!(
+                    block_id = %block_id,
+                    offset,
+                    limit,
+                    path,
+                    lines = result.lines.len(),
+                    bytes,
+                    total_ms,
+                    source_ms = self.source_ms,
+                    gen_before_ms = self.gen_before_ms,
+                    queued_ms,
+                    extend_ms = ?extend_ms,
+                    run_ms,
+                    gen_after_ms = self.gen_after_ms,
+                    $msg
+                )
+            };
+        }
+        if total_ms >= SLOW_READ_RANGE_MS {
+            done!(warn, "blockfile:read_range slow");
+        } else {
+            done!(debug, "blockfile:read_range done");
+        }
+    }
 }
 
 /// Whether `line` starts a turn in a Claude stream-json transcript: the same

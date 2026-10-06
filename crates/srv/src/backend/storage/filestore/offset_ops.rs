@@ -17,6 +17,7 @@ impl FileStore {
     /// Write data at a specific offset.
     /// The offset must be <= current file size.
     #[allow(dead_code)]
+    #[track_caller]
     pub fn write_at(
         &self,
         zone_id: &str,
@@ -165,6 +166,7 @@ impl FileStore {
     /// Read data at a specific offset and size.
     /// For circular files, adjusts offset if it falls before valid data range.
     /// Returns (adjusted_offset, data).
+    #[track_caller]
     pub fn read_at(
         &self,
         zone_id: &str,
@@ -216,7 +218,7 @@ impl FileStore {
         // Load parts from DB: one range query, not one query per 64 KB part —
         // reading an 800 MB transcript part by part was 12,270 queries and
         // took 12 s in a release build.
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn();
         let mut parts_map: HashMap<i32, Vec<u8>> = HashMap::new();
         {
             let mut stmt = conn.prepare_cached(
