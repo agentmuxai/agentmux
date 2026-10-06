@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { TextInput } from "@/app/element/ui";
 import { type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
@@ -175,7 +176,7 @@ export function AdvancedSection(): JSX.Element {
                 label={ADVANCED_SETTINGS.maxConcurrentUploads.label}
                 description={ADVANCED_SETTINGS.maxConcurrentUploads.description}
                 control={
-                    <input
+                    <TextInput
                         class="setting-number setting-number--wide"
                         type="number" min={1}
                         placeholder="unlimited"

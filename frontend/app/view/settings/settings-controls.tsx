@@ -3,8 +3,13 @@
 
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
+import { Button, Field, IconButton, NumberInput, Switch, TextInput, useField } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+
+// Settings' controls, built on the shared line-style set in element/ui/
+// (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §8, PR 2). The names
+// stay so the sections didn't need rewriting.
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -14,20 +19,16 @@ export function set(key: string, value: unknown): void {
 
 // ── SettingRow primitive ──────────────────────────────────────────────────────
 
+/**
+ * One setting: a `Field` (label, description, control) inside the row the
+ * search scrolls to and highlights, by its `setting-<id>` id.
+ */
 export function SettingRow(p: { id?: string; label: string; description?: string; control: JSX.Element; indent?: boolean; stacked?: boolean }): JSX.Element {
     return (
-        <div
-            id={p.id ? `setting-${p.id}` : undefined}
-            class="setting-row"
-            classList={{ "setting-row--indent": p.indent, "setting-row--stacked": p.stacked }}
-        >
-            <div class="setting-row-label">
-                <span class="setting-row-name">{p.label}</span>
-                <Show when={p.description}>
-                    <span class="setting-row-desc">{p.description}</span>
-                </Show>
-            </div>
-            <div class="setting-row-control">{p.control}</div>
+        <div id={p.id ? `setting-${p.id}` : undefined} class="setting-row" classList={{ "setting-row--indent": p.indent }}>
+            <Field label={p.label} description={p.description} layout={p.stacked ? "stacked" : "inline"}>
+                {p.control}
+            </Field>
         </div>
     );
 }
@@ -37,21 +38,11 @@ export function SectionHeader(p: { label: string }): JSX.Element {
 }
 
 export function ToggleControl(p: { checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
-    return (
-        <button
-            type="button"
-            role="switch"
-            aria-checked={p.checked}
-            class="setting-toggle"
-            classList={{ "setting-toggle--on": p.checked }}
-            onClick={() => p.onChange(!p.checked)}
-        >
-            <span class="setting-toggle-thumb" />
-        </button>
-    );
+    return <Switch checked={p.checked} onChange={p.onChange} />;
 }
 
 export function SliderControl(p: { min: number; max: number; step: number; value: number; onChange: (v: number) => void }): JSX.Element {
+    const field = useField();
     const [local, setLocal] = createSignal(p.value);
     createEffect(() => setLocal(p.value));
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -59,6 +50,8 @@ export function SliderControl(p: { min: number; max: number; step: number; value
     return (
         <div class="setting-slider">
             <input
+                id={field?.id}
+                aria-describedby={field?.describedBy()}
                 type="range"
                 min={p.min} max={p.max} step={p.step}
                 value={local()}
@@ -125,34 +118,16 @@ export function NumberControl(p: {
     onChange: (v: number) => void;
     class?: string;
 }): JSX.Element {
-    const [local, setLocal] = createSignal(p.value);
-    createEffect(() => setLocal(p.value));
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    onCleanup(() => { if (timer != null) clearTimeout(timer); });
-    const parseVal = (raw: string) => (p.parse === "int" ? parseInt(raw, 10) : parseFloat(raw));
-    const inRange = (v: number) => !isNaN(v) && v >= p.min && (p.max == null || v <= p.max);
+    // The debounce itself now lives in element/ui's NumberInput, unchanged.
     return (
-        <input
+        <NumberInput
             class={p.class ?? "setting-number"}
-            type="number" min={p.min} max={p.max} step={p.step}
-            value={local()}
-            onInput={(e) => {
-                const v = parseVal(e.currentTarget.value);
-                if (!isNaN(v)) setLocal(v); // mirror what's actually typed, valid or not
-                if (timer != null) clearTimeout(timer);
-                timer = setTimeout(() => { timer = null; if (inRange(v)) p.onChange(v); }, 400);
-            }}
-            onBlur={(e) => {
-                // Only flush if a debounce is actually PENDING — if it
-                // already fired (timer is null), the current value was
-                // already committed and re-committing it here would fire
-                // a second, redundant onChange for the same value.
-                if (timer == null) return;
-                clearTimeout(timer);
-                timer = null;
-                const v = parseVal(e.currentTarget.value);
-                if (inRange(v)) p.onChange(v);
-            }}
+            min={p.min}
+            max={p.max}
+            step={p.step}
+            parse={p.parse}
+            value={p.value}
+            onChange={p.onChange}
         />
     );
 }
@@ -196,7 +171,7 @@ export function MaskedKeyField(p: {
             when={hasValue() && !replacing()}
             fallback={
                 <div class="setting-masked-key setting-masked-key--entry">
-                    <input
+                    <TextInput
                         class="setting-text"
                         type="password"
                         autocomplete="off"
@@ -211,33 +186,21 @@ export function MaskedKeyField(p: {
                         }}
                     />
                     <div class="setting-masked-key-actions">
-                        <button
-                            type="button"
-                            class="setting-masked-key-btn setting-masked-key-btn--primary"
-                            disabled={p.disabled || !draft().trim()}
-                            onClick={save}
-                        >
-                            Save
-                        </button>
                         <Show when={hasValue()}>
-                            <button type="button" class="setting-masked-key-btn" onClick={cancel}>
-                                Cancel
-                            </button>
+                            <Button onClick={cancel}>Cancel</Button>
                         </Show>
+                        <Button tone="accent" disabled={p.disabled || !draft().trim()} onClick={save}>
+                            Save
+                        </Button>
                     </div>
                 </div>
             }
         >
             <div class="setting-masked-key setting-masked-key--locked">
                 <span class="setting-masked-key-dots">••••••••</span>
-                <button
-                    type="button"
-                    class="setting-masked-key-btn"
-                    disabled={p.disabled}
-                    onClick={() => setReplacing(true)}
-                >
+                <Button disabled={p.disabled} onClick={() => setReplacing(true)}>
                     Replace
-                </button>
+                </Button>
             </div>
         </Show>
     );
@@ -267,38 +230,37 @@ export function KeyValueEditor(p: { value: Record<string, string>; onChange: (v:
             <For each={keys()}>
                 {(k) => (
                     <div class="setting-kv-row">
-                        <input class="setting-text setting-kv-key" type="text" value={k} disabled />
-                        <input
-                            class="setting-text setting-kv-val"
-                            type="text"
+                        <TextInput detached class="setting-kv-key" aria-label="Name" value={k} disabled />
+                        <TextInput
+                            detached
+                            class="setting-kv-val"
+                            aria-label={`Value of ${k}`}
                             value={p.value[k] ?? ""}
                             onBlur={(e) => updateEntry(k, e.currentTarget.value)}
                         />
-                        <button type="button" class="setting-kv-remove" aria-label={`Remove ${k}`} onClick={() => removeEntry(k)}>
-                            <i class="fa-solid fa-xmark" />
-                        </button>
+                        <IconButton icon="xmark" label={`Remove ${k}`} tooltip={false} onClick={() => removeEntry(k)} />
                     </div>
                 )}
             </For>
             <div class="setting-kv-row setting-kv-row--new">
-                <input
-                    class="setting-text setting-kv-key"
-                    type="text"
+                <TextInput
+                    detached
+                    class="setting-kv-key"
+                    aria-label="New variable name"
                     placeholder="KEY"
                     value={newKey()}
                     onInput={(e) => setNewKey(e.currentTarget.value)}
                 />
-                <input
-                    class="setting-text setting-kv-val"
-                    type="text"
+                <TextInput
+                    detached
+                    class="setting-kv-val"
+                    aria-label="New variable value"
                     placeholder="value"
                     value={newVal()}
                     onInput={(e) => setNewVal(e.currentTarget.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") addEntry(); }}
                 />
-                <button type="button" class="setting-kv-remove setting-kv-add" aria-label="Add environment variable" onClick={addEntry}>
-                    <i class="fa-solid fa-plus" />
-                </button>
+                <IconButton icon="plus" tone="accent" label="Add environment variable" tooltip={false} onClick={addEntry} />
             </div>
         </div>
     );

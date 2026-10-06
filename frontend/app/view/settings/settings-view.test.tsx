@@ -66,8 +66,8 @@ describe("SettingsView rail", () => {
 
     it("orders the rail as Appearance, Window & Panes, Terminal, Sounds, Notifications & Tray, Recording, Advanced", () => {
         renderSettings();
-        const rail = screen.getByLabelText("Settings section", { selector: "nav.settings-rail" });
-        const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
+        const rail = screen.getByRole("tablist", { name: "Settings section" });
+        const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
         expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Advanced"]);
     });
 
@@ -77,21 +77,22 @@ describe("SettingsView rail", () => {
         expect(screen.queryByTestId("terminal-section")).not.toBeInTheDocument();
     });
 
-    // SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md
-    it("renders the tab-bar before the content body, so it sits at the top of the pane", () => {
+    // One tablist that changes layout with width, instead of a rail plus a
+    // separate top tab bar (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md
+    // §5.4). It still comes before the content, so at narrow widths it sits at
+    // the top (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md).
+    it("renders one tablist, before the content it controls", () => {
         renderSettings();
-        const tabBar = screen.getByLabelText("Settings section", { selector: "nav.settings-tab-bar" });
-        const body = document.querySelector(".settings-body");
-        expect(tabBar.compareDocumentPosition(body as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(screen.getAllByRole("tablist")).toHaveLength(1);
+        const tablist = screen.getByRole("tablist", { name: "Settings section" });
+        const panel = screen.getByRole("tabpanel");
+        expect(tablist.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(panel.getAttribute("aria-labelledby")).toBe(screen.getByRole("tab", { name: "Appearance" }).id);
     });
 
     it("clicking a rail item switches the visible section", () => {
         const { model } = renderSettings();
-        const rail = screen.getByLabelText("Settings section", { selector: "nav.settings-rail" });
-        const terminalButton = Array.from(rail.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("Terminal"),
-        ) as HTMLButtonElement;
-        terminalButton.click();
+        screen.getByRole("tab", { name: "Terminal" }).click();
         expect(model.activeSection()).toBe("terminal");
         expect(screen.getByTestId("terminal-section")).toBeInTheDocument();
         expect(screen.queryByTestId("appearance-section")).not.toBeInTheDocument();
@@ -119,11 +120,7 @@ describe("SettingsView pane title", () => {
         render(() => (
             <SettingsView model={model} />
         ));
-        const rail = screen.getByLabelText("Settings section", { selector: "nav.settings-rail" });
-        const advancedButton = Array.from(rail.querySelectorAll("button")).find(
-            (b) => b.textContent?.includes("Advanced"),
-        ) as HTMLButtonElement;
-        advancedButton.click();
+        screen.getByRole("tab", { name: "Advanced" }).click();
         expect(model.viewName()).toBe("Advanced");
     });
 });

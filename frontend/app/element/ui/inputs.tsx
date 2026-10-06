@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { createEffect, createSignal, For, type JSX, onCleanup, splitProps } from "solid-js";
+import { createEffect, createSignal, For, type JSX, onCleanup, Show, splitProps } from "solid-js";
 import { useField } from "./Field";
 import { densityClass, type UiDensity } from "./shared";
 
@@ -23,19 +23,25 @@ function fieldAttrs(explicitId: () => string | undefined, invalid: () => boolean
 export interface TextInputProps extends Omit<JSX.InputHTMLAttributes<HTMLInputElement>, "class" | "classList"> {
     density?: UiDensity;
     invalid?: boolean;
+    /**
+     * Don't take the enclosing Field's id and description: for one of
+     * several inputs in a field (a key/value row), which would otherwise
+     * share an id. Name it with `aria-label` instead.
+     */
+    detached?: boolean;
     class?: string;
 }
 
 export function TextInput(props: TextInputProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["density", "invalid", "class", "id", "type"]);
+    const [local, rest] = splitProps(props, ["density", "invalid", "detached", "class", "id", "type"]);
     const field = fieldAttrs(() => local.id, () => local.invalid);
     return (
         <input
             {...rest}
             type={local.type ?? "text"}
-            id={field.id()}
+            id={local.detached ? local.id : field.id()}
             class={clsx("ui-input", densityClass(local.density), local.class)}
-            aria-describedby={field.describedBy()}
+            aria-describedby={local.detached ? undefined : field.describedBy()}
             aria-invalid={field.invalid()}
         />
     );
@@ -120,7 +126,9 @@ export interface SelectOption {
 }
 
 export interface SelectProps {
-    options: SelectOption[];
+    /** The choices. Or pass `<option>` elements as children instead. */
+    options?: SelectOption[];
+    children?: JSX.Element;
     value: string;
     onChange: (value: string) => void;
     density?: UiDensity;
@@ -144,15 +152,20 @@ export function Select(props: SelectProps): JSX.Element {
             aria-describedby={field.describedBy()}
             aria-invalid={field.invalid()}
             disabled={props.disabled}
+            value={props.value}
             onChange={(e) => props.onChange(e.currentTarget.value)}
         >
-            <For each={props.options}>
-                {(option) => (
-                    <option value={option.value} disabled={option.disabled} selected={option.value === props.value}>
-                        {option.label}
-                    </option>
+            <Show when={props.options} fallback={props.children}>
+                {(options) => (
+                    <For each={options()}>
+                        {(option) => (
+                            <option value={option.value} disabled={option.disabled} selected={option.value === props.value}>
+                                {option.label}
+                            </option>
+                        )}
+                    </For>
                 )}
-            </For>
+            </Show>
         </select>
     );
 }

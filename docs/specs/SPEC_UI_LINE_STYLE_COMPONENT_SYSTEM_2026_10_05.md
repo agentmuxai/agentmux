@@ -241,7 +241,7 @@ All of them live in `frontend/app/element/ui/` and are exported from `index.ts`.
 | `Tabs`, `TabbedPane` | settings rail and tab bar, section-pane rail and tab bar, Warden, Stash tabs | See §5.4. |
 | `Menu` (later) | `.ctx-menu`, `.action-widget-more-item`, `.agent-row-menu` | See §5.5. Not part of PR 1. |
 | `Field` | `SettingRow`, `agent-new-bundle-modal-field`, launch-modal field rows | `label`, `description?`, `hint?`, `error?`, `layout="inline"\|"stacked"`. Inline fields stack below a container width, as `.setting-row` does today. Wires `id` and `aria-describedby`. |
-| `TextInput`, `NumberInput`, `Select` | `.setting-text/-number/-select`, `.agent-new-bundle-modal-input`, `.agent-launch-modal-*` selects | Line input: 1px `--border-color`, transparent background, `--ui-*` sizing. On focus the border turns accent. `NumberInput` keeps `NumberControl`'s debounced commit. |
+| `TextInput`, `NumberInput`, `Select` | `.setting-text/-number/-select`, `.agent-new-bundle-modal-input`, `.agent-launch-modal-*` selects | Line input: 1px `--border-color`, transparent background, `--ui-*` sizing. On focus the border turns accent. `NumberInput` keeps `NumberControl`'s debounced commit. `Select` takes `options` or native `<option>` children. A `TextInput` marked `detached` doesn't take its `Field`'s id, for one of several inputs in a field (a key/value row). |
 | `Switch` | `.setting-toggle`, the status-bar checkbox (`StatusBar.scss:373`) | Line switch: track with a 1px line and `--radius-full`. **Off:** neutral line, secondary-coloured thumb. **On:** accent line, 12% tint, accent thumb. No solid track. `role="switch"`. |
 | `Slider`, `RadioGroup`, `MaskedKeyField`, `KeyValueEditor`, `SectionHeader` | the existing settings controls, launch-modal radios | Moved from `settings-controls.tsx`, restyled to L1–L6. |
 
@@ -290,7 +290,7 @@ A modal footer becomes `[Cancel: neutral] [Create: accent]`, and the "Close tab"
 - **One DOM.** `TabbedPane` renders a single `role="tablist"` and changes only its layout with its own width:
   - a rail with labels at `collapseBelow` (768px) and wider;
   - an icon-only rail below that;
-  - Stash-style top tabs below `topBelow` (480px).
+  - icon-only tabs spread along the top, Stash-style, below `topBelow` (480px), as the old narrow tab bars were.
 
   These are today's Settings and section-pane breakpoints; today both render two `<nav>`s and hide one with CSS. The width comes from a `ResizeObserver` rather than a container query, so `aria-orientation` and the arrow keys always match what is on screen.
 - **Icon-only mode.** Labels hide and each tab gets a `Tooltip` plus an `aria-label`, so it keeps a name. Today's 48px Settings rail has neither.

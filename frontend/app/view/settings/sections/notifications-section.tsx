@@ -6,6 +6,7 @@
 // from Settings instead of env vars only, and surface auto-start as its own,
 // separate toggle (tray spec §7.4 — the two decisions stay independent).
 
+import { Button, Select, TextInput } from "@/app/element/ui";
 import { createMemo, createResource, Show, type JSX } from "solid-js";
 
 import { hostHas } from "@/app/host/host-caps";
@@ -209,15 +210,15 @@ export function NotificationsSection(): JSX.Element {
                     label={NOTIFICATIONS_SETTINGS.osWhen.label}
                     description={NOTIFICATIONS_SETTINGS.osWhen.description}
                     control={
-                        <select
+                        <Select
                             class="setting-select"
                             value={(s()["notify:os:when"] as string) ?? "unfocused"}
-                            onChange={(e) => set("notify:os:when", e.currentTarget.value)}
+                            onChange={(v) => set("notify:os:when", v)}
                         >
                             <option value="unfocused">When AgentMux isn't focused</option>
                             <option value="always">Always (except the pane you're looking at)</option>
                             <option value="never">Never</option>
-                        </select>
+                        </Select>
                     }
                 />
                 {kindRow(NOTIFICATIONS_SETTINGS.osInputWaiting, "notify:os:inputwaiting")}
@@ -233,7 +234,7 @@ export function NotificationsSection(): JSX.Element {
                     label={NOTIFICATIONS_SETTINGS.quietHours.label}
                     description={NOTIFICATIONS_SETTINGS.quietHours.description}
                     control={
-                        <input
+                        <TextInput
                             class="setting-text"
                             type="text"
                             value={(s()["notify:quiethours"] as string) ?? ""}
@@ -260,15 +261,15 @@ export function NotificationsSection(): JSX.Element {
                     label={NOTIFICATIONS_SETTINGS.osPreview.label}
                     description={NOTIFICATIONS_SETTINGS.osPreview.description}
                     control={
-                        <select
+                        <Select
                             class="setting-select"
                             value={(s()["notify:os:preview"] as string) ?? "redacted"}
-                            onChange={(e) => set("notify:os:preview", e.currentTarget.value)}
+                            onChange={(v) => set("notify:os:preview", v)}
                         >
                             <option value="redacted">Short preview</option>
                             <option value="full">Longer preview</option>
                             <option value="none">Title only</option>
-                        </select>
+                        </Select>
                     }
                 />
             </Show>
@@ -277,13 +278,11 @@ export function NotificationsSection(): JSX.Element {
                 label={NOTIFICATIONS_SETTINGS.osTest.label}
                 description={NOTIFICATIONS_SETTINGS.osTest.description}
                 control={
-                    <button
-                        type="button"
-                        class="setting-masked-key-btn"
+                    <Button
                         onClick={() => void RpcApi.NotifyTestCommand(TabRpcClient).catch(() => {})}
                     >
                         Send
-                    </button>
+                    </Button>
                 }
             />
             {/* Desktop-only: a host without a tray or login entries doesn't show these. */}

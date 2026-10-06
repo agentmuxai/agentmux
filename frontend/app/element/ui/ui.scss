@@ -86,6 +86,11 @@
 .ui-tabs--vertical {
     flex-direction: column;
     padding: var(--space-2) 0;
+
+    // Each tab sits in its tooltip's anchor; the anchor spans the rail.
+    > .ui-tooltip-anchor {
+        display: flex;
+    }
 }
 
 .ui-tab {
@@ -200,6 +205,16 @@
     > .ui-tabs {
         flex: 0 0 auto;
         padding: 0 var(--space-2);
+    }
+
+    // Icon-only tabs share the width, like the old narrow tab bars.
+    > .ui-tabs > .ui-tooltip-anchor {
+        flex: 1 1 0;
+        min-width: 0;
+
+        > .ui-tab {
+            flex: 1 1 auto;
+        }
     }
 }
 

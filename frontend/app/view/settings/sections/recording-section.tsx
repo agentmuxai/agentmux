@@ -7,6 +7,7 @@
  * settings.json-only. See docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md
  * for the full design this section implements.
  */
+import { Button, Select, TextInput } from "@/app/element/ui";
 import { createSignal, onCleanup, onMount, Show, For, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
@@ -96,7 +97,7 @@ function PathField(p: { value: string | undefined; onChange: (v: string) => void
 
     return (
         <div class="setting-path-field">
-            <input
+            <TextInput
                 class="setting-text"
                 type="text"
                 value={p.value ?? ""}
@@ -316,13 +317,13 @@ export function RecordingSection(): JSX.Element {
                     id={RECORDING_SETTINGS.engine.id}
                     label={RECORDING_SETTINGS.engine.label}
                     control={
-                        <select class="setting-select" value={engine()} onChange={(e) => set("voice:engine", e.currentTarget.value)}>
+                        <Select class="setting-select" value={engine()} onChange={(v) => set("voice:engine", v)}>
                             <option value="groq">Groq (cloud)</option>
                             <option value="whisper-local">whisper.cpp (local, offline)</option>
                             <Show when={isDev()}>
                                 <option value="webspeech">Web Speech (dev only)</option>
                             </Show>
-                        </select>
+                        </Select>
                     }
                     description={RECORDING_SETTINGS.engine.description}
                 />
@@ -358,11 +359,10 @@ export function RecordingSection(): JSX.Element {
                         id={RECORDING_SETTINGS.model.id}
                         label={RECORDING_SETTINGS.model.label}
                         control={
-                            <select
+                            <Select
                                 class="setting-select"
                                 value={modelChoice()}
-                                onChange={(e) => {
-                                    const v = e.currentTarget.value;
+                                onChange={(v) => {
                                     if (v === "custom") {
                                         setExplicitCustom(true);
                                     } else {
@@ -377,7 +377,7 @@ export function RecordingSection(): JSX.Element {
                             >
                                 <For each={WHISPER_MODEL_CHOICES}>{(m) => <option value={m}>{m}</option>}</For>
                                 <option value="custom">custom path…</option>
-                            </select>
+                            </Select>
                         }
                         description={RECORDING_SETTINGS.model.description}
                     />
@@ -402,31 +402,30 @@ export function RecordingSection(): JSX.Element {
                     id={RECORDING_SETTINGS.inputDevice.id}
                     label={RECORDING_SETTINGS.inputDevice.label}
                     control={
-                        <select
+                        <Select
                             class="setting-select"
                             value={(s()["voice:inputDeviceId"] as string) ?? "default"}
-                            onChange={(e) => set("voice:inputDeviceId", e.currentTarget.value)}
+                            onChange={(v) => set("voice:inputDeviceId", v)}
                         >
                             <option value="default">System default</option>
                             <For each={devices()}>
                                 {(d, i) => <option value={d.deviceId}>{d.label || `Microphone ${i() + 1}`}</option>}
                             </For>
-                        </select>
+                        </Select>
                     }
                 />
 
                 <SectionHeader label="Test your microphone" />
                 <div class="setting-mic-test">
-                    <button
-                        type="button"
-                        class="setting-masked-key-btn setting-masked-key-btn--primary"
+                    <Button
+                        tone="accent"
                         disabled={testState() === "listening" || testState() === "transcribing"}
                         onClick={() => void runTest()}
                     >
                         {testState() === "listening" ? "Listening…" : testState() === "transcribing" ? "Transcribing…" : "Start test"}
-                    </button>
+                    </Button>
                     <Show when={testState() === "listening" || testState() === "transcribing"}>
-                        <button type="button" class="setting-masked-key-btn" onClick={cancelTest}>Cancel</button>
+                        <Button onClick={cancelTest}>Cancel</Button>
                     </Show>
                     <div class="setting-mic-test-meter">
                         <div class="setting-mic-test-meter-fill" style={{ width: `${Math.min(100, meter.level() * 220)}%` }} />
