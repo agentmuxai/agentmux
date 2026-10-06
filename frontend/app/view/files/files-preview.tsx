@@ -25,6 +25,7 @@ import { createEffect, createSignal, Match, on, onCleanup, Show, Switch, type JS
 import { detectLanguage } from "../agent/components/detectLanguage";
 import { HighlightedCode } from "../agent/components/HighlightedCode";
 import { extensionOf } from "./files-sort";
+import { Button } from "@/app/element/ui";
 
 /** How much of a text file the preview reads. */
 export const PREVIEW_TEXT_BYTES = 256 * 1024;
@@ -150,9 +151,9 @@ export function FilesPreview(props: {
                             <i class="fa fa-folder files-preview-icon" aria-hidden="true" />
                             <div class="files-preview-name">{p().entry.name}</div>
                             <div class="files-preview-facts">{facts(p().entry)}</div>
-                            <button type="button" class="files-button" onClick={() => props.onOpen(p().entry)}>
+                            <Button class="files-button" onClick={() => props.onOpen(p().entry)}>
                                 Open folder
-                            </button>
+                            </Button>
                         </div>
                     )}
                 </Match>
@@ -198,9 +199,9 @@ export function FilesPreview(props: {
                             <i class="fa fa-film files-preview-icon" aria-hidden="true" />
                             <div class="files-preview-name">{p().entry.name}</div>
                             <div class="files-preview-facts">{facts(p().entry)}</div>
-                            <button type="button" class="files-button" onClick={() => props.onOpen(p().entry)}>
+                            <Button class="files-button" onClick={() => props.onOpen(p().entry)}>
                                 Play in a Media pane
-                            </button>
+                            </Button>
                         </div>
                     )}
                 </Match>
@@ -213,9 +214,9 @@ export function FilesPreview(props: {
                             <div class="files-preview-facts">
                                 {p().kind === "binary" ? "No preview: not a text file." : ((p() as { reason?: string }).reason ?? "No preview.")}
                             </div>
-                            <button type="button" class="files-button" onClick={() => props.onOpenWithOs(p().entry)}>
+                            <Button class="files-button" onClick={() => props.onOpenWithOs(p().entry)}>
                                 Open with default app
-                            </button>
+                            </Button>
                         </div>
                     )}
                 </Match>
