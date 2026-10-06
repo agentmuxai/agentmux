@@ -112,6 +112,9 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
                 onChange={setActiveTab}
                 idPrefix={idPrefix}
                 ariaLabel="Stash"
+                // Labels are hidden by a container query when narrow (see
+                // AgentStashModal.scss), so the name stays on hover.
+                tooltips="always"
             />
 
             <div

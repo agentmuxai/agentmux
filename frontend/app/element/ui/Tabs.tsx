@@ -34,6 +34,12 @@ export interface TabsProps<T extends string> {
     orientation?: "horizontal" | "vertical";
     /** Hide labels; each tab keeps its label as its name and gets a tooltip. */
     iconOnly?: boolean;
+    /**
+     * When tabs show their tooltip: `icon-only` (default) only while `iconOnly`
+     * hides the labels; `always` for a consumer that hides labels itself, e.g.
+     * with a container query, as the Stash does.
+     */
+    tooltips?: "icon-only" | "always";
     density?: UiDensity;
     /** Prefix for the tab and panel ids that tie tabs to their panel. */
     idPrefix: string;
@@ -79,7 +85,7 @@ export function Tabs<T extends string>(props: TabsProps<T>): JSX.Element {
                         <Tooltip
                             content={item.tooltip ?? item.label}
                             placement={orientation() === "vertical" ? "right" : "bottom"}
-                            disable={!props.iconOnly}
+                            disable={!props.iconOnly && props.tooltips !== "always"}
                             divClassName="ui-tooltip-anchor"
                         >
                             <button
