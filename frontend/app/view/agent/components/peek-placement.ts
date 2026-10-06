@@ -19,7 +19,9 @@
  *    leftward (what it always did).
  *  - Wider than the row: it reaches past the row, over the pane borders, by at
  *    most half the row's width in total (`MAX_OVERSHOOT_FRACTION`: a 500px pane
- *    gives a panel up to 750px). That overshoot is split by where the row sits
+ *    gives a panel up to 750px), and never further than it takes to reach a
+ *    readable width (`readableWidth`, about 120 characters of code): a pane
+ *    already that wide gets no overshoot at all. That overshoot is split by where the row sits
  *    in the window: a pane at the left edge overshoots only to the right, one at
  *    the right edge only to the left, a centred one by a quarter on each side,
  *    and anything in between by interpolation. Room the window edge takes from
@@ -63,6 +65,14 @@ export const BOTTOM_MARGIN_PX = 4;
 export const VIEWPORT_MARGIN_PX = 8;
 /** How far past its row's edges a wide panel may reach in total, as a fraction of the row's width. */
 export const MAX_OVERSHOOT_FRACTION = 0.5;
+/**
+ * The readable width the overshoot reaches for, in characters of the panel's
+ * code font (`PeekOverlay` measures it). Code style guides settle on 80–120
+ * characters; past that, width adds blank space and lines too long to track.
+ * Why this and not a fraction of the window:
+ * docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md §9.
+ */
+export const READABLE_WIDTH_CHARS = 120;
 
 // ── Horizontal ───────────────────────────────────────────────────────────────
 
@@ -78,6 +88,12 @@ export interface PeekHorizontalInput {
      * actually available, so it never runs off the window.
      */
     minWidth?: number;
+    /**
+     * The readable width (viewport px): `READABLE_WIDTH_CHARS` of the panel's
+     * code font. The overshoot stops where the panel reaches it, so a pane at
+     * least this wide gets none. Absent: no such limit.
+     */
+    readableWidth?: number;
 }
 
 export interface PeekHorizontal {
@@ -120,10 +136,12 @@ export function computePeekHorizontal(input: PeekHorizontalInput): PeekHorizonta
     };
     if (width <= rowWidth) return rightAligned;
 
-    // Wider than the row: overshoot by at most half the row's width, split by
-    // the row's place in the window, inside the window's margins (or the row's
-    // own edges, if it already reaches past them).
-    const overshoot = rowWidth * MAX_OVERSHOOT_FRACTION;
+    // Wider than the row: overshoot by at most half the row's width, and only
+    // as far as the readable width, split by the row's place in the window,
+    // inside the window's margins (or the row's own edges, if it already
+    // reaches past them).
+    const readable = input.readableWidth != null && input.readableWidth > 0 ? input.readableWidth : Infinity;
+    const overshoot = Math.min(rowWidth * MAX_OVERSHOOT_FRACTION, Math.max(0, readable - rowWidth));
     const roomLeft = Math.max(0, row.left - VIEWPORT_MARGIN_PX);
     const roomRight = Math.max(0, viewport.width - VIEWPORT_MARGIN_PX - row.right);
     let toLeft = overshoot * rowSide(row, viewport);

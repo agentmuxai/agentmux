@@ -1,6 +1,6 @@
 # Report: the tool-call hover panel — line height, flicker when it is too tall, and leaving the pane
 
-**Status:** active: Option A (§6) implemented in #4215 (placement, hover bridge, window boundary, line height); Option B (move onto `AnchoredPopover`) remains open
+**Status:** active: Option A (§6) implemented in #4215 (placement, hover bridge, window boundary, line height); Option B (move onto `AnchoredPopover`) remains open; overshoot limited to a readable width (§9)
 
 Date: 2026-10-02 · Author: Loap · Base: `main` @ `f5dfeafbc` (v0.59.5)
 
@@ -295,6 +295,58 @@ Fix, for panels that scroll (enterable) only; a panel that fits behaves as befor
   short from the code, but I did not audit their content).
 - Behaviour with a browser pane beside the agent pane (§5.1) — reasoned from
   `pane-overlay.ts`, not exercised.
+
+## 9. Decision (2026-10-06): the overshoot only reaches for a readable width
+
+**Owner's goal.** Stop wide panes from getting hover panels that reach far past them. Before this, a wide panel (one wider than its row) could overshoot the row by half the row's width in total, whatever the pane's width (`MAX_OVERSHOOT_FRACTION`, #4350, split left/right by the pane's place in the window). So a 1200px pane could get an 1800px panel.
+
+**Rule.**
+
+```
+overshoot = min( MAX_OVERSHOOT_FRACTION × rowWidth,     // 50%: unchanged for thin panes
+                 max(0, readableWidth − rowWidth) )     // never past a readable width
+readableWidth = READABLE_WIDTH_CHARS (120) × 1ch of the panel's code font (--font-mono)
+```
+
+The overshoot is then split left/right by the pane's position exactly as before (#4350), and window edges still hand room from one side to the other. The 600px minimum for tall panels (#4267) still applies, capped to the room.
+
+At the default font, 120ch is about 950px. The total overshoot past the pane is then:
+
+| Pane width | Panel can reach | Overshoot (total) |
+|---|---|---|
+| 350px (pane minimum) | 525px | 175px (50%) |
+| 500px | 750px | 250px (50%) |
+| 700px | 950px | 250px (36%) |
+| 900px | 950px | 50px (6%) |
+| 950px or more | the pane | 0 |
+
+The most any panel ever reaches past its pane is about 317px (950 / 3), for a pane of about 633px, where half the pane equals the gap to the readable width. The rule does not depend on window or monitor size.
+
+**Why this rule.** No standard covers "how far may a hover panel leave its container". Three established practices point the same way:
+
+1. **Cap popover width by what is readable, not by the trigger.** Simple tooltips use a fixed px max-width (about 200–320px; Bootstrap hard-codes 276px). Sizing to the trigger is for select-style menus.
+2. **VS Code's content hover, the closest analogue (rich, code-heavy):** max width = `max(66% of the editor width, 750px)`, never beyond the window (minus 14px); the user can drag it larger. A narrow editor's hover spills past the editor to reach a readable floor; a wide editor's never does. That is the same shape as this rule.
+3. **Line length.** Prose reads best at 50–75 characters (WCAG 1.4.8: at most 80). Code style guides settle on 80–120 characters (PEP 8: 79, Black: 88, Google: 100, GDS: 120), and longer lines are known to be harder to read. Past about 120 characters, more width mostly adds blank space or lines too long to track. So 120 is the upper end of accepted code widths: generous for tool output, which is code and logs.
+
+**Alternatives considered and rejected.**
+
+- **Interpolate by the pane's share of the window** (50% at the 350px minimum, 0% at full window width; the owner's first proposal). It depends on the monitor: on a 3840px window a 1500px pane still overshoots about 33%, or 500px. It also limits the *share*, while what the eye notices is the *distance*: share × width peaks around 300px for mid panes on a 2000px window, and grows on larger ones. Its two anchor points (350px gets 50%, a half-window pane gets 25%) also cannot both hold on one straight line.
+- **Interpolate by an absolute pane width** (50% at 350px, 0% at, say, 1200px). Monitor-independent, and close to the chosen rule in effect: it peaks around 210px at a 600px pane. But its end point is arbitrary, while the chosen rule's cap is tied to a reason (readable line length) and to the panel's real font.
+- **A fixed px cap on overshoot** (e.g. at most 250px). Simple, but wide panes would still overshoot when they don't need to.
+
+**Implementation.**
+
+- `frontend/app/view/agent/components/peek-placement.ts`: `READABLE_WIDTH_CHARS`, the `readableWidth` input of `computePeekHorizontal`, and the `min(…)` above. It is pure geometry, swept by `peek-placement.test.ts` (the "readable width" block pins the table; the invariant sweep includes it).
+- `PeekOverlay.tsx` `measureReadableWidth()`: measures `120ch` in `var(--font-mono)` inside the panel, so it follows the pane's zoom and font size. If nothing can be measured (0), the limit is skipped and the 50% cap alone applies (the previous behaviour).
+
+**To reassess.**
+
+- Tune the single constant `READABLE_WIDTH_CHARS`: 100 is stricter, 140 looser.
+- `MAX_OVERSHOOT_FRACTION` still sets the thin-pane end.
+- If users ask for wider panels for very long lines, VS Code's answer was a resizable hover (vscode#185751), not a larger default.
+- Not verified in a running window: the measured 120ch at real fonts and zoom levels. Check the panel on a 350px, a 700px and a 1200px pane.
+
+**Sources.** UXPin, [What is a tooltip](https://www.uxpin.com/studio/blog/what-is-a-tooltip-in-ui-ux/) and [Optimal line length](https://www.uxpin.com/studio/blog/optimal-line-length-for-readability/); [Bootstrap-Vue popover](https://bootstrap-vue.org/docs/components/popover/); [VS Code `contentHoverWidget.ts`](https://github.com/microsoft/vscode/blob/main/src/vs/editor/contrib/hover/browser/contentHoverWidget.ts), [vscode#14165](https://github.com/microsoft/vscode/issues/14165), [vscode#185751](https://github.com/microsoft/vscode/issues/185751); [Baymard, line length](https://baymard.com/blog/line-length-readability); [Wikipedia, Line length](https://en.wikipedia.org/wiki/Line_length); [PEP 8](https://peps.python.org/pep-0008/); [Real Python on PEP 8](https://realpython.com/python-pep8/); [GDS Way, Python style](https://gds-way.digital.cabinet-office.gov.uk/manuals/programming-languages/python/python.html).
 
 ## References
 
