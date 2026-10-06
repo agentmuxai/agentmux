@@ -732,7 +732,7 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
             // via the `resizeObserver` closure var, not a second onCleanup.
             if (containerRef) {
                 resizeObserver = new ResizeObserver(() => {
-                    termWrap?.handleResize_debounced();
+                    termWrap?.handleResizeLive();
                 });
                 resizeObserver.observe(containerRef);
             }

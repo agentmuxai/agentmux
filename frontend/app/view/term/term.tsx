@@ -211,7 +211,7 @@ function TerminalView(props: { model: TermViewModel }): JSX.Element {
         window.term = termWrap;
         model.termRef.current = termWrap;
         const rszObs = new ResizeObserver(() => {
-            termWrap.handleResize_debounced();
+            termWrap.handleResizeLive();
         });
         rszObs.observe(connectElemRef);
         termWrap.onSearchResultsDidChange = (results: { resultIndex: number; resultCount: number }) => {

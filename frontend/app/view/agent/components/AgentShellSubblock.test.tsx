@@ -226,7 +226,7 @@ vi.mock("@/app/view/term/termwrap", () => {
             this.loaded = true;
         }
         handleResize() {}
-        handleResize_debounced() {}
+        handleResizeLive() {}
         dispose() {
             this.disposed = true;
         }
