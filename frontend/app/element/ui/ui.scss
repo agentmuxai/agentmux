@@ -330,7 +330,9 @@ select.ui-input {
     }
 }
 
-input.ui-input[type="number"] {
+// A default only: `:where()` keeps it at zero specificity, so a consumer's
+// width class wins.
+:where(input.ui-input[type="number"]) {
     width: 9ch;
 }
 
