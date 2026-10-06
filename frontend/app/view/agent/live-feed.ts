@@ -26,11 +26,11 @@ import { isNodeInProgress, nodeBytesFull } from "./virtualization/streaming-buff
  */
 export const LIVE_FEED_DEFAULT_TURNS = Number.POSITIVE_INFINITY;
 /**
- * Finished turns kept are capped by size; at least one always stays. 5 MB (was
- * 15 MB, #4121): at 15 MB a long-running agent paged in hundreds of older pages
- * on scroll-up and its pane slowed down.
+ * Finished turns kept are capped by size; at least one always stays. 1 MB (was
+ * 5 MB; 15 MB before #4121): a larger feed slowed a long-running agent's pane
+ * and made it slow to open.
  */
-export const LIVE_FEED_MAX_FINISHED_BYTES = 5_000_000;
+export const LIVE_FEED_MAX_FINISHED_BYTES = 1_000_000;
 /**
  * And by rows: the layout keeps a position and height per row, so a budget of
  * many tiny rows is bounded too. At least one finished turn always stays.
