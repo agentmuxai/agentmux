@@ -645,6 +645,7 @@ impl FileStore {
     }
 
     /// Append data to the end of a file.
+    #[track_caller]
     pub fn append_data(
         &self,
         zone_id: &str,
@@ -664,6 +665,7 @@ impl FileStore {
     /// codex P2 on PR #2508: the `output.tsidx` sidecar keys batch
     /// receive-times by offset, and a racy pre-append stat could stamp a
     /// batch with another batch's position.
+    #[track_caller]
     pub fn append_data_at(
         &self,
         zone_id: &str,
@@ -675,6 +677,7 @@ impl FileStore {
 
     /// [`Self::append_data_at`], also reporting the line counter's position
     /// (`filestore/counter.rs`).
+    #[track_caller]
     pub fn append_data_pos(
         &self,
         zone_id: &str,

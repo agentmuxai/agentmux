@@ -612,6 +612,7 @@ impl FileStore {
     /// Phase 1 of [`Self::init_line_counter`]: the windowed scan — from byte 0,
     /// or, for an epoch that is only behind, from the start of its last open
     /// line.
+    #[track_caller]
     pub(super) fn init_scan(&self, zone_id: &str, name: &str) -> Result<InitScan, StoreError> {
         self.init_scan_from(zone_id, name, ScanFrom::Anywhere)
     }

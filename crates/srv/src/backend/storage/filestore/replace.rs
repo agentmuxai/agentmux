@@ -74,6 +74,7 @@ impl FileStore {
     /// Replace `name`'s content with `data` (creating the file if missing)
     /// and delete the files in `drop`, in one transaction. The new content
     /// starts a new counted epoch with a fresh `gen` (counter.rs).
+    #[track_caller]
     pub fn replace_file(&self, zone_id: &str, name: &str, data: &[u8], drop: &[&str]) -> Result<(), StoreError> {
         self.replace_inner(zone_id, name, data, None, drop, None).map(|_| ())
     }
@@ -82,6 +83,7 @@ impl FileStore {
     /// and merge `meta` into its metadata (a null value removes a key), in
     /// one transaction — so the metadata can describe the content without a
     /// window where it describes other content.
+    #[track_caller]
     pub fn put_file_with_meta(&self, zone_id: &str, name: &str, data: &[u8], meta: FileMeta) -> Result<(), StoreError> {
         self.replace_inner(zone_id, name, data, Some(meta), &[], None).map(|_| ())
     }
@@ -92,6 +94,7 @@ impl FileStore {
     /// replaced while it was being derived, nothing is written and this
     /// returns `false`. With `expected_gen` `None` (an uncounted `guard`, no
     /// generation to compare) it always writes.
+    #[track_caller]
     pub fn put_file_with_meta_if(
         &self,
         zone_id: &str,
