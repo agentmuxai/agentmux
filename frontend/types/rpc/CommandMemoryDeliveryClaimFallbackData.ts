@@ -13,4 +13,11 @@ reason: string,
  * The compaction boundary's `uuid`: only the block whose own CLI wrote
  * that boundary can deliver; any other block stands down.
  */
-boundary_uuid?: string, };
+boundary_uuid?: string, 
+/**
+ * A fresh session's time, ms since the epoch: its
+ * `agentmux_session_outcome` frame's `timestamp`, which srv wrote. The
+ * hook's delivery for that session then counts however late the claim
+ * comes, as it does for a fallback deferred behind a long first turn.
+ */
+event_at_ms?: number, };
