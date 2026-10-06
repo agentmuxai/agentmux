@@ -1,7 +1,9 @@
 # Report: the My Agents tile's expand arrow and edit panel sit in the wrong place
 
-Date: 2026-10-05. Code read at `origin/main` `6943d5fd5`. Status: option B (section 4) is implemented in the PR that carries
-this report. Option C was left out on purpose: it is a visual refinement, not part of the fix.
+**Status:** implemented (PR #4360). Option B (section 4) was built; option C was left out on purpose, as a visual refinement
+that is not part of the fix.
+
+Date: 2026-10-05. Code read at `origin/main` `6943d5fd5`.
 
 ## 1. What is wrong
 
