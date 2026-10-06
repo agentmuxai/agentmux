@@ -10,6 +10,7 @@ import {
     filterRetired,
     groupCacheKey,
     hasRenderableBlock,
+    swarmContextTokens,
     loadRetiredRowKeysFromStorage,
     mergeDispatchActivityEntries,
     mergeSubagentsPreservingIdentity,
@@ -836,5 +837,26 @@ describe("subagentToolDetail", () => {
     it("shows nothing for a call that carried no input", () => {
         expect(subagentToolDetail("Bash", null)).toBe("");
         expect(subagentToolDetail("Bash", undefined)).toBe("");
+    });
+});
+
+describe("swarmContextTokens", () => {
+    const reading = { tokens: 300_000, model: "claude-sonnet-5-5", window: 1_000_000, windowSource: "reported", source: "live", at: 1 };
+
+    it("shows the pane's mirrored reading", () => {
+        expect(swarmContextTokens({ "agent:context": reading } as MetaType)).toBe(300_000);
+    });
+
+    it("ignores the legacy bare count older builds wrote (it could be a turn total)", () => {
+        expect(swarmContextTokens({ "term:ctx-tokens": 17_000_000 } as MetaType)).toBeNull();
+    });
+
+    it("refuses a mirrored reading that can't be true", () => {
+        expect(swarmContextTokens({ "agent:context": { ...reading, tokens: 17_000_000, window: 200_000 } } as MetaType)).toBeNull();
+    });
+
+    it("nothing when there is no meta or no reading", () => {
+        expect(swarmContextTokens(undefined)).toBeNull();
+        expect(swarmContextTokens({ "agent:context": null } as MetaType)).toBeNull();
     });
 });

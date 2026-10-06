@@ -451,3 +451,47 @@ describe("agent-pane-state-store (cascade contracts)", () => {
         });
     });
 });
+
+describe("agent-pane-state-store — rejected context readings", () => {
+    afterEach(() => {
+        __resetAllSlots();
+        __resetListeners();
+        setEventSink(() => {});
+        vi.restoreAllMocks();
+    });
+
+    it("logs a refused reading once per source and reason, not on every call", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        registerPane("blk-ctx", "agent");
+        const seed17m = { type: "ReconcileContextFromHistory", tokens: 17_000_000, model: "claude-sonnet-5-5" } as const;
+        dispatch("blk-ctx", seed17m);
+        dispatch("blk-ctx", seed17m);
+        const lines = () => warn.mock.calls.filter((c) => c[0] === "[agent-context]");
+        expect(lines()).toHaveLength(1);
+        expect(lines()[0].join(" ")).toMatch(/rejected history reading: tokens exceed the window tokens=17000000 window=1000000 model=claude-sonnet-5-5/);
+        dispatch("blk-ctx", { type: "TokensIn", input: 2_000_000, model: "claude-haiku-4-5" });
+        expect(lines()).toHaveLength(2);
+        expect(paneView("blk-ctx")!.context?.tokens).toBe(2_000_000);
+    });
+
+    it("logs the same refusal again after a reading the meter could show", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        registerPane("blk-rearm", "agent");
+        const lines = () => warn.mock.calls.filter((c) => c[0] === "[agent-context]");
+        dispatch("blk-rearm", { type: "TokensIn", input: 2_000_000, model: "claude-haiku-4-5" });
+        expect(lines()).toHaveLength(1);
+        dispatch("blk-rearm", { type: "TokensIn", input: 50_000, model: "claude-haiku-4-5" });
+        dispatch("blk-rearm", { type: "TokensIn", input: 2_000_000, model: "claude-haiku-4-5" });
+        expect(lines()).toHaveLength(2);
+    });
+
+    it("logs a reported window an accepted prompt refuted", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+        registerPane("blk-refute", "agent");
+        dispatch("blk-refute", { type: "ContextWindowsReported", windows: { "claude-sonnet-4-6": 200_000 } });
+        dispatch("blk-refute", { type: "TokensIn", input: 250_000, model: "claude-sonnet-4-6" });
+        const lines = warn.mock.calls.filter((c) => c[0] === "[agent-context]");
+        expect(lines).toHaveLength(1);
+        expect(lines[0].join(" ")).toMatch(/reported window refuted for claude-sonnet-4-6: reported=200000 prompt=250000 now=1000000/);
+    });
+});
