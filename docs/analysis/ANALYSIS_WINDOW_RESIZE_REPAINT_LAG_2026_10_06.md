@@ -1,7 +1,7 @@
 # Window resize: why AgentMux shows grey before the new size paints, and what it takes to keep up like Chrome
 
 **Date:** 2026-10-06
-**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R3 and the System Info half of R6 are implemented in the PR that adds this doc, which also covers R2 (see §9 for the results). R4, R5, the rest of R6, R7 and R8 are not yet.
+**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R2, R3 and the System Info half of R6 shipped first (§9); R4, R5 and the rest of R6 in #4398 and #4399; R8 and the agent-pane tab in §10. R7 is open.
 **Author:** Agent4
 **Trigger:** Repo owner, 2026-10-06: *"in chrome, if I resize the app window the paint is always tight against the window edge, but in agentmux there is a long delay lag where a grey placeholder appears before the paint makes it. We did work on removing this, I believe there was some sort of debounce. Is that still there? We want the resize of window to make the contents repaint seamlessly, ultra-high performance. ID any bottlenecks in the path."* Later: *"i dragged around in your dev instance, it's definitely an improvement"*.
 **Related:** `SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` (proposed, never implemented; its delays are re-checked in §4), `ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md` and `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` (where `window:keepinactivetabslaidout` came from), `SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`.
@@ -235,3 +235,27 @@ Implemented in the PR that adds this doc.
 - R6: the terminal refit debounce.
 - R7: the fill colour.
 - R8: what restyles the whole document.
+
+R4, R5 and R6 shipped next (PRs #4398 and #4399).
+
+## 10. Results: R8, and a tab of agent panes
+
+After those PRs, the repo owner reported terminal tabs much better but **a tab of agent panes still lagging and flickering**. Measured on that tab: 5 agent panes, System Info charts, same stepped resize, and the four other tabs still skipped (§9).
+
+**Before:** 55 frames, p90 67 ms, 14 long frames (973 ms). Most frames were one style recalc of the **whole tab, ~2,420 elements, 12–28 ms**, so no frame could fit in 16.7 ms. An invalidation-tracking trace found three causes:
+
+1. **`.tile-layout` flipped its `animate` class during the drag.** `TileLayout.core.tsx` set `animate: animate() && !isResizing()`, and `isContainerResizing` clears 30 ms after the last container resize. With frames this long, the 30 ms passed between almost every step, so the class went off and on about every 90 ms. Each flip invalidated the whole subtree ("allDescendantsMightBeInvalid"), and so did the pane size changes in the frames between. `animate` now only eases the drag-rearrange placeholder, which doesn't exist during a resize, so the class no longer follows resizing. **This alone took the tab from 55 to 84 frames, and its largest recalc from 2,430 elements to 364.**
+2. **Every System Info chart redraw replaced a stylesheet.** Observable Plot puts a `<style>` in each SVG it draws. Since #4399 the chart redraws as its pane resizes, so every redraw removed one sheet and added another: 28 sheet changes per drag. About every 500 ms, that sheet change was followed by `StyleEngine::InvalidateStyleAndLayoutForFontUpdates` and a full relayout of the tab (3,772 of 3,772 objects, 35–45 ms). The charts now carry a fixed `sysinfo-plot` class whose rules are in `sysinfo-plot.scss`, and the per-chart `<style>` is dropped before the SVG is inserted.
+3. **The redraw itself cost ~8 ms a frame.** It is now throttled to one per 100 ms, first and last size included. The SVG fills its container with `preserveAspectRatio="none"`, so between redraws the last drawing stretches with the pane, which still follows the window edge every frame.
+
+Also: `PaneTabStrip`'s overflow check read `scrollWidth` inside its ResizeObserver callback, after other observers had already written to the DOM, so every strip forced a layout every frame (~105 ms per drag). It now reads on the next animation frame.
+
+**Measured**, three runs each:
+
+| Agent-pane tab | Frames (ideal ~96) | Frame gap p50 / p90 / max | Long frames | Long-frame total |
+|---|---|---|---|---|
+| Before | 55 | 16.7 / 66.6 / 100 ms | 14 | 973 ms |
+| `animate` fixed | 84–86 | 16.7 / 16.8–33.3 / 83 ms | 2–3 | 155–219 ms |
+| All of the above | 89–92 | 16.7 / 16.8 / 50–67 ms | 2 | 130–172 ms |
+
+The two long frames left (64–81 ms, about 500 ms apart) run no script, and style and layout are under half of each. They look like periodic paint or commit work and need their own trace.

@@ -6,6 +6,9 @@ import dayjs from "dayjs";
 import * as htl from "htl";
 import type { JSX } from "solid-js";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { throttle } from "throttle-debounce";
+
+import "./sysinfo-plot.scss";
 
 import type { DataItem } from "./sysinfo-types";
 import {
@@ -35,6 +38,9 @@ type SingleLinePlotProps = {
 // SVGs; a per-instance suffix prevents the wrong gradient being resolved.
 let _gradientSeq = 0;
 
+/** At most one chart rebuild per this many ms while its pane is resizing. */
+const CHART_RESIZE_REDRAW_MS = 100;
+
 /** Width in px of the widest y-axis tick label in a rendered plot; 0 if it can't be measured. */
 function widestYTickLabel(plot: Element): number {
     let widest = 0;
@@ -43,6 +49,23 @@ function widestYTickLabel(plot: Element): number {
         if (w > widest) widest = w;
     }
     return widest;
+}
+
+/** Class on every chart's SVG; sysinfo-plot.scss carries Plot's rules for it. */
+export const PLOT_CLASS = "sysinfo-plot";
+
+/**
+ * Ready a freshly drawn plot before it enters the document.
+ *
+ * Plot puts a `<style>` in every SVG it draws. A chart redrawn as its pane
+ * resizes then changed the document's stylesheets each time, and now and then
+ * that invalidated every font on the page and relaid out the whole tab in the
+ * middle of a window drag. Those rules are in sysinfo-plot.scss instead.
+ * The drawing stretches with its SVG between throttled redraws.
+ */
+export function preparePlotSvg(plot: Element): void {
+    plot.querySelector(":scope > style")?.remove();
+    plot.setAttribute("preserveAspectRatio", "none");
 }
 
 function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
@@ -54,18 +77,24 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
 
     onMount(() => {
         if (!containerRef) return;
-        // Every tick applies the new size, as the first one always did: a
-        // trailing timer here held the chart at its old size for a whole window
-        // drag (SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.2). The
-        // gradient id is fixed per instance and the same SVG is updated in place.
+        // A trailing timer here held the chart at its old size for a whole
+        // window drag (SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md §4.2).
+        // Redrawing on every tick instead cost ~8 ms a frame, since Plot builds
+        // a new SVG each time. So a drag redraws at most every
+        // CHART_RESIZE_REDRAW_MS, first and last size included, and the drawn
+        // SVG stretches to the pane in between (see the effect below).
+        const resize = throttle(CHART_RESIZE_REDRAW_MS, (width: number, height: number) => {
+            setPlotWidth(width);
+            setPlotHeight(height);
+        });
         const rszObs = new ResizeObserver((entries) => {
             const rect = entries[entries.length - 1].contentRect;
-            setPlotWidth(rect.width);
-            setPlotHeight(rect.height);
+            resize(rect.width, rect.height);
         });
         rszObs.observe(containerRef);
         onCleanup(() => {
             rszObs.disconnect();
+            resize.cancel();
         });
     });
 
@@ -212,8 +241,9 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         const margins = computePlotMargins(sparkline, title);
         const axisLabels = buildPlotAxisLabelOptions();
 
-        const buildPlot = (marginLeft: number) =>
-            Plot.plot({
+        const buildPlot = (marginLeft: number) => {
+            const plot = Plot.plot({
+                className: PLOT_CLASS,
                 axis: !sparkline,
                 ...margins,
                 marginLeft,
@@ -231,6 +261,9 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
                 height: ph,
                 marks: marks,
             });
+            preparePlotSvg(plot);
+            return plot;
+        };
         let plot = buildPlot(margins.marginLeft);
         containerRef.append(plot);
         if (!sparkline) {

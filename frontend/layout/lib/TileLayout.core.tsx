@@ -164,7 +164,6 @@ export function createTileLayout(platform: TileLayoutPlatform) {
     function TileLayoutComponent(props: TileLayoutProps) {
         const layoutModel = useTileLayout(props.tabAtom, props.contents);
         const overlayTransform = () => layoutModel.overlayTransform();
-        const isResizing = () => layoutModel.isResizing();
 
         // Issue #836: hold the on-screen overlayTransform for 150ms after
         // activeDrag flips false, so the Placeholder's inner-div exit fade
@@ -251,9 +250,13 @@ export function createTileLayout(platform: TileLayoutPlatform) {
             onCleanup(stop);
         });
 
+        // `animate` only eases the drag-rearrange placeholder. It isn't dropped
+        // while the window or a splitter resizes: its class flips restyled the
+        // whole tab, every ~90 ms of a window drag
+        // (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §10).
         return (
             <div
-                class={clsx("tile-layout", props.contents.className, { animate: animate() && !isResizing() })}
+                class={clsx("tile-layout", props.contents.className, { animate: animate() })}
                 style={tileStyle()}
             >
                 <div
