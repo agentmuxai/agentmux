@@ -1,7 +1,7 @@
 # Window resize: why AgentMux shows grey before the new size paints, and what it takes to keep up like Chrome
 
 **Date:** 2026-10-06
-**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R2, R3 and the System Info half of R6 shipped first (§9); R4, R5 and the rest of R6 in #4398 and #4399; R8 and the agent-pane tab in §10 and §11, where R7 is also checked and found unnecessary.
+**Status:** analysis. Measurements in §2, causes in §3, recommendations in §5. R1, R2, R3 and the System Info half of R6 shipped first (§9); R4, R5 and the rest of R6 in #4398 and #4399; R8 and the agent-pane tab in §10 and §11. R7 is open.
 **Author:** Agent4
 **Trigger:** Repo owner, 2026-10-06: *"in chrome, if I resize the app window the paint is always tight against the window edge, but in agentmux there is a long delay lag where a grey placeholder appears before the paint makes it. We did work on removing this, I believe there was some sort of debounce. Is that still there? We want the resize of window to make the contents repaint seamlessly, ultra-high performance. ID any bottlenecks in the path."* Later: *"i dragged around in your dev instance, it's definitely an improvement"*.
 **Related:** `SPEC_WINDOW_RESIZE_NO_PAINT_DELAY_2026_09_24.md` (proposed, never implemented; its delays are re-checked in §4), `ANALYSIS_WINDOW_TAB_SWITCH_SMOOTHNESS_2026_09_24.md` and `ANALYSIS_WINDOW_TAB_SWITCH_PAINT_2026_09_30.md` (where `window:keepinactivetabslaidout` came from), `SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md`.
@@ -277,5 +277,3 @@ The two long frames left after §10 came at the same window widths in every run.
 | After §11 | 96–97 | 16.7 / 16.7 / 16.8–33.4 / 16.8–33.4 ms | 0 |
 
 **For future CSS:** a viewport-width media query (including Tailwind's `sm:`, `md:`, `lg:`, `xl:` and `2xl:` variants, none of which the app uses today) brings this cost back at each of its widths. Size-dependent styling belongs in container queries, which the panes already use.
-
-**R7, checked rather than built.** §8 asked whether the grey is the page's `#222` or Chromium's own fill. With the fixes above, the dev window was grown 300 px in one `SetWindowPos` step and the uncovered strip captured from the screen at several delays. Until the next frame it shows `#222222` (the page's `--main-bg-color`) and `#2A2A2A`. The panes' own content (`#353535`) is there 16–25 ms after the resize, one frame. So the fill is already the app's own dark background, and it lasts one frame. Setting the window's background colour from the theme (R7) wouldn't change what's seen, so it isn't worth the host change. A real mouse drag goes through Windows' modal size loop and wasn't captured this way.
