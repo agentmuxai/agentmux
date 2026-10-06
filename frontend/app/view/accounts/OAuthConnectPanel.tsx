@@ -21,6 +21,7 @@ import { writeText } from "@/util/clipboard";
 import type { AccountProvider } from "@/app/view/identity/identity-model";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { oauthInfo, needsByo } from "./oauth-catalog";
+import { Button } from "@/app/element/ui";
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -200,13 +201,14 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
                     </Show>
                 </Show>
                 <div class="identity-key-actions">
-                    <button
+                    <Button
+                        tone="accent"
                         class="identity-btn identity-btn-primary"
                         disabled={busy()}
                         onClick={() => void connect()}
                     >
                         {busy() ? "Starting…" : `Connect with ${providerLabel(props.provider)}`}
-                    </button>
+                    </Button>
                 </div>
             </Show>
 
@@ -221,19 +223,20 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
                                     <code class="oauth-device-code">
                                         {(s() as { userCode: string }).userCode}
                                     </code>
-                                    <button
+                                    <Button
                                         class="identity-btn identity-btn-secondary"
                                         onClick={() => void writeText((s() as { userCode: string }).userCode)}
                                     >
                                         Copy
-                                    </button>
+                                    </Button>
                                 </div>
-                                <button
+                                <Button
+                                    tone="accent"
                                     class="identity-btn identity-btn-primary"
                                     onClick={() => openLink((s() as { verificationUri: string }).verificationUri)}
                                 >
                                     Open verification page ↗
-                                </button>
+                                </Button>
                                 <div class="oauth-waiting">Waiting for you to authorize…</div>
                             </div>
                         </Show>
@@ -267,14 +270,14 @@ export function OAuthConnectPanel(props: OAuthConnectPanelProps): JSX.Element {
                             <Show
                                 when={s().status === "failed"}
                                 fallback={
-                                    <button class="identity-btn identity-btn-secondary" onClick={reset}>
+                                    <Button class="identity-btn identity-btn-secondary" onClick={reset}>
                                         Cancel
-                                    </button>
+                                    </Button>
                                 }
                             >
-                                <button class="identity-btn identity-btn-secondary" onClick={reset}>
+                                <Button class="identity-btn identity-btn-secondary" onClick={reset}>
                                     Try again
-                                </button>
+                                </Button>
                             </Show>
                         </div>
                     </div>

@@ -21,65 +21,6 @@
         border-bottom: 1px solid var(--border-color);
     }
 
-    .identity-pane-new-btn {
-        width: 100%;
-        padding: 6px 10px;
-        background: var(--accent-color);
-        color: var(--accent-text-color, #fff);
-        border: none;
-        border-radius: 0;
-        cursor: default;
-        font-size: 13px;
-
-        &:hover {
-            filter: brightness(1.1);
-        }
-    }
-
-    .identity-pane-list {
-        flex: 1 1 auto;
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        overflow-y: auto;
-    }
-
-    .identity-pane-list-item {
-        padding: 10px 12px;
-        cursor: default;
-        border-bottom: 1px solid var(--border-color-faint, rgba(255, 255, 255, 0.06));
-
-        &:hover {
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
-        }
-
-        &.is-selected {
-            background: var(--selected-bg-color, rgba(255, 255, 255, 0.08));
-        }
-
-        &.is-blank {
-            font-style: italic;
-            color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
-        }
-    }
-
-    .identity-pane-list-item-name {
-        font-size: 13px;
-        font-weight: 500;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .identity-pane-list-item-desc {
-        font-size: 11px;
-        color: var(--secondary-text-color, rgba(255, 255, 255, 0.6));
-        margin-top: 2px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
     .identity-pane-detail {
         flex: 1 1 auto;
         padding: 16px 24px;
@@ -115,11 +56,6 @@
     .identity-pane-name {
         font-size: 20px;
         margin: 0 0 4px;
-    }
-
-    .identity-pane-description {
-        margin: 0 0 16px;
-        color: var(--secondary-text-color);
     }
 
     .identity-pane-section-title {
@@ -188,114 +124,6 @@
 
     .identity-pane-status-label {
         white-space: nowrap;
-    }
-
-    .identity-pane-reconnect-btn {
-        margin-left: 8px;
-        padding: 2px 8px;
-        font-size: 11px;
-        background: transparent;
-        color: var(--accent-color);
-        border: 1px solid var(--accent-color);
-        border-radius: 0;
-        cursor: default;
-
-        &:hover {
-            background: var(--accent-color);
-            color: var(--accent-text-color, #fff);
-        }
-    }
-
-    .identity-pane-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 16px;
-    }
-
-    .identity-pane-edit-btn,
-    .identity-pane-delete-btn,
-    .identity-pane-cancel-btn,
-    .identity-pane-save-btn {
-        padding: 6px 14px;
-        border: 1px solid var(--border-color);
-        border-radius: 0;
-        background: transparent;
-        color: var(--main-text-color);
-        cursor: default;
-        font-size: 13px;
-
-        &:hover:not(:disabled) {
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
-        }
-
-        &:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-    }
-
-    .identity-pane-save-btn {
-        background: var(--accent-color);
-        color: var(--accent-text-color, #fff);
-        border-color: transparent;
-    }
-
-    .identity-pane-delete-btn {
-        color: var(--error-text-color, #ff8080);
-        border-color: var(--error-text-color, #ff8080);
-    }
-
-    // ── Edit form ──────────────────────────────────────────────────
-    .identity-pane-form {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        max-width: 720px;
-    }
-
-    .identity-pane-form-title {
-        font-size: 18px;
-        margin: 0 0 4px;
-    }
-
-    .identity-pane-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-    }
-
-    .identity-pane-field-label {
-        font-size: 12px;
-        color: var(--secondary-text-color);
-    }
-
-    .identity-pane-input {
-        padding: 6px 10px;
-        background: var(--input-bg-color, rgba(0, 0, 0, 0.2));
-        color: var(--main-text-color);
-        border: 1px solid var(--border-color);
-        border-radius: 0;
-        font-size: 13px;
-        font-family: inherit;
-
-        &:focus {
-            outline: none;
-            border-color: var(--accent-color);
-        }
-    }
-
-    .identity-pane-form-actions {
-        display: flex;
-        gap: 8px;
-        justify-content: flex-end;
-        margin-top: 8px;
-    }
-
-    .identity-pane-form-hint {
-        font-size: 11px;
-        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
-        margin: 4px 0 0;
-        font-style: italic;
     }
 }
 
