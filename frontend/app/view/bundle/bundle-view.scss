@@ -20,18 +20,12 @@
     border-bottom: 1px solid var(--border-color);
 }
 
+// Buttons here are element/ui Buttons; these rules only place them.
 .bundle-view-new-btn {
     width: 100%;
-    padding: 6px 10px;
-    background: var(--accent-color);
-    color: var(--accent-text-color, #fff);
-    border: none;
-    border-radius: 0;
-    cursor: default;
-    font-size: 13px;
 
-    &:hover {
-        filter: brightness(1.1);
+    & + & {
+        margin-top: var(--space-1);
     }
 }
 
@@ -164,39 +158,6 @@
     margin-top: 16px;
 }
 
-.bundle-view-edit-btn,
-.bundle-view-delete-btn,
-.bundle-view-cancel-btn,
-.bundle-view-save-btn {
-    padding: 6px 14px;
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-    font-size: 13px;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-}
-
-.bundle-view-save-btn {
-    background: var(--accent-color);
-    color: var(--accent-text-color, #fff);
-    border-color: transparent;
-}
-
-.bundle-view-delete-btn {
-    color: var(--error-text-color, #ff8080);
-    border-color: var(--error-text-color, #ff8080);
-}
-
 // ── Edit form ───────────────────────────────────────────────────
 .bundle-view-form {
     display: flex;
@@ -265,26 +226,10 @@
 }
 
 .bundle-view-validate-btn {
-    padding: 6px 14px;
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-    font-size: 13px;
     // Pushed to the far left of the actions row (Cancel/Save stay grouped
     // on the right via justify-content: flex-end) since Validate is a
     // read-only side action, not part of the commit/discard pair.
     margin-right: auto;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 }
 
 .bundle-view-validation {
@@ -360,23 +305,6 @@
 
     .bundle-view-input {
         flex: 1;
-    }
-}
-
-.bundle-view-provider-instruction-remove,
-.bundle-view-provider-instruction-add {
-    padding: 4px 10px;
-    background: transparent;
-    color: var(--secondary-text-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    font-size: 12px;
-    font-family: inherit;
-    cursor: pointer;
-
-    &:hover {
-        color: var(--main-text-color);
-        border-color: var(--accent-color);
     }
 }
 

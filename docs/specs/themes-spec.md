@@ -92,7 +92,7 @@ A theme file only needs to override the variables that visually change. The mini
 | **Hover/Highlight** | `--hover-bg-color`, `--highlight-bg-color` |
 | **Status** | `--error-color`, `--warning-color`, `--success-color` |
 | **Terminal ANSI** | All 16 `--term-*` colors + `--term-foreground`, `--term-background` |
-| **Buttons** | `--button-green-bg`, `--button-red-bg`, `--button-yellow-bg` |
+| **Buttons** | `--button-text-color` (text on the few remaining solid surfaces). Buttons themselves are outlines drawn from `--accent-color`, `--error-color` and `--border-color` (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md) |
 | **Scrollbars** | `--scrollbar-thumb-color`, `--scrollbar-thumb-hover-color` |
 
 ---

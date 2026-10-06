@@ -6,6 +6,8 @@
 
 import { onCleanup, onMount, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
+
+import { Button } from "@/app/element/ui";
 import "./confirm-dialog.scss";
 
 interface Props {
@@ -47,19 +49,12 @@ export function ConfirmDialog(props: Props): JSX.Element {
                     <div class="confirm-dialog-title">{props.title}</div>
                     <div class="confirm-dialog-message">{props.message}</div>
                     <div class="confirm-dialog-actions">
-                        <button
-                            ref={cancelBtnRef}
-                            class="confirm-btn confirm-btn--cancel"
-                            onClick={props.onCancel}
-                        >
+                        <Button ref={cancelBtnRef} onClick={props.onCancel}>
                             Cancel
-                        </button>
-                        <button
-                            class="confirm-btn confirm-btn--danger"
-                            onClick={props.onConfirm}
-                        >
+                        </Button>
+                        <Button tone="danger" onClick={props.onConfirm}>
                             {props.confirmLabel ?? "Delete"}
-                        </button>
+                        </Button>
                     </div>
                 </div>
             </div>

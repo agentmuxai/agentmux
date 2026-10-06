@@ -35,6 +35,7 @@ import {
     serializeInstructionsByProvider,
     type ProviderInstruction,
 } from "./bundle-model";
+import { Button } from "@/app/element/ui";
 
 interface BundleProviderInstructionsSectionProps {
     /** The draft's raw `instructions_by_provider` JSON string. */
@@ -127,14 +128,13 @@ export const BundleProviderInstructionsSection = (
                                         }
                                         onContextMenu={showTextInputContextMenu}
                                     />
-                                    <button
-                                        type="button"
+                                    <Button
                                         class="bundle-view-provider-instruction-remove"
                                         onClick={() => removeRow(index)}
                                         title="Remove this provider override"
                                     >
                                         Remove
-                                    </button>
+                                    </Button>
                                 </div>
                                 <Show when={problem()}>
                                     {/* The consequence differs by case and the
@@ -181,9 +181,9 @@ export const BundleProviderInstructionsSection = (
                     <For each={knownProviders()}>{(p) => <option value={p} />}</For>
                 </datalist>
 
-                <button type="button" class="bundle-view-provider-instruction-add" onClick={addRow}>
-                    + Add provider override
-                </button>
+                <Button icon="plus" class="bundle-view-provider-instruction-add" onClick={addRow}>
+                    Add provider override
+                </Button>
             </Show>
         </div>
     );

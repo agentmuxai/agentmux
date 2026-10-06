@@ -14,65 +14,33 @@
 }
 
 .confirm-dialog {
-    background: var(--modal-bg-color, #1e1e2e);
-    border: 1px solid var(--border-color, #45475a);
-    border-radius: 6px;
-    padding: 20px 24px;
+    background: var(--modal-bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--space-5) var(--space-6);
     min-width: 300px;
     max-width: 460px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    box-shadow: var(--shadow-modal);
     color: var(--main-text-color);
 }
 
 .confirm-dialog-title {
-    font-size: 14px;
+    font-size: var(--text-md);
     font-weight: 600;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .confirm-dialog-message {
-    font-size: 12px;
+    font-size: var(--text-sm);
     color: var(--secondary-text-color);
-    line-height: 1.5;
-    margin-bottom: 20px;
+    line-height: var(--leading-normal);
+    margin-bottom: var(--space-5);
 }
 
+// The buttons are element/ui's line-style Button: Cancel neutral, the
+// confirm action danger.
 .confirm-dialog-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
     justify-content: flex-end;
-}
-
-.confirm-btn {
-    padding: 5px 14px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: default;
-    transition: background 80ms ease, opacity 80ms ease;
-
-    &--cancel {
-        background: transparent;
-        border: 1px solid var(--border-color, #45475a);
-        color: var(--main-text-color);
-
-        &:hover {
-            background: rgba(255, 255, 255, 0.05);
-        }
-    }
-
-    &--danger {
-        background: var(--error-color, #f38ba8);
-        border: 1px solid transparent;
-        color: #1e1e2e;
-        font-weight: 500;
-
-        &:hover {
-            opacity: 0.88;
-        }
-    }
-
-    &:focus-visible {
-        outline: 2px solid var(--accent-color, #89b4fa);
-        outline-offset: 2px;
-    }
 }
