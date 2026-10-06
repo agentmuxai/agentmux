@@ -2,41 +2,47 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import clsx from "clsx";
-import { JSX, mergeProps, splitProps } from "solid-js";
-import { Dynamic } from "solid-js/web";
+import { JSX, splitProps } from "solid-js";
 
-import "./button.scss";
+import { Button as LineButton, type UiTone } from "./ui";
 
-interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
+// The legacy button, now drawn by element/ui's line-style Button
+// (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.6). Its old
+// `className` vocabulary is mapped to a tone here, once, so every call site
+// changed look without being edited. New code imports from "./ui" and
+// passes `tone` directly.
+
+interface ButtonProps extends Omit<JSX.ButtonHTMLAttributes<HTMLButtonElement>, "class"> {
     className?: string;
     children?: JSX.Element;
-    as?: string | ((props: any) => JSX.Element);
 }
 
-function Button(inProps: ButtonProps): JSX.Element {
-    const props = mergeProps({ as: "button", className: "" }, inProps);
-    const [local, rest] = splitProps(props, ["children", "disabled", "className", "as"]);
+/** The legacy category and colour words; everything else in `className` is passed through. */
+const LEGACY_WORDS = new Set(["solid", "outlined", "outline", "ghost", "green", "grey", "red", "yellow"]);
 
-    // Check if the className contains any of the categories: solid, outlined, or ghost
-    const containsButtonCategory = /(solid|outline|ghost)/.test(local.className);
-    // If no category is present, default to 'solid'
-    const categoryClassName = containsButtonCategory ? local.className : `solid ${local.className}`;
+/**
+ * Tone for a legacy `className`. The old default (no words) was a solid
+ * accent block, so it maps to `accent` — except a modal's dismiss button,
+ * which was the same block as its main action and is the neutral one.
+ */
+export function legacyTone(className: string | undefined, isDismiss: boolean): UiTone {
+    const words = new Set((className ?? "").split(/\s+/));
+    if (words.has("red")) return "danger";
+    if (words.has("ghost")) return "quiet";
+    if (words.has("grey") || words.has("yellow")) return "neutral";
+    return isDismiss ? "neutral" : "accent";
+}
 
-    // Check if the className contains any of the color options: green, grey, red, or yellow
-    const containsColor = /(green|grey|red|yellow)/.test(categoryClassName);
-    // If no color is present, default to 'green'
-    const finalClassName = containsColor ? categoryClassName : `green ${categoryClassName}`;
-
+function Button(props: ButtonProps): JSX.Element {
+    const [local, rest] = splitProps(props, ["className", "children"]);
+    const kept = () => (local.className ?? "").split(/\s+/).filter((w) => w && !LEGACY_WORDS.has(w));
+    const isDismiss = () => (rest as Record<string, unknown>)["data-modal-dismiss"] != null;
     return (
-        <Dynamic
-            component={local.as}
-            tabIndex={local.disabled ? -1 : 0}
-            class={clsx("wave-button", finalClassName)}
-            disabled={local.disabled}
-            {...rest}
-        >
+        // `wave-button` stays: a few surfaces (tab close, block header, menu
+        // button) still size it in context.
+        <LineButton {...rest} tone={legacyTone(local.className, isDismiss())} class={clsx("wave-button", kept())}>
             {local.children}
-        </Dynamic>
+        </LineButton>
     );
 }
 

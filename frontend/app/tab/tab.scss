@@ -145,6 +145,7 @@
         flex-shrink: 0;
         width: 20px;
         height: 20px;
+        min-height: 0; // the line Button's 26px minimum would outgrow the tab
         display: flex;
         align-items: center;
         justify-content: center;
