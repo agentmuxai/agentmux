@@ -89,26 +89,8 @@
     margin-left: auto;
 }
 
-.drone-btn {
-    background: var(--main-bg-color);
-    border: 1px solid var(--border-color);
-    color: inherit;
-    padding: 4px 12px;
-    border-radius: 0;
-    cursor: default;
-    font-size: 12px;
-    &:hover { background: color-mix(in srgb, var(--main-text-color) 8%, transparent); }
-    &:disabled { opacity: 0.5; cursor: not-allowed; }
-    &--primary {
-        background: var(--accent-color);
-        border-color: var(--accent-color);
-        color: var(--main-bg-color);
-    }
-    &--small {
-        padding: 2px 8px;
-        font-size: 11px;
-    }
-}
+// The Drone buttons are element/ui Buttons: primary accent, small ones at
+// compact density.
 
 .drone-error {
     position: absolute;
