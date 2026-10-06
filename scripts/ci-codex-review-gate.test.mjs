@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import {
     CODEX_LOGIN,
     evaluateCodexGate,
+    isDependencyBotPr,
     isDocsOnlyPath,
     latestCodexOutput,
     reviewedCommit,
@@ -508,5 +509,53 @@ describe("ReAgent skip reasons", () => {
         };
         const r = evaluateCodexGate({ headSha: HEAD, comments: [note("round-cap")], reviews: [findings] });
         expect(r.state).not.toBe("success");
+    });
+});
+
+// Shaped like the pulls commits API on #4368 (a real Dependabot bump).
+const commit = (author, committer = "web-flow") => ({ author: { login: author }, committer: { login: committer } });
+
+describe("dependency bot PRs", () => {
+    it("a Dependabot PR of only its own commits counts", () => {
+        expect(isDependencyBotPr("dependabot[bot]", [commit("dependabot[bot]")])).toBe(true);
+        expect(isDependencyBotPr("renovate[bot]", [commit("renovate[bot]", "renovate[bot]")])).toBe(true);
+    });
+
+    it("a commit by anyone else makes it need Codex", () => {
+        expect(isDependencyBotPr("dependabot[bot]", [commit("dependabot[bot]"), commit("agent3-workflow[bot]")])).toBe(false);
+    });
+
+    it("a commit authored as the bot but committed by someone else does not count", () => {
+        expect(isDependencyBotPr("dependabot[bot]", [commit("dependabot[bot]", "someone")])).toBe(false);
+    });
+
+    it("another bot's commits on a Dependabot PR do not count", () => {
+        expect(isDependencyBotPr("dependabot[bot]", [commit("renovate[bot]")])).toBe(false);
+    });
+
+    it("an agent's or a person's PR never counts, even of bot commits", () => {
+        expect(isDependencyBotPr("agent3-workflow[bot]", [commit("dependabot[bot]")])).toBe(false);
+        expect(isDependencyBotPr("someone", [commit("dependabot[bot]")])).toBe(false);
+    });
+
+    it("an empty or unknown commit list does not count", () => {
+        expect(isDependencyBotPr("dependabot[bot]", [])).toBe(false);
+        expect(isDependencyBotPr("dependabot[bot]", null)).toBe(false);
+        expect(isDependencyBotPr(undefined, [commit("dependabot[bot]")])).toBe(false);
+    });
+
+    it("passes a dependency bot PR that Codex was never asked about", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, dependencyBot: true });
+        expect(r.state).toBe("success");
+        expect(r.description).toContain("Dependency bot PR");
+    });
+
+    it("a verdict Codex did give still counts: findings fail a dependency bot PR", () => {
+        const r = evaluateCodexGate({ headSha: HEAD, reviews: [findingsReview(HEAD)], dependencyBot: true });
+        expect(r.state).toBe("failure");
+    });
+
+    it("without the flag the same PR still waits", () => {
+        expect(evaluateCodexGate({ headSha: HEAD }).state).toBe("pending");
     });
 });
