@@ -17,7 +17,7 @@ vi.mock("@/app/store/mps", () => ({
     },
 }));
 
-import { useContextReading } from "./useContextReading";
+import { useContextMeter } from "./useContextReading";
 
 const live = (over: Partial<ContextReading> = {}): ContextReading => ({
     tokens: 300_000,
@@ -37,7 +37,7 @@ const flush = async () => {
     for (let i = 0; i < 5; i++) await Promise.resolve();
 };
 
-describe("useContextReading", () => {
+describe("useContextMeter", () => {
     let dispose: (() => void) | undefined;
     let onModelSwitched: ReturnType<typeof vi.fn<(model: string) => void>>;
 
@@ -55,7 +55,7 @@ describe("useContextReading", () => {
         const [meta, setMeta] = createSignal<MetaType | null | undefined>(opts.meta ?? null);
         const meter = createRoot((d) => {
             dispose = d;
-            return useContextReading("blk-1", context, { ready, meta, onModelSwitched });
+            return useContextMeter("blk-1", context, { ready, meta, onModelSwitched });
         });
         return { meter, setContext, setReady, setMeta };
     };

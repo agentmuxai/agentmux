@@ -13,6 +13,7 @@ import { ContextMenuModel } from "@/app/store/contextmenu";
 import { buildAccountRowMenu } from "./bind-to-agent-menu";
 import { ConfirmModal } from "@/app/element/confirm-modal";
 import "./identity-view.scss";
+import { Button } from "@/app/element/ui";
 
 // CLI providers whose config dir holds conversation history that a delete
 // keeps: those with a `history_native_subdir` in
@@ -363,21 +364,21 @@ function AccountDetailPanel({ model, account }: { model: IdentityViewModel; acco
 
             <div class="identity-account-panel-actions">
                 <Show when={account.status === "expired" && account.kind !== "oauth"}>
-                    <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
+                    <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
                         Reauth
-                    </button>
+                    </Button>
                 </Show>
                 <Show when={account.status === "unknown" && account.secret_ref?.backend === "keychain"}>
-                    <button class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
+                    <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => model.openEditForm(account)}>
                         Validate…
-                    </button>
+                    </Button>
                 </Show>
-                <button class="identity-btn identity-btn-secondary" onClick={() => model.openEditForm(account)}>
+                <Button class="identity-btn identity-btn-secondary" onClick={() => model.openEditForm(account)}>
                     Edit
-                </button>
-                <button class="identity-btn identity-btn-danger" onClick={() => model.requestDelete(account)}>
+                </Button>
+                <Button tone="danger" class="identity-btn identity-btn-danger" onClick={() => model.requestDelete(account)}>
                     Delete account…
-                </button>
+                </Button>
             </div>
         </div>
     );

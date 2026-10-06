@@ -23,6 +23,7 @@ import {
     type ContextReading,
 } from "@/app/store/agent-pane-state/context-reading";
 import { setBlockMeta } from "@/app/store/block-meta";
+import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import {
     autoCompactPoint,
     parseAutoCompactReport,
@@ -63,7 +64,26 @@ export interface ContextMeterOptions {
     onModelSwitched: (model: string) => void;
 }
 
+/**
+ * The meter for one agent pane, wired to its pane model and block: the
+ * reading, mirrored once the history restore completed, and a change of the
+ * model setting dispatched as `ContextModelSwitched`. Kept here, not in
+ * agent-view.tsx, which has a line budget (agent-view-size.test.ts).
+ */
 export function useContextReading(
+    blockId: string,
+    pane: Pick<AgentPaneModel, "state" | "dispatchPane">,
+    block: Accessor<{ meta?: MetaType } | null | undefined>,
+): ContextMeter {
+    return useContextMeter(blockId, () => pane.state.context, {
+        ready: () => pane.state.initPhase.kind === "InitReady",
+        meta: () => block()?.meta,
+        onModelSwitched: (m) => pane.dispatchPane({ type: "ContextModelSwitched", model: m }, "system"),
+    });
+}
+
+/** `useContextReading` with its inputs given separately (tests drive this). */
+export function useContextMeter(
     blockId: string,
     context: Accessor<ContextReading | null>,
     opts: ContextMeterOptions,

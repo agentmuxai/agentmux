@@ -28,6 +28,7 @@ import { InAppLoginPanel, type InAppLoginPhase } from "@/app/view/agent/componen
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { Modal, type ModalScope } from "@/element/modal";
 import { ensureProviderAuthDir } from "@/app/view/agent/agent-launch-env";
+import { Button } from "@/app/element/ui";
 
 const CLAUDE_PROVIDER = PROVIDERS["claude"];
 
@@ -323,9 +324,9 @@ export function ClaudeLoginPanel(props: {
                     <div class="accounts-chooser-modes">
                         <div class="oauth-byo-note">✓ Signed in to Anthropic.</div>
                         <div class="identity-key-actions">
-                            <button class="identity-btn identity-btn-primary" onClick={() => props.onClose()}>
+                            <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => props.onClose()}>
                                 Done
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 }
@@ -336,12 +337,12 @@ export function ClaudeLoginPanel(props: {
                         <div class="accounts-chooser-modes">
                             <div class="oauth-byo-note">{error()}</div>
                             <div class="identity-key-actions">
-                                <button class="identity-btn identity-btn-primary" onClick={() => void start()}>
+                                <Button tone="accent" class="identity-btn identity-btn-primary" onClick={() => void start()}>
                                     Retry
-                                </button>
-                                <button class="identity-btn identity-btn-secondary" onClick={() => props.onClose()}>
+                                </Button>
+                                <Button class="identity-btn identity-btn-secondary" onClick={() => props.onClose()}>
                                     Close
-                                </button>
+                                </Button>
                             </div>
                         </div>
                     }

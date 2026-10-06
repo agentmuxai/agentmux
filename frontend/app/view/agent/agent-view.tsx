@@ -304,13 +304,8 @@ export const AgentPresentationView = ({
         });
     }
 
-    // The context meter: validated reading, its provenance note, and the
-    // Swarm's meta mirror (hooks/useContextReading.ts).
-    const { reading: contextReading, note: contextNote, autoCompact } = useContextReading(model.blockId, () => paneModel.state.context, {
-        ready: () => paneModel.state.initPhase.kind === "InitReady",
-        meta: () => block()?.meta,
-        onModelSwitched: (m) => paneModel.dispatchPane({ type: "ContextModelSwitched", model: m }, "system"),
-    });
+    // The context meter and its Swarm mirror (hooks/useContextReading.ts).
+    const { reading: contextReading, note: contextNote, autoCompact } = useContextReading(model.blockId, paneModel, block);
 
     // ── Layout slice lifecycle. The slice is FED from
     //    AgentDocumentVirtualList (Phase 3): it owns `partition()`, so it can
