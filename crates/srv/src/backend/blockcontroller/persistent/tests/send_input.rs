@@ -3845,6 +3845,59 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
     assert_eq!((p.origin, p.tainted), (TurnOrigin::User, true), "automated input got into the user's turn");
 }
 
+/// A Swarm broadcast to a running persistent agent goes through structured
+/// delivery, labelled as the user's (SPEC_SWARM_BROADCAST_AS_USER_MESSAGE §6
+/// q2): on an idle agent it starts a user turn, exactly as typing would.
+#[tokio::test]
+async fn a_labelled_structured_delivery_starts_a_user_turn() {
+    use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+    use crate::backend::blockcontroller::Controller;
+    let (c, mut rx) = idle_controller();
+    let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into() };
+    assert_eq!(c.send_user_message_outcome_from("finish then quit".to_string(), Some(input)).unwrap(), SendOutcome::Sent);
+    assert!(rx.try_recv().unwrap().contains("finish then quit"));
+    let p = c.turn_provenance().expect("a turn is in flight");
+    assert_eq!((p.origin, p.tainted, p.user_text.as_deref()), (TurnOrigin::User, false, Some("finish then quit")));
+}
+
+/// Into a running user turn it is more of the user's input, so it does not
+/// taint it — the same as typing mid-turn.
+#[tokio::test]
+async fn a_labelled_structured_delivery_mid_turn_does_not_taint_a_user_turn() {
+    use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+    use crate::backend::blockcontroller::Controller;
+    let (c, _rx) = idle_controller();
+    let user = |t: &str| TurnInput { origin: TurnOrigin::User, text: t.into() };
+    c.send_user_message_outcome_from("first".to_string(), Some(user("first"))).unwrap();
+    c.send_user_message_outcome_from("second".to_string(), Some(user("second"))).unwrap();
+    let p = c.turn_provenance().unwrap();
+    assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
+}
+
+/// Written together with a backlog queued by automated senders, the turn
+/// can't be the user's: the label is dropped and the turn is unknown, so it
+/// can never authorize a self-quit.
+#[tokio::test]
+async fn a_labelled_structured_delivery_written_with_a_backlog_is_unlabelled() {
+    use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
+    use crate::backend::blockcontroller::Controller;
+    let (c, mut rx) = idle_controller();
+    enqueue_deferred(&c, "an older jekt");
+    let input = TurnInput { origin: TurnOrigin::User, text: "then quit".into() };
+    assert_eq!(c.send_user_message_outcome_from("then quit".to_string(), Some(input)).unwrap(), SendOutcome::Sent);
+    assert_eq!(drain(&mut rx).len(), 2, "the backlog went out with it");
+    assert_eq!(c.turn_provenance(), None, "an unlabelled start is unknown");
+}
+
+/// The unlabelled form — every jekt — is unchanged: an idle start is unknown.
+#[tokio::test]
+async fn an_unlabelled_structured_delivery_still_starts_an_unknown_turn() {
+    use crate::backend::blockcontroller::Controller;
+    let (c, _rx) = idle_controller();
+    assert_eq!(c.send_user_message_outcome("jekt".to_string()).unwrap(), SendOutcome::Sent);
+    assert_eq!(c.turn_provenance(), None);
+}
+
 /// ReAgent P1 on #3789: the spawn path labels the turn from the queued
 /// message (`hint_next_turn`), `spawn_process` starts it, and then
 /// `mark_turn_active_and_publish` runs for the same message. That last call is

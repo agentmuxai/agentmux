@@ -19,9 +19,12 @@
 //! `run_agent_turn`) with a one-line `[BROADCAST:FROM=user VIA=swarm ...]` header
 //! from `reactive::broadcast_turn_message`, instead of a `self-declared` jekt from
 //! `unknown`. See `docs/specs/SPEC_SWARM_BROADCAST_AS_USER_MESSAGE_2026_10_01.md`.
-//! The turn is `BROADCAST_TURN_ORIGIN` (`Automated`), not `User`: srv, not the
-//! text, decides what a turn may authorize (e.g. it cannot satisfy the self-quit
-//! gate), and anything that holds the pane key could otherwise mint a `User` turn.
+//! The turn is `BROADCAST_TURN_ORIGIN` (`User`): a broadcast is the human's own
+//! message, with the same powers as typing it into each pane, including
+//! authorizing an agent's self-quit (owner decision 2026-10-06, spec §6 q2).
+//! That adds no power to anything holding the pane key, which could already send
+//! any pane a plain `User` turn through `agent.input` (spec §2 finding 7, §4.2).
+//! srv, not the text, still decides: the label comes from this module only.
 //! A target running on another channel on this machine is reached over loopback,
 //! the way a stop is (`forward_broadcast_to_channel`): the sender passes only the
 //! target block, the body, the `MSGID` and the `RECIPIENTS` count, and the
@@ -51,10 +54,10 @@ use super::AppState;
 use super::agent_io::stop_one_agent_block;
 use crate::server::agent_handlers::{run_agent_turn, AgentTurnDeps, TurnRegistration};
 
-/// Every broadcast turn is attributed here, and only here. `Automated`, not `User`
-/// — see the module doc. A test pins both this value and that `run_broadcast`
-/// hands it to the delivery function.
-pub(crate) const BROADCAST_TURN_ORIGIN: TurnOrigin = TurnOrigin::Automated;
+/// Every broadcast turn is attributed here, and only here: `User` — see the
+/// module doc. A test pins both this value and that `run_broadcast` hands it to
+/// the delivery function. It was `Automated` until 2026-10-06.
+pub(crate) const BROADCAST_TURN_ORIGIN: TurnOrigin = TurnOrigin::User;
 
 const FLEET_BROADCAST_AUDIT_ACTION: &str = "fleet.broadcast";
 
@@ -176,16 +179,20 @@ pub(crate) fn broadcast_action(route: Result<crate::bootstrap::AgentRoute, Strin
 }
 
 /// Delivers one broadcast text to one block the way an inter-agent message reaches
-/// it (`route_agent_message`): structured controllers (persistent, ACP, App Server)
-/// take it on their own channel, which also steers a turn already running; a
-/// subprocess or not-yet-spawned persistent agent gets a turn started with `origin`.
+/// it (`route_agent_message_from`): structured controllers (persistent, ACP, App
+/// Server) take it on their own channel, which also steers a turn already running;
+/// a subprocess or not-yet-spawned persistent agent gets a turn started with
+/// `origin`. Either way the turn is labelled with `origin` where the controller
+/// tracks provenance at all (persistent and subprocess, the same agents a typed
+/// message can authorize a self-quit on).
 async fn deliver_broadcast_turn(
     deps: &AgentTurnDeps,
     block_id: String,
     text: String,
     origin: TurnOrigin,
 ) -> Result<(), String> {
-    match broadcast_action(crate::bootstrap::route_agent_message(&block_id, &text)) {
+    let input = crate::backend::blockcontroller::health::TurnInput { origin, text: text.clone() };
+    match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input))) {
         BroadcastAction::Done => Ok(()),
         BroadcastAction::Fail(e) => Err(e),
         // The block was resolved through the reactive handler's own agent map, so
@@ -969,10 +976,11 @@ mod broadcast_core_tests {
         block.strip_prefix("blk-").map(|n| format!("agent-{n}"))
     }
 
+    /// Owner decision 2026-10-06 (spec §6 q2): a broadcast is the user's own
+    /// message, with the user's powers.
     #[test]
-    fn broadcast_turns_are_attributed_to_automated_not_user() {
-        assert_eq!(BROADCAST_TURN_ORIGIN, TurnOrigin::Automated);
-        assert_ne!(BROADCAST_TURN_ORIGIN, TurnOrigin::User);
+    fn broadcast_turns_are_attributed_to_the_user() {
+        assert_eq!(BROADCAST_TURN_ORIGIN, TurnOrigin::User);
     }
 
     #[tokio::test]
@@ -985,19 +993,21 @@ mod broadcast_core_tests {
         })
         .await;
         assert_eq!(out.len(), 3);
-        assert!(seen.lock().unwrap().iter().all(|o| *o == TurnOrigin::Automated));
+        assert!(seen.lock().unwrap().iter().all(|o| *o == TurnOrigin::User));
     }
 
+    /// The self-quit gate passes an untainted broadcast turn whose text has the
+    /// quoted instruction, exactly as it does a typed one; the quote check and
+    /// the taint rule still apply.
     #[tokio::test]
-    async fn the_self_quit_gate_refuses_a_broadcast_turn() {
+    async fn the_self_quit_gate_accepts_a_broadcast_turn_like_a_typed_one() {
         use crate::backend::blockcontroller::health::TurnProvenance;
         use crate::sagas::self_quit::{gate, GateRefusal};
-        let p = TurnProvenance {
-            origin: BROADCAST_TURN_ORIGIN,
-            tainted: false,
-            user_text: Some("finish the PR then quit".into()),
-        };
-        assert_eq!(gate(Some(&p), "then quit"), Err(GateRefusal::NotUserTurn));
+        let text = broadcast_turn_message("agent-1", 3, "m1", "finish the PR then quit");
+        let p = |tainted| TurnProvenance { origin: BROADCAST_TURN_ORIGIN, tainted, user_text: Some(text.clone()) };
+        assert_eq!(gate(Some(&p(false)), "then quit"), Ok(()));
+        assert_eq!(gate(Some(&p(false)), "delete everything"), Err(GateRefusal::InstructionMismatch));
+        assert_eq!(gate(Some(&p(true)), "then quit"), Err(GateRefusal::Tainted));
     }
 
     #[tokio::test]

@@ -53,6 +53,17 @@ pub(crate) enum AgentRoute {
 /// structured controller that failed to take the message; it must not be retried
 /// as keystrokes.
 pub(crate) fn route_agent_message(block_id: &str, message: &str) -> Result<AgentRoute, String> {
+    route_agent_message_from(block_id, message, None)
+}
+
+/// [`route_agent_message`], saying who the input is from: the Swarm broadcast
+/// labels its delivery to a running persistent agent as the user's
+/// (`deliver_agent_message_from`). `None` is exactly `route_agent_message`.
+pub(crate) fn route_agent_message_from(
+    block_id: &str,
+    message: &str,
+    origin: Option<backend::blockcontroller::health::TurnInput>,
+) -> Result<AgentRoute, String> {
     let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
         return Err(format!("no controller for block {block_id}"));
     };
@@ -63,7 +74,7 @@ pub(crate) fn route_agent_message(block_id: &str, message: &str) -> Result<Agent
     if is_subprocess {
         return Ok(AgentRoute::StartTurn { subprocess: true });
     }
-    match backend::blockcontroller::deliver_agent_message(block_id, message) {
+    match backend::blockcontroller::deliver_agent_message_from(block_id, message, origin) {
         Ok(backend::blockcontroller::AgentDelivery::Structured) => {
             Ok(AgentRoute::Sent(reactive::SenderDelivery::Delivered))
         }
