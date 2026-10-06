@@ -16,7 +16,7 @@ import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } f
 import { makeIconClass } from "@/util/util";
 import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
-import { handleWidgetSelect } from "./action-widgets-config";
+import { handleWidgetSelect, widgetIconStyle } from "./action-widgets-config";
 import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 
 const MoreDropdown = ({
@@ -179,7 +179,7 @@ const MoreDropdown = ({
                                 onClick={() => handleItemClick(widget)}
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
-                                <span class="action-widget-more-item-icon widget-icon">
+                                <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>
                                     <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
                                 </span>
                                 <span class="action-widget-more-item-label">{widget.label}</span>
@@ -213,7 +213,7 @@ const MoreDropdown = ({
                                 }}
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
-                                <span class="action-widget-more-item-icon widget-icon">
+                                <span class="action-widget-more-item-icon widget-icon" style={widgetIconStyle(widget)}>
                                     <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
                                 </span>
                                 <span class="action-widget-more-item-label">{widget.label}</span>

@@ -81,6 +81,17 @@ export function blockRoleColor(
     return id ? paneRoleColor(id.hslHue, id.hex, isLightTheme, role) : undefined;
 }
 
+/** A widget type's own color for `role` in the current theme (the top bar,
+ *  the Launcher), or undefined when the type has none. */
+export function widgetRoleColor(
+    view: string | null | undefined,
+    isLightTheme: boolean,
+    role: PaneColorRole
+): string | undefined {
+    const hue = widgetHueFor(view);
+    return hue === undefined ? undefined : paneRoleColor(hue, undefined, isLightTheme, role);
+}
+
 /** Whether the current theme is a light one. Reactive. */
 export function isLightThemeActive(): boolean {
     const themeId = getSettingsKeyAtom("window:theme")();

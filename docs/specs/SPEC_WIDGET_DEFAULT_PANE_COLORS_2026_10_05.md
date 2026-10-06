@@ -1,6 +1,6 @@
 # SPEC: a default color for every widget type, set per widget in Settings
 
-**Status:** active. PR #4362 (§7 PR 1) built the color lookup, the built-in colors and the header-tail rule. §7 PR 2 built the Settings section and the menu entry. PR 3 (top bar) is next. §8 records the decisions taken.
+**Status:** implemented. PR #4362 (§7 PR 1) built the color lookup, the built-in colors and the header-tail rule, #4385 (§7 PR 2) the Settings section and the menu entry, and §7 PR 3 the top bar. §8 records the decisions taken.
 **Date:** 2026-10-05
 **Author:** Agent3
 
@@ -134,15 +134,16 @@ A new subsection in **Appearance** (`view/settings/sections/appearance-section.t
 
 ### 3.6 The top-bar widget's subtle hue
 
-- `ActionWidget` resolves its view from `widget.blockdef.meta.view` and asks `widgetHueFor()` for the hue. It never reads a pane, so many Terminal panes in different colors don't make the Terminal button flicker.
-- The tint uses a new token role, `widgetTint`, in `PANE_COLOR_TOKENS`:
-  - It colors the **icon** only, at low chroma (around `c: 0.06`), with lightness close to `--widget-icon-color` in each theme.
-  - The button background stays neutral, and hover and active states keep their current tokens.
-  - This keeps the top bar calm, as `SPEC_WIDGET_ICON_COLORS_2026-05-26.md` intended, while tying each button to its panes. "Subtle" is a single token to tune.
-- It is applied as an inline `--widget-tint` on `.widget-icon`, falling back to `var(--widget-icon-color)` in `action-widgets.scss`.
-- Entries with no view stay monochrome: messenger children, group parents, "More".
-- **Reactive by construction:** `widgetHueFor()` depends on the setting, so a change in Settings or through §3.7 repaints the button immediately.
-- **The widget's `color` field in `widgets.json`:** built-in entries stop carrying a hex. Their color now comes from the manifest, and keeping both would be two sources for one fact (§4.1 item 5). The Launcher grid switches to `widgetHueFor()` too. A user-defined widget's `color` is honoured as before where it is used; no migration is needed.
+- One helper, `widgetEntryColor(widget, role)` in `window/action-widgets-config.ts`, gives a widget entry its color. The entry's own `color` wins, else the color of the view it opens (`widgetRoleColor(view)`, pane-identity.ts). It never reads a pane, so Terminal panes in different colors don't make the Terminal button flicker.
+- **Why the entry color wins:** the messenger entries (Discord, Slack, Telegram, WhatsApp, Teams) open a **browser** view. Keyed on the view alone they would all turn Browser amber and lose their brand colors. The built-in entries whose `color` only restated their own type (agent, swarm, drone, warden, media) drop it from `widgets.json`, so the manifest is their one source (§4.1 item 5). A user-defined widget's `color` is honoured as before.
+- The top bar uses a new token role, `widgetTint`, in `PANE_COLOR_TOKENS`:
+  - It colors the **icon** only, at the lightness of the monochrome icon it replaces (`--widget-icon-color`, OKLCH L ≈ 0.82 dark, 0.45 light) and low chroma (0.07 dark, 0.09 light).
+  - The button background stays neutral, and hover keeps its current token.
+  - The top bar stays calm, as `SPEC_WIDGET_ICON_COLORS_2026-05-26.md` intended. `pane-color-scheme.test.ts` checks every hue in both themes: 3:1 against the bar, and within 1.25:1 of the grey icon.
+- `widgetIconStyle(widget)` sets an inline `--widget-tint` on `.widget-icon`; `action-widgets.scss` falls back to `var(--widget-icon-color)`. It is used by the bar, the More dropdown and the pinned flyout, the three places a widget icon is drawn.
+- Entries with no colored view stay monochrome: group parents, "More".
+- **Reactive by construction:** `widgetHueFor()` reads the setting, so a change in Settings or through §3.7 repaints the icon immediately.
+- **The Launcher grid** uses `widgetEntryColor(widget, "identity")` instead of the raw hex, so its tiles follow the same colors at full strength.
 
 ### 3.7 Pane Color menu: "Use for all <Label> panes"
 
@@ -223,8 +224,8 @@ Rule: **only tiers 1 and 2 count as identities in the tail rule.**
 ## 7. Delivery
 
 1. **PR 1, resolver and defaults (built):** §3.1–3.3 and §3.8, `frame:hue` and `pane:colors` typed (§4.2 H), `isLightThemeActive`. Every pane gets its default color; the setting can be edited in `settings.json` but has no UI yet.
-2. **PR 2, Settings and menu (built):** §3.4, §3.5, §3.7, and `legacyOf` for `cpuplot` and `armory` (§3.3).
-3. **PR 3, top bar:** §3.6, the `widgetTint` token, Launcher, `widgets.json` cleanup.
+2. **PR 2, Settings and menu (built, #4385):** §3.4, §3.5, §3.7, and `legacyOf` for `cpuplot` and `armory` (§3.3).
+3. **PR 3, top bar (built):** §3.6, the `widgetTint` token, Launcher, `widgets.json` cleanup.
 
 PR 1 alone changes the look of every uncolored pane, so it could also ship behind PR 2's setting with "None" as each widget's starting value. §8 D3 decides.
 

@@ -17,7 +17,7 @@
  * `PANE_COLOR_TOKENS` is the one place to tune the look.
  */
 
-export type PaneColorRole = "identity" | "border" | "pill" | "pillActive" | "headerTint";
+export type PaneColorRole = "identity" | "border" | "pill" | "pillActive" | "headerTint" | "widgetTint";
 
 export interface OklchTone {
     /** Perceived lightness, 0–1. */
@@ -43,6 +43,9 @@ export const PANE_COLOR_TOKENS: Record<"dark" | "light", Record<PaneColorRole, O
         // The header row of a pane with exactly one identity: a subtle tint at
         // the neutral header's own lightness (NON_AGENT_DEFAULT_HEADER_BG ≈ L 0.27).
         headerTint: { l: 0.27, c: 0.035 },
+        // A top-bar widget icon: its type's hue, faintly, at the lightness of
+        // the monochrome icon it replaces (--widget-icon-color, L ≈ 0.82).
+        widgetTint: { l: 0.82, c: 0.07 },
     },
     light: {
         identity: { l: 0.52, c: 0.17 },
@@ -51,6 +54,7 @@ export const PANE_COLOR_TOKENS: Record<"dark" | "light", Record<PaneColorRole, O
         pill: { l: 0.91, c: 0.04 },
         pillActive: { l: 0.86, c: 0.07 },
         headerTint: { l: 0.95, c: 0.025 },
+        widgetTint: { l: 0.45, c: 0.09 },
     },
 };
 

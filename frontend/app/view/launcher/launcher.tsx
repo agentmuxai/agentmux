@@ -3,7 +3,7 @@
 
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, replaceBlock } from "@/app/store/global";
-import { getChildWidgets, getPinnedKeys } from "@/app/window/action-widgets-config";
+import { getChildWidgets, getPinnedKeys, widgetEntryColor } from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -313,7 +313,7 @@ function LauncherView(props: { model: LauncherViewModel }): JSX.Element {
                             )}
                             style={{ width: `${finalTileWidth()}px`, height: `${finalTileHeight()}px` }}
                         >
-                            <div class="relative" style={{ color: widget.color }}>
+                            <div class="relative" style={{ color: widgetEntryColor(widget, "identity") }}>
                                 <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })} />
                                 <Show when={model.isParentWidget(widget)}>
                                     <i class="fa-sharp fa-solid fa-chevron-right absolute -right-2.5 top-1/2 -translate-y-1/2 text-[8px] opacity-60" />

@@ -33,6 +33,7 @@ import {
     handleWidgetSelect,
     pinWidget,
     unpinWidget,
+    widgetIconStyle,
 } from "./action-widgets-config";
 import { buildWidgetOpenActions } from "./action-widgets-menu";
 import { MoreDropdown } from "./more-dropdown";
@@ -68,7 +69,7 @@ const ActionWidget = (props: {
             divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-foreground rounded-sm h-full"
             divOnClick={props.onClick ?? (() => handleWidgetSelect(props.widget))}
         >
-            <div class="widget-icon text-sm">
+            <div class="widget-icon text-sm" style={widgetIconStyle(props.widget)}>
                 <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "browser" })}></i>
             </div>
             <Show when={!props.iconOnly && !isBlank(props.widget.label)}>

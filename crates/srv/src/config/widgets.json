@@ -3,7 +3,6 @@
         "display:order": 1,
         "display:pinned": true,
         "icon": "sparkles",
-        "color": "#cc785c",
         "label": "Agent",
         "description": "Unified AI agent with streaming output and tool execution",
         "blockdef": {
@@ -21,7 +20,6 @@
         "display:order": 4,
         "display:pinned": true,
         "icon": "bee",
-        "color": "#f59e0b",
         "label": "Swarm",
         "description": "Multi-agent orchestration",
         "blockdef": {
@@ -107,7 +105,6 @@
         "display:order": 12,
         "display:pinned": false,
         "icon": "diagram-project",
-        "color": "#06b6d4",
         "label": "Drone",
         "description": "Visual DAG-of-blocks drone engine (Sim-modeled, issue #753)",
         "blockdef": {
@@ -132,7 +129,6 @@
         "display:order": 13,
         "display:pinned": false,
         "icon": "shield-halved",
-        "color": "#8b5cf6",
         "label": "Warden",
         "description": "Monitor and control AgentMux instances across Host / LAN / Internet layers, plus a jekt audit trail and opt-in continuation Supervisor (spec: SPEC_WARDEN_WIDGET_2026-05-25.md)",
         "blockdef": {
@@ -233,7 +229,6 @@
         "display:order": 14,
         "display:pinned": false,
         "icon": "photo-film",
-        "color": "#10b981",
         "label": "Media",
         "description": "View images and video files, with live updates as they change on disk",
         "blockdef": {

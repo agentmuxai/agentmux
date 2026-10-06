@@ -16,6 +16,26 @@ const IDENTITIES: Array<{ name: string; hue?: number; hex?: string }> = [
 // (blockframe.tsx NON_AGENT_DEFAULT_HEADER_BG, hsl(220, 12%, 16%)).
 const DARK_NEUTRAL_HEADER = "#24272e";
 
+// The top bar's opaque background, under its translucency (theme.scss and
+// themes/light.scss --main-bg-color).
+const TOP_BAR_BG = { dark: "#222222", light: "#f6f6f7" };
+// The monochrome widget icon the tint replaces (--secondary-text-color).
+const MONO_ICON = { dark: "#c3c8c2", light: "#4b535c" };
+
+describe("widgetTint (a top-bar widget icon)", () => {
+    for (const theme of ["dark", "light"] as const) {
+        for (const o of PANE_HUE_OPTIONS) {
+            it(`${theme}, ${o.label}: clears WCAG 3:1 against the bar and stays as bright as the monochrome icon`, () => {
+                const tint = paneRoleColor(o.hue, undefined, theme === "light", "widgetTint")!;
+                expect(contrastRatio(tint, TOP_BAR_BG[theme])).toBeGreaterThanOrEqual(3);
+                // Subtle: about the same luminance as the grey icon, so no
+                // widget is louder than the others.
+                expect(contrastRatio(tint, MONO_ICON[theme])).toBeLessThan(1.25);
+            });
+        }
+    }
+});
+
 describe("pane colour scheme", () => {
     for (const theme of ["dark", "light"] as const) {
         const light = theme === "light";
