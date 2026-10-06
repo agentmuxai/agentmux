@@ -125,7 +125,8 @@ export interface SelectOption {
     disabled?: boolean;
 }
 
-export interface SelectProps {
+export interface SelectProps
+    extends Omit<JSX.SelectHTMLAttributes<HTMLSelectElement>, "class" | "classList" | "onChange" | "value" | "children"> {
     /** The choices. Or pass `<option>` elements as children instead. */
     options?: SelectOption[];
     children?: JSX.Element;
@@ -143,23 +144,24 @@ export interface SelectProps {
  * the OS; `color-scheme` in theme.scss keeps it on the right palette.
  */
 export function Select(props: SelectProps): JSX.Element {
-    const field = fieldAttrs(() => props.id);
+    const [local, rest] = splitProps(props, ["options", "children", "value", "onChange", "density", "id", "ariaLabel", "class"]);
+    const field = fieldAttrs(() => local.id);
     return (
         <select
+            {...rest}
             id={field.id()}
-            class={clsx("ui-input", densityClass(props.density), props.class)}
-            aria-label={props.ariaLabel}
+            class={clsx("ui-input", densityClass(local.density), local.class)}
+            aria-label={local.ariaLabel ?? rest["aria-label"]}
             aria-describedby={field.describedBy()}
             aria-invalid={field.invalid()}
-            disabled={props.disabled}
-            value={props.value}
-            onChange={(e) => props.onChange(e.currentTarget.value)}
+            value={local.value}
+            onChange={(e) => local.onChange(e.currentTarget.value)}
         >
-            <Show when={props.options} fallback={props.children}>
+            <Show when={local.options} fallback={local.children}>
                 {(options) => (
                     <For each={options()}>
                         {(option) => (
-                            <option value={option.value} disabled={option.disabled} selected={option.value === props.value}>
+                            <option value={option.value} disabled={option.disabled} selected={option.value === local.value}>
                                 {option.label}
                             </option>
                         )}

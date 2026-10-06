@@ -16,7 +16,7 @@
 
 import { createSignal, type JSX } from "solid-js";
 
-import { Button } from "@/element/button";
+import { Button, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
@@ -97,8 +97,7 @@ export const AgentAddAccountModalPanel = (
             <div class="modal-panel-body agent-new-bundle-modal-body">
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Name</span>
-                    <input
-                        type="text"
+                    <TextInput
                         class="agent-new-bundle-modal-input"
                         autofocus
                         placeholder="Work, Personal, Client X, …"
@@ -110,7 +109,7 @@ export const AgentAddAccountModalPanel = (
                 </label>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">API key</span>
-                    <input
+                    <TextInput
                         type="password"
                         class="agent-new-bundle-modal-input"
                         placeholder="sk-…"
@@ -129,8 +128,9 @@ export const AgentAddAccountModalPanel = (
                     Cancel
                 </Button>
                 <Button
+                    tone="accent"
+                    busy={submitting()}
                     onClick={() => void submit()}
-                    className="green solid"
                     disabled={!canSubmit()}
                 >
                     {submitting() ? "Validating…" : "Add"}

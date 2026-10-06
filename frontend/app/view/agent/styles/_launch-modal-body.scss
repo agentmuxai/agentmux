@@ -47,34 +47,10 @@
     color: var(--secondary-text-color);
 }
 
+// Selects and inputs are element/ui's Select / TextInput; this only sizes them.
 .agent-launch-modal-input {
-    font-size: 13px;
-    font-family: inherit;
-    color: var(--main-text-color);
-    background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    padding: var(--space-1-5) var(--space-2);
-    outline: none;
-
-    &:focus {
-        border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 6%, transparent);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-
-    // <select> dropdown options render in Chromium's native picker —
-    // it doesn't reliably inherit the parent's color, so options
-    // appear with system white-on-white when the OS theme is light.
-    // Pin readable colors against the app's panel background.
-    & > option {
-        color: var(--main-text-color);
-        background-color: var(--main-bg-color);
-    }
+    width: 100%;
+    min-width: 0;
 }
 
 .agent-launch-modal-hint {
@@ -256,84 +232,16 @@
     font-weight: 500;
 }
 
-// Empty-state button — spans the dropdown column AND the +-btn slot
-// so it reads as a single full-width affordance.
-.agent-launch-modal-bundle-empty-btn {
+// Empty-state button (element/ui Button) — spans the dropdown column AND the
+// +-btn slot so it reads as a single full-width affordance. The dashed line
+// says "nothing here yet".
+.agent-launch-modal-bundle-row .agent-launch-modal-bundle-empty-btn {
     grid-column: 2 / span 2;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-1-5) var(--space-2);
-    border: 1px dashed var(--border-color);
-    background: transparent;
-    border-radius: 0;
-    color: var(--main-text-color);
-    font-size: var(--text-sm);
-    cursor: default;
-    transition: border-color 0.12s, color 0.12s, background 0.12s;
-
-    &:hover:not(:disabled) {
-        border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
-        color: var(--accent-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
+    border-style: dashed;
 }
 
-// Feature A — Continue/New view-mode toggle. A borderless text button
-// that flips the launch modal between resuming an existing agent and
-// configuring a new one (SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A).
-.agent-launch-modal-mode-toggle {
+// Feature A — Continue / New (SPEC_AGENT_LAUNCH_AND_MODAL_DISMISSAL §A), an
+// element/ui SegmentedControl.
+.agent-launch-modal-mode {
     align-self: flex-start;
-    background: none;
-    border: none;
-    padding: var(--space-0-5) 0;
-    font-size: var(--text-sm);
-    font-family: inherit;
-    color: var(--accent-color);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        text-decoration: underline;
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
 }
-
-// Inline "+" button next to the dropdown when bundles exist.
-.agent-launch-modal-bundle-new-btn {
-    width: 28px;
-    height: 28px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 1px solid var(--border-color);
-    background: color-mix(in srgb, var(--main-text-color) 4%, transparent);
-    border-radius: 0;
-    color: var(--main-text-color);
-    font-size: 16px;
-    font-weight: 500;
-    line-height: 1;
-    cursor: default;
-    transition: border-color 0.12s, color 0.12s, background 0.12s;
-
-    &:hover:not(:disabled) {
-        border-color: var(--accent-color);
-        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
-        color: var(--accent-color);
-    }
-
-    &:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-    }
-}
-

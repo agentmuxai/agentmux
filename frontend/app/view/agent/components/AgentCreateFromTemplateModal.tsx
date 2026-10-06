@@ -24,7 +24,7 @@
 
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 
-import { Button } from "@/element/button";
+import { Button, Select, TextInput } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
@@ -329,8 +329,7 @@ export const AgentCreateFromTemplateModalPanel = (
             <div class="modal-panel-body agent-new-bundle-modal-body">
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Name</span>
-                    <input
-                        type="text"
+                    <TextInput
                         class="agent-new-bundle-modal-input"
                         autofocus
                         placeholder={props.template.name}
@@ -344,11 +343,10 @@ export const AgentCreateFromTemplateModalPanel = (
                 </label>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Runtime</span>
-                    <select
+                    <Select
                         class="agent-new-bundle-modal-input"
                         value={runtime()}
-                        onChange={(e) =>
-                            pickRuntime(e.currentTarget.value as "host" | "container")}
+                        onChange={(v) => pickRuntime(v as "host" | "container")}
                         disabled={submitting()}
                         data-testid="create-from-template-runtime-select"
                     >
@@ -357,7 +355,7 @@ export const AgentCreateFromTemplateModalPanel = (
                             In a safe sandbox (container)
                             {canPickContainer() ? "" : " — Docker not detected"}
                         </option>
-                    </select>
+                    </Select>
                     <Show when={runtime() === "host"}>
                         <span class="agent-new-bundle-modal-hint">
                             Runs directly on your machine with full access to your files,
@@ -378,17 +376,17 @@ export const AgentCreateFromTemplateModalPanel = (
                 <Show when={modelOptions().length > 0}>
                     <label class="agent-new-bundle-modal-field">
                         <span class="agent-new-bundle-modal-label">Model</span>
-                        <select
+                        <Select
                             class="agent-new-bundle-modal-input"
                             value={model()}
-                            onChange={(e) => pickModel(e.currentTarget.value)}
+                            onChange={(v) => pickModel(v)}
                             disabled={submitting()}
                             data-testid="create-from-template-model-select"
                         >
                             <For each={modelOptions()}>
                                 {(m) => <option value={m.value}>{m.label}</option>}
                             </For>
-                        </select>
+                        </Select>
                         <span class="agent-new-bundle-modal-hint">
                             Which model {props.template.name} runs with. Changeable later
                             from the agent pane's runtime picker.
@@ -398,8 +396,7 @@ export const AgentCreateFromTemplateModalPanel = (
                 <Show when={supportsCustomEndpoint()}>
                     <label class="agent-new-bundle-modal-field">
                         <span class="agent-new-bundle-modal-label">Model Vendor / Custom Endpoint</span>
-                        <input
-                            type="text"
+                        <TextInput
                             class="agent-new-bundle-modal-input"
                             placeholder={`Default (${PROVIDERS[effectiveProviderId()]?.baseUrlEnvVar})`}
                             value={modelVendorBaseUrl()}
@@ -417,10 +414,10 @@ export const AgentCreateFromTemplateModalPanel = (
                 </Show>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Identity</span>
-                    <select
+                    <Select
                         class="agent-new-bundle-modal-input"
                         value={accountId()}
-                        onChange={(e) => pickAccount(e.currentTarget.value)}
+                        onChange={(v) => pickAccount(v)}
                         disabled={submitting()}
                         data-testid="create-from-template-identity-select"
                     >
@@ -430,14 +427,14 @@ export const AgentCreateFromTemplateModalPanel = (
                                 <option value={a.id}>{a.display_name?.trim() || a.name}</option>
                             )}
                         </For>
-                    </select>
+                    </Select>
                 </label>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Memory</span>
-                    <select
+                    <Select
                         class="agent-new-bundle-modal-input"
                         value={bundleId()}
-                        onChange={(e) => setBundleId(e.currentTarget.value)}
+                        onChange={(v) => setBundleId(v)}
                         disabled={submitting()}
                         data-testid="create-from-template-memory-select"
                     >
@@ -445,7 +442,7 @@ export const AgentCreateFromTemplateModalPanel = (
                         <For each={realBundles()}>
                             {(m) => <option value={m.id}>{m.name}</option>}
                         </For>
-                    </select>
+                    </Select>
                 </label>
                 <Show when={error()}>
                     <div class="agent-new-bundle-modal-error" data-testid="create-from-template-error">
@@ -458,8 +455,9 @@ export const AgentCreateFromTemplateModalPanel = (
                     Cancel
                 </Button>
                 <Button
+                    tone="accent"
+                    busy={submitting()}
                     onClick={() => void submit()}
-                    className="green solid"
                     disabled={!canSubmit()}
                     data-testid="create-from-template-submit"
                 >

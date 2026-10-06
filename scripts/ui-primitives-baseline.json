@@ -44,7 +44,6 @@
         "frontend/app/view/agent/components/AgentFooter.tsx": 1,
         "frontend/app/view/agent/components/AgentIdentityModal.tsx": 1,
         "frontend/app/view/agent/components/AgentIdentityPanel.tsx": 2,
-        "frontend/app/view/agent/components/AgentLaunchModal.tsx": 6,
         "frontend/app/view/agent/components/AgentMcpModal.tsx": 5,
         "frontend/app/view/agent/components/AgentNativeMemoryModal.tsx": 10,
         "frontend/app/view/agent/components/AgentPickerFilterBar.tsx": 1,

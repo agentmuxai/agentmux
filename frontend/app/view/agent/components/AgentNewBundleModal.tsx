@@ -22,7 +22,7 @@
 
 import { Show, createSignal, type JSX } from "solid-js";
 
-import { Button } from "@/element/button";
+import { Button, TextInput } from "@/app/element/ui";
 
 type SeedMode = "empty" | "paste" | "files";
 
@@ -98,8 +98,7 @@ export const AgentNewBundleModalPanel = (
             <div class="modal-panel-body agent-new-bundle-modal-body">
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Name</span>
-                    <input
-                        type="text"
+                    <TextInput
                         class="agent-new-bundle-modal-input"
                         autofocus
                         placeholder="Project Apollo notes, Style guide, …"
@@ -113,8 +112,7 @@ export const AgentNewBundleModalPanel = (
                     <span class="agent-new-bundle-modal-label">
                         Description <span class="agent-new-bundle-modal-optional">(optional)</span>
                     </span>
-                    <input
-                        type="text"
+                    <TextInput
                         class="agent-new-bundle-modal-input"
                         placeholder="What's this bundle for?"
                         value={description()}
@@ -180,8 +178,9 @@ export const AgentNewBundleModalPanel = (
                     Cancel
                 </Button>
                 <Button
+                    tone="accent"
+                    busy={submitting()}
                     onClick={() => void submit()}
-                    className="green solid"
                     disabled={!canSubmit()}
                 >
                     {submitting() ? "Creating…" : "Create"}
