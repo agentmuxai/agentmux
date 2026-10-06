@@ -117,6 +117,19 @@ describe("AcpTranslator — standard session/update", () => {
         expect(JSON.stringify(end)).toContain("Read a.ts");
     });
 
+    it("a kind-only update never replaces a real title; it names a call that had none", () => {
+        const t = new AcpTranslator();
+        t.translate(update({ sessionUpdate: "tool_call", toolCallId: "c7", title: "Read a.ts", status: "pending" }));
+        expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c7", kind: "read" }))).toEqual([]);
+        const [end] = t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c7", status: "completed" }));
+        expect(JSON.stringify(end)).toContain("Read a.ts");
+        // No title at first ("tool"): a kind is better than nothing.
+        t.translate(update({ sessionUpdate: "tool_call", toolCallId: "c8", status: "pending" }));
+        expect(t.translate(update({ sessionUpdate: "tool_call_update", toolCallId: "c8", kind: "execute" }))).toEqual([
+            { type: "tool_call", tool: "execute", id: "c8", params: {} },
+        ]);
+    });
+
     it("reset forgets ended calls", () => {
         const t = new AcpTranslator();
         t.translate(update({ sessionUpdate: "tool_call", toolCallId: "c5", title: "x", status: "completed" }));
