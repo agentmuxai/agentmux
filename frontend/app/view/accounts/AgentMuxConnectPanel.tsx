@@ -28,6 +28,7 @@ import { ProviderLogo } from "@/element/ProviderLogo";
 import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
+import { Button } from "@/app/element/ui";
 
 // Production Cognito config — set after deployment.
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
@@ -322,14 +323,15 @@ export function AgentMuxConnectPanel(props: {
                                         install, no key to manage.
                                     </div>
                                     <div class="identity-key-actions">
-                                        <button
+                                        <Button
+                                            tone="accent"
                                             class="identity-btn identity-btn-primary"
                                             onClick={() =>
                                                 void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())
                                             }
                                         >
                                             {muxbus.loading() ? "Connecting… (Cancel)" : "Connect with AgentMux"}
-                                        </button>
+                                        </Button>
                                     </div>
                                 </>
                             }
@@ -352,20 +354,21 @@ export function AgentMuxConnectPanel(props: {
                             </div>
                             <div class="identity-key-actions">
                                 <Show when={muxbusNeedsSignInAgain(muxbus.status())}>
-                                    <button
+                                    <Button
+                                        tone="accent"
                                         class="identity-btn identity-btn-primary"
                                         onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
                                     >
                                         {muxbus.loading() ? "Connecting… (Cancel)" : "Sign in again"}
-                                    </button>
+                                    </Button>
                                 </Show>
-                                <button
+                                <Button
                                     class="identity-btn identity-btn-secondary"
                                     disabled={muxbus.loading()}
                                     onClick={() => void muxbus.disconnect()}
                                 >
                                     Disconnect
-                                </button>
+                                </Button>
                             </div>
                         </Show>
                     </Show>

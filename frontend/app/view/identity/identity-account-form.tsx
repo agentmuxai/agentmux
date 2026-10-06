@@ -17,6 +17,7 @@ import { OAuthConnectPanel } from "@/app/view/accounts/OAuthConnectPanel";
 import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
+import { Button } from "@/app/element/ui";
 
 // Per-provider validation endpoint, surfaced in the egress help note next to
 // the Validate button so the user sees exactly where their key is sent before
@@ -338,12 +339,12 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                                     <span class="identity-key-locked-note">
                                         Stored in the OS keychain · not recoverable
                                     </span>
-                                    <button
+                                    <Button
                                         class="identity-btn identity-btn-secondary"
                                         onClick={() => setKeyReplacing(true)}
                                     >
                                         Replace key
-                                    </button>
+                                    </Button>
                                 </div>
                             }
                         >
@@ -383,22 +384,23 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             </Show>
                             <div class="identity-key-actions">
                                 <Show when={validationEndpoint()}>
-                                    <button
+                                    <Button
+                                        tone="accent"
                                         class="identity-btn identity-btn-primary"
                                         disabled={keyBusy()}
                                         onClick={() => void submitKey(true)}
                                     >
                                         {keyBusy() ? "Validating…" : "Validate & Save"}
-                                    </button>
+                                    </Button>
                                 </Show>
-                                <button
+                                <Button
                                     class="identity-btn identity-btn-secondary"
                                     disabled={keyBusy()}
                                     onClick={() => void submitKey(false)}
                                     title="Store the key without contacting the service"
                                 >
                                     Save without validating
-                                </button>
+                                </Button>
                             </div>
                         </Show>
                     </Show>
@@ -484,18 +486,18 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                 </div>
 
                 <div class="identity-form-footer">
-                    <button class="identity-btn identity-btn-secondary" onClick={() => model.cancelForm()}>
+                    <Button class="identity-btn identity-btn-secondary" onClick={() => model.cancelForm()}>
                         Cancel
-                    </button>
+                    </Button>
                     {/* OAuth connects via its own panel; the keychain *entry* path
                         has its own Validate/Save buttons — hide the generic upsert
                         in both. A locked keychain account (editing, not replacing
                         the key) still uses this button for metadata-only saves;
                         buildAccount preserves the keychain pointer + context. */}
                     <Show when={kind() !== "oauth" && (secretBackend() !== "keychain" || (isEdit() && !keyReplacing()))}>
-                        <button class="identity-btn identity-btn-primary" onClick={handleSubmit}>
+                        <Button tone="accent" class="identity-btn identity-btn-primary" onClick={handleSubmit}>
                             {isEdit() ? "Save" : "Add Account"}
-                        </button>
+                        </Button>
                     </Show>
                 </div>
             </div>

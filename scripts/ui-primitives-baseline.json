@@ -22,9 +22,7 @@
         "frontend/app/statusbar/TokenUsageIndicator.tsx": 1,
         "frontend/app/tab/tab.tsx": 2,
         "frontend/app/view/accounts/AccountsGallery.tsx": 3,
-        "frontend/app/view/accounts/AgentMuxConnectPanel.tsx": 7,
-        "frontend/app/view/accounts/ClaudeLoginPanel.tsx": 3,
-        "frontend/app/view/accounts/OAuthConnectPanel.tsx": 5,
+        "frontend/app/view/accounts/AgentMuxConnectPanel.tsx": 4,
         "frontend/app/view/accounts/accounts-manager.tsx": 1,
         "frontend/app/view/agent/attachments/AttachmentLightbox.tsx": 4,
         "frontend/app/view/agent/attachments/AttachmentStrip.tsx": 1,
@@ -71,9 +69,8 @@
         "frontend/app/view/files/files-view.tsx": 8,
         "frontend/app/view/global-bundle/GlobalMemoryImportBanner.tsx": 1,
         "frontend/app/view/global-bundle/global-bundle-manager.tsx": 1,
-        "frontend/app/view/identity/agent-identity-links-panel.tsx": 2,
-        "frontend/app/view/identity/identity-account-form.tsx": 6,
-        "frontend/app/view/identity/identity-accounts-tab.tsx": 6,
+        "frontend/app/view/identity/identity-account-form.tsx": 1,
+        "frontend/app/view/identity/identity-accounts-tab.tsx": 2,
         "frontend/app/view/mcp/McpCatalogPicker.tsx": 2,
         "frontend/app/view/mcp/mcp-manager.tsx": 3,
         "frontend/app/view/media/media-view.tsx": 1,
@@ -95,12 +92,7 @@
         "frontend/app/window/window-controls.darwin.tsx": 3,
         "frontend/app/window/window-controls.win32.tsx": 3
     },
-    "solidFills": [
-        "frontend/app/view/identity/identity-pane-view.scss :: .identity-pane .identity-pane-new-btn",
-        "frontend/app/view/identity/identity-pane-view.scss :: .identity-pane .identity-pane-reconnect-btn:hover",
-        "frontend/app/view/identity/identity-pane-view.scss :: .identity-pane .identity-pane-save-btn",
-        "frontend/app/view/identity/styles/_detail.scss :: .identity-btn.identity-btn-primary"
-    ],
+    "solidFills": [],
     "radius": {
         "frontend/app/app.scss": 1,
         "frontend/app/block/block.scss": 5,

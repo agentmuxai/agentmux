@@ -40,6 +40,7 @@ import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
 import "./identity-pane-view.scss";
 import type { AgentDefinition, AgentDefinitionIdentity } from "@/app/store/rpc-api";
+import { Button } from "@/app/element/ui";
 
 interface AgentIdentityLinksPanelProps {
     /** The agent whose linked accounts to show. `undefined` when this
@@ -246,8 +247,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                             migrated agent (reagent P1 on PR #2414;
                                                             see provider-id-aliases.ts). */}
                                                         <Show when={canonicalProviderId(row.provider) === "claude"}>
-                                                            <button
-                                                                type="button"
+                                                            <Button
                                                                 class="identity-btn identity-btn-secondary"
                                                                 // reagent P2 on PR #2414 (round 5): row.accountId
                                                                 // (from the link row itself, agent-identities-model.ts)
@@ -261,7 +261,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                                 onClick={() => openClaudeLogin(row.accountId, row.provider)}
                                                             >
                                                                 {row.account ? "Re-login" : "Connect"}
-                                                            </button>
+                                                            </Button>
                                                         </Show>
                                                     </td>
                                                 </tr>
@@ -293,13 +293,13 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                             }
                         >
                             <div class="identity-pane-empty-hint">
-                                <button
-                                    type="button"
+                                <Button
+                                    tone="accent"
                                     class="identity-btn identity-btn-primary"
                                     onClick={() => openClaudeLogin(undefined)}
                                 >
                                     Connect Anthropic account
-                                </button>
+                                </Button>
                             </div>
                         </Show>
                     </div>
