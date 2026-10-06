@@ -754,12 +754,17 @@ export class TermWrap {
         }, PTY_RESIZE_DEBOUNCE_MS);
     }
 
-    /** Send the PTY its current size now, if it differs from what it last heard. */
+    /**
+     * Send the PTY its current size now, if it differs from what it last heard.
+     * Nothing goes out before init(): it sends the first size itself, and the
+     * backend drops a size for a block with no controller yet.
+     */
     private flushPtySize() {
         if (this.ptySizeTimer != null) {
             clearTimeout(this.ptySizeTimer);
             this.ptySizeTimer = null;
         }
+        if (!this.hasResized) return;
         const size = { rows: this.terminal.rows, cols: this.terminal.cols };
         if (this.lastSentTermSize?.rows === size.rows && this.lastSentTermSize?.cols === size.cols) return;
         this.sendTermSize();
