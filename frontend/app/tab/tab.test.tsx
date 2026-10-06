@@ -154,3 +154,38 @@ describe("Tab activity flash", () => {
         restore();
     });
 });
+
+describe("window tab colour tones", () => {
+    it("draws a picked colour as the pane-tab pill tones, not the solid swatch", async () => {
+        const { windowTabToneVars, TAB_COLORS } = await import("./tab");
+        for (const light of [false, true]) {
+            for (const { hex } of TAB_COLORS) {
+                const tone = windowTabToneVars(hex, light)!;
+                expect(tone["--tab-bg"]).not.toBe(hex);
+                expect(tone["--tab-bg-active"]).not.toBe(tone["--tab-bg"]);
+                expect(tone["--tab-underline"]).toMatch(/^#[0-9a-f]{6}$/);
+            }
+        }
+    });
+
+    it("keeps the theme's text readable on the pill in both themes", async () => {
+        const { windowTabToneVars, TAB_COLORS } = await import("./tab");
+        const { contrastRatio } = await import("@/app/block/pane-color-scheme");
+        // Representative theme text: near-white on dark, near-black on light.
+        for (const { light, text } of [
+            { light: false, text: "#f0f0f0" },
+            { light: true, text: "#1a1a1a" },
+        ]) {
+            for (const { hex } of TAB_COLORS) {
+                const tone = windowTabToneVars(hex, light)!;
+                expect(contrastRatio(text, tone["--tab-bg"])).toBeGreaterThanOrEqual(4.5);
+                expect(contrastRatio(text, tone["--tab-bg-active"])).toBeGreaterThanOrEqual(4.5);
+            }
+        }
+    });
+
+    it("returns nothing for a value that is not a hex colour", async () => {
+        const { windowTabToneVars } = await import("./tab");
+        expect(windowTabToneVars("not-a-colour", false)).toBeUndefined();
+    });
+});

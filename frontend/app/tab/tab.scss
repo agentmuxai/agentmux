@@ -162,7 +162,10 @@
         visibility: hidden;
     }
 
-    // Custom tab color — overrides all other backgrounds
+    // Custom tab color — the pane-tab pill tones for the picked hue (tab.tsx
+    // sets --tab-bg, --tab-bg-active and --tab-underline). Quiet when
+    // inactive, a step stronger when selected; the label keeps the theme's
+    // text colour, so it reads in every theme.
     &.tab-colored {
         /* stylelint-disable declaration-no-important --
            User-picked tab colour must beat the hover/active/dragging
@@ -170,15 +173,20 @@
            `!important` the later-declared hover selectors win and
            the custom colour vanishes. */
         .tab-inner {
-            background: var(--tab-color) !important;
-        }
-        .name {
-            color: rgba(255, 255, 255, 0.95) !important;
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+            background: var(--tab-bg) !important;
         }
         /* stylelint-enable declaration-no-important */
-        .wave-button {
-            color: rgba(255, 255, 255, 1);
+        .name {
+            color: var(--secondary-text-color);
+        }
+    }
+
+    &.tab-colored.active {
+        .tab-inner {
+            background: var(--tab-bg-active) !important; /* stylelint-disable-line declaration-no-important */
+        }
+        .name {
+            color: var(--main-text-color);
         }
     }
 }
@@ -240,27 +248,28 @@ body:not(.nohover) .tab.active:hover {
     animation: new-tab-fade-in 0.1s forwards;
 }
 
-// Colored active tab — white accent bar for contrast on any color
-body:not(.nohover) .tab.tab-colored.active:hover {
-    .tab-inner {
-        filter: brightness(1.1);
-    }
-}
-
+// Colored tab — the underline is the hue at full strength; hover lifts the
+// resting tone slightly and never swaps it for the generic tint.
 .tab.tab-colored.active {
     .tab-inner::after {
-        background: rgba(255, 255, 255, 0.85);
+        background: var(--tab-underline);
     }
 }
 
-// Colored tab — keep color on hover/drag, just brighten slightly
 body:not(.nohover) .tab.tab-colored:hover,
 body:not(.nohover) .tab.tab-colored.dragging {
     .tab-inner {
         /* Same override as the base `.tab-colored` rule above — user
            tab colour must beat the hover background. */
-        background: var(--tab-color) !important; /* stylelint-disable-line declaration-no-important */
-        filter: brightness(1.18);
+        background: var(--tab-bg) !important; /* stylelint-disable-line declaration-no-important */
+        filter: brightness(1.12);
+    }
+}
+
+body:not(.nohover) .tab.tab-colored.active:hover,
+body:not(.nohover) .tab.tab-colored.active.dragging {
+    .tab-inner {
+        background: var(--tab-bg-active) !important; /* stylelint-disable-line declaration-no-important */
     }
 }
 
