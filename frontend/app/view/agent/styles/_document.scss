@@ -46,6 +46,22 @@
         overflow: hidden; // .agent-document inside owns the real scrolling
     }
 
+    // HistoryLoadingRow: shown over the transcript's top while it loads after
+    // the cover's time bound. Out of flow, so nothing moves when it goes.
+    .agent-history-loading {
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 1;
+        padding: 3px 10px;
+        border: 1px solid var(--border-color);
+        background: var(--main-bg-color);
+        color: var(--secondary-text-color);
+        font-size: 12px;
+        pointer-events: none;
+    }
+
     // A `.agent-view--working-row-visible` rule used to live here, zeroing
     // the top margin of AgentAuthPanel / AgentQuestionPanel / the
     // disconnected banner while the working row was visible. It existed

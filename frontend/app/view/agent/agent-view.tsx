@@ -67,6 +67,7 @@ import { AgentBottomPanels } from "./components/AgentBottomPanels";
 import { AgentComposerStrip } from "./components/AgentComposerStrip";
 import { AgentShellDrawer } from "./components/AgentShellDrawer";
 import { AgentDocumentView } from "./components/AgentDocumentView";
+import { HistoryLoadingRow } from "./components/HistoryLoadingRow";
 import { AgentFooter } from "./components/AgentFooter";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { collapseDrawerOnShellExit } from "./shell-exit-collapse";
@@ -1334,6 +1335,7 @@ export const AgentPresentationView = ({
                 overlay had to stay inset from
                 (SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md). */}
             <div class="agent-document-scroll-region">
+                <HistoryLoadingRow readiness={readiness} />
                 <AgentDocumentView
                     documentNodes={displayDocument}
                     documentStateAtom={agentAtoms().documentStateAtom}

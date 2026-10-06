@@ -59,8 +59,10 @@
  *
  * So by default the cover stays until every gate reports, and `warnAfterMs` only
  * LOGS which gates are outstanding — full diagnosability, zero behaviour change.
- * A caller that genuinely wants a bound opts in with `revealTimeoutMs`; nothing
- * does today.
+ * A caller that genuinely wants a bound opts in with `revealTimeoutMs`. Agent
+ * panes do since 2026-10-05 (`usePaneReveal`, 1.5 s): the owner chose an open
+ * that shows at once, with "Loading conversation…" over the transcript, over a
+ * cover that stayed up for a 17 s history read.
  *
  * The two are INDEPENDENT deadlines on independent timers. Collapsing them into
  * one timer at `Math.min(...)` makes a caller's explicit hard bound silently

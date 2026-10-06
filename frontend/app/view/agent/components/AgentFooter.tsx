@@ -16,6 +16,7 @@ import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
+import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
@@ -989,6 +990,14 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         }
         const attachments = attachmentDraft?.refs() ?? [];
         if (!message.trim() && attachments.length === 0) return;
+        // The pane can show before its conversation has loaded (usePaneReveal's
+        // reveal bound). A send then is refused by the init guard
+        // (useAgentCommands) after this handler has cleared the draft, so the
+        // message would be lost: keep it and say why (#4374).
+        if (draftBlockId && paneSnapshot(draftBlockId)?.initPhase.kind === "InitPending") {
+            showSendHint("Waiting for the conversation to load");
+            return;
+        }
         if (props.onSendMessage) {
             // agent-submit span per SPEC_INPUT_RESPONSIVENESS §7.1. Includes
             // the synchronous onSendMessage cost (WS send, slice dispatch).
