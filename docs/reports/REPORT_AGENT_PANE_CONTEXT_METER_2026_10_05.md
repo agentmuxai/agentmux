@@ -262,6 +262,11 @@ A report that an accepted prompt contradicts emits `context-window-refuted`, log
 ### 9.8 Not done
 
 - **Live check in a dev build.** A throwaway Claude pane with no agent definition (so nothing is written to the host-wide agent registry) could not start. The pane's sign-in gate held every send, because no identity is bound to an ad-hoc agent id.
-- **Exact auto-compact threshold.** `get_context_usage` (§9.1) would replace the 33K constant and honour the overrides. srv already has the pattern (`get_settings`, re-sent at each `result`), so it is a contained follow-up across srv and the frontend.
 - **The "context compacted" card** still prints `pre → post_tokens` (for example 40.7k → 1.4k). That is honest about the messages but not the context size; it could take the next call's prompt instead.
 - **Other providers' windows** (§7 question 2) are unchanged, except that no provider constant is shown any more.
+
+### 9.9 Follow-up: the CLI's own auto-compact point
+
+srv asks a control-protocol process `get_context_usage` (`detail: "summary"`, answered locally) at spawn and at every turn boundary, next to `get_settings`, and publishes the answer as the persisted per-pane `agentcontextusage` event (`crates/srv/src/backend/agent_context_usage.rs`): the model, the auto-compact window, the threshold (absent when off) and whether auto-compaction is on. An unchanged answer is not re-published; one from a replaced process is ignored.
+
+The pane (`store/agent-pane-state/auto-compact.ts`, subscribed in `useContextReading`) uses the reported threshold when the report is for the reading's model (compared without case, a `[1m]` suffix or a date stamp). When the CLI says auto-compaction is off, it shows no countdown and bands against the window. Until the CLI has answered, it assumes window − 33K, and the tooltip says which. The CLI's reported threshold ignores `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (probed), so with that override the real point is earlier than shown.

@@ -149,6 +149,7 @@
  */
 
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
+import type { AutoCompactPoint } from "@/app/store/agent-pane-state/auto-compact";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
@@ -548,27 +549,46 @@ export function computeStatsInline(
 
 type CtxBand = "low" | "mid" | "high" | "critical";
 
-function ctxBand(tokens: number, contextWindow: number): CtxBand {
-    const fraction = tokens / compactionThreshold(contextWindow);
+/** The auto-compact point to measure against: the one given, else the CLI's
+ *  default for the window (window − 33K), assumed. */
+function pointFor(contextWindow: number, point: AutoCompactPoint | null | undefined): AutoCompactPoint {
+    return point ?? { kind: "at", tokens: compactionThreshold(contextWindow), source: "assumed" };
+}
+
+/** How close the reading is to auto-compacting; against the window itself when
+ *  auto-compaction is off (the CLI then stops at the window). */
+function ctxBand(tokens: number, contextWindow: number, point?: AutoCompactPoint | null): CtxBand {
+    const p = pointFor(contextWindow, point);
+    const fraction = tokens / (p.kind === "at" ? p.tokens : contextWindow);
     if (fraction >= 0.9) return "critical";
     if (fraction >= 0.75) return "high";
     if (fraction >= 0.5) return "mid";
     return "low";
 }
 
-function contextTitle(tokens: number, contextWindow: number | undefined, note: string | undefined): string {
+function contextTitle(
+    tokens: number,
+    contextWindow: number | undefined,
+    note: string | undefined,
+    point?: AutoCompactPoint | null,
+): string {
     const tail = note ? `\n${note}` : "";
     if (contextWindow == null) {
         return `Context: ${formatExactNumber(tokens)} tokens${tail}`;
     }
     const pct = ((tokens / contextWindow) * 100).toFixed(1);
-    const remaining = Math.max(0, compactionThreshold(contextWindow) - tokens);
+    const p = pointFor(contextWindow, point);
+    const compactLine =
+        p.kind === "off"
+            ? `Auto-compaction is off for this session; a manual /compact still works.`
+            : `Auto-compacts ${p.source === "reported" ? "at" : "around"} ${formatExactNumber(p.tokens)} tokens ` +
+              `(≈${formatExactNumber(Math.max(0, p.tokens - tokens))} tokens left)` +
+              `${p.source === "reported" ? ", as the CLI reports it" : ""}.\n` +
+              `Applies to auto-compaction only — a manual /compact can happen at any fill level.`;
     return (
         `Context window: ${formatExactNumber(tokens)} / ${formatExactNumber(contextWindow)} tokens (${pct}%)\n` +
         `This is the conversation sent to the model on its latest call.\n` +
-        `Auto-compacts around ${formatExactNumber(compactionThreshold(contextWindow))} tokens ` +
-        `(≈${formatExactNumber(remaining)} tokens left).\n` +
-        `Applies to auto-compaction only — a manual /compact can happen at any fill level.` +
+        compactLine +
         tail
     );
 }
@@ -583,10 +603,12 @@ function contextTitle(tokens: number, contextWindow: number | undefined, note: s
  * and is fundamentally unpredictable, so this must never be read as "the"
  * time compaction will happen, only as "no sooner than."
  */
-function compactionCountdownText(tokens: number, window: number): string | null {
-    const band = ctxBand(tokens, window);
+function compactionCountdownText(tokens: number, window: number, point?: AutoCompactPoint | null): string | null {
+    const p = pointFor(window, point);
+    if (p.kind === "off") return null;
+    const band = ctxBand(tokens, window, p);
     if (band === "low") return null;
-    const remaining = Math.max(0, compactionThreshold(window) - tokens);
+    const remaining = Math.max(0, p.tokens - tokens);
     return `~${formatCompactNumber(remaining)} to auto-compact`;
 }
 
@@ -608,6 +630,9 @@ interface AgentComposerStripProps {
     /** Where the two numbers come from (`contextReadingNote`), appended to
      *  the reading's tooltip and shown in its popover. */
     contextNote?: string;
+    /** Where auto-compaction happens (auto-compact.ts): the CLI's own point,
+     *  "off", or — when absent — the default window − 33K, assumed. */
+    autoCompact?: AutoCompactPoint | null;
     /** Resolved model id on the last main-agent reply (the Runtime menu shows it). */
     lastReplyModel?: string | null;
     /** Durable logged-in/out state (useAgentControllerStatus's authStatus) —
@@ -693,7 +718,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         const t = props.contextTokens;
         const w = props.contextWindow;
         if (t == null || t <= 0 || w == null) return "";
-        const b = ctxBand(t, w);
+        const b = ctxBand(t, w, props.autoCompact);
         return `agent-composer-strip-ctx--${b}`;
     };
 
@@ -738,7 +763,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         const w = props.contextWindow;
         if (t == null || t <= 0 || w == null) return null;
         if (props.providerId !== "claude") return null;
-        return compactionCountdownText(t, w);
+        return compactionCountdownText(t, w, props.autoCompact);
     };
 
     // Only offer manual compaction for Claude (the only provider this has
@@ -930,7 +955,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                 ctxClass={ctxClass()}
                                 title={
                                     props.contextTokens != null
-                                        ? contextTitle(props.contextTokens, props.contextWindow, props.contextNote)
+                                        ? contextTitle(props.contextTokens, props.contextWindow, props.contextNote, props.autoCompact)
                                         : undefined
                                 }
                                 label={ctxText() ?? "session"}

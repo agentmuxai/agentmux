@@ -29,6 +29,9 @@ pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 /// What an agent process was actually spawned with. See `agent_runtime.rs`.
 pub const EVENT_AGENT_RUNTIME: &str = "agentruntime";
+/// Where an agent process will auto-compact, as its CLI reports it. See
+/// `agent_context_usage.rs`.
+pub const EVENT_AGENT_CONTEXT_USAGE: &str = "agentcontextusage";
 pub const EVENT_MUX_OBJ_UPDATE: &str = "waveobj:update";
 pub const EVENT_BLOCK_FILE: &str = "blockfile";
 pub const EVENT_INSTALL_PROGRESS: &str = "install_progress";

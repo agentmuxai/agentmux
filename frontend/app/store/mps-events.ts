@@ -18,6 +18,9 @@ export const WpsEvent = {
     // What an agent process was spawned with (model, effort, permission) and
     // whether a restart is pending. Mirrors EVENT_AGENT_RUNTIME in mps.rs.
     AgentRuntime: "agentruntime",
+    // Where an agent process auto-compacts, as its CLI reports it. Mirrors
+    // EVENT_AGENT_CONTEXT_USAGE in mps.rs.
+    AgentContextUsage: "agentcontextusage",
     MuxObjUpdate: "waveobj:update",
     // One WS frame carrying an ARRAY of MuxObjUpdates from a single atomic
     // backend transition (e.g. CloseTab's [update workspace, delete tab]

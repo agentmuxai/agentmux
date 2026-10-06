@@ -30,6 +30,7 @@ pub mod mcp_seed;
 pub mod layout;
 pub mod project_instructions;
 pub mod agent_runtime;
+pub mod agent_context_usage;
 pub mod providers;
 pub mod cli_install;
 pub mod cli_prune;
