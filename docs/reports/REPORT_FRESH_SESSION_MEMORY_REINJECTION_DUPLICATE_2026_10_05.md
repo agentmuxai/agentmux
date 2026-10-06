@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-05
 **Area:** memory delivery on a fresh session (`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md` §7 P2, the hidden reinjection fallback of §3.3)
-**Status:** fixed in the PR that adds this report
+**Status:** analysis; the fix ships in the same PR as this report
 
 ## 1. What happened
 
