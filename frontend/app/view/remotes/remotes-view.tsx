@@ -23,6 +23,7 @@ import {
     type RemoteGroup,
 } from "./remotes-sections";
 import "./remotes-view.scss";
+import { Button, IconButton } from "@/app/element/ui";
 
 interface MenuState {
     items: ContextMenuItem[];
@@ -59,12 +60,10 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
                     value={model.filter()}
                     onInput={(e) => model.setFilter(e.currentTarget.value)}
                 />
-                <button class="remotes-icon-button" title="Refresh" aria-label="Refresh" onClick={() => void model.refresh()}>
-                    <i class="fa fa-rotate-right" />
-                </button>
-                <button class="remotes-add-button" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
-                    <i class="fa fa-plus" /> Add remote
-                </button>
+                <IconButton icon="rotate-right" label="Refresh" class="remotes-icon-button" onClick={() => void model.refresh()} />
+                <Button icon="plus" class="remotes-add-button" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
+                    Add remote
+                </Button>
             </div>
             <Show when={adding()}>
                 <AddRemoteForm model={model} onDone={() => setAdding(false)} />
@@ -77,9 +76,9 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
             <Show when={model.notice()}>
                 <div class="remotes-notice" role="status">
                     <span>{model.notice()}</span>
-                    <button class="remotes-link" onClick={() => model.setNotice("")}>
+                    <Button tone="quiet" class="remotes-link" onClick={() => model.setNotice("")}>
                         Dismiss
-                    </button>
+                    </Button>
                 </div>
             </Show>
             <div class="remotes-list">
@@ -214,22 +213,18 @@ function Row(props: {
                     </Show>
                 </span>
                 <span class="remotes-row-actions" onClick={stop} onDblClick={stop}>
-                    <button
+                    <IconButton
+                        icon="terminal"
+                        label={`New terminal on ${r().name}`}
                         class="remotes-icon-button"
-                        title="New terminal"
-                        aria-label={`New terminal on ${r().name}`}
                         onClick={() => void model.run("New terminal", () => model.newTerminal(r().name))}
-                    >
-                        <i class="fa fa-terminal" />
-                    </button>
-                    <button
+                    />
+                    <IconButton
+                        icon="folder-open"
+                        label={`Browse files on ${r().name}`}
                         class="remotes-icon-button"
-                        title="Browse files"
-                        aria-label={`Browse files on ${r().name}`}
                         onClick={() => void model.run("Browse files", () => model.browseFiles(r().name))}
-                    >
-                        <i class="fa fa-folder-open" />
-                    </button>
+                    />
                 </span>
             </div>
             <Show when={expanded()}>
@@ -381,13 +376,14 @@ function Detail(props: { record: RemoteRecord; model: RemotesViewModel }): JSX.E
                             {(agent) => (
                                 <li>
                                     <span class="remotes-agent-name">{agent}</span>
-                                    <button
+                                    <Button
+                                        tone="quiet"
                                         class="remotes-link"
                                         aria-label={`Revoke ${agent} on ${r().name}`}
                                         onClick={run("Revoke", () => model.revokeAgent(r().name, agent))}
                                     >
                                         Revoke
-                                    </button>
+                                    </Button>
                                 </li>
                             )}
                         </For>
