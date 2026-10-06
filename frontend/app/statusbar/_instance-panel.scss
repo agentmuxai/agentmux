@@ -138,30 +138,9 @@
     margin-top: var(--space-1);
 }
 
+// element/ui Buttons (primary accent); this only sizes them in the row.
 .instance-panel-btn {
     flex: 1 1 auto;
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--main-text-color);
-    padding: var(--space-1) var(--space-2);
-    border-radius: 0;
-    font-size: 12px;
-    cursor: default;
-
-    &:hover {
-        background: var(--hover-bg-color);
-    }
-}
-
-.instance-panel-btn-primary {
-    background: var(--accent-color);
-    border-color: var(--accent-color);
-    color: var(--button-text-color);
-    font-weight: 600;
-
-    &:hover {
-        filter: brightness(1.1);
-    }
 }
 
 // Floating pane rows — same geometry as .instance-panel-window-row but the

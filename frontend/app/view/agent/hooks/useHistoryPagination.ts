@@ -36,7 +36,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { noteTaskFrame } from "../activity/task-outcomes";
-import { parseHistoryLines } from "../parseHistoryLines";
+import { parseHistoryLines, type ParsedHistory } from "../parseHistoryLines";
 import { historyPin, type TranscriptSettleLatch } from "../transcript-cursor";
 
 import type { DocumentState, FilterState, LogFn } from "../types";
@@ -173,6 +173,31 @@ const DEFAULT_FILTER_STATE: FilterState = {
     showIncoming: true,
     showOutgoing: true,
 };
+
+/**
+ * Seed the pane's context meter from a restored window: the main agent's last
+ * API call there (never a `result`'s turn total — REPORT_AGENT_PANE_CONTEXT_
+ * METER_2026_10_05.md §2), with the context windows the window's `result`
+ * frames reported. The reducer keeps a live reading that beat it and refuses an
+ * implausible one. Exported for tests.
+ */
+export function seedContextFromHistory(
+    model: Pick<AgentPaneModel, "dispatchPane">,
+    parsed: Pick<ParsedHistory, "lastContext" | "reportedContextWindows">,
+): void {
+    const ctx = parsed.lastContext;
+    const hasWindows = Object.keys(parsed.reportedContextWindows).length > 0;
+    if (!ctx && !hasWindows) return;
+    // One command either way: its windows merge UNDER any reported live,
+    // which `ContextWindowsReported` (the live path's) would overwrite.
+    model.dispatchPane({
+        type: "ReconcileContextFromHistory",
+        tokens: ctx?.tokens ?? null,
+        model: ctx?.model ?? null,
+        at: ctx?.at ?? null,
+        reportedWindows: hasWindows ? parsed.reportedContextWindows : null,
+    });
+}
 
 export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHistoryPagination {
     // Every page parsed here — the newest window first, older pages later — also
@@ -388,22 +413,18 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                         // fields and returns the window).
                         const readStart = typeof rangeResp.offset === "number" ? rangeResp.offset : windowStart;
                         markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
-                        const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, readStart));
+                        const parsed = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, readStart));
+                        const { nodes } = parsed;
                         markAgentOpen(opts.blockId, "parsed");
                         batch(() => opts.model.dispatchDoc({ type: "HistoryRestored", fromSnapshot: true, nodes }));
                         // Right after the dispatch, before anything else can
                         // run: live records must land after these nodes.
                         opts.transcriptSettle?.settle(historyPin(readStart, rangeResp));
-                        // Hydrate the composer strip's context-fill bar from the
-                        // resumed conversation's last known usage instead of
+                        // Hydrate the composer strip's context meter from the
+                        // resumed conversation's last main-agent call instead of
                         // leaving it blank until the first live turn — see
                         // docs/plans/PLAN_PANE_REOPEN_SESSION_RESUME_AND_STATS_BAR_2026_07_10.md.
-                        if (typeof lastSessionStats?.input_tokens === "number") {
-                            opts.model.dispatchPane({
-                                type: "ReconcileContextFromHistory",
-                                tokens: lastSessionStats.input_tokens,
-                            });
-                        }
+                        seedContextFromHistory(opts.model, parsed);
                         // Apply DocumentState + pane overlay via caller callback.
                         const ds = snapshot.documentState;
                         if (ds && opts.onSnapshotOverlay) {
@@ -531,19 +552,15 @@ export function useHistoryPagination(opts: UseHistoryPaginationOptions): UseHist
                 if (!mounted) return;
                 markAgentOpen(opts.blockId, "history_read", { history_lines: rangeResp.lines?.length ?? 0 });
 
-                const { nodes, lastSessionStats } = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, rangeResp.offset ?? offset));
+                const parsed = parseHistoryLines(rangeResp.lines ?? [], opts.outputFormat(), opts.agentName?.(), rangeResp.stamps, parseOptsAt(rangeResp, rangeResp.offset ?? offset));
+                const { nodes } = parsed;
                 markAgentOpen(opts.blockId, "parsed");
                 if (nodes.length > 0) {
                     batch(() => opts.model.dispatchDoc({ type: "HistoryLoaded", nodes }));
                 }
                 opts.transcriptSettle?.settle(historyPin(offset, rangeResp));
                 // See the v2-restore branch above for rationale.
-                if (typeof lastSessionStats?.input_tokens === "number") {
-                    opts.model.dispatchPane({
-                        type: "ReconcileContextFromHistory",
-                        tokens: lastSessionStats.input_tokens,
-                    });
-                }
+                seedContextFromHistory(opts.model, parsed);
 
                 // `resp.total` from the backend is the actual available
                 // line count clamped to the event ring buffer window —

@@ -34,6 +34,7 @@ import { NativeMemoryHistoryModel } from "../native-memory-history-model";
 import "./AgentNativeMemoryModal.scss";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { keyLabel } from "@/app/keybindings";
+import { Button } from "@/app/element/ui";
 
 interface AgentNativeMemoryModalProps {
     agentId: string;
@@ -140,7 +141,8 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                                 this agent. You can also create files manually — they'll be
                                 available at the next session start.
                             </p>
-                            <button
+                            <Button
+                                tone="accent"
                                 class="agent-memory-modal-btn agent-memory-modal-btn-primary"
                                 disabled={creatingIndex()}
                                 onClick={() => {
@@ -149,7 +151,7 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                                 }}
                             >
                                 + Create MEMORY.md
-                            </button>
+                            </Button>
                         </div>
                     </Show>
                 }
@@ -202,8 +204,8 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                         <div class="agent-memory-modal-new-input-error">{newFileError()}</div>
                     </Show>
                     <div class="agent-memory-modal-new-input-actions">
-                        <button class="agent-memory-modal-btn" onClick={cancelNewInput}>Cancel</button>
-                        <button class="agent-memory-modal-btn agent-memory-modal-btn-primary" onClick={commitNewFile}>Create</button>
+                        <Button class="agent-memory-modal-btn" onClick={cancelNewInput}>Cancel</Button>
+                        <Button tone="accent" class="agent-memory-modal-btn agent-memory-modal-btn-primary" onClick={commitNewFile}>Create</Button>
                     </div>
                 </div>
             </Show>
@@ -244,24 +246,28 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                             <Show
                                 when={model.editingAtom()}
                                 fallback={
-                                    <button
+                                    <Button
+                                        density="compact"
                                         class="memory-editor-btn"
                                         disabled={model.contentAtom() === null}
                                         onClick={() => model.startEdit()}
                                     >
                                         Edit
-                                    </button>
+                                    </Button>
                                 }
                             >
-                                <button
+                                <Button
+                                    density="compact"
+                                    tone="accent"
                                     class="memory-editor-btn is-primary"
                                     disabled={model.savingAtom()}
                                     onClick={() => void model.saveEdit()}
                                     title={`Save (${keyLabel("mod+s")})`}
                                 >
                                     {model.savingAtom() ? "Saving…" : "Save"}
-                                </button>
-                                <button
+                                </Button>
+                                <Button
+                                    density="compact"
                                     class="memory-editor-btn"
                                     disabled={model.savingAtom()}
                                     onClick={() =>
@@ -270,17 +276,17 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                                     title="Cancel (Esc)"
                                 >
                                     Cancel
-                                </button>
+                                </Button>
                             </Show>
-                            <button
+                            <Button
+                                density="compact"
                                 class="memory-editor-btn"
-                                classList={{ "is-active": showHistory() }}
+                                pressed={showHistory()}
                                 disabled={model.contentAtom() === null}
-                                aria-pressed={showHistory()}
                                 onClick={() => setShowHistory(!showHistory())}
                             >
                                 {showHistory() ? "Hide history" : "History"}
-                            </button>
+                            </Button>
                         </div>
                         <Show when={model.draft.errorAtom()}>
                             <div class="memory-editor-error">{model.draft.errorAtom()}</div>
@@ -332,9 +338,9 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                 <div class="agent-memory-modal-title-row">
                     <div class="agent-memory-modal-title">Memory — {props.agentName}</div>
                     <Show when={props.onClose}>
-                        <button class="agent-memory-modal-btn" data-modal-dismiss onClick={() => props.onClose?.()}>
+                        <Button class="agent-memory-modal-btn" data-modal-dismiss onClick={() => props.onClose?.()}>
                             Close
-                        </button>
+                        </Button>
                     </Show>
                 </div>
                 <code class="agent-memory-modal-path" title={props.workingDirectory}>

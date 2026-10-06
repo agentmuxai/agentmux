@@ -35,6 +35,7 @@ import { MemoryHistory } from "@/app/view/memory-editor/MemoryHistory";
 import { PinnedEditorLayout } from "@/app/view/memory-editor/PinnedEditorLayout";
 import { sha256Hex } from "@/util/sha256";
 import { keyLabel } from "@/app/keybindings";
+import { Button } from "@/app/element/ui";
 
 interface NativeMemoryFileViewProps {
     agentId: string;
@@ -136,34 +137,35 @@ export function NativeMemoryFileView(props: NativeMemoryFileViewProps): JSX.Elem
                 <Show
                     when={draft.editingAtom()}
                     fallback={
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
                             class="memory-editor-btn"
                             disabled={history.contentAtom() === null}
                             onClick={startEdit}
                         >
                             Edit
-                        </button>
+                        </Button>
                     }
                 >
-                    <button
-                        type="button"
+                    <Button
+                        density="compact"
+                        tone="accent"
                         class="memory-editor-btn is-primary"
                         disabled={draft.savingAtom()}
                         onClick={() => void save()}
                         title={`Save (${keyLabel("mod+s")})`}
                     >
                         {draft.savingAtom() ? "Saving…" : "Save"}
-                    </button>
-                    <button
-                        type="button"
+                    </Button>
+                    <Button
+                        density="compact"
                         class="memory-editor-btn"
                         disabled={draft.savingAtom()}
                         onClick={() => requestCancel({ isDirty: draft.dirtyAtom, onCancel: cancel })}
                         title="Cancel (Esc)"
                     >
                         Cancel
-                    </button>
+                    </Button>
                     <span class="memory-editor-status">{draft.dirtyAtom() ? "Unsaved changes" : "No changes"}</span>
                 </Show>
             </div>

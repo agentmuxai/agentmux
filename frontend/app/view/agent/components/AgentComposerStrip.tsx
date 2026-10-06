@@ -556,18 +556,20 @@ function ctxBand(tokens: number, contextWindow: number): CtxBand {
     return "low";
 }
 
-function contextTitle(tokens: number, contextWindow: number | undefined): string {
+function contextTitle(tokens: number, contextWindow: number | undefined, note: string | undefined): string {
+    const tail = note ? `\n${note}` : "";
     if (contextWindow == null) {
-        return `Context: ${formatExactNumber(tokens)} tokens`;
+        return `Context: ${formatExactNumber(tokens)} tokens${tail}`;
     }
     const pct = ((tokens / contextWindow) * 100).toFixed(1);
     const remaining = Math.max(0, compactionThreshold(contextWindow) - tokens);
     return (
         `Context window: ${formatExactNumber(tokens)} / ${formatExactNumber(contextWindow)} tokens (${pct}%)\n` +
-        `This is the total conversation history sent to the model on each turn.\n` +
+        `This is the conversation sent to the model on its latest call.\n` +
         `Auto-compacts around ${formatExactNumber(compactionThreshold(contextWindow))} tokens ` +
         `(≈${formatExactNumber(remaining)} tokens left).\n` +
-        `Applies to auto-compaction only — a manual /compact can happen at any fill level.`
+        `Applies to auto-compaction only — a manual /compact can happen at any fill level.` +
+        tail
     );
 }
 
@@ -597,10 +599,15 @@ interface AgentComposerStripProps {
     logOpen: boolean;
     /** Dispatches `DetailsToggle` to the pane reducer. */
     onToggleLog: () => void;
-    /** Current context fill in tokens (from message_start). */
+    /** Tokens in context: the main agent's latest call's whole prompt — a
+     *  reading that already passed `plausibleReading` (context-reading.ts). */
     contextTokens?: number | null;
-    /** Provider's max context window size. undefined = unknown. */
+    /** The model's context window. undefined = unknown (the strip then shows
+     *  the token count alone, with no fill band). */
     contextWindow?: number;
+    /** Where the two numbers come from (`contextReadingNote`), appended to
+     *  the reading's tooltip and shown in its popover. */
+    contextNote?: string;
     /** Resolved model id on the last main-agent reply (the Runtime menu shows it). */
     lastReplyModel?: string | null;
     /** Durable logged-in/out state (useAgentControllerStatus's authStatus) —
@@ -853,7 +860,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             });
         }
 
-        if (ctxText() != null || hasSessionToManage()) {
+        // A pane whose provider reports no context reading (codex, gemini, …)
+        // still gets the popover — cost and processed tokens — once a turn
+        // has reported totals.
+        if (ctxText() != null || hasSessionToManage() || props.sessionTotals != null) {
             out.push({
                 key: "ctx",
                 // ctx text + countdown (conditional) + Compact button
@@ -915,11 +925,12 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                 providerId={props.providerId ?? ""}
                                 contextTokens={props.contextTokens}
                                 contextWindow={props.contextWindow}
+                                contextNote={props.contextNote}
                                 sessionTotals={props.sessionTotals}
                                 ctxClass={ctxClass()}
                                 title={
                                     props.contextTokens != null
-                                        ? contextTitle(props.contextTokens, props.contextWindow)
+                                        ? contextTitle(props.contextTokens, props.contextWindow, props.contextNote)
                                         : undefined
                                 }
                                 label={ctxText() ?? "session"}

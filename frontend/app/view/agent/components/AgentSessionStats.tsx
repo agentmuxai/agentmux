@@ -43,10 +43,12 @@ interface AgentSessionStatsProps {
     blockId: string;
     blockAtom: BlockAccessor;
     providerId: string;
-    /** Current context fill in tokens (from message_start). */
+    /** Tokens in context (the strip's validated reading). */
     contextTokens?: number | null;
-    /** Provider's max context window size. undefined = unknown. */
+    /** The model's context window. undefined = unknown. */
     contextWindow?: number;
+    /** Where those numbers come from (`contextReadingNote`). */
+    contextNote?: string;
     /** Cumulative cost/tokens/duration across this pane's completed turns. */
     sessionTotals?: SessionStats | null;
     /** The strip's own ctx band class, applied to the trigger. */
@@ -75,6 +77,15 @@ function formatAgo(ts: number): string {
     if (delta < 60_000) return "just now";
     return `${formatDuration(delta).split(" ")[0]} ago`;
 }
+
+/**
+ * What the "Processed" row counts. Every API call re-sends the whole
+ * conversation, so these totals grow far faster than the context and are
+ * not a context size (the Context row above is).
+ */
+const PROCESSED_TITLE =
+    "Tokens sent and received across every API call in this pane's turns. Each call re-sends the conversation, " +
+    "so input here counts the context once per call: it tracks cost, not how full the context is.";
 
 /** `$2.41`, or `—` when the provider reports no cost (codex/gemini). */
 function formatCost(usd: number | undefined): string {
@@ -198,15 +209,30 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                 >
                     <div class="agent-session-stats-section">Session</div>
 
-                    <Show when={contextPct() != null}>
+                    <Show
+                        when={contextPct() != null}
+                        fallback={
+                            <Show when={(props.contextTokens ?? 0) > 0}>
+                                {statRow(
+                                    "Context",
+                                    <span title={props.contextNote}>
+                                        {formatCompactNumber(props.contextTokens ?? 0)} (window unknown)
+                                    </span>
+                                )}
+                            </Show>
+                        }
+                    >
                         {statRow(
                             "Context",
-                            <>
+                            <span title={props.contextNote}>
                                 {formatCompactNumber(props.contextTokens ?? 0)} /{" "}
                                 {formatCompactNumber(props.contextWindow ?? 0)} (
                                 {contextPct()!.toFixed(0)}%)
-                            </>
+                            </span>
                         )}
+                    </Show>
+                    <Show when={props.contextNote}>
+                        <div class="agent-session-stats-note">{props.contextNote}</div>
                     </Show>
 
                     <Show when={totals()}>
@@ -225,8 +251,8 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                             </>
                         )}
                         {statRow(
-                            "Tokens",
-                            <>
+                            "Processed",
+                            <span title={PROCESSED_TITLE}>
                                 {formatCompactNumber(totals()?.input_tokens ?? 0)} in
                                 <Show when={cacheShare() != null}>
                                     {" "}
@@ -234,7 +260,7 @@ export const AgentSessionStats = (props: AgentSessionStatsProps): JSX.Element =>
                                 </Show>
                                 {" · "}
                                 {formatCompactNumber(totals()?.output_tokens ?? 0)} out
-                            </>
+                            </span>
                         )}
                     </Show>
 
