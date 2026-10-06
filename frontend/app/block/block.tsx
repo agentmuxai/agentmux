@@ -24,7 +24,7 @@ import { getApi } from "@/app/store/app-api";
 import { BrainSpinner } from "@/app/element/BrainSpinner";
 import { PaneLoadingCover } from "@/app/element/PaneLoadingCover";
 import { registerPaneMounted } from "@/app/store/pane-content-holds";
-import { createPaneReadiness, type PaneReadinessPhase } from "@/app/store/pane-readiness";
+import { createPaneReadiness, PANE_REVEAL_BOUND_MS, type PaneReadinessPhase } from "@/app/store/pane-readiness";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
@@ -578,7 +578,20 @@ function Block(props: BlockProps): JSX.Element {
     // controller's job, mid-life re-covers are not.
     const [reCoverPhase, setReCoverPhase] = createSignal<PaneReadinessPhase>("live");
     let reCoverFade: ReturnType<typeof setTimeout> | undefined;
-    onCleanup(() => clearTimeout(reCoverFade));
+    // A re-cover lasts at most PANE_REVEAL_BOUND_MS: a backfill measured at
+    // ~14 s (useSubagentBackfillGate) would otherwise keep a reopened agent
+    // covered long past the agent view's own 1.5 s bound (#4374). The pane
+    // then shows mid-backfill; a later "started" cycle re-covers and is
+    // bounded again.
+    let reCoverBound: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => {
+        clearTimeout(reCoverFade);
+        clearTimeout(reCoverBound);
+    });
+    const fadeReCover = () => {
+        setReCoverPhase("revealing");
+        reCoverFade = setTimeout(() => setReCoverPhase("live"), READY_GATE_FADE_MS);
+    };
     createEffect(() => {
         const settled = subagentBackfillSettled();
         // BOTH reads are tracked, deliberately. An earlier version read the
@@ -598,13 +611,14 @@ function Block(props: BlockProps): JSX.Element {
         // the controller owns the screen until it reaches `live`.
         if (readiness.phase() !== "live") return;
         clearTimeout(reCoverFade);
+        clearTimeout(reCoverBound);
         if (!settled) {
             setReCoverPhase("assembling"); // re-covered, opaque, no fade in
+            reCoverBound = setTimeout(fadeReCover, PANE_REVEAL_BOUND_MS);
             return;
         }
-        if (untrack(reCoverPhase) === "live") return; // nothing to fade out
-        setReCoverPhase("revealing");
-        reCoverFade = setTimeout(() => setReCoverPhase("live"), READY_GATE_FADE_MS);
+        if (untrack(reCoverPhase) !== "assembling") return; // nothing to fade out
+        fadeReCover();
     });
 
     // One cover, two sources: the controller until it goes live, this block's

@@ -127,6 +127,14 @@ export interface PaneReadinessOptions {
 const DEFAULT_WARN_AFTER_MS = 8000;
 
 /**
+ * The longest an agent pane stays behind a loading cover, from either source:
+ * its own assembly (`usePaneReveal`'s `revealTimeoutMs`) or the block's
+ * subagent-backfill re-cover (`block.tsx`). The owner's call, 2026-10-05: an
+ * open that shows at once, its content arriving in place.
+ */
+export const PANE_REVEAL_BOUND_MS = 1500;
+
+/**
  * Creates a readiness controller. Call inside a reactive owner — both deadline
  * timers are cleared on cleanup so a disposed pane cannot fire them.
  */

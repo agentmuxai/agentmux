@@ -261,16 +261,19 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let extend = std::time::Instant::now();
                                 let extended = extend_output_idx(&filestore, &read_block);
                                 idx_clock.lock().unwrap().extend_ms = Some(ms_since(extend));
-                                // Even if extending failed, an index that
-                                // covers a prefix can still serve the read.
-                                let _ = extended;
+                                // A failed extension leaves an index that
+                                // may be far behind: its prefix isn't a
+                                // stand-in for the read, so take the
+                                // whole-file path below (#4384).
+                                extended?;
                                 match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
                                     Some(read) => read,
-                                    // An append landed between the extension
-                                    // and this read (an agent's spawn writing
-                                    // to the transcript its pane is opening):
-                                    // serve the indexed prefix rather than
-                                    // fall through to reading the whole file
+                                    // The extension succeeded, so only an
+                                    // append that landed since (an agent's
+                                    // spawn writing to the transcript its pane
+                                    // is opening) can make this miss: serve
+                                    // the indexed prefix, a few lines short at
+                                    // most, rather than read the whole file
                                     // below (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
                                     None => {
                                         let read = read_via_stale_index(&filestore, &read_block, offset as u64, limit as u64)?;
