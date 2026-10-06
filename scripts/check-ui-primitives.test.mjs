@@ -11,6 +11,8 @@ import {
     compare,
     countButtons,
     declarations,
+    parseCatFileBatch,
+    pickBase,
     resolveSelector,
     solidFills,
     stripComments,
@@ -129,13 +131,41 @@ describe("compare", () => {
 
     it("reports growth, including in a file that was clean", () => {
         const current = { ...structuredClone(baseline), buttons: { "a.tsx": 3, "b.tsx": 1 } };
-        expect(compare(current, baseline).grew).toEqual(["buttons: a.tsx has 3, baseline 2", "buttons: b.tsx has 1, baseline 0"]);
+        expect(compare(current, baseline).grew).toEqual(["buttons: a.tsx has 3, base 2", "buttons: b.tsx has 1, base 0"]);
     });
 
-    it("reports shrinkage, so the baseline gets lowered", () => {
+    it("reports shrinkage separately from growth", () => {
         const current = { buttons: {}, radius: {}, solidFills: [], undefinedVars: [] };
         const { grew, shrank } = compare(current, baseline);
         expect(grew).toEqual([]);
-        expect(shrank).toEqual(["buttons: a.tsx has 0, baseline 2", "solidFills: gone x.scss :: .old-btn", "undefinedVars: gone --old"]);
+        expect(shrank).toEqual(["buttons: a.tsx has 0, base 2", "solidFills: gone x.scss :: .old-btn", "undefinedVars: gone --old"]);
+    });
+});
+
+describe("parseCatFileBatch", () => {
+    it("splits blobs by their declared size, including newlines and multi-byte text", () => {
+        const a = "line one\nline two\n";
+        const b = "é ✓";
+        const out = Buffer.concat([
+            Buffer.from(`abc123 blob ${Buffer.byteLength(a)}\n${a}\n`),
+            Buffer.from("frontend/missing.tsx missing\n"),
+            Buffer.from(`def456 blob ${Buffer.byteLength(b)}\n${b}\n`),
+        ]);
+        expect(parseCatFileBatch(out)).toEqual([a, null, b]);
+    });
+});
+
+describe("pickBase", () => {
+    it("uses the merge-base on a pull request", () => {
+        expect(pickBase("mb", "head", "parent")).toBe("mb");
+    });
+
+    it("uses the previous commit on a push to the base branch, where the merge-base is HEAD", () => {
+        // `previous` is the push's `before` commit when CI provides it, else HEAD^.
+        expect(pickBase("head", "head", "before")).toBe("before");
+    });
+
+    it("has nothing to compare against for a root commit", () => {
+        expect(pickBase("head", "head", null)).toBeNull();
     });
 });

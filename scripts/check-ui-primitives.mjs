@@ -6,8 +6,8 @@
 // docs/specs/SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7
 //
 // THE RULES. Controls come from frontend/app/element/ui/ and follow its line
-// style. Four counts are held at a checked-in baseline
-// (scripts/ui-primitives-baseline.json) that may only go down:
+// style. Four counts may not go up compared with the base branch (the
+// merge-base with origin/main, or $GITHUB_BASE_REF):
 //
 //   1. buttons      hand-rolled `<button` elements in .tsx outside element/ui/,
 //                   per file
@@ -21,25 +21,25 @@
 //                   takes its fallback: settings.scss's `--panel-bg-alt` was
 //                   a fixed grey in every theme.
 //
-// A count above the baseline fails: use the element/ui/ components instead.
-// A count below it also fails, so the baseline drops with each migration:
-// run `node scripts/check-ui-primitives.mjs --update` and commit the result.
-// Adding to the baseline by hand needs a reason in the PR.
+// A count above the base's fails: use the element/ui/ components instead. A
+// count below it is reported and passes. There is no checked-in baseline:
+// one used to live in scripts/ui-primitives-baseline.json, and since every
+// migration PR edited it, each merge put the others into conflict. Comparing
+// with the base branch gives the same ratchet with nothing to keep in sync.
 //
 // Why a script and not stylelint: stylelint isn't run in CI (see
 // scripts/check-no-transition-all.sh), and rule 2 needs SCSS nesting resolved.
 //
 // Usage:
-//   node scripts/check-ui-primitives.mjs            # check
-//   node scripts/check-ui-primitives.mjs --update   # rewrite the baseline
+//   node scripts/check-ui-primitives.mjs   # working tree vs the base branch
 
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FRONTEND = join(REPO_ROOT, "frontend");
-const BASELINE_PATH = join(REPO_ROOT, "scripts", "ui-primitives-baseline.json");
 const UI_DIR = "frontend/app/element/ui/";
 
 // ── File walking ────────────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ function sortObject(obj) {
 
 // ── Compare ─────────────────────────────────────────────────────────────────
 
-/** Problems with `current` against `baseline`, as human-readable lines. */
+/** How `current` differs from `baseline` (the base branch), as human-readable lines. */
 export function compare(current, baseline) {
     const grew = [];
     const shrank = [];
@@ -279,8 +279,8 @@ export function compare(current, baseline) {
         for (const file of [...files].sort()) {
             const now = current[key][file] ?? 0;
             const was = baseline[key]?.[file] ?? 0;
-            if (now > was) grew.push(`${key}: ${file} has ${now}, baseline ${was}`);
-            else if (now < was) shrank.push(`${key}: ${file} has ${now}, baseline ${was}`);
+            if (now > was) grew.push(`${key}: ${file} has ${now}, base ${was}`);
+            else if (now < was) shrank.push(`${key}: ${file} has ${now}, base ${was}`);
         }
     }
     for (const key of ["solidFills", "undefinedVars"]) {
@@ -292,26 +292,86 @@ export function compare(current, baseline) {
     return { grew, shrank };
 }
 
+// ── The base branch ─────────────────────────────────────────────────────────
+
+function git(args, input) {
+    return spawnSync("git", args, { cwd: REPO_ROOT, input, maxBuffer: 1 << 30 });
+}
+
+/** The commit to compare against, or null when it can't be resolved (shallow clone, no remote). */
+function baseCommit() {
+    const branch = process.env.GITHUB_BASE_REF || "main";
+    const rev = (ref) => {
+        const r = git(["rev-parse", "--verify", "--quiet", ref]);
+        return r.status === 0 ? r.stdout.toString().trim() : null;
+    };
+    // Set by ci-pr.yml on a push: the commit the branch pointed to before it.
+    const before = process.env.UI_RATCHET_BEFORE?.trim();
+    const pushedFrom = before && !/^0+$/.test(before) ? rev(`${before}^{commit}`) : null;
+    for (const ref of [`origin/${branch}`, branch]) {
+        const mb = git(["merge-base", "HEAD", ref]);
+        if (mb.status === 0) return pickBase(mb.stdout.toString().trim(), rev("HEAD"), pushedFrom ?? rev("HEAD^"));
+    }
+    return null;
+}
+
+/**
+ * The commit to compare against, given the merge-base with the base branch.
+ * On a pull request that is where the branch left main. On a push to main
+ * itself the merge-base is HEAD, which would compare the tree with itself and
+ * never fail, so `previous` is used instead: the push event's `before` commit,
+ * which covers every commit in the push, or failing that HEAD's first parent.
+ */
+export function pickBase(mergeBase, head, previous) {
+    if (mergeBase !== head) return mergeBase;
+    return previous;
+}
+
+/** Parse `git cat-file --batch` output into the contents of each blob, in order. */
+export function parseCatFileBatch(buf) {
+    const out = [];
+    let i = 0;
+    while (i < buf.length) {
+        const nl = buf.indexOf(10, i);
+        const header = buf.subarray(i, nl).toString();
+        i = nl + 1;
+        const m = /^\S+ (\S+) (\d+)$/.exec(header);
+        if (!m) {
+            out.push(null); // "<name> missing"
+            continue;
+        }
+        const size = Number(m[2]);
+        out.push(buf.subarray(i, i + size).toString("utf8"));
+        i += size + 1; // contents, then a newline
+    }
+    return out;
+}
+
+/** The frontend's style and script files as they are at `ref`. */
+function filesAtRef(ref) {
+    const list = git(["ls-tree", "-r", "--name-only", ref, "--", "frontend"]);
+    const paths = list.stdout
+        .toString()
+        .split("\n")
+        .filter((p) => /\.(s?css|tsx?)$/.test(p));
+    const batch = git(["cat-file", "--batch"], paths.map((p) => `${ref}:${p}`).join("\n") + "\n");
+    const contents = parseCatFileBatch(batch.stdout);
+    return paths.map((path, i) => ({ path, source: contents[i] ?? "" }));
+}
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
 
 if (isMain) {
-    const files = walk(FRONTEND).map((p) => ({ path: rel(p), source: readFileSync(p, "utf8") }));
-    const current = collect(files);
-
-    if (process.argv.includes("--update")) {
-        writeFileSync(BASELINE_PATH, JSON.stringify(current, null, 4) + "\n");
-        const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
-        console.log(
-            `Baseline written: ${total(current.buttons)} hand-rolled buttons, ${current.solidFills.length} solid fills, ` +
-                `${total(current.radius)} off-token radii, ${current.undefinedVars.length} undefined variables.`
-        );
+    const base = baseCommit();
+    if (!base) {
+        console.log("check-ui-primitives: cannot resolve the base branch (shallow clone?) — skipping.");
         process.exit(0);
     }
-
-    const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
-    const { grew, shrank } = compare(current, baseline);
+    const current = collect(walk(FRONTEND).map((p) => ({ path: rel(p), source: readFileSync(p, "utf8") })));
+    const before = collect(filesAtRef(base));
+    const { grew, shrank } = compare(current, before);
 
     if (grew.length > 0) {
         console.log("ERROR: new UI that bypasses the line-style component set");
@@ -322,12 +382,16 @@ if (isMain) {
         console.log("Use Button / IconButton / Tabs / SegmentedControl / Field / inputs from");
         console.log("frontend/app/element/ui/, a line instead of a solid fill, a --radius-* token,");
         console.log("and only custom properties that are defined.");
+        process.exit(1);
     }
+    const total = (o) => Object.values(o).reduce((a, b) => a + b, 0);
+    console.log(
+        `OK: no new hand-rolled controls vs ${base.slice(0, 9)}. Now ${total(current.buttons)} hand-rolled buttons, ` +
+            `${current.solidFills.length} solid fills, ${total(current.radius)} off-token radii, ` +
+            `${current.undefinedVars.length} undefined variables.`
+    );
     if (shrank.length > 0) {
-        console.log(grew.length > 0 ? "\nAlso, the baseline is out of date:" : "The baseline is out of date (good news: the count went down):");
+        console.log(`Down from the base branch (${shrank.length}):`);
         for (const line of shrank) console.log(`  ${line}`);
-        console.log("\nRun `node scripts/check-ui-primitives.mjs --update` and commit scripts/ui-primitives-baseline.json.");
     }
-    if (grew.length > 0 || shrank.length > 0) process.exit(1);
-    console.log("OK: UI primitives at baseline.");
 }

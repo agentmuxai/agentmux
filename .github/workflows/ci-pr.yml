@@ -501,8 +501,13 @@ jobs:
 
       # Ratchet for the line-style component set: hand-rolled buttons, solid
       # fills on controls, off-token corner radii and undefined CSS variables
-      # may only go down (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7).
+      # may not go up compared with the base branch, which this job's
+      # fetch-depth: 0 checkout has (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7).
       - name: UI primitives ratchet
+        env:
+          # On a push to main: where main was before the push, so the check
+          # covers every commit pushed, not just the last one.
+          UI_RATCHET_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: node scripts/check-ui-primitives.mjs
 
       # Same posture as the two gates above: encodes a regression that already
