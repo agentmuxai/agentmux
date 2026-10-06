@@ -554,7 +554,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             class="agent-launch-modal-input"
                             type="text"
                             maxLength={64}
-                            placeholder="Descriptive nickname"
+                            placeholder="Choose a name"
                             value={name()}
                             onInput={(e) => setName(e.currentTarget.value)}
                             disabled={submitting() || isContinue()}

@@ -61,7 +61,9 @@ interface CreateFromTemplateFormData {
 interface AgentCreateFromTemplateModalPanelProps {
     /** Seeded template the user clicked. */
     template: AgentDefinition;
-    /** Suggested initial name (defaults to template name). */
+    /** Initial name. Empty when absent: the field never suggests the
+     *  template's name, or every agent ends up called Claude, Claude2, …
+     *  (SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06.md). */
     initialName?: string;
     /** Called when the user clicks Create with valid data. The layer
      *  wraps this with the create-then-launch RPC chain. */
@@ -69,10 +71,23 @@ interface AgentCreateFromTemplateModalPanelProps {
     onCancel: () => void;
 }
 
+/**
+ * The submit error as the modal shows it. The server's duplicate-name refusal
+ * reaches us prefixed with its RPC name (`agentdefcreatefromtemplate: an agent
+ * named "X" already exists`); say it in words instead, with the name as typed.
+ * Every other error passes through unchanged.
+ */
+export function friendlySubmitError(message: string, typedName: string): string {
+    if (/an agent named .* already exists/.test(message)) {
+        return `You already have an agent named ${typedName}. Choose another name.`;
+    }
+    return message;
+}
+
 export const AgentCreateFromTemplateModalPanel = (
     props: AgentCreateFromTemplateModalPanelProps,
 ): JSX.Element => {
-    const [name, setName] = createSignal(props.initialName ?? props.template.name);
+    const [name, setName] = createSignal(props.initialName ?? "");
     const [accountId, setAccountId] = createSignal("");
     const [bundleId, setBundleId] = createSignal("");
     const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
@@ -298,7 +313,7 @@ export const AgentCreateFromTemplateModalPanel = (
             // Layer unmounts via close-on-success. Reset is defensive.
             setSubmitting(false);
         } catch (e) {
-            setError((e as Error)?.message ?? String(e));
+            setError(friendlySubmitError((e as Error)?.message ?? String(e), name().trim()));
             setSubmitting(false);
         }
     };
@@ -332,7 +347,7 @@ export const AgentCreateFromTemplateModalPanel = (
                     <TextInput
                         class="agent-new-bundle-modal-input"
                         autofocus
-                        placeholder={props.template.name}
+                        placeholder="Choose a name"
                         value={name()}
                         onInput={(e) => setName(e.currentTarget.value)}
                         onKeyDown={onKeyDown}
@@ -340,6 +355,10 @@ export const AgentCreateFromTemplateModalPanel = (
                         disabled={submitting()}
                         data-testid="create-from-template-name-input"
                     />
+                    <span class="agent-new-bundle-modal-hint">
+                        Name it for its job, like Reviewer or Docs writer, so you can tell your
+                        agents apart.
+                    </span>
                 </label>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Runtime</span>

@@ -6,7 +6,8 @@
  * (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md — Phase 1).
  *
  * Covered:
- *  - default name field pre-fills with the template's name
+ *  - the name field opens empty, with the same ghost text for every provider
+ *  - a duplicate-name refusal is shown in words
  *  - Identity + Memory selects render the accounts / bundles list
  *    (the empty account option reads "No auth")
  *  - clicking Create fires onSubmit with the form snapshot
@@ -89,10 +90,16 @@ afterEach(() => cleanup());
 const flush = () => sleep(0);
 
 describe("AgentCreateFromTemplateModalPanel", () => {
-    it("defaults the name field to the template name", async () => {
+    // SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06.md: the field used to open
+    // holding the template's name, so agents piled up as Claude, Claude2, ….
+    // It opens empty for every provider, with the same ghost text.
+    it.each([
+        ["Claude Code", "claude"],
+        ["Codex", "codex"],
+    ])("opens the name field empty with ghost text for %s", async (name, provider) => {
         render(() => (
             <AgentCreateFromTemplateModalPanel
-                template={template}
+                template={{ ...template, name, provider } as AgentDefinition}
                 onSubmit={vi.fn().mockResolvedValue(undefined)}
                 onCancel={vi.fn()}
             />
@@ -100,7 +107,43 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         const input = screen.getByTestId(
             "create-from-template-name-input",
         ) as HTMLInputElement;
-        expect(input.value).toBe("Claude Code");
+        expect(input.value).toBe("");
+        expect(input.placeholder).toBe("Choose a name");
+        const submit = screen.getByTestId(
+            "create-from-template-submit",
+        ) as HTMLButtonElement;
+        expect(submit.disabled).toBe(true);
+    });
+
+    it("enables Create once a name is typed", async () => {
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={template}
+                onSubmit={vi.fn().mockResolvedValue(undefined)}
+                onCancel={vi.fn()}
+            />
+        ));
+        const input = screen.getByTestId("create-from-template-name-input");
+        fireEvent.input(input, { target: { value: "Reviewer" } });
+        const submit = screen.getByTestId(
+            "create-from-template-submit",
+        ) as HTMLButtonElement;
+        expect(submit.disabled).toBe(false);
+    });
+
+    it("Ctrl+Enter does not submit an empty name", async () => {
+        const onSubmit = vi.fn().mockResolvedValue(undefined);
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={template}
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+            />
+        ));
+        const input = screen.getByTestId("create-from-template-name-input");
+        fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+        await flush();
+        expect(onSubmit).not.toHaveBeenCalled();
     });
 
     it("clicking Create fires onSubmit with form snapshot", async () => {
@@ -184,10 +227,11 @@ describe("AgentCreateFromTemplateModalPanel", () => {
     });
 
     it("surfaces an error from onSubmit", async () => {
-        const onSubmit = vi.fn().mockRejectedValue(new Error("name exists"));
+        const onSubmit = vi.fn().mockRejectedValue(new Error("container runtime went away"));
         render(() => (
             <AgentCreateFromTemplateModalPanel
                 template={template}
+                initialName="Reviewer"
                 onSubmit={onSubmit}
                 onCancel={vi.fn()}
             />
@@ -195,7 +239,32 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         const submit = screen.getByTestId("create-from-template-submit");
         fireEvent.click(submit);
         const err = await screen.findByTestId("create-from-template-error");
-        expect(err.textContent).toContain("name exists");
+        expect(err.textContent).toContain("container runtime went away");
+    });
+
+    it("says a duplicate name in words and keeps the typed name", async () => {
+        const onSubmit = vi
+            .fn()
+            .mockRejectedValue(
+                new Error('agentdefcreatefromtemplate: an agent named "Reviewer" already exists'),
+            );
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={template}
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+            />
+        ));
+        const input = screen.getByTestId(
+            "create-from-template-name-input",
+        ) as HTMLInputElement;
+        fireEvent.input(input, { target: { value: "Reviewer" } });
+        fireEvent.click(screen.getByTestId("create-from-template-submit"));
+        const err = await screen.findByTestId("create-from-template-error");
+        expect(err.textContent).toBe(
+            "You already have an agent named Reviewer. Choose another name.",
+        );
+        expect(input.value).toBe("Reviewer");
     });
 
     it("trims whitespace and rejects empty names", async () => {
@@ -225,6 +294,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         render(() => (
             <AgentCreateFromTemplateModalPanel
                 template={template}
+                initialName="Reviewer"
                 onSubmit={onSubmit}
                 onCancel={vi.fn()}
             />
@@ -252,6 +322,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         render(() => (
             <AgentCreateFromTemplateModalPanel
                 template={codexTemplate}
+                initialName="Reviewer"
                 onSubmit={onSubmit}
                 onCancel={vi.fn()}
             />
@@ -304,6 +375,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             render(() => (
                 <AgentCreateFromTemplateModalPanel
                     template={template}
+                    initialName="Reviewer"
                     onSubmit={onSubmit}
                     onCancel={vi.fn()}
                 />
@@ -333,6 +405,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             render(() => (
                 <AgentCreateFromTemplateModalPanel
                     template={noModelsTemplate}
+                    initialName="Reviewer"
                     onSubmit={onSubmit}
                     onCancel={vi.fn()}
                 />
@@ -470,6 +543,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         render(() => (
             <AgentCreateFromTemplateModalPanel
                 template={antigravityTemplate}
+                initialName="Reviewer"
                 onSubmit={onSubmit}
                 onCancel={vi.fn()}
             />
