@@ -24,8 +24,7 @@
 //             the task fades the page itself with CSS on the alpha-capable
 //             window.
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::Arc;
 
 use crate::state::AppState;
 
@@ -37,45 +36,17 @@ use super::lifecycle::find_all_own_windows;
 ///
 /// The frontend's opacity slider calls `set_window_opacity` on every
 /// `onInput` tick with no debounce of its own — a drag can fire dozens of
-/// calls/sec. The naive approach (spawn a thread + TCP connection per call)
-/// lets those writes race each other: srv's `SetWindowOpacity` RPC does an
-/// unconditional `store.update` with no sequencing, so out-of-order network
-/// delivery could persist a stale mid-drag value instead of the final one
-/// — silently defeating the crash-restart correctness this phase exists
-/// for. A generation counter per label fixes this without touching the
-/// frontend or adding a CAS/version check to the Phase 1 RPC (out of
-/// scope for this phase): each call bumps its label's generation, then
-/// its spawned writer sleeps `OPACITY_WRITE_DEBOUNCE_MS` and only actually
-/// writes if no newer call has superseded it in the meantime. A burst
-/// collapses to exactly one outbound write — the final settled value —
-/// while deliberate, slowly-spaced changes (deliberate clicks, not a drag)
-/// each still get their own write once they clear the window.
+/// calls/sec. Unsequenced writes would race: srv's `SetWindowOpacity` RPC
+/// does an unconditional `store.update`, so out-of-order delivery could
+/// persist a stale mid-drag value instead of the final one. The shared
+/// `TrailingWriter` keeps only the latest value per label and writes it
+/// once `OPACITY_WRITE_DEBOUNCE_MS` passes with no newer call, from one
+/// worker thread — a burst collapses to exactly one write of the settled
+/// value, while slowly spaced changes each still get their own write.
 const OPACITY_WRITE_DEBOUNCE_MS: u64 = 400;
 
-fn opacity_write_generations() -> &'static Mutex<HashMap<String, u64>> {
-    static MAP: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
-    MAP.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Bump and return the new generation for `label`.
-fn next_opacity_write_generation(label: &str) -> u64 {
-    let mut m = opacity_write_generations()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let gen = m.entry(label.to_string()).or_insert(0);
-    *gen += 1;
-    *gen
-}
-
-/// True if `generation` is still the latest recorded generation for
-/// `label` — i.e. no newer `set_window_opacity` call for this label has
-/// happened since this one was scheduled.
-fn is_current_opacity_write_generation(label: &str, generation: u64) -> bool {
-    let m = opacity_write_generations()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    m.get(label).copied() == Some(generation)
-}
+static OPACITY_WRITER: super::trailing_writer::TrailingWriter =
+    super::trailing_writer::TrailingWriter::new("opacity", std::time::Duration::from_millis(OPACITY_WRITE_DEBOUNCE_MS));
 
 /// Set window transparency/blur effects for a single window.
 ///
@@ -257,7 +228,7 @@ pub fn set_window_opacity(
     // (`get_window_opacity` below reads it back). Platform-agnostic, so this
     // fires once per call, not once per platform.
     //
-    // Debounced per label (see `next_opacity_write_generation` above,
+    // Debounced per label (see `OPACITY_WRITER` above,
     // reagent P1 on #1985) so a rapid burst — e.g. a slider drag, which
     // the frontend fires on every `onInput` tick with no debounce of its
     // own — collapses to exactly one outbound write of the final settled
@@ -275,17 +246,9 @@ pub fn set_window_opacity(
             );
             continue;
         };
-        let generation = next_opacity_write_generation(&ev_label);
         let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
         let auth_key = state.auth_key.lock().clone();
-        let debounce_label = ev_label.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(OPACITY_WRITE_DEBOUNCE_MS));
-            if !is_current_opacity_write_generation(&debounce_label, generation) {
-                // A newer call for this label superseded us during the
-                // sleep — this value is stale, don't persist it.
-                return;
-            }
+        OPACITY_WRITER.schedule(ev_label, move || {
             crate::client::backend_set_window_opacity(&web_endpoint, &auth_key, &window_id, ev_opacity);
         });
     }
@@ -337,64 +300,4 @@ pub async fn get_window_opacity(
         None => 1.0,
     };
     Ok(serde_json::json!(opacity))
-}
-
-#[cfg(test)]
-mod opacity_debounce_tests {
-    use super::{is_current_opacity_write_generation, next_opacity_write_generation};
-
-    /// Simulates a rapid burst (slider drag): only the LAST call's
-    /// generation should still be "current" once all bumps have happened
-    /// — the reagent P1 scenario this debounce exists to prevent (an
-    /// earlier, superseded call's stale value winning a network race).
-    #[test]
-    fn burst_only_the_last_generation_is_current() {
-        let label = "test-burst-only-last-wins";
-        let gens: Vec<u64> = (0..5).map(|_| next_opacity_write_generation(label)).collect();
-        for &g in &gens[..gens.len() - 1] {
-            assert!(
-                !is_current_opacity_write_generation(label, g),
-                "earlier generation {g} must be superseded after a burst"
-            );
-        }
-        assert!(
-            is_current_opacity_write_generation(label, *gens.last().unwrap()),
-            "the last generation in the burst must still be current"
-        );
-    }
-
-    /// A single, deliberate (non-burst) call must still be current —
-    /// debouncing a burst down to one write must not also drop the only
-    /// write when there's no burst to coalesce.
-    #[test]
-    fn single_call_is_current() {
-        let label = "test-single-call-is-current";
-        let g = next_opacity_write_generation(label);
-        assert!(is_current_opacity_write_generation(label, g));
-    }
-
-    /// Generations are tracked independently per label — a burst on one
-    /// window must not supersede a pending write for a different window.
-    #[test]
-    fn generations_are_independent_per_label() {
-        let a = "test-independent-label-a";
-        let b = "test-independent-label-b";
-        let ga = next_opacity_write_generation(a);
-        let gb = next_opacity_write_generation(b);
-        // A second call on `a` only supersedes `a`'s generation, not `b`'s.
-        next_opacity_write_generation(a);
-        assert!(!is_current_opacity_write_generation(a, ga));
-        assert!(is_current_opacity_write_generation(b, gb));
-    }
-
-    /// A generation that was never issued for a label (or an unknown
-    /// label entirely) must never read as current — the debounce map
-    /// only knows about labels it has actually seen.
-    #[test]
-    fn unknown_label_or_generation_is_never_current() {
-        assert!(!is_current_opacity_write_generation("test-never-seen-this-label", 1));
-        let label = "test-known-label-wrong-generation";
-        let g = next_opacity_write_generation(label);
-        assert!(!is_current_opacity_write_generation(label, g + 1));
-    }
 }

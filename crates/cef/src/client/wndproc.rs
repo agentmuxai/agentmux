@@ -458,6 +458,10 @@ struct WindowEdgeResizeHookEntry {
     original: isize,
     install_label: String,
     session_began: bool,
+    /// Whether Shift was held at the last `WM_SIZING` tick of this size loop.
+    /// A tick is only sent to the page while Shift is held or on the tick it
+    /// is released (`should_send_resize_tick`).
+    last_tick_shift: bool,
     /// The window's `(top, bottom)` in PHYSICAL px as of the start of the
     /// current native size loop, captured lazily on its first `WM_SIZING`
     /// tick and cleared on `WM_EXITSIZEMOVE`.
@@ -507,6 +511,18 @@ fn emit_window_edge_resize_event(
         .label_for_hwnd(hwnd)
         .unwrap_or_else(|| install_label.to_string());
     crate::events::emit_event_to_window(state, &label, event, payload);
+}
+
+/// Whether a `WM_SIZING` tick goes to the page as `windowresize:tick`.
+///
+/// The page (`frontend/layout/lib/windowEdgeResize.ts`) only acts on a tick
+/// while Shift is held, plus the one tick where Shift is released (to fall
+/// back to proportional scaling). Every other tick used to cost the renderer
+/// an `ExecuteJavaScript` task and a forced layout on every frame of a plain
+/// window drag (ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md §3.4, R4).
+#[cfg(target_os = "windows")]
+fn should_send_resize_tick(shift_held: bool, shift_held_last_tick: bool) -> bool {
+    shift_held || shift_held_last_tick
 }
 
 /// Window-edge-resize hook body — observes the native size loop and
@@ -573,14 +589,17 @@ unsafe extern "system" fn window_edge_resize_wndproc(
         if !edge.is_empty() {
             // Read/update session state under the lock, emit AFTER releasing
             // it (same discipline as tear_off_hook's handle_mouse_move).
+            let shift_held = (GetAsyncKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
             let session = WINDOW_EDGE_RESIZE_WNDPROCS.lock().ok().and_then(|mut m| {
                 m.get_mut(&(hwnd as usize)).map(|entry| {
                     let first_tick = !entry.session_began;
                     entry.session_began = true;
-                    (entry.install_label.clone(), first_tick)
+                    let send_tick = should_send_resize_tick(shift_held, entry.last_tick_shift);
+                    entry.last_tick_shift = shift_held;
+                    (entry.install_label.clone(), first_tick, send_tick)
                 })
             });
-            if let Some((install_label, first_tick)) = session {
+            if let Some((install_label, first_tick, send_tick)) = session {
                 if first_tick {
                     emit_window_edge_resize_event(
                         hwnd,
@@ -589,14 +608,14 @@ unsafe extern "system" fn window_edge_resize_wndproc(
                         &serde_json::json!({}),
                     );
                 }
-                let shift_held =
-                    (GetAsyncKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
-                emit_window_edge_resize_event(
-                    hwnd,
-                    &install_label,
-                    "windowresize:tick",
-                    &serde_json::json!({ "edge": edge, "shiftHeld": shift_held }),
-                );
+                if send_tick {
+                    emit_window_edge_resize_event(
+                        hwnd,
+                        &install_label,
+                        "windowresize:tick",
+                        &serde_json::json!({ "edge": edge, "shiftHeld": shift_held }),
+                    );
+                }
             }
         }
     } else if msg == WM_EXITSIZEMOVE {
@@ -608,6 +627,7 @@ unsafe extern "system" fn window_edge_resize_wndproc(
                 // session_began branch because a plain move loop never sets
                 // that flag but must still not leave state behind.
                 entry.session_origin_top_bottom = None;
+                entry.last_tick_shift = false;
                 if entry.session_began {
                     entry.session_began = false;
                     Some(entry.install_label.clone())
@@ -825,6 +845,7 @@ pub(crate) unsafe fn install_window_edge_resize_hook(
                     original,
                     install_label: label.to_string(),
                     session_began: false,
+                    last_tick_shift: false,
                     session_origin_top_bottom: None,
                 },
             );
@@ -1400,5 +1421,26 @@ mod invisible_activation_tests {
     #[test]
     fn nothing_to_hand_back_to_when_activation_came_from_another_app() {
         assert_eq!(invisible_activation(false, false, false), InvisibleActivation::Nothing);
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod resize_tick_tests {
+    use super::should_send_resize_tick;
+
+    #[test]
+    fn a_plain_drag_sends_no_ticks() {
+        assert!(!should_send_resize_tick(false, false));
+    }
+
+    #[test]
+    fn ticks_go_while_shift_is_held() {
+        assert!(should_send_resize_tick(true, false));
+        assert!(should_send_resize_tick(true, true));
+    }
+
+    #[test]
+    fn the_release_tick_still_goes() {
+        assert!(should_send_resize_tick(false, true));
     }
 }

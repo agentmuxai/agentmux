@@ -39,6 +39,10 @@ mod chrome;
 // Minimize / maximize command handlers, dispatched by ipc.rs.
 pub use chrome::*;
 
+// Per-key trailing debounce on one worker thread, shared by the srv
+// write-throughs for opacity (`transparency`) and position (`position_persist`).
+mod trailing_writer;
+
 mod transparency;
 // Transparency + per-window opacity command handlers, dispatched by ipc.rs.
 pub use transparency::*;
