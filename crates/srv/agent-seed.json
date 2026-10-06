@@ -128,7 +128,7 @@
       "icon": "\u03c0",
       "provider": "pi",
       "agent_type": "host",
-      "description": "Plandex's multi-provider agent",
+      "description": "Minimal multi-provider coding agent",
       "working_directory": "",
       "shell": "pwsh",
       "agent_bus_id": "pi",

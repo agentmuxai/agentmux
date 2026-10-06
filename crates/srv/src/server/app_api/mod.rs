@@ -23,7 +23,7 @@ use crate::backend::storage::identities::IdentityAccount;
 use crate::backend::storage::bundles::Bundle;
 
 use super::AppState;
-use crate::server::cli_handlers::resolve_cli_on_path;
+use crate::server::cli_handlers::resolve_provider_cli_on_path;
 
 mod agent_open;
 /// Re-exported for `server/mod.rs`'s `POST /api/v1/agent/open` handler (the
