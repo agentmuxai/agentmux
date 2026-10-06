@@ -21,6 +21,7 @@ import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-re
 import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { formatUtcTimestamp } from "@/util/format-time";
 import { ObjectService } from "@/store/services";
 import { getObjectValue, makeORef } from "@/store/mos";
 import { dispatchWindowOpacity, liveWindowOpacity } from "@/app/store/window-opacity-store";
@@ -55,24 +56,6 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             arch: (d as any)?.arch ?? null,
         };
     });
-
-    // Build timestamp -> "Jan 3, 2019 8:12AM PDT": abbreviated month, no
-    // leading-zero day/hour, 2-digit minute, AM/PM with no separating space,
-    // trailing short timezone name (browser's local zone — this is a local
-    // build timestamp, not UTC, so the zone is the only way to read it
-    // unambiguously against a machine in a different zone).
-    const formatBuildTime = (ms: number): string => {
-        const s = new Date(ms).toLocaleString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-            timeZoneName: "short",
-        });
-        return s.replace(/, (\d{1,2}:\d{2})/, " $1").replace(/\s(AM|PM)\b/, "$1");
-    };
 
     const entries = openWindowEntriesAtom;
     const floatingEntries = openFloatingPaneEntriesAtom;
@@ -471,7 +454,7 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                     <div class="instance-panel-row instance-panel-row-meta">
                         <span class="instance-panel-label">Build Time</span>
                         <span class="instance-panel-value instance-panel-mono">
-                            {formatBuildTime(about().buildTime!)}
+                            {formatUtcTimestamp(about().buildTime!)}
                         </span>
                     </div>
                 </Show>
