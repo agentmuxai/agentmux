@@ -158,8 +158,8 @@ account:
   `ssh` to that host with the user's keys. An agent reaching a host that way
   needs the user's per-host consent (§8.2), checked against its signed
   identity, and `muxsh` has none. Agents get the list through a
-  consent-checked tool instead. Users get it from the terminal pane menu's
-  "Sessions on <host>…".
+  consent-checked tool instead. Users get it from the Remotes pane's
+  "Sessions…".
 
 Same single-instance scope as the rest of this tool family: `muxsh` operates
 on the instance the calling pane belongs to. Cross-instance operation is not

@@ -50,7 +50,7 @@ Name chosen by the owner on 2026-10-05; "Outposts", "Uplink" and "Tower" were al
 | `status.rs` | One status per connection, as `connchange` events, read with `GetAllConnStatus` (`connecting/connected/disconnected/error` plus the last error) |
 | `helper_hosts.rs` | The hosts the helper has answered on (`remote-helper-hosts.json`) |
 | `agent_access.rs` | Agents the user has always allowed on a host (`ssh-agent-access.json`) |
-| `sessions.rs` | Durable sessions on a host, behind the pane menu's "Sessions on <host>…" |
+| `sessions.rs` | Durable sessions on a host, behind the Remotes pane's "Sessions…" (the terminal pane menu had "Sessions on <host>…" until 2026-10-05) |
 
 **Commands.** `ConnList` returns names only: the ssh-config hosts plus any connection with a status this run. Also `ConnEnsure`, `ConnConnect`, `ConnDisconnect`, `ConnSessions`, `ConnSessionEnd` and `WslList`.
 

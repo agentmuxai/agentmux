@@ -237,8 +237,8 @@ export function showJsContextMenu(
         // on entry — matches the old zero-delay mouseleave's implicit
         // sibling-closing side effect, which createSubmenuHover's open-delay/
         // safe-triangle close otherwise silently drops (reagent P1 on
-        // PR #2525; termSettingsMenu.ts's Themes/Font Size/Terminal Zoom/
-        // Transparency submenus are the concrete affected case). One list
+        // PR #2525; the terminal's Themes/Font Size/Terminal Zoom/
+        // Transparency submenus were the concrete case). One list
         // per renderItems call — each call is exactly one menu level, so
         // nested submenus never reach across levels to close an ancestor.
         const peers: SubmenuHoverController[] = [];
