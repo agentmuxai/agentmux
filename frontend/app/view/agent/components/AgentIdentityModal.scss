@@ -28,23 +28,3 @@
     border-top: 1px solid var(--border-color);
     background: color-mix(in srgb, var(--main-text-color) 2%, transparent);
 }
-
-.agent-modal-done-btn {
-    padding: var(--space-1-5) var(--space-4);
-    font-size: var(--text-sm);
-    font-weight: var(--font-weight-medium);
-    color: var(--button-text-color);
-    background: var(--accent-color);
-    border: none;
-    border-radius: 0;
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
-    }
-
-    &:focus-visible {
-        outline: none;
-        box-shadow: var(--shadow-focus-ring);
-    }
-}

@@ -262,49 +262,7 @@
     flex-shrink: 0;
 }
 
-.agent-question-panel-btn {
-    padding: var(--space-1-5) var(--space-3);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm, 0);
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-    font-size: var(--text-sm, 12px);
-    transition: background 80ms ease, opacity 80ms ease;
-
-    &:hover {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
-    }
-
-    // Accept Recommended — a lighter-weight secondary-accent style
-    // (bordered/text, not filled) so it's visually distinct from both the
-    // neutral Cancel and the filled-accent Submit below: a shortcut for the
-    // default path, not a competing primary CTA. A filled button here would
-    // push the user toward the shortcut over actually reading the options,
-    // which under-serves a question the agent thought worth asking at all.
-    // See docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md §3.
-    &--recommended {
-        border-color: var(--accent-color);
-        color: var(--accent-color);
-
-        &:hover {
-            background: rgba(var(--accent-color-rgb, 65, 159, 224), 0.1);
-        }
-    }
-
-    &--submit {
-        background: var(--accent-color);
-        border-color: var(--accent-color);
-        color: var(--button-text-color, #000);
-
-        &:hover {
-            opacity: 0.9;
-            background: var(--accent-color);
-        }
-
-        &:disabled {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-    }
-}
+// The footer buttons are element/ui Buttons. Cancel and Accept Recommended
+// are neutral, Submit is accent: the recommended-answer shortcut must not
+// compete with Submit, so a user still reads the options
+// (docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md §3).
