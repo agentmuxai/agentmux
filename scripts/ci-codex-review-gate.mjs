@@ -3,7 +3,8 @@
 //
 // Sets the `Codex review` commit status on a PR's head: success only once
 // Codex has said "Didn't find any major issues" about that exact commit, or
-// answered the request for it with its out-of-quota notice.
+// answered the request for it with its out-of-quota notice. A dependency
+// bot's own PR passes without Codex (see DEPENDENCY_BOTS).
 // Run by .github/workflows/codex-review-gate.yml.
 //
 // Why a status keyed to the head commit: #3513 merged at 18:07 while Codex
@@ -56,6 +57,31 @@ export const TRIGGER_AUTHOR = "a5af";
 
 // ReAgent's GitHub App, the only author whose quota-skip marker counts.
 export const SKIP_AUTHOR = "reagentx-workflow[bot]";
+
+// Dependency bots. ReAgent doesn't review their PRs, so it never asks Codex,
+// and the gate would wait forever. A pure version bump is a manifest and
+// lockfile diff Codex has little to say about, so such a PR passes without
+// Codex; the required approving review and CI still apply. Only while every
+// commit is the bot's own: once anyone else pushes to the branch (a code fix
+// for a breaking bump), it needs Codex.
+export const DEPENDENCY_BOTS = new Set(["dependabot[bot]", "renovate[bot]"]);
+// GitHub's own committer for commits an App makes through the API.
+const GITHUB_COMMITTER = "web-flow";
+
+/**
+ * Whether a PR is a dependency bot's own: opened by one, and every commit
+ * (from the pulls commits API) authored by that bot and committed by it or by
+ * GitHub for it. An empty or unknown commit list is not.
+ */
+export function isDependencyBotPr(prAuthor, commits) {
+    const bot = String(prAuthor ?? "").toLowerCase();
+    if (!DEPENDENCY_BOTS.has(bot) || !Array.isArray(commits) || commits.length === 0) return false;
+    return commits.every((c) => {
+        const author = String(c?.author?.login ?? "").toLowerCase();
+        const committer = String(c?.committer?.login ?? "").toLowerCase();
+        return author === bot && (committer === bot || committer === GITHUB_COMMITTER);
+    });
+}
 
 const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 // Straight or curly apostrophe.
@@ -226,7 +252,14 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
  * over when it is an OK or findings only on docs, and `filesSinceLatest`
  * (the diff from its commit to the head, null if unknown) is docs-only.
  */
-export function evaluateCodexGate({ headSha, comments = [], reviews = [], reviewComments = [], filesSinceLatest = null }) {
+export function evaluateCodexGate({
+    headSha,
+    comments = [],
+    reviews = [],
+    reviewComments = [],
+    filesSinceLatest = null,
+    dependencyBot = false,
+}) {
     const head = headSha.toLowerCase();
     const short = head.slice(0, 10);
     const all = codexOutputs({ comments, reviews, reviewComments });
@@ -271,6 +304,10 @@ export function evaluateCodexGate({ headSha, comments = [], reviews = [], review
     }
     if (isDocsOnlyFindings(latest) && onlyDocsSince) {
         return { state: "success", description: `Codex only flagged docs in ${latest.sha}; see its comments` };
+    }
+    // Only where it would otherwise wait: a verdict Codex did give still counts.
+    if (dependencyBot) {
+        return { state: "success", description: `Dependency bot PR: Codex isn't asked; ${short} passes without it` };
     }
     return {
         state: "pending",
@@ -340,7 +377,12 @@ async function main() {
         (latest?.kind === "ok" || isDocsOnlyFindings(latest)) && !headSha.toLowerCase().startsWith(latest.sha)
             ? await changedFiles(repo, latest.sha, headSha, token)
             : null;
-    const result = evaluateCodexGate({ headSha, comments, reviews, reviewComments, filesSinceLatest });
+    // The pulls commits API lists at most 250; a longer PR isn't a bot bump.
+    const dependencyBot =
+        DEPENDENCY_BOTS.has(String(pull.user?.login ?? "").toLowerCase()) &&
+        pull.commits <= 250 &&
+        isDependencyBotPr(pull.user.login, await ghAll(`/repos/${repo}/pulls/${pr}/commits`, token));
+    const result = evaluateCodexGate({ headSha, comments, reviews, reviewComments, filesSinceLatest, dependencyBot });
     console.log(`#${pr} ${headSha.slice(0, 10)}: ${result.state} — ${result.description}`);
     if (DRY_RUN) return;
     await gh(`/repos/${repo}/statuses/${headSha}`, token, {
