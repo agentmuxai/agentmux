@@ -1,7 +1,7 @@
 # Spec: one line-style UI component set (buttons, tabs, menus, form controls)
 
 **Date:** 2026-10-05
-**Status:** Active. PR 1 (tokens, components, CI ratchet) is built; the migrations in §8 follow.
+**Status:** active — PR 1 (tokens, components, CI ratchet) in PR #4365; the migrations in §8 follow.
 **Owner:** Agent4
 **Builds on:** `SPEC_DESIGN_SYSTEM_2026_04_23.md` (tokens and mixins, which landed), `SPEC_HARD_CORNERS_2026_05_26.md`, `SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md` (popup menus, still unbuilt)
 
