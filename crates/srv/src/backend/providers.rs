@@ -709,7 +709,10 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     // by SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md (added later);
     // None until independently verified rather than guessed.
     history_native_subdir: None,
-    auth_extra_env: &[("ANTIGRAVITY_FORCE_FILE_STORAGE", "true")],
+    // agy reads neither ANTIGRAVITY_FORCE_FILE_STORAGE nor
+    // ANTIGRAVITY_CONFIG_DIR (neither string is in agy.exe); it signs in once
+    // per machine. The frontend's `authType: "cli-managed"` binds no account.
+    auth_extra_env: &[],
     unset_env: &[],
     // Not on npm: `agy` is a native binary that Google's own installer
     // (https://antigravity.google/cli/install.ps1, and its `.sh` twin) puts
@@ -723,10 +726,9 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     base_url_env_var: None,
     supported_vendors: &["google"],
     // INFERRED, not independently doc-confirmed: Antigravity CLI's own
-    // settings live at ~/.gemini/antigravity-cli/settings.json — same
-    // ~/.gemini/ namespace root as Gemini CLI itself, consistent with this
-    // provider's own doc comment above (shares Gemini CLI's NDJSON
-    // schema). No explicit Antigravity docs page independently confirms
+    // settings live at ~/.gemini/antigravity-cli/settings.json — the same
+    // ~/.gemini/ namespace root as Gemini CLI itself (its output schema is
+    // its own, though). No explicit Antigravity docs page independently confirms
     // GEMINI.md context-file behavior. Flagged as a known gap. See
     // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
     startup_instructions_filename: Some("GEMINI.md"),
