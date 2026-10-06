@@ -17,7 +17,7 @@ function makeController(overrides: {
     now?: () => number;
     isPaneWorking?: ReturnType<typeof vi.fn<() => boolean>>;
     dispatchTurnStart?: ReturnType<typeof vi.fn<(content: string, hidden: boolean) => void>>;
-    dispatchTurnReset?: ReturnType<typeof vi.fn<() => void>>;
+    dispatchTurnStartFailed?: ReturnType<typeof vi.fn<() => void>>;
     sendRpc?: ReturnType<typeof vi.fn<(message: string) => Promise<void>>>;
     fetchEntries?: ReturnType<typeof vi.fn<() => Promise<MemoryEntryInput[]>>>;
 } = {}) {
@@ -34,7 +34,7 @@ function makeController(overrides: {
     // path; the busy-deferral describe block below overrides this explicitly.
     const isPaneWorking = overrides.isPaneWorking ?? vi.fn<() => boolean>().mockReturnValue(false);
     const dispatchTurnStart = overrides.dispatchTurnStart ?? vi.fn<(content: string, hidden: boolean) => void>();
-    const dispatchTurnReset = overrides.dispatchTurnReset ?? vi.fn<() => void>();
+    const dispatchTurnStartFailed = overrides.dispatchTurnStartFailed ?? vi.fn<() => void>();
     const sendRpc = overrides.sendRpc ?? vi.fn<(message: string) => Promise<void>>().mockResolvedValue(undefined);
     const fetchEntries =
         overrides.fetchEntries ??
@@ -45,11 +45,11 @@ function makeController(overrides: {
         now,
         isPaneWorking,
         dispatchTurnStart,
-        dispatchTurnReset,
+        dispatchTurnStartFailed,
         sendRpc,
         fetchEntries,
     });
-    return { controller, isPaneWorking, dispatchTurnStart, dispatchTurnReset, sendRpc, fetchEntries };
+    return { controller, isPaneWorking, dispatchTurnStart, dispatchTurnStartFailed, sendRpc, fetchEntries };
 }
 
 describe("createMemoryReinjectionController — idle pane (fires immediately)", () => {
@@ -120,19 +120,19 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
         expect(dispatchTurnStart).toHaveBeenCalledTimes(1);
     });
 
-    it("on RPC send failure: clears hiding, calls dispatchTurnReset, never leaves the pane stuck", async () => {
-        const { controller, dispatchTurnReset } = makeController({
+    it("on RPC send failure: clears hiding, calls dispatchTurnStartFailed, never leaves the pane stuck", async () => {
+        const { controller, dispatchTurnStartFailed } = makeController({
             sendRpc: vi.fn().mockRejectedValue(new Error("network down")),
         });
 
         await controller.trigger("2026-09-22T10:00:00.000Z", "compaction");
 
-        expect(dispatchTurnReset).toHaveBeenCalledTimes(1);
+        expect(dispatchTurnStartFailed).toHaveBeenCalledTimes(1);
         expect(controller.isHiding()).toBe(false);
     });
 
     it("on fetchEntries failure: never dispatches TurnStart, never hides — nothing was sent, so nothing needs resetting", async () => {
-        const { controller, dispatchTurnStart, dispatchTurnReset, sendRpc } = makeController({
+        const { controller, dispatchTurnStart, dispatchTurnStartFailed, sendRpc } = makeController({
             fetchEntries: vi.fn().mockRejectedValue(new Error("rpc down")),
         });
 
@@ -140,7 +140,7 @@ describe("createMemoryReinjectionController — idle pane (fires immediately)", 
 
         expect(dispatchTurnStart).not.toHaveBeenCalled();
         expect(sendRpc).not.toHaveBeenCalled();
-        expect(dispatchTurnReset).not.toHaveBeenCalled();
+        expect(dispatchTurnStartFailed).not.toHaveBeenCalled();
         expect(controller.isHiding()).toBe(false);
     });
 
@@ -378,7 +378,7 @@ describe("createMemoryReinjectionController — claimFallback (the SessionStart 
             now: () => 0,
             isPaneWorking,
             dispatchTurnStart,
-            dispatchTurnReset: vi.fn(),
+            dispatchTurnStartFailed: vi.fn(),
             sendRpc,
             fetchEntries: vi.fn<() => Promise<MemoryEntryInput[]>>().mockResolvedValue([globalEntry("g1", "body")]),
             claimFallback: claim,
@@ -480,7 +480,7 @@ describe("createMemoryReinjectionController — srv composes (CD2b)", () => {
             sendRpc,
             compose: compose as never,
             dispatchTurnStart: vi.fn(),
-            dispatchTurnReset: vi.fn(),
+            dispatchTurnStartFailed: vi.fn(),
         });
         return { controller, sendRpc, fetchEntries };
     };
@@ -528,7 +528,7 @@ describe("createMemoryReinjectionController — compaction claimed at the bounda
             now: () => 0,
             isPaneWorking: () => busy,
             dispatchTurnStart: vi.fn(),
-            dispatchTurnReset: vi.fn(),
+            dispatchTurnStartFailed: vi.fn(),
             sendRpc,
             fetchEntries,
             claimFallback: claim,

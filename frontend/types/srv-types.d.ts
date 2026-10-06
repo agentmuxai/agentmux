@@ -949,6 +949,23 @@ declare global {
             model?: string | null;
             effort?: string | null;
         };
+        /** The agent pane's context-meter reading, mirrored for views that
+         *  can't see the pane's state (the Swarm). Frontend-only; written by
+         *  agent-view.tsx, read through `contextReadingFromMeta`
+         *  (store/agent-pane-state/context-reading.ts). */
+        "agent:context"?: {
+            tokens: number;
+            model: string | null;
+            window: number | null;
+            windowSource: "reported" | "model" | "learned" | null;
+            source: "live" | "history";
+            at: number | null;
+            switchedTo?: string | null;
+        } | null;
+        /** @deprecated Bare context-token count from older builds (it could hold
+         *  a turn total, not a context size). Cleared by the agent pane; read by
+         *  nothing. Use "agent:context". */
+        "term:ctx-tokens"?: number | null;
         "session:start_ts_ms"?: number;
         "session:last_activity_ms"?: number;
         "session:line_count"?: number;

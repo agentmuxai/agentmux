@@ -78,6 +78,7 @@ import { usePaneReveal } from "./hooks/usePaneReveal";
 import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { LIVE_FEED_RESTORE_BYTES } from "./live-feed";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
+import { useContextReading } from "./hooks/useContextReading";
 import { useFocusRepoll, useHeldMessageDelivery } from "./hooks/useTurnReconciliation";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
@@ -300,15 +301,19 @@ export const AgentPresentationView = ({
                 void RpcApi.DeleteSubBlockCommand(TabRpcClient, { blockid: shellSubBlockIdRef });
             }
         });
-
-        // Mirror context token count to block meta so the Swarm view can read
-        // it without needing access to per-pane in-memory signals. Fires at
-        // most once per turn (TokensIn at message_start).
-        createEffect(() => {
-            const tokens = (paneModel.state.lastContextTokens ?? null);
-            void setBlockMeta(model.blockId, { "term:ctx-tokens": tokens ?? null } as any);
-        });
     }
+
+    // The context meter: validated reading, its provenance note, and the
+    // Swarm's meta mirror (hooks/useContextReading.ts).
+    const { reading: contextReading, note: contextNote } = useContextReading(
+        model.blockId,
+        () => paneModel.state.context,
+        {
+            ready: () => paneModel.state.initPhase.kind === "InitReady",
+            meta: () => block()?.meta,
+            onModelSwitched: (m) => paneModel.dispatchPane({ type: "ContextModelSwitched", model: m }, "system"),
+        },
+    );
 
     // ── Layout slice lifecycle. The slice is FED from
     //    AgentDocumentVirtualList (Phase 3): it owns `partition()`, so it can
@@ -1405,8 +1410,9 @@ export const AgentPresentationView = ({
                 loading={paneBusy()}
                 logOpen={paneModel.state.detailsOpen}
                 onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
-                contextTokens={(paneModel.state.lastContextTokens ?? null)}
-                contextWindow={(paneModel.state.lastContextWindow ?? null) ?? provider()?.contextWindow}
+                contextTokens={contextReading()?.tokens ?? null}
+                contextWindow={contextReading()?.window ?? undefined}
+                contextNote={contextNote()}
                 lastReplyModel={paneModel.state.lastContextModel}
                 authStatus={loginStatus()}
                 authEmail={authEmail()}

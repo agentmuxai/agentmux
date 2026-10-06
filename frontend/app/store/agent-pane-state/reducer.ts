@@ -48,8 +48,68 @@ import {
     workingFromPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
-import { learnContextWindow } from "./context-window";
+import {
+    implausibleReason,
+    learnedWindowsAfter,
+    makeContextReading,
+    mergeContextWindows,
+    plausibleReading,
+    refutedReportedWindow,
+    rewindowContextReading,
+    windowFor,
+    type ContextReading,
+} from "./context-reading";
 import { turnAddedInput } from "./turn-contribution";
+
+/** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
+function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {
+    return {
+        type: "context-reading-rejected",
+        tokens: reading.tokens,
+        window: reading.window,
+        model: reading.model,
+        source: reading.source,
+        reason,
+    };
+}
+
+/**
+ * `state` with `reading` as the pane's reading — any window it proved recorded
+ * per model — plus the events it warrants: `context-reading-rejected` when it
+ * can't be shown and `wasShown` says it is news (a reading that just turned
+ * implausible, not one refused again), and `context-window-refuted` when it
+ * newly contradicts a reported window.
+ */
+function withReading(
+    state: AgentPaneState,
+    reading: ContextReading | null,
+    wasShown: boolean,
+): { state: AgentPaneState; events: AgentPaneEvent[] } {
+    const events: AgentPaneEvent[] = [];
+    if (reading) {
+        const reason = implausibleReason(reading);
+        if (reason != null && wasShown) events.push(rejectedEvent(reading, reason));
+        const refuted = refutedReportedWindow(reading, state.reportedContextWindows);
+        const knownBefore = windowFor(state.learnedContextWindows, reading.model);
+        if (refuted != null && reading.model && reading.window != null && (knownBefore == null || knownBefore < reading.window)) {
+            events.push({
+                type: "context-window-refuted",
+                model: reading.model,
+                reported: refuted,
+                tokens: reading.tokens,
+                window: reading.window,
+            });
+        }
+    }
+    const learnedContextWindows = learnedWindowsAfter(state.learnedContextWindows, reading);
+    return { state: { ...state, context: reading, learnedContextWindows }, events };
+}
+
+/** A live reading taken after `t` (unix ms): it already measures what an event
+ *  at `t` left behind. */
+function readingPostdates(reading: ContextReading | null, t: number): boolean {
+    return reading != null && reading.source === "live" && reading.at != null && reading.at > t;
+}
 
 export function update(
     state: AgentPaneState,
@@ -546,16 +606,75 @@ export function update(
         }
 
         case "ReconcileContextFromHistory": {
-            // Only ever seeds the mount-default null — never overrides a
-            // real live TokensIn (or an earlier reconciliation) that already
-            // landed. Mirrors ReconcileTurnActive's only-if-still-default
-            // guard above.
-            if (state.lastContextTokens != null) {
-                return { state, events: [] };
+            // The history's reported windows are older than any reported
+            // live, so live entries stay on top.
+            const reportedContextWindows = command.reportedWindows
+                ? mergeContextWindows(command.reportedWindows, state.reportedContextWindows)
+                : state.reportedContextWindows;
+            const merged = { ...state, reportedContextWindows };
+            const known = { reported: reportedContextWindows, learned: state.learnedContextWindows };
+            // Seeds only while nothing more current has spoken — a live
+            // reading, an invalidation, a compaction, a reset — never over
+            // real-time data, and never a conversation invalidated while the
+            // history was still loading (`contextSeedable`). The windows
+            // still merge either way.
+            if (!state.contextSeedable || command.tokens == null) {
+                if (reportedContextWindows === state.reportedContextWindows) return { state, events: [] };
+                return withReading(merged, rewindowContextReading(state.context, known), plausibleReading(state.context) != null);
+            }
+            const model = command.model ?? state.lastContextModel;
+            const reading = makeContextReading(
+                { tokens: command.tokens, model, source: "history", at: command.at ?? null },
+                known,
+            );
+            const reason = implausibleReason(reading);
+            if (reason != null) {
+                return {
+                    state: reportedContextWindows === state.reportedContextWindows ? state : merged,
+                    events: [rejectedEvent(reading, reason)],
+                };
+            }
+            const seeded = withReading(
+                { ...merged, contextSeedable: false, lastContextModel: state.lastContextModel ?? model },
+                reading,
+                false,
+            );
+            return {
+                state: seeded.state,
+                events: [{ type: "context-reconciled-at-mount", tokens: command.tokens }, ...seeded.events],
+            };
+        }
+
+        case "ContextWindowsReported": {
+            const reportedContextWindows = mergeContextWindows(state.reportedContextWindows, command.windows);
+            if (reportedContextWindows === state.reportedContextWindows) return { state, events: [] };
+            const reading = rewindowContextReading(state.context, {
+                reported: reportedContextWindows,
+                learned: state.learnedContextWindows,
+            });
+            return withReading({ ...state, reportedContextWindows }, reading, plausibleReading(state.context) != null);
+        }
+
+        case "ContextInvalidated": {
+            if (state.context == null && !state.contextSeedable) return { state, events: [] };
+            return { state: { ...state, context: null, contextSeedable: false }, events: [] };
+        }
+
+        case "ContextModelSwitched": {
+            const r = state.context;
+            if (r == null || r.switchedTo === command.model) return { state, events: [] };
+            // Switching back to the model the reading was measured on before
+            // any reply: its window holds again.
+            if (r.model != null && command.model === r.model) {
+                const back = rewindowContextReading(
+                    { ...r, switchedTo: null },
+                    { reported: state.reportedContextWindows, learned: state.learnedContextWindows },
+                );
+                return { state: { ...state, context: back }, events: [] };
             }
             return {
-                state: { ...state, lastContextTokens: command.tokens },
-                events: [{ type: "context-reconciled-at-mount", tokens: command.tokens }],
+                state: { ...state, context: { ...r, window: null, windowSource: null, switchedTo: command.model } },
+                events: [],
             };
         }
 
@@ -758,7 +877,8 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
-                    lastContextTokens: 0,
+                    context: null,
+                    contextSeedable: false,
                     // TurnReset is a wholesale clear → Idle. The
                     // working/stopping cascade lives entirely on
                     // turnPhase since PR G.
@@ -776,9 +896,9 @@ export function update(
             // Deliberately touches ONLY turnPhase (+ compacting, see below)
             // — see this command's doc
             // comment in types.ts for why TurnReset's wholesale clear is
-            // wrong here (a transient send failure must not wipe
-            // sessionStats/sessionTotals/lastContextTokens accumulated by
-            // prior real turns in this same pane).
+            // wrong here (a transient send failure, or a slash/bang command
+            // handled locally, must not wipe sessionStats/sessionTotals/
+            // context accumulated by prior real turns in this same pane).
             // `compacting` IS cleared, unlike the fields above: codex P2
             // on PR #2378 (round 8) — a `compaction_started` ping can
             // land while this (new, doomed) turn attempt is briefly
@@ -822,10 +942,13 @@ export function update(
             // the turn's first call and carried unchanged after. It is the
             // previous turn's last context size; with nothing before it (a
             // fresh pane, after TurnReset) the first call's own input stands
-            // in, so the turn is not credited with the system prompt.
+            // in, so the turn is not credited with the system prompt. A
+            // reading restored from history is the same quantity (the last
+            // call's prompt), so it serves as well as a live one.
+            const prevReading = state.context;
             const contextBaseline =
                 state.turnTokens?.contextBaseline ??
-                ((state.lastContextTokens ?? 0) > 0 ? (state.lastContextTokens as number) : command.input);
+                (plausibleReading(prevReading)?.tokens ?? command.input);
             const next = {
                 input: command.input,
                 output: state.turnTokens?.output ?? 0,
@@ -834,29 +957,27 @@ export function update(
                 cacheRead: command.cacheRead,
                 contextBaseline,
             };
-            // Learn the context window from the resolved model + observed fill
-            // (seed-then-high-water-upgrade); null until a recognised model is
-            // seen, so the view falls back to the provider's static window.
-            const learnedWindow =
-                learnContextWindow(
-                    state.lastContextWindow,
-                    command.input,
-                    command.model,
-                    state.lastContextModel,
-                ) ?? state.lastContextWindow;
-            const nextState = bumpEvent(
-                {
-                    ...state,
-                    turnTokens: next,
-                    lastContextTokens: command.input,
-                    lastContextWindow: learnedWindow ?? null,
-                    lastContextModel: command.model ?? state.lastContextModel,
-                },
-                nowMs,
-                0,
+            // The window: reported by Claude Code for this model, a larger one
+            // proven by an accepted prompt, else the model-name table
+            // (context-reading.ts). Unknown stays unknown.
+            const model = command.model ?? state.lastContextModel;
+            const reading = makeContextReading(
+                { tokens: command.input, model, source: "live", at: nowMs },
+                { reported: state.reportedContextWindows, learned: state.learnedContextWindows },
             );
+            // Kept in state even when the meter won't show it (the next call
+            // replaces it). Refusing it is news only when the meter had
+            // something to show, or nothing at all, before — not on every
+            // call of a turn that keeps reporting the same impossibility.
+            const withLive = withReading(
+                { ...state, turnTokens: next, lastContextModel: model, contextSeedable: false },
+                reading,
+                prevReading == null || plausibleReading(prevReading) != null,
+            );
+            const nextState = bumpEvent(withLive.state, nowMs, 0);
             const events: AgentPaneEvent[] = [
                 { type: "tokens-updated", input: command.input, output: null },
+                ...withLive.events,
             ];
             // Detect context compaction: token count drops ≥50% from a
             // non-trivial baseline. Compaction typically drops 80–95%;
@@ -865,14 +986,23 @@ export function update(
             //
             // Backstop only for Claude: a REAL `CompactionBoundary` event
             // (exact backend data, not inferred) already fired its own
-            // `context-compacted` and reconciled `lastContextTokens` to
-            // `postTokens` — suppress this heuristic within the window
-            // below so the same boundary doesn't produce two events.
+            // `context-compacted` and cleared `context` (so there is no
+            // "before" to compare) — the window below suppresses the
+            // heuristic as well, so the same boundary can't produce two
+            // events whatever the ordering.
             // Providers without a structured signal (codex/gemini/copilot)
             // never set `lastCompactionBoundaryAt`, so the heuristic stays
             // fully active for them. See
             // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.3.
-            const prev = state.lastContextTokens;
+            //
+            // Only a reading this process measured counts as "before": a
+            // seed restored from history describes a session that may since
+            // have been resumed, replaced or compacted out of sight, and
+            // comparing against it once produced a "compacted 17m → 300k"
+            // card on a pane's first turn (REPORT_AGENT_PANE_CONTEXT_METER_
+            // 2026_10_05.md §2.3). An implausible reading is no baseline either.
+            const prevPlausible = plausibleReading(prevReading);
+            const prev = prevPlausible?.source === "live" ? prevPlausible.tokens : null;
             const suppressedByRealBoundary =
                 state.lastCompactionBoundaryAt != null
                 && nowMs - state.lastCompactionBoundaryAt < COMPACTION_HEURISTIC_SUPPRESS_MS;
@@ -1445,19 +1575,22 @@ export function update(
                 // back to `command.at` when frameTimestamp is unparseable,
                 // same as preservesNewerCompaction above.
                 lastCompactionBoundaryAt: Number.isNaN(boundaryAt) ? command.at : boundaryAt,
-                // reagent P2 on PR #2378 (round 11): gated the same way as
-                // `compacting` above. When this boundary belongs to an
-                // OLDER compaction that's finishing after a newer one has
-                // already started (preservesNewerCompaction), its
-                // postTokens describes a context-fill state that's already
-                // stale -- overwriting the live lastContextTokens with it
-                // would show a smaller/incorrect reading while the newer
-                // compaction is still confirmed in flight. The
-                // context-compacted event below still reports this
-                // boundary's own true tokens (accurate historical record
-                // of what that specific compaction did); only the live
-                // state gate changes here.
-                lastContextTokens: preservesNewerCompaction ? state.lastContextTokens : command.postTokens,
+                // The reading measured the conversation before this
+                // compaction, so it no longer holds; the meter shows none
+                // until the next call reports the real size. `postTokens` is
+                // NOT that size: it counts only the summary messages, not the
+                // system prompt and tools every call carries (CLI 2.1.288: a
+                // /compact reported post_tokens 1,417; the next call's prompt
+                // was 39,490). Kept when this boundary is an OLDER compaction
+                // finishing after a newer one started (reagent P2 on PR #2378
+                // round 11, gated like `compacting` above), or when the
+                // reading already postdates the boundary.
+                context:
+                    preservesNewerCompaction || readingPostdates(state.context, Number.isNaN(boundaryAt) ? command.at : boundaryAt)
+                        ? state.context
+                        : null,
+                // A restored transcript ends before this boundary.
+                contextSeedable: false,
             };
             if (state.lastEventMs != null) {
                 next.lastEventMs = command.at;

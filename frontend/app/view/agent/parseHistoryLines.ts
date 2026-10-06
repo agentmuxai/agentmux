@@ -16,25 +16,30 @@ import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcom
 import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
 import { parseCliNoticeFrame } from "./cli-notice";
 import { ClaudeCodeStreamParser } from "./stream-parser";
-import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode, SessionStats } from "./types";
+import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
+import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
+
+/**
+ * The context size a transcript ends on: the main agent's last API call's whole
+ * prompt (fresh + cache creation + cache read) and the model it ran on. None
+ * after a compaction until the next call. Never a `result`'s usage, which sums
+ * every call of the turn
+ * (docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md §2).
+ */
+export interface HistoryContext {
+    tokens: number;
+    model: string | null;
+    /** The line's receive stamp (unix ms), when the backend has one. */
+    at: number | null;
+}
 
 export interface ParsedHistory {
     nodes: DocumentNode[];
-    /**
-     * Stats payload of the last `session_end` event seen during replay that
-     * actually carries token usage, or `null` if none was found. Claude's
-     * persistent-mode controller emits a `session_end` after EVERY plain-text
-     * turn as a boundary marker with `stats: {}` (see
-     * ClaudeTranslator.handleAssistantMessage) — the real usage-bearing
-     * `result` event only fires at process teardown, which for a
-     * long-running persistent session may be far earlier in the replayed
-     * window than the last turn boundary. Tracking the chronologically last
-     * `session_end` unconditionally would let an empty boundary marker
-     * clobber real historical stats. Callers use this to seed the composer
-     * strip's context-fill bar at mount (see useAgentStream's `finalizeTurn`
-     * / `TokensIn` for the live-stream equivalent).
-     */
-    lastSessionStats: SessionStats | null;
+    /** See `HistoryParser.lastContext`. Seeds the context meter at mount. */
+    lastContext: HistoryContext | null;
+    /** See `HistoryParser.reportedContextWindows`. */
+    reportedContextWindows: Record<string, number>;
 }
 
 /**
@@ -57,7 +62,8 @@ export interface ParsedHistory {
  *                     node unstamped (never 0 → never a 1970 hover). Spec:
  *                     SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md §4.4.
  * @returns            Ordered DocumentNodes (deduped by node id) plus the
- *                      last `session_end` stats payload found, if any.
+ *                      context the window ends on and the context windows
+ *                      its `result` frames reported.
  */
 export function parseHistoryLines(
     lines: string[],
@@ -68,7 +74,11 @@ export function parseHistoryLines(
 ): ParsedHistory {
     const parser = new HistoryParser(outputFormat, agentName, opts);
     parser.feed(lines, stamps);
-    return { nodes: parser.nodes, lastSessionStats: parser.lastSessionStats };
+    return {
+        nodes: parser.nodes,
+        lastContext: parser.lastContext,
+        reportedContextWindows: parser.reportedContextWindows,
+    };
 }
 
 export interface HistoryParserOptions {
@@ -125,7 +135,24 @@ export class HistoryParser {
     // accumulated tail (the last delta containing the full text) wins,
     // which is the same end state the live stream produces.
     private readonly indexById = new Map<string, number>();
-    lastSessionStats: SessionStats | null = null;
+    /**
+     * The context the lines fed so far end on (`HistoryContext`): the last
+     * main-agent API call — read the same way as live (`mainAgentUsage`:
+     * `message_start` or `assistant`, subagents' lines ignored). Reset to null
+     * at a compaction (the next call reports the new size) and at a `fresh`
+     * session boundary
+     * (codex P2 on PR #2507): the fresh model has none of the old session's
+     * tokens, so only post-boundary usage may seed the meter.
+     */
+    lastContext: HistoryContext | null = null;
+    /** The main agent's model as of the last call seen, across boundaries —
+     *  a compaction's reading is measured on it. */
+    private lastModel: string | null = null;
+    /** The stream carries Claude Code's per-call usage (`readsMainAgentUsage`). */
+    private readonly readsUsage: boolean;
+    /** Context windows the lines' `result` frames reported
+     *  (`modelUsage[*].contextWindow`), later frames winning. */
+    reportedContextWindows: Record<string, number> = {};
 
     constructor(
         outputFormat: string,
@@ -133,6 +160,7 @@ export class HistoryParser {
         private readonly opts?: HistoryParserOptions
     ) {
         this.translator = createTranslator(outputFormat, { replay: true });
+        this.readsUsage = readsMainAgentUsage(outputFormat);
         if (agentName) this.parser.setAgentId(agentName);
     }
 
@@ -203,6 +231,19 @@ export class HistoryParser {
             // Handle stderr events (unlikely in persisted history, but be safe)
             if (rawEvent.type === "stderr") continue;
 
+            // Observe only, like the live path's usage read in
+            // useAgentStream.ts — the frame still flows through everything
+            // below.
+            if (this.readsUsage) {
+                const usage = mainAgentUsage(rawEvent);
+                if (usage?.kind === "in") {
+                    if (usage.model) this.lastModel = usage.model;
+                    this.lastContext = { tokens: usage.input, model: this.lastModel, at: stampFor(lineIdx) ?? null };
+                }
+                const windows = reportedContextWindowsFromResult(rawEvent);
+                if (windows) this.reportedContextWindows = { ...this.reportedContextWindows, ...windows };
+            }
+
             // Observe only — the frame still flows through everything below.
             // Replay is the path that needs this: the persisted stream is the
             // one place a finished background task's end is still recorded
@@ -233,6 +274,11 @@ export class HistoryParser {
                 // per-line loop processed them.
                 parser.flushPending();
                 putReleased();
+                // The last call before a compaction measures a conversation
+                // that no longer exists, and the boundary's post_tokens is not
+                // the new size (summary messages only, no system prompt or
+                // tools): nothing to seed until the next call.
+                this.lastContext = null;
                 const data = parseCompactBoundaryFrame(rawEvent);
                 if (data) {
                     this.compactionSummaries.noteBoundary(data);
@@ -278,7 +324,7 @@ export class HistoryParser {
                 // session until some future real user_message appears.
                 // Unconditional on this frame merely being SEEN (not gated on
                 // `data` parsing successfully or on which outcome it reports,
-                // unlike the narrower `lastSessionStats` reset below) — any
+                // unlike the narrower `lastContext` reset below) — any
                 // session boundary is a safe point to stop trusting a flag
                 // that was only ever meant to span a single turn, and a stuck
                 // suppression that silently eats real history is a worse
@@ -292,14 +338,14 @@ export class HistoryParser {
                 // AFTER the first post-resume exchange — as a divider row it
                 // announces a non-event in the wrong place. The line stays in
                 if (data && data.outcome === "fresh") {
-                    // codex P2 on PR #2507: a usage-bearing `session_end` seen
-                    // BEFORE this boundary belongs to the old session — the
-                    // fresh model has none of those tokens in context. Without
-                    // this reset, a restore window shaped [old result → fresh
-                    // boundary → no new result yet] hydrates the context-fill
-                    // bar (`ReconcileContextFromHistory`) with the dead
-                    // session's count. Only post-boundary usage may seed it.
-                    this.lastSessionStats = null;
+                    // codex P2 on PR #2507: usage seen BEFORE this boundary
+                    // belongs to the old session — the fresh model has none
+                    // of those tokens in context. Without this reset, a
+                    // restore window shaped [old call → fresh boundary → no
+                    // new call yet] hydrates the context meter
+                    // (`ReconcileContextFromHistory`) with the dead session's
+                    // count. Only post-boundary usage may seed it.
+                    this.lastContext = null;
                 }
                 if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {
                     const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
@@ -381,15 +427,9 @@ export class HistoryParser {
                     // The turn ended: a jekt held for its last block goes out now.
                     parser.releaseHeld();
                     putReleased();
-                    // Only overwrite when this session_end actually carries usage —
-                    // skip the empty-stats per-turn boundary marker so it can't
-                    // clobber a real result's stats seen earlier in the window.
-                    if (
-                        event.stats &&
-                        (typeof event.stats.input_tokens === "number" || typeof event.stats.output_tokens === "number")
-                    ) {
-                        this.lastSessionStats = event.stats;
-                    }
+                    // Its stats are the turn's totals — every call summed —
+                    // and are deliberately NOT a context size; the meter's
+                    // seed is `lastContext` above.
                     continue;
                 }
                 const node = parser.parseLine(JSON.stringify(event));
