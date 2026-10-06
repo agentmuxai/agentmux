@@ -480,8 +480,18 @@
 // tile's `<li>`, which is what put them under the tallest tile of the row.
 // ---------------------------------------------------------------------------
 
+// Text of a portaled panel. `.agent-view` sets these and the panels no longer
+// inherit them, so without this they would fall back to the app's sans body font.
+@mixin agent-panel-text {
+    color: var(--main-text-color);
+    font-family: var(--font-mono);
+    font-size: var(--font-agent-size);
+    line-height: 1.35;
+}
+
 // Row actions menu — the popover body.
 .agent-row-menu {
+    @include agent-panel-text;
     min-width: 180px;
     border: 1px solid var(--border-color);
     // `--panel-bg-color`/`--main-bg-color` are deliberately translucent
@@ -541,6 +551,7 @@
 // Same opaque-backdrop reasoning as `.agent-row-menu`; the accent tint keeps it
 // distinct from the actions menu.
 .agent-fork-prompt {
+    @include agent-panel-text;
     width: 360px;
     max-width: 90vw;
     display: flex;
