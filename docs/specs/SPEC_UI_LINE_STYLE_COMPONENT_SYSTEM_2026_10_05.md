@@ -377,16 +377,16 @@ Recommendation: leave both as they are.
 
 ## 7. Enforcement
 
-Stylelint doesn't run in CI, so this follows the repo's own gate pattern (`scripts/check-no-transition-all.sh`, `check-scrollbar-cursor.sh`). `scripts/check-ui-primitives.mjs` runs in `ci-pr.yml` and holds four counts at a checked-in baseline, `scripts/ui-primitives-baseline.json`:
+Stylelint doesn't run in CI, so this follows the repo's own gate pattern (`scripts/check-no-transition-all.sh`, `check-scrollbar-cursor.sh`). `scripts/check-ui-primitives.mjs` runs in `ci-pr.yml` and compares four counts in the PR with the same counts at its merge-base on the base branch:
 
-| Check | What it counts | At baseline (2026-10-05) |
+| Check | What it counts | When this started (2026-10-05) |
 |---|---|---|
 | 1. Hand-rolled buttons | `<button` in `.tsx` outside `element/ui/` and tests, per file | 389 |
 | 2. Solid fills on controls | SCSS rules whose `background` is `var(--accent-color\|--error-color\|--success-color)`, with or without a fallback, and whose resolved selector names a control (`btn`, `button`, `tab`, `toggle`, `is-active`, `--active`, `--on`, `--primary`, `--confirm`, `--destructive`, `--danger`). Pseudo-element underlines are ignored. | 34 |
 | 3. Corners | `border-radius` values other than `0`, `var(--radius-*)`, `50%`, `inherit` or `none`, per file | 170 |
 | 4. Undefined variables | `var(--x)` where `--x` is declared in no stylesheet and set by no script. Comments and tests don't count. | 29 |
 
-A count above the baseline fails the PR. A count below it fails too, with the instruction to run `node scripts/check-ui-primitives.mjs --update` and commit the result, so each migration PR lowers the baseline as it goes. An entry added to the baseline shows in the PR diff and needs a reason there. The two decided exceptions at the end of §6 aren't caught by check 2 at all.
+A count above the base branch's fails the PR; a count below it is reported and passes. The first version kept the counts in a checked-in baseline, `scripts/ui-primitives-baseline.json`, that each migration PR had to lower. Every migration edited the same file, so each merge put the other open migrations into conflict; comparing with the base branch gives the same ratchet with nothing to keep in sync. The two decided exceptions at the end of §6 aren't caught by check 2 at all.
 
 ## 8. Migration plan
 

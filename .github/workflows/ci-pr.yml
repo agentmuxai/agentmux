@@ -501,7 +501,8 @@ jobs:
 
       # Ratchet for the line-style component set: hand-rolled buttons, solid
       # fills on controls, off-token corner radii and undefined CSS variables
-      # may only go down (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7).
+      # may not go up compared with the base branch, which this job's
+      # fetch-depth: 0 checkout has (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §7).
       - name: UI primitives ratchet
         run: node scripts/check-ui-primitives.mjs
 
