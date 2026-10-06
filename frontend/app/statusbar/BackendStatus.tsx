@@ -9,6 +9,7 @@ import { getGpuInfo } from "@/util/gpuutil";
 import { Accessor, createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { formatUptime, resolveUptimeSecs } from "./backend-uptime";
+import { Button } from "@/app/element/ui";
 
 function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
     switch (c) {
@@ -111,8 +112,9 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                     </span>
                 </div>
                 <div class="status-bar-popover-row">
-                    <button
-                        type="button"
+                    <Button
+                        density="compact"
+                        tone="danger"
                         class="status-bar-restart-btn"
                         onClick={() => {
                             props.onClose();
@@ -120,7 +122,7 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                         }}
                     >
                         Open Maintenance ↗
-                    </button>
+                    </Button>
                 </div>
             </Show>
             {/* GPU / WebGL rendering — enabled/disabled + driver info.
@@ -190,13 +192,15 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
                 </Show>
                 <div class="status-bar-popover-divider" />
                 <div class="status-bar-popover-row">
-                    <button
+                    <Button
+                        density="compact"
+                        tone="danger"
                         class="status-bar-restart-btn"
                         disabled={props.restarting()}
                         onClick={props.onRestart}
                     >
                         {props.restarting() ? "Restarting…" : "Restart Backend"}
-                    </button>
+                    </Button>
                 </div>
             </Show>
         </AnchoredPopover>

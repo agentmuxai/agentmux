@@ -18,6 +18,7 @@ import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { openKnowledge } from "@/app/view/section-pane/panes";
 import { AgentSkillModel } from "../agent-skill-model";
 import "./AgentPrimitiveModal.scss";
+import { Button } from "@/app/element/ui";
 
 interface AgentSkillsModalProps {
     agentId: string;
@@ -125,20 +126,21 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                             <Show
                                 when={skill().bound_to_agent}
                                 fallback={
-                                    <button
+                                    <Button
+                                        tone="accent"
                                         class="agent-primitive-modal-btn agent-primitive-modal-btn-primary"
                                         onClick={() => void model.bind(skill().id)}
                                     >
                                         Bind
-                                    </button>
+                                    </Button>
                                 }
                             >
-                                <button
+                                <Button
                                     class="agent-primitive-modal-btn"
                                     onClick={() => void model.unbind(skill().id)}
                                 >
                                     Unbind
-                                </button>
+                                </Button>
                             </Show>
                         </div>
                     </div>

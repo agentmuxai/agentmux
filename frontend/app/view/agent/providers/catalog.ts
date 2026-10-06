@@ -156,7 +156,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // anthropics/claude-code#29898). Without git the CLI fails
         // with `Error: Git is required but was not found.`.
         systemPrereqs: [GIT_PREREQ, NODE_PREREQ, NPM_PREREQ],
-        contextWindow: 200_000,
         // Labels carry the concrete version the pinned CLI (see `pinnedVersion`)
         // currently resolves each family alias to — curated, kept in sync on a
         // pin bump (SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG Part B). The `value`
@@ -216,7 +215,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "thread_id",
         controllerType: "subprocess",
         systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
-        contextWindow: 200_000,
         // Verify ChatGPT-account availability when bumping the codex CLI pin.
         models: [
             { value: "gpt-5.5", label: "GPT-5.5", default: true, description: "Current codex frontier" },
@@ -260,7 +258,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
         systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
-        contextWindow: 200_000,
     },
     gemini: {
         id: "gemini",
@@ -291,7 +288,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
         systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
-        contextWindow: 1_000_000,
     },
     // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
     // Same stream-json headless surface → reuses the gemini translator
@@ -394,7 +390,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Node ("node:sqlite truncates TEXT at embedded NUL", nodejs/node#61954),
         // checked at 2026.9.4, 2026.9.7 and 2026.9.8.
         systemPrereqs: [GIT_PREREQ, { ...NODE_PREREQ, minVersion: "24.16.0" }, NPM_PREREQ],
-        contextWindow: 200_000,
     },
     // Kimi Code CLI — Moonshot AI's coding agent.
     // Python-based CLI (not npm). Supports stream-json output and OpenAI-style tool calls.
@@ -423,7 +418,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "session_id",
         controllerType: "subprocess",
-        contextWindow: 128_000,
     },
     // GitHub Copilot CLI — Microsoft's coding agent.
     // Runs in ACP mode (`--acp` flag) so the existing ACP controller
@@ -459,7 +453,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "sessionId",
         controllerType: "acp",
         systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
-        contextWindow: 128_000,
     },
     // Pi — the lightweight coding agent that powers OpenClaw.
     // Standalone CLI, no gateway required. Pure coding agent with read/write/bash/edit tools.
@@ -523,7 +516,6 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         sessionIdField: "session_id",
         controllerType: "subprocess",
         systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
-        contextWindow: 1_000_000,
         models: [
             { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", default: true, description: "Fast, highly capable frontier model with 1M context" },
             { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Deep reasoning and complex coding" },

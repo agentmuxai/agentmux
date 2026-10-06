@@ -18,6 +18,7 @@ import { MOS } from "@/app/store/global";
 import { callBackendService } from "@/store/mos";
 import { BlockService } from "@/app/store/services";
 import { readSwarmSummary } from "@/app/store/activitySummary";
+import { contextReadingFromMeta } from "@/app/store/agent-pane-state/context-reading";
 import { resolveSwarmLine, type SwarmLine } from "@/app/store/swarm-line";
 import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, type Accessor, type Setter } from "solid-js";
@@ -425,6 +426,16 @@ export function buildCronRows(crons: ActiveCron[], blockId: string | null): Acti
  * `buildShellRows`/`buildCronRows` above.
  * See RETRO_SWARM_PHANTOM_ROWS_AND_STALE_TRACKING_2026_08_06.md.
  */
+/**
+ * The context size a Swarm row shows: the agent pane's own validated reading,
+ * mirrored to `agent:context` (store/agent-pane-state/context-reading.ts). The
+ * legacy bare `term:ctx-tokens` is ignored: older builds wrote turn totals
+ * there (a "17m" context), and a pane that isn't open never rewrites it.
+ */
+export function swarmContextTokens(meta: MetaType | null | undefined): number | null {
+    return contextReadingFromMeta(meta?.["agent:context"])?.tokens ?? null;
+}
+
 export function hasRenderableBlock<T>(block: T | null | undefined, isLoading: boolean): boolean {
     if (isLoading) return true;
     return block != null;
@@ -2113,8 +2124,7 @@ export class SwarmViewModel {
                 (block?.meta?.["agentProvider"] as string | undefined)?.trim() || null;
             // The same function the pane tab tooltip uses, so the two cannot disagree.
             const activitySummary = readSwarmSummary(block?.meta);
-            const rawCtx = block?.meta?.["term:ctx-tokens"];
-            const contextTokens = typeof rawCtx === "number" ? rawCtx : null;
+            const contextTokens = swarmContextTokens(block?.meta);
             const agentStatus = statuses.get(blockId) ?? "idle";
             const { agentToolRows: rawAgentToolRows, workflowRows: rawWorkflowRows } = buildDispatchBuckets(
                 dispatches.filter((d) => d.parent_block_id === blockId),

@@ -131,6 +131,15 @@
     font-variant-numeric: tabular-nums;
 }
 
+// Where the Context row's numbers come from (contextReadingNote): one or two
+// short sentences under the row, wrapped to the panel's width.
+.agent-session-stats-note {
+    max-width: 260px;
+    padding: 0 var(--space-2) 2px;
+    color: var(--secondary-text-color);
+    white-space: pre-line;
+}
+
 .agent-session-stats-actions {
     display: flex;
     gap: var(--space-1-5);

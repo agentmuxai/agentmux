@@ -181,7 +181,12 @@ export function resolveSwarmLine(input: SwarmLineInput): SwarmLine {
         return { text: currentTool ? STATUS_WORKING : STATUS_THINKING, source: "status" };
     }
     return {
-        text: (contextTokens ?? 0) > 0 ? STATUS_SUMMARIZING : STATUS_NO_ACTIVITY,
+        // Any transcript counts as history: a context reading exists only for
+        // providers that report one (Claude), and only once the pane mirrored it.
+        text:
+            (contextTokens ?? 0) > 0 || ((meta?.["session:line_count"] as number | undefined) ?? 0) > 0
+                ? STATUS_SUMMARIZING
+                : STATUS_NO_ACTIVITY,
         source: "status",
     };
 }
