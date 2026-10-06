@@ -84,7 +84,7 @@ import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, createComputed, createEffect, on, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { findScrollContainerRect } from "./hover-anchor";
-import { BOTTOM_MARGIN_PX, computePeekHorizontal, computePeekVertical } from "./peek-placement";
+import { BOTTOM_MARGIN_PX, computePeekHorizontal, computePeekVertical, READABLE_WIDTH_CHARS } from "./peek-placement";
 import {
     beginPeekBridge,
     clearPeekPanelOpenAfterLeave,
@@ -408,10 +408,11 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         // the previous placement. The px constants are in the panel's own pixels,
         // so they scale with the pane's zoom; placement works in viewport px.
         const naturalWidth = measureWidth();
-        let hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth });
+        const readableWidth = measureReadableWidth();
+        let hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth, readableWidth });
         let naturalHeight = measureHeightAt(hz.maxWidth, 0, paneZoom);
         if (naturalHeight > PEEK_MIN_WIDTH_ABOVE_HEIGHT_PX * paneZoom) {
-            hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth, minWidth: PEEK_MIN_WIDTH_PX * paneZoom });
+            hz = computePeekHorizontal({ row: rowRect, viewport, naturalWidth, readableWidth, minWidth: PEEK_MIN_WIDTH_PX * paneZoom });
             naturalHeight = measureHeightAt(hz.maxWidth, hz.minWidth, paneZoom);
         }
         const placeAt = { row: rowRect, container, viewport, naturalHeight };
@@ -476,6 +477,18 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     // The content's own width: no cap and no minimum.
     const measureWidth = (): number =>
         withCapsLifted("none", "0px", (el) => el.getBoundingClientRect().width, 0);
+    // `READABLE_WIDTH_CHARS` of the panel's code font, in viewport px (so at the
+    // pane's zoom and font size); 0 when there is no panel to measure in.
+    const measureReadableWidth = (): number => {
+        const el = floatingEl;
+        if (!el) return 0;
+        const probe = document.createElement("span");
+        probe.style.cssText = `position:absolute;visibility:hidden;font-family:var(--font-mono);width:${READABLE_WIDTH_CHARS}ch`;
+        el.appendChild(probe);
+        const w = probe.getBoundingClientRect().width;
+        probe.remove();
+        return w;
+    };
     // The height at the width the panel will actually have (between min and max).
     const measureHeightAt = (maxWidthPx: number, minWidthPx: number, paneZoom: number): number =>
         withCapsLifted(`${maxWidthPx / paneZoom}px`, `${minWidthPx / paneZoom}px`, (el) => el.getBoundingClientRect().height, 0);

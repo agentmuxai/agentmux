@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
     CURSOR_GAP_PX,
     MAX_OVERSHOOT_FRACTION,
+    READABLE_WIDTH_CHARS,
     VIEWPORT_MARGIN_PX,
     computePeekHorizontal,
     computePeekVertical,
@@ -82,6 +83,59 @@ describe("computePeekHorizontal", () => {
         const h = computePeekHorizontal({ row: wide, viewport: VIEWPORT, naturalWidth: 5000 });
         expect(h.shift).toBe(1);
         expect(h.extendsPastRow).toBe(false);
+    });
+});
+
+// The overshoot only reaches for a readable width (~120 characters of code):
+// full for thin panes, none for panes already that wide. The decision and its
+// sources: docs/reports/REPORT_TOOL_HOVER_PANEL_SIZE_AND_PLACEMENT_2026_10_02.md §9.
+describe("computePeekHorizontal: readable width", () => {
+    const viewport = { width: 2000, height: 1000 };
+    const READABLE = 950; // ≈120ch of the panel's code font at the default size
+    const widthFor = (paneWidth: number, left = 0) => {
+        const row = { left, right: left + paneWidth, top: 300, bottom: 330 };
+        return computePeekHorizontal({ row, viewport, naturalWidth: 50_000, readableWidth: READABLE }).maxWidth;
+    };
+
+    it("is about 120 characters", () => {
+        expect(READABLE_WIDTH_CHARS).toBe(120);
+    });
+
+    it("thin panes keep the full half-width overshoot", () => {
+        expect(widthFor(350)).toBe(525);
+        expect(widthFor(500)).toBe(750);
+    });
+
+    it("wider panes overshoot only as far as the readable width", () => {
+        expect(widthFor(700)).toBe(950);
+        expect(widthFor(900)).toBe(950);
+    });
+
+    it("a pane at least the readable width gets no overshoot", () => {
+        for (const paneWidth of [950, 1000, 1400]) {
+            const row = { left: 300, right: 300 + paneWidth, top: 300, bottom: 330 };
+            const h = computePeekHorizontal({ row, viewport, naturalWidth: 50_000, readableWidth: READABLE });
+            expect(h).toMatchObject({ maxWidth: paneWidth, shift: 1, extendsPastRow: false });
+        }
+    });
+
+    it("the smaller overshoot keeps the split by position", () => {
+        // A 700px pane centred in a 2000px window: 250px of overshoot, half each side.
+        const row = { left: 650, right: 1350, top: 300, bottom: 330 };
+        const h = computePeekHorizontal({ row, viewport, naturalWidth: 50_000, readableWidth: READABLE });
+        expect(placedSpan(h, 50_000)).toEqual({ left: 525, right: 1475 });
+    });
+
+    it("the 600px minimum still applies below the readable width", () => {
+        const row = { left: 0, right: 500, top: 300, bottom: 330 };
+        const h = computePeekHorizontal({ row, viewport, naturalWidth: 120, minWidth: 600, readableWidth: READABLE });
+        expect(h.minWidth).toBe(600);
+        expect(h.extendsPastRow).toBe(true);
+    });
+
+    it("without a readable width, the half-width cap alone applies (as before)", () => {
+        const row = { left: 0, right: 1000, top: 300, bottom: 330 };
+        expect(computePeekHorizontal({ row, viewport, naturalWidth: 50_000 }).maxWidth).toBe(1500);
     });
 });
 
@@ -242,7 +296,9 @@ describe("the pointer is never inside the placed panel", () => {
                         const container = { top: 60, bottom: viewport.height - 80 };
                         for (let y = container.top + 1; y < container.bottom; y += 7) {
                             const row = { ...pane, top: y - 10, bottom: y + 10 };
-                            const hz = computePeekHorizontal({ row, viewport, naturalWidth, minWidth });
+                            // With the minimum, as PeekOverlay places a tall panel: with the readable width too.
+                            const readableWidth = minWidth ? 950 : undefined;
+                            const hz = computePeekHorizontal({ row, viewport, naturalWidth, minWidth, readableWidth });
                             const v = computePeekVertical({ row, mouseY: y, container, viewport, naturalHeight, flushToRow });
                             const e = placedExtent(v);
                             const s = placedSpan(hz, naturalWidth);
