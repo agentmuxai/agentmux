@@ -141,25 +141,20 @@ export function NumberControl(p: {
 export function HueSwatchRow(p: { value: number | null | undefined; onChange: (hue: number | null) => void; label: string }): JSX.Element {
     return (
         <div class="setting-hue-swatches" role="group" aria-label={p.label}>
-            <button
-                type="button"
+            <Button
                 class="setting-hue-swatch setting-hue-swatch--none"
-                classList={{ "setting-hue-swatch--selected": p.value === null }}
-                aria-pressed={p.value === null}
+                icon="ban"
+                pressed={p.value === null}
                 aria-label="None"
                 title="None"
                 onClick={() => p.onChange(null)}
-            >
-                <i class="fa-solid fa-ban" />
-            </button>
+            />
             <For each={PANE_HUE_OPTIONS}>
                 {(opt) => (
-                    <button
-                        type="button"
+                    <Button
                         class="setting-hue-swatch"
-                        classList={{ "setting-hue-swatch--selected": p.value === opt.hue }}
                         style={{ "background-color": hueToActiveBorder(opt.hue) }}
-                        aria-pressed={p.value === opt.hue}
+                        pressed={p.value === opt.hue}
                         aria-label={opt.label}
                         title={opt.label}
                         onClick={() => p.onChange(opt.hue)}
