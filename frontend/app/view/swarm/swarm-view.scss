@@ -885,48 +885,8 @@
     margin-left: auto;
 }
 
-.swarm-fleet-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    appearance: none;
-    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
-    border-radius: 4px;
-    background: var(--main-bg-color);
-    color: var(--main-text-color);
-    font-size: 12px;
-    padding: 4px 9px;
-    cursor: pointer;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
-    }
-
-    &:disabled {
-        opacity: 0.5;
-        cursor: default;
-    }
-
-    &--primary {
-        border-color: var(--accent-color);
-        color: var(--accent-color);
-    }
-
-    // A toggle that is on (Stats with its panel open).
-    &--active {
-        border-color: var(--accent-color);
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
-    }
-
-    &--destructive {
-        border-color: var(--error-color, #e5484d);
-        color: var(--error-color, #e5484d);
-
-        &:hover:not(:disabled) {
-            background: rgba(229, 72, 77, 0.1);
-        }
-    }
-}
+// Fleet toolbar buttons are element/ui Buttons: primary accent, destructive
+// danger, the Stats toggle pressed while its panel is open.
 
 .swarm-fleet-broadcast-inline {
     display: flex;

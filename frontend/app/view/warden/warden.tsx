@@ -13,6 +13,7 @@ export const wardenPaneTab: PaneTabManifest = {
     view: "warden",
     label: "Warden",
     icon: "shield-halved",
+    defaultHue: 270,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     create: (ctx) => {

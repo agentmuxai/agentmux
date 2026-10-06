@@ -11,6 +11,7 @@ export const remotesPaneTab: PaneTabManifest = {
     view: "remotes",
     label: "Remotes",
     icon: "server",
+    defaultHue: 210,
     // Applies `term:zoom` as CSS zoom. The default lifecycle (remount): the
     // list is srv's, so nothing is lost when an inactive tab unmounts.
     capabilities: { paneZoom: {} },

@@ -33,6 +33,7 @@ export const mediaPaneTab: PaneTabManifest = {
     view: "media",
     label: "Media",
     icon: "photo-film",
+    defaultHue: 120,
     create: (ctx) => {
         const pane = new MediaPaneModel(ctx);
         return {

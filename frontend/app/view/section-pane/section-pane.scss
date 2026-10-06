@@ -16,73 +16,17 @@
 }
 
 .armory-view {
-    display: flex;
-    flex-direction: row;
     width: 100%;
     height: 100%;
     overflow: hidden;
 }
 
-// Rail and section styles reuse the bundle-manager- prefix so the
-// AccountsManager / IdentityManager / GlobalBundleManager / BundleManager
-// child components that reference `.bundle-manager-*` keep working.
+// The navigation is element/ui's TabbedPane (a rail, an icon-only rail, or
+// top tabs, by width). Its panel carries `bundle-manager-section`, and the
+// managers inside still reference the `.bundle-manager-*` classes, which is
+// why the names stay.
 
-.bundle-manager-rail {
-    flex: 0 0 168px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px;
-    border-right: 1px solid var(--border-color);
-    background: var(--panel-bg-color, var(--main-bg-color));
-    overflow-y: auto;
-}
-
-.bundle-manager-rail-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 10px;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    color: var(--main-text-color);
-    font-size: 13px;
-    text-align: left;
-    cursor: default;
-
-    i {
-        width: 16px;
-        text-align: center;
-        opacity: 0.8;
-    }
-
-    &:hover {
-        background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
-    }
-
-    &.is-active {
-        background: var(--accent-color);
-        color: var(--accent-text-color);
-
-        i {
-            opacity: 1;
-        }
-    }
-
-    // ABF gets a standing accent highlight regardless of selection state —
-    // see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md §5.
-    &.is-abf-highlight:not(.is-active) {
-        i {
-            color: var(--accent-color);
-            opacity: 1;
-        }
-    }
-}
-
-.bundle-manager-section {
-    flex: 1 1 auto;
+.ui-tabbed-pane-panel.bundle-manager-section {
     position: relative;
     overflow: hidden;
 }
@@ -97,97 +41,9 @@
     }
 }
 
-// ── Tab bar, top of pane (xs only) ────────────────────────────────────────────
-
-.bundle-manager-tab-bar {
-    display: none;
-    flex-direction: row;
-    align-items: stretch;
-    // Rendered at the TOP of the pane (see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md)
-    // — the hairline separates it from the content rendered below, not above.
-    border-bottom: 1px solid var(--border-color);
-    background: var(--panel-bg-color, var(--main-bg-color));
-    flex-shrink: 0;
-    overflow-x: auto;
-
-    button {
-        flex: 1;
-        min-width: 44px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 3px;
-        padding: 6px 2px;
-        border: none;
-        background: transparent;
-        color: var(--main-text-color);
-        font-size: 10px;
-        cursor: default;
-        opacity: 0.6;
-
-        i { font-size: 16px; }
-
-        span { font-size: 10px; }
-
-        &.is-active {
-            opacity: 1;
-            color: var(--accent-color);
-            // Bottom edge, not top — the bar sits at the TOP of the pane now
-            // (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md), so the
-            // active-tab indicator should touch the content it's showing,
-            // rendered below, not the far edge away from it.
-            border-bottom: 2px solid var(--accent-color);
-        }
-
-        &:hover:not(.is-active) {
-            opacity: 0.85;
-            background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
-        }
-
-        // ABF gets a standing accent highlight regardless of selection state —
-        // see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md §5.
-        &.is-abf-highlight:not(.is-active) {
-            i { color: var(--accent-color); }
-        }
-    }
-}
-
-// ── Responsive container queries ─────────────────────────────────────────────
-
-// sm: compress outer rail to icon-only (48px)
-@container armory (max-width: 767px) {
-    .bundle-manager-rail {
-        flex: 0 0 48px;
-        padding: 8px 4px;
-
-        span { display: none; }
-    }
-
-    .bundle-manager-rail-item {
-        justify-content: center;
-        padding: 10px 0;
-
-        i { width: auto; }
-    }
-}
-
-// xs: hide rail, show the top tab bar, switch to column layout
-@container armory (max-width: 479px) {
-    .armory-view {
-        flex-direction: column;
-    }
-
-    .bundle-manager-rail {
-        display: none;
-    }
-
-    .bundle-manager-tab-bar {
-        display: flex;
-    }
-
-    .bundle-manager-section {
-        flex: 1 1 auto;
-        min-height: 0;
-    }
+// ABF gets a standing accent on its icon whatever the selection
+// (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md §5).
+.ui-tab.is-abf-highlight:not([aria-selected="true"]) i {
+    color: var(--accent-color);
+    opacity: 1;
 }

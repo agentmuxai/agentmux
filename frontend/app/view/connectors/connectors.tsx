@@ -33,6 +33,7 @@ export const connectorsPaneTab: PaneTabManifest = {
     view: CONNECTORS_VIEW,
     label: "Connectors",
     icon: "plug",
+    defaultHue: 90,
     // Applies `term:zoom` as CSS zoom.
     capabilities: { paneZoom: {} },
     create: (ctx) => {

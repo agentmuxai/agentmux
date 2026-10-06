@@ -78,6 +78,7 @@ export const AgentStashDrawer = (props: {
                 // agentId alone but Memory is the more useful default
                 // for a pane with no saved definition yet.
                 initialTab={props.hasDefinition ? "accounts" : "memory"}
+                density="compact"
                 // No `onClose` — closing is the header icon's job, so
                 // the Memory tab hides its footer Close button rather
                 // than rendering a dead one (§3.4).

@@ -21,32 +21,6 @@
     margin-right: var(--space-1);
 }
 
-.identity-tabs {
-    display: flex;
-    gap: var(--space-0-5);
-}
-
-.identity-tab {
-    padding: 3px 10px;
-    font-size: 12px;
-    border-radius: 0;
-    border: none;
-    background: transparent;
-    color: var(--secondary-text-color);
-    cursor: default;
-    transition: background 0.1s, color 0.1s;
-
-    &:hover {
-        background: var(--hover-bg-color);
-        color: var(--main-text-color);
-    }
-
-    &.active {
-        background: var(--highlight-bg-color);
-        color: var(--main-text-color);
-    }
-}
-
 .identity-add-btn {
     margin-left: auto;
     padding: 3px 10px;

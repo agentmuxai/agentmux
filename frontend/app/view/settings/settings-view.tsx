@@ -91,7 +91,7 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
             {/* One tablist: a rail when wide, icons only when narrower, tabs
                 along the top when narrow (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4).
                 It replaced a rail and a separate top tab bar, one hidden by CSS. */}
-            <TabbedPane items={RAIL} value={section()} onChange={setSection} idPrefix="settings" ariaLabel="Settings section">
+            <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Settings section">
                 <div class="settings-body">
                     <SettingsSearchBar
                         query={props.model.query}

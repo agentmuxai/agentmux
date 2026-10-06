@@ -20,6 +20,7 @@ export const agentPaneTabManifest: PaneTabManifest = {
     aliases: ["forge"],
     label: "Agent",
     icon: "sparkles",
+    defaultHue: 30,
     capabilities: {
         // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1
         // §5): remounting loses the conversation's scroll and composer draft.

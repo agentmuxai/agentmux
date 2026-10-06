@@ -4,7 +4,6 @@
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { setBlockMeta } from "@/app/store/block-meta";
-import { paneRoleColor } from "./pane-color-scheme";
 
 export interface PaneHueOption {
     label: string;
@@ -52,83 +51,6 @@ function hslToHex(h: number, s: number, l: number): string {
  * keeps going forward is the one the user actually saw and chose. */
 export function hueToAgentIdentityColor(hue: number): string {
     return hslToHex(hue, 65, 52);
-}
-
-/**
- * One header-background rule for both color sources a pane can have —
- * this IS the "single system": an explicit "Pane Color" hue pick
- * (`frame:hue`) and an agent's passive persisted identity color
- * (`frame:activebordercolor`, a hex) now produce the header treatment the
- * SAME way, both resolved to one identity hue (pane-color-scheme.ts
- * `identityOklchHue`). Before that, an explicit hue got a darkened/muted header while a plain agent
- * identity color was applied to the header at full, vivid strength — the
- * same value the border used — so only explicitly-colored panes got the
- * dark-header/vivid-border look; every other agent pane's header matched
- * its border exactly. The border side (`computeFocusRingBorderColor`)
- * resolves both sources to the same hue too (`identity` focused, `border`
- * unfocused, since 2026-10-02).
- *
- * `isLightTheme`: on 2026-09-21 the light theme was kept at the identity's
- * full strength, because darkening it (the dark-theme treatment) read as
- * muddy on a light UI. Since 2026-10-02 the light theme gets its own soft
- * tint instead, lightened rather than darkened (pane-color-scheme.ts
- * `headerTint`, OKLCH L 0.95), so a header is no longer a solid block of
- * the agent's colour (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §4:
- * the solid header also made the active-tab underline invisible, 1:1).
- */
-export function headerBgForEffectiveColor(
-    hue: number | undefined,
-    activeBorderHex: string | undefined,
-    isLightTheme: boolean,
-): string | undefined {
-    // 2026-10-02: both themes now take a subtle OKLCH tint of the identity
-    // (pane-color-scheme.ts `headerTint`) instead of hsl(h, 28%, 16%) on dark
-    // and the identity at full strength on light. A large surface stays calm;
-    // the pills carry identity (REPORT_PANE_TAB_COLOR_BEST_PRACTICES_2026_10_02.md §6 P3).
-    return paneRoleColor(hue, activeBorderHex, isLightTheme, "headerTint");
-}
-
-/** A pane-tab pill's own background, for an inactive tab: the identity, quietly
- * (pane-color-scheme.ts `pill`). Distinct from the header's tint so a pill
- * still reads as coloured against its own pane's tinted header. */
-export function paneTabBgForEffectiveColor(
-    hue: number | undefined,
-    activeBorderHex: string | undefined,
-    isLightTheme: boolean,
-): string | undefined {
-    return paneRoleColor(hue, activeBorderHex, isLightTheme, "pill");
-}
-
-/** The selected pill's background: the same hue a step stronger than an
- * inactive pill (`pillActive`), so selection is shown by lightness and the
- * underline, not by hue alone (WCAG 1.4.1). */
-export function paneTabActiveBgForEffectiveColor(
-    hue: number | undefined,
-    activeBorderHex: string | undefined,
-    isLightTheme: boolean,
-): string | undefined {
-    return paneRoleColor(hue, activeBorderHex, isLightTheme, "pillActive");
-}
-
-/** The identity at full strength for the theme (`identity`): the active-tab
- * underline. Clears 3:1 against every pill and header surface for every hue
- * (pane-color-scheme.test.ts). */
-export function paneIdentityForEffectiveColor(
-    hue: number | undefined,
-    activeBorderHex: string | undefined,
-    isLightTheme: boolean,
-): string | undefined {
-    return paneRoleColor(hue, activeBorderHex, isLightTheme, "identity");
-}
-
-/** An unfocused pane's border (`border`): the identity dimmed for the theme,
- * at one perceived lightness for every hue. */
-export function paneBorderForEffectiveColor(
-    hue: number | undefined,
-    activeBorderHex: string | undefined,
-    isLightTheme: boolean,
-): string | undefined {
-    return paneRoleColor(hue, activeBorderHex, isLightTheme, "border");
 }
 
 /**

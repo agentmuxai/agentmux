@@ -831,6 +831,8 @@ declare global {
         frame?: boolean;
         "frame:bordercolor"?: string;
         "frame:activebordercolor"?: string;
+        /** The "Pane Color" pick, a hue 0–360; `null` after "Default". */
+        "frame:hue"?: number | null;
         "frame:title"?: string;
         "frame:icon"?: string;
         "frame:text"?: string;
@@ -1153,6 +1155,8 @@ declare global {
         "window:dimensions"?: string;
         "window:zoom"?: number;
         "window:theme"?: string;
+        /** Per widget type (`meta.view`): a hue 0–360 overriding its built-in color, or `null` for none. */
+        "pane:colors"?: { [view: string]: number | null };
         "telemetry:*"?: boolean;
         "telemetry:enabled"?: boolean;
         "telemetry:interval"?: number;

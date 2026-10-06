@@ -8,19 +8,6 @@
     background: var(--main-bg-color);
     color: var(--main-text-color);
 
-    .identity-pane-rail {
-        flex: 0 0 240px;
-        display: flex;
-        flex-direction: column;
-        border-right: 1px solid var(--border-color);
-        overflow: hidden;
-    }
-
-    .identity-pane-rail-header {
-        padding: 8px;
-        border-bottom: 1px solid var(--border-color);
-    }
-
     .identity-pane-detail {
         flex: 1 1 auto;
         padding: 16px 24px;
@@ -131,13 +118,6 @@
 @container identity-pane (max-width: 767px) {
     .identity-pane {
         flex-direction: column;
-    }
-
-    .identity-pane-rail {
-        flex: 0 0 auto;
-        max-height: 40%;
-        border-right: none;
-        border-bottom: 1px solid var(--border-color);
     }
 
     .identity-pane-detail {

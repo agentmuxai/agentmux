@@ -17,6 +17,7 @@ export const dronePaneTab: PaneTabManifest = {
     aliases: ["workflows"],
     label: "Drone",
     icon: "diagram-project",
+    defaultHue: 240,
     capabilities: { noPadding: true },
     create: (ctx) => {
         const model = new DroneViewModel(ctx);

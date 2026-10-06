@@ -38,7 +38,10 @@
  *       docs/specs/archive/EXPLAINER_COMPOSABLE_MODEL_AND_AGENT_PANE_2026_07_02.md §4.
  */
 
-import { createSignal, For, Show, type JSX } from "solid-js";
+import clsx from "clsx";
+import { createSignal, createUniqueId, Show, type JSX } from "solid-js";
+
+import { densityClass, tabId, tabPanelId, Tabs, type TabItem, type UiDensity } from "@/app/element/ui";
 import { AgentIdentityLinksPanel } from "@/app/view/identity/agent-identity-links-panel";
 import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
@@ -65,16 +68,14 @@ interface AgentStashModalProps {
      * re-hosting it in a drawer a prop change rather than a rewrite.
      */
     onClose?: () => void;
+    /** `compact` in the Stash drawer, where it sits beside the composer strip. */
+    density?: UiDensity;
 }
 
-interface StashTabDef {
-    id: StashTabId;
-    label: string;
-    /** FontAwesome icon name — same choice as the matching section of the
-     *  Connectors and Knowledge panes (connectors.tsx, knowledge.tsx), for
-     *  visual parity since this modal is the per-agent-scoped analogue of them. */
-    icon: string;
-}
+// Icons are the same choice as the matching section of the Connectors and
+// Knowledge panes (connectors.tsx, knowledge.tsx), for visual parity since
+// this modal is the per-agent-scoped analogue of them.
+type StashTabDef = TabItem<StashTabId> & { icon: string };
 
 export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
     // Data-driven tab list — Briefs slots in here later (no backend
@@ -95,31 +96,33 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
     ];
 
     const [activeTab, setActiveTab] = createSignal<StashTabId>(props.initialTab ?? "accounts");
+    const idPrefix = `agent-stash-${createUniqueId()}`;
 
     return (
         // agent-stash-modal carries container-type so the tabs below (a
         // descendant) can be targeted by @container agent-stash queries —
         // same technique as section-pane.tsx's .armory-container wrapper.
-        <div class="agent-stash-modal">
-            <div class="agent-stash-modal-tabs" role="tablist">
-                <For each={tabs}>
-                    {(tab) => (
-                        <button
-                            class="agent-stash-modal-tab"
-                            classList={{ "is-active": activeTab() === tab.id }}
-                            role="tab"
-                            aria-selected={activeTab() === tab.id}
-                            title={tab.label}
-                            onClick={() => setActiveTab(tab.id)}
-                        >
-                            <i class={`fa-sharp fa-solid fa-${tab.icon}`} aria-hidden="true" />
-                            <span>{tab.label}</span>
-                        </button>
-                    )}
-                </For>
-            </div>
+        <div class={clsx("agent-stash-modal", densityClass(props.density))}>
+            {/* element/ui's Tabs — the look the line-style component set was
+                modelled on (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §3.2). */}
+            <Tabs
+                class="agent-stash-modal-tabs"
+                items={tabs}
+                value={activeTab()}
+                onChange={setActiveTab}
+                idPrefix={idPrefix}
+                ariaLabel="Stash"
+                // Labels are hidden by a container query when narrow (see
+                // AgentStashModal.scss), so the name stays on hover.
+                tooltips="always"
+            />
 
-            <div class="agent-stash-modal-panel">
+            <div
+                class="agent-stash-modal-panel"
+                role="tabpanel"
+                id={tabPanelId(idPrefix)}
+                aria-labelledby={tabId(idPrefix, activeTab())}
+            >
                 <Show when={activeTab() === "accounts"}>
                     <AgentIdentityLinksPanel agentId={props.agentId} />
                 </Show>

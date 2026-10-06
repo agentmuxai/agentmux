@@ -90,19 +90,10 @@
 // proportions anywhere else it is ever hosted — this is a host-specific
 // density, not a change to the component's own defaults.
 .agent-stash-drawer-resizable {
+    // Tab sizes come from the compact density AgentStashDrawer passes down;
+    // only the tablist's own inset is drawer-specific.
     .agent-stash-modal-tabs {
-        gap: 2px;
         padding: 2px var(--space-1-5) 0;
-    }
-
-    .agent-stash-modal-tab {
-        gap: var(--space-1);
-        padding: 2px var(--space-1-5);
-        font-size: 10px;
-
-        i {
-            width: 12px;
-        }
     }
 
     .agent-stash-modal-panel {

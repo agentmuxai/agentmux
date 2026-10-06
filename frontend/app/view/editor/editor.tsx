@@ -13,6 +13,7 @@ export const editorPaneTab: PaneTabManifest = {
     view: "editor",
     label: "Editor",
     icon: "file-lines",
+    defaultHue: 270,
     // Keep-alive per the repo owner's decision (SPEC_PANE_TAB_CONTRACT_V1 §5):
     // remounting loses the cursor, scroll and undo. Zooms from a 13px base.
     capabilities: { lifecycle: "keepAlive", paneZoom: { baseFontSize: 13 }, noPadding: true },

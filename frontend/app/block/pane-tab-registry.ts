@@ -45,8 +45,8 @@ export interface PaneTabCapabilities {
      *  set to `false` (terminal: `term:showstatsbadge`). Without it the badge
      *  always shows. */
     statsBadgeSetting?: string;
-    /** `frame:hue` (or `frame:activebordercolor`) colors this tab's active
-     *  border — a terminal running an agent CLI shows that agent's color. */
+    /** The pane's color (pane-identity.ts) also paints this tab's inner
+     *  active border — a terminal running an agent CLI shows that agent's color. */
     hueBorder?: boolean;
     /** Takes part in per-pane zoom (`term:zoom`, Ctrl+Scroll, the all-panes
      *  batch), scaling from `baseFontSize` (default 15) unless the block sets
@@ -144,6 +144,11 @@ export interface PaneTabManifest {
     label: string;
     /** Font Awesome icon name. */
     icon: string;
+    /** This widget type's color: a hue (0–360) on the same scale as a pane's
+     *  "Pane Color" pick (`frame:hue`). A pane with no pick and no agent color
+     *  is drawn in it, unless the user set another in `pane:colors`
+     *  (SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md §3.1). None: neutral. */
+    defaultHue?: number;
     capabilities?: PaneTabCapabilities;
     /** How a block of this view becomes a tab pill, beyond label and icon. */
     tab?: PaneTabDescriptor;

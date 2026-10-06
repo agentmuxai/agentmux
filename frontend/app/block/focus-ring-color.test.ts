@@ -7,7 +7,7 @@
 // OKLCH roles (pane-color-scheme.ts `identity` focused, `border` unfocused).
 
 import { describe, expect, it } from "vitest";
-import { paneBorderForEffectiveColor, paneIdentityForEffectiveColor } from "./pane-color-menu";
+import { paneRoleColor } from "./pane-color-scheme";
 import {
     computeBlockActiveBorderColor,
     computeBlockIdentityColor,
@@ -38,12 +38,12 @@ describe("computeFocusRingBorderColor", () => {
 
         it(`${theme}: focused, an explicit hue wins over the agent identity color`, () => {
             const meta = { "frame:hue": 120, "frame:activebordercolor": "#ff0000" } as Block["meta"];
-            expect(computeFocusRingBorderColor(true, meta, light)).toBe(paneIdentityForEffectiveColor(120, undefined, light));
+            expect(computeFocusRingBorderColor(true, meta, light)).toBe(paneRoleColor(120, undefined, light, "identity"));
         });
 
         it(`${theme}: focused, falls back to the agent identity color, then to nothing`, () => {
             expect(computeFocusRingBorderColor(true, { "frame:activebordercolor": "#ff0000" } as Block["meta"], light)).toBe(
-                paneIdentityForEffectiveColor(undefined, "#ff0000", light)
+                paneRoleColor(undefined, "#ff0000", light, "identity")
             );
             expect(computeFocusRingBorderColor(true, {} as Block["meta"], light)).toBeUndefined();
             expect(computeFocusRingBorderColor(true, undefined, light)).toBeUndefined();
@@ -58,18 +58,18 @@ describe("computeFocusRingBorderColor", () => {
         it(`${theme}: unfocused, derived from the hue, else the agent colour, else frame:bordercolor, else nothing`, () => {
             const all = { "frame:hue": 120, "frame:activebordercolor": "#ff0000", "frame:bordercolor": "#110000" };
             expect(computeFocusRingBorderColor(false, all as Block["meta"], light)).toBe(
-                paneBorderForEffectiveColor(120, undefined, light)
+                paneRoleColor(120, undefined, light, "border")
             );
             expect(
                 computeFocusRingBorderColor(false, { "frame:activebordercolor": "#ff0000", "frame:bordercolor": "#110000" } as Block["meta"], light)
-            ).toBe(paneBorderForEffectiveColor(undefined, "#ff0000", light));
+            ).toBe(paneRoleColor(undefined, "#ff0000", light, "border"));
             expect(computeFocusRingBorderColor(false, { "frame:bordercolor": "#110000" } as Block["meta"], light)).toBe("#110000");
             expect(computeFocusRingBorderColor(false, {} as Block["meta"], light)).toBeUndefined();
         });
 
         it(`${theme}: a cleared hue (null) falls through to the agent color, not to nothing`, () => {
             const meta = { "frame:hue": null, "frame:activebordercolor": "#00ff00" } as Block["meta"];
-            expect(computeFocusRingBorderColor(true, meta, light)).toBe(paneIdentityForEffectiveColor(undefined, "#00ff00", light));
+            expect(computeFocusRingBorderColor(true, meta, light)).toBe(paneRoleColor(undefined, "#00ff00", light, "identity"));
         });
     }
 

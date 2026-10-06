@@ -7,7 +7,6 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { Button } from "@/app/element/button";
 import { ChangeConnectionBlockModal } from "@/app/modals/conntypeahead";
 import { ContextMenuModel } from "@/app/store/contextmenu";
-import { LIGHT_THEME_IDS } from "@/app/menu/base-menus";
 import {
     atoms,
     getBlockComponentModel,
@@ -40,16 +39,8 @@ import { partitionHeaderElems } from "./header-elems";
 import { canTackFloatingPane, FloatingAlwaysOnTopButton } from "./floating-ontop";
 import { resolveContextMenuRegion } from "./context-menu-region";
 import { buildPaneContextMenu, joinMenuGroups, type PaneMenuSection } from "./pane-actions";
-import {
-    headerBgForEffectiveColor,
-    hueToActiveBorder,
-    paneBorderForEffectiveColor,
-    paneIdentityForEffectiveColor,
-    paneTabActiveBgForEffectiveColor,
-    paneTabBgForEffectiveColor,
-    PANE_HUE_OPTIONS,
-    setHue,
-} from "./pane-color-menu";
+import { hueToActiveBorder, PANE_HUE_OPTIONS, setHue } from "./pane-color-menu";
+import { blockRoleColor, isLightThemeActive, type PaneIdentityOptions } from "./pane-identity";
 import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
@@ -62,16 +53,17 @@ const NumActiveConnColors = 8;
  * tint, pane-color-scheme.ts `headerTint`) —
  * shared by BlockFrame_Header's headerStyle and PaneChrome's inactive
  * pane-tab pills (PaneTabStrip.tsx), so a pill for a background tab reads as
- * the same color its header would show if it were active. See
- * headerBgForEffectiveColor's own doc comment for the darkened-vs-bright
- * rule. Returns undefined when the block has no color of its
- * own (neither frame:hue nor frame:activebordercolor set) — callers fall
- * back to their own default background.
+ * the same color its header would show if it were active. Returns
+ * undefined when the block has no color at all (no pick, no
+ * agent color, and its widget type has none; pane-identity.ts) — callers
+ * fall back to their own default background.
  */
-export function computeBlockColorBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
-    const hue = blockMeta?.["frame:hue"];
-    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
-    return headerBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+export function computeBlockColorBg(
+    blockMeta: Block["meta"] | undefined,
+    isLightTheme: boolean,
+    opts?: PaneIdentityOptions
+): string | undefined {
+    return blockRoleColor(blockMeta, isLightTheme, "headerTint", opts);
 }
 
 /** Same as computeBlockColorBg, for an inactive pane-tab pill's own
@@ -80,18 +72,14 @@ export function computeBlockColorBg(blockMeta: Block["meta"] | undefined, isLigh
  * indistinguishable from black and from a neighbouring uncoloured pill
  * (ANALYSIS_PANE_TAB_COLOR_COLLAPSE_2026_09_21.md). */
 export function computeBlockTabPillBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
-    const hue = blockMeta?.["frame:hue"];
-    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
-    return paneTabBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+    return blockRoleColor(blockMeta, isLightTheme, "pill");
 }
 
 /** The selected pane-tab pill's background (`pillActive`): this block's own
  * identity a step stronger than its inactive pill. Undefined when the block
  * has no colour of its own. */
 export function computeBlockTabPillActiveBg(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
-    const hue = blockMeta?.["frame:hue"];
-    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
-    return paneTabActiveBgForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+    return blockRoleColor(blockMeta, isLightTheme, "pillActive");
 }
 
 /** This block's identity at full strength for the theme: the active-tab
@@ -99,9 +87,7 @@ export function computeBlockTabPillActiveBg(blockMeta: Block["meta"] | undefined
  * surfaces for every hue (pane-color-scheme.ts). Undefined when the block has
  * no colour of its own (callers fall back to the accent colour). */
 export function computeBlockIdentityColor(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
-    const hue = blockMeta?.["frame:hue"];
-    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
-    return paneIdentityForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme);
+    return blockRoleColor(blockMeta, isLightTheme, "identity");
 }
 
 /** Fixed header background for every non-agent pane with no other color
@@ -166,7 +152,7 @@ export function computeNonAgentHeaderBg(isLightTheme: boolean): string {
  * "Default" clears it.
  */
 function buildPaneColorSubmenu(blockData: Block): ContextMenuItem[] {
-    const currentHue = blockData?.meta?.["frame:hue"] as number | undefined;
+    const currentHue = blockData?.meta?.["frame:hue"];
     // Only real agent panes have an identity color to persist into — see
     // setHue's own doc comment for why "Default" never passes this.
     const agentId = blockData?.meta?.agentId as string | undefined;
@@ -716,17 +702,13 @@ function BlockFrame_Header(
     const hasSummary = createMemo(() => props.error != null || splitHeaderElems().inline.length > 0);
     const headerStyle = createMemo<JSX.CSSProperties>(() => {
         const style: JSX.CSSProperties = {};
-        // One rule for both color sources — see headerBgForEffectiveColor's
-        // own doc comment. An explicit "Pane Color" pick
-        // (frame:hue) wins over the agent's passive persisted identity
-        // color (SPEC_AGENT_COLOR_2026_08_08.md's `frame:activebordercolor`,
-        // already seeded per-agent for the border); either way the header
-        // gets the SAME treatment (SPEC_AGENT_HEADER_COLOR_UNIFICATION_2026_09_20.md's
-        // deferred consolidation): since 2026-10-02 a subtle OKLCH tint of
-        // the identity in both themes (pane-color-scheme.ts `headerTint`) —
-        // no longer the identity at full strength on a light theme.
-        const themeId = getSettingsKeyAtom("window:theme")();
-        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        // One rule for every color source (pane-identity.ts): an explicit
+        // "Pane Color" pick (frame:hue) wins over the agent's identity color
+        // (SPEC_AGENT_COLOR_2026_08_08.md's `frame:activebordercolor`), which
+        // wins over the widget type's color. Whichever it is, the header gets
+        // the same subtle OKLCH tint in both themes (pane-color-scheme.ts
+        // `headerTint`, since 2026-10-02).
+        const isLightTheme = isLightThemeActive();
         // An explicit override wins over this block's own color: the row is
         // shared with the tab strip's leftover "tail", which must not track
         // whichever tab is active when the pane's tabs disagree on a color
@@ -1014,14 +996,13 @@ function ConnStatusOverlay({
  * default color rather than to no color at all.
  */
 export function computeBlockActiveBorderColor(blockMeta: Block["meta"] | undefined, isLightTheme: boolean): string | undefined {
-    const hue = blockMeta?.["frame:hue"];
-    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
     // The identity at full strength in OKLCH (pane-color-scheme.ts
     // `identity`), the same colour as the active-tab underline. Since
     // 2026-10-02; before, `hsl(h, 65%, 52%)` or the raw hex, whose perceived
     // lightness ran from 0.50 (blue) to 0.84 (yellow). A value that is not a
     // hex (nothing writes one today) is passed through as before.
-    return paneIdentityForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme) ?? (ac || undefined);
+    const ac = blockMeta?.["frame:activebordercolor"];
+    return blockRoleColor(blockMeta, isLightTheme, "identity") ?? (ac || undefined);
 }
 
 /**
@@ -1058,12 +1039,7 @@ export function computeFocusRingBorderColor(
     // Same hue-first precedence, dimmed (pane-color-scheme.ts `border`). The
     // agent's persisted `frame:bordercolor` (dimAgentColor's HSL snapshot) is
     // used only when there is no identity to derive from.
-    const hue = blockMeta?.["frame:hue"];
-    const ac = blockMeta?.["frame:activebordercolor"] as string | undefined;
-    return (
-        paneBorderForEffectiveColor(typeof hue === "number" ? hue : undefined, ac, isLightTheme) ??
-        ((blockMeta?.["frame:bordercolor"] as string | undefined) || undefined)
-    );
+    return blockRoleColor(blockMeta, isLightTheme, "border") ?? (blockMeta?.["frame:bordercolor"] || undefined);
 }
 
 function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
@@ -1074,8 +1050,7 @@ function BlockMask({ nodeModel }: { nodeModel: NodeModel }): JSX.Element {
     const [blockData] = MOS.useMuxObjectValue<Block>(MOS.makeORef("block", nodeModel.blockId));
 
     const style = createMemo<JSX.CSSProperties>(() => {
-        const themeId = getSettingsKeyAtom("window:theme")();
-        const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+        const isLightTheme = isLightThemeActive();
         const color = computeFocusRingBorderColor(isFocused(), blockData()?.meta, isLightTheme);
         return color ? { "border-color": color } : {};
     });
@@ -1185,8 +1160,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // from that alone — only real agents (or an explicit hue pick) do.
     const blockAgentColor = createMemo(() => {
         if (!props.preview && paneTabCapability(blockData()?.meta?.view, "hueBorder")) {
-            const themeId = getSettingsKeyAtom("window:theme")();
-            const isLightTheme = typeof themeId === "string" && LIGHT_THEME_IDS.has(themeId);
+            const isLightTheme = isLightThemeActive();
             const color = computeBlockActiveBorderColor(blockData()?.meta, isLightTheme);
             if (isUsableFocusRingColor(color)) {
                 return color;

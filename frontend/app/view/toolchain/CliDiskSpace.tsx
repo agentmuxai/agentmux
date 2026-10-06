@@ -14,6 +14,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import type { ToolchainPruneResult } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { Button } from "@/app/element/ui";
 
 /** `1.2 GB`, `340 MB`, `12 KB`. */
 export function formatBytes(n: number): string {
@@ -76,9 +77,9 @@ export const CliDiskSpace = (): JSX.Element => {
                     Agent CLIs are kept after an upgrade. This lists the ones nothing has used for 30 days and nothing is
                     running, and frees their space only when you ask.
                 </div>
-                <button class="toolchain-link-btn" onClick={check}>
+                <Button tone="quiet" class="toolchain-link-btn" onClick={check}>
                     Check for old versions
-                </button>
+                </Button>
             </Show>
             <Show when={state().kind === "error"}>
                 <div class="toolchain-env-line toolchain-error" role="alert">
@@ -109,13 +110,13 @@ export const CliDiskSpace = (): JSX.Element => {
                                     {formatBytes(r().reclaimable_bytes)} can be freed
                                 </div>
                                 {list(r().candidates)}
-                                <button class="toolchain-link-btn" onClick={() => remove(r().candidates.map((c) => c.dir))}>
+                                <Button tone="quiet" class="toolchain-link-btn" onClick={() => remove(r().candidates.map((c) => c.dir))}>
                                     Remove {r().candidates.length} · free {formatBytes(r().reclaimable_bytes)}
-                                </button>
+                                </Button>
                             </Show>
-                            <button class="toolchain-link-btn" onClick={check}>
+                            <Button tone="quiet" class="toolchain-link-btn" onClick={check}>
                                 Check again
-                            </button>
+                            </Button>
                         </>
                     );
                 })()}
@@ -150,9 +151,9 @@ export const CliDiskSpace = (): JSX.Element => {
                                     or {r().skipped.length === 1 ? "it was" : "they were"} locked.
                                 </div>
                             </Show>
-                            <button class="toolchain-link-btn" onClick={check}>
+                            <Button tone="quiet" class="toolchain-link-btn" onClick={check}>
                                 Check again
-                            </button>
+                            </Button>
                         </>
                     );
                 })()}
