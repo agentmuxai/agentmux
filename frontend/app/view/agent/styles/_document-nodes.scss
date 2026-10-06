@@ -742,21 +742,6 @@ $transcript-preview-max-height: calc(50vh / 3);
                 color: var(--success-color);
             }
         }
-
-        .agent-tool-show-more {
-            margin-top: var(--space-2);
-            padding: var(--space-1) var(--space-3);
-            background: var(--accent-color);
-            color: var(--main-bg-color);
-            border: none;
-            border-radius: 0;
-            cursor: default;
-            font-size: var(--text-xs);
-
-            &:hover {
-                opacity: 0.9;
-            }
-        }
     }
 
     // AskUserQuestion's answer should read like a normal typed message once answered —
