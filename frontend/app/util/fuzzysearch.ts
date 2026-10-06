@@ -58,14 +58,21 @@ export function fuzzySearch<T>(items: T[], query: string, options: IFuseOptions<
  * in `items` order. Only when no name contains it does this fall back to
  * `fuzzySearch`, so a typo still finds something.
  *
+ * `text` gives an item's name, or a list: its name first, then other words it
+ * is known by (keywords, a category, an id, a description; blanks are
+ * skipped). Every item whose name contains `query` comes before every item
+ * that only matches in those other words; within each group the order above
+ * applies, by the item's best string.
+ *
  * `fuzzySearch` alone treats "agentx" as close enough to "agenty", which is
- * right for a command palette and wrong for a list the user is narrowing by a
- * name they know. Returns `items` unchanged for a blank query.
+ * wrong when the user types a name they know: an exact name should come first,
+ * not share the list with near-misses. Returns `items` unchanged for a blank
+ * query.
  */
 export function literalFirstSearch<T>(
     items: T[],
     query: string,
-    text: (item: T) => string,
+    text: (item: T) => string | readonly (string | null | undefined)[],
     fuzzyOptions: IFuseOptions<T>
 ): T[] {
     const q = query.trim();
@@ -73,12 +80,32 @@ export function literalFirstSearch<T>(
     const needle = q.toLowerCase();
     const hits: { item: T; rank: number; index: number }[] = [];
     items.forEach((item, index) => {
-        const haystack = text(item).toLowerCase();
-        const at = haystack.indexOf(needle);
-        if (at < 0) return;
-        const rank = haystack === needle ? 0 : at === 0 ? 1 : /[\s\-_.]/.test(haystack[at - 1]) ? 2 : 3;
-        hits.push({ item, rank, index });
+        const texts = text(item);
+        const [name, ...others] = typeof texts === "string" ? [texts] : texts;
+        let rank = containsRank(name, needle);
+        if (rank < 0) {
+            for (const other of others) {
+                const r = containsRank(other, needle);
+                if (r >= 0 && (rank < 0 || r < rank)) rank = r;
+            }
+            if (rank >= 0) rank += OTHER_WORDS_RANK;
+        }
+        if (rank >= 0) hits.push({ item, rank, index });
     });
     if (hits.length > 0) return hits.sort((a, b) => a.rank - b.rank || a.index - b.index).map((h) => h.item);
     return fuzzySearch(items, q, fuzzyOptions);
+}
+
+// Added to a match in an item's other words, so it ranks below any name match
+// (whose ranks are 0..3).
+const OTHER_WORDS_RANK = 4;
+
+// How `haystack` contains `needle` (already lower-case): 0 is the whole
+// string, 1 at its start, 2 at a word start, 3 elsewhere, -1 not at all.
+function containsRank(haystack: string | null | undefined, needle: string): number {
+    if (!haystack) return -1;
+    const h = haystack.toLowerCase();
+    const at = h.indexOf(needle);
+    if (at < 0) return -1;
+    return h === needle ? 0 : at === 0 ? 1 : /[\s\-_.]/.test(h[at - 1]) ? 2 : 3;
 }

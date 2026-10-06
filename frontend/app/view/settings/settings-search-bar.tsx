@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Search bar at the top of the Settings pane — docs/specs/SPEC_SETTINGS_PANE_SEARCH_2026_09_21.md
-// §3.5. Typo-tolerant and synonym-aware (via each entry's curated `keywords`
-// — §3.4) through the shared `fuzzySearch` utility (§2), same one the
-// command palette and agent-picker filter use.
+// §3.5. Literal first, synonym-aware (via each entry's curated `keywords`
+// — §3.4) and typo-tolerant through `searchSettings` (settings-index.ts),
+// which uses the same shared `literalFirstSearch` as the command palette and
+// the My Agents filter.
 
 import { createMemo, createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 
-import { fuzzySearch } from "@/app/util/fuzzysearch";
-import { SETTINGS_INDEX } from "./settings-index";
+import { SETTINGS_INDEX, searchSettings } from "./settings-index";
 import type { SettingsIndexEntry } from "./settings-model";
 import "./settings-search-bar.scss";
 
@@ -28,13 +28,7 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
     const results = createMemo(() => {
         const q = props.query().trim();
         if (!q) return [];
-        return fuzzySearch(SETTINGS_INDEX, q, {
-            keys: [
-                { name: "label", weight: 0.45 },
-                { name: "keywords", weight: 0.35 },
-                { name: "description", weight: 0.2 },
-            ],
-        }).slice(0, MAX_RESULTS);
+        return searchSettings(SETTINGS_INDEX, q).slice(0, MAX_RESULTS);
     });
 
     const isOpen = () => props.query().trim().length > 0;

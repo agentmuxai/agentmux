@@ -9,7 +9,7 @@ import { commandRegistry, type CommandEntry } from "@/app/store/command-registry
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
 import { Modal } from "@/element/modal";
-import { fuzzySearch } from "@/app/util/fuzzysearch";
+import { searchCommands } from "./command-palette-search";
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import "./command-palette.scss";
 import { shortcutFor } from "@/app/keybindings";
@@ -36,17 +36,10 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
         const q = query().trim();
         const all = sortCommands(commandRegistry.all().filter((c) => !c.hidden));
         if (!q) return all; // browsing, unfiltered: keep category+label order
-        // Relevance-ranked while actively searching — best match first, same
-        // as every other command palette (VS Code included) — rather than
-        // still being category+label sorted mid-search.
-        return fuzzySearch(all, q, {
-            keys: [
-                { name: "label", weight: 0.5 },
-                { name: "keywords", weight: 0.2 },
-                { name: "category", weight: 0.2 },
-                { name: "id", weight: 0.1 },
-            ],
-        });
+        // Ranked while actively searching: the exact command first, then
+        // commands containing what was typed (category+label order among
+        // equals); fuzzy only for a typo. See command-palette-search.ts.
+        return searchCommands(all, q);
     });
 
     // Clamp selectedIdx when results change

@@ -166,6 +166,22 @@ describe("SettingsView search bar", () => {
         expect(screen.queryByTestId("settings-search-results")).not.toBeInTheDocument();
     });
 
+    it("lists an exact setting name alone, not the settings that only look like it", () => {
+        renderSettings();
+        const input = screen.getByTestId("settings-search-input");
+        fireEvent.input(input, { target: { value: "Message accepted" } });
+        const results = screen.getAllByTestId("settings-search-result");
+        expect(results).toHaveLength(1);
+        expect(results[0]).toHaveTextContent("Message accepted");
+    });
+
+    it("still finds a setting through a typo", () => {
+        renderSettings();
+        const input = screen.getByTestId("settings-search-input");
+        fireEvent.input(input, { target: { value: "Copy on selct" } });
+        expect(screen.getAllByTestId("settings-search-result")[0]).toHaveTextContent("Copy on select");
+    });
+
     it("shows an empty state for a query with no match", () => {
         renderSettings();
         const input = screen.getByTestId("settings-search-input");

@@ -6,18 +6,14 @@
 // "golden set," run against the actual authored keyword lists so a
 // threshold/weight tuning change (or a typo in a keyword list) that breaks
 // a real synonym case is caught here, not just in fuzzysearch.test.ts's
-// synthetic fixture.
+// synthetic fixture. Runs `searchSettings`, the search the Settings pane
+// itself uses.
 
 import { describe, expect, it } from "vitest";
 
-import { fuzzySearch } from "@/app/util/fuzzysearch";
-import { SETTINGS_INDEX } from "./settings-index";
+import { SETTINGS_INDEX, searchSettings } from "./settings-index";
 
-const SEARCH_KEYS = [
-    { name: "label", weight: 0.45 },
-    { name: "keywords", weight: 0.35 },
-    { name: "description", weight: 0.2 },
-];
+const labels = (query: string) => searchSettings(SETTINGS_INDEX, query).map((e) => e.label);
 
 describe("SETTINGS_INDEX", () => {
     it("has no duplicate ids", () => {
@@ -48,7 +44,37 @@ describe("SETTINGS_INDEX", () => {
         ["gpu rendering", "advanced.disable_webgl"],
         ["clipboard", "terminal.copy_on_select"],
     ])('finds the right setting for %j', (query, expectedId) => {
-        const results = fuzzySearch(SETTINGS_INDEX, query, { keys: SEARCH_KEYS });
+        const results = searchSettings(SETTINGS_INDEX, query);
         expect(results[0]?.id).toBe(expectedId);
+    });
+});
+
+// Literal first: what the user typed counts before how close it looks.
+describe("searchSettings", () => {
+    it("returns the entries unchanged for a blank query", () => {
+        expect(searchSettings(SETTINGS_INDEX, "  ")).toBe(SETTINGS_INDEX);
+    });
+
+    it("lists an exact setting name first", () => {
+        expect(labels("Theme")[0]).toBe("Theme");
+        expect(labels("model")[0]).toBe("Model");
+    });
+
+    it("does not list near-misses that do not contain the query", () => {
+        // A plain fuzzy search also listed "Message rejected" and "Agent
+        // stopped with an error" for these.
+        expect(labels("Message accepted")).toEqual(["Message accepted"]);
+        expect(labels("Turn error")).toEqual(["Turn error"]);
+        expect(labels("Font size")).toEqual(["Font size"]);
+    });
+
+    it("ranks label matches above keyword and description matches", () => {
+        // Terminal transparency only has "opacity" as a keyword.
+        expect(labels("opacity")).toEqual(["Opacity", "Magnified opacity", "Terminal transparency"]);
+    });
+
+    it("still finds a setting through a typo", () => {
+        expect(labels("Copy on selct")[0]).toBe("Copy on select");
+        expect(labels("Opactiy")[0]).toBe("Opacity");
     });
 });
