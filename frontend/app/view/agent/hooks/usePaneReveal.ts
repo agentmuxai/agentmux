@@ -4,7 +4,7 @@
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 8).
 
 import { trackPaneContent } from "@/app/store/pane-content-holds";
-import { createPaneReadiness, type PaneReadiness } from "@/app/store/pane-readiness";
+import { createPaneReadiness, PANE_REVEAL_BOUND_MS, type PaneReadiness } from "@/app/store/pane-readiness";
 import { useWindowTabDisplayed } from "@/app/workspace/window-tab-visibility";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
@@ -33,7 +33,7 @@ const defaultDeps: PaneRevealDeps = {
  * The longest an agent pane stays behind its loading cover. Most opens
  * reveal before this, once their history has painted.
  */
-export const AGENT_REVEAL_TIMEOUT_MS = 1500;
+export const AGENT_REVEAL_TIMEOUT_MS = PANE_REVEAL_BOUND_MS;
 
 export interface PaneReveal {
     readiness: PaneReadiness;

@@ -20,6 +20,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { createMemo, createSignal, onCleanup } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PANE_REVEAL_BOUND_MS } from "@/app/store/pane-readiness";
 import type { NodeModel } from "@/layout/index";
 import { registerPaneTab, type PaneTabHostContext } from "./pane-tab-registry";
 
@@ -536,6 +537,46 @@ describe("Block — backfill outstanding from the very start", () => {
         expect(covers()[0].classList.contains("is-fading")).toBe(false);
         expect(covers()[0].classList.contains("is-in-flow")).toBe(false);
         expect(document.querySelector('[data-testid="blockframe-real-b-slowfill"]')).not.toBeNull();
+    });
+
+    it("shows the pane at the reveal bound even while the backfill is still running", async () => {
+        vi.useFakeTimers();
+        try {
+            setBackfillSettled(false); // never settles during this test
+            setBlockView("b-slowfill3", "agent");
+            const Block = await loadBlock();
+            render(() => <Block nodeModel={makeNodeModel({ blockId: "b-slowfill3" })} preview={false} />);
+            expect(covers().length).toBe(1);
+            vi.advanceTimersByTime(PANE_REVEAL_BOUND_MS - 1);
+            expect(covers()[0].classList.contains("is-fading")).toBe(false);
+            vi.advanceTimersByTime(1);
+            expect(covers()[0].classList.contains("is-fading")).toBe(true);
+            vi.advanceTimersByTime(1000);
+            expect(covers().length).toBe(0);
+            // Settling afterwards changes nothing: there is no cover to fade.
+            setBackfillSettled(true);
+            expect(covers().length).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("a backfill settling during the bound's fade still lets the cover go", async () => {
+        vi.useFakeTimers();
+        try {
+            setBackfillSettled(false);
+            setBlockView("b-slowfill4", "agent");
+            const Block = await loadBlock();
+            render(() => <Block nodeModel={makeNodeModel({ blockId: "b-slowfill4" })} preview={false} />);
+            vi.advanceTimersByTime(PANE_REVEAL_BOUND_MS); // the bound fires: fading
+            expect(covers()[0].classList.contains("is-fading")).toBe(true);
+            vi.advanceTimersByTime(50);
+            setBackfillSettled(true); // settles inside the 200 ms fade
+            vi.advanceTimersByTime(1000);
+            expect(covers().length).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("starts fading only once that first backfill finally settles", async () => {
