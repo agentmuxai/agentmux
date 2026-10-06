@@ -13,6 +13,7 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { diffLineClass, diffLines } from "./line-diff";
 import { sourceLabel, sourceWarning, type MemoryHistoryModel, type MemoryVersionMeta } from "./memory-history-model";
 import "./memory-history.scss";
+import { Button } from "@/app/element/ui";
 
 interface MemoryHistoryProps<V extends MemoryVersionMeta> {
     model: MemoryHistoryModel<V>;
@@ -114,14 +115,17 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                             >
                                                 <div class="native-memory-history-revert-confirm">
                                                     <span>Restore this content as a new version?</span>
-                                                    <button
+                                                    <Button
+                                                        density="compact"
                                                         class="native-memory-history-btn"
                                                         disabled={model.revertingAtom()}
                                                         onClick={() => setConfirmingRevert(null)}
                                                     >
                                                         Cancel
-                                                    </button>
-                                                    <button
+                                                    </Button>
+                                                    <Button
+                                                        density="compact"
+                                                        tone="accent"
                                                         class="native-memory-history-btn native-memory-history-btn-primary"
                                                         disabled={model.revertingAtom() || props.revertDisabled}
                                                         onClick={() => {
@@ -130,7 +134,7 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                                                         }}
                                                     >
                                                         {model.revertingAtom() ? "Reverting…" : "Confirm revert"}
-                                                    </button>
+                                                    </Button>
                                                 </div>
                                             </Show>
                                         </Show>
@@ -146,9 +150,9 @@ export function MemoryHistory<V extends MemoryVersionMeta>(props: MemoryHistoryP
                 <div class="native-memory-history-diff">
                     <div class="native-memory-history-diff-header">
                         <span>Diff</span>
-                        <button class="native-memory-history-btn" onClick={() => model.clearDiffSelection()}>
+                        <Button density="compact" class="native-memory-history-btn" onClick={() => model.clearDiffSelection()}>
                             Clear selection
-                        </button>
+                        </Button>
                     </div>
                     <Show
                         when={!model.diffLoadingAtom()}

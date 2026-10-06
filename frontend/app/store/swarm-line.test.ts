@@ -167,6 +167,10 @@ describe("resolveSwarmLine", () => {
         expect(line({ contextTokens: 52_000 })).toEqual({ text: STATUS_SUMMARIZING, source: "status" });
         expect(line({ contextTokens: 0 })).toEqual({ text: STATUS_NO_ACTIVITY, source: "status" });
         expect(line({ contextTokens: null })).toEqual({ text: STATUS_NO_ACTIVITY, source: "status" });
+        // A transcript is history too: providers with no context reading
+        // (codex, gemini, …) and panes that haven't mirrored one yet.
+        expect(line({ meta: { "session:line_count": 40 } })).toEqual({ text: STATUS_SUMMARIZING, source: "status" });
+        expect(line({ meta: { "session:line_count": 0 } })).toEqual({ text: STATUS_NO_ACTIVITY, source: "status" });
     });
 
     it("is never empty, whatever the meta holds", () => {

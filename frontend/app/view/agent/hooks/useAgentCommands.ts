@@ -621,8 +621,11 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // Undo handleSendMessage's TurnStart so the pane doesn't wait
                 // out the 30s watchdog — only if it was idle at submit:
                 // resetting a streaming turn would clobber its UI state.
+                // TurnStartFailed, NOT TurnReset: no agent turn ran, so the
+                // context meter and session totals stand (TurnReset wiped
+                // them after every `!cmd`, `/help` or `/model`).
                 if (!wasAlreadyWorking) {
-                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                    opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
                 }
                 // Bang commands are shell execs — they never resolve auth.
                 restoreAuthFailureIfUnresolved(false);
@@ -650,15 +653,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // dispatchSlashCommand threw — reset TurnStart so the pane
                 // doesn't stay locked for the 30s watchdog window.
                 if (!wasAlreadyWorking) {
-                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                    opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
                 }
                 restoreAuthFailureIfUnresolved(authFailureClearedByCommand);
                 return;
             }
             if (outcome.kind === "handled") {
-                // No agent turn started; reset as in the bang path above.
+                // No agent turn started; revert as in the bang path above.
                 if (!wasAlreadyWorking) {
-                    opts.model.dispatchPane({ type: "TurnReset" }, "system");
+                    opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
                 }
                 restoreAuthFailureIfUnresolved(authFailureClearedByCommand);
                 return;
@@ -930,7 +933,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // identity spawn gate, a network rejection) otherwise leaves
             // "Working…" forever, since PendingMessageRejected skips turnPhase.
             // TurnStartFailed, NOT TurnReset: TurnReset also wipes
-            // sessionStats/sessionTotals/lastContextTokens, which a transient
+            // sessionStats/sessionTotals/context, which a transient
             // send failure must keep (#2318).
             if (initiatesTurn) {
                 opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");

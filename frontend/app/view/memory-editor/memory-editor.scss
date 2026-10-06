@@ -67,43 +67,8 @@
     color: var(--secondary-text-color);
 }
 
-.memory-editor-btn {
-    padding: var(--space-1) var(--space-2);
-    font-size: var(--text-xs);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    background: transparent;
-    color: var(--main-text-color);
-    cursor: default;
-
-    &:hover:not(:disabled) {
-        background: var(--hover-bg-color);
-    }
-
-    &:disabled {
-        opacity: 0.5;
-    }
-
-    &.is-primary {
-        background: var(--accent-color);
-        color: var(--button-text-color);
-        border-color: var(--accent-color);
-
-        &:hover:not(:disabled) {
-            opacity: 0.85;
-        }
-    }
-
-    &.is-danger {
-        color: var(--error-color);
-        border-color: color-mix(in srgb, var(--error-color) 40%, var(--border-color));
-    }
-
-    &.is-active {
-        border-color: var(--accent-color);
-        color: var(--accent-color);
-    }
-}
+// Toolbar buttons are element/ui Buttons at compact density (primary
+// accent, danger red line, toggles pressed); nothing to style here.
 
 .memory-editor-error {
     padding: var(--space-1-5) var(--space-2);

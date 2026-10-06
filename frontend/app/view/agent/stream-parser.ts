@@ -245,7 +245,7 @@ export class ClaudeCodeStreamParser {
     // second review round: parseHistoryLines.ts reuses ONE parser instance
     // across an entire concatenated multi-session lines array (it already
     // has precedent for exactly this class of session-boundary reset:
-    // lastSessionStats = null on an agentmux_session_outcome "fresh"
+    // lastContext = null on an agentmux_session_outcome "fresh"
     // boundary). Without a matching reset here, a hidden reinjection turn
     // landing as the LAST turn of a session before a process restart/
     // resume leaves the flag above stuck true across the boundary,
@@ -254,7 +254,7 @@ export class ClaudeCodeStreamParser {
     // genuine conversation history, not just failing to hide something.
     // clearHiddenReinjectionState() below is the one sanctioned way to
     // clear it from outside this class, called from parseHistoryLines.ts
-    // at the same point the existing lastSessionStats reset already
+    // at the same point the existing lastContext reset already
     // happens.
     clearHiddenReinjectionState(): void {
         this.hidingUntilNextUserMessage = false;

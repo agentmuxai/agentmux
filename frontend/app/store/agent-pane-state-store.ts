@@ -22,6 +22,7 @@
 
 import { type Accessor, batch, createSignal, type Setter } from "solid-js";
 
+import { plausibleReading } from "./agent-pane-state/context-reading";
 import { update } from "./agent-pane-state/reducer";
 import {
     AgentPaneCommand,
@@ -96,6 +97,10 @@ interface Slot {
     // direct fact ("if it were ticking we'd see a line — we don't").
     // See docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md.
     watchdogTickCount: number;
+    // Edge-trigger for the `[agent-context]` rejected-reading line: log a
+    // refusal once until its reason or source changes, or a reading the meter
+    // can show re-arms it.
+    contextRejectedKey: string | null;
 }
 
 // One heartbeat line per this many `StreamWatchdogTick` dispatches (5s
@@ -158,7 +163,7 @@ export function __resetListeners(): void {
 export function registerPane(blockId: string, agentId: string): void {
     const state = initialState(agentId);
     const { signals, view } = createFieldSignals(state);
-    slots.set(blockId, { state, signals, view, stuckLogged: false, watchdogTickCount: 0 });
+    slots.set(blockId, { state, signals, view, stuckLogged: false, watchdogTickCount: 0, contextRejectedKey: null });
 }
 
 /**
@@ -197,6 +202,9 @@ export function dispatch(
     const prev = slot.state;
     const result = update(prev, command);
     slot.state = result.state;
+    if (slot.contextRejectedKey != null && plausibleReading(slot.state.context) != null) {
+        slot.contextRejectedKey = null;
+    }
 
     // [wave-turn] diagnostics — mirrors app-init.ts's `[wave-title]` line
     // (tail with `muxlog host '\[fe\] \[wave-turn\]'`). Before this, an
@@ -390,6 +398,30 @@ export function dispatch(
                 `phase=${slot.state.turnPhase.kind}`,
                 `attachedTask=${slot.state.attachedTask ? `since=${slot.state.attachedTask.since}` : "null"}`,
                 `registryAttachedTaskSince=${slot.state.registryAttachedTaskSince ?? "null"}`,
+            );
+        } else if (ev.type === "context-reading-rejected") {
+            // The meter refused a number that can't be true (more tokens
+            // than its window). It shows nothing instead; this line is the
+            // only record of what was refused and where it came from.
+            // store/agent-pane-state/context-reading.ts.
+            const key = `${ev.source}:${ev.reason}`;
+            if (slot.contextRejectedKey !== key) {
+                slot.contextRejectedKey = key;
+                console.warn(
+                    "[agent-context]",
+                    `pane=${blockId.slice(0, 7)}`,
+                    `rejected ${ev.source} reading: ${ev.reason}`,
+                    `tokens=${ev.tokens} window=${ev.window ?? "unknown"} model=${ev.model ?? "unknown"}`,
+                );
+            }
+        } else if (ev.type === "context-window-refuted") {
+            // Claude Code's reported window was smaller than a prompt the API
+            // accepted. The meter uses the proven tier instead; this line is
+            // the record of the disagreement. Emitted once per model and tier.
+            console.warn(
+                "[agent-context]",
+                `pane=${blockId.slice(0, 7)}`,
+                `reported window refuted for ${ev.model}: reported=${ev.reported} prompt=${ev.tokens} now=${ev.window}`,
             );
         }
         eventSink(blockId, ev);

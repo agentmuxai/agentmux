@@ -332,51 +332,11 @@
         }
     }
 
-    /* Toggle switch used in the LAN discovery row.
-       Spec: docs/specs/lan-discovery-toggle.md */
+    // Holds the LAN discovery row's Switch (element/ui) and its data-tip.
+    // Spec: docs/specs/lan-discovery-toggle.md
     .status-bar-toggle {
         display: inline-flex;
         align-items: center;
-        cursor: default;
-        user-select: none;
-
-        input[type="checkbox"] {
-            appearance: none;
-            -webkit-appearance: none;
-            width: 28px;
-            height: 14px;
-            background: var(--border-color);
-            border-radius: 0;
-            position: relative;
-            cursor: default;
-            transition: background 120ms ease;
-            margin: 0;
-
-            &::before {
-                content: "";
-                position: absolute;
-                top: 1px;
-                left: 1px;
-                width: 12px;
-                height: 12px;
-                background: var(--main-bg-color, #fff);
-                // Square thumb — matches the canonical Toggle component
-                // and the rest of the chrome's hard-corners design
-                // (2026-05-26 toggle audit; supersedes the round-thumb
-                // detail that was still here after the broader
-                // SPEC_HARD_CORNERS_2026_05_26 sweep).
-                border-radius: 0;
-                transition: transform 120ms ease;
-            }
-
-            &:checked {
-                background: var(--accent-color);
-
-                &::before {
-                    transform: translateX(14px);
-                }
-            }
-        }
     }
 }
 
@@ -418,27 +378,10 @@
     max-width: 190px;
 }
 
+// The restart button is an element/ui Button (danger, compact) spanning
+// the popover.
 .status-bar-restart-btn {
     width: 100%;
-    padding: var(--space-1) var(--space-2);
-    background: var(--error-color);
-    /* Pure white on red — intentional for the restart button;
-       no semantic token maps to "always white regardless of theme". */
-    color: #fff; /* stylelint-disable-line color-no-hex */
-    border: none;
-    border-radius: 0;
-    cursor: default;
-    font-size: 11px;
-    opacity: 0.85;
-
-    &:hover:not(:disabled) {
-        opacity: 1;
-    }
-
-    &:disabled {
-        opacity: 0.4;
-        cursor: default;
-    }
 }
 
 // ── MuxBus Cloud login chip ─────────────────────────────────────────────────

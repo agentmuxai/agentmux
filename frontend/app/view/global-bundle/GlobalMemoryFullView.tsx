@@ -23,6 +23,7 @@ import { MemoryHistoryModel } from "@/app/view/memory-editor/memory-history-mode
 import { PinnedEditorLayout } from "@/app/view/memory-editor/PinnedEditorLayout";
 import { globalMemoryHistorySource, type GlobalBundleViewModel, type GlobalMemoryDraft } from "./global-bundle-model";
 import { keyLabel } from "@/app/keybindings";
+import { Button } from "@/app/element/ui";
 
 const SURFACE = "armory-global";
 
@@ -35,17 +36,18 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
     return (
         <>
             <div class="memory-editor-actions">
-                <button
-                    type="button"
+                <Button
+                    density="compact"
+                    tone="accent"
                     class="memory-editor-btn is-primary"
                     disabled={draft.savingAtom() || !value().name.trim()}
                     onClick={() => void props.model.save()}
                     title={`Save (${keyLabel("mod+s")})`}
                 >
                     {draft.savingAtom() ? "Saving…" : props.isNew ? "Add memory" : "Save"}
-                </button>
-                <button
-                    type="button"
+                </Button>
+                <Button
+                    density="compact"
                     class="memory-editor-btn"
                     disabled={draft.savingAtom()}
                     onClick={() =>
@@ -57,7 +59,7 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
                     title="Cancel (Esc)"
                 >
                     Cancel
-                </button>
+                </Button>
                 <span class="memory-editor-status">{draft.dirtyAtom() ? "Unsaved changes" : "No changes"}</span>
             </div>
             <label class="memory-editor-field">
@@ -106,34 +108,35 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
                 when={draft.editingAtom()}
                 fallback={
                     <div class="memory-editor-actions">
-                        <button type="button" class="memory-editor-btn" onClick={() => model.startEdit()}>
+                        <Button density="compact" class="memory-editor-btn" onClick={() => model.startEdit()}>
                             Edit
-                        </button>
+                        </Button>
                         {/* ↑/↓ stay here as the keyboard-reachable fallback for the
                             grid's drag-to-reorder. System entries never reorder. */}
                         <Show when={!isSystem()}>
-                            <button
-                                type="button"
+                            <Button
+                                density="compact"
                                 class="memory-editor-btn"
                                 title="Move earlier in the injection order"
                                 disabled={ordIndex() <= 0}
                                 onClick={() => void model.move(id, -1)}
                             >
                                 ↑
-                            </button>
-                            <button
-                                type="button"
+                            </Button>
+                            <Button
+                                density="compact"
                                 class="memory-editor-btn"
                                 title="Move later in the injection order"
                                 disabled={ordIndex() === -1 || ordIndex() === model.ordinarySectionsAtom().length - 1}
                                 onClick={() => void model.move(id, 1)}
                             >
                                 ↓
-                            </button>
+                            </Button>
                         </Show>
                         <span class="memory-editor-actions-spacer" />
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
+                            tone="danger"
                             class="memory-editor-btn is-danger"
                             title="Remove this memory from Global Memory"
                             onClick={() => {
@@ -142,7 +145,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
                             }}
                         >
                             Remove
-                        </button>
+                        </Button>
                     </div>
                 }
             >

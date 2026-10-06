@@ -33,7 +33,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 
-import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, useHistoryPagination } from "./useHistoryPagination";
+import { OLDER_PAGE_LINES, RESTORE_WINDOW_LINES, seedContextFromHistory, useHistoryPagination } from "./useHistoryPagination";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 
 const makeMockModel = (): AgentPaneModel & {
@@ -457,5 +457,92 @@ describe("useHistoryPagination — read sizes stay within srv's per-read cap", (
         // the newest — crates/srv/src/server/app_api/blockfile.rs (`limit.min(10_000)`).
         expect(RESTORE_WINDOW_LINES).toBeLessThanOrEqual(10_000);
         expect(OLDER_PAGE_LINES).toBeLessThanOrEqual(10_000);
+    });
+});
+
+// docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md: the mount-time
+// seed is the main agent's last call, never a `result`'s turn total.
+describe("useHistoryPagination — context meter seed", () => {
+    const call = (id: string, cacheRead: number) =>
+        JSON.stringify({
+            type: "stream_event",
+            event: {
+                type: "message_start",
+                message: { id, model: "claude-sonnet-5-5", usage: { input_tokens: 1, cache_read_input_tokens: cacheRead } },
+            },
+        });
+    // A long autonomous turn: 60 calls at ~300K. Its result sums them to ~18M.
+    const turn = [
+        ...Array.from({ length: 60 }, (_, i) => call(`msg_${i}`, 290_000 + i * 100)),
+        JSON.stringify({
+            type: "result",
+            subtype: "success",
+            num_turns: 60,
+            usage: { input_tokens: 60, cache_read_input_tokens: 17_577_000, output_tokens: 9_000 },
+            modelUsage: { "claude-sonnet-5-5": { contextWindow: 1_000_000 } },
+        }),
+    ];
+
+    it("NDJSON replay seeds the last call's prompt and the reported window, not the 18M turn total", async () => {
+        vi.mocked(RpcApi.BlockfileLineCountCommand).mockResolvedValue({ count: turn.length });
+        vi.mocked(RpcApi.BlockfileReadRangeCommand).mockResolvedValue({
+            lines: turn,
+            stamps: turn.map((_, i) => 1_790_000_000_000 + i),
+            total: turn.length,
+            offset: 0,
+        });
+        const model = makeMockModel();
+        createRoot((d) => {
+            dispose = d;
+            useHistoryPagination({ blockId: "blk-1", model, outputFormat: () => "claude-stream-json", log: () => {} });
+        });
+        for (let i = 0; i < 5; i++) await flushMicrotasks();
+
+        const seeds = model.paneEvents.filter((e) => e.type === "ReconcileContextFromHistory");
+        expect(seeds).toEqual([
+            {
+                type: "ReconcileContextFromHistory",
+                tokens: 290_000 + 59 * 100 + 1,
+                model: "claude-sonnet-5-5",
+                at: 1_790_000_000_059,
+                reportedWindows: { "claude-sonnet-5-5": 1_000_000 },
+            },
+        ]);
+    });
+});
+
+describe("seedContextFromHistory", () => {
+    const recorder = () => {
+        const sent: any[] = [];
+        return { sent, model: { dispatchPane: (cmd: any) => { sent.push(cmd); return []; } } };
+    };
+
+    it("dispatches nothing when the window has neither a call nor a reported window", () => {
+        const { sent, model } = recorder();
+        seedContextFromHistory(model as any, { lastContext: null, reportedContextWindows: {} });
+        expect(sent).toEqual([]);
+    });
+
+    it("records reported windows on their own when the window holds no call — through the reconcile, so they merge under live ones", () => {
+        const { sent, model } = recorder();
+        seedContextFromHistory(model as any, { lastContext: null, reportedContextWindows: { m: 200_000 } });
+        expect(sent).toEqual([
+            { type: "ReconcileContextFromHistory", tokens: null, model: null, at: null, reportedWindows: { m: 200_000 } },
+        ]);
+    });
+
+    it("dispatches nothing for a window with neither a call nor a reported window", () => {
+        const { sent, model } = recorder();
+        seedContextFromHistory(model as any, { lastContext: null, reportedContextWindows: {} });
+        expect(sent).toEqual([]);
+    });
+
+    it("seeds the call with no reported windows as null", () => {
+        const { sent, model } = recorder();
+        seedContextFromHistory(model as any, {
+            lastContext: { tokens: 5, model: null, at: null },
+            reportedContextWindows: {},
+        });
+        expect(sent).toEqual([{ type: "ReconcileContextFromHistory", tokens: 5, model: null, at: null, reportedWindows: null }]);
     });
 });

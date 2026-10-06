@@ -114,7 +114,7 @@ interface AgentWorkingRowProps {
      *  exactly one place to check "is something happening right now." Takes
      *  priority over the normal Working/tool display. */
     compacting?: CompactionState | null;
-    /** Tokens in the pane's context (`state.lastContextTokens`). While
+    /** Tokens in the pane's context (`state.context`, validated). While
      *  `compacting`, the row estimates how long this compaction will take from
      *  earlier ones (`compaction-estimate.ts`) scaled by this, and shows an
      *  ESTIMATE bar — Claude Code reports no real compaction progress, so the

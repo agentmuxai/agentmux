@@ -41,7 +41,7 @@ import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
-import { mainAgentUsage } from "./main-agent-usage";
+import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -63,6 +63,7 @@ import { MemoryDeliveryApi } from "@/app/store/rpc-api/memory-delivery";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
 import { contextWindowForModel } from "@/app/store/agent-pane-state/context-window";
+import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { useToolChunkStream } from "./hooks/useToolChunkStream";
@@ -275,14 +276,26 @@ export function useAgentStream({
     // choke point already.
     const rawQueue = createStreamFlushQueue(model);
 
-    // FALLBACK_CONTEXT_WINDOW (used only before the first message_start of
-    // this session) is shared with memory-reinjection.ts's own replay-time
-    // reconstruction — see that constant's doc comment for why 200K —
-    // rather than each picking the number independently.
+    // The pane's context window for memory sizing: the meter's own reading
+    // (reported by Claude Code, else the model table) when it has one; the
+    // last-seen model's table entry next; FALLBACK_CONTEXT_WINDOW only
+    // before any model is known. The fallback is shared with
+    // memory-reinjection.ts's own replay-time reconstruction — see that
+    // constant's doc comment for why 200K — rather than each picking the
+    // number independently.
     let lastSeenModelId: string | undefined;
+    const currentContextWindow = (): number =>
+        paneSnapshot(blockId)?.context?.window ?? contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW;
+    // The API message the last TokensIn was for: one call is reported by its
+    // message_start and again by its assistant frame(s) (main-agent-usage.ts),
+    // and must count once.
+    let lastUsageMessageId: string | undefined;
+    // Only Claude Code's stream carries per-call usage in the shape the meter
+    // reads (main-agent-usage.ts); other providers' panes show no reading.
+    const readsUsage = readsMainAgentUsage(outputFormat);
 
     const memoryReinjectionController = createMemoryReinjectionController({
-        contextWindow: () => contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
+        contextWindow: currentContextWindow,
         now: () => Date.now(),
         // reagentx P0, PR #3502: a real turn is genuinely in flight for the
         // common auto-compaction case (compact_boundary lands mid an
@@ -325,7 +338,7 @@ export function useAgentStream({
             const r = await MemoryDeliveryApi.ComposeCommand(TabRpcClient, { block_id: blockId, reason });
             if (!r.text || !r.delivery_id || !r.frame) return null;
             const node = buildMemoryInjectedNode(r.frame, {
-                contextWindow: contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
+                contextWindow: currentContextWindow(),
                 now: Date.now(),
             });
             return node ? { deliveryId: r.delivery_id, text: r.text, node } : null;
@@ -340,7 +353,7 @@ export function useAgentStream({
                 ...(boundaryUuid ? { boundary_uuid: boundaryUuid } : {}),
                 ...(eventAtMs !== undefined ? { event_at_ms: eventAtMs } : {}),
             }).then((r) => r.deliver),
-        // Reuses the REAL TurnStart/TurnReset commands unmodified — a hidden
+        // Reuses the REAL TurnStart/TurnStartFailed commands unmodified — a hidden
         // reinjection is a completely genuine turn state-machine-wise; only
         // its rendering differs. See memory-reinjection-controller.ts's
         // module doc comment. `content`/`hidden` are always exactly what the
@@ -351,8 +364,8 @@ export function useAgentStream({
         dispatchTurnStart: (content, hidden) => {
             model.dispatchPane({ type: "TurnStart", at: Date.now(), content, hidden }, "system");
         },
-        dispatchTurnReset: () => {
-            model.dispatchPane({ type: "TurnReset" }, "system");
+        dispatchTurnStartFailed: () => {
+            model.dispatchPane({ type: "TurnStartFailed" }, "system");
         },
     });
 
@@ -482,7 +495,16 @@ export function useAgentStream({
         // they published nothing before Phase 5a-3b, and the pane keeps what
         // it shows, as it did then.
         const resetStream = (fileop: "truncate" | "replace" | "delete") => {
-            if (fileop !== "truncate") return;
+            if (fileop !== "truncate") {
+                // Archive (`delete`) and restore (`replace`) swap the
+                // conversation under the pane: the meter's reading measured
+                // the old one. srv sends no `fresh` outcome for an archive,
+                // so this is the only signal. The next call reports the new
+                // size; without this, its smaller reading would also look
+                // like a compaction to the TokensIn heuristic.
+                model.dispatchPane({ type: "ContextInvalidated", reason: "transcript_replaced" });
+                return;
+            }
             const events = model.dispatchDoc({
                 type: "StreamTruncate",
                 reason: "fileop",
@@ -686,6 +708,9 @@ export function useAgentStream({
                             // COMPACTION_2026_09_22.md §3.3a, "fresh session"
                             // addendum.
                             if (sessionOutcome.outcome === "fresh") {
+                                // The meter's reading measured the conversation
+                                // that is now gone.
+                                model.dispatchPane({ type: "ContextInvalidated", reason: "fresh_session" });
                                 void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
                             }
                         }
@@ -744,7 +769,7 @@ export function useAgentStream({
                     parser.flushPending();
                     pushReleasedJekts();
                     const node = buildMemoryInjectedNode(rawEvent, {
-                        contextWindow: contextWindowForModel(lastSeenModelId) ?? FALLBACK_CONTEXT_WINDOW,
+                        contextWindow: currentContextWindow(),
                         now: Date.now(),
                     });
                     if (node && !hasNodeId(node.id)) {
@@ -766,11 +791,15 @@ export function useAgentStream({
                     // MAIN-agent usage only: a subagent's lines carry a
                     // parent_tool_use_id and have their own context and model
                     // (main-agent-usage.ts).
-                    const usage = mainAgentUsage(rawEvent);
-                    if (usage?.kind === "in") {
+                    const usage = readsUsage ? mainAgentUsage(rawEvent) : null;
+                    // A call already counted from its message_start (its
+                    // assistant frames repeat the same usage).
+                    const sameCall = usage?.kind === "in" && usage.messageId != null && usage.messageId === lastUsageMessageId;
+                    if (usage?.kind === "in" && !sameCall) {
+                        lastUsageMessageId = usage.messageId;
                         // message.model is the resolved model id (e.g.
-                        // "claude-opus-4-8") — used to seed the context-window
-                        // meter per model (Opus/Sonnet 1M, Haiku 200K).
+                        // "claude-opus-4-8") — the reading is measured on it
+                        // and its window resolved for it (context-reading.ts).
                         // Also feeds memoryReinjectionController's own
                         // contextWindow lookup (§3.4.2) — kept as a
                         // simple last-seen value rather than threaded
@@ -800,6 +829,11 @@ export function useAgentStream({
                     } else if (usage?.kind === "out") {
                         model.dispatchPane({ type: "TokensOut", output: usage.output });
                     }
+                    // The windows Claude Code reports for the models this turn
+                    // used — authoritative over the model-name table. Read off
+                    // the raw frame: the translator keeps only the usage.
+                    const windows = readsUsage ? reportedContextWindowsFromResult(rawEvent) : null;
+                    if (windows) model.dispatchPane({ type: "ContextWindowsReported", windows });
                 }
 
                 // Translate provider-specific format → StreamEvent[]
