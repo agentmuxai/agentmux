@@ -993,7 +993,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // The pane can show before its conversation has loaded (usePaneReveal's
         // reveal bound). A send then is refused by the init guard
         // (useAgentCommands) after this handler has cleared the draft, so the
-        // message would be lost: keep it and say why (ReAgent P1 on #4374).
+        // message would be lost: keep it and say why (#4374).
         if (draftBlockId && paneSnapshot(draftBlockId)?.initPhase.kind === "InitPending") {
             showSendHint("Waiting for the conversation to load");
             return;
