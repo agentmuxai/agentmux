@@ -1,7 +1,7 @@
 # REPORT: Opening an agent can stall for ~17 s on the history read
 
 **Date:** 2026-10-05
-**Status:** analysis — trigger found, blocking point not yet pinned; instrumentation added (this PR), fixes proposed.
+**Status:** root cause found (§2a) and fixed; instrumentation (#4371), 1 MB restore (#4373), bounded reveal (#4374) and the race fix with append-only index extension (§2a) landed or in review.
 **Verified against:** `agentmux` `main` @ `742cb2ff5`. Logs from the retained instances on one Windows host (v0.58.2 → v0.59.10); measurements against a running v0.59.10 backend and the local transcript store, read-only.
 **Related:**
 - `SPEC_AGENT_OPEN_LATENCY_2026_09_27.md` (F6: the logs can't tell where an open's time goes; §5 acceptance: first row ≤ 300 ms);
@@ -53,6 +53,17 @@ Read directly from the store, the last 10,000 lines are 5.4 MB and take 19 ms. O
 - *The 5 s line-count poll's silence during the stall:* it doesn't start until the history load settles, or the 15 s hold timer (`HISTORY_HOLD_MAX_MS`) forces it, which is exactly when it began (02:19:17.068).
 
 **Not yet pinned:** where inside the backend the call waited. The backend logged only when the call started (F6 of the 09-27 spec, still open on the backend side).
+
+## 2a. Root cause: a race sends the read to the whole-file fallback
+
+`blockfile:read_range` reads through `output.idx`. When the first indexed read finds the index stale, it extends the index to `output`'s size S1, then reads again. The second read requires the index to cover `output` exactly. If anything appended to `output` in between, it sees size S2 ≠ S1 and returns `None`, and the handler falls through to its legacy whole-file path: `FileStore::read_file` loads the entire transcript (1.3 GB for AgentA) while holding the store's connection mutex, splits all 1.9 M lines, and returns 10,000 of them. That takes about 15 s and logs nothing.
+
+The append comes from the agent being opened. A pane open that can't `--resume` (the agent last ran in another instance) spawns a fresh session carrying the continuation packet, and that spawn writes to the transcript within milliseconds, exactly inside the window between the extension and the second read. A resumed session doesn't write at that moment, which is why only the continuation-path opens stalled.
+
+**Fix.**
+- After extending, a read that an append has outrun is served from the indexed prefix (`read_via_stale_index`): only lines whose end the index knows, from one snapshot, same generation. The newest few lines are left to the pane's live stream.
+- Extending no longer reads and rewrites the whole index. It reads the header and last entry, and writes the new header and the new entries in one guarded transaction (`FileStore::patch_derived_if`). On AgentA's 15 MB index that removes about 0.5 s from every open after the transcript has grown, the gap seen between `read_range` and `output.idx rebuild starting` in every logged open.
+- A whole-file read of a transcript of 16 MB or more is logged, so any remaining path to it shows up.
 
 ## 3. Why it recurs (architecture)
 

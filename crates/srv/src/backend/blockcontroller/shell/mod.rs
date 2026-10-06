@@ -46,7 +46,7 @@ pub use file_ops::{
 // be re-exported at the same visibility — `pub use` of a `pub(crate)` item is
 // rejected (E0364).
 pub(crate) use file_ops::resolve_global_output_zone;
-pub(crate) use indexing::{extend_output_idx, output_index, output_now, read_via_index};
+pub(crate) use indexing::{extend_output_idx, output_index, output_now, read_via_index, read_via_stale_index};
 // A full rebuild from byte 0: the readers extend instead (`extend_output_idx`
 // falls back to one itself), so only tests call it directly.
 #[cfg(test)]

@@ -102,6 +102,25 @@ pub(crate) struct IndexedRead {
 /// stale, another generation's) or a read hits bytes not stored yet: the
 /// caller rebuilds the index and retries once, or takes its slow path.
 pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64) -> Option<IndexedRead> {
+    read_indexed(fs, zone, offset, limit, false)
+}
+
+/// [`read_via_index`] from an index that covers only a prefix of `output`:
+/// lines appended since it was built aren't returned (`total` is the
+/// index's count), nor is the last indexed line, whose end the index can't
+/// give. For the read right after extending the index, when an append
+/// landed in between — before this, that read fell back to loading the
+/// whole transcript (1.3 GB, ~15 s, under the store's lock) whenever an
+/// agent's spawn was writing to the transcript its pane was opening
+/// (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md). The lines it
+/// leaves out are the newest few, which the pane's live stream delivers.
+/// `None` under the same conditions as [`read_via_index`], and when nothing
+/// requested is within the indexed prefix.
+pub(crate) fn read_via_stale_index(fs: &FileStore, zone: &str, offset: u64, limit: u64) -> Option<IndexedRead> {
+    read_indexed(fs, zone, offset, limit, true)
+}
+
+fn read_indexed(fs: &FileStore, zone: &str, offset: u64, limit: u64, stale_ok: bool) -> Option<IndexedRead> {
     const H: i64 = OUTPUT_IDX_HEADER_LEN;
     fs.read_snapshot(|snap| {
         let Some(out) = snap.file(zone, "output")? else { return Ok(None) };
@@ -109,10 +128,20 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
         let Some(header) = snap.bytes(zone, IDX, 0, H)? else { return Ok(None) };
         let covered = u64::from_le_bytes(header.as_slice().try_into().unwrap_or([0; 8]));
         let output_size = out.size.max(0) as u64;
-        if idx.size < H || covered != output_size || !labelled_for(&idx.meta, out.gen.as_deref()) {
+        // A prefix only counts for the same generation: a replaced `output`
+        // fails the label check whatever its size.
+        let fresh = covered == output_size;
+        let usable_prefix = stale_ok && covered < output_size && out.gen.is_some();
+        if idx.size < H || !(fresh || usable_prefix) || !labelled_for(&idx.meta, out.gen.as_deref()) {
             return Ok(None);
         }
-        let total = ((idx.size - H) / 8) as u64;
+        let entries_total = ((idx.size - H) / 8) as u64;
+        // From a prefix, the last indexed line may have grown since: serve
+        // only lines whose end is the next entry.
+        let total = if fresh { entries_total } else { entries_total.saturating_sub(1) };
+        if !fresh && (limit == 0 || offset >= total) {
+            return Ok(None);
+        }
         let mut read = IndexedRead {
             total,
             output_size,
@@ -127,7 +156,7 @@ pub(crate) fn read_via_index(fs: &FileStore, zone: &str, offset: u64, limit: u64
         let count = limit.min(total - offset);
         // Entries for the returned lines, plus the next line's (the end of
         // the last returned line) when there is one.
-        let want = count + u64::from(offset + count < total);
+        let want = count + u64::from(offset + count < entries_total);
         let Some(entries) = snap.bytes(zone, IDX, H + (offset * 8) as i64, (want * 8) as i64)? else { return Ok(None) };
         let at = |k: u64| u64::from_le_bytes(entries[(k * 8) as usize..(k * 8 + 8) as usize].try_into().unwrap());
         let start = at(0);
@@ -181,7 +210,7 @@ pub(crate) fn rebuild_output_idx(
     output_size: u64,
     output_gen: Option<String>,
 ) -> Option<u64> {
-    build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen)
+    build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen, None)
 }
 
 /// Bring an existing `output.idx` up to `output`'s current size by scanning
@@ -210,16 +239,49 @@ pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
     // unlabelled, and the next reader — once the counter has caught up —
     // rejects it and rebuilds the whole index.
     let _ = fs.catch_up_line_counter(block_id, "output");
-    // `output` and the whole existing index in one snapshot: the seed entries,
-    // the covered size, the label and the output state all describe the same
-    // moment, and the guarded write below refuses if `output` has since been
-    // replaced.
-    let snap = fs.derived_snapshot(block_id, "output", IDX, None).ok()??;
-    let output_size = snap.output_size.max(0) as u64;
-    let output_gen = snap.output_gen;
-    let full = || build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen.clone());
+    // An append that lost a race (the index changed under it, e.g. another
+    // srv instance extended it first) gets one more go from a fresh snapshot,
+    // then a full rebuild — never a failure, which would send a history read
+    // to the whole-file fallback.
+    for _ in 0..2 {
+        match try_extend(fs, block_id) {
+            Extend::Done(lines) => return lines,
+            Extend::Raced => continue,
+        }
+    }
+    let (output_size, output_gen) = output_now(fs, block_id)?;
+    build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen, None)
+}
 
-    let Some(idx) = snap.derived else { return full() };
+enum Extend {
+    Done(Option<u64>),
+    /// The index changed between the snapshot and the append.
+    Raced,
+}
+
+fn try_extend(fs: &FileStore, block_id: &str) -> Extend {
+    const H: i64 = OUTPUT_IDX_HEADER_LEN;
+    // Only what extending needs, in ONE snapshot: `output`'s size and
+    // generation, and the index's size, label, header and last entry. Reading
+    // the whole index here (15 MB for a 1.9 M-line transcript) and rewriting
+    // it was most of the cost of every pane open.
+    let base = fs.read_snapshot(|snap| {
+        let Some(out) = snap.file(block_id, "output")? else { return Ok(None) };
+        let idx = snap.file(block_id, IDX)?;
+        let ends = match &idx {
+            Some(i) if i.size >= H + 8 && (i.size - H) % 8 == 0 => {
+                Some((snap.bytes(block_id, IDX, 0, H)?, snap.bytes(block_id, IDX, i.size - 8, 8)?))
+            }
+            _ => None,
+        };
+        Ok(Some((out, idx, ends)))
+    });
+    let Ok(Some((out, idx, ends))) = base else { return Extend::Done(None) };
+    let output_size = out.size.max(0) as u64;
+    let output_gen = out.gen;
+    let full = || Extend::Done(build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0, output_gen.clone(), None));
+
+    let Some(idx) = idx else { return full() };
     // Extending reuses every entry but the last, so it needs proof that the
     // index describes a prefix of THIS `output`: a valid generation, and the
     // index labelled with it. An uncounted `output` has no such proof — an
@@ -229,19 +291,16 @@ pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
     if output_gen.is_none() || !labelled_for(&idx.meta, output_gen.as_deref()) {
         return full();
     }
-    let Some(bytes) = idx.bytes else { return full() };
-    if bytes.len() < OUTPUT_IDX_HEADER_LEN as usize {
-        return full();
-    }
-    let entry_count = ((bytes.len() - OUTPUT_IDX_HEADER_LEN as usize) / 8) as u64;
-    let Ok(header) = <[u8; 8]>::try_from(&bytes[..8]) else { return full() };
-    let covered = u64::from_le_bytes(header);
+    // No entries, a torn size, or bytes not stored: nothing to anchor on.
+    let Some((Some(header), Some(last))) = ends else { return full() };
+    let entry_count = ((idx.size - H) / 8) as u64;
+    let covered = u64::from_le_bytes(header.as_slice().try_into().unwrap_or([0; 8]));
 
     if covered == output_size {
-        return Some(entry_count); // already current
+        return Extend::Done(Some(entry_count)); // already current
     }
-    // Shrank (rotated/truncated) or nothing to anchor on — a base we can't trust.
-    if covered > output_size || entry_count == 0 {
+    // Shrank (rotated/truncated): a base we can't trust.
+    if covered > output_size {
         return full();
     }
 
@@ -249,17 +308,16 @@ pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
     // previous build may have indexed a trailing line that had no newline yet;
     // bytes appended since continue THAT line rather than starting a new one,
     // so its entry has to be re-derived (it may also have been blank then and
-    // non-blank now). Everything before it is settled and is reused verbatim.
+    // non-blank now). Everything before it is settled and stays as it is.
     let seed_entries = entry_count - 1;
-    let last_at = OUTPUT_IDX_HEADER_LEN as usize + seed_entries as usize * 8;
-    let Ok(last) = <[u8; 8]>::try_from(&bytes[last_at..last_at + 8]) else { return full() };
-    let scan_start = u64::from_le_bytes(last);
+    let scan_start = u64::from_le_bytes(last.as_slice().try_into().unwrap_or([0; 8]));
     if scan_start > output_size {
         return full();
     }
-    let seed = bytes[OUTPUT_IDX_HEADER_LEN as usize..last_at].to_vec();
-
-    build_output_idx_from(fs, block_id, output_size, scan_start, seed, seed_entries, output_gen.clone())
+    match build_output_idx_from(fs, block_id, output_size, scan_start, Vec::new(), seed_entries, output_gen.clone(), Some(idx.size)) {
+        Some(lines) => Extend::Done(Some(lines)),
+        None => Extend::Raced,
+    }
 }
 
 /// Shared scanner behind both entry points.
@@ -269,6 +327,7 @@ pub(crate) fn extend_output_idx(fs: &FileStore, block_id: &str) -> Option<u64> {
 /// it and `seed_count` how many — they are copied through untouched, so the
 /// blank/CRLF rules only ever get applied by the one loop below and the two
 /// paths can't drift apart.
+#[allow(clippy::too_many_arguments)]
 fn build_output_idx_from(
     fs: &FileStore,
     block_id: &str,
@@ -277,6 +336,11 @@ fn build_output_idx_from(
     seed: Vec<u8>,
     seed_count: u64,
     for_gen: Option<String>,
+    // `Some(index size)`: append to the existing index instead of replacing
+    // it — keep its first `seed_count` entries where they are, write the new
+    // ones after them and the new covered size in its header, only if it is
+    // still that size (`FileStore::patch_derived_if`). `seed` is then empty.
+    append_to: Option<i64>,
 ) -> Option<u64> {
     const WIN: i64 = 1 << 20; // 1 MiB read window
 
@@ -304,8 +368,10 @@ fn build_output_idx_from(
     // Offsets buffer starts with the covered-size header, then any reused
     // entries for the region before `scan_start`.
     let mut buf: Vec<u8> = Vec::new();
-    buf.extend_from_slice(&output_size.to_le_bytes());
-    buf.extend_from_slice(&seed);
+    if append_to.is_none() {
+        buf.extend_from_slice(&output_size.to_le_bytes());
+        buf.extend_from_slice(&seed);
+    }
 
     let mut line_count: u64 = seed_count;
     let mut cursor: u64 = scan_start; // byte offset where the current line begins
@@ -377,12 +443,27 @@ fn build_output_idx_from(
         IDX_GEN_META.to_string(),
         for_gen.clone().map_or(serde_json::Value::Null, serde_json::Value::String),
     );
-    match fs.put_file_with_meta_if(block_id, IDX, &buf, label, "output", for_gen.as_deref()) {
+    let written = match (append_to, for_gen.as_deref()) {
+        (None, _) => fs.put_file_with_meta_if(block_id, IDX, &buf, label, "output", for_gen.as_deref()),
+        (Some(idx_size), Some(gen)) => fs.patch_derived_if(
+            block_id,
+            IDX,
+            &output_size.to_le_bytes(),
+            OUTPUT_IDX_HEADER_LEN + seed_count as i64 * 8,
+            &buf,
+            "output",
+            gen,
+            idx_size,
+        ),
+        // Appending needs a generation to guard on (`try_extend` checks).
+        (Some(_), None) => Ok(false),
+    };
+    match written {
         Ok(false) => {
             tracing::info!(
                 block_id = %block_id,
                 duration_ms = started.elapsed().as_millis() as u64,
-                "output.idx rebuild discarded: output was replaced during the scan"
+                "output.idx rebuild discarded: output was replaced, or the index changed, during the scan"
             );
             None
         }
@@ -427,7 +508,7 @@ mod tests {
         let old = output_now(&fs, zone).and_then(|(_, g)| g);
         fs.write_file(zone, "output", b"x\n").unwrap();
 
-        assert_eq!(build_output_idx_from(&fs, zone, 6, 0, Vec::new(), 0, old), None);
+        assert_eq!(build_output_idx_from(&fs, zone, 6, 0, Vec::new(), 0, old, None), None);
         assert!(fs.line_state(zone, "output.idx").unwrap().is_none(), "no index may be published");
 
         // With the current generation it builds and publishes.
@@ -465,5 +546,88 @@ mod tests {
         fs.write_file(zone, "output", b"{\"x\":11111}\n{\"y\":22222}\n").unwrap();
         assert_eq!(fs.line_state(zone, "output").unwrap().unwrap().size, 24);
         assert!(read_via_index(&fs, zone, 0, 10).is_none());
+    }
+
+    /// An agent's spawn appending to the transcript between the index being
+    /// extended and the read: the strict read gives up (the index no longer
+    /// covers `output`), and the stale read serves the indexed lines whose end
+    /// is known — never the last indexed line, which the append may continue.
+    #[test]
+    fn a_read_outrun_by_an_append_serves_the_indexed_prefix() {
+        let fs = FileStore::open_in_memory().unwrap();
+        let zone = "blk-idx-stale";
+        fs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_lines(zone, "output", b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n").unwrap();
+        let view = output_index(&fs, zone).unwrap();
+        assert_eq!(rebuild_output_idx(&fs, zone, view.output_size, view.output_gen), Some(3));
+        fs.append_lines(zone, "output", b"{\"d\":4}\n").unwrap();
+
+        assert!(read_via_index(&fs, zone, 0, 10).is_none(), "the index no longer covers output");
+        let r = read_via_stale_index(&fs, zone, 0, 10).unwrap();
+        assert_eq!(r.total, 2, "lines 0 and 1; line 2's end isn't in the index");
+        assert_eq!(r.line_offsets, vec![0, 8]);
+        assert_eq!(r.raw, b"{\"a\":1}\n{\"b\":2}\n");
+        let r = read_via_stale_index(&fs, zone, 1, 10).unwrap();
+        assert_eq!((r.line_offsets.clone(), r.raw), (vec![8], b"{\"b\":2}\n".to_vec()));
+        assert!(read_via_stale_index(&fs, zone, 2, 10).is_none(), "nothing requested is in the usable prefix");
+        assert!(read_via_stale_index(&fs, zone, 0, 0).is_none());
+    }
+
+    #[test]
+    fn a_stale_read_refuses_a_replaced_output() {
+        let fs = FileStore::open_in_memory().unwrap();
+        let zone = "blk-idx-stale-replaced";
+        fs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_lines(zone, "output", b"{\"a\":1}\n{\"b\":2}\n").unwrap();
+        let view = output_index(&fs, zone).unwrap();
+        assert_eq!(rebuild_output_idx(&fs, zone, view.output_size, view.output_gen), Some(2));
+        // Replaced by longer content: a prefix of the old file is no prefix of this one.
+        fs.replace_file(zone, "output", b"{\"x\":11111}\n{\"y\":22222}\n{\"z\":3}\n", &[]).unwrap();
+        assert!(read_via_stale_index(&fs, zone, 0, 10).is_none());
+    }
+
+    /// Extending in place (header patched, new entries appended) must leave
+    /// exactly the bytes a full rebuild of the same `output` writes — through
+    /// blank lines, a line still open when the index was last built, and
+    /// enough entries to cross a 64 KB part.
+    #[test]
+    fn extending_in_place_matches_a_full_rebuild() {
+        let fs = FileStore::open_in_memory().unwrap();
+        let (zone, twin) = ("blk-idx-extend", "blk-idx-extend-twin");
+        for z in [zone, twin] {
+            fs.make_file(z, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        }
+        let many: String = (0..9000).map(|i| format!("{{\"n\":{i}}}\n")).collect();
+        let chunks: Vec<&[u8]> = vec![b"{\"a\":1}\n\n{\"b\":", b"2}\n{\"c\":3}\n  \n", many.as_bytes(), b"{\"tail\":"];
+        for chunk in chunks {
+            for z in [zone, twin] {
+                fs.append_data(z, "output", chunk).unwrap();
+            }
+            assert!(output_now(&fs, zone).unwrap().1.is_some(), "output must stay counted, or extending only ever rebuilds");
+            let extended = extend_output_idx(&fs, zone).unwrap();
+            let view = output_index(&fs, twin).unwrap();
+            let rebuilt = rebuild_output_idx(&fs, twin, view.output_size, view.output_gen).unwrap();
+            assert_eq!(extended, rebuilt);
+            assert_eq!(
+                fs.read_file(zone, IDX).unwrap(),
+                fs.read_file(twin, IDX).unwrap(),
+                "extended index differs from a rebuild after {} lines",
+                rebuilt
+            );
+        }
+        assert_eq!(output_index(&fs, zone).unwrap().fresh_lines, Some(9004));
+    }
+
+    #[test]
+    fn a_fresh_index_reads_the_same_through_either_door() {
+        let fs = FileStore::open_in_memory().unwrap();
+        let zone = "blk-idx-fresh-both";
+        fs.make_file(zone, "output", FileMeta::default(), FileOpts::default()).unwrap();
+        fs.append_lines(zone, "output", b"{\"a\":1}\n{\"b\":2}\n").unwrap();
+        let view = output_index(&fs, zone).unwrap();
+        rebuild_output_idx(&fs, zone, view.output_size, view.output_gen).unwrap();
+        let strict = read_via_index(&fs, zone, 0, 10).unwrap();
+        let stale = read_via_stale_index(&fs, zone, 0, 10).unwrap();
+        assert_eq!((strict.total, strict.raw), (stale.total, stale.raw));
     }
 }

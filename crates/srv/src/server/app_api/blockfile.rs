@@ -219,7 +219,7 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 //
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-                use crate::backend::blockcontroller::shell::{extend_output_idx, read_via_index};
+                use crate::backend::blockcontroller::shell::{extend_output_idx, read_via_index, read_via_stale_index};
                 if cmd.filename == "output" {
                     // Runs on the blocking pool (#2841). A full rebuild is a
                     // streaming scan of `output`, which reaches hundreds of MB
@@ -261,8 +261,23 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let extend = std::time::Instant::now();
                                 let extended = extend_output_idx(&filestore, &read_block);
                                 idx_clock.lock().unwrap().extend_ms = Some(ms_since(extend));
-                                extended?;
-                                read_via_index(&filestore, &read_block, offset as u64, limit as u64)?
+                                // Even if extending failed, an index that
+                                // covers a prefix can still serve the read.
+                                let _ = extended;
+                                match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
+                                    Some(read) => read,
+                                    // An append landed between the extension
+                                    // and this read (an agent's spawn writing
+                                    // to the transcript its pane is opening):
+                                    // serve the indexed prefix rather than
+                                    // fall through to reading the whole file
+                                    // below (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
+                                    None => {
+                                        let read = read_via_stale_index(&filestore, &read_block, offset as u64, limit as u64)?;
+                                        idx_clock.lock().unwrap().stale = true;
+                                        read
+                                    }
+                                }
                             }
                         };
                         idx_clock.lock().unwrap().run_ms = ms_since(run);
@@ -322,6 +337,14 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Otherwise fall back to ring buffer for backward compatibility.
                 let filestore_lines = match filestore.stat(&read_block, &cmd.filename) {
                     Ok(Some(ref wf)) if wf.size > 0 => {
+                        if wf.size >= WHOLE_FILE_WARN_BYTES {
+                            tracing::warn!(
+                                block_id = %cmd.block_id,
+                                filename = %cmd.filename,
+                                size = wf.size,
+                                "blockfile:read_range: reading the whole file (no usable output.idx)"
+                            );
+                        }
                         match filestore.read_file(&read_block, &cmd.filename) {
                             Ok(Some(bytes)) => {
                                 let text = String::from_utf8_lossy(&bytes);
@@ -411,6 +434,10 @@ fn ms_since(t: std::time::Instant) -> u64 {
     t.elapsed().as_millis() as u64
 }
 
+/// The whole-file fallback of `blockfile:read_range` loads the file under the
+/// store's lock; a file this large is logged when it does.
+const WHOLE_FILE_WARN_BYTES: i64 = 16 * 1024 * 1024;
+
 /// A `blockfile:read_range` call this slow is logged as a warning, with where
 /// its time went.
 const SLOW_READ_RANGE_MS: u64 = 1_000;
@@ -439,6 +466,8 @@ struct IndexClock {
     extend_ms: Option<u64>,
     /// The whole read on that thread, `extend_ms` included.
     run_ms: u64,
+    /// Served from an index an append had outrun (`read_via_stale_index`).
+    stale: bool,
 }
 
 impl ReadRangeClock {
@@ -453,8 +482,8 @@ impl ReadRangeClock {
     ) {
         let total_ms = ms_since(started);
         let bytes: usize = result.lines.iter().map(String::len).sum();
-        let (queued_ms, extend_ms, run_ms) =
-            self.index.as_ref().map_or((0, None, 0), |i| (i.queued_ms, i.extend_ms, i.run_ms));
+        let (queued_ms, extend_ms, run_ms, stale) =
+            self.index.as_ref().map_or((0, None, 0, false), |i| (i.queued_ms, i.extend_ms, i.run_ms, i.stale));
         macro_rules! done {
             ($level:ident, $msg:literal) => {
                 tracing::$level!(
@@ -470,6 +499,7 @@ impl ReadRangeClock {
                     queued_ms,
                     extend_ms = ?extend_ms,
                     run_ms,
+                    stale,
                     gen_after_ms = self.gen_after_ms,
                     $msg
                 )
