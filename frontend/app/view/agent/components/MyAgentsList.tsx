@@ -546,11 +546,11 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const toggleMenu = (definitionId: string): void => {
         setOpenMenuId((prev) => {
             if (prev === definitionId) return null;
-            // The menu and the inline panels all render at `top: 100%` of
-            // the same row, so two open at once would overlap. They are
-            // alternatives — reopening the chevron drops a half-typed
-            // rename/duplicate name, which is the predictable reading of
-            // "go back to the menu".
+            // The menu and the inline panels are all anchored to the same
+            // tile (each floats in an `AnchoredPopover`), so two open at once
+            // would stack on top of each other. They are alternatives —
+            // reopening the chevron drops a half-typed rename/duplicate name,
+            // which is the predictable reading of "go back to the menu".
             setRenameState(definitionId, null);
             setForkState(definitionId, { kind: "idle" });
             return definitionId;
@@ -596,8 +596,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // conversation history forking as-is (forkSession: true, unchanged).
     const handleDuplicate = (row: RecentSessionRow): void => {
         closeMenu(row.definition_id);
-        // Rename and Duplicate render two DIFFERENT inline panels into the
-        // same <li>, from two independent state maps — so opening one while
+        // Rename and Duplicate render two DIFFERENT panels, both anchored to
+        // the same tile, from two independent state maps — so opening one while
         // the other was already open showed both name inputs stacked in one
         // row (ReAgent P2 on PR #3262). They are alternatives, not
         // companions: entering either closes the other.
@@ -1167,7 +1167,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                             anchor={toggleEl}
                                             placement="bottom-end"
                                             class="agent-row-menu"
-                                            role="menu"
+                                            role="group"
                                             aria-label={`Actions for ${row.instance_name || row.definition_name}`}
                                         >
                                             <div data-testid="agent-row-menu" class="agent-row-menu-items">
@@ -1235,76 +1235,76 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                     <Show when={forkState().kind !== "idle"}>
                                         <AnchoredPopover anchor={tileEl} placement="bottom-start" class="agent-fork-prompt">
                                             <div data-testid="agent-fork-prompt">
-                                            {/* Only true when reached via the "already open" row
-                                                click (kind === "prompt") — Duplicate (this spec's
-                                                new entry point) jumps straight to "naming" without
-                                                that being the reason, so the message must not
-                                                assume it. Still shown for "naming" too when the row
-                                                genuinely happens to be open elsewhere. */}
-                                            <Show when={forkState().kind === "prompt" || isActive()}>
-                                                <span class="agent-fork-prompt-msg">
-                                                    <strong>{row.instance_name || row.definition_name}</strong> is
-                                                    already {openWhere()}.
-                                                </span>
-                                            </Show>
-                                            <Show when={forkState().kind === "prompt"}>
-                                                <div class="agent-fork-prompt-actions">
-                                                    <button
-                                                        type="button"
-                                                        class="agent-fork-btn agent-fork-btn--primary"
-                                                        onClick={() => handleOpenNewSession(row)}
-                                                        data-testid="agent-fork-open-new"
-                                                    >
-                                                        Open new session
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        class="agent-fork-btn agent-fork-btn--secondary"
-                                                        onClick={() => handleSwitchToExisting(row)}
-                                                        data-testid="agent-fork-switch"
-                                                    >
-                                                        Switch to existing
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        class="agent-fork-btn agent-fork-btn--ghost"
-                                                        onClick={() => handleForkCancel(row.definition_id)}
-                                                        aria-label="Cancel"
-                                                    >
-                                                        ✕
-                                                    </button>
-                                                </div>
-                                            </Show>
-                                            <Show
-                                                when={
-                                                    forkState().kind === "naming"
-                                                        ? (forkState() as Extract<ForkState, { kind: "naming" }>)
-                                                        : null
-                                                }
-                                            >
-                                                {(ns) => (
-                                                    <NamePrompt
-                                                        label="Name for new session:"
-                                                        placeholder="Session name"
-                                                        value={ns().label}
-                                                        loading={ns().loading}
-                                                        error={ns().error}
-                                                        submitLabel="Start"
-                                                        inputTestid="agent-fork-name-input"
-                                                        submitTestid="agent-fork-start"
-                                                        onInput={(label) =>
-                                                            setForkState(row.definition_id, {
-                                                                kind: "naming",
-                                                                label,
-                                                                loading: false,
-                                                                error: null,
-                                                            })
-                                                        }
-                                                        onSubmit={() => void handleForkStart(row)}
-                                                        onCancel={() => handleForkCancel(row.definition_id)}
-                                                    />
-                                                )}
-                                            </Show>
+                                                {/* Only true when reached via the "already open" row
+                                                    click (kind === "prompt") — Duplicate (this spec's
+                                                    new entry point) jumps straight to "naming" without
+                                                    that being the reason, so the message must not
+                                                    assume it. Still shown for "naming" too when the row
+                                                    genuinely happens to be open elsewhere. */}
+                                                <Show when={forkState().kind === "prompt" || isActive()}>
+                                                    <span class="agent-fork-prompt-msg">
+                                                        <strong>{row.instance_name || row.definition_name}</strong> is
+                                                        already {openWhere()}.
+                                                    </span>
+                                                </Show>
+                                                <Show when={forkState().kind === "prompt"}>
+                                                    <div class="agent-fork-prompt-actions">
+                                                        <button
+                                                            type="button"
+                                                            class="agent-fork-btn agent-fork-btn--primary"
+                                                            onClick={() => handleOpenNewSession(row)}
+                                                            data-testid="agent-fork-open-new"
+                                                        >
+                                                            Open new session
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            class="agent-fork-btn agent-fork-btn--secondary"
+                                                            onClick={() => handleSwitchToExisting(row)}
+                                                            data-testid="agent-fork-switch"
+                                                        >
+                                                            Switch to existing
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            class="agent-fork-btn agent-fork-btn--ghost"
+                                                            onClick={() => handleForkCancel(row.definition_id)}
+                                                            aria-label="Cancel"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                </Show>
+                                                <Show
+                                                    when={
+                                                        forkState().kind === "naming"
+                                                            ? (forkState() as Extract<ForkState, { kind: "naming" }>)
+                                                            : null
+                                                    }
+                                                >
+                                                    {(ns) => (
+                                                        <NamePrompt
+                                                            label="Name for new session:"
+                                                            placeholder="Session name"
+                                                            value={ns().label}
+                                                            loading={ns().loading}
+                                                            error={ns().error}
+                                                            submitLabel="Start"
+                                                            inputTestid="agent-fork-name-input"
+                                                            submitTestid="agent-fork-start"
+                                                            onInput={(label) =>
+                                                                setForkState(row.definition_id, {
+                                                                    kind: "naming",
+                                                                    label,
+                                                                    loading: false,
+                                                                    error: null,
+                                                                })
+                                                            }
+                                                            onSubmit={() => void handleForkStart(row)}
+                                                            onCancel={() => handleForkCancel(row.definition_id)}
+                                                        />
+                                                    )}
+                                                </Show>
                                             </div>
                                         </AnchoredPopover>
                                     </Show>
