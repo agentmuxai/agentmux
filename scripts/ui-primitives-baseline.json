@@ -72,7 +72,7 @@
         "frontend/app/view/drone/drone-view.tsx": 10,
         "frontend/app/view/editor/editor-view.tsx": 7,
         "frontend/app/view/editor/file-tree.tsx": 4,
-        "frontend/app/view/files/files-preview.tsx": 4,
+        "frontend/app/view/files/files-preview.tsx": 1,
         "frontend/app/view/files/files-view.tsx": 8,
         "frontend/app/view/global-bundle/GlobalMemoryFullView.tsx": 6,
         "frontend/app/view/global-bundle/GlobalMemoryImportBanner.tsx": 1,
