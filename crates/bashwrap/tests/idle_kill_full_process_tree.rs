@@ -148,3 +148,48 @@ async fn bashwrap_binary_idle_kill_cleans_up_full_process_tree() {
          exits — found {survivors} process(es) still matching marker {marker:?}"
     );
 }
+
+#[cfg(unix)]
+fn count_processes_with_marker(marker: &str) -> usize {
+    std::process::Command::new("pgrep")
+        .args(["-fc", &format!("^sleep {marker}")])
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<usize>().ok())
+        .unwrap_or(usize::MAX)
+}
+
+/// Unix: the idle-kill takes the command's whole process group, so a child
+/// that ignores SIGHUP (`nohup`) dies too. portable-pty's own kill only
+/// SIGHUPs bash, which left it running.
+#[tokio::test]
+#[cfg(unix)]
+async fn bashwrap_binary_idle_kill_takes_a_nohup_child_on_unix() {
+    let bin = env!("CARGO_BIN_EXE_agentmux-bashwrap");
+    let marker = format!("{}400", std::process::id());
+    let command = format!("nohup sleep {marker}.005 >/dev/null 2>&1 & sleep {marker}.006 & wait");
+    let b64 = {
+        use base64::Engine as _;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        URL_SAFE_NO_PAD.encode(command.as_bytes())
+    };
+    let mut child = tokio::process::Command::new(bin)
+        .args(["exec", "--tool-id=test-binary-idle-kill-unix", &format!("--b64-cmd={b64}")])
+        .env("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "1")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn the real agentmux-bashwrap binary");
+    let status = tokio::time::timeout(Duration::from_secs(20), child.wait())
+        .await
+        .expect("the binary must exit within a bounded time")
+        .expect("waiting on the spawned binary");
+    assert!(!status.success(), "an idle-killed invocation must not report success");
+    let until = Instant::now() + Duration::from_secs(5);
+    let mut left = count_processes_with_marker(&marker);
+    while left > 0 && Instant::now() < until {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        left = count_processes_with_marker(&marker);
+    }
+    assert_eq!(left, 0, "the idle-kill must take the whole group, the nohup child included");
+}

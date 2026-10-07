@@ -143,6 +143,10 @@ pub struct TeardownReport {
     pub stop_error: Option<String>,
     /// The container agent's container that was stopped, if any.
     pub stopped_container: Option<String>,
+    /// Running Docker Compose containers from the agent's working directory,
+    /// left running and reported (`compose_containers_left`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub containers_left: Vec<String>,
     /// Processes from `before` still running after the teardown and one more
     /// forced kill each (spec §6.2 step 8). Empty is the goal.
     pub survivors: Vec<agent_resources::ProcessEntry>,
@@ -360,6 +364,7 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
             if policy.stop_container {
                 report.stopped_container = stop_container(state, block_id, &before, deadline).await;
             }
+            report.containers_left = compose_containers_left(state, block_id, &before).await;
         }
     }
     report
@@ -395,6 +400,31 @@ async fn stop_container(
             None
         }
     }
+}
+
+/// Running Docker Compose containers started from the agent's working
+/// directory (`docker compose up -d`): they belong to the Docker daemon, not
+/// the agent's process tree, so no tracker ends them. Reported, not stopped:
+/// a person may be using them too. Skipped when the agent works in `/` or
+/// the home directory, where every project would match.
+async fn compose_containers_left(state: &AppState, block_id: &str, before: &AgentResources) -> Vec<String> {
+    let dir = std::path::PathBuf::from(&before.cwd);
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from);
+    if before.cwd.is_empty() || dir.parent().is_none() || home.as_deref() == Some(dir.as_path()) {
+        return Vec::new();
+    }
+    let Some(cm) = state.container_manager.get().await else { return Vec::new() };
+    let names = cm.running_compose_containers_under(&dir).await.unwrap_or_default();
+    for name in &names {
+        publish_shutdown(
+            state,
+            block_id,
+            "container",
+            format!("container {name} (Docker Compose, in this agent's folder) is still running"),
+            serde_json::json!({ "container": name, "outcome": "left" }),
+        );
+    }
+    names
 }
 
 /// Stop the agent's running `run_in_background` tasks, each with its process

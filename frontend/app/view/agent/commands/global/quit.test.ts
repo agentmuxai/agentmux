@@ -80,4 +80,11 @@ describe("quit notice", () => {
         expect(m).toContain("1 process is still running (node.exe (pid 4242))");
         expect(quitNoticeMessage(summary({ survivors: [] }))).not.toContain("still running");
     });
+
+    it("names Docker containers from the agent's folder that were left running", () => {
+        const m = quitNoticeMessage(summary({ containers_left: ["web-db-1"] }));
+        expect(m).toContain("1 Docker container from its folder still runs (web-db-1)");
+        expect(m).toContain("`docker compose down` there");
+        expect(quitNoticeMessage(summary({ containers_left: [] }))).not.toContain("Docker");
+    });
 });

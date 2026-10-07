@@ -523,6 +523,14 @@ phase changes one resource kind behind the same entry point.
     the PID list is no longer capped at 256.
   - A Job Object that can't be created is logged as an error and the agent
     falls back to the best-effort tracker, not the stub.
+- **Leftovers** (2026-10-07):
+  - bashwrap's idle-kill on Unix SIGKILLs the command's whole process group
+    (the PTY child leads it), so a `nohup`'d child no longer survives it.
+  - A graceful close reports running Docker Compose containers whose
+    project directory is inside the agent's working directory (`/quit`'s
+    `containers_left`); they belong to the Docker daemon, so no tracker ends
+    them, and they're left running. Plain `docker run` containers carry no
+    such link and aren't reported.
 - **Not yet:**
   - Stopping foreground descendants on Stop (§5). They need telling apart
     from background tasks in the tracker.

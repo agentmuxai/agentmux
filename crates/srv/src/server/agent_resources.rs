@@ -61,6 +61,9 @@ pub struct AgentResources {
     pub sub_blocks: Vec<String>,
     /// A container agent's container (R6), by name.
     pub container: Option<String>,
+    /// The agent's working directory (`cmd:cwd`), empty if unset: where the
+    /// Docker Compose projects it may have started live.
+    pub cwd: String,
 }
 
 /// Who an agent is, for the work-queue and cron sources, which are keyed by
@@ -131,8 +134,12 @@ pub fn snapshot(state: &AppState, block_id: &str) -> AgentResources {
         .collect();
     let block = state.mstore.get::<crate::backend::obj::Block>(block_id).ok().flatten();
     let container = block.as_ref().and_then(container_of);
+    let cwd = block
+        .as_ref()
+        .map(|b| crate::backend::obj::meta_get_string(&b.meta, "cmd:cwd", ""))
+        .unwrap_or_default();
     let sub_blocks = block.and_then(|b| b.subblockids).unwrap_or_default();
-    AgentResources { block_id: block_id.to_string(), processes, background_tasks, shell_sessions, sub_blocks, container }
+    AgentResources { block_id: block_id.to_string(), processes, background_tasks, shell_sessions, sub_blocks, container, cwd }
 }
 
 /// The container a container agent's block runs in (`agentMode` =
