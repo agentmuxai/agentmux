@@ -12,7 +12,8 @@
  *    (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6); the bundle field reads
  *    "Bundle"
  *  - clicking Create fires onSubmit with the form snapshot
- *  - the Create button is disabled while submitting
+ *  - the Create button is disabled while submitting, and until the accounts
+ *    and the provider have loaded
  *  - error from onSubmit surfaces in the panel body
  */
 
@@ -135,6 +136,8 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
+        // Create also waits for the accounts and provider to load.
+        await flush();
         const input = screen.getByTestId("create-from-template-name-input");
         fireEvent.input(input, { target: { value: "Reviewer" } });
         const submit = screen.getByTestId(
@@ -247,6 +250,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
+        await flush();
         const submit = screen.getByTestId("create-from-template-submit");
         fireEvent.click(submit);
         const err = await screen.findByTestId("create-from-template-error");
@@ -266,6 +270,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
+        await flush();
         const input = screen.getByTestId(
             "create-from-template-name-input",
         ) as HTMLInputElement;
@@ -528,6 +533,28 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             await flush();
 
             expect(await submittedAccount()).toBe("acct-codex");
+        });
+
+        it("keeps Create disabled until the accounts and the provider have loaded", async () => {
+            // There's no account field to correct a premature pick, so Create
+            // must not submit with an empty or stale-provider account.
+            let resolveAccounts!: (v: any) => void;
+            vi.mocked(refreshAccountCache).mockReturnValue(new Promise((r) => { resolveAccounts = r; }));
+            let resolveBundle!: (v: any) => void;
+            vi.mocked(RpcApi.GetBundleCommand).mockReturnValue(new Promise((r) => { resolveBundle = r; }));
+            const drifted = { ...template, provider: "", memory_id: "mem-1" } as AgentDefinition;
+            render(() => <AgentCreateFromTemplateModalPanel template={drifted} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+            fireEvent.input(screen.getByTestId("create-from-template-name-input"), { target: { value: "Mary" } });
+            const submit = () => screen.getByTestId("create-from-template-submit") as HTMLButtonElement;
+            await flush();
+            expect(submit().disabled).toBe(true);
+            resolveAccounts([{ id: "acct-codex", name: "Codex Work", provider: "codex" }]);
+            await flush();
+            expect(submit().disabled).toBe(true);
+            resolveBundle({ provider: "codex" });
+            await flush();
+            await flush();
+            expect(submit().disabled).toBe(false);
         });
 
         it("has no account field, and labels its bundle field Bundle", async () => {

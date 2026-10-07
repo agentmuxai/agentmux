@@ -91,6 +91,9 @@ export const AgentCreateFromTemplateModalPanel = (
     const [accountId, setAccountId] = createSignal("");
     const [bundleId, setBundleId] = createSignal("");
     const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
+    // The account list has been fetched (or failed to): Create waits for it,
+    // since the first account is used without a field to show it.
+    const [accountsReady, setAccountsReady] = createSignal(false);
     const [bundles, setBundles] = createSignal<Bundle[]>([]);
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
@@ -104,9 +107,9 @@ export const AgentCreateFromTemplateModalPanel = (
     // gets cloned: the template's own, or its bundle's when it has none
     // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). Falls back to `props.template.provider`
     // while loading/on failure, same contract `resolveEffectiveLaunchProvider`
-    // itself documents — a brief stale flash here is cosmetic (form
-    // options), not a spawn/credential decision the way it would be in
-    // AgentLaunchModal.
+    // itself documents. The provider picks the account the agent is created
+    // with, and the form has no account field to correct it, so Create waits
+    // for this to resolve (`canSubmit`).
     const [resolvedTemplateProviderId] = createResource(
         () => props.template,
         resolveEffectiveLaunchProvider,
@@ -249,6 +252,7 @@ export const AgentCreateFromTemplateModalPanel = (
             } catch {
                 /* non-fatal; user can still create without binding */
             }
+            setAccountsReady(true);
             try {
                 const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
                 setBundles(list ?? []);
@@ -289,6 +293,8 @@ export const AgentCreateFromTemplateModalPanel = (
     const canSubmit = () =>
         name().trim().length > 0
         && name().trim().length <= 200
+        && accountsReady()
+        && !resolvedTemplateProviderId.loading
         && !submitting();
 
     const submit = async () => {
