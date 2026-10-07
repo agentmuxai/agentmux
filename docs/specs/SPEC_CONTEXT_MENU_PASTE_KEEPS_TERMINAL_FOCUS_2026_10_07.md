@@ -1,6 +1,6 @@
 # Pasting into a terminal from the right-click menu should leave the terminal ready for Enter
 
-**Status:** implemented: §5 layers 1–3 (see §8). §6 open items remain.
+**Status:** implemented — PR #4431: §5 layers 1–3 (see §8). §6 open items remain.
 **Date:** 2026-10-07 · **Author:** agent2 · **Base:** `main` @ `22857409f`
 **Related:** `SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md` (the one-click rule for inputs), `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` (`giveBlockFocus`), `SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (the menu every pane shares).
 
