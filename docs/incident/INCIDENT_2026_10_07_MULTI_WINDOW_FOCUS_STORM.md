@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-07
 **Author:** Agent4
-**Status:** fixed in the PR that adds this file (`MainFocusReclaimTask` no longer activates a window that isn't already the active one).
+**Status:** retro. Fixed in the PR that adds this file (`MainFocusReclaimTask` no longer activates a window that isn't already the active one).
 **Seen in:** Agent4's own `task dev` window on `main` @ `60bcc3e99` (v0.59.12), Windows. No experimental switches were on.
 
 ## 1. What happened
