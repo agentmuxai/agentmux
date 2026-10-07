@@ -251,3 +251,19 @@ A `PrintWindow` capture taken right after the last step of the fast drag now sho
 1. **Airspace.** A Views overlay draws above the app's own `BrowserView`, so DOM menus can't cover it. Windows would need what macOS has (a mask on the overlay's layer, which `CefView` doesn't expose: a small patch in the `agentmuxai/cef` fork) or Linux's approach of hiding the whole pane. **Whether the fork patch is feasible is the deciding question**, and the next step if this goes ahead.
 2. **Input and focus.** Clicking, typing, IME, scrolling, popups and DevTools in a Views pane on Windows are unverified. They need a hands-on pass.
 3. **DPI.** Under the same window width the two paths lay the page out differently (only the native path shows horizontal scrollbars at DPR 1.25). The cause is unexplained.
+
+### 9.1 Menus over Views panes: a CEF patch that shapes the overlay
+
+The deciding question above, airspace, now has a working answer on Windows.
+
+- **CEF patch** (against `agentmuxai/cef` branch `8037`; kept with the spike, to go to the fork as a branch when this is implemented): a new `CefOverlayController::SetShape(const std::vector<CefRect>& rects)`, annotated `added=15400`, with its C API slot appended last.
+  - It calls `views::Widget::SetShape` on the overlay's widget. For this child Aura widget that becomes the layer's alpha shape, an alpha-threshold filter that clips the pane's web content too.
+  - It also installs an `aura::WindowTargeter` whose `GetExtraHitTestShapeRects` returns that same shape, so clicks outside it fall through to the app's own page below.
+  - About 60 lines. An incremental build of `libcef` in the existing `Release_GN_154` tree took about 13 minutes, including the thin-LTO relink.
+- **App side** (spike branch): `browser_panes_set_overlay_clip` already reports the DOM overlay rects for a window. For each Views pane, `views_spike::update_shape` computes the pane's rect minus those rects, in pane-local DIP, and calls `set_shape`. It runs again when the pane moves.
+  - A pane fully covered gets one empty rect, because an empty list means "no shape".
+  - The call is gated by `AGENTMUX_PANE_VIEWS_SHAPE=1`, since a stock libcef has no such slot.
+  - The geometry has unit tests.
+- **Result:** with the top bar's "more" dropdown open over a browser pane, the menu draws on top and the pane is clipped exactly around it; the rest of the pane, URL bar included, stays live. Closing the menu restores the full pane. Clicking menu items over a pane still needs a hands-on check (a scripted click would move the operator's mouse).
+
+**What this means for §6:** the Views path is viable on Windows with one small fork patch. That patch could also replace Linux's whole-pane hide, and possibly macOS's hole-punch mask (on macOS `Widget::SetShape` takes a different native path; not tested).

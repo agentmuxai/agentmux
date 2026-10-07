@@ -31,6 +31,140 @@ pub fn enabled() -> bool {
 struct Overlay {
     window_label: String,
     controller: OverlayController,
+    /// The pane's rect, physical client px, as last applied.
+    rect: Rect,
+}
+
+/// DOM overlay rects (menus, modals…) per window, physical client px, from
+/// `browser_panes_set_overlay_clip`.
+static OVERLAY_CLIPS: LazyLock<Mutex<HashMap<String, Vec<Rect>>>> = LazyLock::new(Default::default);
+
+/// `a` minus `b`: up to four rects covering what of `a` lies outside `b`.
+pub(crate) fn subtract(a: &Rect, b: &Rect) -> Vec<Rect> {
+    let (ax2, ay2, bx2, by2) = (a.x + a.width, a.y + a.height, b.x + b.width, b.y + b.height);
+    let (ix, iy, ix2, iy2) = (a.x.max(b.x), a.y.max(b.y), ax2.min(bx2), ay2.min(by2));
+    if ix >= ix2 || iy >= iy2 {
+        return vec![a.clone()];
+    }
+    let mut out = Vec::new();
+    if iy > a.y {
+        out.push(Rect { x: a.x, y: a.y, width: a.width, height: iy - a.y });
+    }
+    if iy2 < ay2 {
+        out.push(Rect { x: a.x, y: iy2, width: a.width, height: ay2 - iy2 });
+    }
+    if ix > a.x {
+        out.push(Rect { x: a.x, y: iy, width: ix - a.x, height: iy2 - iy });
+    }
+    if ix2 < ax2 {
+        out.push(Rect { x: ix2, y: iy, width: ax2 - ix2, height: iy2 - iy });
+    }
+    out
+}
+
+fn key(r: &Rect) -> (i32, i32, i32, i32) {
+    (r.x, r.y, r.width, r.height)
+}
+
+/// The parts of `pane` not under any of `holes`, relative to `pane`'s origin.
+/// `None` when nothing overlaps (no shape needed).
+pub(crate) fn visible_parts(pane: &Rect, holes: &[Rect]) -> Option<Vec<Rect>> {
+    let mut parts = vec![pane.clone()];
+    let mut overlapped = false;
+    for h in holes {
+        let next: Vec<Rect> = parts.iter().flat_map(|p| subtract(p, h)).collect();
+        if next.len() != parts.len() || next.iter().zip(&parts).any(|(a, b)| key(a) != key(b)) {
+            overlapped = true;
+        }
+        parts = next;
+    }
+    if !overlapped {
+        return None;
+    }
+    Some(
+        parts
+            .into_iter()
+            .map(|r| Rect { x: r.x - pane.x, y: r.y - pane.y, width: r.width, height: r.height })
+            .collect(),
+    )
+}
+
+/// Whether to call the patched `CefOverlayController::SetShape`. Its slot
+/// only exists in a libcef built with the AgentMux overlay-shape patch;
+/// reading it from a stock libcef reads past the struct.
+fn shape_enabled() -> bool {
+    static ON: LazyLock<bool> = LazyLock::new(|| std::env::var("AGENTMUX_PANE_VIEWS_SHAPE").as_deref() == Ok("1"));
+    *ON
+}
+
+/// Call the patched `set_shape`: the slot right after the stock struct's last
+/// one (`is_drawn`), per the patch's `added=15400` C API.
+fn set_shape(controller: &OverlayController, rects_dip: &[Rect]) {
+    if !shape_enabled() {
+        return;
+    }
+    type SetShape = unsafe extern "system" fn(*mut cef::sys::_cef_overlay_controller_t, usize, *const cef::sys::_cef_rect_t);
+    let raw = ImplOverlayController::get_raw(controller);
+    let c_rects: Vec<cef::sys::_cef_rect_t> = rects_dip
+        .iter()
+        .map(|r| cef::sys::_cef_rect_t { x: r.x, y: r.y, width: r.width, height: r.height })
+        .collect();
+    unsafe {
+        let slot = (raw as *const u8).add(std::mem::size_of::<cef::sys::_cef_overlay_controller_t>()) as *const Option<SetShape>;
+        if let Some(f) = *slot {
+            f(raw, c_rects.len(), c_rects.as_ptr());
+        }
+    }
+}
+
+/// Recompute one pane's shape from its rect and its window's overlay rects.
+fn update_shape(state: &Arc<AppState>, o: &Overlay) {
+    let Some(window) = crate::ui_tasks::get_window_on_ui(state, &o.window_label) else { return };
+    let scale = window_scale(&window);
+    let holes = OVERLAY_CLIPS.lock().get(&o.window_label).cloned().unwrap_or_default();
+    let dip = |r: &Rect| {
+        let s = |v: i32| (v as f32 / scale).round() as i32;
+        Rect { x: s(r.x), y: s(r.y), width: s(r.width), height: s(r.height) }
+    };
+    match visible_parts(&o.rect, &holes) {
+        None => set_shape(&o.controller, &[]),
+        // Fully covered: one empty rect, since an empty list means "no shape".
+        Some(parts) if parts.is_empty() => set_shape(&o.controller, &[Rect { x: 0, y: 0, width: 0, height: 0 }]),
+        Some(parts) => set_shape(&o.controller, &parts.iter().map(dip).collect::<Vec<_>>()),
+    }
+}
+
+/// Store a window's DOM overlay rects and reshape its Views panes. UI thread.
+pub fn set_overlay_clip(state: &Arc<AppState>, window_label: &str, rects: Vec<Rect>) {
+    OVERLAY_CLIPS.lock().insert(window_label.to_string(), rects);
+    let overlays = OVERLAYS.lock();
+    for o in overlays.values().filter(|o| o.window_label == window_label) {
+        update_shape(state, o);
+    }
+}
+
+wrap_task! {
+    pub struct OverlayClipTask {
+        state: Arc<AppState>,
+        window_label: String,
+        rects: Vec<Rect>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            set_overlay_clip(&self.state, &self.window_label, self.rects.clone());
+        }
+    }
+}
+
+/// From the `browser_panes_set_overlay_clip` IPC thread.
+pub fn post_overlay_clip(state: &Arc<AppState>, window_label: &str, rects: &[(i32, i32, i32, i32)]) {
+    if !enabled() {
+        return;
+    }
+    let rects = rects.iter().map(|&(x, y, w, h)| Rect { x, y, width: w, height: h }).collect();
+    let mut task = OverlayClipTask::new(state.clone(), window_label.to_string(), rects);
+    post_task(ThreadId::UI, Some(&mut task));
 }
 
 /// Live Views panes by label.
@@ -111,7 +245,9 @@ pub fn create(state: Arc<AppState>, block_id: String, label: String, url: String
     }
     let b = controller.bounds();
     tracing::info!(%block_id, %label, scale = window_scale(&window), x = b.x, y = b.y, w = b.width, h = b.height, "[views-spike] pane created as a Views overlay");
-    OVERLAYS.lock().insert(label, Overlay { window_label, controller });
+    let overlay = Overlay { window_label, controller, rect };
+    update_shape(&state, &overlay);
+    OVERLAYS.lock().insert(label, overlay);
 }
 
 /// Move Views panes, then lay out each window once. UI thread.
@@ -119,14 +255,16 @@ pub fn apply(state: &Arc<AppState>, items: &[(String, Rect)]) {
     let started = std::time::Instant::now();
     let mut windows: Vec<String> = Vec::new();
     {
-        let overlays = OVERLAYS.lock();
+        let mut overlays = OVERLAYS.lock();
         for (label, rect) in items {
-            let Some(o) = overlays.get(label) else { continue };
+            let Some(o) = overlays.get_mut(label) else { continue };
+            o.rect = rect.clone();
             let Some(window) = crate::ui_tasks::get_window_on_ui(state, &o.window_label) else { continue };
             let (pos, size) = to_dip(rect, window_scale(&window));
             o.controller.set_size(Some(&size));
             o.controller.set_position(Some(&pos));
             o.controller.set_visible(if rect.width > 0 && rect.height > 0 { 1 } else { 0 });
+            update_shape(state, o);
             if !windows.contains(&o.window_label) {
                 windows.push(o.window_label.clone());
             }
@@ -176,5 +314,49 @@ wrap_task! {
         fn execute(&self) {
             apply(&self.state, &[(self.label.clone(), self.rect.clone())]);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn r(x: i32, y: i32, w: i32, h: i32) -> Rect {
+        Rect { x, y, width: w, height: h }
+    }
+
+    fn area(rs: &[Rect]) -> i32 {
+        rs.iter().map(|r| r.width * r.height).sum()
+    }
+
+    #[test]
+    fn nothing_overlapping_needs_no_shape() {
+        assert!(visible_parts(&r(100, 100, 50, 50), &[r(0, 0, 10, 10)]).is_none());
+    }
+
+    #[test]
+    fn a_menu_over_a_corner_leaves_the_rest_in_pane_coordinates() {
+        let parts = visible_parts(&r(100, 100, 100, 100), &[r(150, 80, 100, 70)]).unwrap();
+        assert_eq!(area(&parts), 100 * 100 - 50 * 50);
+        assert!(parts.iter().all(|p| p.x >= 0 && p.y >= 0 && p.x + p.width <= 100 && p.y + p.height <= 100));
+        assert!(!parts.iter().any(|p| p.x < 100 && p.x + p.width > 50 && p.y < 50 && p.y + p.height > 0));
+    }
+
+    #[test]
+    fn a_menu_inside_the_pane_cuts_a_hole() {
+        let parts = visible_parts(&r(0, 0, 100, 100), &[r(40, 40, 20, 20)]).unwrap();
+        assert_eq!(parts.len(), 4);
+        assert_eq!(area(&parts), 100 * 100 - 20 * 20);
+    }
+
+    #[test]
+    fn overlapping_menus_are_not_double_counted() {
+        let parts = visible_parts(&r(0, 0, 100, 100), &[r(10, 10, 40, 40), r(30, 30, 40, 40)]).unwrap();
+        assert_eq!(area(&parts), 100 * 100 - (40 * 40 + 40 * 40 - 20 * 20));
+    }
+
+    #[test]
+    fn fully_covered_leaves_nothing() {
+        assert!(visible_parts(&r(10, 10, 50, 50), &[r(0, 0, 100, 100)]).is_some_and(|v| v.is_empty()));
     }
 }

@@ -61,6 +61,8 @@ impl BrowserPaneManager {
         window_label: &str,
         overlay_rects: &[(i32, i32, i32, i32)],
     ) {
+        // Views spike: Views panes are shaped around the overlays instead.
+        crate::browser_pane::views_spike::post_overlay_clip(state, window_label, overlay_rects);
         use windows_sys::Win32::Foundation::{POINT, RECT};
         use windows_sys::Win32::Graphics::Gdi::{
             CombineRgn, CreateRectRgn, DeleteObject, InvalidateRect, MapWindowPoints, SetWindowRgn,
