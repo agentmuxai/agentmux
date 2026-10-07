@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.59.12 — 2026-10-06
+
+- Agent pane: tool hover panels on wide panes no longer reach far past the pane; the overshoot stops at a readable width (about 120 characters), so thin panes still get room and wide panes get none
+- The Instance panel's Build Time is shown in UTC with a 24-hour clock (e.g. "Oct 6, 2026 15:04 UTC"), so it reads the same on every machine and matches CI logs.
+- Resizing the window stays smooth with many tabs open: hidden tabs no longer lay out on every frame of a resize, so the new area paints right away instead of showing grey.
+- The new-agent Name field now starts empty with "Choose a name" ghost text for every provider, instead of pre-filling the provider's name, and a duplicate name gets a plain-language error.
+- Dragging the window edge no longer sends the page work on every frame unless Shift is held, and saving the window's position no longer starts a thread each time.
+- Terminals and System Info charts resize along with the window as you drag it, instead of staying at their old size until you let go.
+- Window tabs you colour now use the softer pane-tab tones (quiet when idle, stronger when selected, in dark and light themes) instead of a solid fill with white text.
+- The command palette and Settings search list what you typed first: an exact name comes first and look-alikes are left out, while a typo still finds a match.
+- A Swarm broadcast now carries your full authority, the same as typing it into each pane: "finish the PR, then quit" lets an agent quit itself when it would from a typed message.
+- Agent installers: Antigravity now points you to Google's own installer (it was never on npm, so every install failed) and is found right after installing; Claude, Qwen, Gemini and Pi check for the Node.js version they need before installing; Gemini's card says it needs a Gemini API key; Pi no longer shows another product's name and logo; failed installs are now logged with their npm output.
+- Resizing the window no longer lags in a tab of agent panes: the tab is no longer restyled in full on every frame, and System Info charts follow the drag without rebuilding each frame.
+- Agent pane: the context compacted card shows the context's real size after compaction (from the next reply), instead of the summary's size, which read as if compaction had shrunk the context far more than it did
+- Resizing the window no longer stalls at a few widths: an unused Tailwind utility made each of them restyle and relay out the whole tab.
+- Tabs with several terminals keep up with a fast window drag: terminals now take turns resizing, at most two per frame, instead of all resizing in the same frame.
+- Antigravity agents now work: AgentMux drives the real agy CLI (its own output format, the prompt passed on the command line, the right flags, resume and model list) and uses agy's own sign-in instead of requiring a linked account.
+- Agent pane: Copilot and other ACP agents' replies, thinking and tool calls now show in the pane; the ACP reader expected a message shape no ACP agent sends, and each turn now ends cleanly
+- A middle-click on a link now opens the page in a new AgentMux browser pane, and no link can replace the AgentMux window itself any more: a normal click still opens the system browser.
+- Agent pane: Kimi panes run again; current kimi CLIs refused AgentMux's empty -p placeholder before reading the prompt
+- Agent panes keep up better during a window drag: each pane measures its resized messages in one pass instead of one layout per message.
+- A history read whose index is unavailable no longer loads a large transcript whole under the store lock (it returns an error the pane retries), and a read served from an index an append had outrun is logged
+- Browser panes now keep up with a window resize: they move together, a frame or two behind the page, instead of trailing it by half a second.
+- Transcript reads (opening an agent, scrolling its history) use their own read-only database connections, so they no longer wait behind other agents' writes
+- AgentMux keeps the conversation-history index between launches, so the startup scan re-reads only transcripts that changed instead of every transcript on the machine
+- A fresh channel or build no longer creates an unbound memory bundle for every agent defined only in the shared registry, and an agent's recorded bundle that isn't visible here is replaced instead of being re-minted each time
+- New open-latency benchmark (scripts/benchmarks/agent-open.mjs): opens agents in a running instance and fails when an open misses its time budget
+
 ## 0.59.11 — 2026-10-06
 
 - fix(statusbar): the version panel no longer shows a MuxBus row or Sign in button; sign-in stays in the network panel
