@@ -133,7 +133,15 @@ impl BrowserPaneManager {
         let (applied, post) = PENDING.lock().enqueue(window_label, rects);
         if post {
             let mut task = ApplyPaneBoundsTask::new(state.clone(), window_label.to_string());
-            post_task(ThreadId::UI, Some(&mut task));
+            if post_task(ThreadId::UI, Some(&mut task)) == 0 {
+                // No UI thread to run it (shutting down): drop what's pending
+                // so the window isn't left marked scheduled with no task, and
+                // answer every waiter now.
+                tracing::warn!(window = window_label, "[pane-bounds] post_task failed; dropping pending rects");
+                for w in PENDING.lock().take(window_label).waiters {
+                    let _ = w.send(());
+                }
+            }
         }
         let _ = tokio::time::timeout(APPLY_WAIT, applied).await;
     }
