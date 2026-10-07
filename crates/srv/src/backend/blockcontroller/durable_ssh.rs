@@ -282,7 +282,9 @@ pub struct DurableSshController {
 /// Restarts a pane through `resync_controller`, which then picks the plain
 /// shell controller because [`wants`] has turned false. Built by
 /// `resync_controller` itself, which holds everything a restart needs.
-pub type Fallback = Arc<dyn Fn() + Send + Sync>;
+/// False when it did not restart: the pane would still be durable (so a
+/// restart would only come back here), or the block is gone.
+pub type Fallback = Arc<dyn Fn() -> bool + Send + Sync>;
 
 impl DurableSshController {
     pub fn new(
@@ -470,8 +472,8 @@ impl Controller for DurableSshController {
                 show_done(this.as_ref(), done);
             } else if plain.load(Ordering::SeqCst) {
                 match fallback {
-                    Some(restart) => restart(),
-                    None => show_done(
+                    Some(restart) if restart() => {}
+                    _ => show_done(
                         this.as_ref(),
                         Done {
                             code: EXIT_COMMAND_NOT_FOUND,
@@ -761,6 +763,13 @@ impl Run {
                                     self.conn
                                 ))
                                 .await;
+                                // The helper was just found missing here: a
+                                // record saying it's installed is stale, and
+                                // would keep the pane durable (wants), so the
+                                // restart would come straight back.
+                                if let Err(e) = crate::backend::remote::helper_hosts::forget_helper(&self.conn) {
+                                    tracing::warn!(connection = %self.conn, error = %e, "could not forget the missing helper");
+                                }
                                 self.plain.store(true, Ordering::SeqCst);
                                 return None;
                             }

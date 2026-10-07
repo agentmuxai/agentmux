@@ -974,8 +974,14 @@ pub fn resync_controller(
                 let (boot_id, auth_key, config) = (boot_id.clone(), auth_key.to_string(), config.clone());
                 Arc::new(move || {
                     let Some(block) = mstore.as_ref().and_then(|s| s.get::<Block>(&block_id).ok().flatten()) else {
-                        return;
+                        return false;
                     };
+                    // Still durable: a restart would only start the same
+                    // durable controller again. Leave the pane stopped.
+                    if durable_ssh::wants(&block.meta, config.as_ref().map(|c| c.get_full_config()).as_deref()) {
+                        tracing::warn!(block_id = %block_id, "durable ssh: still durable, not falling back");
+                        return false;
+                    }
                     if let Err(e) = resync_controller(
                         &block,
                         &tab_id,
@@ -994,7 +1000,9 @@ pub fn resync_controller(
                         config.clone(),
                     ) {
                         tracing::warn!(block_id = %block_id, error = %e, "durable ssh: plain terminal fallback failed");
+                        return false;
                     }
+                    true
                 })
             };
             let ctrl = Arc::new(durable_ssh::DurableSshController::new(
