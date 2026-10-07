@@ -470,13 +470,13 @@ export class EditorViewModel {
         // with that one file.
         const restored = hydrateDocTabs(meta?.[DOC_TABS_META], deserializeEditorBuffer);
         const legacyFile = meta?.[META_LEGACY_FILE];
-        // A line to open `file` at, once (pane.open's `line`). Cleared at once,
-        // so a reload of the pane opens where the user left it instead.
+        // A line to open `file` at, once (pane.open's `line`). Kept in the
+        // meta until the loaded file uses it (takeOpenAtLine), so an editor
+        // unmounted mid-load still lands there when it comes back.
         const openAt = readOpenAtLine(meta, legacyFile);
         if (openAt != null && typeof legacyFile === "string") {
             this._openAtLine = { path: canonicalizePath(legacyFile), line: openAt };
         }
-        if (meta?.[META_OPEN_AT_LINE] != null) void this.persistMeta({ [META_OPEN_AT_LINE]: null });
         if (restored) {
             this._docTabsWritten = JSON.stringify(meta?.[DOC_TABS_META]);
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
@@ -516,6 +516,8 @@ export class EditorViewModel {
         const pending = this._openAtLine;
         if (!pending || !path || this.loadingAtom() || canonicalizePath(path) !== pending.path) return undefined;
         this._openAtLine = null;
+        // Used: a reload of the pane opens where the user left it instead.
+        void this.persistMeta({ [META_OPEN_AT_LINE]: null });
         return pending.line;
     }
 
