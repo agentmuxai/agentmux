@@ -25,7 +25,7 @@ import { focusManager } from "@/app/store/focusManager";
 import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
-import { SegmentedControl } from "@/app/element/ui";
+import { Button, SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
@@ -37,7 +37,6 @@ import "./editor-view.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
 import { keybindingsVersion } from "@/app/keybindings/registry";
-import { Button } from "@/app/element/ui";
 import { OpenFromRemoteModal } from "./open-from-remote-modal";
 
 // ── Language loader ─────────────────────────────────────────────────────────
