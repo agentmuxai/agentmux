@@ -15,6 +15,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createBlock, openOrFocusPaneByView } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { isLightThemeActive, widgetRoleColor } from "@/app/block/pane-identity";
+import { resolvePaneTabView } from "@/app/block/pane-tab-registry";
 import { paneRoleColor, type PaneColorRole } from "@/app/block/pane-color-scheme";
 import type { JSX } from "solid-js";
 
@@ -259,9 +260,13 @@ export function buildPaneWidgetMenuItems(
 const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory"]);
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {
-    const view = widget.blockdef?.meta?.["view"] as string | undefined;
+    // A user's widget override written before a pane was renamed can still
+    // name the old view; resolve it, or the open pane wouldn't be found.
+    const raw = widget.blockdef?.meta?.["view"] as string | undefined;
+    const view = raw ? resolvePaneTabView(raw) : undefined;
     if (view && FOCUS_EXISTING_VIEWS.has(view) && !widget.magnified) {
-        await openOrFocusPaneByView(view, widget.blockdef);
+        const blockdef = view === raw ? widget.blockdef : { ...widget.blockdef, meta: { ...widget.blockdef?.meta, view } };
+        await openOrFocusPaneByView(view, blockdef);
         return;
     }
     createBlock(widget.blockdef, widget.magnified);
