@@ -1,6 +1,7 @@
 # Agent pane: one-way flow while following
 
-**Status:** proposed — nothing built. Builds on, and does not replace, the follow state machine
+**Status:** proposed — Phase 0 (recorder + soak) built on `agento/one-way-flow-impl`; §3–§5 revised after an
+adversarial review of the first draft (§9). Builds on, and does not replace, the follow state machine
 (`SPEC_AGENT_PANE_SCROLL_FOLLOW_STATE_MACHINE_2026_09_24.md`; its Phase 0/0b shipped in #3652/#3658, Phases 1–5 open).
 **Date:** 2026-10-07.
 **Requested by:** repo owner (asafebgi): "what i continue to see in the agent pane is the overshoot followed by
@@ -32,8 +33,10 @@ While the pane is **FOLLOWING** and the user is not touching it:
 
 Everything below exists to make V1 and V2 true **by construction**, and §6 checks them on every frame in a soak run.
 
-User-initiated changes are exempt: the user's own scroll, a pane resize, a zoom change, the composer growing or
-shrinking as they type, and sending a message.
+User-initiated changes are exempt: the user's own scroll, wheel, scrollbar drag or text-selection drag; a pane resize or
+zoom change; the composer growing or shrinking as they type; sending a message; collapsing, expanding or pinning a tool;
+answering a question or decision; `/clear`; switching to the pane's tab. Exempt means V1/V2 are not checked for those
+frames, not that the code stops caring: it still never moves content down on its own.
 
 ## 2. Why the current model can't meet the goal
 
@@ -51,7 +54,8 @@ paths don't:
 
 - the viewport ResizeObserver (VL:1013-1041), which fires whenever the working row, ActivityDock, a panel or the
   composer changes height, which is constantly during tool runs;
-- `jumpToBottom` (VL:1105-1109), on **every keystroke** (`agent-view.tsx:1468-1470`), on send and on a queued turn;
+- `jumpToBottom` (VL:1105-1109), while typing (`agent-view.tsx:1467-1469`, at most once per frame via
+  `AgentFooter.tsx:765-808`), on send and on a queued turn;
 - the first-overflow forced pin (VL:1255-1288).
 
 Even the content RO can't strip the row-enter rise, which is CSS, so every new agent row overshoots by about 6 px
@@ -61,8 +65,9 @@ Two smaller sources of the same look:
 
 - a glide fires on growth that was **already** compensated (above the fold, or a mid-view preview growing), so the
   content below drops by Δ and rises again;
-- a head-row remeasure reaches the pin one frame late. The measure RO is deeper in the tree than the content RO, so the
-  browser's depth rule pushes the pin to the next frame, and one frame paints the content pushed down.
+- a head-row remeasure can reach the pin one frame late (inferred, not measured). The measure RO is deeper in the
+  tree than the content RO, so the browser's depth rule pushes the pin to the next frame. Native scroll anchoring
+  covers it when its anchor is a buffer row, not when it is a head row, whose `translateY` (VL:1641) changes.
 
 ### 2.2 Scroll-back during tool previews: we let visible rows shrink, then hide it on a timer
 
@@ -90,141 +95,165 @@ let us overshoot.**
 
 ## 3. The model
 
-Four rules. Each one closes a class of bug outright, without trying to patch individual paths.
+Four rules. The first draft of this section (per-row height floors, an eased follower that only ratcheted
+`scrollTop` forward, overlay chrome, several ResizeObservers) did not survive review; §9 says why. What replaced it is
+smaller and states V1 directly instead of approximating it.
 
-### R1. Motion comes only from `scrollTop`, never from transforms
+### R1. No motion that isn't layout
 
-While FOLLOWING, nothing in the transcript scroller may carry a transform, a `translate`, or a height animation that
-changes its scrollable overflow. Smooth arrival is produced by the **follower** (§4) moving `scrollTop` toward the
-bottom.
+While FOLLOWING, nothing in the transcript scroller may run a transform/translate **animation or transition**, or a
+height animation that **shrinks**. Static transforms (the head rows' `translateY` positions, VL:1641) and growing
+height animations are fine: they are layout the rest of the model sees. The glide and the shrink hold are not used
+(the hold's ease-down is a transform animation; its `min-height` is replaced by R3). New rows fade in with opacity
+only; the 8 px rise is dropped, because a rise extends the scroll range and makes every pin land past the bottom.
 
-- **Overshoot becomes impossible.** The browser clamps `scrollTop` to `scrollHeight − clientHeight`, so the follower
-  cannot write a position past the real bottom. This guarantees V2 for every pin path, with no per-path compensation
-  to forget.
-- The glide and the hold-release ease are deleted, not fixed.
-- **Row entry becomes opacity only** (180 ms fade, no rise). The upward motion a reader sees comes from the follower,
-  the same as the rest of the conversation. If the rise is wanted back, it must be clipped so it can't add overflow:
-  `overflow: clip` on the row wrapper, so the row's own box clips it.
+### R2. Visible rows never move down: compensate, don't predict
 
-### R2. Visible rows are grow-only while following
+In one ResizeObserver callback (R4), with layout clean, the binding knows where every row that was visible at the last
+observation is on screen now. Take the **largest downward move** of any of them and scroll forward by exactly that,
+immediately, before paint. Every row then sits at or above where it was: V1 holds whatever the cause was:
 
-A row that intersects the viewport, or is below it, may grow but may not shrink. A shrink is turned into a **floor**:
-the row wrapper keeps `min-height` at its high-water mark, and the gap shows **inside that row**, under the tool card,
-not as a hole at the bottom of the pane. A floor is released **only where the release is invisible**:
+| Cause | What the rows did | Compensation |
+|---|---|---|
+| A visible row or one above the viewport grew (preview opens, image, highlight swap, a head row remeasured) | Rows below the growth moved down | Scroll forward by the growth |
+| A visible row shrank while at the bottom | The browser clamped `scrollTop`; rows above the shrink moved down | Scroll forward by the clamp; R3 makes room for it |
+| The viewport grew (working row left, a panel closed) | The browser clamped; everything moved down | The same |
+| A row was removed, replaced under a new id, or migrated into the head with a different height | Whatever moved, moved down by some amount | The same |
+| Something shrank wholly above the viewport | Nothing visible moved down | Nothing to do (the clamp is invisible) |
+| New content appended below the last visible row | Nothing visible moved | Nothing; the follower (§4) eases toward the new bottom |
 
-| Situation | Release |
-|---|---|
-| The row's bottom is above the viewport top, and the follower is at rest at the true bottom | Release now. Content above the viewport shrinks, the browser clamps `scrollTop` by the same amount, and nothing on screen moves. This is the 06-16 "collapse once scrolled off the top" rule, applied to every row instead of only tools. |
-| DETACHED (the user is reading) | Release when the row is fully off-screen. If it is above the viewport, correct `scrollTop` by the delta in the same RO pass (anchor-row correction, the 10-04 report §6.3). |
-| Pane width or zoom changed (user-initiated) | Drop every floor and re-measure. Exempt by §1. |
+This is what native scroll anchoring does for one anchor, applied to every visible row and to shrinks. So while
+FOLLOWING the scroller gets `overflow-anchor: none`, and the browser and the app never both correct. DETACHED keeps
+`auto`, so a reader's place is kept by the browser as today.
 
-There are no timers. A floor never "times out" onto a reader.
+Between observations the binding updates its record of row positions by whatever it scrolled, so its own writes are
+never mistaken for movement. A scroll the user made re-baselines the record instead.
 
-**Where the floor is enforced.** In one ResizeObserver over the live-region row wrappers. When an entry's height
-dropped below its recorded max, write `min-height = floor(max)` (always the **floor** of the exact zoom-corrected
-height, never `offsetHeight`, which rounds up; that rounding was the 367 ms tremor in the 10-04 RCA). Then call the
-follower's `settle()` in the same callback. RO runs after layout and before paint, so the shrink is never painted, and
-the `scrollTop` the browser clamped during that layout is restored before paint as well.
+### R3. One bottom spacer makes room, and new content fills it
 
-This is generic. It covers tool results, panel collapses, markdown re-highlighting, async renderers and anything added
-later, without each component having to opt in. Components can still do better at the source, for example by
-rendering a preview's result inside the same box at the same height, so the floor has nothing to hold. Those are polish
-items (§5 Phase 4), not correctness.
+A compensating scroll needs room below it. When the content got shorter or the viewport taller, the position R2
+wants is past the end. A spacer element after the streaming buffer provides exactly that room:
 
-### R3. The viewport doesn't grow mid-flow
+```
+spacer' = max(0, spacer + ceil(wanted + clientHeight − scrollHeight))
+```
 
-The scroller's `clientHeight` may shrink while following (the follower pins, and content moves up), but it may not
-grow except for the user-initiated changes in §1. Transient chrome below the transcript (the working row,
-ActivityDock rows, the question panel, notices above the composer) is laid **over** the bottom of the scroller instead
-of beside it. The transcript content gets a matching **bottom inset**, managed by the same floor rule as R2:
+- It is the only thing that grows when content shrinks. Rows below a shrink move **up** into the space (allowed). The
+  blank appears at the bottom of the pane, where the next content lands.
+- New content fills it. Each observation recomputes it from the same formula, so growth reduces it first and nothing
+  moves until it is used up.
+- It shrinks only when it is below the viewport. As the reader scrolls up, the formula with the reader's `scrollTop`
+  needs less room, and the spare part is off-screen when it goes. `/clear`, a width or zoom change, and a pane reset
+  set it to 0.
+- It is not a row. It is not measured by the head's measure RO or the tail's height cache, so it never leaks into the
+  layout slice. It is not observed, so writing its height does not re-trigger the observer.
+- It covers what the first draft needed three mechanisms for: per-row floors, the overlay chrome for the working row
+  and `AgentBottomPanels`, and floors for removed or replaced nodes.
 
-- the inset grows immediately (content moves up);
-- when the chrome shrinks or leaves, the inset stays as blank space where the chrome was;
-- the inset is released only at the next **user commit point**: a send, the user's own scroll, or a pane resize.
+### R4. One observer, one writer, user input suspends it
 
-At turn end, the working row disappears and leaves its space empty. Nothing slides down.
-
-### R4. One writer, one place it runs
-
-Exactly one function moves the transcript's `scrollTop` while FOLLOWING: the follower's `settle()`. It is called at
-the end of **every** ResizeObserver callback that can change a height: the content RO, the viewport RO, the floor RO,
-and the row-measure RO, which also fixes the one-frame-late head pin. `jumpToBottom` dispatches `JumpToBottom` to the
-state machine and calls `settle()`. It no longer writes `scrollTop` itself.
-
-This is invariant I3 of the 09-24 spec, extended with the motion. It also gives the 09-24 Phase 1/2 reducer and
-binding (`frontend/app/view/agent/scroll/`) their first real job, so the two specs are built as one module.
+- **One ResizeObserver** for the one-way path. It observes the scroller (viewport), the head container, the streaming
+  buffer and every mounted row (head and buffer). It is created after the head's measure RO and the tail RO, so in a
+  round where rows resized it runs after their callbacks have updated the slice, and reads geometry that includes
+  them. In its callback, in order: re-read geometry, compensate (R2), resize the spacer (R3), let the follower (§4)
+  continue.
+- **One writer.** While FOLLOWING, only this callback and the follower's frames write `scrollTop`. The content RO,
+  viewport RO, first-overflow pin, glide and hold do nothing on the one-way path. `jumpToBottom` engages FOLLOWING and
+  asks the follower to snap to the bottom.
+- **The user always wins.** While the user-input window is open (wheel anywhere in the pane, including the preview
+  wheel relay `scroll-handoff.ts:187`; a scrollbar drag; a pointer held on the content, which covers selection drags;
+  scroll keys) the binding neither compensates nor follows; it only re-baselines. A user scroll that moves the
+  transcript up while FOLLOWING detaches at once, whatever the distance, so a small wheel-up is not pulled back.
+- The browser's "ResizeObserver loop completed with undelivered notifications" can still fire when a row
+  measurement grows the head container in the same round. That path exists today (measure RO → head height → content
+  RO). The one-way observer does not add a new one: the spacer is not observed.
 
 ## 4. The follower
 
+The follower only ever handles the part R2 doesn't: content that arrived **below** everything visible. It moves
+`scrollTop` toward the bottom over a few frames, forward only:
+
 ```
-settle(now):                         // runs inside RO callbacks and from rAF while moving
-  if state != FOLLOWING: return
-  max = scrollHeight - clientHeight  // layout is clean here (RO) or we're in rAF after a write
-  gap = max - scrollTop
-  if gap <= 0.5:          at rest; apply pending invisible floor releases (R2 row 1); stop rAF
-  elif reducedMotion or gap > SNAP_PX:   scrollTop = max         // one step
-  else:                   scrollTop += max(1, gap * (1 - exp(-dt / TAU)))   // never past max
-                          schedule rAF(settle)
+next = gap ≤ 1 px            → at rest
+       reduced motion or gap > 0.75 × clientHeight → bottom, at once
+       otherwise              → pos + max(1, gap × (1 − e^(−dt / 60 ms))), never past the bottom
 ```
 
-- **`TAU` = 60 ms** (about 140 ms to land 90% of a step). Steady streaming reads as one continuous scroll. A new
-  target arriving mid-move just raises `max`; there is no carried offset to get wrong.
-- **`SNAP_PX` = 0.75 × clientHeight**, the threshold #4178 already chose. A paste-sized arrival is shown at once
-  instead of scrolled through slowly.
-- **Monotonic by construction.** While FOLLOWING the follower only ever increases `scrollTop`, and the browser caps it
-  at `max`. The only way `scrollTop` decreases is the clamp from a release above the viewport, which R2 restricts to
-  "at rest", where it moves nothing on screen.
-- **Lag is visible and harmless.** While moving, the newest few lines sit just below the viewport edge for about 100 ms.
-  That is the same as the glide today, without drawing anything in the wrong place.
-- **User input wins at once.** A wheel-up or a scroll key cancels the rAF synchronously in the input handler (the
-  09-24 §5.4 gesture table) before the next `settle` can run. The follower's own scroll events carry no user-intent
-  window, so the state machine ignores them (I1).
-- **The inner preview boxes use the same follower** (`ToolOverlayLog`'s internal follow, `SystemToolInstallInline`).
-  Their duplicated follow rules go away, as 09-24 Phase 3 planned.
+- **No overshoot.** The target is the bottom as last measured with layout clean, which can only be at or above the
+  real bottom, and the browser clamps a write to the real bottom anyway. V2 holds for every write.
+- **No layout reads in frames.** The follower's frame step only writes; the target and position come from the
+  observer callback. Each write is marked as our own scroll with its geometry (`pinnedGeometry`), so `handleScrollNow`
+  reads no layout for it and logs nothing.
+- **At rest** is `gap < 1 px` or a write that did not move `scrollTop` (fractional zoom: integer `scrollHeight`,
+  fractional `scrollTop`). It stops its frame loop there and when the pane is hidden or detached.
+- **Why not snap everything?** Snapping (scroll to the bottom in the observer) also satisfies V1/V2 and is simpler.
+  Easing only the appended part keeps the smooth arrival the owner asked for on 10-01 without the glide's transform.
+  `REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01.md` flagged an animated scroll as risky because of the scroll events
+  it fires; marking each write as our own with its geometry is the answer. Reduced motion snaps.
 
 ## 5. Rollout
 
-Each phase is one PR. Everything new sits behind **`agent:onewayflow`** (default on in dev builds, off in release),
-with the old path kept for one release as the kill switch, the same pattern as `agent:turnscopedtail`.
+Everything new sits behind **`agent:onewayflow`** (default on; `false` restores the old path, the kill switch), the
+same pattern as `agent:turnscopedtail`. Read once at pane mount. Nothing merges before the owner has smoke-tested a
+build of it.
 
 | Phase | What | Exit criterion |
 |---|---|---|
-| **0. Measure** | Frame recorder (dev, Ctrl+Shift+D HUD): per rAF, `scrollTop`, `scrollHeight`, `clientHeight`, and the screen `top` of each visible row by node id. It checks V1 and V2 live and logs `[one-way] violation kind=… row=… dy=… cause=…`, with cause attributed from the last RO and timer that ran. A production counter for violations, rate-limited. **Baseline it on current main** with the soak script (§6) before any fix. | A baseline number for V1/V2 violations per minute of tool-heavy streaming, with causes. This settles §2's inferences. |
-| **1. Follower + R1** | `scroll/follow-controller.ts` (the 09-24 reducer) plus `follower.ts` (§4). Route every pin path through `settle()` (R4). Delete the glide and the row-enter rise behind the flag. | V2 violations = 0 in the soak. |
-| **2. Floors (R2)** | The floor RO, invisible release, and DETACHED anchor-row correction. Delete the shrink hold and the hold ease. | V1 violations from row shrinks = 0. |
-| **3. Overlay chrome (R3)** | Working row, ActivityDock, question panel and notices overlay the scroller with a managed bottom inset. | V1 violations from viewport growth = 0. |
-| **4. Sources and DRY** | Preview boxes on the follower; the preview's result renders in the same box at its running height, so there is no floor gap; `resize-contract.ts` keeps grow animations only. | Floor-gap time per tool call is reported; no new violations. |
-| **5. Default on** | 30-minute, 3-pane soak with zero violations; flip the default; delete the old path, `anchor.ts`'s 200 px threshold, the dead flags, and the hold/glide constants. Update this spec and 09-24 to `implemented`. | Owner sign-off on a live run. |
+| **0. Measure** | The recorder (`frontend/app/view/agent/scroll/one-way-recorder.ts`, opt-in in every build: `__agentmuxOneWay.enable()`) and the soak (`scripts/ui-screenshots/one-way-soak.mjs`). Baseline current main. | A baseline count of V1/V2 violations per minute of tool-heavy streaming, with causes. |
+| **1. The one-way path** | R1–R4 and the follower, behind the flag: one observer, compensation, the spacer, the follower, `overflow-anchor: none` while following, no rise, no glide/hold/old pins on this path. | The soak reports zero violations not explained by an exempt user action. |
+| **2. Sources** | Fewer things to compensate: a Write/Bash preview completes inside a box that doesn't shrink while visible; `ToolOverlayLog` and `SystemToolInstallInline` share the user-intent window and log format (09-24 Phase 3). | Spacer time and size per tool call drop in the soak. |
+| **3. Default on** | A 30-minute, 3-pane soak with zero violations; owner sign-off on a live run; flip the default; delete the old path, the glide/hold constants and the 200 px threshold. Update this spec and 09-24 to `implemented`. | Owner sign-off. |
 
 ## 6. Verification
 
-- **Unit (pure).** Follower table tests: monotonic `scrollTop` across random growth sequences; never above `max`;
-  snap above `SNAP_PX`; cancel on `UserEscape`; reduced motion snaps. Floor policy tests: a shrink while visible gives a
-  floor; release only when off-top and at rest, or off-screen when DETACHED; width or zoom change drops floors.
-- **jsdom binding.** Extend `AgentDocumentVirtualList.pin.test.tsx` / `.resize.test.tsx`: assert a single writer of
-  `scrollTop` while FOLLOWING, and that no element in the scroller has a transform or height animation while FOLLOWING.
-- **Live soak (the acceptance test).** `scripts/ui-screenshots/full-conversation-bench.mjs --one-way-soak <min>` over
-  CDP against a dev build. It streams a scripted tool-heavy turn through the real pipeline: Bash previews that
-  stream then complete shorter, Read/Edit previews, parallel tools, panel expand/collapse, subagent dock rows, a
-  question panel, turn end, zoom 0.89. It reads the Phase 0 recorder and fails on any V1/V2 violation outside a
-  synthetic user gesture. It also runs the 09-24 follow-soak assertions (FOLLOWING stays at the bottom within
-  `SNAP_PX` and settles within 300 ms).
+- **Unit (pure).** The follower step (monotonic, never past the target, snap above the threshold, reduced motion,
+  at-rest); the compensation (largest downward move over the rows visible in both, ignoring new and removed rows); the
+  spacer formula (grows on shrink and viewport growth, filled by growth, never negative, shrinks only below the
+  viewport). The recorder's frame check (built).
+- **jsdom binding.** With fake geometry and ResizeObserver callbacks: one writer of `scrollTop` while FOLLOWING; a
+  shrink at the bottom grows the spacer and keeps `scrollTop`; growth above the viewport scrolls forward by exactly the
+  growth; user input suspends both; a wheel-up while following detaches.
+- **Live soak (acceptance).** `node scripts/ui-screenshots/one-way-soak.mjs --strict` against a dev build: scripted
+  tool-heavy turns (Bash, Write, parallel Reads, Edit, code blocks, turn end) through the real stream pipeline, with
+  the recorder checking every painted frame. Run on the base build for the baseline and with the flag on for the
+  change.
+
+The recorder samples once per frame, right after the frame is painted (a high-priority task queued from
+`requestAnimationFrame`). That is an approximation: a task that runs first could show a state that was never
+painted, so a violation is a lead to confirm, and a clean run is the claim.
 
 ## 7. What this trades away (decisions for the owner)
 
-1. **Blank space inside a shrunk row until it scrolls off.** A finished tool whose result is shorter than its preview
-   keeps the preview's height until new content pushes it above the viewport. That replaces today's "gap, then slide
-   back". Phase 4 removes most of it at the source. **Recommended:** accept; it is the only way a visible shrink can
-   avoid moving the content.
-2. **Blank space where the working row was, until the next send.** The same trade for chrome (R3). **Recommended:**
-   accept.
-3. **Motion style.** The follower scroll (§4) replaces the glide and the row rise; rows still fade in. The alternative
-   is an instant snap with fade only, which is simplest, with no rAF at all. **Recommended:** the follower, keeping
-   the smoothness the owner asked for on 10-01.
+1. **Blank space at the bottom until new content fills it.** A tool whose result is shorter than its preview, or a
+   panel closing below the transcript, leaves its height as blank space at the bottom of the pane. The next content
+   fills it with nothing moving; scrolling up releases it. This replaces today's "gap, then slide back". Phase 2
+   reduces how often it happens. **Recommended:** accept; it is the only way a visible shrink can avoid moving content
+   down.
+2. **Motion style.** Appended content arrives by the follower's short scroll (§4) instead of the glide; rows fade in
+   without the rise. The alternative is an instant snap. **Recommended:** the follower.
 
 ## 8. What this doesn't cover
 
-- Mechanism B of the 10-04 report (head estimates corrected while the user scrolls history) is a DETACHED problem. It
-  needs anchor-row correction and a width-aware estimator, and is tracked there. R2's DETACHED correction shares the
-  same helper.
+- Mechanism B of the 10-04 report (head estimates corrected while the user scrolls history) is a DETACHED problem.
+  It is tracked there; R2's compensation is only active while FOLLOWING.
 - The ANCHORED (ChatGPT-style turn anchoring) state and the "↓ New activity" pill stay where 09-24 put them.
+
+## 9. Review of the first draft
+
+An adversarial review (2026-10-07) of the first draft found:
+
+- **The ratchet could not keep V1.** A follower that only moves `scrollTop` forward does nothing for growth above the
+  last visible row (rows below it move down) and, as written, eased back from a clamped position instead of restoring
+  it. R2 (compensate the measured move of every visible row) replaces it.
+- **Several observers could not be ordered.** Floors in one observer and the pin in another raced, and writes to an
+  observed element at a shallower depth re-triggered the loop error. R4 uses one observer, and the spacer is not
+  observed.
+- **Per-row floors leaked into measurement** (the tail height cache and the head's measure RO read the floored height)
+  and missed removed or replaced rows and forced migrations. R3's spacer is not a row.
+- **The overlay chrome reversed `SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md`** and missed most of
+  `AgentBottomPanels`. The spacer handles a taller viewport the same way as a shrink.
+- **"At rest" was unreachable at fractional zoom**, other writers (the preview wheel relay, scrollbar and selection
+  drags) would have been fought, a small wheel-up would have been pulled back, and the exemption list was incomplete.
+  §1, §4 and R4 now cover these.
+- **R1 contradicted the code** (head rows are placed with a static transform). R1 now forbids animated transforms and
+  shrinking height animations only.
