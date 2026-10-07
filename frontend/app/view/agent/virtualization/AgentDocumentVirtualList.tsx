@@ -42,6 +42,7 @@ import {
     restoreScrollFromAnchor,
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
+import { attachOneWayRecorder, noteOneWay } from "../scroll/one-way-recorder";
 import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
@@ -451,12 +452,16 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     }
     function releaseBufferHold(): void {
         clearTimeout(holdTimer);
-        if (streamingBufferRef?.style.minHeight) streamingBufferRef.style.minHeight = "";
+        if (streamingBufferRef?.style.minHeight) {
+            noteOneWay(paneTag(), "hold:release-snap");
+            streamingBufferRef.style.minHeight = "";
+        }
     }
     /** Close the held room, easing the content down rather than snapping. */
     function easeOutBufferHold(): void {
         const el = streamingBufferRef;
         if (!el?.style.minHeight || !scrollRef) return;
+        noteOneWay(paneTag(), "hold:release-ease");
         // A timer, not an input handler: one deliberate layout read pair.
         const before = scrollRef.scrollTop; // perf:allow-layout-read — hold-release timer, once per quiet pause
         el.style.minHeight = "";
@@ -481,6 +486,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (Math.abs(delta) < 1 || !scrollRef || reducedMotion()) return;
         // A jump of more than most of the viewport is a load, not an arrival.
         if (Math.abs(delta) > scrollRef.clientHeight * 0.75) return; // perf:allow-layout-read — pin pass, ResizeObserver callback (layout clean)
+        noteOneWay(paneTag(), "glide");
         for (const el of [virtualContainerRef, streamingBufferRef]) {
             if (!el || typeof el.animate !== "function") continue;
             const a = el.animate([{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }], {
@@ -1016,6 +1022,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // Unconditional — see syncOverflowState's own doc comment.
             syncOverflowState();
             if (h > 0 && props.viewState.stickToBottom()) {
+                noteOneWay(paneTag(), "pin:viewport");
                 scrollToTrueBottom();
                 // Every pin source runs the held-open-tool collapse itself: the
                 // scroll event this pin causes is a trusted pin batch, which
@@ -1080,6 +1087,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // glide ends. Take the glide's remaining offset, stop it, pin, and
             // carry the offset into one new glide.
             const carried = takeGlideOffset();
+            noteOneWay(paneTag(), "pin:content");
             const scrolled = scrollToTrueBottom();
             // Any growth glides, not just a new row: a tool's preview opening,
             // each output line a running command prints ("tick 1", "tick 2"),
@@ -1105,6 +1113,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     const jumpToBottom = (reason?: string): void => {
         if (!scrollRef) return;
         transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
+        noteOneWay(paneTag(), `pin:jump:${reason ?? "unspecified"}`);
         scrollToTrueBottom();
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
@@ -1279,6 +1288,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
                 `forced engage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight}`,
             );
+            noteOneWay(paneTag(), "pin:first-overflow");
             scrollToTrueBottom();
             // Stop here — the pagination check below reads the scrollTop
             // captured at the top of this event, now stale (we just forced
@@ -1447,6 +1457,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // editable element (typing in the composer never scrolls this container).
     // Target identity, not a clientWidth hit-test: no layout read in an input
     // handler (tools/lint/check-input-handler-layout-reads.sh).
+    // One-way-flow recorder (opt-in, `__agentmuxOneWay.enable()`): checks every
+    // painted frame for content moving down or blank space taken back while
+    // following. Phase 0 of SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
+    onMount(() => {
+        if (scrollRef) onCleanup(attachOneWayRecorder(paneTag(), scrollRef));
+    });
+
     onMount(() => {
         if (!scrollRef) return;
         const el = scrollRef;
