@@ -468,11 +468,11 @@ mod tests {
     #[test]
     fn the_install_id_is_reported_when_known() {
         let f = FleetFeed::new("narko".into(), "stable".into(), "0.59.7".into())
-            .with_install_id(Some("pqkksqckrolze5wvcs6rqeic4e".into()));
+            .with_install_id(Some("mw3am46w5weex4a4fqrc3avnua".into()));
         let body = f.body_json(&f.snapshot());
         assert!(keys_of(&body).contains(&"install_id".to_string()));
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(v["install_id"], "pqkksqckrolze5wvcs6rqeic4e");
+        assert_eq!(v["install_id"], "mw3am46w5weex4a4fqrc3avnua");
     }
 
     #[test]

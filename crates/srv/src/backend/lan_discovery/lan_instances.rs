@@ -625,7 +625,7 @@ mod tests {
             write_record(dir.path(), &r).unwrap();
         }
         let d = discovery(Some(dir.path().to_path_buf()));
-        let install_id = "pqkksqckrolze5wvcs6rqeic4e";
+        let install_id = "mw3am46w5weex4a4fqrc3avnua";
 
         let reply = d.probe_response_with(Some(install_id), Some(99));
         let size = serde_json::to_vec(&reply).unwrap().len();
