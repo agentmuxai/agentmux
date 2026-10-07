@@ -612,8 +612,8 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.sessionStats?.added_input_tokens).toBe(5_000);
             });
 
-            // Codex P2 on #4458: a turn whose session_end never arrives must not
-            // lend its tokens to the next turn.
+            // A turn whose session_end never arrives must not lend its tokens to
+            // the next turn.
             it("a new user turn from idle drops tokens left by a turn whose session_end never came", () => {
                 const started = update(reconciled(), { type: "TurnStart", at: 300 }).state;
                 expect(started.turnTokens).toBeNull();
