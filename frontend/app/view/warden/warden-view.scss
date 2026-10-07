@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Warden pane layout. The navigation is element/ui's TabbedPane, the same
-// component as Connectors and Memory (section-pane.tsx); it replaced a
-// hand copy of their rail and top tab bar. The section panes reuse
+// component as Connectors and Memory (section-pane.tsx), which replaced a
+// hand-copied section navigation. The section panes reuse
 // section-pane.scss's `.bundle-manager-section` / `-pane` rules by class
 // name, which is safe because block-registry.ts imports every view's barrel
 // up front, so section-pane.scss is always loaded.
