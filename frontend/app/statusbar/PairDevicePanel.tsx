@@ -8,6 +8,7 @@
 // it and shows another. Pairing needs LAN discovery on, because the device
 // connects over this network.
 
+import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { viewerPairedAtom } from "@/store/global";
@@ -90,27 +91,21 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
                 <Show
                     when={pairing()}
                     fallback={
-                        <button
-                            type="button"
-                            class="status-bar-qr-toggle-btn"
+                        <Button
+                            density="compact"
                             disabled={!props.lanDiscoveryEnabled() || busy()}
                             onClick={() => void start()}
                         >
                             Pair a device
-                        </button>
+                        </Button>
                     }
                 >
-                    <button type="button" class="status-bar-qr-toggle-btn" onClick={() => setPairing(null)}>
+                    <Button density="compact" onClick={() => setPairing(null)}>
                         Hide
-                    </button>
-                    <button
-                        type="button"
-                        class="status-bar-qr-toggle-btn"
-                        disabled={busy()}
-                        onClick={() => void start()}
-                    >
+                    </Button>
+                    <Button density="compact" disabled={busy()} onClick={() => void start()}>
                         New code
-                    </button>
+                    </Button>
                 </Show>
             </div>
             <Show when={!props.lanDiscoveryEnabled()}>
