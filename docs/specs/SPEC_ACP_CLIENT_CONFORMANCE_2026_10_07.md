@@ -1,6 +1,6 @@
 # Spec: Make AgentMux's ACP client speak ACP v1
 
-**Status:** proposed
+**Status:** implemented (#4447)
 **Date:** 2026-10-07
 **Author:** Camper
 

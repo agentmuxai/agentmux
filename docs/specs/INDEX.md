@@ -202,6 +202,7 @@ partial list.
 | [`SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02`](SPEC_ABF_IMPORT_UI_PHASE3_2026_08_02.md) | Spec: ABF Import UI (Phase 3) — Selective Import + Collision Handling |
 | [`SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01`](SPEC_ABF_V0_1_SINGLE_FILE_AND_IMPORTER_2026_08_01.md) | Spec: ABF v0.1 — Single-File Format + Importer (Phase 2) |
 | [`SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14`](SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md) | SPEC — honest account-delete semantics: spawn gating, agent reconciliation, Armory truthfulness |
+| [`SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07`](SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md) | Spec: Make AgentMux's ACP client speak ACP v1 |
 | [`SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23`](SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md) | Activity Dock: coalesce event-triggered refreshes on pane reopen |
 | [`SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23`](SPEC_AGENT_ACTIVITY_TAB_FLASH_2026_09_23.md) | Agent tool-call tones get a visual twin: a subtle flash on the tab that made the sound |
 | [`SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20`](SPEC_AGENT_BROWSER_PANE_DEEP_CONTROL_2026_09_20.md) | SPEC: Deep, no-mouse control of a browser pane via the Agent App API |
@@ -628,7 +629,6 @@ partial list.
 | [`REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04`](REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md) | Report: agent pane blank-load period + brain-logo loading indicator |
 | [`REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26`](REPORT_BASHWRAP_LONGRUNNING_PROCESS_DETERMINISM_2026_07_26.md) | Bashwrap, the Dock, and the Process Broker — a Seventh Mechanism Nobody Wired Up |
 | [`SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30`](SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md) | SPEC #864 — Collapse the Layout Split-Brain to a Single Writer |
-| [`SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07`](SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md) | Spec: Make AgentMux's ACP client speak ACP v1 |
 | [`SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05`](SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md) | SPEC — Activity dock: title over-truncates; tail glyph renders wrong near the time |
 | [`SPEC_AGENT_ACTIVITY_LOG_NO_AUTO_OPEN_2026_05_05`](SPEC_AGENT_ACTIVITY_LOG_NO_AUTO_OPEN_2026_05_05.md) | Agent Activity Log — kill auto-open + drop label |
 | [`SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22`](SPEC_AGENT_BUSY_ANTS_REFINEMENT_2026_06_22.md) | Agent Busy Bar (Marching Ants) Refinement |
