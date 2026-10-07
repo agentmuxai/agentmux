@@ -1483,7 +1483,7 @@ async fn unwatch_agent_does_not_kill_a_watcher_still_depended_on_by_another_bloc
 async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_session() {
     // End-to-end regression test for docs/retro/retro-subagent-watcher-
     // shared-dir-fanout-and-leak-2026-07-23.md Bug A: two blocks share
-    // one config_dir (the common case — every agent without a per-
+    // one config_dir (the common case — every agent without a
     // per-account auth dir resolves to the same default provider
     // path), so both watchers see the same raw filesystem event. Only
     // the block that actually owns the session (via its own persisted
