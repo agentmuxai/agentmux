@@ -67,19 +67,30 @@ variables the layout uses, read once from the computed style. No reserve constan
 
 ### 3.2 Measure the room the tab strip would have
 
-The room the tab bar gets is whatever the header leaves it, so compute it from the live tab bar instead of adding up
-every other element:
+The tab bar and the widget bar share whatever the rest of the header leaves them:
 
 ```
-roomIfLabeled  = tabBar.clientWidth + liveWidgetsW − labeledW
-roomIfIconOnly = tabBar.clientWidth + liveWidgetsW − iconOnlyW
+shared         = header.clientWidth − spent(header, keep: tab bar, status area)
+                                    − spent(status area, keep: widget bar)
+roomIfLabeled  = shared − labeledW
+roomIfIconOnly = shared − iconOnlyW
 ```
 
-`liveWidgetsW` is the widget bar's current width, and `labeledW` and `iconOnlyW` are the two hidden mirrors the hook
-already keeps (`mirrorRef`, `iconMirrorRef`). Swapping the live width for a mirror's width gives the tab bar's width in
-that tier, whatever else is in the header on this platform. Because the mirrors never change with the tier, the result
-doesn't depend on the tier currently shown, so it can't oscillate (the property the 06-05 spec designed the mirrors
-for).
+`spent(row, keep)` is what a flex row spends on everything but `keep`: its padding, the gaps between its laid-out
+children, every child's margins (a kept child's margins still take room), and the width of every in-flow child not
+kept. Hidden and absolutely positioned children take no space. On macOS that is the traffic-light spacer, the left
+drag strip, the hamburger and the status area's margin; on Windows/Linux the window controls instead.
+
+`labeledW` and `iconOnlyW` are the two hidden mirrors the hook already keeps (`mirrorRef`, `iconMirrorRef`). Nothing in
+the formula reads the live tab bar or widget bar, so the result doesn't depend on the tier currently shown and can't
+oscillate (the property the 06-05 spec designed the mirrors for).
+
+**Why not the live bars.** The first version used `tabBar.clientWidth + liveWidgetsW`. That is wrong whenever the live
+widget bar overflows: a window that jumps straight to a width narrower than the labeled bar (a snap or a restore)
+keeps the bar at its content width while the tab bar collapses, so the sum overstates the room. Measured on a macOS
+dev build: header 1097 px, shared room 973 px, live sum 974 px (the bars already overflowed by 1 px). The hook also
+observes the tab bar, the widget bar and the status area, so a tier change re-checks; that is idempotent because the
+decision doesn't read them.
 
 ### 3.3 The tiers
 
