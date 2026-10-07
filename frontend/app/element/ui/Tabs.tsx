@@ -116,13 +116,14 @@ export function Tabs<T extends string>(props: TabsProps<T>): JSX.Element {
     );
 }
 
-export type TabbedPaneLayout = "rail" | "rail-icons" | "top";
+export type TabbedPaneLayout = "top" | "top-icons";
 
-/** Which layout a TabbedPane of this width uses. */
-export function tabbedPaneLayout(width: number, collapseBelow: number, topBelow: number): TabbedPaneLayout {
-    if (width < topBelow) return "top";
-    if (width < collapseBelow) return "rail-icons";
-    return "rail";
+/** The width each tab needs before a TabbedPane shows the labels. */
+export const TAB_LABEL_MIN_WIDTH = 112;
+
+/** Which layout a TabbedPane of this width and number of tabs uses. */
+export function tabbedPaneLayout(width: number, tabCount: number, labelsFrom?: number): TabbedPaneLayout {
+    return width < (labelsFrom ?? tabCount * TAB_LABEL_MIN_WIDTH) ? "top-icons" : "top";
 }
 
 export interface TabbedPaneProps<T extends string> {
@@ -133,10 +134,8 @@ export interface TabbedPaneProps<T extends string> {
     idPrefix?: string;
     ariaLabel: string;
     density?: UiDensity;
-    /** Width below which the rail shows icons only. Default 768. */
-    collapseBelow?: number;
-    /** Width below which the rail becomes tabs along the top. Default 480. */
-    topBelow?: number;
+    /** Width below which the tabs show icons only. Default: `TAB_LABEL_MIN_WIDTH` per tab. */
+    labelsFrom?: number;
     class?: string;
     /** Extra class on the panel that holds the content. */
     panelClass?: string;
@@ -145,23 +144,23 @@ export interface TabbedPaneProps<T extends string> {
 }
 
 /**
- * A pane with section navigation and one panel. Wide: a rail with labels.
- * Narrower: an icon-only rail with tooltips. Narrowest: icon-only tabs
- * spread along the top, Stash-style. One tablist throughout; only its
- * layout changes.
+ * A pane with section navigation and one panel. The tabs run along the top
+ * at every width, Stash-style: icon-only with tooltips while narrow, with
+ * labels once each tab has room. They share the width up to a cap, so in a
+ * wide pane they sit at the left instead of stretching (ui.scss).
  */
 export function TabbedPane<T extends string>(props: TabbedPaneProps<T>): JSX.Element {
     let root: HTMLDivElement | undefined;
     const generatedPrefix = `ui-tabs-${createUniqueId()}`;
     const idPrefix = () => props.idPrefix ?? generatedPrefix;
-    const [layout, setLayout] = createSignal<TabbedPaneLayout>("rail");
+    const [layout, setLayout] = createSignal<TabbedPaneLayout>("top");
 
     onMount(() => {
-        // jsdom (unit tests) has no ResizeObserver; the rail is the default.
+        // jsdom (unit tests) has no ResizeObserver; labels are the default.
         if (!root || typeof ResizeObserver === "undefined") return;
         const observer = new ResizeObserver((entries) => {
             const width = entries[entries.length - 1].contentRect.width;
-            setLayout(tabbedPaneLayout(width, props.collapseBelow ?? 768, props.topBelow ?? 480));
+            setLayout(tabbedPaneLayout(width, props.items.length, props.labelsFrom));
         });
         observer.observe(root);
         onCleanup(() => observer.disconnect());
@@ -173,8 +172,8 @@ export function TabbedPane<T extends string>(props: TabbedPaneProps<T>): JSX.Ele
                 items={props.items}
                 value={props.value}
                 onChange={props.onChange}
-                orientation={layout() === "top" ? "horizontal" : "vertical"}
-                iconOnly={layout() !== "rail"}
+                orientation="horizontal"
+                iconOnly={layout() === "top-icons"}
                 idPrefix={idPrefix()}
                 ariaLabel={props.ariaLabel}
             />

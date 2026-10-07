@@ -20,7 +20,7 @@ export const wardenPaneTab: PaneTabManifest = {
         const model = new WardenViewModel(ctx);
         return {
             component: () => <WardenView model={model} />,
-            // The selected rail section ("Host", "LAN", …) names the pane.
+            // The selected section ("Host", "LAN", …) names the pane.
             liveTitle: () => ({ text: model.viewName() }),
         };
     },

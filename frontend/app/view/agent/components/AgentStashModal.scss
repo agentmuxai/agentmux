@@ -40,7 +40,7 @@
 }
 
 // Narrow modal — icon-only tabs, same "hide the label, keep the icon"
-// compression the section panes' rail does when narrow. Each tab keeps its
+// compression the section panes' tabs do when narrow. Each tab keeps its
 // label as its accessible name (Tabs always sets aria-label).
 @container agent-stash (max-width: 560px) {
     .agent-stash-modal-tabs .ui-tab-label {

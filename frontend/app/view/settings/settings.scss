@@ -296,7 +296,7 @@
 }
 
 // ── Responsive ────────────────────────────────────────────────────────────────
-// The rail itself is TabbedPane's job; these only size the content.
+// The section tabs are TabbedPane's job; these only size the content.
 
 // Wide: cap the section width for comfortable reading.
 @container settings (min-width: 1024px) {

@@ -64,7 +64,7 @@ function mount(manifest: PaneTabManifest, meta: Record<string, unknown> = {}) {
     return { ...result, instance, title: () => instance.liveTitle!().text };
 }
 
-function railLabels(container: HTMLElement): string[] {
+function tabLabels(container: HTMLElement): string[] {
     return Array.from(container.querySelectorAll('[role="tab"] .ui-tab-label')).map((s) => s.textContent ?? "");
 }
 
@@ -82,7 +82,7 @@ afterEach(() => {
 describe("Connectors pane", () => {
     it("has the sections Accounts and MCP servers, on Accounts by default", () => {
         const { container, title } = mount(connectorsPaneTab);
-        expect(railLabels(container)).toEqual(["Accounts", "MCP servers"]);
+        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers"]);
         expect(visiblePane(container)).toBe("accounts-manager");
         expect(title()).toBe("Connectors · Accounts");
     });
@@ -110,7 +110,7 @@ describe("Connectors pane", () => {
 describe("Memory pane", () => {
     it("has the sections Global, Personal, Skills and Bundles, on Global by default", () => {
         const { container, title } = mount(memoryPaneTab);
-        expect(railLabels(container)).toEqual(["Global", "Personal", "Skills", "Bundles"]);
+        expect(tabLabels(container)).toEqual(["Global", "Personal", "Skills", "Bundles"]);
         expect(visiblePane(container)).toBe("global-bundle-manager");
         expect(title()).toBe("Memory · Global");
     });
@@ -211,7 +211,7 @@ describe("a saved Armory block", () => {
 
     it("shows its new pane until the block remounts as it", () => {
         const { container, title } = mount(armoryPaneTab, { view: "trust", "armory:section": "mcp" });
-        expect(railLabels(container)).toEqual(["Accounts", "MCP servers"]);
+        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers"]);
         expect(title()).toBe("Connectors · Accounts");
         // The meta write lands: now the section follows.
         setBlockMeta((m) => ({ ...m, view: "connectors", "connectors:section": "mcp" }));

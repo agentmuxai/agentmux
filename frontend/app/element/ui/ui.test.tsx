@@ -200,10 +200,14 @@ describe("Tabs", () => {
 });
 
 describe("TabbedPane", () => {
-    it("picks its layout from its width", () => {
-        expect(tabbedPaneLayout(900, 768, 480)).toBe("rail");
-        expect(tabbedPaneLayout(767, 768, 480)).toBe("rail-icons");
-        expect(tabbedPaneLayout(479, 768, 480)).toBe("top");
+    it("keeps the tabs on top, with labels once each tab has room", () => {
+        // 112px a tab: four tabs show labels from 448px, seven from 784px.
+        expect(tabbedPaneLayout(2000, 4)).toBe("top");
+        expect(tabbedPaneLayout(448, 4)).toBe("top");
+        expect(tabbedPaneLayout(447, 4)).toBe("top-icons");
+        expect(tabbedPaneLayout(783, 7)).toBe("top-icons");
+        expect(tabbedPaneLayout(784, 7)).toBe("top");
+        expect(tabbedPaneLayout(500, 4, 600)).toBe("top-icons");
     });
 
     it("labels its panel with the selected tab", () => {
@@ -224,7 +228,8 @@ describe("TabbedPane", () => {
         const panel = screen.getByRole("tabpanel");
         expect(panel.id).toBe("p-panel");
         expect(panel.getAttribute("aria-labelledby")).toBe("p-tab-b");
-        expect(screen.getByRole("tablist").getAttribute("aria-orientation")).toBe("vertical");
+        // Along the top at every width.
+        expect(screen.getByRole("tablist").getAttribute("aria-orientation")).toBe("horizontal");
     });
 });
 
