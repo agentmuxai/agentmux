@@ -21,26 +21,37 @@ pub const EXIT_CONNECTION_FAILED: u32 = 255;
 /// Windows installs, which an inherited `PATH` can lack.
 ///
 /// On Windows an MSYS2 or Cygwin build on `PATH` (Git for Windows' own
-/// `usr/bin/ssh.exe`, there when AgentMux is started from Git Bash) is passed
-/// over: it resolves names with its own POSIX resolver, which can't find a
-/// machine on the local network by name ("Could not resolve hostname"), and
-/// it doesn't use Windows' ssh-agent.
+/// `usr/bin/ssh.exe`, there when AgentMux is started from Git Bash) comes
+/// last, after Windows' own client: it resolves names with its own POSIX
+/// resolver, which can't find a machine on the local network by name ("Could
+/// not resolve hostname"), and it doesn't use Windows' ssh-agent. It is still
+/// used when it is the only ssh there is.
 pub fn binary() -> Option<PathBuf> {
-    if let Some(p) = which::which_all("ssh")
-        .ok()
-        .and_then(|mut all| all.find(|p| !is_posix_layer_build(p)))
-    {
-        return Some(p);
-    }
     #[cfg(windows)]
-    {
+    let windows_client = {
         let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-        let p = Path::new(&root).join(r"System32\OpenSSH\ssh.exe");
-        if p.is_file() {
+        Some(Path::new(&root).join(r"System32\OpenSSH\ssh.exe")).filter(|p| p.is_file())
+    };
+    #[cfg(not(windows))]
+    let windows_client = None;
+    pick(which::which_all("ssh").into_iter().flatten(), windows_client, is_posix_layer_build)
+}
+
+/// [`binary`]'s order: the first native `ssh` on `PATH`, then Windows' own
+/// client, then the first MSYS2 or Cygwin build.
+fn pick(
+    on_path: impl IntoIterator<Item = PathBuf>,
+    windows_client: Option<PathBuf>,
+    is_posix_layer: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let mut posix_layer = None;
+    for p in on_path {
+        if !is_posix_layer(&p) {
             return Some(p);
         }
+        posix_layer.get_or_insert(p);
     }
-    None
+    windows_client.or(posix_layer)
 }
 
 /// An `ssh.exe` built for MSYS2 or Cygwin: its runtime DLL sits beside it.
@@ -204,6 +215,18 @@ pub fn control_dir(config_home: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A native ssh on PATH first, then Windows' client, and an MSYS2 or
+    /// Cygwin build only when there is nothing else.
+    #[test]
+    fn a_native_ssh_is_preferred_but_git_bashs_is_kept_as_a_last_resort() {
+        let p = |s: &str| PathBuf::from(s);
+        let posix = |path: &Path| path.starts_with("/git");
+        assert_eq!(pick([p("/git/ssh"), p("/native/ssh")], Some(p("/win/ssh")), posix), Some(p("/native/ssh")));
+        assert_eq!(pick([p("/git/ssh")], Some(p("/win/ssh")), posix), Some(p("/win/ssh")));
+        assert_eq!(pick([p("/git/ssh")], None, posix), Some(p("/git/ssh")), "the only ssh there is");
+        assert_eq!(pick(Vec::<PathBuf>::new(), None, posix), None);
+    }
 
     /// Git for Windows' and Cygwin's ssh are passed over for the native one.
     #[cfg(windows)]
