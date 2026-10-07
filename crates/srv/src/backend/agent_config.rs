@@ -641,12 +641,20 @@ pub fn build_settings_with_hooks(
     // No AI attribution in commits or PR descriptions: the repos' checks
     // (`.github/workflows/no-coauthor-trailers.yml`) reject Co-Authored-By
     // trailers and "Generated with" lines, and Claude Code adds both by
-    // default. An empty string hides each. An agent's own `commit` or `pr`
-    // wins; a field it leaves out is filled in, because Claude Code falls
-    // back to its default attribution for an omitted one.
-    if let Value::Object(attribution) = settings_obj.entry("attribution").or_insert_with(|| json!({})) {
+    // default. An empty string hides each. An agent's own string `commit` or
+    // `pr` wins; a field it leaves out or sets to a non-string is replaced
+    // with "", and so is a non-object `attribution`, because Claude Code falls
+    // back to its default attribution for any of those.
+    let attribution = settings_obj.entry("attribution").or_insert_with(|| json!({}));
+    if !attribution.is_object() {
+        *attribution = json!({});
+    }
+    if let Value::Object(fields) = attribution {
         for field in ["commit", "pr"] {
-            attribution.entry(field).or_insert_with(|| Value::String(String::new()));
+            let value = fields.entry(field).or_insert_with(|| Value::String(String::new()));
+            if !value.is_string() {
+                *value = Value::String(String::new());
+            }
         }
     }
 
@@ -2544,6 +2552,17 @@ mod tests {
             attribution(Some(r#"{"attribution":{"commit":"Agent: Aria"}}"#)),
             json!({ "commit": "Agent: Aria", "pr": "" }),
             "a field the agent leaves out is still hidden, not Claude Code's default"
+        );
+        for malformed in [r#"null"#, r#"[]"#, r#""text""#, r#"{"commit":null,"pr":7}"#] {
+            assert_eq!(
+                attribution(Some(&format!(r#"{{"attribution":{malformed}}}"#))),
+                json!({ "commit": "", "pr": "" }),
+                "a malformed attribution ({malformed}) is replaced, not passed through"
+            );
+        }
+        assert_eq!(
+            attribution(Some(r#"{"attribution":{"commit":"Agent: Aria","pr":false}}"#)),
+            json!({ "commit": "Agent: Aria", "pr": "" }),
         );
     }
 
