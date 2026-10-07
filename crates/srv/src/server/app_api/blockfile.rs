@@ -340,6 +340,18 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // Otherwise fall back to ring buffer for backward compatibility.
                 let filestore_lines = match filestore.stat(&read_block, &cmd.filename) {
                     Ok(Some(ref wf)) if wf.size > 0 => {
+                        if !whole_file_read_allowed(&cmd.filename, wf.opts.circular, wf.size) {
+                            tracing::warn!(
+                                block_id = %cmd.block_id,
+                                size = wf.size,
+                                total_ms = ms_since(started),
+                                "blockfile:read_range: output.idx can't serve this read and the transcript is too large to read whole; refusing"
+                            );
+                            return Err(format!(
+                                "blockfile:read_range: the transcript index for {} is unavailable right now; retry",
+                                cmd.block_id
+                            ));
+                        }
                         if wf.size >= WHOLE_FILE_WARN_BYTES {
                             tracing::warn!(
                                 block_id = %cmd.block_id,
@@ -441,6 +453,22 @@ fn ms_since(t: std::time::Instant) -> u64 {
 /// store's lock; a file this large is logged when it does.
 const WHOLE_FILE_WARN_BYTES: i64 = 16 * 1024 * 1024;
 
+/// A non-circular `output` this large is never read whole: loading it holds the
+/// store's connection mutex for the whole read (about 15 s for a 1.3 GB
+/// transcript), stalling every agent's appends and every pane's reads in this
+/// process (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md). When the
+/// index can't serve such a read, `read_range` answers with an error instead;
+/// the pane falls back to its short tail read, which extends the index again.
+const WHOLE_FILE_REFUSE_BYTES: i64 = 64 * 1024 * 1024;
+
+/// Whether `read_range` may load this file whole (its fallback when
+/// `output.idx` can't serve a read). Everything but a large, non-circular
+/// transcript may; terminal ring buffers (circular) stay bounded by their
+/// `maxsize`.
+fn whole_file_read_allowed(filename: &str, circular: bool, size: i64) -> bool {
+    filename != crate::backend::agent_session::OUTPUT_FILE || circular || size < WHOLE_FILE_REFUSE_BYTES
+}
+
 /// A `blockfile:read_range` call this slow is logged as a warning, with where
 /// its time went.
 const SLOW_READ_RANGE_MS: u64 = 1_000;
@@ -510,6 +538,11 @@ impl ReadRangeClock {
         }
         if total_ms >= SLOW_READ_RANGE_MS {
             done!(warn, "blockfile:read_range slow");
+        } else if stale {
+            // Rare by construction (an append outran the index between its
+            // extension and the read), and the only trace that the stale-prefix
+            // path runs in the field, so kept above debug.
+            done!(info, "blockfile:read_range served an index prefix an append had outrun");
         } else {
             done!(debug, "blockfile:read_range done");
         }
@@ -615,6 +648,24 @@ fn trim_to_tail_bytes(result: &mut BlockfileReadRangeResult, first_line: u64, ma
         }
     }
     result.offset = Some(first_line + cut as u64);
+}
+
+#[cfg(test)]
+mod whole_file_tests {
+    use super::*;
+
+    #[test]
+    fn a_large_transcript_is_never_read_whole() {
+        assert!(!whole_file_read_allowed("output", false, WHOLE_FILE_REFUSE_BYTES));
+        assert!(!whole_file_read_allowed("output", false, 1_310_788_351));
+        assert!(whole_file_read_allowed("output", false, WHOLE_FILE_REFUSE_BYTES - 1));
+    }
+
+    #[test]
+    fn ring_buffers_and_other_files_keep_the_whole_file_path() {
+        assert!(whole_file_read_allowed("output", true, 10 * WHOLE_FILE_REFUSE_BYTES));
+        assert!(whole_file_read_allowed("term", false, 10 * WHOLE_FILE_REFUSE_BYTES));
+    }
 }
 
 #[cfg(test)]
