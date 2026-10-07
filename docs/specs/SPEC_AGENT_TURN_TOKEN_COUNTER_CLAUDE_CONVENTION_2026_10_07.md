@@ -1,6 +1,6 @@
 # Agent pane: one turn token counter, Claude Code's convention
 
-**Status:** implemented — PR #4465.
+**Status:** implemented — PR #4465, landed on main in PR #4468.
 **Date:** 2026-10-07 · **Author:** agent2
 **Component:** `AgentWorkingRow` (`frontend/app/view/agent/components/AgentFooter.tsx`)
 **Token accounting:** `frontend/app/store/agent-pane-state/` (`reducer.ts`, `turn-contribution.ts`), `frontend/app/view/agent/main-agent-usage.ts`, `useAgentStream.ts`
