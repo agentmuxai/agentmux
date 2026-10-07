@@ -191,8 +191,7 @@ export class ClaudeTranslator implements OutputTranslator {
      * timestamp; inventing Date.now() here would win over parseHistoryLines'
      * batch stamp for that line and show every restored user message as sent
      * "just now" (ReAgent P1, #3620). Replay leaves it unset.
-     */
-    /**
+     *
      * `inputIncludesCache`: the CLI's `usage.input_tokens` is already the whole
      * prompt, cached tokens included (Qwen Code), not Claude's uncached share.
      */
