@@ -475,6 +475,10 @@ pub const COMMAND_VIEWER_DEVICES: &str = "viewer.devices";
 pub const COMMAND_VIEWER_REVOKE: &str = "viewer.revoke";
 pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
 
+// The cloud presence publisher (muxbus::wan_presence): its state, and a try now.
+pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";
+pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
+
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
 /// Reorder a Pane Tab within its own pane, or move it into a different

@@ -257,6 +257,9 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // starts finds them all pending there.
                         clear_wan_peer_cache();
                         crate::muxbus::wan_publish::nudge();
+                        // And publish this install's presence now, whatever
+                        // the presence publisher was waiting out.
+                        crate::muxbus::wan_presence::sign_in_changed();
                         let resp = MuxBusLoginResp {
                             success: true,
                             email,
@@ -379,6 +382,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("muxbus.disconnect: task: {e}"))?
                     .map_err(|e| format!("muxbus.disconnect: {e}"))?;
                 clear_wan_peer_cache();
+                crate::muxbus::wan_presence::sign_in_changed();
                 Ok(MuxBusDisconnectResp {})
             }
         },
