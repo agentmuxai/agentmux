@@ -2960,6 +2960,8 @@ fn purge_agent_dependents(
         "db_agent_lan_keys",
         // v37, identity M1: the agent's local identity token dies with it.
         "db_agent_tokens",
+        // The agent's Bundles list.
+        "db_agent_bundles",
     ];
     let present: std::collections::HashSet<String> = {
         let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type='table'")?;
