@@ -105,6 +105,12 @@ describe("inferCauses", () => {
         expect(causes).toContain("content-shrink:180");
     });
 
+    it("names the row that grew", () => {
+        const prev = [row("t", 0, 120, "tool"), row("b", 120, 200)];
+        const cur = [row("t", 0, 150, "tool"), row("b", 150, 200)];
+        expect(inferCauses(frame(prev), frame(cur, { scrollTop: 1010 }))).toContain("row-grow:tool:30");
+    });
+
     it("names a visible row that was removed", () => {
         expect(inferCauses(frame(pinned), frame(pinned.slice(0, 2)))).toContain("row-removed:1");
     });

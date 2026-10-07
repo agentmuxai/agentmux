@@ -42,7 +42,7 @@ import {
     restoreScrollFromAnchor,
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
-import { attachOneWayRecorder, noteOneWay } from "../scroll/one-way-recorder";
+import { attachOneWayRecorder, noteOneWay, sampleOneWayFrame } from "../scroll/one-way-recorder";
 import { OneWayFlow } from "../scroll/one-way-flow";
 import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
@@ -1659,9 +1659,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 pendingProgrammaticScroll = true;
                 pinnedGeometry = geo;
             },
+            // Collapsing held-open tools that scrolled off the top changes
+            // layout, so it runs before the observation is measured and its
+            // effect is compensated in the same frame.
+            prepare: () => collapseScrolledOffTools(),
             observed: (geo) => {
                 syncOverflowState(geo);
-                collapseScrolledOffTools();
+                sampleOneWayFrame(paneTag());
             },
             note: (label) => noteOneWay(paneTag(), label),
         })
@@ -1681,7 +1685,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
     const observeRow = (el: HTMLElement, nodeId: string): void => {
         elNodeId.set(el, nodeId);
-        measureRO?.observe(el);
+        // Border box: the height dispatched is the rect's, so a padding or
+        // border change must re-measure too.
+        measureRO?.observe(el, { box: "border-box" });
         oneWayFlow?.observeRow(el);
     };
     const unobserveRow = (el: HTMLElement): void => {
@@ -1833,7 +1839,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         ref={(el) => {
                                             rowEl = el;
                                             tailRowNode.set(el, nodeAccessor);
-                                            tailRO?.observe(el);
+                                            tailRO?.observe(el, { box: "border-box" });
                                             oneWayFlow?.observeRow(el);
                                         }}
                                     />

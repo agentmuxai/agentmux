@@ -18,6 +18,9 @@
 //   node scripts/ui-screenshots/one-way-soak.mjs --target "<title or id substr>"
 //        [--port 9223] [--panes all|<blockId,...>] [--minutes 3] [--gap-ms 1500]
 //        [--seed 1] [--out one-way-<time>.json] [--strict] [--clear-existing] [--keep]
+//        [--motion os|full|reduce]   (default os: whatever the OS says. full / reduce
+//        emulate prefers-reduced-motion for the page, so both of the follower's paths
+//        can be soaked whatever the machine's setting)
 //
 // Use freshly opened agent panes, visible, and leave them alone while it runs:
 // any input to a pane exempts the frames around it. Panes holding real
@@ -32,6 +35,11 @@ import { assertDevPort, connectPage } from "./lib/cdp-client.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const motion = (m) => {
+    if (m !== "os" && m !== "full" && m !== "reduce") throw new Error("--motion must be os, full or reduce");
+    return m;
+};
 
 export function parseArgs(argv) {
     const get = (k, d) => {
@@ -56,6 +64,7 @@ export function parseArgs(argv) {
         strict: has("--strict"),
         clearExisting: has("--clear-existing"),
         keep: has("--keep"),
+        motion: motion(get("--motion", "os")),
         allowProduction: has("--allow-production"),
     };
 }
@@ -94,6 +103,11 @@ async function main() {
     let wasEnabled = false;
     let blockIds = [];
     try {
+        if (opts.motion !== "os") {
+            await page.send("Emulation.setEmulatedMedia", {
+                features: [{ name: "prefers-reduced-motion", value: opts.motion === "reduce" ? "reduce" : "no-preference" }],
+            });
+        }
         await page.evaluate(readFileSync(join(HERE, "lib", "bench-page.js"), "utf8"));
         const init = await page.evaluate(`window.__fcb.init(${JSON.stringify(opts.panes)})`);
         if (init.visibility !== "visible") throw new Error(`page is ${init.visibility} — restore the window first`);
@@ -109,7 +123,8 @@ async function main() {
         if (wasEnabled === null) throw new Error("this build has no one-way recorder (window.__agentmuxOneWay)");
         await page.evaluate("window.__agentmuxOneWay.enable(); window.__agentmuxOneWay.reset()");
         await sleep(500);
-        console.log(`soak: ${blockIds.length} pane(s), ${opts.minutes} min, seed ${opts.seed}`);
+        const reduced = await page.evaluate('matchMedia("(prefers-reduced-motion: reduce)").matches');
+        console.log(`soak: ${blockIds.length} pane(s), ${opts.minutes} min, seed ${opts.seed}, reduced motion ${reduced ? "on" : "off"}`);
         const run = await page.evaluate(
             `window.__ows.run(${JSON.stringify({ minutes: opts.minutes, gapMs: opts.gapMs, seed: opts.seed })})`,
             { timeout: (opts.minutes * 60 + 300) * 1000 },
@@ -127,6 +142,7 @@ async function main() {
         if (!wasEnabled) await page.evaluate("window.__agentmuxOneWay?.disable()").catch(() => {});
         if (!opts.keep && blockIds.length) await page.evaluate(`window.__fcb.clear(${JSON.stringify(blockIds)})`).catch(() => {});
         await page.evaluate("window.__fcb?.dispose?.()").catch(() => {});
+        if (opts.motion !== "os") await page.send("Emulation.setEmulatedMedia", { features: [] }).catch(() => {});
         await page.close().catch(() => {});
     }
 }

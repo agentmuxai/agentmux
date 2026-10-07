@@ -267,3 +267,32 @@ An adversarial review (2026-10-07) of the first draft found:
   §1, §4 and R4 now cover these.
 - **R1 contradicted the code** (head rows are placed with a static transform). R1 now forbids animated transforms and
   shrinking height animations only.
+
+## 10. Soak results (2026-10-07)
+
+macOS dev build, three agent panes (transcripts about 150-500 px tall), scripted tool-heavy turns through the real
+stream pipeline (`one-way-soak.mjs --motion full`: the eased follower, not reduced motion), every painted frame checked.
+
+| Run | Frames | Violations | Largest |
+|---|---|---|---|
+| Old path (`agent:onewayflow=false`), 1 pane, 3 min | 10,916 | 58 (57 overshoot) | 130.6 px |
+| One-way path as shipped in #4438, 30 min | 323,295 | 78 | 16.9 px |
+| With the fixes below, 30 min | 324,648 | 7 (1 of them compensated within 0.6 px) | 38.8 px |
+
+The recorder first sampled after paint, which can see a state a later task produced and that was never painted. It
+now samples at the end of the one-way observer's last run in each frame (a probe in the ResizeObserver phase when it
+doesn't run), so every reported move is one that was painted.
+
+Fixes from tracing the violations frame by frame:
+
+- **Rows by node id, not element.** A row moving from the live tail into the virtualized head is a new element.
+- **Every mounted row is recorded**, not only the visible ones: the follower scrolls rows into view between
+  observations, and a later growth above such a row was missed.
+- **The host's own layout change runs first** (`prepare`: collapsing a held-open tool that scrolled off the top), so
+  whatever it moves is compensated in the same frame.
+- **Border-box observation** (rows, containers, the head's measure observer, the tail height cache): a padding or
+  border change moves the rows below without changing the content box.
+
+**Remaining:** a tool row growing 7-46 px with the row below dropping for one frame, about one occurrence per
+10 minutes per tall pane. A trace build did not reproduce it (8 minutes, 3 panes, 0 violations), so it is timing
+dependent. Phase 3 (default on everywhere, delete the old path) waits for a clean 30-minute run.

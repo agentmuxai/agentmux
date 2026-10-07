@@ -135,8 +135,9 @@ class Model {
         this.top = Math.min(this.top, this.max());
     }
 
-    add(h: number): HTMLElement {
+    add(h: number, id = `n${this.rows.length}`): HTMLElement {
         const el = document.createElement("div");
+        el.dataset.nodeId = id;
         const row = { el, h };
         this.rows.push(row);
         this.scroller.insertBefore(el, this.spacer);
@@ -239,6 +240,29 @@ function expectV1(before: Map<HTMLElement, number>, after: Map<HTMLElement, numb
     }
 }
 
+describe("OneWayFlow observation", () => {
+    it("observes rows and containers by their border box", () => {
+        const calls: (ResizeObserverOptions | undefined)[] = [];
+        vi.stubGlobal(
+            "ResizeObserver",
+            class {
+                observe(_el: Element, opts?: ResizeObserverOptions): void {
+                    calls.push(opts);
+                }
+                unobserve(): void {}
+                disconnect(): void {}
+            },
+        );
+        const flow = new OneWayFlow({ following: () => true, userActive: () => false, reducedMotion: () => false, wrote: () => {} });
+        const scroller = document.createElement("div");
+        flow.attach(scroller, document.createElement("div"), [document.createElement("div")]);
+        flow.observeRow(document.createElement("div"));
+        // calls[0] is the scroller (its viewport size); the rest must be border-box.
+        expect(calls.slice(1).every((o) => o?.box === "border-box")).toBe(true);
+        expect(calls.length).toBe(3);
+    });
+});
+
 describe("OneWayFlow", () => {
     it("content appended below is eased to, forward only", () => {
         const { m, flow, fire } = setup();
@@ -306,6 +330,75 @@ describe("OneWayFlow", () => {
         fire();
         expectV1(before, m.visible());
         expect(m.spacerPx()).toBe(60);
+    });
+
+    it("a row remounted as a new element (tail to head) is still kept in place", () => {
+        const { m, flow, fire } = setup();
+        const last = m.rows.length - 1;
+        const before = new Map([...m.visible()].map(([e, t]) => [e.dataset.nodeId, t]));
+        // The last row is handed to the virtualized head: its old element goes
+        // and a new one for the same node mounts. In the same frame the row
+        // above it grows 12 px, so the only row that moves down is the one
+        // with the new element; nothing else in the record moved.
+        const old = m.rows[last].el;
+        flow.unobserveRow(old);
+        old.remove();
+        const el = document.createElement("div");
+        el.dataset.nodeId = old.dataset.nodeId!;
+        m.scroller.insertBefore(el, m.spacer);
+        el.getBoundingClientRect = old.getBoundingClientRect;
+        m.rows[last].el = el;
+        flow.observeRow(el);
+        m.rows[last - 1].h += 12;
+        fire();
+        const after = new Map([...m.visible()].map(([e, t]) => [e.dataset.nodeId, t]));
+        expect(after.get(old.dataset.nodeId)! - before.get(old.dataset.nodeId)!).toBeLessThanOrEqual(0.5);
+    });
+
+    it("a row the follower scrolled into view between observations is still kept in place", () => {
+        const { m, flow, fire } = setup();
+        // New content below the bottom: the follower starts easing toward it.
+        flow.observeRow(m.add(150));
+        fire();
+        runFrames(3); // a few eased frames, no resize, so no observation
+        const before = new Map([...m.visible()].map(([e, t]) => [e.dataset.nodeId, t]));
+        expect(before.has(`n${m.rows.length - 1}`)).toBe(true); // the new row is on screen now
+        // A row above it grows (a line of text re-rendered).
+        m.rows[m.rows.length - 2].h += 21;
+        fire();
+        const after = new Map([...m.visible()].map(([e, t]) => [e.dataset.nodeId, t]));
+        for (const [id, t] of before) {
+            const n = after.get(id);
+            if (n !== undefined) expect(n - t).toBeLessThanOrEqual(0.5);
+        }
+    });
+
+    it("the host's own layout change (a held tool released) is compensated in the same frame", () => {
+        let release: (() => void) | null = null;
+        const { m, flow, fire } = setup({
+            prepare: () => {
+                release?.();
+                release = null;
+            },
+        });
+        // New content below: the follower is easing, not at the bottom.
+        flow.observeRow(m.add(200));
+        fire();
+        const painted = new Map([...m.visible()].map(([e, t]) => [e.dataset.nodeId, t]));
+        // In the next observation the host releases a held tool row above the
+        // visible rows and it re-renders 45 px taller: rows below must not drop.
+        release = () => {
+            m.rows[2].h += 45;
+        };
+        const topBefore = m.top;
+        fire();
+        expect(release).toBeNull(); // the host step ran within the observation
+        expect(m.top).toBe(topBefore + 45); // and was compensated in the same frame
+        const after = new Map([...m.visible()].map(([e, t]) => [e.dataset.nodeId, t]));
+        for (const [id, t] of painted) {
+            const n = after.get(id);
+            if (n !== undefined) expect(n - t).toBeLessThanOrEqual(0.5);
+        }
     });
 
     it("does nothing while the user is touching the pane, and re-baselines", () => {
