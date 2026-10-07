@@ -147,7 +147,8 @@ const TypeAheadModal = (props: TypeAheadModalProps) => {
         if (!props.blockRef?.current || !modalRef) return;
 
         const blockRect = props.blockRef.current.getBoundingClientRect();
-        const anchorRect = props.anchorRef.current.getBoundingClientRect();
+        // No anchor on screen (its element isn't rendered): place it by the pane.
+        const anchorRect = (props.anchorRef.current ?? props.blockRef.current).getBoundingClientRect();
 
         const minGap = 20;
         const availableWidth = blockRect.width - minGap * 2;

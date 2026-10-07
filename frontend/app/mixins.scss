@@ -190,6 +190,17 @@
                 fill: var(--warning-color);
             }
         }
+
+        // A local pane's chip ("Local"): quiet until hovered.
+        &.connection-button--local {
+            color: var(--secondary-text-color);
+            padding-left: var(--space-1);
+
+            .connection-icon-box {
+                flex: 0 0 auto;
+                margin-right: var(--space-1);
+            }
+        }
     }
 
     .block-frame-textelems-wrapper {
