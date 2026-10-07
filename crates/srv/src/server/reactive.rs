@@ -1539,18 +1539,24 @@ pub(super) async fn handle_reactive_agents(
 /// `/agentmux/reactive/agent?id=…`, so this makes enumeration cheap rather
 /// than newly possible, and it's what lets a peer show which agents live on
 /// another host instead of the empty `agents: []` every LAN peer reported
-/// before. **Do not extend this response with anything beyond names**
-/// without revisiting that decision.
+/// before. **Do not extend this response with anything beyond names and
+/// kinds** without revisiting that decision.
+///
+/// `agent_kinds` (`{name: "host" | "container"}`, an agent whose block can't
+/// be read left out) is the one widening since: where an agent runs, not what
+/// it does, by the owner's decision of 2026-10-06 (agentmux-mobile's
+/// SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5.2, §11). The same
+/// field is on the fleet feed this route is the fallback for.
 pub(super) async fn handle_reactive_agent_names(
     State(state): State<AppState>,
 ) -> Json<serde_json::Value> {
-    let names: Vec<String> = state
-        .reactive_handler
-        .list_agents()
-        .into_iter()
-        .map(|a| a.agent_id)
-        .collect();
-    Json(json!({ "agents": names }))
+    let agents = state.reactive_handler.list_agents();
+    let kinds = crate::backend::fleet_source::kinds_by_name(
+        agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str())),
+        |block_id| crate::backend::operator_config_seed::agent_kind_of_block(&state.mstore, block_id),
+    );
+    let names: Vec<String> = agents.into_iter().map(|a| a.agent_id).collect();
+    Json(json!({ "agents": names, "agent_kinds": kinds }))
 }
 
 #[derive(serde::Deserialize)]

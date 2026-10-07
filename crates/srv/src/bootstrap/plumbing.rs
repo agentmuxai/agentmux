@@ -130,11 +130,14 @@ pub fn build_app_state(
     // docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
     let dev_proxy = crate::backend::dev_proxy::DevProxyRegistry::new();
 
-    let fleet_feed = Arc::new(crate::backend::fleet_feed::FleetFeed::new(
-        net.hostname.clone(),
-        crate::backend::reactive::registry::local_channel_id(),
-        version.clone(),
-    ));
+    let fleet_feed = Arc::new(
+        crate::backend::fleet_feed::FleetFeed::new(
+            net.hostname.clone(),
+            crate::backend::reactive::registry::local_channel_id(),
+            version.clone(),
+        )
+        .with_install_id(crate::backend::fleet_source::install_id()),
+    );
 
     AppState {
         auth_key: config.auth_key.clone(),
