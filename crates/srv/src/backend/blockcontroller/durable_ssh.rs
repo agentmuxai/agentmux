@@ -713,6 +713,8 @@ impl Run {
         let mut attempt = 0u32;
         let mut noted_drop = false;
         let mut installed_once = false;
+        // Whether this run has asked the host if it is Windows (once).
+        let mut platform_asked = false;
         loop {
             let how = *leave_rx.borrow();
             if how != Leave::Stay {
@@ -755,7 +757,19 @@ impl Run {
                     // A Windows host: the helper doesn't run there, so the
                     // pane is a plain SSH terminal (remote terminals spec
                     // §6.4).
-                    if !attached && windows_shell_refused(&stderr) {
+                    // Its English answer says so at once; in another language
+                    // (localised, and not POSIX's 127) the host is asked,
+                    // once per run.
+                    let windows = !attached
+                        && (windows_shell_refused(&stderr)
+                            || (!platform_asked
+                                && code != Some(EXIT_COMMAND_NOT_FOUND)
+                                && code != Some(EXIT_SSH_FAILED)
+                                && {
+                                    platform_asked = true;
+                                    self.host_is_windows().await
+                                }));
+                    if windows {
                         crate::backend::remote::helper_consent::note_unsupported(&self.conn);
                         // A record saying the helper is installed here is
                         // stale (it can't run on Windows), and would keep the
@@ -1077,6 +1091,16 @@ impl Run {
         if let Ok(mut child) = cmd.spawn() {
             let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
         }
+    }
+
+    /// Whether the host is Windows, asked in a way no language changes: from
+    /// `cmd` or PowerShell, `cmd /c echo %OS%` prints `Windows_NT`; a POSIX
+    /// host has no `cmd`.
+    async fn host_is_windows(&self) -> bool {
+        self.host
+            .run("cmd /c echo %OS%", None, Duration::from_secs(15))
+            .await
+            .is_ok_and(|out| out.stdout.contains("Windows_NT"))
     }
 
     fn ssh_command(&self, remote: &str) -> tokio::process::Command {
@@ -1751,6 +1775,93 @@ sys.exit(1)
         assert_eq!(log, "attach\n", "tried once, no install");
         let term = state.filestore.read_file(block, "term").unwrap().unwrap();
         assert!(String::from_utf8_lossy(&term).contains("plain SSH terminal"));
+    }
+
+    /// A Windows host in another language: its `cmd` answers in German, and
+    /// only `cmd /c echo %OS%` tells it apart.
+    const FAKE_SSH_WINDOWS_DE: &str = r#"
+import os, sys
+cmd = sys.argv[-1]
+with open(os.environ['FAKE_SSH_LOG5'], 'ab') as log:
+    log.write((cmd.split()[0] if cmd.startswith('cmd') else cmd.split()[1]).encode() + b'\n')
+if cmd.startswith('cmd /c echo'):
+    sys.stdout.write('Windows_NT"\n')
+    sys.exit(0)
+sys.stderr.write("Der Befehl \"~\" ist entweder falsch geschrieben oder\nkonnte nicht gefunden werden.\n")
+sys.exit(1)
+"#;
+
+    #[tokio::test]
+    async fn a_windows_host_in_another_language_is_found_by_asking_it() {
+        let Some(python) = python() else {
+            eprintln!("skipped: no python to stand in for ssh");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake_ssh_windows_de.py");
+        std::fs::write(&script, FAKE_SSH_WINDOWS_DE).unwrap();
+        let ssh_path = if cfg!(windows) {
+            let cmd = dir.path().join("fake_ssh_windows_de.cmd");
+            std::fs::write(
+                &cmd,
+                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
+            )
+            .unwrap();
+            cmd
+        } else {
+            let sh = dir.path().join("fake_ssh_windows_de");
+            std::fs::write(
+                &sh,
+                format!(
+                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
+                    python.display(),
+                    script.display()
+                ),
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            sh
+        };
+        std::env::set_var("FAKE_SSH_LOG5", dir.path().join("log"));
+
+        let state = crate::server::tests::test_state();
+        let plain = Arc::new(AtomicBool::new(false));
+        let run = Run {
+            block_id: "durable-windows-de-block".to_string(),
+            conn: "windowshost-de".to_string(),
+            host: HostSsh {
+                dest: SshDest {
+                    destination: "windowshost-de".to_string(),
+                    port: None,
+                },
+                ssh_path,
+                control_dir: None,
+                env: Vec::new(),
+            },
+            session: "amx-windows-de".to_string(),
+            size: (80, 24),
+            broker: Some(state.broker.clone()),
+            filestore: Some(state.filestore.clone()),
+            _askpass_grant: None,
+            plain: plain.clone(),
+        };
+        let (_input_tx, input_rx) = mpsc::unbounded_channel();
+        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        let ended = tokio::time::timeout(
+            Duration::from_secs(20),
+            run.run(input_rx, leave_rx, Box::new(|_| panic!("no done: the pane is restarted"))),
+        )
+        .await
+        .expect("the run ends at once, without reconnecting");
+        assert_eq!(ended, None);
+        assert!(plain.load(Ordering::SeqCst));
+        assert!(crate::backend::remote::helper_consent::plain_instead("windowshost-de"));
+        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
+        assert_eq!(log, "attach\ncmd\n", "one attach, then the host asked once");
     }
 
     #[test]
