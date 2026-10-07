@@ -21,7 +21,7 @@ jobs:
       # Shared by both steps so the self-test actually exercises the same
       # pattern the real check uses, not an independent hardcoded copy that
       # could silently drift and keep passing after PATTERN regresses.
-      PATTERN: '(?m)^Co-authored-by:\s*.+<.+@.+>\s*$'
+      PATTERN: '(?m)^(Co-authored-by:\s*.+<.+@.+>|[^\w\n]*Generated with\s+\S.*)\s*$'
     steps:
       - name: Self-test (negative control — must run before the real check)
         run: |
@@ -33,8 +33,17 @@ jobs:
           echo '{"commit":{"message":"docs: explain why Co-authored-by trailers are rejected"}}' \
             | jq -e '.commit.message | test(env.PATTERN; "i") | not' >/dev/null \
             || { echo "::error::self-test failed: prose mention was incorrectly matched"; exit 1; }
+          echo '{"commit":{"message":"body\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"}}' \
+            | jq -e '.commit.message | test(env.PATTERN; "i")' >/dev/null \
+            || { echo "::error::self-test failed: known-bad Generated with line was NOT matched"; exit 1; }
+          echo '{"commit":{"message":"body\n\nGenerated with Claude Code"}}' \
+            | jq -e '.commit.message | test(env.PATTERN; "i")' >/dev/null \
+            || { echo "::error::self-test failed: plain Generated with line was NOT matched"; exit 1; }
+          echo '{"commit":{"message":"docs: reject Generated with attribution lines in PRs"}}' \
+            | jq -e '.commit.message | test(env.PATTERN; "i") | not' >/dev/null \
+            || { echo "::error::self-test failed: prose mention of Generated with was incorrectly matched"; exit 1; }
 
-      - name: Check commits and PR description for Co-Authored-By trailers
+      - name: Check commits and PR description for Co-Authored-By trailers and Generated with lines
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -55,8 +64,8 @@ jobs:
             --jq 'select(.body != null) | select(.body | test(env.PATTERN; "i")) | "PR body"')
 
           if [ -n "$commit_violations" ] || [ -n "$body_violation" ]; then
-            echo "::error::Co-Authored-By trailer found."
+            echo "::error::Co-Authored-By trailer or 'Generated with' attribution line found."
             [ -n "$commit_violations" ] && echo "Commits: $commit_violations — amend/rebase and force-push."
-            [ -n "$body_violation" ] && echo "PR description contains a trailer — edit the PR body to remove it."
+            [ -n "$body_violation" ] && echo "PR description contains one — edit the PR body to remove the line."
             exit 1
           fi

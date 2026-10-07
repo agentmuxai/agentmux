@@ -14,8 +14,18 @@
 MSG_FILE="$1"
 TMP_FILE="${MSG_FILE}.tmp.$$"
 
+#
+# Also strips a "Generated with ..." attribution line (e.g. Claude Code's
+# "🤖 Generated with [Claude Code](...)"): the line starts with the phrase,
+# after anything that isn't a letter or digit. A sentence that merely
+# mentions the phrase doesn't start with it and is kept.
 awk '
-  { if (tolower(substr($0, 1, 15)) == "co-authored-by:") next; lines[++n] = $0 }
+  {
+    l = tolower($0)
+    if (substr(l, 1, 15) == "co-authored-by:") next
+    if (l ~ /^[^a-z0-9]*generated with /) next
+    lines[++n] = $0
+  }
   END {
     while (n > 0 && lines[n] ~ /^[ \t]*$/) n--
     for (i = 1; i <= n; i++) print lines[i]

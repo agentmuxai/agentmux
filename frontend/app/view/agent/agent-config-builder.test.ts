@@ -387,3 +387,16 @@ describe("buildSettingsWithHooks — SessionStart memory delivery", () => {
         expect(SESSION_START_HOOK_PARTS).toBe(Number(match[1]));
     });
 });
+
+describe("buildSettingsWithHooks — attribution", () => {
+    const attribution = (settings?: string) => JSON.parse(buildSettingsWithHooks(settings, undefined)!).attribution;
+
+    it("hides Claude Code's commit and PR attribution by default", () => {
+        expect(attribution()).toEqual({ commit: "", pr: "" });
+        expect(attribution(JSON.stringify({ model: "opus" }))).toEqual({ commit: "", pr: "" });
+    });
+
+    it("keeps an agent's own attribution", () => {
+        expect(attribution(JSON.stringify({ attribution: { commit: "Agent: Aria", pr: "" } }))).toEqual({ commit: "Agent: Aria", pr: "" });
+    });
+});
