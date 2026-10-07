@@ -769,6 +769,11 @@ async fn run_auth_check(
     // `pi --list-models` prints "No models available" until a provider is
     // set up (SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md).
     let pi = crate::backend::providers::pi_beside_pi_acp(cli_path);
+    // pi-acp itself exits 0 on any flag, so without its pi there is nothing
+    // that can answer.
+    if pi.is_none() && crate::backend::providers::is_pi_acp(cli_path) {
+        return Err("pi is not installed beside pi-acp".to_string());
+    }
     let program = pi.as_deref().unwrap_or(cli_path);
     let output = tokio::time::timeout(std::time::Duration::from_secs(10), {
         let mut check_cmd = make_cli_cmd(program);
@@ -1095,6 +1100,16 @@ mod tests {
         assert!(!super::pi_lists_models(false, "", ""));
         assert!(super::pi_lists_models(true, "anthropic/claude-sonnet-4-6
 ", ""));
+    }
+
+    #[tokio::test]
+    async fn pi_acp_without_its_pi_is_refused_not_read_as_signed_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let acp = dir.path().join(if cfg!(windows) { "pi-acp.cmd" } else { "pi-acp" });
+        std::fs::write(&acp, "").unwrap();
+        let args = vec!["--list-models".to_string()];
+        let err = super::run_auth_check(&acp.to_string_lossy(), &args, &Default::default()).await.unwrap_err();
+        assert!(err.contains("not installed beside pi-acp"), "{err}");
     }
 
     #[tokio::test]

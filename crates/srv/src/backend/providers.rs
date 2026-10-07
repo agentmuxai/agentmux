@@ -871,11 +871,10 @@ fn antigravity_install_paths(
 /// none (the managed install's `.bin` isn't on PATH) or an older one.
 /// SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
 pub fn pi_beside_pi_acp(cmd: &str) -> Option<String> {
-    let path = std::path::Path::new(cmd);
-    let stem = path.file_stem()?.to_string_lossy().to_ascii_lowercase();
-    if stem != "pi-acp" {
+    if !is_pi_acp(cmd) {
         return None;
     }
+    let path = std::path::Path::new(cmd);
     let dir = path.parent()?;
     let names: &[&str] = if cfg!(windows) { &["pi.cmd", "pi.exe", "pi"] } else { &["pi"] };
     names
@@ -883,6 +882,13 @@ pub fn pi_beside_pi_acp(cmd: &str) -> Option<String> {
         .map(|n| dir.join(n))
         .find(|p| p.is_file())
         .map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Whether `cmd` (a path or bare name) is the pi-acp adapter.
+pub fn is_pi_acp(cmd: &str) -> bool {
+    std::path::Path::new(cmd)
+        .file_stem()
+        .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case("pi-acp"))
 }
 
 /// Look up a provider by canonical ID or alias.
