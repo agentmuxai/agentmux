@@ -1,6 +1,7 @@
 name: PR title names the agent
 
-# A PR opened through the shared GitHub App (genericagentx-workflow[bot]) can't
+# A PR opened through the shared GitHub App (muxagent[bot], named
+# genericagentx-workflow[bot] until 2026-10-07) can't
 # say which agent opened it, so its title must start with "<Agent>@<host>: ",
 # e.g. "Korp@narko: fix the toolbar". PRs from any other author pass.
 # Keep this file identical across agentmux, agentmux-docs, agentmux-landing and
@@ -23,7 +24,7 @@ jobs:
           AUTHOR: ${{ github.event.pull_request.user.login }}
           TITLE: ${{ github.event.pull_request.title }}
         run: |
-          if [ "$AUTHOR" != "genericagentx-workflow[bot]" ]; then
+          if [ "$AUTHOR" != "muxagent[bot]" ] && [ "$AUTHOR" != "genericagentx-workflow[bot]" ]; then
             echo "Opened by $AUTHOR, not the shared identity: nothing to check."
             exit 0
           fi
@@ -31,5 +32,5 @@ jobs:
             echo "Title names the agent."
             exit 0
           fi
-          echo "::error title=PR title must name the agent::PRs opened as genericagentx-workflow[bot] must start the title with '<Agent>@<host>: ', for example 'Korp@narko: fix the toolbar'. Edit the title; this check re-runs."
+          echo "::error title=PR title must name the agent::PRs opened as $AUTHOR must start the title with '<Agent>@<host>: ', for example 'Korp@narko: fix the toolbar'. Edit the title; this check re-runs."
           exit 1

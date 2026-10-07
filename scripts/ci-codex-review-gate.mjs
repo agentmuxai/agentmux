@@ -56,7 +56,10 @@ export const STATUS_CONTEXT = "Codex review";
 export const TRIGGER_AUTHOR = "a5af";
 
 // ReAgent's GitHub App, the only author whose quota-skip marker counts.
-export const SKIP_AUTHOR = "reagentx-workflow[bot]";
+// The App was renamed reagentx-workflow -> muxreview on 2026-10-07; markers
+// posted before the rename keep the old login.
+export const SKIP_AUTHORS = new Set(["muxreview[bot]", "reagentx-workflow[bot]"]);
+export const SKIP_AUTHOR = "muxreview[bot]";
 
 // Dependency bots. ReAgent doesn't review their PRs, so it never asks Codex,
 // and the gate would wait forever. A pure version bump is a manifest and
@@ -167,7 +170,7 @@ export function skippedHead(comment) {
 
 /** A ReAgent skip comment's { sha, reason }, or null. */
 export function skipNote(comment) {
-    if (comment?.user?.login !== SKIP_AUTHOR) return null;
+    if (!SKIP_AUTHORS.has(comment?.user?.login)) return null;
     const m = SKIPPED_HEAD.exec(comment.body ?? "");
     return m ? { reason: m[1].toLowerCase(), sha: m[2].toLowerCase() } : null;
 }
@@ -274,7 +277,7 @@ export function evaluateCodexGate({
         if (onHead.reason === "round-cap") {
             return {
                 state: "success",
-                description: `ReAgent stopped asking Codex after this PR's round cap; ${short} passes without it ('@reagentx-workflow codex re-review' asks anyway)`,
+                description: `ReAgent stopped asking Codex after this PR's round cap; ${short} passes without it ('@muxreview codex re-review' asks anyway)`,
             };
         }
         if (onHead.reason === "docs-only") {
@@ -311,7 +314,7 @@ export function evaluateCodexGate({
     }
     return {
         state: "pending",
-        description: `Waiting for Codex on ${short}: ReAgent asks after approving, or comment '@reagentx-workflow codex re-review'`,
+        description: `Waiting for Codex on ${short}: ReAgent asks after approving, or comment '@muxreview codex re-review'`,
     };
 }
 

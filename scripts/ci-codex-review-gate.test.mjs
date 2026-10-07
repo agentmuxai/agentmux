@@ -406,9 +406,17 @@ describe("ReAgent quota skip marker", () => {
     });
 
     it("ignores the same marker from anyone else", () => {
-        for (const login of ["someone", "a5af", CODEX_LOGIN, "reagentx-workflow"]) {
+        for (const login of ["someone", "a5af", CODEX_LOGIN, "reagentx-workflow", "muxreview"]) {
             const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD, { login })] });
             expect(r.state).toBe("pending");
+        }
+    });
+
+    // The App was renamed reagentx-workflow -> muxreview on 2026-10-07.
+    it("counts the marker from the renamed App and from its old login", () => {
+        for (const login of ["muxreview[bot]", "reagentx-workflow[bot]"]) {
+            const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD, { login })] });
+            expect(r.state).toBe("success");
         }
     });
 
