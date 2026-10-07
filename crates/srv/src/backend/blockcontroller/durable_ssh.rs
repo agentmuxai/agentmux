@@ -97,6 +97,11 @@ pub fn wants(meta: &MetaMapType, config: Option<&crate::backend::wconfig::FullCo
     {
         return false;
     }
+    // A host found to be one the helper can't run on (Windows) is plain even
+    // when a stale record says it has the helper and couldn't be forgotten.
+    if crate::backend::remote::helper_consent::unsupported_host(&conn) {
+        return false;
+    }
     let conn_setting = config.and_then(|c| {
         c.connections
             .iter()
@@ -1790,6 +1795,10 @@ sys.exit(1)
         assert_eq!(ended, None);
         assert!(plain.load(Ordering::SeqCst), "the pane is to become a plain terminal");
         assert!(crate::backend::remote::helper_consent::plain_instead("windowshost"));
+        let mut meta = MetaMapType::new();
+        meta.insert(super::super::META_KEY_CONNECTION.into(), serde_json::json!("windowshost"));
+        meta.insert(META_KEY_DURABLE.into(), serde_json::json!(true));
+        assert!(!wants(&meta, None), "durable no more, whatever a helper record says");
         let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
         assert_eq!(log, "attach\n", "tried once, no install");
         let term = state.filestore.read_file(block, "term").unwrap().unwrap();

@@ -154,7 +154,7 @@ fn declined() -> std::sync::MutexGuard<'static, HashSet<String>> {
 /// answered "Not now" for it since srv started. Set to Always, never. Also
 /// a host the helper can't run on (a Windows host), whatever the setting.
 pub fn plain_instead(connection: &str) -> bool {
-    if unsupported().contains(&host_key(connection)) {
+    if unsupported_host(connection) {
         return true;
     }
     let Some(deps) = DEPS.get() else {
@@ -174,6 +174,11 @@ fn unsupported() -> std::sync::MutexGuard<'static, HashSet<String>> {
         .get_or_init(|| Mutex::new(HashSet::new()))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether `connection`'s host was found to be one the helper can't run on.
+pub fn unsupported_host(connection: &str) -> bool {
+    unsupported().contains(&host_key(connection))
 }
 
 /// `connection`'s host can't run the helper (a Windows host, spec §6.4 of
