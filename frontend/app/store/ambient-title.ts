@@ -65,7 +65,7 @@ const ABSENCE_EXACT = new Set([
 /**
  * Deliberately few and specific: a prefix rejects every title that begins with it, so
  * "no title" and "title not" are NOT here ("No title bar on Windows" and "Title not
- * updating in swarm row" are real titles; ReAgent on #4185). Anything that is only
+ * updating in swarm row" are real titles; muxreview on #4185). Anything that is only
  * absence as the WHOLE reply belongs in ABSENCE_EXACT.
  */
 const ABSENCE_PREFIXES = [
@@ -139,7 +139,7 @@ function absenceForm(text: string): string {
  * A reply that is entirely ONE parenthetical or bracketed note. Only a single balanced
  * pair wrapping the whole text counts: "(WIP) Fix login redirect (again)" and
  * "[Windows] Fix installer crash [x64]" start and end with brackets but are real titles
- * (ReAgent on #4185).
+ * (muxreview on #4185).
  */
 function isWrappedNote(text: string): boolean {
     const t = text.trim();

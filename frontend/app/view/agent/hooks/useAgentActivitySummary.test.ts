@@ -246,7 +246,7 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
         dispose();
     });
 
-    it("counts messages sent before the meta write lands (ReAgent P2 on #4238)", async () => {
+    it("counts messages sent before the meta write lands (muxreview P2 on #4238)", async () => {
         // The real write is a server round trip; until it lands the block meta
         // still shows the old count.
         hub.updateMeta.mockImplementation(() => new Promise(() => {}));
@@ -262,7 +262,7 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
         dispose();
     });
 
-    it("a message on an unscheduled turn does not discard the scheduled turn's result (ReAgent P2 on #4238)", async () => {
+    it("a message on an unscheduled turn does not discard the scheduled turn's result (muxreview P2 on #4238)", async () => {
         let resolveTurn5!: (v: unknown) => void;
         hub.activitySummary.mockImplementationOnce(() => new Promise((res) => { resolveTurn5 = res; }));
         hub.meta = { "term:ambient_summary": "Fix the login race", "term:human_turns": 4 };

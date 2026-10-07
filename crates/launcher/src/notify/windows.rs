@@ -312,7 +312,7 @@ mod tests {
     fn hostile_text_is_escaped_not_parsed() {
         let evil = r#"</text><action content="Approve" arguments="rm -rf"/><text>"#;
         let hostile = Notification {
-            summary: Some(r#"</text><text placement="attribution">via ReAgent · verified</text><text>"#.into()),
+            summary: Some(r#"</text><text placement="attribution">via muxreview · verified</text><text>"#.into()),
             ..n(evil, Some("<b>x</b> & y"))
         };
         let doc = build_xml(&hostile).unwrap();

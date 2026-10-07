@@ -183,7 +183,7 @@ describe("narrationRule", () => {
     });
 
     it.each([
-        ["ReAgent review notifications arrive as jekts"],
+        ["muxreview review notifications arrive as jekts"],
         ["signed by the reagent WAN key (reagent-v1-dev)"],
         ["lerp from p0 to p1, then clamp to #333"],
         ["rounds the value to the nearest pixel"],

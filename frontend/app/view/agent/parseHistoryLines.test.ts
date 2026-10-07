@@ -629,7 +629,7 @@ describe("parseHistoryLines — Gemini-family transcripts keep the user's messag
     });
 });
 
-describe("parseHistoryLines — restored user messages keep their historical time (ReAgent P1, #3620)", () => {
+describe("parseHistoryLines — restored user messages keep their historical time (muxreview P1, #3620)", () => {
     // A translator must not invent a "now" timestamp for a replayed user
     // message: parseHistoryLines only fills the line's batch stamp when a node
     // has no timestamp, so a fabricated Date.now() showed every restored user

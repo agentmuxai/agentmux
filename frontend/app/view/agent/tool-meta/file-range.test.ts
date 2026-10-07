@@ -69,7 +69,7 @@ describe("fileRangeOf: Read", () => {
         expect(formatFileRangeShort(r)).toBe("10:20");
     });
 
-    // ReAgent on #4159: `numLines: 0` is a read past the end of the file.
+    // muxreview on #4159: `numLines: 0` is a read past the end of the file.
     it("reports a read past the end of the file as empty, not as the range the call asked for", () => {
         const r = fileRangeOf(
             node({ file_path: "a.ts", offset: 500, limit: 50 }, { content: "", range: { startLine: 500, numLines: 0, totalLines: 456 } })
@@ -99,7 +99,7 @@ describe("fileRangeOf: Read", () => {
     });
 });
 
-// ReAgent on #4165: a call that did not go through reached none of the lines it names.
+// muxreview on #4165: a call that did not go through reached none of the lines it names.
 describe("fileRangeOf: a call that did not go through", () => {
     it.each(["failed", "denied", "canceled"] as const)("has no range for a %s Write, Read or Edit", (status) => {
         const base = { collapsed: true, summary: "", id: "t", type: "tool" as const, status };

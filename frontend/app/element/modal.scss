@@ -138,7 +138,7 @@
 // `min-width` (e.g. `.agent-launch-modal-body`) is also (0,1,0).
 // In compact mode we still need to win — make the selector
 // `.modal-panel-body[class]` to bump specificity to (0,2,0) without
-// requiring a wrapper class. Reagent + codex P1 on PR #1060 round 1.
+// requiring a wrapper class. muxreview + codex P1 on PR #1060 round 1.
 @container modal-mount (max-width: 400px) {
     .modal-panel-body[class],
     .modal-panel-body[class] > * {

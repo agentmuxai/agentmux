@@ -283,7 +283,7 @@ struct SessionState {
     /// notification stream), so a `turn/completed` for the SAME turn can
     /// be applied before `start_turn`'s continuation resumes. Without this
     /// check, `start_turn`'s unconditional post-await write would resurrect
-    /// an already-terminal turn as `Running`, permanently stuck (ReAgent
+    /// an already-terminal turn as `Running`, permanently stuck (muxreview
     /// P1, PR #3210). One id is enough, not a growing set: only one turn is
     /// ever active at a time, so at most one termination can be "pending
     /// recognition" by a not-yet-resumed `start_turn` call.
@@ -409,7 +409,7 @@ impl CodexAppServerSession {
             // request is even sent — this is what makes the check-then-act
             // atomic. Without it, two concurrent callers could both observe
             // turn_id == None and turn_starting == false before either
-            // released the lock, and both would send turn/start (ReAgent
+            // released the lock, and both would send turn/start (muxreview
             // P1, PR #3210).
             state.turn_starting = true;
             thread_id
@@ -799,7 +799,7 @@ impl CodexAppServerSession {
         // check-then-await-then-reinsert-on-Err only runs that reinsert
         // code if the future resolves; drop the future mid-await instead
         // and Rust never runs it at all, silently stranding the entry with
-        // no response ever sent and no error surfaced to anyone (ReAgent
+        // no response ever sent and no error surfaced to anyone (muxreview
         // P1, PR #3212 5th review). Folding the ordinary failure path into
         // the same Drop impl means both cases are handled by one piece of
         // logic instead of two copies of it.
@@ -1029,7 +1029,7 @@ impl CodexAppServerSession {
                 // TurnStatus's terminal values: "completed", "interrupted"
                 // (user cancellation), "failed". Collapsing "interrupted"
                 // into Failed hid an expected cancellation behind the same
-                // signal as a genuine provider/execution failure (ReAgent
+                // signal as a genuine provider/execution failure (muxreview
                 // P1, PR #3210). Anything else unrecognized still maps to
                 // Failed rather than erroring — this notification has
                 // already been accepted; the phase is best-effort.

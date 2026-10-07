@@ -330,7 +330,7 @@ unsafe fn run_splash(
             // the whole hold. Keep polling briefly, but only while some row
             // is genuinely still open (`done.is_none()`) — the common case
             // (every stage already resolved) exits immediately, same as
-            // before. Reagent PR #2968 review.
+            // before. muxreview PR #2968 review.
             let drain_deadline = Instant::now() + std::time::Duration::from_millis(150);
             loop {
                 let mut fresh = Vec::new();

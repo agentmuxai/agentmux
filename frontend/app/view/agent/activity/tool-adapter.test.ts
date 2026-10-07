@@ -344,7 +344,7 @@ describe("whole-command sleeps promote immediately (sleep-detect.ts)", () => {
     });
 });
 
-describe("toolOutputChunks (ReAgent P1 on #4125)", () => {
+describe("toolOutputChunks (muxreview P1 on #4125)", () => {
     const base = { type: "tool", id: "t", tool: "Bash", params: { command: "make" }, collapsed: true, summary: "make" } as const;
 
     it("uses the live log while it has chunks", () => {

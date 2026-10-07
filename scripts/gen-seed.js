@@ -182,7 +182,7 @@ task changeset -- patch "fix(scope): short description"
 
 \`muxlog host\` / \`muxlog srv\` / \`muxlog fe\` — pipe to \`grep\` for filtering.
 
-### Reagent Bot
+### muxreview Bot
 
 All PRs are auto-reviewed by reagent (Claude Opus). Address P1 findings before
 merging. P2 findings should also be fixed if feasible.

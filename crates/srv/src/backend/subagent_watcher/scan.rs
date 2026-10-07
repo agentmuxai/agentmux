@@ -350,7 +350,7 @@ impl SubagentWatcher {
             // `SessionWatch`. We only have a confirmed-idle read for THIS one
             // `parent_block_id` — a sibling block's subagent could easily still
             // be genuinely active, so only reconcile entries this block itself
-            // owns (mirrors unwatch_agent's own parent-scoped filter). Reagent
+            // owns (mirrors unwatch_agent's own parent-scoped filter). muxreview
             // P1 on PR #2131.
             let mut reconciled_agent_ids = Vec::new();
             let mut completed_members: Vec<(String, String, usize)> = Vec::new();

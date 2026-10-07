@@ -370,7 +370,7 @@ const NARRATION = [
     ["re-review", /\bre-?review/i],
     ["review round count", /\bround \d+\b/i],
     ["review bot next to a PR number", /\b(?:reagentx?|codex)\b[^.\n]{0,20}#\d{3,}/i],
-    ["review bot with a severity tag", /\b(?:reagentx?|ReAgent|codex|Codex)\b.{0,12}\bP[0-3]\b/],
+    ["review bot with a severity tag", /\b(?:reagentx?|ReAgent|muxreview|codex|Codex)\b.{0,12}\bP[0-3]\b/],
     ["review bot verdict", /\b(?:reagentx?|codex)\s+(?:asked|flagged|caught|found|noted|pointed|raised|requested|suggested)\b/i],
 ];
 

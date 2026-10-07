@@ -6,7 +6,7 @@
 [data-theme="dracula"] {
     // Alpha-aware (matches theme.scss's :root default) so body's
     // background — and anything else using this token — stays
-    // translucent when window:transparent/window:blur is on. Reagent P1
+    // translucent when window:transparent/window:blur is on. muxreview P1
     // on PR #2138: a plain opaque hex here broke transparency for every
     // named theme once body switched from a hardcoded translucent
     // literal to reading this token directly.

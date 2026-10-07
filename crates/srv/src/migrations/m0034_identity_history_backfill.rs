@@ -167,7 +167,7 @@ impl Migration for M0034IdentityHistoryBackfill {
 /// function only checked one level under `dev/`, which silently found
 /// nothing for that layout and would have marked the migration applied
 /// without ever backfilling clone-scoped dev instances — caught in review
-/// (ReAgent + Codex, independently, on the same commit) before merge.
+/// (muxreview + Codex, independently, on the same commit) before merge.
 /// Depth 2 covers every known layout: `channels/<slug>/identities/`,
 /// `dev/<branch>/identities/`, and `dev/<branch>/<clone_id>/identities/`.
 /// Kept as its own copy rather than calling the adapter's function
@@ -338,7 +338,7 @@ mod tests {
         );
     }
 
-    /// The gap caught in review (ReAgent + Codex, independently, same
+    /// The gap caught in review (muxreview + Codex, independently, same
     /// commit): a dev build with a clone id nests one level deeper —
     /// `dev/<branch>/<clone_id>/identities/...`, per
     /// `DataPaths::resolve`'s `RuntimeMode::Dev` branch — which

@@ -94,7 +94,7 @@ else
 fi
 
 # 7. With no probe tool on PATH, `pick` and `listening` fail loudly instead of
-#    reporting every port as free (ReAgent P2 on #4214). An empty PATH hides
+#    reporting every port as free (muxreview P2 on #4214). An empty PATH hides
 #    lsof, ss and netstat alike; `blocked` and `check` need none of them.
 EMPTY="$(mktemp -d)"
 out="$(env PATH="$EMPTY" "$BASH" "$SUT" pick 2>&1)"; st=$?

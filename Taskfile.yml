@@ -1308,7 +1308,7 @@ tasks:
                 # errors out instead of silently rebinding to the next free
                 # port (which would let the readiness loop succeed against
                 # the foreign Vite we're trying to avoid attaching to).
-                # Reagent P1 on #866.
+                # muxreview P1 on #866.
                 AGENTMUX_VITE_PORT="$AGENTMUX_VITE_PORT" npx vite --config vite.config.ts --port "$AGENTMUX_VITE_PORT" --strictPort &
 
                 echo "Waiting for Vite on port $AGENTMUX_VITE_PORT..."
@@ -1407,7 +1407,7 @@ tasks:
                 # broken under go-task's mvdan/sh shell — $! returns a goroutine
                 # ID ("g1"), not a real OS PID, so `kill -0 g1` exits non-zero
                 # immediately and the loop reported a false "Vite exited" on
-                # every run. Reagent P1 on #866.
+                # every run. muxreview P1 on #866.
                 if [ -z "$AGENTMUX_VITE_PORT" ]; then
                   CLONE_ROOT="$(pwd)"
                   PORT_OFFSET=$(( $(echo -n "$CLONE_ROOT" | cksum | cut -d' ' -f1) % 200 ))

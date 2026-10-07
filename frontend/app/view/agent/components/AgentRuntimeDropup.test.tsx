@@ -430,7 +430,7 @@ describe("AgentRuntimeDropup — shows what the agent really runs, and a pick ho
     });
 });
 
-describe("AgentRuntimeDropup — the mode a definition pins is the mode shown (ReAgent P2 on #4161)", () => {
+describe("AgentRuntimeDropup — the mode a definition pins is the mode shown (muxreview P2 on #4161)", () => {
     const meta = {
         "agent:runtime": { model: "sonnet", permissionMode: "bypass", effort: "high" },
         "agent:provider_flags": "--permission-mode plan",

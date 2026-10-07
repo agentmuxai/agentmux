@@ -436,7 +436,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(overrides.model).toBe("opus");
     });
 
-    // Identity M4b-3 follow-up (ReAgent on #3585): an aborted launch shows the
+    // Identity M4b-3 follow-up (muxreview on #3585): an aborted launch shows the
     // "Launch aborted" notice, and a later launch that did not abort clears
     // it instead of leaving it up.
     it("shows the launch-aborted notice, and clears it after a later launch that did not abort", async () => {

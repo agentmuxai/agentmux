@@ -97,7 +97,7 @@ function readFromMeta(result: Rec | null): FileRange | null {
         ...base("read"),
         start,
         // `numLines: 0` is a read past the end of the file: say so, rather than
-        // falling back to the range the call asked for (ReAgent on #4159).
+        // falling back to the range the call asked for (muxreview on #4159).
         end: count === 0 ? null : start + count - 1,
         total: toInt(m?.totalLines),
         capped: m?.truncatedByTokenCap === true,
@@ -238,7 +238,7 @@ const NO_RANGE_STATUSES = new Set<ToolNode["status"]>(["failed", "denied", "canc
 /**
  * The range a Read, Edit or Write covers, or null when nothing is known yet,
  * or the call failed, was denied or was canceled: its parameters name lines it
- * never touched (ReAgent on #4165).
+ * never touched (muxreview on #4165).
  */
 export function fileRangeOf(node: Pick<ToolNode, "tool" | "toolName" | "params" | "result" | "status">): FileRange | null {
     if (NO_RANGE_STATUSES.has(node.status)) return null;

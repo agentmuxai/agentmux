@@ -20,7 +20,7 @@
  * Two SAME-kind calls issued in one turn (e.g. two parallel Agent-tool
  * spawns) can have distinct, non-tied `spawned_at` values whose relative
  * order still doesn't match transcript position — the kind-compatibility
- * check below can't catch this, both sides read the same kind. Reagent
+ * check below can't catch this, both sides read the same kind. muxreview
  * flagged this across FIVE consecutive review rounds on PR #2676. THREE
  * different attempted closures were each shot down, the last one for a
  * more serious reason than the first two — it actively broke the common

@@ -20,23 +20,23 @@
 //     "Reviewed commit" line and inline comments.
 //   - out of quota: an ISSUE COMMENT "You have reached your Codex usage
 //     limits for code reviews. ..." naming no commit. When it answers the
-//     only outstanding ReAgent trigger ("@codex review" by a5af with
+//     only outstanding muxreview trigger ("@codex review" by a5af with
 //     `<!-- reagent:codex-trigger head=<sha> -->`), it counts for that
 //     head and passes it: Codex being unavailable must not block merges
 //     (#3562 sat pending). See quotaAttribution for overlapping requests.
 //     A later real verdict on the head still wins.
 //
-// What ReAgent posts (a5af/reagent spec codex-efficiency-2026-09-30):
-//   - quota skip: while Codex's quota is exhausted ReAgent stops asking and
+// What muxreview posts (agentmuxai/muxreview spec codex-efficiency-2026-09-30):
+//   - quota skip: while Codex's quota is exhausted muxreview stops asking and
 //     instead keeps one ISSUE COMMENT per PR, edited in place for each head
 //     it skips, carrying `<!-- reagent:codex-skipped reason=quota
 //     head=<sha> -->`. From reagentx-workflow[bot] only (anyone can type the
 //     marker), it counts as a quota answer for that head, but only when
-//     Codex itself has said nothing about the head: ReAgent may write it
+//     Codex itself has said nothing about the head: muxreview may write it
 //     before reading Codex's answers. It is never carried to a later head.
 //
-// Codex only reviews when asked by a5af, not a bot. ReAgent decides when
-// to ask (a5af/reagent lambdas/codex_policy.py): after it approves a head,
+// Codex only reviews when asked by a5af, not a bot. muxreview decides when
+// to ask (agentmuxai/muxreview lambdas/codex_policy.py): after it approves a head,
 // then again only when a push touches a file Codex flagged, or when a
 // write-access commenter says "@reagentx-workflow codex re-review". After an
 // OK it does NOT re-ask for a docs-only diff, so this gate carries an OK
@@ -44,24 +44,24 @@
 // files Codex flagged changed, so findings whose inline comments (matched to
 // the review by pull_request_review_id) are all on docs pass on the head, and
 // carry to a later head like an OK: only while they are Codex's latest word
-// and only docs changed since (a code change makes ReAgent re-ask). Findings
+// and only docs changed since (a code change makes muxreview re-ask). Findings
 // on any non-doc file, or on files unknown, fail or wait as before. This
 // gate only reads.
 
 export const CODEX_LOGIN = "chatgpt-codex-connector[bot]";
 export const STATUS_CONTEXT = "Codex review";
 
-// Only ReAgent's trigger names the head it asked about; reagent's
+// Only muxreview's trigger names the head it asked about; reagent's
 // codex_policy.py reads the same marker from the same author.
 export const TRIGGER_AUTHOR = "a5af";
 
-// ReAgent's GitHub App, the only author whose quota-skip marker counts.
+// muxreview's GitHub App, the only author whose quota-skip marker counts.
 // The App was renamed reagentx-workflow -> muxreview on 2026-10-07; markers
 // posted before the rename keep the old login.
 export const SKIP_AUTHORS = new Set(["muxreview[bot]", "reagentx-workflow[bot]"]);
 export const SKIP_AUTHOR = "muxreview[bot]";
 
-// Dependency bots. ReAgent doesn't review their PRs, so it never asks Codex,
+// Dependency bots. muxreview doesn't review their PRs, so it never asks Codex,
 // and the gate would wait forever. A pure version bump is a manifest and
 // lockfile diff Codex has little to say about, so such a PR passes without
 // Codex; the required approving review and CI still apply. Only while every
@@ -91,7 +91,7 @@ const REVIEWED_COMMIT = /Reviewed commit:\**\s*`([0-9a-f]{7,40})`/i;
 const NO_MAJOR_ISSUES = /Didn.t find any major issues/i;
 const USAGE_LIMIT = /reached your Codex usage limits/i;
 const TRIGGER_HEAD = /reagent:codex-trigger\s+head=([0-9a-f]{7,40})/i;
-// reason: quota (Codex out of quota), round-cap (ReAgent stopped asking after
+// reason: quota (Codex out of quota), round-cap (muxreview stopped asking after
 // its per-PR cap of automatic rounds) or docs-only (a PR of only docs).
 const SKIPPED_HEAD = /<!--\s*reagent:codex-skipped\s+reason=(quota|round-cap|docs-only)\s+head=([0-9a-f]{7,40})\s*-->/i;
 
@@ -119,7 +119,7 @@ export function reviewedCommit(body) {
 
 /**
  * The head each quota notice answered (Map: notice -> sha), from the
- * timeline of ReAgent triggers and Codex answers. The notice carries no
+ * timeline of muxreview triggers and Codex answers. The notice carries no
  * request id, so the requests still outstanding when it arrives decide:
  *   - an answer naming a commit closes only the requests for that commit
  *     (Codex P1 on #3589: a blanket "since Codex last spoke" cutoff also
@@ -163,12 +163,12 @@ function quotaAttribution({ comments, reviews }) {
     return attributed;
 }
 
-/** The head a ReAgent skip comment names, or null. */
+/** The head a muxreview skip comment names, or null. */
 export function skippedHead(comment) {
     return skipNote(comment)?.sha ?? null;
 }
 
-/** A ReAgent skip comment's { sha, reason }, or null. */
+/** A muxreview skip comment's { sha, reason }, or null. */
 export function skipNote(comment) {
     if (!SKIP_AUTHORS.has(comment?.user?.login)) return null;
     const m = SKIPPED_HEAD.exec(comment.body ?? "");
@@ -192,7 +192,7 @@ function isDocsOnlyFindings(o) {
 }
 
 /**
- * ReAgent's quota skips, as `quota` outputs, oldest first. ReAgent edits one
+ * muxreview's quota skips, as `quota` outputs, oldest first. muxreview edits one
  * comment in place per outage, so its last edit dates the skip of the head
  * it now names. Not Codex verdicts: see evaluateCodexGate for precedence.
  */
@@ -247,8 +247,8 @@ export function latestCodexOutput({ comments = [], reviews = [], reviewComments 
  * Decide the status for `headSha` from the PR's issue comments, reviews and
  * review comments (GitHub REST shapes). The latest Codex output naming this
  * head wins, so a spontaneous findings review after an OK takes the OK back.
- * A ReAgent quota skip counts only when Codex has said nothing about the
- * head: ReAgent can post or edit it before reading Codex's answers, so its
+ * A muxreview quota skip counts only when Codex has said nothing about the
+ * head: muxreview can post or edit it before reading Codex's answers, so its
  * date can trail a real verdict it must not override.
  *
  * With nothing on the head, Codex's latest verdict (never a skip) carries
@@ -273,11 +273,11 @@ export function evaluateCodexGate({
         return { state: "success", description: `Codex found no major issues in ${short}` };
     }
     if (onHead?.kind === "quota") {
-        // A ReAgent skip names why it didn't ask; Codex's own notice is quota.
+        // A muxreview skip names why it didn't ask; Codex's own notice is quota.
         if (onHead.reason === "round-cap") {
             return {
                 state: "success",
-                description: `ReAgent stopped asking Codex after this PR's round cap; ${short} passes without it ('@muxreview codex re-review' asks anyway)`,
+                description: `muxreview stopped asking Codex after this PR's round cap; ${short} passes without it ('@muxreview codex re-review' asks anyway)`,
             };
         }
         if (onHead.reason === "docs-only") {
@@ -291,7 +291,7 @@ export function evaluateCodexGate({
     if (onHead?.kind === "findings") {
         return {
             state: "failure",
-            description: `Codex left findings on ${short}; ReAgent re-asks once a push touches a flagged file`,
+            description: `Codex left findings on ${short}; muxreview re-asks once a push touches a flagged file`,
         };
     }
     if (onHead) {
@@ -299,7 +299,7 @@ export function evaluateCodexGate({
     }
 
     const latest = all.at(-1);
-    // ReAgent re-asks for any non-doc change after either verdict, so both
+    // muxreview re-asks for any non-doc change after either verdict, so both
     // carry only across a docs-only diff; a code change waits for Codex.
     const onlyDocsSince = Array.isArray(filesSinceLatest) && filesSinceLatest.every(isDocsOnlyPath);
     if (latest?.kind === "ok" && onlyDocsSince) {
@@ -314,7 +314,7 @@ export function evaluateCodexGate({
     }
     return {
         state: "pending",
-        description: `Waiting for Codex on ${short}: ReAgent asks after approving, or comment '@muxreview codex re-review'`,
+        description: `Waiting for Codex on ${short}: muxreview asks after approving, or comment '@muxreview codex re-review'`,
     };
 }
 

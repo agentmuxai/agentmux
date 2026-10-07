@@ -290,7 +290,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const entries = model.entries;
     const order = model.order;
     // The window only changes when a row crosses an edge, not on every
-    // scroll event (ReAgent on #4201).
+    // scroll event (muxreview on #4201).
     /** Tiles per grid row. */
     const gridCols = createMemo(() => Math.max(1, Math.floor((viewWidth() - 8) / TILE_W)));
     const grid = () => model.viewMode() === "grid";
@@ -665,7 +665,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         }
         const workdir = paneWorkdir(target.blockId);
         // A container agent sees only its working folder (bind-mounted), so a
-        // host path outside it means nothing to it (ReAgent on #4225).
+        // host path outside it means nothing to it (muxreview on #4225).
         if (isContainerPane(target.blockId)) {
             const outside = list.filter((e) => !workdir || !isWithin(model.pathOf(e.name), workdir));
             if (outside.length > 0) {
@@ -953,7 +953,7 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     onKeyDown={onKeyDown}
                     onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
                     // Over blank space, the header or a notice: no folder row is
-                    // the target any more (ReAgent on #4224). A row's own
+                    // the target any more (muxreview on #4224). A row's own
                     // dragover runs first and sets or clears it.
                     onDragOver={(e) => {
                         if (!(e.target instanceof Element && e.target.closest(".files-rows .files-row, .files-tile"))) setDropRow(null);
@@ -1414,7 +1414,7 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
     const [problem, setProblem] = createSignal<string | null>(null);
     let busy = false;
     // Enter or Escape unmounts the input, and its removal can fire blur,
-    // which must not commit a second time (ReAgent on #4201).
+    // which must not commit a second time (muxreview on #4201).
     let finished = false;
     // Scrolled out of the window, the row (and this box) unmounts: leave
     // rename mode with it, or the list's keyboard would wait on a box that
@@ -1429,7 +1429,7 @@ function RenameInput(props: { model: FilesModel; entry: FsEntry; onDone: () => v
     /** Enter commits and stays in the box on a problem, so it can be fixed.
      *  Leaving the box (blur) commits too, but on a problem it cancels: with
      *  the focus gone, the list's keys would otherwise wait on a box nobody
-     *  is typing in (ReAgent on #4201). */
+     *  is typing in (muxreview on #4201). */
     const finish = async (commit: boolean, leaving = false): Promise<void> => {
         if (busy || finished) return;
         const value = input?.value ?? props.entry.name;

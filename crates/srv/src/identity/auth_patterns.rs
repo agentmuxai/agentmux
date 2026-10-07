@@ -148,7 +148,7 @@ fn match_logged_in_as(line: &str) -> Option<AuthPatternMatch> {
     let line_low = line.to_lowercase();
     // Negative forms ("not authenticated", "not logged in", "isn't
     // authenticated", "n't logged in", "failed to authenticate") are
-    // status messages, not success — fall through. Reagent caught the
+    // status messages, not success — fall through. muxreview caught the
     // bare `contains("authenticated")` matching error lines on PR #840.
     if line_low.contains("not authenticated")
         || line_low.contains("not logged in")

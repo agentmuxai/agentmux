@@ -844,7 +844,7 @@ impl Store {
     /// another AgentMux instance's own startup reseed, since multiple
     /// instances can run in parallel by design — could land a new version
     /// between the read and the write, and the caller's decision would be
-    /// based on data that was already stale by the time it acted (ReAgent
+    /// based on data that was already stale by the time it acted (muxreview
     /// P1, PR #3244).
     ///
     /// `seeder_identity` is the reserved `written_by` value that marks a row

@@ -293,7 +293,7 @@
     }
 
     // Same selector as the enter rule, so it wins on order, not lost on
-    // specificity (ReAgent P1 on #4178).
+    // specificity (muxreview P1 on #4178).
     @media (prefers-reduced-motion: reduce) {
         .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
             transition: none;

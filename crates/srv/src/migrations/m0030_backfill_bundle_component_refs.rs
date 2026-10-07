@@ -447,7 +447,7 @@ mod tests {
     #[test]
     fn an_entrys_own_type_becomes_the_transport() {
         // Hardcoding stdio would give the row a transport column that
-        // contradicts its own config JSON (ReAgent, PR #3152).
+        // contradicts its own config JSON (muxreview, PR #3152).
         let s = store();
         let mcp = r#"[{"name":"remote","type":"sse","url":"https://example.test"}]"#;
         insert_bundle(&s, "bundle-1", "[]", mcp);

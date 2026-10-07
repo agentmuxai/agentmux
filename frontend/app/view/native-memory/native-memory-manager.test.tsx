@@ -374,7 +374,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         expect(screen.getByText("AgentY").closest(".memory-agent-card")).toHaveTextContent("No memories yet");
     });
 
-    // ReAgent (PR #2932, non-blocking follow-up): fetchCountFor previously
+    // muxreview (PR #2932, non-blocking follow-up): fetchCountFor previously
     // overwrote to {kind: "loading"} unconditionally, including on a
     // reactive refresh of an ALREADY-resolved card -- a visible
     // "Loading…" flash on every write, inconsistent with the feature's own

@@ -33,7 +33,7 @@ import {
  * `awaiting_answer` (nothing rewrites them), so — as on restore — only the
  * old session's LAST node can be an open thought or an unanswered question:
  * that one is canceled, since the new session can't finish or answer it
- * (ReAgent on #4147). An earlier question was answered and resolves as on
+ * (muxreview on #4147). An earlier question was answered and resolves as on
  * restore. In-pane shells are AgentMux's, not the session's, and are left
  * alone.
  */

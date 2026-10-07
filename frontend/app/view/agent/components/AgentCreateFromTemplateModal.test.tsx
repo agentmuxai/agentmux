@@ -635,7 +635,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
     // matching setProviderModels' own documented "label-only refresh"
     // contract, so this can't itself corrupt any earlier test's
     // `select.value` assertions either.
-    it("shows a live-overlaid model label, not the stale static catalog label (ReAgent P1 on #2618)", async () => {
+    it("shows a live-overlaid model label, not the stale static catalog label (muxreview P1 on #2618)", async () => {
         const { setProviderModels } = await import("../providers");
         setProviderModels("claude", [
             { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },

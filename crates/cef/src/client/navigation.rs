@@ -228,7 +228,7 @@ fn signal_gated_reveal_complete(elapsed_ms: u64, reason: &'static str, status: &
     // Also called from `reveal_top_level_window`'s `label: None` fallback
     // branch — that path never arms the paint gate (no label to key it on),
     // so it must fire this signal itself rather than relying on this
-    // function, which the fallback never reaches. Reagent PR #2968 review:
+    // function, which the fallback never reaches. muxreview PR #2968 review:
     // the signal used to fire unconditionally in `on_load_end` regardless of
     // label resolution; moving it here alone silently dropped that fallback
     // case, leaving the launcher's splash wait (no overall timeout,
@@ -297,7 +297,7 @@ wrap_task! {
 ///   load-blocking resources finish). Record the label in
 ///   `linux_first_paint_seen` so `on_load_end` reveals immediately when it
 ///   does arm, instead of silently dropping this signal and falling through
-///   to the slower safety timeout. Reagent PR #2151 second-round review.
+///   to the slower safety timeout. muxreview PR #2151 second-round review.
 ///
 /// Must run on the CEF UI thread.
 #[cfg(any(target_os = "linux", target_os = "windows"))]

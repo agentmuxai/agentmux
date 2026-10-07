@@ -59,7 +59,7 @@ export class FilesOps {
     private readonly setOps: (fn: (o: OpView[]) => OpView[]) => void;
     private readonly labels = new Map<string, string>();
     /** `fs.op.start` calls awaiting their reply. srv starts the op before it
-     *  answers, so its events, even the last, can arrive first (ReAgent on
+     *  answers, so its events, even the last, can arrive first (muxreview on
      *  #4221): they wait here until the reply names the op. */
     private pendingStarts = 0;
     private readonly early = new Map<string, FsOpEvent>();
@@ -201,7 +201,7 @@ export function opProgressText(op: OpView): string {
 export function opFinishedText(op: OpView): { text: string; tone: "info" | "error" } {
     const verb = op.kind === "move" ? "Moved" : "Copied";
     // srv gives a reason when it stopped the op itself (a conflict nobody
-    // answered for an hour): say that, not just "canceled" (ReAgent on #4221).
+    // answered for an hour): say that, not just "canceled" (muxreview on #4221).
     if (op.state === "canceled" && op.error) return { text: op.error, tone: "error" };
     if (op.state === "canceled") return { text: `${op.kind === "move" ? "Move" : "Copy"} canceled after ${op.done_items} of ${op.total_items}`, tone: "info" };
     if (op.state === "failed") return { text: `Couldn't ${op.kind}: ${op.error ?? "it failed"}`, tone: "error" };

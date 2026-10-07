@@ -161,7 +161,7 @@ describe("resolveLanIndicator", () => {
             }
         });
 
-        // ReAgent on #4151: `blocked` also covers "Block all incoming connections",
+        // muxreview on #4151: `blocked` also covers "Block all incoming connections",
         // where no rule exists, so the wording must not tell the user to find a rule.
         it("words a block so it fits both a Block rule and the block-all setting", () => {
             const m = FIREWALL_MESSAGES.blocked;

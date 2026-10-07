@@ -79,7 +79,7 @@ describe("LogView", () => {
         ]);
     });
 
-    it("re-measures its viewport when resized without a scroll (ReAgent P2 on #3684)", () => {
+    it("re-measures its viewport when resized without a scroll (muxreview P2 on #3684)", () => {
         let onResize: (() => void) | null = null;
         const RO = vi.fn(function (this: unknown, cb: () => void) {
             onResize = cb;

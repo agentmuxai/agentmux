@@ -55,7 +55,7 @@ use std::sync::mpsc;
 /// reports success. Every backend builds the icon on another thread (Windows:
 /// its pump thread; macOS: the AppKit main thread; Linux: the ksni thread), and
 /// `start_if_enabled` must not report success for an icon that was only
-/// *requested*: `unavailable` depends on it (ReAgent P1s on #3785).
+/// *requested*: `unavailable` depends on it (muxreview P1s on #3785).
 pub(crate) const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long a login start keeps trying for a tray host that is not up yet

@@ -879,7 +879,7 @@ impl Controller for ShellController {
 
         // Propagate this instance's local API endpoint + auth key to ALL
         // THREE branches above, not just the interactive shell — same "don't
-        // half-fix it" lesson as the sanitize_pty_command call below (ReAgent
+        // half-fix it" lesson as the sanitize_pty_command call below (muxreview
         // P0 on PR #3326). `muxsh`/`muxspect`/`muxopen`/`muxlog` — meant for
         // a human to run from inside a plain Terminal-widget pane, the same
         // role Wave Terminal's `wsh` played — need both to authenticate

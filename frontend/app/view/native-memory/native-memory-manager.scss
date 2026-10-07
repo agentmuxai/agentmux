@@ -475,7 +475,7 @@
     }
 }
 
-// ── Filter bar — narrow panes (Codex/ReAgent, PR #2929 — three rounds) ──────
+// ── Filter bar — narrow panes (Codex/muxreview, PR #2929 — three rounds) ──────
 // Panes go down to 128px in either dimension (MinNodeSizePx,
 // frontend/layout/lib/layoutResize.ts) — well below the app's existing
 // `armory` container breakpoints (767px/479px, section-pane.scss). At a 128px

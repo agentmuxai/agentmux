@@ -764,7 +764,7 @@ function installWindowTitleEffect(windowId: string): void {
     // taking the JS context (and the effect) with it — but routing
     // through `beforeunload` keeps the pattern correct if the renderer
     // ever outlives a single window load (e.g. in-place navigation,
-    // future host-driven reload paths). Per ReAgent review on PR #841.
+    // future host-driven reload paths). Per muxreview review on PR #841.
     const dispose = createRoot((disposeFn) => {
         createEffect(() => {
             const activeTabId = atoms.activeTabId();

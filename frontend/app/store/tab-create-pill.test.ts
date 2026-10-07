@@ -143,7 +143,7 @@ describe("new tab pill selection", () => {
         await settle();
     });
 
-    // ReAgent on #4140: the first pill has arrived, its reply hasn't, when
+    // muxreview on #4140: the first pill has arrived, its reply hasn't, when
     // the second New Tab starts.
     it("selects the second pill at once when the first one had already arrived", async () => {
         createTab();
@@ -162,7 +162,7 @@ describe("new tab pill selection", () => {
         await settle();
     });
 
-    // ReAgent on #4140: an earlier creation fails after a later one started.
+    // muxreview on #4140: an earlier creation fails after a later one started.
     it("stops waiting on an earlier creation that failed", async () => {
         createTab();
         createTab();
@@ -198,7 +198,7 @@ describe("new tab pill selection", () => {
         expect(intents).toEqual([null]);
     });
 
-    // ReAgent on #4140: the older creation's activation is already in flight.
+    // muxreview on #4140: the older creation's activation is already in flight.
     it("a newer New Tab still wins over an older activation already in flight", async () => {
         createTab();
         state.setTabIds(["tab-a", "tab-1"]);

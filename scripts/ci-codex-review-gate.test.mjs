@@ -139,7 +139,7 @@ describe("evaluateCodexGate", () => {
     });
 });
 
-// #3562: ReAgent asked for 259331cc79 and Codex answered with its quota
+// #3562: muxreview asked for 259331cc79 and Codex answered with its quota
 // notice, which names no commit; the gate sat pending.
 const trigger = (sha, at, login = TRIGGER_AUTHOR) => ({
     user: { login },
@@ -157,7 +157,7 @@ const quotaComment = (at) => ({
 describe("Codex out of review quota", () => {
     it("passes the head the quota notice answered", () => {
         // #3562's real sequence: Codex answered the OLD trigger (14:36)
-        // before ReAgent asked about HEAD.
+        // before muxreview asked about HEAD.
         const comments = [
             trigger(OLD, "2026-09-23T14:31:42Z"),
             trigger(HEAD, "2026-09-23T14:46:38Z"),
@@ -216,7 +216,7 @@ describe("Codex out of review quota", () => {
         expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
     });
 
-    it("ignores a trigger marker from anyone but ReAgent's a5af", () => {
+    it("ignores a trigger marker from anyone but muxreview's a5af", () => {
         const comments = [trigger(HEAD, "2026-09-23T14:46:38Z", "someone"), quotaComment("2026-09-23T14:46:48Z")];
         expect(evaluateCodexGate({ headSha: HEAD, comments }).state).toBe("pending");
     });
@@ -234,7 +234,7 @@ describe("Codex out of review quota", () => {
     });
 });
 
-// Mirrors reagent's codex_policy.is_docs_only_path: ReAgent doesn't re-ask
+// Mirrors reagent's codex_policy.is_docs_only_path: muxreview doesn't re-ask
 // Codex for a docs-only diff after an OK, so the gate must carry that OK.
 describe("isDocsOnlyPath", () => {
     it("accepts the docs tree, changesets and README/CHANGELOG/LICENSE", () => {
@@ -306,8 +306,8 @@ describe("carrying an OK across a docs-only diff", () => {
     });
 });
 
-// ReAgent no longer re-asks Codex when only doc files it flagged changed
-// (a5af/reagent spec codex-efficiency-2026-09-30 §3), so findings that only
+// muxreview no longer re-asks Codex when only doc files it flagged changed
+// (agentmuxai/muxreview spec codex-efficiency-2026-09-30 §3), so findings that only
 // touch docs must not leave the PR failing or waiting.
 const reviewWithId = (id, sha, at) => ({ ...findingsReview(sha, at), id });
 const inline = (reviewId, path) => ({ pull_request_review_id: reviewId, path, user: { login: CODEX_LOGIN } });
@@ -333,7 +333,7 @@ describe("findings only on docs", () => {
     });
 
     it("waits for Codex when code changed since docs-only findings", () => {
-        // ReAgent re-asks for a non-doc change, so that answer decides the head.
+        // muxreview re-asks for a non-doc change, so that answer decides the head.
         const r = evaluateCodexGate({
             headSha: HEAD,
             ...docsFindingsOnOld,
@@ -386,7 +386,7 @@ describe("findings only on docs", () => {
     });
 });
 
-// While Codex's quota is exhausted ReAgent doesn't ask; it keeps one comment
+// While Codex's quota is exhausted muxreview doesn't ask; it keeps one comment
 // per PR naming the head it skipped (spec §2).
 const skipComment = (sha, { login = SKIP_AUTHOR, created = "2026-09-30T10:00:00Z", updated } = {}) => ({
     user: { login },
@@ -398,8 +398,8 @@ const skipComment = (sha, { login = SKIP_AUTHOR, created = "2026-09-30T10:00:00Z
         `<!-- reagent:codex-skipped reason=quota head=${sha} -->`,
 });
 
-describe("ReAgent quota skip marker", () => {
-    it("passes the head ReAgent skipped", () => {
+describe("muxreview quota skip marker", () => {
+    it("passes the head muxreview skipped", () => {
         const r = evaluateCodexGate({ headSha: HEAD, comments: [skipComment(HEAD)] });
         expect(r.state).toBe("success");
         expect(r.description).toBe(`Codex is out of review quota; ${HEAD.slice(0, 10)} passes without it`);
@@ -420,14 +420,14 @@ describe("ReAgent quota skip marker", () => {
         }
     });
 
-    it("follows the comment when ReAgent edits it to a newer head", () => {
+    it("follows the comment when muxreview edits it to a newer head", () => {
         const edited = skipComment(HEAD, { created: "2026-09-30T10:00:00Z", updated: "2026-09-30T10:30:00Z" });
         expect(evaluateCodexGate({ headSha: HEAD, comments: [edited] }).state).toBe("success");
         // The edit replaced OLD's marker, so OLD is no longer passed by it.
         expect(evaluateCodexGate({ headSha: OLD, comments: [edited] }).state).toBe("pending");
     });
 
-    // ReAgent writes the note before reading Codex's
+    // muxreview writes the note before reading Codex's
     // answers, so a skip can name, and post-date, a head Codex answered.
     it("never overrides Codex findings on the head, even when the skip is newer", () => {
         const r = evaluateCodexGate({
@@ -480,9 +480,9 @@ describe("ReAgent quota skip marker", () => {
     });
 });
 
-// a5af/reagent: ReAgent also skips Codex past a per-PR cap of automatic rounds
+// agentmuxai/muxreview: muxreview also skips Codex past a per-PR cap of automatic rounds
 // and on docs-only PRs, with the same note and a different reason.
-describe("ReAgent skip reasons", () => {
+describe("muxreview skip reasons", () => {
     const note = (reason, sha = HEAD) => ({
         user: { login: "reagentx-workflow[bot]" },
         created_at: "2026-10-01T12:00:00Z",

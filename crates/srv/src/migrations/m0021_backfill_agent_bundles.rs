@@ -20,7 +20,7 @@
 //! `Store::bundle_provision_for_new_agent` uses for brand-new agents) —
 //! and point the definition's `memory_id` at it.
 //!
-//! P0 fix (2026-08-15, ReAgent review on PR #2587): this used to hardcode
+//! P0 fix (2026-08-15, muxreview review on PR #2587): this used to hardcode
 //! `provider='claude'`, `model='anthropic'` for every backfilled agent
 //! regardless of `def.provider`, reasoning from §7.3's operator-confirmed
 //! "every agent on this instance is Claude Code + OAuth Anthropic." That's
@@ -487,7 +487,7 @@ mod tests {
         });
     }
 
-    // P1 regression test (Codex + ReAgent review on PR #2587): the bundle
+    // P1 regression test (Codex + muxreview review on PR #2587): the bundle
     // must land in the EFFECTIVE identity/memory store (shared store,
     // mirroring AppState.id_store), never the channel-local store the
     // agent definition itself lives in — a channel-local bundle is
@@ -517,7 +517,7 @@ mod tests {
         });
     }
 
-    // P0 regression test (ReAgent review on PR #2587): the migration must
+    // P0 regression test (muxreview review on PR #2587): the migration must
     // derive each bundle's provider from THAT definition's own
     // `provider`, never a hardcoded value — a hardcoded claude/anthropic
     // default would silently reassign a non-Claude agent's harness on

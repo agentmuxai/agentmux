@@ -78,7 +78,7 @@ describe("permissionModeFromFlags / effectiveRuntime's mode", () => {
         expect(permissionModeFromFlags(["--add-dir", "/x"])).toBeUndefined();
         expect(permissionModeFromFlags(["--permission-mode"])).toBeUndefined();
     });
-    it("the definition's own mode wins over the stored selection (ReAgent P2 on #4161)", () => {
+    it("the definition's own mode wins over the stored selection (muxreview P2 on #4161)", () => {
         const base = { permissionMode: "bypass", model: "sonnet", effort: "high" };
         expect(effectiveRuntime(base, "--permission-mode plan").permissionMode).toBe("plan");
         expect(effectiveRuntime(base, "--add-dir /tmp").permissionMode).toBe("bypass");

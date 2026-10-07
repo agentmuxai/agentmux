@@ -116,7 +116,7 @@ vi.mock("@/app/store/rpc-api", () => ({
         CreateSubBlockCommand: vi.fn(() => Promise.resolve("block:new-sub-block-id")),
         SetMetaCommand: vi.fn(() => Promise.resolve()),
         // Absent until the reattach-failure tests below needed it, which is
-        // why that path — where ReAgent found the round-2 P0 — had no coverage.
+        // why that path — where muxreview found the round-2 P0 — had no coverage.
         DeleteSubBlockCommand: vi.fn(() => Promise.resolve()),
     },
 }));
@@ -1143,7 +1143,7 @@ describe("AgentShellSubblock — re-attaches when the parent repoints term:shell
             )
         );
         // And critically, it must never become the live TermWrap — the
-        // orphan-and-forget failure mode ReAgent flagged would otherwise
+        // orphan-and-forget failure mode muxreview flagged would otherwise
         // still leave the pane silently attached to it.
         expect(termWrapInstances.some((t) => t.id === createdIdA)).toBe(false);
     });

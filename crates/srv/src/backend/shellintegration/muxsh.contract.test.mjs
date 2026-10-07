@@ -11,7 +11,7 @@
 // manifest (or that the manifest claims but the real Rust struct doesn't
 // have) fails CI on whichever side drifted, instead of shipping as a silent
 // mismatch discovered after merge — which is exactly how Phase 1's real bug
-// (ReAgent, PR #3255, a field that should have been sent but wasn't) was
+// (muxreview, PR #3255, a field that should have been sent but wasn't) was
 // actually found.
 
 import { readFileSync } from "node:fs";

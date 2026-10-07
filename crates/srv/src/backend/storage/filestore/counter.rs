@@ -596,7 +596,7 @@ impl FileStore {
         // The scan decides on the row it reads under its own lock: a separate
         // check first could see an epoch behind, then a rewrite land before
         // the scan reads the row again, and the scan would count from byte 0
-        // (ReAgent on #3663).
+        // (muxreview on #3663).
         match self.init_scan_from(zone_id, name, ScanFrom::CatchUpOnly)? {
             InitScan::Done(state) => Ok(state),
             InitScan::Scanned(scan) => match self.init_finish(zone_id, name, scan)? {

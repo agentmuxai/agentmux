@@ -638,7 +638,7 @@ mod tests {
         assert!(ids("http:// https://").is_empty());
     }
 
-    /// ReAgent P2s on #3674.
+    /// muxreview P2s on #3674.
     #[test]
     fn a_path_with_an_anchor_is_still_a_path() {
         assert_eq!(ids("see docs/guide.md#install"), vec!["docs/guide.md".to_string()]);

@@ -104,7 +104,7 @@ export function splitTurns(nodes: readonly DocumentNode[]): Turn[] {
  * styled rendering (`answerText` / `questionText`) and the client-side
  * auto-fill note are optimistic, and those fields are never cleared once set
  * (reducer `mergeReplacement`) — blocking on them would keep every such turn
- * forever (ReAgent review). An unanswered question is kept anyway: it is in
+ * forever (muxreview review). An unanswered question is kept anyway: it is in
  * progress (`isNodeInProgress`).
  *
  * Live-only decoration rows (stderr, notifications, "Interrupted", heuristic

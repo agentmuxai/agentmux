@@ -239,7 +239,7 @@ export class FilesModel {
     private disposed = false;
     /** Protected macOS places the user clicked Open on in this pane: the
      *  click is the consent, whether or not macOS then allowed the read, so
-     *  Try again and Refresh work after a denial (ReAgent on #4201). */
+     *  Try again and Refresh work after a denial (muxreview on #4201). */
     private readonly openedPlaces = new Set<string>();
     /** Called once the first listing has painted (or failed): the view's
      *  settled-content hold (§6.5). */
@@ -458,7 +458,7 @@ export class FilesModel {
         if (!isMacOS() || this.connection()) return null;
         // Compare the folder srv will list, not how it was spelled: `~/Documents`
         // or `Desktop/../Documents` from the path box, `mux view` or OpenFiles
-        // must not slip past the gate (ReAgent on #4201).
+        // must not slip past the gate (muxreview on #4201).
         const home = this.places().find((p) => p.kind === "home")?.path ?? "";
         const path = normalizePath(raw, home);
         for (const p of this.places()) {
@@ -570,7 +570,7 @@ export class FilesModel {
     async list(dir: string, opts: { silent: boolean; consented?: boolean }): Promise<void> {
         // Only navigate() decides to list a protected macOS folder; Refresh,
         // a change event, New folder or Undo must not list one the user hasn't
-        // opened (ReAgent on #4201).
+        // opened (muxreview on #4201).
         if (!opts.consented && (this.phase() === "gated" || this.needsConsent(dir))) return;
         const gen = ++this.generation;
         const oldOrder = this.order();
@@ -615,7 +615,7 @@ export class FilesModel {
                     // Paint the first page at once. Later pages are collected
                     // and the listing is set (and sorted) once at the end: a
                     // re-sort per page is O(pages x n log n) on a 200k-entry
-                    // folder (ReAgent on #4201). A silent re-list keeps the old
+                    // folder (muxreview on #4201). A silent re-list keeps the old
                     // rows until then, so nothing vanishes and returns.
                     batch(() => {
                         if (first && res.path && !samePath(res.path, this.path())) {
@@ -669,7 +669,7 @@ export class FilesModel {
             .filter((n) => present.has(n));
         if (names.length > 0) {
             this.setSelection({ names: new Set(names), focus: names[0], anchor: names[0] });
-            // Show the user where the agent pointed (ReAgent on #4201).
+            // Show the user where the agent pointed (muxreview on #4201).
             this.setRevealRequest({ name: names[0] });
         }
         void this.ctx.setMeta({ [META_SELECT]: null });
@@ -698,7 +698,7 @@ export class FilesModel {
             this.watchId = res.watch_id;
         } catch {
             // No live updates for this folder; Refresh still works, and the
-            // next listing tries to watch again (ReAgent on #4201).
+            // next listing tries to watch again (muxreview on #4201).
             if (this.watchedPath && samePath(this.watchedPath, dir)) this.watchedPath = null;
         }
     }
@@ -726,7 +726,7 @@ export class FilesModel {
     selectedEntries(): FsEntry[] {
         // Selected names only, never the focused row on its own: a row that
         // shows as unselected must not be deleted, opened or copied
-        // (ReAgent on #4201).
+        // (muxreview on #4201).
         const names = this.selection().names;
         return this.entries().filter((e) => names.has(e.name));
     }
@@ -766,7 +766,7 @@ export class FilesModel {
             batch(() => {
                 this.setSelection({ names: new Set([name]), focus: name, anchor: name });
                 // Scrolled into view first: the rename box only exists on a
-                // mounted row, and the keyboard waits on it (ReAgent on #4201).
+                // mounted row, and the keyboard waits on it (muxreview on #4201).
                 this.setRevealRequest({ name });
                 this.setRenaming(name);
             });
@@ -878,7 +878,7 @@ export class FilesModel {
         }
         if (this.phase() !== "ready") return;
         // A cut is used up only once srv has taken the move: a refused one
-        // (protected place, folder into itself) keeps it (ReAgent on #4221).
+        // (protected place, folder into itself) keeps it (muxreview on #4221).
         // The clipboard's paths are on the connection they were cut or
         // copied on, which may be another host than this pane's.
         const started = await this.transfer(c.kind === "cut" ? "move" : "copy", c.paths, this.path(), c.connection ?? "");

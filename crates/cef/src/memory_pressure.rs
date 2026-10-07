@@ -41,7 +41,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 /// `::default()` (identical to the original consts), but they can diverge
 /// later once there's real data to tune against, without another rewrite.
 ///
-/// Reagent-adjacent finding, `docs/retro/retro-commit-restart-reclaim-2026-07-16.md`
+/// muxreview-adjacent finding, `docs/retro/retro-commit-restart-reclaim-2026-07-16.md`
 /// §5.2: the commit tracker used to threshold on absolute free MB
 /// (1024 / 512), which on a large-commit-limit machine (60-80 GB seen live)
 /// never fired until far past the point the status bar already shows red —

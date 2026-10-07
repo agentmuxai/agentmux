@@ -763,7 +763,7 @@ proptest! {
 #[test]
 fn a_catch_up_never_scans_a_file_it_cannot_catch_up() {
     use super::counter::{InitScan, ScanFrom};
-    // ReAgent on #3663: behind when first seen, rewritten before the scan
+    // muxreview on #3663: behind when first seen, rewritten before the scan
     // reads the row. Catch-up must not fall back to a whole-file count; the
     // decision is made on the row the scan itself reads.
     let fs = mem();

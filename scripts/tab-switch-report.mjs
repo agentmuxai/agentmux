@@ -88,7 +88,7 @@ if (withReveal.length) {
   };
   console.log(
     // Only switches whose reveal was seen: the rest have no "after reveal"
-    // window, and their zeros would understate the cost (ReAgent P2 on #3686).
+    // window, and their zeros would understate the cost (muxreview P2 on #3686).
     `\n${rows.length} switches, ${withReveal.length} with a reveal · median reveal ${median(withReveal.map((r) => r.reveal))} ms · median after-reveal long tasks ${median(withReveal.map((r) => r.total))} ms · worst ${Math.max(...withReveal.map((r) => r.total))} ms`
   );
 }

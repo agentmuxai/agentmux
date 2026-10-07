@@ -195,7 +195,7 @@ describe("a local image in an agent message", () => {
         }
     });
 
-    it("revokes the blob URL as soon as the image fails to decode (ReAgent P2 on #4064)", async () => {
+    it("revokes the blob URL as soon as the image fails to decode (muxreview P2 on #4064)", async () => {
         const c = mount("![x](corrupt.png)").container;
         await waitFor(() => expect(c.querySelector("img")).not.toBeNull());
         const src = c.querySelector("img")!.getAttribute("src")!;

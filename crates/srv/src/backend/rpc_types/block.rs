@@ -963,7 +963,7 @@ mod app_api_manifest_contract_tests {
     //! test can catch both sides being wrong in the same way, but together
     //! a field rename here now fails CI in both suites instead of shipping
     //! as a silent runtime mismatch (which is exactly how Phase 1's real bug,
-    //! ReAgent on PR #3255, was actually found — after merge, not before).
+    //! muxreview on PR #3255, was actually found — after merge, not before).
     use super::*;
     use std::collections::HashSet;
     use std::path::Path;

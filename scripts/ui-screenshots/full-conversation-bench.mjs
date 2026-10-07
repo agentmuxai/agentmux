@@ -345,7 +345,7 @@ async function run(opts, page, browser, target) {
     try {
         // Start every pane from empty, or the history count N would be wrong:
         // a pane holding leftovers from an interrupted or --keep run is bench
-        // content and is cleared without asking (ReAgent P1, #3593); real
+        // content and is cleared without asking (muxreview P1, #3593); real
         // content was refused above unless --clear-existing.
         if (init.panes.some((p) => p.nodeCount > 0)) {
             await page.evaluate(`window.__fcb.clear(${JSON.stringify(blockIds)})`);

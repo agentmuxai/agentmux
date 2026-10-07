@@ -196,7 +196,7 @@ export function NativeMemoryManager(): JSX.Element {
         const generation = (countRequestGeneration.get(agent.id) ?? 0) + 1;
         countRequestGeneration.set(agent.id, generation);
         // Only flash to "loading" for a genuinely new agent — no resolved
-        // state yet to show in the meantime. ReAgent (PR #2932): the
+        // state yet to show in the meantime. muxreview (PR #2932): the
         // reactive agent:memory:changed handler also calls this function,
         // and unconditionally overwriting to "loading" made an
         // already-resolved card visibly flicker back to "Loading…" on

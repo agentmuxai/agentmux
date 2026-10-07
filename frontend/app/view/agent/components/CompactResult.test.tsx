@@ -71,7 +71,7 @@ describe("CompactResult — no chevron for a text body", () => {
         expect(container.textContent).toBe("Todos updated");
     });
 
-    it("caps one huge unbroken line (ReAgent P1 on #3877: minified JSON, base64)", () => {
+    it("caps one huge unbroken line (muxreview P1 on #3877: minified JSON, base64)", () => {
         const huge = "x".repeat(MAX_TOOL_OUTPUT_CHARS + 5000);
         const { container } = render(() => <CompactResult tool="Other" params={{}} result={{ content: huge }} />);
         const shown = container.querySelector(".agent-tool-compact-line")!.textContent!;

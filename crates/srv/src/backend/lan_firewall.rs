@@ -336,7 +336,7 @@ fn applies_to(rule: &FwRule, exe: &str, need: Need, category: Category, local_ip
 /// we cannot evaluate would claim coverage we cannot prove. A BLOCK is the
 /// opposite case, handled in `coverage_with`: skipping one we cannot evaluate
 /// would lean toward `Covered`, the very direction the unreadable-means-unknown
-/// rule forbids (ReAgent on #4151).
+/// rule forbids (muxreview on #4151).
 fn rule_applies(rule: &FwRule, exe: &str, need: Need, category: Category, local_ips: &[Ipv4Addr]) -> bool {
     applies_to(rule, exe, need, category, local_ips) == Applies::Yes
 }
@@ -1209,7 +1209,7 @@ mod tests {
         assert_eq!(report(&none, EXE, &needs()).status, FirewallStatus::NeedsSetup);
     }
 
-    // ReAgent on #4151: skipping a block we cannot evaluate leans toward Covered.
+    // muxreview on #4151: skipping a block we cannot evaluate leans toward Covered.
     #[test]
     fn a_block_that_might_apply_cannot_be_skipped_toward_covered() {
         let allow = program_rule(EXE, Proto::Any, ALL, true);

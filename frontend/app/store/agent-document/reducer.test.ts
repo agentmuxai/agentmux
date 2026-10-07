@@ -1604,7 +1604,7 @@ describe("agent document reducer", () => {
             expect(r.events.some((e) => e.type === "orphans-scrubbed")).toBe(true);
         });
 
-        it("a live fresh boundary cancels the old session's trailing open thought only (ReAgent on #4147)", () => {
+        it("a live fresh boundary cancels the old session's trailing open thought only (muxreview on #4147)", () => {
             const thought = (id: string): DocumentNode => ({ ...md(id), metadata: { thinking: true } }) as DocumentNode;
             const start = seed([thought("done-thought"), md("reply"), thought("open-thought")]);
             const r = update(

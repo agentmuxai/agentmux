@@ -281,7 +281,7 @@ impl Store {
                        AND (not_before IS NULL OR not_before <= ?3)
                        -- Identity M3: an item that carries a target UID is
                        -- claimable by that identity ONLY — never by a
-                       -- same-named other (ReAgent P1 on PR #3563: the name
+                       -- same-named other (muxreview P1 on PR #3563: the name
                        -- branch must not short-circuit a UID-addressed item).
                        -- Items with no UID (pre-M1b rows, names that did not
                        -- resolve) keep the name path until M5, so a claimer
