@@ -8,21 +8,18 @@
 //! 1. `JobObjectTracker::new(block_id)` creates an anonymous job and sets
 //!    `KILL_ON_JOB_CLOSE`, so anything in the job dies automatically if
 //!    AgentMux itself crashes without calling `kill_tree`.
-//! 2. The caller gets the tracker handle and, when spawning the agent
-//!    CLI, calls `assign_process(child_pid)` immediately after spawn.
-//!    Every `CreateProcess` descendant of that PID inherits the job
-//!    automatically — no per-process tagging.
+//! 2. Agent-side tokio spawns go through `registry::spawn_tracked`: the
+//!    child starts `CREATE_SUSPENDED`, `assign_process(pid)` puts it in the
+//!    job, then it is resumed, so nothing it starts can escape the job.
+//!    Every `CreateProcess` descendant inherits the job automatically.
+//!    Spawns that can't start suspended (ConPTY, the Codex App Server) are
+//!    assigned right after spawn.
 //! 3. `list_members` queries the job for its current PID set and
 //!    enriches each with command line + RSS via `PROCESS_QUERY_LIMITED_INFORMATION`
 //!    + `GetModuleFileNameEx` / `GetProcessMemoryInfo`.
-//! 4. `kill_tree` → `TerminateJobObject`. One call nukes everything.
-//!
-//! The only non-trivial thing: there's a ~1ms race window between
-//! `CreateProcess` and our `AssignProcessToJobObject`. A child the CLI
-//! creates in that window escapes the job. In practice the CLI doesn't
-//! spawn anything before it reads stdin, so this is a theoretical
-//! concern — but worth a future move to `CREATE_SUSPENDED` + assign +
-//! `ResumeThread` if we see escapes.
+//! 4. `kill_tree` → `TerminateJobObject`: everything in the job dies, and
+//!    the job stays open for whatever the block starts next. `Drop` closes
+//!    it, which `KILL_ON_JOB_CLOSE` turns into the same kill.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -57,8 +54,7 @@ pub struct JobObjectTracker {
 
 struct Inner {
     job: HANDLE,
-    /// Closed-idempotent flag. `kill_tree` + `Drop` both call
-    /// `CloseHandle`; the second caller must no-op.
+    /// Set by `Drop`, the only place the job handle is closed.
     closed: bool,
 }
 
