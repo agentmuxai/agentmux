@@ -176,8 +176,9 @@ The follower only ever handles the part R2 doesn't: content that arrived **below
 
 ```
 next = gap ≤ 1 px            → at rest
-       reduced motion or gap > 0.75 × clientHeight → bottom, at once
-       otherwise              → pos + max(1, gap × (1 − e^(−dt / 60 ms))), never past the bottom
+       gap > 0.75 × clientHeight → bottom, at once
+       otherwise              → pos + max(1, gap × (1 − e^(−dt / τ))), never past the bottom
+                                τ = 60 ms, or 25 ms under reduced motion
 ```
 
 - **No overshoot.** The target is the bottom as last measured with layout clean, which can only be at or above the
@@ -190,7 +191,9 @@ next = gap ≤ 1 px            → at rest
 - **Why not snap everything?** Snapping (scroll to the bottom in the observer) also satisfies V1/V2 and is simpler.
   Easing only the appended part keeps the smooth arrival the owner asked for on 10-01 without the glide's transform.
   `REPORT_AGENT_PANE_ROW_ENTER_MOTION_2026_10_01.md` flagged an animated scroll as risky because of the scroll events
-  it fires; marking each write as our own with its geometry is the answer. Reduced motion snaps.
+  it fires; marking each write as our own with its geometry is the answer.
+  **Reduced motion is quicker, not off** (owner, 2026-10-07): τ = 25 ms (~60 ms to land) and a 90 ms fade instead of
+  180 ms. The old path still drops all arrival motion under reduced motion.
 
 ## 5. Rollout
 

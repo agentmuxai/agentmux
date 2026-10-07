@@ -19,6 +19,8 @@
 
 /** Time constant of the approach: ~140 ms to cover 90 % of a step. */
 export const FOLLOW_TAU_MS = 60;
+/** Under reduced motion the approach is quicker, not gone: ~60 ms to cover 90 % of a step. */
+export const FOLLOW_TAU_REDUCED_MS = 25;
 /** A step larger than this share of the viewport is shown at once (a paste, a load). */
 export const SNAP_FRACTION = 0.75;
 /** Within this of the target the follower is at rest. 1 px, not less: at a fractional
@@ -37,8 +39,9 @@ export interface StepInput {
 export function stepToward({ pos, target, clientHeight, dtMs, reducedMotion }: StepInput): number {
     const gap = target - pos;
     if (gap < REST_PX) return pos;
-    if (reducedMotion || gap > clientHeight * SNAP_FRACTION) return target;
-    const k = 1 - Math.exp(-Math.max(0, dtMs) / FOLLOW_TAU_MS);
+    if (gap > clientHeight * SNAP_FRACTION) return target;
+    const tau = reducedMotion ? FOLLOW_TAU_REDUCED_MS : FOLLOW_TAU_MS;
+    const k = 1 - Math.exp(-Math.max(0, dtMs) / tau);
     return Math.min(target, pos + Math.max(1, gap * k));
 }
 
@@ -81,8 +84,8 @@ export class Follower {
         this.clientHeight = clientHeight;
         if (!this.host.active()) return this.stop();
         const gap = this.target - pos;
-        if (gap >= REST_PX && (this.host.reducedMotion() || gap > clientHeight * SNAP_FRACTION)) {
-            // A snap (reduced motion, or more than most of a viewport): land now, before paint.
+        if (gap >= REST_PX && gap > clientHeight * SNAP_FRACTION) {
+            // A snap (more than most of a viewport): land now, before paint.
             // Anything smaller is left to the frames: no step here.
             this.write(this.target);
         }

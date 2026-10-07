@@ -318,10 +318,11 @@
         }
     }
 
-    // Reduced motion: no fade either, the same as the path above.
+    // Reduced motion: quicker, not gone (owner, 2026-10-07): a shorter fade,
+    // and the follower's approach is quicker too (scroll/follower.ts).
     @media (prefers-reduced-motion: reduce) {
         .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
-            transition: none;
+            transition: opacity 90ms cubic-bezier(0.2, 0, 0, 1);
         }
     }
 

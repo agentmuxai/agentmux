@@ -32,9 +32,15 @@ describe("stepToward", () => {
         expect(stepToward({ ...base, pos: 100 - REST_PX / 2 })).toBe(100 - REST_PX / 2);
     });
 
-    it("snaps a large gap and under reduced motion", () => {
+    it("snaps a large gap", () => {
         expect(stepToward({ ...base, target: 600 * SNAP_FRACTION + 10 })).toBe(600 * SNAP_FRACTION + 10);
-        expect(stepToward({ ...base, reducedMotion: true })).toBe(100);
+    });
+
+    it("under reduced motion moves quicker, but still eases", () => {
+        const normal = stepToward(base);
+        const reduced = stepToward({ ...base, reducedMotion: true });
+        expect(reduced).toBeGreaterThan(normal);
+        expect(reduced).toBeLessThan(100);
     });
 });
 
