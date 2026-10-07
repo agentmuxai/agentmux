@@ -18,7 +18,6 @@ function deps(over: Partial<StartupSequenceDeps> = {}): StartupSequenceDeps & { 
         version: () => "1.2.3",
         peerAgents: () => [],
         getAgentContent: async (contentType) => (contentType === "startup" ? { content: "freeform" } : null),
-        getBundle: async () => null,
         listIdentities: async () => [],
         loadAccounts: () => [],
         send: async (payload) => {
@@ -55,22 +54,13 @@ describe("sendStartupSequence", () => {
         expect(d.sent).toEqual([]);
     });
 
-    it("prefers a selected bundle's instructions over the freeform startup content", async () => {
-        const d = deps({
-            getAgentContent: async (t) => (t === "startup" ? { content: "freeform" } : { content: " b-7 " }),
-            getBundle: async (id) => (id === "b-7" ? { instructions: "from the bundle" } : null),
-        });
+    // Bundles reach the agent through its startup file now
+    // (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6), not this message.
+    it("reads only the freeform startup content, never a startup bundle", async () => {
+        const getAgentContent = vi.fn(async (t: string) => (t === "startup" ? { content: "freeform" } : null));
+        const d = deps({ getAgentContent });
         await sendStartupSequence(d);
-        expect(d.sent[0]).toContain("from the bundle");
-        expect(d.sent[0]).not.toContain("freeform");
-    });
-
-    it("falls back to the freeform content when the bundle no longer resolves", async () => {
-        const d = deps({
-            getAgentContent: async (t) => (t === "startup" ? { content: "freeform" } : { content: "gone" }),
-            getBundle: async () => null,
-        });
-        await sendStartupSequence(d);
+        expect(getAgentContent.mock.calls.map((c) => c[0])).toEqual(["startup"]);
         expect(d.sent[0]).toContain("freeform");
     });
 

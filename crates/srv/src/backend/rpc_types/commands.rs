@@ -247,6 +247,10 @@ pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";
 pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
 pub const COMMAND_DELETE_MEMORY: &str = "deletememory";
+/// An agent's Bundles list: the bundles picked for it, in order, not its own
+/// (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
+pub const COMMAND_GET_AGENT_BUNDLES: &str = "getagentbundles";
+pub const COMMAND_SET_AGENT_BUNDLES: &str = "setagentbundles";
 /// v9 — set the global-bundle section order. `ids` is the full ordered list
 /// of global bundle ids; each row's `sort_order` becomes its index.
 pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
@@ -463,6 +467,13 @@ pub const COMMAND_FLEET_GROUP_CREATE: &str = "fleet.group.create";
 pub const COMMAND_FLEET_GROUP_LIST: &str = "fleet.group.list";
 pub const COMMAND_FLEET_GROUP_UPDATE: &str = "fleet.group.update";
 pub const COMMAND_FLEET_GROUP_DELETE: &str = "fleet.group.delete";
+
+// Pairing a device with the viewer listener (backend::viewer, agentmux-mobile's
+// SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2).
+pub const COMMAND_VIEWER_PAIR_START: &str = "viewer.pair-start";
+pub const COMMAND_VIEWER_DEVICES: &str = "viewer.devices";
+pub const COMMAND_VIEWER_REVOKE: &str = "viewer.revoke";
+pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
 
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";

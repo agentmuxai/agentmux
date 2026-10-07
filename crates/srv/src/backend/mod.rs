@@ -3,6 +3,7 @@
 
 
 pub mod agent_admission;
+pub mod agent_state;
 pub mod attachments;
 pub mod agent_color;
 pub mod agent_config;
@@ -22,6 +23,7 @@ pub mod bundle_validate;
 pub mod background_task_feed;
 pub mod dock_snapshot;
 pub mod fleet_feed;
+pub mod fleet_source;
 pub mod narrated_events;
 pub mod pending_background_pids;
 pub mod mcp_probe;
@@ -105,6 +107,7 @@ pub mod sysinfo;
 pub mod storage;
 pub mod subagent_watcher;
 pub mod userinput;
+pub mod viewer;
 pub mod text_encoding;
 pub mod base;
 pub mod obj;

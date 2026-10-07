@@ -144,37 +144,7 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                         super::session_restore::save_last_session_snapshot(store, snapshot);
                     }
                 }
-                // A workspace the reducer tracks goes through the
-                // saga (keeps reducer + store consistent, durable
-                // provenance). One it never knew — the usual case
-                // when its window diverged too — would make the
-                // saga's reducer dispatch error out, so cascade at
-                // the store layer directly instead.
-                let reducer_knows_ws = state
-                    .srv_state
-                    .lock()
-                    .await
-                    .workspaces
-                    .contains_key(&ws_id);
-                if reducer_knows_ws {
-                    if let Err(e) =
-                        crate::sagas::delete_workspace::run(state, ws_id.clone()).await
-                    {
-                        tracing::warn!(
-                            workspace_id = %ws_id,
-                            "CloseWindow: divergence-path delete_workspace saga failed: {}",
-                            e,
-                        );
-                    }
-                } else if let Err(e) =
-                    crate::backend::wcore::delete_workspace(store, &ws_id)
-                {
-                    tracing::warn!(
-                        workspace_id = %ws_id,
-                        "CloseWindow: divergence-path store cascade failed: {}",
-                        e,
-                    );
-                }
+                close_workspace(state, ws_id).await;
             }
         }
         return WebReturnType::success_empty();
@@ -230,21 +200,64 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                     super::session_restore::save_last_session_snapshot(store, snapshot);
                 }
             }
-            if let Err(e) =
-                crate::sagas::delete_workspace::run(state, ws_id.clone()).await
-            {
-                tracing::warn!(
-                    workspace_id = %ws_id,
-                    "CloseWindow: delete_workspace saga failed: {}",
-                    e,
-                );
-            }
+            close_workspace(state, ws_id).await;
         }
     }
     // Subscriber's apply_srv_window_closed already pruned
     // Client.windowids and deleted the Window row; nothing
     // more for the handler to do.
     WebReturnType::success_empty()
+}
+
+/// Delete a closed window's workspace, every agent in it closed gracefully
+/// first (`agent_teardown`, `Policy::close()`).
+///
+/// Detached (`agent_teardown::detached`): the host waits only 2 s for
+/// `CloseWindow`, less than a graceful close takes, and when it hangs up
+/// this handler is dropped. The close still finishes, and on app exit srv
+/// waits for it.
+///
+/// A workspace the reducer tracks goes through the `delete_workspace` saga
+/// (reducer and store stay consistent, durable provenance). One it never
+/// knew — the usual case when its window diverged too (#2051) — would make
+/// the saga's reducer dispatch error out, so its agents are closed here, the
+/// store cascades directly, and each block's close is finished as the saga
+/// would (`close_pane::finish_close`).
+async fn close_workspace(state: &AppState, ws_id: String) {
+    let st = state.clone();
+    let done = crate::sagas::agent_teardown::detached(async move {
+        let reducer_knows_ws = st.srv_state.lock().await.workspaces.contains_key(&ws_id);
+        let result = if reducer_knows_ws {
+            crate::sagas::delete_workspace::run(&st, ws_id.clone()).await.map(|_| ())
+        } else {
+            let block_ids = store_block_ids(&st.mstore, &ws_id);
+            crate::sagas::agent_teardown::run_many(&st, &block_ids, crate::sagas::agent_teardown::Policy::close())
+                .await;
+            let deleted = crate::backend::wcore::delete_workspace(&st.mstore, &ws_id).map_err(|e| e.to_string());
+            for block_id in &block_ids {
+                crate::sagas::close_pane::finish_close(&st, block_id).await;
+            }
+            deleted
+        };
+        if let Err(e) = result {
+            tracing::warn!(workspace_id = %ws_id, reducer_knows_ws, "CloseWindow: workspace delete failed: {}", e);
+        }
+    })
+    .await;
+    if done.is_none() {
+        tracing::warn!("CloseWindow: the workspace close task panicked");
+    }
+}
+
+/// Every block in a workspace's tabs (regular and pinned), read from the store.
+fn store_block_ids(store: &crate::backend::storage::store::Store, ws_id: &str) -> Vec<String> {
+    let Ok(Some(ws)) = store.get::<Workspace>(ws_id) else { return Vec::new() };
+    ws.tabids
+        .iter()
+        .chain(ws.pinnedtabids.iter())
+        .filter_map(|tid| store.get::<Tab>(tid).ok().flatten())
+        .flat_map(|t| t.blockids)
+        .collect()
 }
 
 /// #2051 — `CloseWindow` divergence-path tests: the reducer's

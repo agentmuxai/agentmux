@@ -471,7 +471,10 @@ impl LanDiscovery {
         let host_name_mdns = mdns_hostname(&hostname);
         let channel = crate::backend::reactive::registry::local_channel_id();
         let os = crate::backend::host_os::local_os();
-        let properties = [
+        // Not `channels_running`: it changes, and a TXT update is costly; a
+        // peer reads it from the fleet feed instead.
+        let install_id = crate::backend::fleet_source::install_id();
+        let mut properties = vec![
             ("version", version.as_str()),
             ("hostname", hostname.as_str()),
             ("instance_id", instance_id.as_str()),
@@ -479,6 +482,9 @@ impl LanDiscovery {
             ("os", os.as_str()),
             ("auth_key", auth_key.as_str()),
         ];
+        if let Some(id) = install_id.as_deref() {
+            properties.push(("install_id", id));
+        }
         // `""` alone does NOT mean "auto-detect" despite how that reads —
         // `AsIpAddrs for &str`'s own doc comment: "If the string is empty,
         // will return an empty set." Auto-detection is a SEPARATE opt-in:
@@ -823,6 +829,21 @@ impl LanDiscovery {
     /// tests. Desktop peers get this (`udp_peers`); phones get
     /// [`Self::build_probe_response`].
     fn build_identity_response(&self) -> serde_json::Value {
+        self.identity_response_with(
+            crate::backend::fleet_source::install_id().as_deref(),
+            crate::backend::fleet_source::latest_channels_running(),
+            crate::backend::viewer::advertised_viewer_port(),
+        )
+    }
+
+    /// [`Self::build_identity_response`] with the install id, channel count
+    /// and viewer port given, so a test needs no WAN identity or fleet feed.
+    fn identity_response_with(
+        &self,
+        install_id: Option<&str>,
+        channels_running: Option<u32>,
+        viewer_port: Option<u16>,
+    ) -> serde_json::Value {
         let mut response = probe_response_json(
             &self.instance_id,
             &self.hostname,
@@ -835,6 +856,22 @@ impl LanDiscovery {
         // extra field: older parsers (mobile included) ignore it.
         response["channel"] = json!(crate::backend::reactive::registry::local_channel_id());
         response["os"] = json!(crate::backend::host_os::local_os());
+        // What a phone merges this install with its cloud record by, and how
+        // many channels this machine runs, shared on the LAN or not
+        // (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06
+        // §5.3). Both only when known.
+        if let Some(id) = install_id {
+            response["install_id"] = json!(id);
+        }
+        if let Some(n) = channels_running {
+            response["channels_running"] = json!(n);
+        }
+        // The viewer listener's port while it is up, so a paired device finds
+        // it again after an address change (agentmux-mobile's
+        // SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2).
+        if let Some(port) = viewer_port {
+            response["viewer_port"] = json!(port);
+        }
         response
     }
 
@@ -843,7 +880,20 @@ impl LanDiscovery {
     /// datagram (`lan_instances::MAX_REPLY_BYTES`). Each sibling carries its
     /// own `lan_key`, which it already broadcasts over mDNS.
     fn build_probe_response(&self) -> serde_json::Value {
-        let mut response = self.build_identity_response();
+        self.probe_response_with(
+            crate::backend::fleet_source::install_id().as_deref(),
+            crate::backend::fleet_source::latest_channels_running(),
+            crate::backend::viewer::advertised_viewer_port(),
+        )
+    }
+
+    fn probe_response_with(
+        &self,
+        install_id: Option<&str>,
+        channels_running: Option<u32>,
+        viewer_port: Option<u16>,
+    ) -> serde_json::Value {
+        let mut response = self.identity_response_with(install_id, channels_running, viewer_port);
         lan_instances::attach_siblings(&mut response, &self.sibling_entries(), lan_instances::MAX_REPLY_BYTES);
         response
     }

@@ -183,6 +183,9 @@ export function buildPaneContextMenu(
                             const text = await clipboardReadText();
                             if (!text) return;
                             viewModel?.paste?.(text);
+                            // The next keystroke (usually Enter) belongs to
+                            // the pane just pasted into.
+                            viewModel?.giveFocus?.();
                         } catch (e) {
                             console.error("[pane-actions] paste failed:", e);
                         }

@@ -15,6 +15,7 @@ import { TerminalSection } from "./sections/terminal-section";
 import { SoundsSection } from "./sections/sounds-section";
 import { NotificationsSection } from "./sections/notifications-section";
 import { RecordingSection } from "./sections/recording-section";
+import { DevicesSection } from "./sections/devices-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
 
@@ -54,6 +55,7 @@ const RAIL: TabItem<SettingsSection>[] = [
     { id: "sounds",     label: SETTINGS_SECTION_LABELS.sounds,     icon: "volume-high" },
     { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
     { id: "recording",  label: SETTINGS_SECTION_LABELS.recording,  icon: "microphone" },
+    { id: "devices",    label: SETTINGS_SECTION_LABELS.devices,    icon: "mobile-screen" },
     { id: "advanced",   label: SETTINGS_SECTION_LABELS.advanced,   icon: "sliders" },
 ];
 
@@ -88,9 +90,8 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
 
     return (
         <div class="settings-view-container">
-            {/* One tablist: a rail when wide, icons only when narrower, tabs
-                along the top when narrow (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4).
-                It replaced a rail and a separate top tab bar, one hidden by CSS. */}
+            {/* One tablist along the top: icons only when narrow, labels when
+                there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
             <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Settings section">
                 <div class="settings-body">
                     <SettingsSearchBar
@@ -117,6 +118,9 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         </Match>
                         <Match when={section() === "recording"}>
                             <RecordingSection />
+                        </Match>
+                        <Match when={section() === "devices"}>
+                            <DevicesSection />
                         </Match>
                         <Match when={section() === "advanced"}>
                             <AdvancedSection />

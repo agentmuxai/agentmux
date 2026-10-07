@@ -653,7 +653,9 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@agentmuxai/muxcode",
-    pinned_version: "0.1.0",
+    // The first version published to npm (0.1.0 never was, so the installer
+    // 404ed). Every version pinned here must be published first.
+    pinned_version: "0.8.0",
     base_url_env_var: None,
     supported_vendors: &["ollama", "anthropic", "openai"],
     // Confirmed by design intent: this provider's own doc comment above
@@ -946,7 +948,7 @@ AgentMux: intentionally empty.\n\
 This is an isolated Claude Code config directory (CLAUDE_CONFIG_DIR),\n\
 separate from your personal ~/.claude/CLAUDE.md, so this agent never\n\
 silently inherits your personal global instructions. To give every\n\
-agent shared instructions, use Knowledge -> Global instead --\n\
+agent shared instructions, use Memory -> Global instead --\n\
 those compose into this agent's own project-level CLAUDE.md at launch,\n\
 not this file. See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.\n\
 -->\n";

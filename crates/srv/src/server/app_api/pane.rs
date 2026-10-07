@@ -235,6 +235,9 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
             } else if is_markdown {
                 meta.insert("editor:tree_expanded".to_string(), json!(false));
             }
+            if let Some(line) = cmd.line.filter(|&n| n > 0) {
+                meta.insert("editor:line".to_string(), json!(line));
+            }
         }
         "term" => {
             meta.insert("view".to_string(), json!("term"));

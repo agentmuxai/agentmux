@@ -383,6 +383,20 @@ pub fn install_pinned_cli_with(
     Ok(InstallOutcome::Installed(bin))
 }
 
+/// Registry flags for installing `package`. AgentMux's own packages
+/// (`@agentmuxai/*`) are published to the public npm registry, but a machine
+/// can route that scope elsewhere in its `.npmrc` (a
+/// `@agentmuxai:registry=https://npm.pkg.github.com` line, for internal
+/// packages), and the install then 404s. The flag pins the scope for this one
+/// command only; other packages use the user's config as before.
+pub(crate) fn npm_registry_args(package: &str) -> Vec<String> {
+    if package.starts_with("@agentmuxai/") {
+        vec!["--@agentmuxai:registry=https://registry.npmjs.org/".to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
 /// Run `npm install --prefix <dir> <package>` to completion. `package` is one
 /// or more space-separated `name@version` specs.
 ///
@@ -407,8 +421,9 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
                 flags |= BELOW_NORMAL_PRIORITY_CLASS;
             }
             let prefix = dir.to_string_lossy().replace('/', "\\");
+            let registry = npm_registry_args(package).join(" ");
             let cmdline = format!(
-                "npm install --loglevel=http --no-audit --no-fund --no-progress --prefix \"{prefix}\" {package}"
+                "npm install --loglevel=http --no-audit --no-fund --no-progress {registry} --prefix \"{prefix}\" {package}"
             );
             let mut c = std::process::Command::new("cmd");
             // `npm install` runs arbitrary postinstall scripts — no instance
@@ -431,8 +446,9 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
                 "--no-audit",
                 "--no-fund",
                 "--no-progress",
-                "--prefix",
             ])
+            .args(npm_registry_args(package))
+            .arg("--prefix")
             .arg(dir)
             .args(package.split_whitespace())
             .env("CI", "true")
@@ -598,6 +614,19 @@ pub fn warm_used_providers(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn agentmux_packages_install_from_the_public_registry_others_use_npmrc() {
+        // A `.npmrc` routing @agentmuxai to GitHub Packages made the muxcode
+        // install 404; the flag pins the scope for this command only.
+        assert_eq!(
+            super::npm_registry_args("@agentmuxai/muxcode@0.8.0"),
+            vec!["--@agentmuxai:registry=https://registry.npmjs.org/".to_string()]
+        );
+        assert!(super::npm_registry_args("@anthropic-ai/claude-code@2.1.288").is_empty());
+        assert!(super::npm_registry_args("openclaw").is_empty());
+    }
+
     use super::*;
 
     fn paths_in(root: &Path) -> DataPaths {

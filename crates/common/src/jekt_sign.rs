@@ -47,7 +47,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// message body is free text, but shifting the separator's *position* within
 /// the body can't produce a colliding signature for a different logical
 /// (source, target, msgid, ts) tuple, which is what actually matters here).
-const FIELD_SEP: char = '\u{1}';
+pub(crate) const FIELD_SEP: char = '\u{1}';
 
 fn signed_material(msgid: &str, source_agent: &str, target_agent: &str, ts_secs: i64, message: &str) -> String {
     format!("{msgid}{FIELD_SEP}{source_agent}{FIELD_SEP}{target_agent}{FIELD_SEP}{ts_secs}{FIELD_SEP}{message}")
@@ -654,21 +654,21 @@ fn wan_revoke_material(old_instance_id: &str, new_instance_id: &str, revoked_at:
     format!("{WAN_REVOKE_DOMAIN}{FIELD_SEP}{old_instance_id}{FIELD_SEP}{new_instance_id}{FIELD_SEP}{revoked_at}")
 }
 
-fn ed25519_sign_b64(private_key: &[u8], material: &str) -> Option<String> {
+pub(crate) fn ed25519_sign_b64(private_key: &[u8], material: &str) -> Option<String> {
     let seed: [u8; 32] = private_key.try_into().ok()?;
     let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
     let signature = ed25519_dalek::Signer::sign(&signing_key, material.as_bytes());
     Some(BASE64.encode(signature.to_bytes()))
 }
 
-fn ed25519_verify_b64(public_key: &[u8; 32], material: &str, sig_b64: &str) -> bool {
+pub(crate) fn ed25519_verify_b64(public_key: &[u8; 32], material: &str, sig_b64: &str) -> bool {
     let Ok(verifying_key) = VerifyingKey::from_bytes(public_key) else { return false };
     let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
     let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
     verifying_key.verify(material.as_bytes(), &Signature::from_bytes(&sig_arr)).is_ok()
 }
 
-fn decode_public_key_b64(b64: &str) -> Option<[u8; 32]> {
+pub(crate) fn decode_public_key_b64(b64: &str) -> Option<[u8; 32]> {
     BASE64.decode(b64).ok()?.try_into().ok()
 }
 

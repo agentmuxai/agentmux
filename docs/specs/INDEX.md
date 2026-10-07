@@ -305,6 +305,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03`](SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md) | SPEC — Composer strip: left-justified, tiered wrap (up to 3 levels) |
 | [`SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02`](SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md) | SPEC — Promote Mode to the composer strip; retire the nested "Controls" panel under Log |
 | [`SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30`](SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md) | SPEC — Composer strip: two-line wrap when the pane narrows |
+| [`SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07`](SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07.md) | Pasting into a terminal from the right-click menu should leave the terminal ready for Enter |
 | [`SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10`](SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10.md) | SPEC: Copy Button Silently Failing (Three Stacked Bugs) |
 | [`SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30`](SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30.md) | Move the Rust crates under `crates/`, with a merge freeze and a rebase plan |
 | [`SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06`](SPEC_CREATE_AGENT_NAME_NO_PREFILL_2026_10_06.md) | Spec: The new-agent Name field starts empty, with ghost text |
@@ -587,7 +588,9 @@ partial list.
 | [`SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11`](SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11.md) | SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification |
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
+| [`SPEC_REMOTES_PANE_2026_10_05`](SPEC_REMOTES_PANE_2026_10_05.md) | SPEC: The Remotes pane: one place for every remote machine |
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
+| [`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06`](SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md) | SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings |
 | [`SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25`](SPEC_RESUME_GATE_AND_SAME_IDENTITY_CONTINUATION_2026_09_25.md) | SPEC: one resume gate, and native continuation across logins of the same identity |
 | [`SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05`](SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md) | SPEC: Retire the Armory — two panes, Connectors and Knowledge |
 | [`SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27`](SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md) | SPEC: one way to reveal a block — including a background tab in a multi-tab pane |
@@ -739,7 +742,6 @@ partial list.
 | [`SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06`](SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md) | Provider CLI version upgrade (2026-09-06 drift report) |
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
 | [`SPEC_RELEASE_CICD_CORRECTION_2026_06_30`](SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md) | Release CI/CD Correction — remove the `dl.agentmux.ai` fabrication |
-| [`SPEC_REMOTES_PANE_2026_10_05`](SPEC_REMOTES_PANE_2026_10_05.md) | SPEC: The Remotes pane: one place for every remote machine |
 | [`SPEC_REMOVE_PIN_FEATURE`](SPEC_REMOVE_PIN_FEATURE.md) | SPEC: Remove Tab Pinning, Uniform Inter-Tab Separator |
 | [`SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01`](SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md) | SPEC: Finishing the runtime menu — approval prompts, a remembered runtime, the resolved model, and install cleanup |
 | [`SPEC_SHARED_AGENT_REGISTRY_2026_05_12`](SPEC_SHARED_AGENT_REGISTRY_2026_05_12.md) | Spec: Shared agent registry — cross-version "Continue agent" dropdown |

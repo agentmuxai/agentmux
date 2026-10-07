@@ -18,7 +18,7 @@ import { getPaneTab, isKeepAliveView, paneTabCapability, resolvePaneTabView } fr
 const VIEWS = [
     "term", "cpuplot", "sysinfo", "help", "launcher", "agent", "swarm", "editor", "browser",
     "memory", "media", "identity", "drone", "warden", "toolchain", "armory", "settings",
-    "connectors", "knowledge",
+    "connectors",
 ];
 
 const OLD_ICONS: Record<string, string> = {
@@ -38,11 +38,11 @@ const OLD_LABELS: Record<string, string> = {
 // So did the last five legacy views, whose pills fell back to "square" and
 // three of them to their lowercase view name.
 const NEW_ICONS: Record<string, string> = {
-    cpuplot: "chart-line", warden: "shield-halved", armory: "vault", connectors: "plug", knowledge: "book",
-    launcher: "shapes", memory: "layer-group", identity: "user", toolchain: "wrench", settings: "cog",
+    cpuplot: "chart-line", warden: "shield-halved", armory: "vault", connectors: "plug",
+    launcher: "shapes", memory: "brain", identity: "user", toolchain: "wrench", settings: "cog",
 };
 const NEW_LABELS: Record<string, string> = {
-    cpuplot: "Sysinfo", armory: "Armory", connectors: "Connectors", knowledge: "Knowledge", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
+    cpuplot: "Sysinfo", armory: "Armory", connectors: "Connectors", launcher: "Launcher", toolchain: "Toolchain", settings: "Settings",
 };
 
 describe("built-in pane tabs (block-registry.ts)", () => {
@@ -69,6 +69,7 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         expect(resolvePaneTabView("forge")).toBe("agent");
         expect(resolvePaneTabView("workflows")).toBe("drone");
         expect(resolvePaneTabView("trust")).toBe("armory");
+        expect(resolvePaneTabView("knowledge")).toBe("memory");
     });
 
     // Phase 5: each capability replaces a view-name check in shared code, so
@@ -88,7 +89,7 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         // 5b: zoom.ts's allowlist and editor's base size, paste, Ctrl+F, cwd.
         // The Armory's zoom went to the two panes that replaced it; the Armory
         // shim renders one of them until its block remounts.
-        expect(holders("paneZoom")).toEqual(["agent", "armory", "connectors", "editor", "knowledge", "swarm", "term", "warden"]);
+        expect(holders("paneZoom")).toEqual(["agent", "armory", "connectors", "editor", "memory", "swarm", "term", "warden"]);
         expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
         expect(paneTabCapability("term", "paneZoom")?.baseFontSize).toBeUndefined();
         expect(holders("acceptsInput")).toEqual(["term"]);

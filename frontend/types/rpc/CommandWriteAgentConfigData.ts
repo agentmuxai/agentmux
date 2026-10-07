@@ -29,4 +29,9 @@ auto_allocate: boolean,
  * (`operator_config_seed::global_bundles_for_agent`). Absent from an
  * older frontend: treated as a host agent, the default kind.
  */
-agent_type?: string, };
+agent_type?: string, 
+/**
+ * The agent definition's id. The bundles picked for it go into the
+ * startup file after Global Memory. Absent from an older frontend: none.
+ */
+agent_id?: string, };

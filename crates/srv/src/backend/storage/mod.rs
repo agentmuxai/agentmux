@@ -5,6 +5,7 @@
 //! Port of Go's pkg/mstore and pkg/filestore.
 
 pub mod agent_activity_summaries;
+pub mod agent_bundles;
 pub mod agent_credentials;
 pub mod agent_groups;
 pub mod agent_jekt_keys;
@@ -38,8 +39,10 @@ pub mod registry_mirror;
 pub mod skills;
 pub mod snapshot;
 pub mod store;
+pub mod viewer_devices;
 pub mod work_queue;
 
+pub use agent_bundles::{agent_picked_bundles, format_agent_bundle_block, join_startup_blocks};
 pub use agent_credentials::AgentCredential;
 pub use agent_native_memory::{NativeMemoryMirrorRow, NativeMemoryMirrorRowWithAgent};
 pub use agent_native_memory_versions::{NativeMemoryVersion, NativeMemoryVersionSummary};

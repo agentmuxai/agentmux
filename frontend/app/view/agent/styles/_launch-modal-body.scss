@@ -226,6 +226,16 @@
     gap: var(--space-2);
 }
 
+// The Bundles row holds a list (BundleListEditor), taller than one control:
+// its label and + button sit at the top.
+.agent-launch-modal-bundle-row:has(.agent-launch-modal-bundle-list) {
+    align-items: start;
+}
+
+.agent-launch-modal-bundle-list {
+    min-width: 0;
+}
+
 .agent-launch-modal-bundle-row-label {
     font-size: var(--text-sm);
     color: var(--main-text-color);

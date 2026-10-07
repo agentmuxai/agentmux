@@ -180,6 +180,13 @@ export function showJsContextMenu(
     closeJsContextMenu();
     document.getElementById("cef-context-menu-overlay")?.remove();
 
+    // Where the caret was when the menu opened (a terminal's textarea, an
+    // input), so a menu that closes without moving focus elsewhere hands it
+    // back. SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07.md.
+    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+        ? document.activeElement
+        : null;
+
     const overlay = document.createElement("div");
     overlay.id = "cef-context-menu-overlay";
     Object.assign(overlay.style, {
@@ -213,12 +220,26 @@ export function showJsContextMenu(
         document.removeEventListener("mousedown", onDocMouseDown, true);
         document.removeEventListener("keydown", onDocKeyDown, true);
         overlay.remove();
+        // After the chosen item has run (it runs right after closeMenu): if
+        // focus fell to <body> or went with the removed menu, give it back to
+        // the opener. An item that moved focus on purpose (a split's new pane,
+        // Inspect) keeps it.
+        queueMicrotask(() => {
+            const active = document.activeElement;
+            const lost = active == null || active === document.body || overlay.contains(active);
+            if (lost && opener?.isConnected) opener.focus({ preventScroll: true });
+        });
     }
     activeContextMenuClose = closeMenu;
     document.addEventListener("mousedown", onDocMouseDown, true);
     document.addEventListener("keydown", onDocKeyDown, true);
 
     overlay.addEventListener("mousedown", (e) => {
+        // A press on the menu or its backdrop must not take focus: the browser
+        // otherwise blurs the focused element (a terminal's textarea) to
+        // <body>, and after "Paste" the user's next Enter went nowhere.
+        // The click still fires; only the focus change is cancelled.
+        e.preventDefault();
         if (e.target === overlay) closeMenu();
     });
 

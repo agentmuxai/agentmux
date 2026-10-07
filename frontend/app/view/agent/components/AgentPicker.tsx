@@ -482,6 +482,8 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         buildLaunchRequest(agent, {
                             ...current,
                             bundleId: id,
+                            // The new bundle joins the list being edited.
+                            bundleIds: [...(current.bundleIds ?? []), id],
                         })
                     );
                 },

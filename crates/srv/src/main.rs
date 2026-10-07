@@ -231,7 +231,14 @@ async fn main() {
     let config_watcher_for_lan = Arc::clone(&state.config_watcher);
     let dev_proxy_registry = state.dev_proxy.clone();
     let fleet_feed = Arc::clone(&state.fleet_feed);
-    let reactive_handler = state.reactive_handler;
+    let fleet_source = backend::fleet_source::FleetSource::live(
+        state.reactive_handler,
+        Arc::clone(&state.mstore),
+        state.local_web_url.clone(),
+    );
+    let presence_id_store = Arc::clone(&state.id_store);
+    let viewer = Arc::clone(&state.viewer);
+    let viewer_router = server::build_viewer_router(state.clone());
     let routers = build_routers(state);
     let router = routers.full;
 
@@ -250,6 +257,10 @@ async fn main() {
     // (DHCP renewal, Wi-Fi↔Ethernet handoff, VPN up/down) without a restart.
     // See `backend::lan_listeners`.
     net.lan_listeners.set_router(routers.lan);
+    // The viewer listener (backend::viewer) comes up beside the LAN
+    // listeners, on its own port of the same range.
+    net.lan_listeners
+        .set_viewer(viewer_router, viewer, backend::lan_ports::LAN_PORT_RANGE);
     net.lan_listeners
         .apply(config_watcher_for_lan.get_settings().network_lan_discovery);
     Arc::clone(&net.lan_listeners).spawn_reconcile_loop();
@@ -265,11 +276,14 @@ async fn main() {
     bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_mstore, wal_filestore);
 
     // The fleet feed's change detection (`backend::fleet_feed`): compares the
-    // reachable agent names once a second, stops with the same token.
-    fleet_feed.spawn_change_detection(
-        move || reactive_handler.list_agents().into_iter().map(|a| a.agent_id).collect(),
-        stdin_token.clone(),
-    );
+    // reachable agents, their kinds and states and this machine's channel
+    // count once a second, stops with the same token.
+    Arc::clone(&fleet_feed).spawn_change_detection(move || fleet_source.observe(), stdin_token.clone());
+
+    // The cloud presence record, published from the fleet feed's snapshot
+    // while signed in (`muxbus::wan_presence`). Here rather than beside
+    // `wan_publish::spawn` because the feed exists only once AppState does.
+    muxbus::wan_presence::spawn(fleet_feed, presence_id_store, stdin_token.clone());
 
     // Run both servers until shutdown
     tokio::select! {

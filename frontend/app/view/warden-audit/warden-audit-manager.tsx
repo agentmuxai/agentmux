@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Warden — Audit section. The jekt-injection audit feed lifted out of the
-// original monolithic warden.tsx's Host section into its own rail-
-// switchable manager (it was never Host-specific — every jekt, from any
+// original monolithic warden.tsx's Host section into its own section
+// (it was never Host-specific — every jekt, from any
 // tier, lands here). Also renders Supervisor's continue/decline decisions
 // once those exist (entries with `outcome` set) — see
 // docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.

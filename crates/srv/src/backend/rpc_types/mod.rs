@@ -32,6 +32,7 @@ mod remotes;
 mod session;
 mod skill;
 mod toolchain;
+mod viewer;
 mod websocket;
 
 pub use agent::*;
@@ -55,6 +56,7 @@ pub use remotes::*;
 pub use session::*;
 pub use skill::*;
 pub use toolchain::*;
+pub use viewer::*;
 pub use websocket::*;
 
 // ---- RpcMessage wire format ----

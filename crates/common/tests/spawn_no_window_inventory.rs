@@ -151,7 +151,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade.rs", "\"cmd\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/launcher/src/upgrade.rs", "\"sh\"", 1,
+    ("crates/launcher/src/upgrade.rs", "\"sh\"", 2,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade.rs", "if cfg!(windows", 1,
      "test: unit-test or fixture code, never on a user machine"),

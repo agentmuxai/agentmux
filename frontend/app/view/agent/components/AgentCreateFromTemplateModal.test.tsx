@@ -8,16 +8,29 @@
  * Covered:
  *  - the name field opens empty, with the same ghost text for every provider
  *  - a duplicate-name refusal is shown in words
- *  - Identity + Memory selects render the accounts / bundles list
- *    (the empty account option reads "No auth")
+ *  - there's no account field: the provider's first account is submitted
+ *    (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6)
+ *  - the Bundles field starts empty and submits the picks in order
  *  - clicking Create fires onSubmit with the form snapshot
- *  - the Create button is disabled while submitting
+ *  - the Create button is disabled while submitting, and until the accounts
+ *    and the provider have loaded
  *  - error from onSubmit surfaces in the panel body
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sleep } from "@/util/util";
+
+// The account the form submits, for tests that render with `accountSubmit`.
+const accountSubmit = vi.fn().mockResolvedValue(undefined);
+async function submittedAccount(): Promise<string | undefined> {
+    accountSubmit.mockClear();
+    const input = screen.getByTestId("create-from-template-name-input") as HTMLInputElement;
+    fireEvent.input(input, { target: { value: "Mary" } });
+    fireEvent.click(screen.getByTestId("create-from-template-submit"));
+    await waitFor(() => expect(accountSubmit).toHaveBeenCalledTimes(1));
+    return accountSubmit.mock.calls[0][0].accountId;
+}
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -123,6 +136,8 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
+        // Create also waits for the accounts and provider to load.
+        await flush();
         const input = screen.getByTestId("create-from-template-name-input");
         fireEvent.input(input, { target: { value: "Reviewer" } });
         const submit = screen.getByTestId(
@@ -155,7 +170,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
-        // Bundles auto-pick once loaded.
+        // Lists load.
         await flush();
         await flush();
         await flush();
@@ -173,11 +188,10 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         });
         const args = onSubmit.mock.calls[0][0];
         expect(args.name).toBe("Mary");
-        // Identity auto-picked from the first available account for
-        // the template's provider; Memory from the first non-blank
-        // bundle.
+        // The account is the first one for the template's provider. No
+        // bundle is picked for the user.
         expect(args.accountId).toBe("id-work");
-        expect(args.bundleId).toBe("mem-notes");
+        expect(args.bundleIds).toEqual([]);
         // No Docker → runtime defaults to host (never a mode that
         // can't actually start).
         expect(args.agentType).toBe("host");
@@ -236,6 +250,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
+        await flush();
         const submit = screen.getByTestId("create-from-template-submit");
         fireEvent.click(submit);
         const err = await screen.findByTestId("create-from-template-error");
@@ -255,6 +270,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
+        await flush();
         const input = screen.getByTestId(
             "create-from-template-name-input",
         ) as HTMLInputElement;
@@ -442,7 +458,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             render(() => (
                 <AgentCreateFromTemplateModalPanel
                     template={drifted}
-                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onSubmit={accountSubmit}
                     onCancel={vi.fn()}
                 />
             ));
@@ -470,7 +486,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             render(() => (
                 <AgentCreateFromTemplateModalPanel
                     template={drifted}
-                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onSubmit={accountSubmit}
                     onCancel={vi.fn()}
                 />
             ));
@@ -478,16 +494,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             await flush();
             await flush();
 
-            const select = screen.getByTestId(
-                "create-from-template-identity-select",
-            ) as HTMLSelectElement;
-            const optionIds = Array.from(select.options).map((o) => o.value);
-            expect(optionIds).toContain("acct-claude");
-            expect(optionIds).not.toContain("acct-codex");
-            // The empty choice reads "No auth"; ambient credentials are gone.
-            const labels = Array.from(select.options).map((o) => o.textContent);
-            expect(labels).toContain("No auth");
-            expect(labels).not.toContain("(ambient credentials)");
+            expect(await submittedAccount()).toBe("acct-claude");
         });
 
         it("does not auto-pick an account filtered against the stale fallback provider before the bundle resolves", async () => {
@@ -510,7 +517,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             render(() => (
                 <AgentCreateFromTemplateModalPanel
                     template={drifted}
-                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onSubmit={accountSubmit}
                     onCancel={vi.fn()}
                 />
             ));
@@ -525,10 +532,60 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             await flush();
             await flush();
 
-            const select = screen.getByTestId(
-                "create-from-template-identity-select",
-            ) as HTMLSelectElement;
-            expect(select.value).toBe("acct-codex");
+            expect(await submittedAccount()).toBe("acct-codex");
+        });
+
+        it("keeps Create disabled until the accounts and the provider have loaded", async () => {
+            // There's no account field to correct a premature pick, so Create
+            // must not submit with an empty or stale-provider account.
+            let resolveAccounts!: (v: any) => void;
+            vi.mocked(refreshAccountCache).mockReturnValue(new Promise((r) => { resolveAccounts = r; }));
+            let resolveBundle!: (v: any) => void;
+            vi.mocked(RpcApi.GetBundleCommand).mockReturnValue(new Promise((r) => { resolveBundle = r; }));
+            const drifted = { ...template, provider: "", memory_id: "mem-1" } as AgentDefinition;
+            render(() => <AgentCreateFromTemplateModalPanel template={drifted} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+            fireEvent.input(screen.getByTestId("create-from-template-name-input"), { target: { value: "Mary" } });
+            const submit = () => screen.getByTestId("create-from-template-submit") as HTMLButtonElement;
+            await flush();
+            expect(submit().disabled).toBe(true);
+            resolveAccounts([{ id: "acct-codex", name: "Codex Work", provider: "codex" }]);
+            await flush();
+            expect(submit().disabled).toBe(true);
+            resolveBundle({ provider: "codex" });
+            await flush();
+            await flush();
+            expect(submit().disabled).toBe(false);
+        });
+
+        it("has no account field, and a Bundles field", async () => {
+            render(() => (
+                <AgentCreateFromTemplateModalPanel template={template} onSubmit={vi.fn()} onCancel={vi.fn()} />
+            ));
+            await flush();
+            expect(screen.queryByTestId("create-from-template-identity-select")).toBeNull();
+            expect(screen.queryByText("Identity")).toBeNull();
+            expect(screen.getByRole("group", { name: "Bundles" })).toBeTruthy();
+        });
+
+        it("submits the bundles picked, in order", async () => {
+            render(() => (
+                <AgentCreateFromTemplateModalPanel template={template} onSubmit={accountSubmit} onCancel={vi.fn()} />
+            ));
+            await flush();
+            await flush();
+            const add = () => screen.getByTestId("bundle-list-editor-add") as HTMLSelectElement;
+            const real = Array.from(add().options).filter((o) => o.value);
+            expect(real.length).toBeGreaterThanOrEqual(1);
+            // Pick every bundle, then move the last to the front.
+            for (const option of real) fireEvent.change(add(), { target: { value: option.value } });
+            const picked = real.map((o) => o.value);
+            if (picked.length > 1) {
+                const ups = screen.getAllByRole("button", { name: "Move up" });
+                fireEvent.click(ups[ups.length - 1]);
+                picked.unshift(...picked.splice(picked.length - 1, 1));
+            }
+            await submittedAccount();
+            expect(accountSubmit.mock.calls[0][0].bundleIds).toEqual(picked);
         });
     });
 

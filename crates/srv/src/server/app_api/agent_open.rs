@@ -1101,24 +1101,26 @@ pub(super) fn write_agent_config_files(
         }
     }
 
-    // Inject global memory bundles (Armory global bundles) into CLAUDE.md.
-    // All agents get these regardless of per-agent memory selection. Each
-    // section carries a `# [Workspace] <name>` heading (see
-    // format_global_bundle_block) so the rules are attributable to the
-    // workspace and ordered per the Armory Global section's sort_order.
-    // Operator Config entries targeted at another agent kind are left out.
+    // Global Memory (minus Operator Config for another agent kind), then the
+    // agent's picked bundles in list order, go into CLAUDE.md; WriteAgentConfig
+    // composes the same text (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
     let global_bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
         id_store.bundle_list_global().unwrap_or_default(),
         &agent.agent_type,
     );
-    let global_block = crate::backend::storage::format_global_bundle_block(&global_bundles);
-    if !global_block.is_empty() {
+    let startup_block = crate::backend::storage::join_startup_blocks(
+        &crate::backend::storage::format_global_bundle_block(&global_bundles),
+        &crate::backend::storage::format_agent_bundle_block(&crate::backend::storage::agent_picked_bundles(
+            mstore, id_store, &agent.id,
+        )),
+    );
+    if !startup_block.is_empty() {
         content_map
             .entry("memory".to_string())
             .and_modify(|existing| {
-                *existing = format!("{global_block}\n\n---\n\n{existing}");
+                *existing = format!("{startup_block}\n\n---\n\n{existing}");
             })
-            .or_insert(global_block);
+            .or_insert(startup_block);
     }
 
     // v1 skills: globals are always injected; the agent's OWN ref-bound skills
@@ -1646,6 +1648,78 @@ mod write_agent_config_files_tests {
             parsed["mcpServers"].get("bundle-server").is_some(),
             "the bundle-referenced server must still be included, just not treated as agent-authoritative: {mcp_json}"
         );
+    }
+
+    fn make_bundle(id: &str, name: &str, instructions: &str, is_global: bool) -> crate::backend::storage::bundles::Bundle {
+        crate::backend::storage::bundles::Bundle {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global,
+            provider: String::new(),
+            model: String::new(),
+            instructions: instructions.to_string(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+            is_system: false,
+        }
+    }
+
+    /// The bundles picked for an agent reach its launch
+    /// (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6): their
+    /// instructions as `# [Bundle]` sections after Global Memory, in list
+    /// order, and their MCP servers; a listed bundle that no longer exists is
+    /// skipped.
+    #[test]
+    fn picked_bundles_reach_the_startup_file_and_mcp_config() {
+        let mstore = make_store();
+        let id_store = make_store();
+        let work_dir = tempfile::tempdir().unwrap();
+        let work_dir_str = work_dir.path().to_str().unwrap();
+
+        let mut agent = make_agent("agent-1", work_dir_str);
+        mstore.agent_def_insert(&mut agent).unwrap();
+        id_store.bundle_upsert(&make_bundle("global-1", "Rules", "global rule", true)).unwrap();
+        id_store.bundle_upsert(&make_bundle("b1", "Reviewer", "review carefully", false)).unwrap();
+        id_store.bundle_upsert(&make_bundle("b2", "Writer", "write plainly", false)).unwrap();
+        mstore
+            .mcp_server_upsert_unique(
+                &mstore,
+                "some-other-context",
+                &crate::backend::storage::McpServer {
+                    id: "b2-server".to_string(),
+                    name: "writer-tools".to_string(),
+                    transport: "stdio".to_string(),
+                    config: r#"{"command":"writer-tool"}"#.to_string(),
+                    is_global: false,
+                    created_at: 1_700_000_000_000,
+                    updated_at: 1_700_000_000_000,
+                },
+                false,
+            )
+            .unwrap_or(());
+        mstore.bundle_mcp_bind(&mstore, &id_store, "b2", "b2-server").unwrap();
+        mstore
+            .agent_bundles_set("agent-1", &["b2".to_string(), "gone".to_string(), "b1".to_string()])
+            .unwrap();
+
+        write_agent_config_files(&mstore, &id_store, &mstore, &agent, "test-agent", work_dir_str).unwrap();
+
+        let claude_md = std::fs::read_to_string(work_dir.path().join("CLAUDE.md")).unwrap();
+        let global = claude_md.find("# [Workspace] Rules").expect("Global Memory section");
+        let writer = claude_md.find("# [Bundle] Writer\n\nwrite plainly").expect("first pick's section");
+        let reviewer = claude_md.find("# [Bundle] Reviewer\n\nreview carefully").expect("second pick's section");
+        assert!(global < writer && writer < reviewer, "Global Memory, then the picks in order: {claude_md}");
+
+        let mcp_json = std::fs::read_to_string(work_dir.path().join(".mcp.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&mcp_json).unwrap();
+        assert!(parsed["mcpServers"].get("writer-tools").is_some(), "a picked bundle's server: {mcp_json}");
     }
 }
 

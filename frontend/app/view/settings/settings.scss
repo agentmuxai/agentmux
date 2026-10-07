@@ -296,7 +296,7 @@
 }
 
 // ── Responsive ────────────────────────────────────────────────────────────────
-// The rail itself is TabbedPane's job; these only size the content.
+// The section tabs are TabbedPane's job; these only size the content.
 
 // Wide: cap the section width for comfortable reading.
 @container settings (min-width: 1024px) {
@@ -328,4 +328,37 @@
             min-width: 80px;
         }
     }
+}
+
+// Paired devices (sections/devices-section.tsx): one row per device, Revoke
+// at the end.
+.setting-devices-description,
+.setting-devices-empty {
+    color: var(--secondary-text-color);
+    margin-bottom: var(--space-2);
+}
+
+.setting-devices {
+    width: 100%;
+    border-collapse: collapse;
+
+    th {
+        text-align: left;
+        font-weight: normal;
+        color: var(--secondary-text-color);
+    }
+
+    th,
+    td {
+        padding: var(--space-1) var(--space-2) var(--space-1) 0;
+    }
+
+    td:last-child {
+        text-align: right;
+        padding-right: 0;
+    }
+}
+
+.setting-devices-name {
+    overflow-wrap: anywhere;
 }

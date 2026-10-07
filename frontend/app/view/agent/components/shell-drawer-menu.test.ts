@@ -53,6 +53,17 @@ describe("shell drawer Paste", () => {
         expect(paste).toHaveBeenCalledWith("echo hi\nls");
     });
 
+    it("then focuses the shell, so the next keystroke (Enter) reaches it", async () => {
+        const paste = vi.fn();
+        const focus = vi.fn();
+        const { pasteItem } = setup({ clipboard: "echo hi", getTerminal: () => ({ getSelection: () => "", paste, focus }) });
+        pasteItem.click!();
+        await flush();
+        expect(paste).toHaveBeenCalledWith("echo hi");
+        expect(focus).toHaveBeenCalledTimes(1);
+        expect(paste.mock.invocationCallOrder[0]).toBeLessThan(focus.mock.invocationCallOrder[0]);
+    });
+
     it("advertises the size limit in the label (the JS menu renders no sublabels)", () => {
         const { pasteItem } = setup();
         expect(pasteItem.label).toBe("Paste (up to 1 MB)");

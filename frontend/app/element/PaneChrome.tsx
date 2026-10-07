@@ -73,6 +73,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
     const remoteColor = createMemo(
         () => remoteDisplay(atoms.fullConfigAtom()?.connections, activeBlockData()?.meta?.connection)?.color
     );
+    // Each tab on a remote with a colour shows it as a swatch beside its label.
+    const remoteSwatchOf = (blockId: string): string | undefined =>
+        remoteDisplay(
+            atoms.fullConfigAtom()?.connections,
+            MOS.getMuxObjectAtom<Block>(MOS.makeORef("block", blockId))()?.meta?.connection
+        )?.color;
     const ringBorderColor = createMemo(() => {
         const isLightTheme = isLightThemeActive();
         return computeFocusRingBorderColor(isFocused(), activeBlockData()?.meta, isLightTheme);
@@ -402,7 +408,12 @@ export function renderPaneChromeShell(nodeModel: NodeModel, content: JSX.Element
                         onCancel={() => setRenamingId(null)}
                     />
                 ) : (
-                    <span class="pane-tab-label">{labelOf(id)}</span>
+                    <>
+                        <Show when={remoteSwatchOf(id)}>
+                            {(color) => <span class="pane-tab-swatch" style={{ background: color() }} />}
+                        </Show>
+                        <span class="pane-tab-label">{labelOf(id)}</span>
+                    </>
                 )
             }
             connBtnRef={model()?.connBtnRef}

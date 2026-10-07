@@ -9,6 +9,7 @@ pub mod copy_into_dir;
 pub mod data_paths;
 pub mod errors;
 pub mod event_log;
+pub mod install_presence;
 pub mod ipc;
 pub mod jekt_sign;
 pub mod layout_types;

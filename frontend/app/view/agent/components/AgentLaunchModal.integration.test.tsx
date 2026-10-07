@@ -42,6 +42,12 @@ vi.mock("@/app/store/rpc-api", () => {
         // never even trigger the fetch; tests that DO exercise the
         // resolution set their own `mockResolvedValue`.
         GetBundleCommand: vi.fn().mockResolvedValue(undefined),
+        // The agent's Bundles list: empty unless a test says otherwise.
+        GetAgentBundlesCommand: vi.fn().mockResolvedValue({ bundle_ids: [], own_bundle_id: "" }),
+        SetAgentBundlesCommand: vi.fn(async (_c: unknown, d: { bundle_ids: string[] }) => ({
+            bundle_ids: d.bundle_ids,
+            own_bundle_id: "",
+        })),
     };
     return { RpcApi };
 });
@@ -269,9 +275,9 @@ afterEach(() => {
 // ── Tests ───────────────────────────────────────────────────────────
 
 describe("AgentLaunchModal — memory change must not reset auth state (§6.10)", () => {
-    // The §6.10 requirement holds — changing the Bundle does NOT reset
+    // The §6.10 requirement holds — changing the Bundles does NOT reset
     // auth (asserted below).
-    it("preserves auth-ready state across a Memory selection change", async () => {
+    it("preserves auth-ready state across a Bundles change", async () => {
         const user = userEvent.setup();
         const onSubmit = vi.fn();
         const onCancel = vi.fn();
@@ -287,7 +293,7 @@ describe("AgentLaunchModal — memory change must not reset auth state (§6.10)"
         // runs after AccountsLoaded fires. The Account selector renders
         // once accounts for the agent's provider are loaded.
         const identitySelect = await screen.findByLabelText("Account");
-        const memorySelect = await screen.findByLabelText("Bundle");
+        const addBundle = await screen.findByLabelText("Add a bundle");
 
         // Verify the auto-pick wired the Work account. It supplies
         // claude creds, so the Connect panel must NOT mount.
@@ -305,15 +311,50 @@ describe("AgentLaunchModal — memory change must not reset auth state (§6.10)"
             screen.queryByRole("button", { name: /connect/i }),
         ).not.toBeInTheDocument();
 
-        // THE REGRESSION: change Memory selection.
-        await user.selectOptions(memorySelect, "mem-personal");
+        // THE REGRESSION: change the Bundles.
+        await user.selectOptions(addBundle, "mem-personal");
 
         // Connect button still absent. Auth state survives.
         expect(
             screen.queryByRole("button", { name: /connect/i }),
         ).not.toBeInTheDocument();
         expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
-        expect((memorySelect as HTMLSelectElement).value).toBe("mem-personal");
+        expect(screen.getAllByTestId("bundle-list-editor-item").map((r) => r.textContent)).toHaveLength(1);
+    });
+
+    it("saves the Bundles list to the agent before launching, and needs none", async () => {
+        const user = userEvent.setup();
+        const onSubmit = vi.fn();
+        render(() => <AgentLaunchModalPanel agent={claudeAgent} onSubmit={onSubmit} onCancel={vi.fn()} />);
+        await screen.findByLabelText("Account");
+        await user.type(screen.getByLabelText("Agent name"), "alpha");
+        const launch = screen.getByRole("button", { name: /^launch/i });
+        await waitFor(() => expect(launch).not.toBeDisabled());
+
+        await user.selectOptions(screen.getByLabelText("Add a bundle"), "mem-personal");
+        await user.click(launch);
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(RpcApi.SetAgentBundlesCommand).toHaveBeenCalledWith(expect.anything(), {
+            agent_id: claudeAgent.id,
+            bundle_ids: ["mem-personal"],
+        });
+        expect(onSubmit.mock.calls[0][0].bundleId).toBe("mem-personal");
+    });
+
+    // An unedited list is never saved (#4434), so one that
+    // loaded late or failed to load can't wipe the agent's saved bundles.
+    it("leaves the saved list alone when it wasn't edited, even if it failed to load", async () => {
+        vi.mocked(RpcApi.GetAgentBundlesCommand).mockRejectedValueOnce(new Error("down"));
+        const user = userEvent.setup();
+        const onSubmit = vi.fn();
+        render(() => <AgentLaunchModalPanel agent={claudeAgent} onSubmit={onSubmit} onCancel={vi.fn()} />);
+        await screen.findByLabelText("Account");
+        await user.type(screen.getByLabelText("Agent name"), "alpha");
+        const launch = screen.getByRole("button", { name: /^launch/i });
+        await waitFor(() => expect(launch).not.toBeDisabled());
+        await user.click(launch);
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(RpcApi.SetAgentBundlesCommand).not.toHaveBeenCalled();
     });
 });
 

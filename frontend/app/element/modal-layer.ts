@@ -71,6 +71,8 @@ export interface LaunchFormStateWire {
     image: string;
     accountId: string;
     bundleId: string;
+    /** The Bundles list being edited, carried through the round-trip. */
+    bundleIds?: string[];
     /** Continuation context — the `continueOfId` from the Continue
      *  dropdown. `null` = "— New agent —". Threaded through the
      *  `+ New bundle` round-trip so the re-opened launch modal restores

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for the Settings rail (`SettingsView`) — no test coverage existed
+ * Tests for the Settings section tabs (`SettingsView`) — no test coverage existed
  * for this view before; added alongside the dynamic-pane-title fix (see
  * docs/specs/SPEC_SECTIONED_PANE_DYNAMIC_TITLE_2026_08_12.md §3.2, §8) since
  * that fix touches this file and there was nothing to catch a regression.
@@ -45,6 +45,10 @@ vi.mock("./sections/recording-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     RecordingSection: () => <div data-testid="recording-section" />,
 }));
+vi.mock("./sections/devices-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    DevicesSection: () => <div data-testid="devices-section" />,
+}));
 vi.mock("./sections/advanced-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     AdvancedSection: () => <div data-testid="advanced-section" />,
@@ -53,7 +57,7 @@ vi.mock("./sections/advanced-section", async (importOriginal) => ({
 import { SettingsView } from "./settings-view";
 import { SettingsViewModel } from "./settings-model";
 
-describe("SettingsView rail", () => {
+describe("SettingsView section tabs", () => {
     afterEach(() => {
         cleanup();
     });
@@ -64,11 +68,11 @@ describe("SettingsView rail", () => {
         return { ...result, model };
     }
 
-    it("orders the rail as Appearance, Window & Panes, Terminal, Sounds, Notifications & Tray, Recording, Advanced", () => {
+    it("orders the tabs as Appearance, Window & Panes, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Advanced", () => {
         renderSettings();
-        const rail = screen.getByRole("tablist", { name: "Settings section" });
-        const labels = Array.from(rail.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Advanced"]);
+        const tabs = screen.getByRole("tablist", { name: "Settings section" });
+        const labels = Array.from(tabs.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
+        expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {
@@ -77,10 +81,9 @@ describe("SettingsView rail", () => {
         expect(screen.queryByTestId("terminal-section")).not.toBeInTheDocument();
     });
 
-    // One tablist that changes layout with width, instead of a rail plus a
-    // separate top tab bar (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md
-    // §5.4). It still comes before the content, so at narrow widths it sits at
-    // the top (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md).
+    // One tablist, along the top at every width
+    // (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4), before the
+    // content it controls.
     it("renders one tablist, before the content it controls", () => {
         renderSettings();
         expect(screen.getAllByRole("tablist")).toHaveLength(1);
@@ -90,7 +93,7 @@ describe("SettingsView rail", () => {
         expect(panel.getAttribute("aria-labelledby")).toBe(screen.getByRole("tab", { name: "Appearance" }).id);
     });
 
-    it("clicking a rail item switches the visible section", () => {
+    it("clicking a tab switches the visible section", () => {
         const { model } = renderSettings();
         screen.getByRole("tab", { name: "Terminal" }).click();
         expect(model.activeSection()).toBe("terminal");
@@ -115,7 +118,7 @@ describe("SettingsView pane title", () => {
         expect(model.viewName()).toBe("Sounds");
     });
 
-    it("clicking a rail item updates viewName() to match", () => {
+    it("clicking a tab updates viewName() to match", () => {
         const model = new SettingsViewModel();
         render(() => (
             <SettingsView model={model} />

@@ -25,6 +25,7 @@ vi.mock("@/app/store/global", () => ({
 
 import { applyHueToAllPanes, hueToActiveBorder, hueToAgentIdentityColor, setHue, setWidgetHue } from "./pane-color-menu";
 import { contrastRatio, paneRoleColor } from "./pane-color-scheme";
+import { registerPaneTab } from "./pane-tab-registry";
 
 describe("hueToAgentIdentityColor", () => {
     it("matches hsl(hue, 65%, 52%) — the same values hueToActiveBorder uses — converted to hex", () => {
@@ -148,6 +149,20 @@ describe("setWidgetHue", () => {
         paneColors = { browser: 90, term: 120 };
         setWidgetHue("term", undefined);
         expect(written()).toEqual({ "pane:colors": { browser: 90 } });
+    });
+
+    it("removes a color saved under the widget's former id, so a reset sticks", () => {
+        const unregister = registerPaneTab({ apiVersion: 1, view: "t-new", aliases: ["t-old"], label: "N", icon: "square", create: () => ({}) as never });
+        try {
+            paneColors = { "t-old": 90, browser: 30 };
+            setWidgetHue("t-new", undefined);
+            expect(written()).toEqual({ "pane:colors": { browser: 30 } });
+            paneColors = { "t-old": 90 };
+            setWidgetHue("t-new", 120);
+            expect(written()).toEqual({ "pane:colors": { "t-new": 120 } });
+        } finally {
+            unregister();
+        }
     });
 
     it("deletes the whole setting when the last key goes", () => {

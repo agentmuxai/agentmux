@@ -247,7 +247,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // `auth login` pulls a default local model when no backend is configured.
         authLoginCommand: ["auth", "login"],
         npmPackage: "@agentmuxai/muxcode",
-        pinnedVersion: "0.1.0",
+        // The first version published to npm (0.1.0 never was). Mirrors
+        // srv's providers.rs; every pinned version must be published first.
+        pinnedVersion: "0.8.0",
         docsUrl: "https://github.com/agentmuxai/muxcode",
         windowsInstallCommand: "npm install -g @agentmuxai/muxcode",
         unixInstallCommand: "npm install -g @agentmuxai/muxcode",
@@ -260,7 +262,8 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "--resume",
         sessionIdField: "session_id",
         controllerType: "subprocess",
-        systemPrereqs: [NODE_PREREQ, NPM_PREREQ],
+        // The package's `engines`: Node 24.18.1 or later.
+        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "24.18.1" }, NPM_PREREQ],
     },
     gemini: {
         id: "gemini",

@@ -728,27 +728,26 @@ impl Store {
         Ok(count > 0)
     }
 
-    /// Union the rows referenced by `agent_id`'s bound bundle into
-    /// `visible`, deduped by id (a global row is already in `visible` and
-    /// would otherwise appear twice). Composable model v2 — without this,
-    /// bundle-level refs would be exactly as inert at launch as the bundle's
-    /// old inline JSON columns were (GH issue #2024 item 3). Silent on
-    /// lookup failure, like the two callers it was lifted from.
+    /// Union the rows referenced by `agent_id`'s bundles into `visible`, in
+    /// list order (its own bundle first, then its picks: `agent_bundle_chain`),
+    /// deduped by id, so the first bundle to name a row wins and a global row
+    /// already in `visible` isn't added twice. Composable model v2 — without
+    /// this, bundle-level refs would be exactly as inert at launch as the
+    /// bundle's old inline JSON columns were (GH issue #2024 item 3). Silent
+    /// on lookup failure, like the two callers it was lifted from.
     pub(super) fn managed_union_bundle_refs<R: ManagedResource>(
         &self,
         catalog: &Store,
         agent_id: &str,
         visible: &mut Vec<R>,
     ) {
-        if let Ok(Some(def)) = self.agent_def_get(agent_id) {
-            if !def.memory_id.is_empty() {
-                for (row, _) in self
-                    .managed_list::<R>(catalog, Owner::Bundle, &def.memory_id)
-                    .unwrap_or_default()
-                {
-                    if !visible.iter().any(|s| s.id() == row.id()) {
-                        visible.push(row);
-                    }
+        for bundle_id in self.agent_bundle_chain(agent_id) {
+            for (row, _) in self
+                .managed_list::<R>(catalog, Owner::Bundle, &bundle_id)
+                .unwrap_or_default()
+            {
+                if !visible.iter().any(|s| s.id() == row.id()) {
+                    visible.push(row);
                 }
             }
         }

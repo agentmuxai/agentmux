@@ -247,7 +247,28 @@ pub struct LanListenerSupervisor {
     /// reachable. Optional only because the two are constructed separately;
     /// in production it is always set.
     discovery: std::sync::OnceLock<std::sync::Arc<super::lan_discovery::LanDiscoveryController>>,
+    /// The viewer listener (`backend::viewer`): its router, service and port
+    /// candidates. Set once from `main.rs`; until then no viewer listener.
+    viewer: std::sync::OnceLock<ViewerServe>,
+    /// Viewer listeners by address, alongside `active`: one TLS listener on
+    /// every address the LAN listeners are bound on. Separate because a
+    /// viewer bind failing must not take the LAN routes down with it.
+    viewer_active: std::sync::Mutex<
+        std::collections::HashMap<std::net::IpAddr, tokio_util::sync::CancellationToken>,
+    >,
 }
+
+/// What the supervisor needs to serve the viewer routes.
+struct ViewerServe {
+    router: axum::Router,
+    service: std::sync::Arc<super::viewer::ViewerService>,
+    /// Where the viewer port is taken from: `lan_ports::LAN_PORT_RANGE` in
+    /// production, a port of the test's own in tests.
+    ports: Vec<u16>,
+}
+
+/// How long a viewer client may take to finish its TLS handshake.
+const VIEWER_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl LanListenerSupervisor {
     pub fn new(web_port: u16, ws_port: u16) -> Self {
@@ -259,7 +280,27 @@ impl LanListenerSupervisor {
             enabled: std::sync::atomic::AtomicBool::new(false),
             lan_allowed: std::sync::atomic::AtomicBool::new(true),
             discovery: std::sync::OnceLock::new(),
+            viewer: std::sync::OnceLock::new(),
+            viewer_active: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// Hand the supervisor the viewer router (`server::build_viewer_router`)
+    /// and service. Called once from `main.rs`, beside `set_router`; the next
+    /// reconcile brings viewer listeners up wherever LAN listeners are.
+    pub fn set_viewer(
+        &self,
+        router: axum::Router,
+        service: std::sync::Arc<super::viewer::ViewerService>,
+        ports: impl IntoIterator<Item = u16>,
+    ) {
+        let _ = self.viewer.set(ViewerServe { router, service, ports: ports.into_iter().collect() });
+    }
+
+    /// True when at least one viewer listener is bound.
+    #[cfg(test)]
+    pub fn has_viewer_listener(&self) -> bool {
+        self.viewer_active.lock().map(|a| !a.is_empty()).unwrap_or(false)
     }
 
     /// Never listen on the LAN in this process, whatever the setting says —
@@ -338,12 +379,14 @@ impl LanListenerSupervisor {
         // no-router path it stops us claiming reachability we can't deliver.
         if !enabled {
             drop(active);
+            self.reconcile_viewer(&[]);
             self.sync_advertising();
             return;
         }
         let Some(router) = self.router.get() else {
             tracing::warn!("LAN enabled before the router existed; will bind on the next sweep");
             drop(active);
+            self.reconcile_viewer(&[]);
             self.sync_advertising();
             return;
         };
@@ -369,8 +412,121 @@ impl LanListenerSupervisor {
                 }
             }
         }
+        let lan_bound: Vec<std::net::IpAddr> = active.keys().copied().collect();
         drop(active);
+        self.reconcile_viewer(&lan_bound);
         self.sync_advertising();
+    }
+
+    /// Converge the viewer listeners onto `lan_bound`, the addresses the LAN
+    /// listeners are bound on now: none when LAN is off, so the viewer is up
+    /// exactly while LAN discovery is. Every failure is logged and leaves the
+    /// LAN listeners as they are.
+    fn reconcile_viewer(&self, lan_bound: &[std::net::IpAddr]) {
+        let Some(viewer) = self.viewer.get() else {
+            return;
+        };
+        let Ok(mut active) = self.viewer_active.lock() else {
+            tracing::warn!("viewer listener map poisoned; skipping reconcile");
+            return;
+        };
+        let stale: Vec<std::net::IpAddr> =
+            active.keys().filter(|ip| !lan_bound.contains(ip)).copied().collect();
+        for ip in stale {
+            if let Some(token) = active.remove(&ip) {
+                token.cancel();
+                tracing::info!(%ip, "viewer listener stopped");
+            }
+        }
+        let missing: Vec<std::net::IpAddr> =
+            lan_bound.iter().filter(|ip| !active.contains_key(*ip)).copied().collect();
+        let port = if lan_bound.is_empty() {
+            None
+        } else {
+            viewer.service.reserve_port(viewer.ports.iter().copied())
+        };
+        match port {
+            Some(port) if !missing.is_empty() => match viewer.service.tls().and_then(|tls| tls.server_config()) {
+                Ok(config) => {
+                    let acceptor = tokio_rustls::TlsAcceptor::from(config);
+                    for ip in missing {
+                        let token = tokio_util::sync::CancellationToken::new();
+                        match Self::bind_std(ip, port) {
+                            Ok(listener) => {
+                                Self::serve_tls(viewer.router.clone(), listener, acceptor.clone(), token.clone());
+                                active.insert(ip, token);
+                                tracing::info!(%ip, port, "viewer listener started");
+                            }
+                            Err(e) => {
+                                tracing::warn!(%ip, port, error = %e, "could not bind viewer listener; skipping this address")
+                            }
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "viewer listener not started: no usable certificate"),
+            },
+            None if !missing.is_empty() => {
+                tracing::warn!("viewer listener not started: no free port in the LAN port range")
+            }
+            _ => {}
+        }
+        let bound: Vec<std::net::IpAddr> = active.keys().copied().collect();
+        drop(active);
+        viewer.service.set_bound(bound, port.unwrap_or(0));
+    }
+
+    /// Accept TLS connections on `std_listener` and serve `router` over
+    /// HTTP/1.1 until `token` is cancelled, which also drops every open
+    /// connection (and with it every open feed). Each request carries the
+    /// peer's address as `ConnectInfo`, for the pairing rate limit.
+    fn serve_tls(
+        router: axum::Router,
+        std_listener: std::net::TcpListener,
+        acceptor: tokio_rustls::TlsAcceptor,
+        token: tokio_util::sync::CancellationToken,
+    ) {
+        tokio::spawn(async move {
+            let Ok(listener) = tokio::net::TcpListener::from_std(std_listener) else {
+                tracing::warn!("could not adopt viewer listener into the tokio runtime");
+                return;
+            };
+            loop {
+                let (tcp, peer) = tokio::select! {
+                    _ = token.cancelled() => break,
+                    accepted = listener.accept() => match accepted {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::debug!(error = %e, "viewer accept failed");
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            continue;
+                        }
+                    },
+                };
+                let (acceptor, router, token) = (acceptor.clone(), router.clone(), token.clone());
+                tokio::spawn(async move {
+                    let tls = match tokio::time::timeout(VIEWER_HANDSHAKE_TIMEOUT, acceptor.accept(tcp)).await {
+                        Ok(Ok(tls)) => tls,
+                        // A client that doesn't speak TLS, or pinned another
+                        // certificate and hung up: nothing to serve.
+                        _ => return,
+                    };
+                    let service = hyper::service::service_fn(move |mut req: hyper::Request<hyper::body::Incoming>| {
+                        req.extensions_mut().insert(axum::extract::ConnectInfo(peer));
+                        let router = router.clone();
+                        async move {
+                            use tower::ServiceExt;
+                            router.oneshot(req.map(axum::body::Body::new)).await
+                        }
+                    });
+                    let conn = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(tls), service);
+                    tokio::select! {
+                        _ = conn => {}
+                        _ = token.cancelled() => {}
+                    }
+                });
+            }
+        });
     }
 
     /// Keep mDNS advertising in step with actual reachability.
@@ -788,6 +944,128 @@ mod supervisor_tests {
             .unwrap();
         assert_eq!(body, "pong", "the LAN listener must serve the same router");
 
+        sup.apply(false);
+    }
+
+    /// Accepts exactly one certificate, by its fingerprint, the way a paired
+    /// device does.
+    #[derive(Debug)]
+    struct Pinned(String);
+
+    impl rustls::client::danger::ServerCertVerifier for Pinned {
+        fn verify_server_cert(
+            &self,
+            end_entity: &rustls::pki_types::CertificateDer<'_>,
+            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
+            _server_name: &rustls::pki_types::ServerName<'_>,
+            _ocsp: &[u8],
+            _now: rustls::pki_types::UnixTime,
+        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+            if crate::backend::viewer::cert::fingerprint(end_entity) == self.0 {
+                Ok(rustls::client::danger::ServerCertVerified::assertion())
+            } else {
+                Err(rustls::Error::General("certificate fingerprint mismatch".into()))
+            }
+        }
+        fn verify_tls12_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            let algs = rustls::crypto::ring::default_provider().signature_verification_algorithms;
+            rustls::crypto::verify_tls12_signature(message, cert, dss, &algs)
+        }
+        fn verify_tls13_signature(
+            &self,
+            message: &[u8],
+            cert: &rustls::pki_types::CertificateDer<'_>,
+            dss: &rustls::DigitallySignedStruct,
+        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+            let algs = rustls::crypto::ring::default_provider().signature_verification_algorithms;
+            rustls::crypto::verify_tls13_signature(message, cert, dss, &algs)
+        }
+        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+            rustls::crypto::ring::default_provider().signature_verification_algorithms.supported_schemes()
+        }
+    }
+
+    fn pinned_client(fingerprint: &str) -> reqwest::Client {
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let config = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .dangerous()
+            .with_custom_certificate_verifier(std::sync::Arc::new(Pinned(fingerprint.to_string())))
+            .with_no_client_auth();
+        reqwest::Client::builder()
+            .use_preconfigured_tls(config)
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap()
+    }
+
+    /// The viewer listener comes up with the LAN listeners, serves its router
+    /// over TLS with the kept certificate (a client pinning that fingerprint
+    /// connects, one pinning another doesn't), hands each request the peer's
+    /// address, advertises its port while up, and goes down with LAN.
+    #[tokio::test]
+    async fn the_viewer_listener_serves_tls_while_lan_is_on() {
+        let Some(ip) = primary_lan_ipv4() else {
+            eprintln!("skipping: host has no non-loopback IPv4");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let broker = crate::backend::mps::Broker::new();
+        let viewer = crate::backend::viewer::ViewerService::new(Some(dir.path().to_path_buf()), &broker);
+        let viewer_router = axum::Router::new().route(
+            "/agentmux/viewer/hello",
+            axum::routing::get(|peer: axum::extract::ConnectInfo<std::net::SocketAddr>| async move {
+                format!("hello {}", peer.0.ip())
+            }),
+        );
+        let (w, s) = free_port_pair();
+        let viewer_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let sup = LanListenerSupervisor::new(w, s);
+        sup.set_router(router());
+        sup.set_viewer(viewer_router, viewer.clone(), [viewer_port]);
+        assert!(!sup.has_viewer_listener(), "nothing before LAN is on");
+
+        sup.apply(true);
+        assert!(sup.has_viewer_listener());
+        assert_eq!(viewer.advertised_port(), Some(viewer_port));
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let fingerprint = viewer.tls().unwrap().fingerprint.clone();
+        let url = format!("https://{ip}:{viewer_port}/agentmux/viewer/hello");
+        let body = pinned_client(&fingerprint).get(&url).send().await.unwrap().text().await.unwrap();
+        assert!(body.starts_with("hello "), "{body}");
+        assert!(
+            pinned_client(&"0".repeat(64)).get(&url).send().await.is_err(),
+            "a client pinned to another certificate must not connect"
+        );
+        assert!(
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap()
+                .get(format!("http://{ip}:{viewer_port}/agentmux/viewer/hello"))
+                .send()
+                .await
+                .is_err(),
+            "plain HTTP is not served"
+        );
+
+        sup.apply(false);
+        assert!(!sup.has_viewer_listener(), "the viewer goes down with LAN");
+        assert_eq!(viewer.advertised_port(), None);
+        // The cancelled listeners close their sockets on their own tasks;
+        // give them a moment, as the 20 s sweep would.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        sup.apply(true);
+        assert_eq!(viewer.advertised_port(), Some(viewer_port), "the same port comes back");
+        let again = viewer.tls().unwrap().fingerprint.clone();
+        assert_eq!(again, fingerprint, "and the same certificate");
         sup.apply(false);
     }
 

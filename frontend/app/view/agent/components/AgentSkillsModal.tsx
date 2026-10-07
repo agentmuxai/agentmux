@@ -6,7 +6,7 @@
  * reactive, read-only list of every skill visible to this agent (global +
  * this agent's own, if any exist), plus a bound-state-aware Bind/Unbind
  * toggle for global ones (driven by `bound_to_agent` — see AgentSkillModel's
- * doc comment). Skills are authored in Knowledge → Skills, not here. Distinct from
+ * doc comment). Skills are authored in Memory → Skills, not here. Distinct from
  * the legacy AgentSkillCard/AgentSkillsPanel (the agent-definition
  * `agent_skill_*` surface) — this is the v1 standalone Skill primitive
  * (`skill.*` / `db_skills`).
@@ -15,7 +15,7 @@
 import { onCleanup, For, Show, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
-import { openKnowledge } from "@/app/view/section-pane/panes";
+import { openMemory } from "@/app/view/section-pane/panes";
 import { AgentSkillModel } from "../agent-skill-model";
 import "./AgentPrimitiveModal.scss";
 import { Button } from "@/app/element/ui";
@@ -67,9 +67,9 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
 
             <button
                 class="agent-primitive-modal-new-btn"
-                onClick={() => void openKnowledge("skills")}
+                onClick={() => void openMemory("skills")}
             >
-                Browse all in Knowledge →
+                Browse all in Memory →
             </button>
         </div>
     );
@@ -84,11 +84,11 @@ export const AgentSkillsModal = (props: AgentSkillsModalProps): JSX.Element => {
                     <div class="agent-primitive-modal-readonly">
                         <h3 class="agent-primitive-modal-name">{skill().name}</h3>
                         <p class="agent-primitive-modal-global-note">
-                            Global — managed in Knowledge → Skills. You can bind/unbind it here, or{" "}
+                            Global — managed in Memory → Skills. You can bind/unbind it here, or{" "}
                             <button
                                 type="button"
                                 class="agent-primitive-modal-link-btn"
-                                onClick={() => void openKnowledge("skills")}
+                                onClick={() => void openMemory("skills")}
                             >
                                 edit it there
                             </button>

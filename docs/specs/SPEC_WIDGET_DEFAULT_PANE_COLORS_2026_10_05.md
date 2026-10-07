@@ -1,6 +1,7 @@
 # SPEC: a default color for every widget type, set per widget in Settings
 
 **Status:** implemented. PR #4362 (§7 PR 1) built the color lookup, the built-in colors and the header-tail rule, #4385 (§7 PR 2) the Settings section and the menu entry, and §7 PR 3 the top bar. §8 records the decisions taken.
+**Amended 2026-10-06:** the Knowledge pane is renamed **Memory** and takes the `memory` view; the old bundle-summary pane that held that id is gone, so the table has one Memory row (Emerald, as both had). See `SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md`.
 **Date:** 2026-10-05
 **Author:** Agent3
 
@@ -93,19 +94,18 @@ The hues were drawn with a seeded shuffle. The first twelve views (the most used
 | `help` | Help | Chartreuse | 90 |
 | `launcher` | Launcher | Pink | 330 |
 | `remotes` | Remotes | Sky | 210 |
-| `memory` | Memory | Emerald | 150 |
+| `memory` | Memory (was Knowledge) | Emerald | 150 |
 | `identity` | Identity | Amber | 60 |
 | `drone` | Drone | Blue | 240 |
 | `warden` | Warden | Violet | 270 |
 | `toolchain` | Toolchain | Sky | 210 |
 | `connectors` | Connectors | Chartreuse | 90 |
-| `knowledge` | Knowledge | Emerald | 150 |
 | `armory` | Armory | (Connectors) | — |
 | `settings` | Settings | Crimson | 0 |
 
 The draw gave Agent Crimson, which can read as "error", and Swarm Coral. They were swapped (§8 D4): Agent is Coral, close to today's agent `#cc785c`, and the twelve most-used widgets keep twelve distinct colors. Settings drew Coral alongside Swarm and moved with it to Crimson. `block-registry.test.ts` checks that every built-in has a color from the palette and that the twelve are distinct.
 
-Two built-in views are legacy shells, kept only so saved blocks still load: `cpuplot` (an old name for Sysinfo) and `armory` (rewrites its block to Connectors or Knowledge as it loads). Their manifests carry `legacyOf`, the view they stand in for, instead of a color: they take that view's color and setting, and Settings doesn't list them (§3.5). `widgetColorView(view)` (pane-identity.ts) gives the `pane:colors` key for any view, after aliases and `legacyOf`.
+Two built-in views are legacy shells, kept only so saved blocks still load: `cpuplot` (an old name for Sysinfo) and `armory` (rewrites its block to Connectors or Memory as it loads). Their manifests carry `legacyOf`, the view they stand in for, instead of a color: they take that view's color and setting, and Settings doesn't list them (§3.5). `widgetColorView(view)` (pane-identity.ts) gives the `pane:colors` key for any view, after aliases and `legacyOf`.
 
 A manifest without `defaultHue` (a third-party widget that declares none) gets **no** default and stays neutral, as today. Hashing the view name to a hue was considered and rejected: a color nobody chose, which changes if the widget is renamed.
 

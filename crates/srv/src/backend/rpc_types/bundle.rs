@@ -24,6 +24,31 @@ pub struct CommandDeleteBundleData {
     pub id: String,
 }
 
+/// Input for `getagentbundles`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandGetAgentBundlesData {
+    pub agent_id: String,
+}
+
+/// Input for `setagentbundles`: the whole list, in order. Blank ids, repeats
+/// and the agent's own bundle are dropped.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandSetAgentBundlesData {
+    pub agent_id: String,
+    pub bundle_ids: Vec<String>,
+}
+
+/// Result of both: the agent's picked bundle ids, in order, as stored, and
+/// its own bundle's id ('' when it has none), which launch puts first.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct AgentBundlesResult {
+    pub bundle_ids: Vec<String>,
+    pub own_bundle_id: String,
+}
+
 /// Response for `deletememory` and `deletesystemmemory` — both take the
 /// same request (`CommandDeleteBundleData`, above) and answer with the
 /// same shape, so they share this response type too. Was an anonymous

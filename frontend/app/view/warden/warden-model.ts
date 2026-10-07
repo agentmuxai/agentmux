@@ -34,7 +34,7 @@ export class WardenViewModel {
     // term/agent/swarm — see section-pane.tsx's zoomAtom for the precedent
     // this mirrors exactly.
     zoomAtom: Accessor<number>;
-    // Selected rail section, meta-backed the same way as zoomAtom above —
+    // Selected section, meta-backed the same way as zoomAtom above —
     // moved here from a local createSignal in warden-view.tsx so viewName
     // (below) can react to it. Mirrors section-pane.tsx's sectionAtom.
     sectionAtom: Accessor<WardenSection>;

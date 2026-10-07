@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A pane with a rail of sections, each one manager component: the shape of
- * the Connectors and Knowledge panes (connectors.tsx, knowledge.tsx), which
+ * A pane with a row of sections, each one manager component: the shape of
+ * the Connectors and Memory panes (connectors.tsx, memory.tsx), which
  * replaced the Armory. The selected section lives in block meta under the
  * pane's own key, so it names the pane, survives a remount, and lets an entry
  * point open the pane on a given section (panes.ts).
@@ -30,9 +30,12 @@ export interface SectionPaneSpec<Id extends string> {
     view: string;
     /** Block meta key holding the selected section id. */
     sectionKey: string;
+    /** Keys that held it before the pane was renamed, read when `sectionKey`
+     *  holds nothing and cleared on the next selection. */
+    legacySectionKeys?: readonly string[];
     /** Section shown when the meta holds none, or an unknown id. */
     defaultSection: Id;
-    /** The rail's accessible name. */
+    /** The section tabs' accessible name. */
     ariaLabel: string;
     sections: readonly PaneSection<Id>[];
 }
@@ -57,7 +60,8 @@ export class SectionPaneModel<Id extends string> {
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<Id>(() => {
-            const s = (meta() as Record<string, unknown> | undefined)?.[spec.sectionKey];
+            const m = meta() as Record<string, unknown> | undefined;
+            const s = [spec.sectionKey, ...(spec.legacySectionKeys ?? [])].map((k) => m?.[k]).find((v) => v != null);
             return spec.sections.some((sec) => sec.id === s) ? (s as Id) : spec.defaultSection;
         });
         this.viewName = createMemo<string>(
@@ -66,7 +70,8 @@ export class SectionPaneModel<Id extends string> {
     }
 
     selectSection(id: Id): void {
-        this.setMeta({ [this.spec.sectionKey]: id });
+        const cleared = Object.fromEntries((this.spec.legacySectionKeys ?? []).map((k) => [k, null]));
+        this.setMeta({ ...cleared, [this.spec.sectionKey]: id });
     }
 }
 
@@ -100,8 +105,8 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
         // answer the `armory` container queries; an element can't answer its own.
         <div class="armory-container">
             <div class="armory-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
-                {/* One tablist: a rail, an icon-only rail, or tabs along the top,
-                    by width (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
+                {/* One tablist along the top: icons only when narrow, labels when
+                    there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
                 <TabbedPane
                     items={sections.map((item) => ({
                         id: item.id,

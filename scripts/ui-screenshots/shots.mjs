@@ -76,12 +76,12 @@ export const shots = [
         },
     },
     {
-        id: "knowledge-bundles",
-        title: "Knowledge — Bundles",
-        description: "The Knowledge widget's Bundles section.",
+        id: "memory-bundles",
+        title: "Memory — Bundles",
+        description: "The Memory widget's Bundles section.",
         selector: `.pane-stack:has(.armory-view)`,
         prep: async (session) => {
-            await openWidget(session, "Knowledge");
+            await openWidget(session, "Memory");
             await session.wait(300);
             await session.clickText(".bundle-manager-tab-bar", "Bundles");
         },

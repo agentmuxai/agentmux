@@ -6,7 +6,7 @@
  * (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
  *
  * Opens when the user clicks a card in the picker's Templates section.
- * Collects a name + identity + memory, then in `onSubmit` the layer
+ * Collects a name and its bundles (the account is the provider's first), then in `onSubmit` the layer
  * clones the seeded template into a new user-owned definition via
  * `agentdefcreatefromtemplate`, immediately launches it with the
  * picked bindings, and closes.
@@ -25,6 +25,7 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 
 import { Button, Select, TextInput } from "@/app/element/ui";
+import { BundleListEditor } from "./BundleListEditor";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
@@ -39,7 +40,8 @@ import type { AgentDefinition, Bundle } from "@/app/store/rpc-api";
 interface CreateFromTemplateFormData {
     name: string;
     accountId: string;
-    bundleId: string;
+    /** The agent's Bundles list, in order; empty for none. */
+    bundleIds: string[];
     /** Where the new agent runs. Chosen here at instantiation time —
      *  it is NOT a property of the template (a template is runtime-
      *  agnostic). "container" requires a reachable Docker runtime. */
@@ -89,8 +91,11 @@ export const AgentCreateFromTemplateModalPanel = (
 ): JSX.Element => {
     const [name, setName] = createSignal(props.initialName ?? "");
     const [accountId, setAccountId] = createSignal("");
-    const [bundleId, setBundleId] = createSignal("");
+    const [bundleIds, setBundleIds] = createSignal<string[]>([]);
     const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
+    // The account list has been fetched (or failed to): Create waits for it,
+    // since the first account is used without a field to show it.
+    const [accountsReady, setAccountsReady] = createSignal(false);
     const [bundles, setBundles] = createSignal<Bundle[]>([]);
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
@@ -104,9 +109,9 @@ export const AgentCreateFromTemplateModalPanel = (
     // gets cloned: the template's own, or its bundle's when it has none
     // (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §3.1). Falls back to `props.template.provider`
     // while loading/on failure, same contract `resolveEffectiveLaunchProvider`
-    // itself documents — a brief stale flash here is cosmetic (form
-    // options), not a spawn/credential decision the way it would be in
-    // AgentLaunchModal.
+    // itself documents. The provider picks the account the agent is created
+    // with, and the form has no account field to correct it, so Create waits
+    // for this to resolve (`canSubmit`).
     const [resolvedTemplateProviderId] = createResource(
         () => props.template,
         resolveEffectiveLaunchProvider,
@@ -249,6 +254,7 @@ export const AgentCreateFromTemplateModalPanel = (
             } catch {
                 /* non-fatal; user can still create without binding */
             }
+            setAccountsReady(true);
             try {
                 const list = await RpcApi.ListBundlesCommand(TabRpcClient, {});
                 setBundles(list ?? []);
@@ -272,29 +278,20 @@ export const AgentCreateFromTemplateModalPanel = (
     // the account fetch settles before the provider resolution, this
     // effect would lock onto an account filtered against the STALE
     // fallback provider and never reconsider once the real one lands.
-    // `accountTouched` (mirroring runtimeTouched/modelTouched above)
-    // stops the re-pick once the user has made an explicit choice.
+    // The form has no account field (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md
+    // §3.6): the agent takes this account, and it's changed later in the Stash.
     // is_system entries are AgentMux-controlled workspace policy, not a
     // selectable per-agent bundle (reagent P1, PR #2782).
     const realBundles = createMemo(() => bundles().filter((m) => !m.is_blank && !m.is_system));
-    let accountTouched = false;
     createEffect(() => {
-        if (accountTouched) return;
         setAccountId(accounts()[0]?.id ?? "");
-    });
-    const pickAccount = (v: string) => {
-        accountTouched = true;
-        setAccountId(v);
-    };
-    createEffect(() => {
-        if (bundleId()) return;
-        const first = realBundles()[0];
-        if (first) setBundleId(first.id);
     });
 
     const canSubmit = () =>
         name().trim().length > 0
         && name().trim().length <= 200
+        && accountsReady()
+        && !resolvedTemplateProviderId.loading
         && !submitting();
 
     const submit = async () => {
@@ -305,7 +302,7 @@ export const AgentCreateFromTemplateModalPanel = (
             await props.onSubmit({
                 name: name().trim(),
                 accountId: accountId(),
-                bundleId: bundleId(),
+                bundleIds: bundleIds(),
                 agentType: runtime(),
                 modelVendorBaseUrl: supportsCustomEndpoint() ? modelVendorBaseUrl().trim() : "",
                 model: modelOptions().length > 0 ? model() : "",
@@ -431,38 +428,21 @@ export const AgentCreateFromTemplateModalPanel = (
                         </span>
                     </label>
                 </Show>
-                <label class="agent-new-bundle-modal-field">
-                    <span class="agent-new-bundle-modal-label">Identity</span>
-                    <Select
-                        class="agent-new-bundle-modal-input"
-                        value={accountId()}
-                        onChange={(v) => pickAccount(v)}
+                {/* Several controls, so a group, not a <label>. Starts empty:
+                    the agent gets Global Memory and its own bundle. */}
+                <div class="agent-new-bundle-modal-field" role="group" aria-labelledby="create-from-template-bundles-label">
+                    <span class="agent-new-bundle-modal-label" id="create-from-template-bundles-label">Bundles</span>
+                    <BundleListEditor
+                        bundles={realBundles()}
+                        value={bundleIds()}
+                        onChange={setBundleIds}
                         disabled={submitting()}
-                        data-testid="create-from-template-identity-select"
-                    >
-                        <option value="">No auth</option>
-                        <For each={accounts()}>
-                            {(a) => (
-                                <option value={a.id}>{a.display_name?.trim() || a.name}</option>
-                            )}
-                        </For>
-                    </Select>
-                </label>
-                <label class="agent-new-bundle-modal-field">
-                    <span class="agent-new-bundle-modal-label">Memory</span>
-                    <Select
-                        class="agent-new-bundle-modal-input"
-                        value={bundleId()}
-                        onChange={(v) => setBundleId(v)}
-                        disabled={submitting()}
-                        data-testid="create-from-template-memory-select"
-                    >
-                        <option value="">(vanilla CLI)</option>
-                        <For each={realBundles()}>
-                            {(m) => <option value={m.id}>{m.name}</option>}
-                        </For>
-                    </Select>
-                </label>
+                        testId="create-from-template-bundles"
+                    />
+                    <span class="agent-new-bundle-modal-hint">
+                        In order: when two bundles name the same skill or MCP server, the first wins.
+                    </span>
+                </div>
                 <Show when={error()}>
                     <div class="agent-new-bundle-modal-error" data-testid="create-from-template-error">
                         {error()}

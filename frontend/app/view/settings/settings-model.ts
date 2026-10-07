@@ -10,6 +10,7 @@ export type SettingsSection =
     | "sounds"
     | "notifications"
     | "recording"
+    | "devices"
     | "advanced";
 
 /** One searchable settings row. `keywords` is where "synonyms match" lives —
@@ -37,6 +38,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     sounds: "Sounds",
     notifications: "Notifications & Tray",
     recording: "Recording",
+    devices: "Paired devices",
     advanced: "Advanced",
 };
 

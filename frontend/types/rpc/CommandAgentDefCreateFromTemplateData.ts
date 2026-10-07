@@ -40,6 +40,11 @@ identity_id?: string,
  */
 memory_id?: string, 
 /**
+ * The new agent's Bundles list, in order (`setagentbundles`). Absent
+ * from an older frontend: the list starts empty.
+ */
+bundle_ids?: Array<string>, 
+/**
  * Runtime to persist on the cloned definition: "host" or
  * "container". Empty/absent → keep the template's `agent_type`.
  * Runtime is chosen at instantiation time, not a property of the

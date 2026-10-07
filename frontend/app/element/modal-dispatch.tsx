@@ -212,7 +212,7 @@ export function renderRequest(
                         // (spec note on CreateFromTemplateRequest) so
                         // `submitting()` covers both RPC steps and ESC
                         // / backdrop dismiss stay blocked end-to-end.
-                        onSubmit={async ({ name, accountId, bundleId, agentType, modelVendorBaseUrl, model }) => {
+                        onSubmit={async ({ name, accountId, bundleIds, agentType, modelVendorBaseUrl, model }) => {
                             setSubmitting(true);
                             try {
                                 const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
@@ -221,7 +221,12 @@ export function renderRequest(
                                         template_id: req.template.id,
                                         name,
                                         identity_id: accountId,
-                                        memory_id: bundleId,
+                                        // Only echoed back, for the
+                                        // launch's record of a bundle
+                                        // (first pick); the agent still
+                                        // gets a fresh bundle of its own.
+                                        memory_id: bundleIds[0] ?? "",
+                                        bundle_ids: bundleIds,
                                         // Persist the chosen runtime on the
                                         // new user-owned definition so later
                                         // reattach/auto-continue uses it too.

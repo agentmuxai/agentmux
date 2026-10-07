@@ -15,7 +15,7 @@
 //! The server installs the window and the settings ([`install`]) once srv is
 //! up; until then (and in tests) there is no one to ask, so nothing installs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Mutex, OnceLock};
@@ -139,6 +139,54 @@ fn lock() -> std::sync::MutexGuard<'static, AgentPanes> {
     agent_panes().lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Hosts the user answered "Not now" for since srv started.
+fn declined() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    static DECLINED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    DECLINED
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// Whether a durable pane on `connection` runs as a plain SSH terminal
+/// instead, because the user doesn't want the helper there (§4.9: "Not now,
+/// or Never: the pane falls back"): the host is set to Never, or the user
+/// answered "Not now" for it since srv started. Set to Always, never.
+pub fn plain_instead(connection: &str) -> bool {
+    let Some(deps) = DEPS.get() else {
+        return false;
+    };
+    let (host, global) = (deps.settings)(connection);
+    plain_for(
+        Policy::resolve(&host, &global),
+        declined().contains(&host_key(connection)),
+    )
+}
+
+/// [`plain_instead`] from the host's policy and whether the user answered
+/// "Not now" for it since srv started.
+fn plain_for(policy: Policy, declined: bool) -> bool {
+    match policy {
+        Policy::Always => false,
+        Policy::Never => true,
+        Policy::Ask => declined,
+    }
+}
+
+/// Remember an answer for [`plain_instead`]: "Not now" until srv restarts,
+/// undone by a later Install. A closed window is no answer.
+pub(crate) fn note_answer(connection: &str, answer: Answer) {
+    if !answer.answered {
+        return;
+    }
+    let mut declined = declined();
+    if answer.approve {
+        declined.remove(&host_key(connection));
+    } else {
+        declined.insert(host_key(connection));
+    }
+}
+
 /// One host, however it is spelled.
 fn host_key(connection: &str) -> String {
     super::ConnTarget::parse(connection)
@@ -245,6 +293,7 @@ pub async fn allow_install(connection: &str, block_id: Option<&str>) -> Result<(
         }
     }
     tracing::info!(connection = %connection, agent = ?agent, install, remember = ?remember, "helper install: asked");
+    note_answer(connection, answer);
     if install {
         Ok(())
     } else if answer.answered {
@@ -286,6 +335,26 @@ mod tests {
         assert_eq!(outcome(a(false, true)), (false, Some("never")), "Never for this host");
         let closed = Answer { answered: false, approve: false, remember: true };
         assert_eq!(outcome(closed), (false, None), "a closed window stores nothing");
+    }
+
+    #[test]
+    fn a_host_the_user_doesnt_want_the_helper_on_gets_a_plain_terminal() {
+        assert!(plain_for(Policy::Never, false), "Never");
+        assert!(plain_for(Policy::Ask, true), "Not now, since srv started");
+        assert!(!plain_for(Policy::Ask, false), "not asked yet");
+        assert!(!plain_for(Policy::Always, true), "Always wins over an earlier Not now");
+    }
+
+    #[test]
+    fn not_now_is_remembered_until_an_install_and_a_closed_window_is_no_answer() {
+        let a = |answered, approve| Answer { answered, approve, remember: false };
+        let host = "me@declined-host";
+        note_answer(host, a(false, false));
+        assert!(!declined().contains(host), "a closed window");
+        note_answer(&format!(" {host} "), a(true, false));
+        assert!(declined().contains(host), "Not now, however the host is spelled");
+        note_answer(host, a(true, true));
+        assert!(!declined().contains(host), "a later Install");
     }
 
     #[test]

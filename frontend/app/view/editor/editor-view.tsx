@@ -24,7 +24,8 @@ import { settingsAtom } from "@/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
-import { SegmentedControl } from "@/app/element/ui";
+import { cursorAtLine } from "./open-at-line";
+import { Button, SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
@@ -36,6 +37,7 @@ import "./editor-view.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { codeMirrorKeys, keyLabel, paneCommandFor } from "@/app/keybindings";
 import { keybindingsVersion } from "@/app/keybindings/registry";
+import { OpenFromRemoteModal } from "./open-from-remote-modal";
 
 // ── Language loader ─────────────────────────────────────────────────────────
 // Lazy-load language extensions to keep initial bundle small.
@@ -476,6 +478,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         // Focus that was in the now-destroyed CodeMirror has already fallen
         // back to <body>, so the guard never blocks restoring it.
         model.cmViewRef.current = cmView;
+        // Opened at a line (pane.open's `line`): the cursor goes there once.
+        const openAt = model.takeOpenAtLine(model.filePathAtom());
+        if (openAt) cmView.dispatch(cursorAtLine(cmView.state, openAt));
         if (!userIsTypingElsewhereIn(rootRef, document.activeElement)) {
             focusManager.claimFocusOnMount(model.blockId, () => model.giveFocus());
         }
@@ -697,6 +702,11 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                     </div>
                 ))}
             </div>
+            <div class="editor-empty-actions">
+                <Button density="compact" icon="server" onClick={() => model.setOpenFromRemote(true)}>
+                    Open from remote…
+                </Button>
+            </div>
             {/* Only where the button is: an editor on a remote host has no tree. */}
             <Show when={!model.treeExpandedAtom() && !model.connection()}>
                 <div class="editor-empty-hint">Show the file tree (the folder button above) to browse files.</div>
@@ -889,6 +899,15 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             classList={{ "editor-view--tree-collapsed": !model.treeExpandedAtom() }}
             style={{ zoom: model.zoomAtom() }}
         >
+            <Show when={model.openFromRemoteAtom() && rootRef}>
+                <OpenFromRemoteModal
+                    blockRef={{ current: rootRef! }}
+                    anchorRef={{ current: rootRef! }}
+                    current={model.connection()}
+                    onOpen={(host, path) => model.openFromRemote(host, path)}
+                    onClose={() => model.setOpenFromRemote(false)}
+                />
+            </Show>
             <Show when={model.treeExpandedAtom()}>
                 <div
                     class="editor-tree-column"

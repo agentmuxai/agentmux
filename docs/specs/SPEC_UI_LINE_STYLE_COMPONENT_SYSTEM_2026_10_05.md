@@ -2,6 +2,8 @@
 
 **Date:** 2026-10-05
 **Status:** active — PR 1 (tokens, components, CI ratchet) in PR #4365, PR 2 (Settings) in PR #4366; the other migrations in §8 follow.
+**Amended 2026-10-07:** `TabbedPane` keeps its tabs along the top at every width; the side rail is gone (§5.4).
+**Amended 2026-10-06:** the Knowledge pane is renamed **Memory** (view `memory`; `knowledge` still opens it). See `SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md`.
 **Owner:** Agent4
 **Builds on:** `SPEC_DESIGN_SYSTEM_2026_04_23.md` (tokens and mixins, which landed), `SPEC_HARD_CORNERS_2026_05_26.md`, `SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md` (popup menus, still unbuilt)
 
@@ -279,20 +281,19 @@ A modal footer becomes `[Cancel: neutral] [Create: accent]`, and the "Close tab"
 />
 
 // A whole pane: navigation plus the selected section's panel.
-<TabbedPane items={…} value={section()} onChange={setSection} idPrefix="settings" ariaLabel="Settings"
-            collapseBelow={768} topBelow={480}>
+<TabbedPane items={…} value={section()} onChange={setSection} idPrefix="settings" ariaLabel="Settings">
     <SelectedSection />
 </TabbedPane>
 ```
 
 - **Horizontal look:** the Stash tab, exactly. Secondary text at rest, main text on hover, and a **2px accent underline** on the selected tab. No fill.
 - **Vertical look (rail):** the same rule turned sideways. The selected item gets a **2px accent line on its leading edge** (`box-shadow: inset 2px 0 0 var(--accent-color)`) and main text. **No solid fill.** Hover is a 6% tint. This replaces the solid accent blocks in Settings and section-pane.
-- **One DOM.** `TabbedPane` renders a single `role="tablist"` and changes only its layout with its own width:
-  - a rail with labels at `collapseBelow` (768px) and wider;
-  - an icon-only rail below that;
-  - icon-only tabs spread along the top, Stash-style, below `topBelow` (480px), as the old narrow tab bars were.
+- **One DOM.** `TabbedPane` renders a single `role="tablist"`, along the top at every width (amended 2026-10-07, operator: a side rail wastes a pane's width, and the app's menus are top menus):
+  - icon-only tabs sharing the width while narrow;
+  - labels once each tab gets `TAB_LABEL_MIN_WIDTH` (112px), so the threshold grows with the number of tabs; `labelsFrom` overrides it;
+  - each tab grows to at most 10rem, so in a wide pane the row sits at the left instead of stretching.
 
-  These are today's Settings and section-pane breakpoints; today both render two `<nav>`s and hide one with CSS. The width comes from a `ResizeObserver` rather than a container query, so `aria-orientation` and the arrow keys always match what is on screen.
+  This replaced a labelled rail (768px and wider) and an icon-only rail (480–768px). Before this spec, Settings and section-pane rendered two `<nav>`s and hid one with CSS. The width comes from a `ResizeObserver` rather than a container query, so `aria-orientation` and the arrow keys always match what is on screen.
 - **Icon-only mode.** Labels hide and each tab gets a `Tooltip` plus an `aria-label`, so it keeps a name. Today's 48px Settings rail has neither.
 - **Accessibility:**
   - Roles are `tablist`, `tab` with `aria-selected` and `aria-controls`, and `tabpanel` labelled by the selected tab.

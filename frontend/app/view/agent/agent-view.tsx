@@ -1110,7 +1110,6 @@ export const AgentPresentationView = ({
             peerAgents: agentDefinitions,
             getAgentContent: (contentType) =>
                 RpcApi.GetAgentContentCommand(TabRpcClient, { agent_id: agentId, content_type: contentType }),
-            getBundle: (id) => RpcApi.GetBundleCommand(TabRpcClient, { id }),
             listIdentities: () => RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentId }),
             loadAccounts,
             send: handleSendMessage,

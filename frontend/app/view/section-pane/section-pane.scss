@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// The sectioned pane shared by Connectors and Knowledge (section-pane.tsx); ported from
+// The sectioned pane shared by Connectors and Memory (section-pane.tsx); ported from
 // the Armory, which it replaced. The class names and the `armory` container name stay:
 // the managers inside (native-memory-manager.scss) query that container.
 
@@ -21,8 +21,8 @@
     overflow: hidden;
 }
 
-// The navigation is element/ui's TabbedPane (a rail, an icon-only rail, or
-// top tabs, by width). Its panel carries `bundle-manager-section`, and the
+// The navigation is element/ui's TabbedPane: tabs along the top at every
+// width, icon-only when narrow. Its panel carries `bundle-manager-section`, and the
 // managers inside still reference the `.bundle-manager-*` classes, which is
 // why the names stay.
 

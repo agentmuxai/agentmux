@@ -1539,18 +1539,41 @@ pub(super) async fn handle_reactive_agents(
 /// `/agentmux/reactive/agent?id=…`, so this makes enumeration cheap rather
 /// than newly possible, and it's what lets a peer show which agents live on
 /// another host instead of the empty `agents: []` every LAN peer reported
-/// before. **Do not extend this response with anything beyond names**
-/// without revisiting that decision.
+/// before. **Do not extend this response with anything beyond names, kinds
+/// and status** without revisiting those decisions.
+///
+/// Two widenings since, both activity or placement metadata, never content.
+/// `agent_kinds` (`{name: "host" | "container"}`, an agent whose block can't
+/// be read left out): where an agent runs, by the owner's decision of
+/// 2026-10-06 (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06
+/// §5.2, §11). `agent_status` (`{name: {state, since_ms}}`, an agent with no
+/// known state left out) and `now_ms`: whether an agent is busy and since
+/// when, nothing it says or does, by the owner's decision D1 of 2026-10-07
+/// (agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §3.4,
+/// §11). The same fields are on the fleet feed this route is the fallback for.
 pub(super) async fn handle_reactive_agent_names(
     State(state): State<AppState>,
 ) -> Json<serde_json::Value> {
-    let names: Vec<String> = state
-        .reactive_handler
-        .list_agents()
-        .into_iter()
-        .map(|a| a.agent_id)
+    let agents = state.reactive_handler.list_agents();
+    let kinds = crate::backend::fleet_source::kinds_by_name(
+        agents.iter().map(|a| (a.agent_id.as_str(), a.block_id.as_str())),
+        |block_id| crate::backend::operator_config_seed::agent_kind_of_block(&state.mstore, block_id),
+    );
+    let status: std::collections::BTreeMap<&str, _> = agents
+        .iter()
+        .filter_map(|a| {
+            crate::backend::agent_state::agent_status_of_block(&state.mstore, &a.block_id)
+                .map(|s| (a.agent_id.as_str(), s))
+        })
         .collect();
-    Json(json!({ "agents": names }))
+    let status = serde_json::to_value(status).unwrap_or_else(|_| json!({}));
+    let names: Vec<String> = agents.iter().map(|a| a.agent_id.clone()).collect();
+    Json(json!({
+        "agents": names,
+        "agent_kinds": kinds,
+        "now_ms": agentmux_common::time::now_ms_u64(),
+        "agent_status": status,
+    }))
 }
 
 #[derive(serde::Deserialize)]

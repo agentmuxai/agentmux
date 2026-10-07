@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The Connectors and Knowledge panes (section-pane.tsx and the two manifests),
+ * The Connectors and Memory panes (section-pane.tsx and the two manifests),
  * and the Armory manifest that moves saved Armory blocks onto them.
  * docs/specs/SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md.
  */
@@ -36,7 +36,7 @@ vi.mock("@/app/store/block-component-registry", () => ({
 import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { armoryPaneTab } from "@/app/view/armory/armory";
 import { connectorsPaneTab } from "@/app/view/connectors/connectors";
-import { knowledgePaneTab } from "@/app/view/knowledge/knowledge";
+import { memoryPaneTab } from "@/app/view/memory/memory";
 
 // A real signal behind the host context, so a setMeta write flows back into
 // the pane the way the backend's meta push does.
@@ -64,7 +64,7 @@ function mount(manifest: PaneTabManifest, meta: Record<string, unknown> = {}) {
     return { ...result, instance, title: () => instance.liveTitle!().text };
 }
 
-function railLabels(container: HTMLElement): string[] {
+function tabLabels(container: HTMLElement): string[] {
     return Array.from(container.querySelectorAll('[role="tab"] .ui-tab-label')).map((s) => s.textContent ?? "");
 }
 
@@ -82,7 +82,7 @@ afterEach(() => {
 describe("Connectors pane", () => {
     it("has the sections Accounts and MCP servers, on Accounts by default", () => {
         const { container, title } = mount(connectorsPaneTab);
-        expect(railLabels(container)).toEqual(["Accounts", "MCP servers"]);
+        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers"]);
         expect(visiblePane(container)).toBe("accounts-manager");
         expect(title()).toBe("Connectors · Accounts");
     });
@@ -107,33 +107,44 @@ describe("Connectors pane", () => {
     });
 });
 
-describe("Knowledge pane", () => {
+describe("Memory pane", () => {
     it("has the sections Global, Personal, Skills and Bundles, on Global by default", () => {
-        const { container, title } = mount(knowledgePaneTab);
-        expect(railLabels(container)).toEqual(["Global", "Personal", "Skills", "Bundles"]);
+        const { container, title } = mount(memoryPaneTab);
+        expect(tabLabels(container)).toEqual(["Global", "Personal", "Skills", "Bundles"]);
         expect(visiblePane(container)).toBe("global-bundle-manager");
-        expect(title()).toBe("Knowledge · Global");
+        expect(title()).toBe("Memory · Global");
     });
 
     it.each([
         ["personal", "native-memory-manager"],
         ["skills", "skill-manager"],
         ["bundles", "bundle-manager"],
-    ])("opens on knowledge:section=%s", (section, testId) => {
-        const { container } = mount(knowledgePaneTab, { "knowledge:section": section });
+    ])("opens on memory:section=%s", (section, testId) => {
+        const { container } = mount(memoryPaneTab, { "memory:section": section });
         expect(visiblePane(container)).toBe(testId);
     });
 
     it("keeps every section mounted, hiding all but the selected one", () => {
-        const { container } = mount(knowledgePaneTab);
+        const { container } = mount(memoryPaneTab);
         expect(container.querySelectorAll(".bundle-manager-section > .bundle-manager-pane")).toHaveLength(4);
         expect(container.querySelectorAll(".bundle-manager-section > .bundle-manager-pane.is-hidden")).toHaveLength(3);
     });
 
-    it("clicking a tab writes knowledge:section", () => {
-        const { container } = mount(knowledgePaneTab);
+    it("clicking a tab writes memory:section", () => {
+        const { container } = mount(memoryPaneTab);
         fireEvent.click(screen.getByRole("tab", { name: "Skills" }));
-        expect(setMetaMock).toHaveBeenCalledWith({ "knowledge:section": "skills" });
+        // The section key from when the pane was named Knowledge is cleared too.
+        expect(setMetaMock).toHaveBeenCalledWith({ "knowledge:section": null, "memory:section": "skills" });
+        expect(visiblePane(container)).toBe("skill-manager");
+    });
+
+    it("opens on the section a block saved when the pane was named Knowledge", () => {
+        const { container } = mount(memoryPaneTab, { "knowledge:section": "bundles" });
+        expect(visiblePane(container)).toBe("bundle-manager");
+    });
+
+    it("prefers memory:section over the old key when a block has both", () => {
+        const { container } = mount(memoryPaneTab, { "memory:section": "skills", "knowledge:section": "bundles" });
         expect(visiblePane(container)).toBe("skill-manager");
     });
 
@@ -142,16 +153,16 @@ describe("Knowledge pane", () => {
     // so at narrow widths it sits at the top of the pane
     // (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md).
     it("renders one tablist, before the sections", () => {
-        const { container } = mount(knowledgePaneTab);
+        const { container } = mount(memoryPaneTab);
         expect(screen.getAllByRole("tablist")).toHaveLength(1);
-        const tablist = screen.getByRole("tablist", { name: "Knowledge section" });
+        const tablist = screen.getByRole("tablist", { name: "Memory section" });
         const panel = container.querySelector(".bundle-manager-section")!;
         expect(panel.getAttribute("role")).toBe("tabpanel");
         expect(tablist.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("highlights only Bundles", () => {
-        const { container } = mount(knowledgePaneTab);
+        const { container } = mount(memoryPaneTab);
         const highlighted = Array.from(container.querySelectorAll(".is-abf-highlight")).map((el) => el.textContent);
         expect(highlighted).toEqual(["Bundles"]);
     });
@@ -167,7 +178,7 @@ describe("section pane zoom", () => {
     });
 
     it("Ctrl+Wheel steps term:zoom; back at 1.0 it clears the key", () => {
-        const { container } = mount(knowledgePaneTab);
+        const { container } = mount(memoryPaneTab);
         const view = container.querySelector(".armory-view")!;
         wheel(view, { ctrlKey: true, deltaY: 100 });
         expect(setMetaMock).toHaveBeenLastCalledWith({ "term:zoom": 0.9 });
@@ -176,7 +187,7 @@ describe("section pane zoom", () => {
     });
 
     it("leaves a plain wheel and Ctrl+Shift+Wheel (all panes) alone", () => {
-        const { container } = mount(knowledgePaneTab);
+        const { container } = mount(memoryPaneTab);
         const view = container.querySelector(".armory-view")!;
         wheel(view, { deltaY: 100 });
         wheel(view, { ctrlKey: true, shiftKey: true, deltaY: 100 });
@@ -191,8 +202,8 @@ describe("a saved Armory block", () => {
         expect(setMetaMock).not.toHaveBeenCalled();
         await Promise.resolve();
         expect(setMetaMock).toHaveBeenCalledWith({
-            view: "knowledge",
-            "knowledge:section": "skills",
+            view: "memory",
+            "memory:section": "skills",
             "armory:section": null,
             "armory:memory:subsection": null,
         });
@@ -200,7 +211,7 @@ describe("a saved Armory block", () => {
 
     it("shows its new pane until the block remounts as it", () => {
         const { container, title } = mount(armoryPaneTab, { view: "trust", "armory:section": "mcp" });
-        expect(railLabels(container)).toEqual(["Accounts", "MCP servers"]);
+        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers"]);
         expect(title()).toBe("Connectors · Accounts");
         // The meta write lands: now the section follows.
         setBlockMeta((m) => ({ ...m, view: "connectors", "connectors:section": "mcp" }));

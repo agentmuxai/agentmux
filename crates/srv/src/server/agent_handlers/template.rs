@@ -234,6 +234,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // agent has its own (ARCHITECTURE_MANDATORY_ABF_RETHINK_
                 // 2026_08_14.md §3.2, "strong reading").
                 mstore.agent_def_provision_and_bind_bundle(&id_store, &mut new_def, now);
+                // After the own bundle exists, so a pick of it is dropped.
+                if let Some(bundle_ids) = cmd.bundle_ids.as_deref().filter(|ids| !ids.is_empty()) {
+                    mstore
+                        .agent_bundles_set(&new_def.id, bundle_ids)
+                        .map_err(|e| format!("agentdefcreatefromtemplate: bundles: {e}"))?;
+                }
 
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "agents:changed".to_string(),

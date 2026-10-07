@@ -1,6 +1,7 @@
 # SPEC: Retire the Armory — two panes, Connectors and Knowledge
 
 **Status:** active — decided (§9). Shipped: Phase 1 (the two panes, entry points, migration, default widget bar), #4345; Phase 2 (server and agent-facing text), #4347. Remaining: Phase 3 (removing the Armory shim and `app:identity`, a release later), §5
+**Amended 2026-10-06:** the Knowledge pane is renamed **Memory** (view `memory`; `knowledge` still opens it). See `SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md`.
 **Date:** 2026-10-05
 **Author:** Camper (agent), at operator request
 **Related:** `ARCHITECTURE_ARMORY_2026_07_20.md` (what the Armory holds and why),
