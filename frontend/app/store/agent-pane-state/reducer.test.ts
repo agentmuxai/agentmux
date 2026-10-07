@@ -153,7 +153,7 @@ describe("agent-pane-state reducer", () => {
             expect(r.events[0]).toMatchObject({ type: "turn-inactive-reconciled", at: 200 });
         });
 
-        it("clears currentTool and turnTokens when demoting a stuck Streaming turn", () => {
+        it("clears currentTool when demoting a stuck Streaming turn, and keeps its tokens for the session_end that follows", () => {
             let s = streaming(100);
             s = update(s, { type: "ToolStart", name: "Bash", arg: "ls" }).state;
             s = update(s, { type: "TokensIn", input: 500, model: "claude-sonnet-5" }).state;
@@ -162,7 +162,7 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.turnPhase.kind).toBe("Idle");
             expect(r.state.currentTool).toBe(null);
             expect(r.state.currentToolArg).toBe(null);
-            expect(r.state.turnTokens).toBe(null);
+            expect(r.state.turnTokens).toMatchObject({ input: 500 });
         });
 
         it("demotes Streaming even with a tool active — backend turn_active=false is authoritative (unlike the timeout watchdog)", () => {
@@ -574,8 +574,9 @@ describe("agent-pane-state reducer", () => {
 
         // srv publishes `turn_active: false` when it reads the CLI's `result`
         // line, before it forwards that line to the pane, so the reconcile
-        // lands first and clears turnTokens. Without the snapshot, TurnEnd
-        // found no live tokens and the footer showed every call's input summed.
+        // lands while the stream is still delivering the turn. It used to
+        // clear turnTokens, so TurnEnd found no live tokens and the footer
+        // showed every call's input summed.
         describe("when the turn-ended push arrives before session_end", () => {
             const midTurn = () => {
                 let s: AgentPaneState = { ...streaming(110), context: liveReading(40_000) };
@@ -583,15 +584,15 @@ describe("agent-pane-state reducer", () => {
                 s = update(s, { type: "TokensOut", output: 300 }).state;
                 return update(s, { type: "TokensIn", input: 43_000 }).state;
             };
+            const reconciled = () => update(midTurn(), { type: "ReconcileTurnActive", at: 200, active: false }).state;
             const resultStats = { input_tokens: 84_000, output_tokens: 512 } as any;
 
             it("TurnEnd still records what the turn added", () => {
-                const reconciled = update(midTurn(), { type: "ReconcileTurnActive", at: 200, active: false }).state;
-                expect(reconciled.turnPhase.kind).toBe("Idle");
-                expect(reconciled.turnTokens).toBeNull();
-                const r = update(reconciled, { type: "TurnEnd", stats: resultStats });
+                const s = reconciled();
+                expect(s.turnPhase.kind).toBe("Idle");
+                const r = update(s, { type: "TurnEnd", stats: resultStats });
                 expect(r.state.sessionStats).toMatchObject({ input_tokens: 84_000, added_input_tokens: 3_000 });
-                expect(r.state.endedTurnTokens).toBeNull();
+                expect(r.state.turnTokens).toBeNull();
             });
 
             it("so does a session_end that follows the liveness recovery", () => {
@@ -605,15 +606,32 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.sessionStats?.added_input_tokens).toBe(3_000);
             });
 
-            it("a turn whose session_end never came doesn't lend its tokens to the next turn", () => {
-                const reconciled = update(midTurn(), { type: "ReconcileTurnActive", at: 200, active: false }).state;
-                // The next turn's first call: the stale snapshot goes.
-                const next = update(reconciled, { type: "TokensIn", input: 44_000 }).state;
-                expect(next.endedTurnTokens).toBeNull();
-                expect(next.turnTokens?.contextBaseline).toBe(43_000);
-                // And a new user turn drops it too.
-                const started = update(reconciled, { type: "TurnStart", at: 300 }).state;
-                expect(started.endedTurnTokens).toBeNull();
+            it("a call of the same turn that the stream delivers after the push still counts toward it", () => {
+                const late = update(reconciled(), { type: "TokensIn", input: 45_000 }).state;
+                const r = update(late, { type: "TurnEnd", stats: resultStats });
+                expect(r.state.sessionStats?.added_input_tokens).toBe(5_000);
+            });
+
+            // Codex P2 on #4458: a turn whose session_end never arrives must not
+            // lend its tokens to the next turn.
+            it("a new user turn from idle drops tokens left by a turn whose session_end never came", () => {
+                const started = update(reconciled(), { type: "TurnStart", at: 300 }).state;
+                expect(started.turnTokens).toBeNull();
+            });
+
+            it("so does the backend's turn-active push starting the next turn", () => {
+                const promoted = update(reconciled(), { type: "ReconcileTurnActive", at: 300, active: true }).state;
+                expect(promoted.turnPhase.kind).toBe("Streaming");
+                expect(promoted.turnTokens).toBeNull();
+                // With no live tokens of its own, its TurnEnd reports the result's figures.
+                const r = update(promoted, { type: "TurnEnd", stats: resultStats });
+                expect(r.state.sessionStats?.added_input_tokens).toBeUndefined();
+            });
+
+            it("a message accepted mid-turn keeps the running turn's tokens", () => {
+                const s = midTurn();
+                const steered = update(s, { type: "TurnStart", at: 150 }).state;
+                expect(steered.turnTokens).toBe(s.turnTokens);
             });
         });
     });

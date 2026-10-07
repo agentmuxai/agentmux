@@ -279,19 +279,18 @@ export interface AgentPaneState {
     /** First significant argument of the active tool (file path, command, etc.).
      *  Cleared alongside currentTool on ToolEnd / TurnEnd / TurnReset. */
     currentToolArg: string | null;
-    turnTokens: TurnTokens | null;
     /**
-     * `turnTokens` as they stood when the turn was ended early, to Idle, by
-     * `ReconcileTurnActive(false)` or the liveness recovery, kept for the
-     * `TurnEnd` that may still follow. srv publishes `turn_active: false` as
-     * soon as it reads the CLI's `result` line, before it forwards the line,
-     * so on a persistent Claude pane the reconcile usually lands first.
-     * Without this, `TurnEnd` found no live tokens and the footer showed
-     * every call's input summed instead of what the turn added.
-     * Cleared by `TurnEnd`, `TurnStart`, `TurnReset` and the next `TokensIn`
-     * (a new turn's call, so that turn's `session_end` never came).
+     * The current turn's live usage, from the stream. Its lifetime follows the
+     * stream's own order: set by `TokensIn`, cleared by that turn's `TurnEnd`.
+     * `ReconcileTurnActive(false)` and the liveness recovery leave it alone:
+     * they don't come from the stream, and srv sends the turn-ended push
+     * before it forwards the `result` line, so the turn's `session_end` (and
+     * sometimes earlier calls) still follow. A new turn established without
+     * a `TurnEnd` (`TurnStart` from idle, a backend turn-active promotion)
+     * clears it, so a lost `session_end` can't credit one turn's tokens to
+     * the next. Hard ends (disconnect, failure, timeouts, reset) clear it.
      */
-    endedTurnTokens: TurnTokens | null;
+    turnTokens: TurnTokens | null;
     /**
      * True for the duration of a turn started specifically to send a
      * manual "/compact" (the composer's "Compact now" button, or a user
@@ -489,7 +488,6 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentTool: null,
     currentToolArg: null,
     turnTokens: null,
-    endedTurnTokens: null,
     pendingCompactTurn: false,
     context: null,
     contextSeedable: true,
