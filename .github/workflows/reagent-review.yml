@@ -41,7 +41,9 @@ jobs:
         github.event.changes.title || github.event.changes.body)) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
        github.event.comment.user.login != 'reagentx-workflow[bot]' &&
+       github.event.comment.user.login != 'muxreview[bot]' &&
        (contains(github.event.comment.body, '@reagentx-workflow') ||
+        contains(github.event.comment.body, '@muxreview') ||
         endsWith(github.event.comment.user.login, '[bot]') ||
         startsWith(github.event.comment.user.login, 'GenericAgentX-')))
     runs-on: ubuntu-latest
