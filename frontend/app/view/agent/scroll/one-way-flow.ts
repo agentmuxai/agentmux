@@ -22,6 +22,9 @@
 
 import { Follower } from "./follower";
 
+/** How often to look again while the user is touching a following pane: just past the 250 ms input window. */
+export const RECHECK_MS = 300;
+
 /** Below this, a move is sub-pixel noise, not something to compensate. */
 export const MOVE_EPSILON_PX = 0.5;
 
@@ -84,6 +87,8 @@ export class OneWayFlow {
     private lastGeo = { scrollHeight: 0, clientHeight: 0 };
     private readonly follower: Follower;
     private disposed = false;
+    /** A re-check scheduled while the user touched a following pane (see onResize). */
+    private recheckTimer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(private readonly host: OneWayHost) {
         this.ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => this.onResize()) : null;
@@ -117,6 +122,7 @@ export class OneWayFlow {
 
     dispose(): void {
         this.disposed = true;
+        clearTimeout(this.recheckTimer);
         this.follower.stop();
         this.ro?.disconnect();
         this.rows.clear();
@@ -212,10 +218,17 @@ export class OneWayFlow {
                 live = el.scrollTop; // perf:allow-layout-read — after the spacer write: one layout, inside the RO callback
                 this.host.wrote({ scrollTop: live, scrollHeight: sh, clientHeight: ch });
             }
+            // The geometry any write from here reports (ReAgent P2 on #4438).
+            this.lastGeo = { scrollHeight: sh, clientHeight: ch };
             this.follower.update(live, sh - ch, ch);
             live = this.follower.position;
         } else {
             this.follower.stop();
+            // Following, but the user is touching the pane: nothing moves now.
+            // Look again once they let go, or content that arrived meanwhile
+            // would sit below the bottom until some unrelated resize
+            // (ReAgent P2 on #4438).
+            if (this.host.following()) this.recheckSoon();
             // Detached: keep only the room the reader's position needs.
             if (this.spacerPx > 0) {
                 const spacer = spacerFor({ spacer: this.spacerPx, wanted: live, clientHeight: ch, scrollHeight: sh });
@@ -228,6 +241,23 @@ export class OneWayFlow {
         this.lastGeo = { scrollHeight: sh, clientHeight: ch };
         this.baseline = this.readVisible(el, ch);
         this.host.observed?.({ scrollTop: live, scrollHeight: sh, clientHeight: ch });
+    }
+
+    /** Run the observation again (the user let go of the pane). Reads layout once, outside a frame. */
+    recheck(): void {
+        clearTimeout(this.recheckTimer);
+        this.recheckTimer = undefined;
+        if (!this.disposed && this.host.following()) this.onResize();
+    }
+
+    /** Look again once the user has let go (RECHECK_MS, repeated while they still hold on). */
+    recheckSoon(): void {
+        if (this.recheckTimer !== undefined || this.disposed) return;
+        this.recheckTimer = setTimeout(() => {
+            this.recheckTimer = undefined;
+            if (this.host.userActive()) this.recheckSoon();
+            else this.recheck();
+        }, RECHECK_MS);
     }
 
     private writeScroll(top: number, delta: number): void {

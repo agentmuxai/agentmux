@@ -12,7 +12,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FOLLOW_TAU_MS, REST_PX, SNAP_FRACTION, stepToward } from "./follower";
-import { OneWayFlow, largestDownwardMove, spacerFor, type OneWayHost } from "./one-way-flow";
+import { OneWayFlow, RECHECK_MS, largestDownwardMove, spacerFor, type OneWayHost } from "./one-way-flow";
 
 describe("stepToward", () => {
     const base = { pos: 0, target: 100, clientHeight: 600, dtMs: 16, reducedMotion: false };
@@ -310,6 +310,33 @@ describe("OneWayFlow", () => {
         fire();
         expect(m.top).toBe(top);
         expect(frames.length).toBe(0);
+    });
+
+    it("content that arrived while the user touched the pane is followed once they let go", () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        try {
+            const { m, flow, fire, setUser } = setup();
+            setUser(true);
+            flow.observeRow(m.add(150)); // the last row of a turn, under a held pointer
+            fire();
+            expect(frames.length).toBe(0);
+            setUser(false);
+            vi.advanceTimersByTime(RECHECK_MS);
+            runFrames();
+            expect(m.max() - m.top).toBeLessThan(REST_PX);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("an observation with a small gap writes nothing until a frame runs", () => {
+        const { m, flow, fire } = setup();
+        const writes = m.writes.length;
+        flow.observeRow(m.add(40));
+        fire();
+        expect(m.writes.length).toBe(writes);
+        runFrames(1);
+        expect(m.writes.length).toBeGreaterThan(writes);
     });
 
     it("does nothing while detached, except let go of room below the viewport", () => {

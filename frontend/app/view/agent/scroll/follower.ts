@@ -80,10 +80,11 @@ export class Follower {
         this.target = Math.max(pos, target);
         this.clientHeight = clientHeight;
         if (!this.host.active()) return this.stop();
-        const next = stepToward({ pos, target: this.target, clientHeight, dtMs: 0, reducedMotion: this.host.reducedMotion() });
-        if (next > pos) {
+        const gap = this.target - pos;
+        if (gap >= REST_PX && (this.host.reducedMotion() || gap > clientHeight * SNAP_FRACTION)) {
             // A snap (reduced motion, or more than most of a viewport): land now, before paint.
-            this.write(next);
+            // Anything smaller is left to the frames: no step here (ReAgent P2 on #4438).
+            this.write(this.target);
         }
         if (this.target - this.pos < REST_PX) return this.stop();
         if (this.raf === null) {

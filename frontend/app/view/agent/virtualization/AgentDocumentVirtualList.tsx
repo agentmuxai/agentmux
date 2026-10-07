@@ -1520,6 +1520,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             mark();
         };
         const onPointerUp = (): void => {
+            // Let go of the pane: look again shortly (a timer, not a layout
+            // read in this handler) in case content arrived meanwhile.
+            if (pointerHeld) oneWayFlow?.recheckSoon();
             pointerHeld = false;
             if (!scrollbarPointerHeld) return;
             scrollbarPointerHeld = false;
