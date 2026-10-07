@@ -37,6 +37,9 @@ export interface ToolDescriptor {
     label?: (name: string, detail: string) => string | null;
     /** The call's main argument for the header: path, command, query, host/path. */
     detail?: (params: Record<string, any>) => string;
+    /** The detail is a file path: the row cuts it from the left ("…/src/a.ts"),
+     *  so the file name stays in view. */
+    detailIsPath?: boolean;
     /** "content": expanded by default once finished (SPEC_AGENT_PANE_ROW_DISCLOSURE). */
     presentation?: "panel" | "content";
     /** Where the preview box starts: following the latest output, or at the top. */
@@ -100,11 +103,12 @@ const webLabel = (name: string, detail: string): string | null => (detail ? null
 // (see resolveFact). The catch-all is last.
 export const TOOL_DESCRIPTORS: readonly ToolDescriptor[] = [
     // Documents: read from the top.
-    { names: ["Read", "read", "read_file"], icon: "📖", detail: pathOf, scroll: "top" },
+    { names: ["Read", "read", "read_file"], icon: "📖", detail: pathOf, detailIsPath: true, scroll: "top" },
     {
         names: ["Write", "write", "write_file"],
         icon: "📝",
         detail: pathOf,
+        detailIsPath: true,
         scroll: "top",
         pill: (r) =>
             typeof r.bytesWritten === "number"
@@ -115,6 +119,7 @@ export const TOOL_DESCRIPTORS: readonly ToolDescriptor[] = [
         names: ["Edit", "edit", "str_replace_editor", "multiedit"],
         icon: "✏️",
         detail: pathOf,
+        detailIsPath: true,
         scroll: "top",
         pill: (r) =>
             typeof r.linesChanged === "number"
@@ -185,6 +190,7 @@ export const TOOL_DESCRIPTORS: readonly ToolDescriptor[] = [
         icon: "🛠️",
         label: (name) => name,
         detail: () => "",
+        detailIsPath: false,
         presentation: "panel",
         scroll: "follow",
         pill: () => null,
@@ -247,6 +253,11 @@ export function toolDetail(name: string, params: Record<string, any> | undefined
 /** A node's header detail: its raw name's, else its coarse kind's. */
 export function toolDetailOf(node: Pick<ToolNode, "tool" | "toolName" | "params">): string {
     return nodeFact(node, "detail")((node.params as Record<string, any>) ?? {});
+}
+
+/** Whether a node's header detail is a file path (see `ToolDescriptor.detailIsPath`). */
+export function toolDetailIsPath(node: Pick<ToolNode, "tool" | "toolName">): boolean {
+    return nodeFact(node, "detailIsPath");
 }
 
 export function toolLabel(name: string, detail: string): string | null {

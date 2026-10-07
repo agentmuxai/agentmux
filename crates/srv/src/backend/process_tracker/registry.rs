@@ -44,8 +44,12 @@ pub fn global() -> Option<Arc<AgentProcessRegistry>> {
 /// rejects the PID, since this is opportunistic enrichment, not a liveness signal on
 /// its own (see `broker::process::ProcessStatus`'s own doc comment).
 pub fn track_spawned(block_id: &str, pid: u32) {
+    track(block_id, pid, false);
+}
+
+fn track(block_id: &str, pid: u32, agent: bool) {
     let Some(registry) = global() else { return };
-    if let Err(e) = registry.assign(block_id, pid) {
+    if let Err(e) = registry.assign_kind(block_id, pid, agent) {
         tracing::warn!(
             block_id = %block_id,
             pid = pid,
@@ -72,6 +76,110 @@ pub fn track_adopted(block_id: &str, pid: u32) {
     }
 }
 
+/// Make a child about to be spawned for `block_id` join its tracker before it
+/// execs, so nothing it forks escapes between spawn and [`track_spawned`]
+/// (Linux: the agent's cgroup). `create`: start the block's tracker if it has
+/// none (an agent's own CLI); otherwise join only an existing one (`Shell()`,
+/// `!cmd`, like [`track_adopted`]). Still call `track_spawned*` /
+/// `track_adopted` after the spawn: that records the PID and covers platforms
+/// with no pre-exec placement.
+pub fn place_spawn(block_id: &str, cmd: &mut tokio::process::Command, create: bool) {
+    #[cfg(target_os = "linux")]
+    if let Some(target) = spawn_target(block_id, create) {
+        super::cgroup_linux::join_before_exec(cmd, target);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (block_id, cmd, create);
+}
+
+/// How a spawn joins its block's tracker (see [`spawn_tracked`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Join {
+    /// The agent's own process: starts the block's tracker if needed and is
+    /// recorded as a root ([`track_spawned_agent`]).
+    Agent,
+    /// Started on an agent's behalf (`Shell()`, `!cmd`): joins an existing
+    /// tracker only ([`track_adopted`]).
+    Adopted,
+}
+
+/// Spawn `cmd` for `block_id` already inside the block's tracker, so nothing
+/// it starts can escape between spawn and assignment: on Linux it joins the
+/// cgroup before exec ([`place_spawn`]); on Windows it starts suspended, is
+/// assigned to the job, then resumed. The one way an agent-side tokio spawn
+/// should start (the Codex App Server, which spawns internally, uses
+/// [`place_spawn`] and [`track_spawned_agent`]).
+pub fn spawn_tracked(block_id: &str, cmd: &mut tokio::process::Command, join: Join) -> std::io::Result<tokio::process::Child> {
+    place_spawn(block_id, cmd, join == Join::Agent);
+    #[cfg(windows)]
+    let suspended = start_suspended(block_id, cmd, join == Join::Agent);
+    let mut child = cmd.spawn()?;
+    if let Some(pid) = child.id() {
+        match join {
+            Join::Agent => track_spawned_agent(block_id, pid),
+            Join::Adopted => track_adopted(block_id, pid),
+        }
+        // Resumed whether or not the assignment worked: a child left
+        // suspended would never run.
+        #[cfg(windows)]
+        if suspended {
+            if let Err(e) = agentmux_common::win32::resume_main_thread(pid) {
+                let _ = child.start_kill();
+                return Err(std::io::Error::other(format!("resume suspended child {pid}: {e}")));
+            }
+        }
+    }
+    Ok(child)
+}
+
+/// Make `cmd` start suspended when the block has (or, `create`, gets) a Job
+/// Object to put it in first. Agent-side spawns set no creation flag but
+/// `CREATE_NO_WINDOW`, which this keeps.
+#[cfg(windows)]
+fn start_suspended(block_id: &str, cmd: &mut tokio::process::Command, create: bool) -> bool {
+    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+    let Some(registry) = global() else { return false };
+    if block_id.is_empty() {
+        return false;
+    }
+    let tracker = if create {
+        Some(registry.ensure_tracker_kind(block_id, true))
+    } else {
+        registry.inner.lock().get(block_id).map(|e| e.tracker.clone())
+    };
+    if !tracker.is_some_and(|t| t.confidence() == TrackingConfidence::High) {
+        return false;
+    }
+    cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    true
+}
+
+/// [`place_spawn`] for an agent's PTY spawn, which has no pre-exec hook: the
+/// command is wrapped to join first (`cgroup_linux::join_before_exec_pty`).
+pub fn place_pty_spawn(block_id: &str, cmd: &mut portable_pty::CommandBuilder) {
+    #[cfg(target_os = "linux")]
+    if let Some(target) = spawn_target(block_id, true) {
+        super::cgroup_linux::join_before_exec_pty(cmd, target);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (block_id, cmd);
+}
+
+/// Where a spawn for `block_id` joins its agent's tree, if anywhere.
+#[cfg(target_os = "linux")]
+fn spawn_target(block_id: &str, create: bool) -> Option<std::path::PathBuf> {
+    if block_id.is_empty() {
+        return None;
+    }
+    let registry = global()?;
+    let tracker = if create {
+        Some(registry.ensure_tracker_kind(block_id, true))
+    } else {
+        registry.inner.lock().get(block_id).map(|e| e.tracker.clone())
+    };
+    tracker?.spawn_target()
+}
+
 /// Settings key: run agents' process trees at below-normal CPU priority so
 /// their builds and tests yield to AgentMux (and the user's foreground apps)
 /// under contention, while still using every idle core. Default on.
@@ -81,7 +189,7 @@ pub const SETTING_AGENT_BELOW_NORMAL_PRIORITY: &str = "agent:belownormalpriority
 /// priority policy to the block's whole tree. Terminal panes a human types in
 /// keep calling [`track_spawned`] and are never deprioritized.
 pub fn track_spawned_agent(block_id: &str, pid: u32) {
-    track_spawned(block_id, pid);
+    track(block_id, pid, true);
     let Some(registry) = global() else { return };
     let on = registry.agent_below_normal_priority();
     if let Err(e) = registry.set_below_normal_priority(block_id, on) {
@@ -143,11 +251,20 @@ impl AgentProcessRegistry {
     /// twice for the same block returns the existing tracker so the
     /// job survives controller re-creation (e.g. on /clear).
     pub fn ensure_tracker(&self, block_id: &str) -> Arc<dyn TrackerHandle> {
+        self.ensure_tracker_kind(block_id, false)
+    }
+
+    /// [`ensure_tracker`](Self::ensure_tracker) for an agent's block
+    /// (`agent`) or a terminal a person types in. The kind matters on every
+    /// Unix, where an agent gets a cgroup or the best-effort scan tracker (its
+    /// whole tree ends with it) and a terminal keeps Unix semantics: what the
+    /// user `nohup`s outlives it.
+    pub fn ensure_tracker_kind(&self, block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
         let mut map = self.inner.lock();
         if let Some(entry) = map.get(block_id) {
             return entry.tracker.clone();
         }
-        let tracker = new_tracker(block_id);
+        let tracker = new_tracker(block_id, agent);
         map.insert(
             block_id.to_string(),
             RegistryEntry {
@@ -166,8 +283,10 @@ impl AgentProcessRegistry {
 
     /// Assign a freshly-spawned agent/shell PID to `block_id`'s tracker
     /// (creating it if needed) and remember it as a root.
-    pub fn assign(&self, block_id: &str, pid: u32) -> Result<(), String> {
-        let tracker = self.ensure_tracker(block_id);
+    /// The tracker is an agent's or a terminal's (see
+    /// [`ensure_tracker_kind`](Self::ensure_tracker_kind)).
+    pub fn assign_kind(&self, block_id: &str, pid: u32, agent: bool) -> Result<(), String> {
+        let tracker = self.ensure_tracker_kind(block_id, agent);
         tracker.assign_process(pid)?;
         if let Some(entry) = self.inner.lock().get_mut(block_id) {
             entry.roots.insert(pid);
@@ -187,8 +306,8 @@ impl AgentProcessRegistry {
     }
 
     /// Drop a block's tracker — call when the pane closes. The tracker's
-    /// Drop impl kills the whole process tree (via `KILL_ON_JOB_CLOSE`
-    /// on Windows, `cgroup.kill` on Linux, `killpg` on macOS).
+    /// Drop impl kills the whole process tree (`KILL_ON_JOB_CLOSE` on
+    /// Windows, `cgroup.kill` on Linux; nothing on the stub).
     pub fn remove(&self, block_id: &str) {
         let mut map = self.inner.lock();
         if map.remove(block_id).is_some() {
@@ -228,6 +347,21 @@ impl AgentProcessRegistry {
             .get(block_id)
             .map(|e| e.tracker.confidence())
             .unwrap_or(TrackingConfidence::None)
+    }
+
+    /// Ask everything in `block_id`'s tree to exit (SIGTERM on Linux), the
+    /// graceful step before [`remove`](Self::remove) kills what's left.
+    /// `false` when nothing was asked (no tracker, or no graceful signal).
+    pub fn terminate(&self, block_id: &str) -> bool {
+        let tracker = self.inner.lock().get(block_id).map(|e| e.tracker.clone());
+        tracker.is_some_and(|t| t.terminate())
+    }
+
+    /// Every process in `block_id`'s tree, plumbing included; 0 without a
+    /// tracker.
+    pub fn member_count(&self, block_id: &str) -> usize {
+        let tracker = self.inner.lock().get(block_id).map(|e| e.tracker.clone());
+        tracker.map_or(0, |t| t.member_count())
     }
 
     /// Kill the entire process tree for a given block. Returns `true`
@@ -421,7 +555,7 @@ mod tests {
 
         let registry = AgentProcessRegistry::new(None);
         registry
-            .assign("test-block-real-spawn", pid)
+            .assign_kind("test-block-real-spawn", pid, false)
             .expect("assign should succeed for a live child we just spawned");
 
         let raw = registry.ensure_tracker("test-block-real-spawn").list_members();
@@ -478,7 +612,7 @@ mod tests {
         };
         let (mut agent, mut shell) = (spawn(), spawn());
         let registry = AgentProcessRegistry::new(None);
-        registry.assign("test-block-adopt", agent.id()).expect("assign the agent root");
+        registry.assign_kind("test-block-adopt", agent.id(), false).expect("assign the agent root");
         assert_eq!(registry.adopt("test-block-adopt", shell.id()), Ok(true));
 
         let listed = registry.list_block("test-block-adopt");
@@ -495,5 +629,49 @@ mod tests {
         assert!(shell.try_wait().ok().flatten().is_some(), "releasing the agent's tracker must end the adopted shell");
         let _ = agent.kill();
         let _ = agent.wait();
+    }
+
+    /// `spawn_tracked`'s Windows path: a child started suspended is in the
+    /// job before it runs, and runs once resumed (it never stays stuck).
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn a_suspended_child_is_assigned_then_resumed_and_runs() {
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        let tracker = super::super::windows::JobObjectTracker::new("test-suspended").unwrap();
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.args(["/C", "exit 7"]).creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        let mut child = cmd.spawn().expect("spawn suspended");
+        let pid = child.id().unwrap();
+        tracker.assign_process(pid).unwrap();
+        assert!(tracker.list_members().iter().any(|p| p.pid == pid), "in the job before it runs");
+        agentmux_common::win32::resume_main_thread(pid).unwrap();
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+            .await
+            .expect("the resumed child ran and exited")
+            .unwrap();
+        assert_eq!(status.code(), Some(7));
+    }
+
+    /// After `kill_tree` the job stays usable: a respawned process is still
+    /// assigned and listed.
+    #[test]
+    #[cfg(windows)]
+    fn a_job_still_tracks_after_kill_tree() {
+        let spawn = || {
+            std::process::Command::new("cmd")
+                .args(["/C", "ping -n 30 127.0.0.1 > nul"])
+                .spawn()
+                .expect("failed to spawn a disposable test child")
+        };
+        let tracker = super::super::windows::JobObjectTracker::new("test-kill-keeps-job").unwrap();
+        let mut first = spawn();
+        tracker.assign_process(first.id()).unwrap();
+        tracker.kill_tree();
+        let _ = first.wait();
+        let mut second = spawn();
+        tracker.assign_process(second.id()).expect("the job still accepts processes");
+        assert!(tracker.list_members().iter().any(|p| p.pid == second.id()));
+        tracker.kill_tree();
+        let _ = second.wait();
     }
 }

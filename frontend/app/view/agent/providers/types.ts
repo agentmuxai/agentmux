@@ -61,7 +61,7 @@ export interface ProviderDefinition {
     styledOutputFormat: "claude-stream-json" | "qwen-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp";
     // "oauth": a per-account login AgentMux isolates and binds to the agent
     // (launch is blocked until an account is chosen). "api-key": a key from
-    // the identity bundle. "cli-managed": the CLI keeps its own sign-in for
+    // the agent's bound account. "cli-managed": the CLI keeps its own sign-in for
     // the whole machine (Antigravity's `agy`), so there is nothing to bind;
     // the auth check still runs.
     authType: "oauth" | "api-key" | "cli-managed";

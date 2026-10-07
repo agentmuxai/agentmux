@@ -387,3 +387,30 @@ describe("buildSettingsWithHooks — SessionStart memory delivery", () => {
         expect(SESSION_START_HOOK_PARTS).toBe(Number(match[1]));
     });
 });
+
+describe("buildSettingsWithHooks — attribution", () => {
+    const attribution = (settings?: string) => JSON.parse(buildSettingsWithHooks(settings, undefined)!).attribution;
+
+    it("hides Claude Code's commit and PR attribution by default", () => {
+        expect(attribution()).toEqual({ commit: "", pr: "" });
+        expect(attribution(JSON.stringify({ model: "opus" }))).toEqual({ commit: "", pr: "" });
+    });
+
+    it("keeps an agent's own attribution", () => {
+        expect(attribution(JSON.stringify({ attribution: { commit: "Agent: Aria", pr: "Agent: Aria" } }))).toEqual({
+            commit: "Agent: Aria",
+            pr: "Agent: Aria",
+        });
+    });
+
+    it("still hides a field the agent leaves out, rather than Claude Code's default", () => {
+        expect(attribution(JSON.stringify({ attribution: { commit: "Agent: Aria" } }))).toEqual({ commit: "Agent: Aria", pr: "" });
+    });
+
+    it("replaces a malformed attribution instead of passing it through", () => {
+        for (const malformed of [null, [], "text", { commit: null, pr: 7 }]) {
+            expect(attribution(JSON.stringify({ attribution: malformed }))).toEqual({ commit: "", pr: "" });
+        }
+        expect(attribution(JSON.stringify({ attribution: { commit: "Agent: Aria", pr: false } }))).toEqual({ commit: "Agent: Aria", pr: "" });
+    });
+});

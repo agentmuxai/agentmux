@@ -30,7 +30,7 @@ struct SeedManifest {
     memories: Vec<SeedMemory>,
 }
 
-/// A memory bundle in the seed manifest.
+/// A bundle in the seed manifest.
 #[derive(Debug, Deserialize)]
 struct SeedMemory {
     id: String,
@@ -241,7 +241,7 @@ pub fn seed_agents(mstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
     Ok(SeedReport { created, skipped })
 }
 
-/// Seed memory bundles from the manifest. Skips any bundle whose ID already
+/// Seed bundles from the manifest. Skips any bundle whose ID already
 /// exists — this is a one-time seed, not an upsert on every startup.
 fn seed_memories(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
     let existing = mstore.bundle_list()?;
@@ -285,7 +285,7 @@ fn seed_memories(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
                     id = %mem_def.id,
                     name = %mem_def.name,
                     error = %e,
-                    "agent seed: skipping memory bundle due to upsert error (name collision?)"
+                    "agent seed: skipping bundle due to upsert error (name collision?)"
                 );
             }
         }
@@ -337,11 +337,11 @@ pub fn auto_seed_on_startup(mstore: &Arc<Store>) {
         Err(e) => tracing::error!("agent seed: failed to count agents: {e}"),
     }
 
-    // Seed memory bundles once — skips any bundle whose ID already exists.
+    // Seed bundles once — skips any bundle whose ID already exists.
     if !manifest.memories.is_empty() {
         match seed_memories(mstore, &manifest) {
             Ok(0) => {}
-            Ok(n) => tracing::info!("agent seed: seeded {n} memory bundles"),
+            Ok(n) => tracing::info!("agent seed: seeded {n} bundles"),
             Err(e) => tracing::error!("agent seed: failed to seed memories: {e}"),
         }
     }

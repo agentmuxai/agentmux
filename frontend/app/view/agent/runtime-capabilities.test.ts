@@ -107,7 +107,8 @@ describe("permissionModeText", () => {
         expect(permissionModeText("plan", false).label).toBe("Plan (read-only)");
         expect(permissionModeText("default", false).note).toMatch(/refused/);
         expect(permissionModeText("default", false).label).not.toMatch(/prompt all/i);
-        expect(permissionModeText("acceptEdits", false).note).toMatch(/edits are allowed.*refused/);
+        expect(permissionModeText("acceptEdits", false).note).toMatch(/edits allowed.*refused/);
+        expect(permissionModeText("acceptEdits", false).detail).toMatch(/edits are allowed.*refused/);
         expect(permissionModeText("auto", false).label).toBe("Auto (AI classifier)");
     });
 
@@ -116,17 +117,36 @@ describe("permissionModeText", () => {
             const t = permissionModeText(m, true);
             expect(t.label, m).not.toMatch(/prompt all|AI classifier|read-only/i);
         }
-        expect(permissionModeText("default", true).note).toMatch(/allowed automatically/);
-        expect(permissionModeText("acceptEdits", true).note).toMatch(/allowed automatically/);
+        expect(permissionModeText("default", true).note).toMatch(/auto-approved/);
+        expect(permissionModeText("acceptEdits", true).note).toMatch(/auto-approved/);
+        expect(permissionModeText("default", true).detail).toMatch(/allowed automatically/);
+        expect(permissionModeText("acceptEdits", true).detail).toMatch(/allowed automatically/);
     });
 
     it("Plan on a persistent agent does NOT stop edits: writes are asked about and allowed (observed)", () => {
         // The first wording said "read-only while planning". Running the CLI showed a write in
         // plan mode is ASKED about, not refused, and an "allow" lets it happen.
-        const note = permissionModeText("plan", true).note ?? "";
+        const { note = "", detail = "" } = permissionModeText("plan", true);
         expect(note).toMatch(/does NOT stop edits/);
         expect(note).not.toMatch(/read-only/i);
-        expect(note).toMatch(/plan is approved automatically/);
+        expect(note).toMatch(/plan auto-approved/);
+        expect(detail).toMatch(/does NOT stop edits/);
+        expect(detail).toMatch(/plan is approved automatically/);
+    });
+
+    // The runtime panel shows the note under the mode; the full text is the row's
+    // tooltip (REPORT_THEME_MENU_RUNTIME_PANEL_TOOL_PREVIEW_TWEAKS_2026_10_07.md §2).
+    // A note that grows past this length overflows the panel again.
+    it("every note is short, and its full explanation travels with it", () => {
+        for (const mode of MODES) {
+            for (const autoAnswers of [true, false]) {
+                const t = permissionModeText(mode, autoAnswers);
+                if (!t.note) continue;
+                expect(t.note.length, `${mode}/${autoAnswers}: "${t.note}"`).toBeLessThanOrEqual(40);
+                expect(t.detail, `${mode}/${autoAnswers}`).toBeTruthy();
+                expect(t.detail!.length).toBeGreaterThan(t.note.length);
+            }
+        }
     });
 
     it("Bypass says nothing false either way, so it needs no note", () => {

@@ -877,6 +877,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // CRASH_2026_06_29 P1). Default production filter is info, so
                 // this is now suppressed unless RUST_LOG=debug is set.
                 tracing::debug!(oref = %oref_str, keys = ?meta_keys, "SetMeta");
+                crate::server::browser_owner::guard_client_meta_write(&oref_str, &cmd.meta)?;
                 update_object_meta(&mstore, &oref_str, &cmd.meta)?;
                 // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE): the
                 // frontend writes term:zoom via this WebSocket path, not the HTTP

@@ -123,7 +123,7 @@ export function useContinueOrNewMode(opts: UseContinueOrNewModeOpts) {
         // backend resolution step. Forwarding one of these as accountId
         // causes a real FOREIGN KEY failure in linkagentidentity (see
         // identity-carry-over.ts's realAccountIdOrEmpty). A UUID-shape
-        // check alone isn't enough — a pre-#1624-PR-C identity-bundle id
+        // check alone isn't enough — a pre-#1624-PR-C `db_identity_bundles` id
         // was also UUID-formatted, just not an account id — so this cross-
         // checks against a fresh account fetch (reagentx P2 on #2464,
         // flagging this call site was still on the shape-only check while

@@ -154,6 +154,9 @@ export class BrowserViewModel {
     meta: Accessor<MetaType | undefined>;
     private ctx: PaneTabHostContext;
     showControlsAtom: Accessor<boolean>;
+    /** The agent driving this pane, when an agent opened it with `OpenBrowser`
+     *  (`browser:owner_agent`, written by srv; SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
+    driverAgentAtom: Accessor<string | undefined>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -360,6 +363,10 @@ export class BrowserViewModel {
                 return v;
             });
             this.showControlsAtom = createMemo(() => (this.meta()?.["browser:show_controls"] as boolean | undefined) ?? true);
+            this.driverAgentAtom = createMemo(() => {
+                const v = this.meta()?.["browser:owner_agent"];
+                return typeof v === "string" && v.trim() ? v.trim() : undefined;
+            });
             return dispose;
         });
 
@@ -745,6 +752,14 @@ export class BrowserViewModel {
         // Windows-level keyboard focus to the pane's HWND.
         getApi().browserPanes.focus(this.blockId).catch(() => {});
         return true;
+    }
+
+    /** The human takes the pane back from the agent driving it: clearing
+     *  `browser:owner_agent` ends the agent's control at once, since srv's
+     *  owner check needs both its own record and this key
+     *  (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
+    takeOver(): Promise<void> {
+        return this.ctx.setMeta({ "browser:owner_agent": null });
     }
 
     dispose(): void {

@@ -98,7 +98,7 @@ pub struct CommandListNamedAgentsData {
 /// One row of the launch modal's "Continue agent" dropdown. Joins
 /// `db_agent_instances` with `db_agent_definitions` (for the definition's
 /// display name + provider), `db_agent_identity_links`/`db_accounts`
-/// (for the identity display name), and `db_bundles` (for memory bundle
+/// (for the identity display name), and `db_bundles` (for bundle
 /// names) so the frontend renders without further lookups.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamedAgentRow {

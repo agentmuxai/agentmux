@@ -143,6 +143,10 @@ pub struct TeardownReport {
     pub stop_error: Option<String>,
     /// The container agent's container that was stopped, if any.
     pub stopped_container: Option<String>,
+    /// Running Docker Compose containers from the agent's working directory,
+    /// left running and reported (`compose_containers_left`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub containers_left: Vec<String>,
     /// Processes from `before` still running after the teardown and one more
     /// forced kill each (spec §6.2 step 8). Empty is the goal.
     pub survivors: Vec<agent_resources::ProcessEntry>,
@@ -360,6 +364,7 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
             if policy.stop_container {
                 report.stopped_container = stop_container(state, block_id, &before, deadline).await;
             }
+            report.containers_left = compose_containers_left(state, block_id, &before, deadline).await;
         }
     }
     report
@@ -395,6 +400,48 @@ async fn stop_container(
             None
         }
     }
+}
+
+/// Running Docker Compose containers started from the agent's working
+/// directory (`docker compose up -d`): they belong to the Docker daemon, not
+/// the agent's process tree, so no tracker ends them. Reported, not stopped:
+/// a person may be using them too. Skipped when the agent works in `/` or
+/// the home directory, where every project would match.
+async fn compose_containers_left(
+    state: &AppState,
+    block_id: &str,
+    before: &AgentResources,
+    deadline: std::time::Instant,
+) -> Vec<String> {
+    let dir = std::path::PathBuf::from(&before.cwd);
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from);
+    if before.cwd.is_empty() || dir.parent().is_none() || home.as_deref() == Some(dir.as_path()) {
+        return Vec::new();
+    }
+    let Some(cm) = state.container_manager.get().await else { return Vec::new() };
+    // A daemon that accepts but never answers must not hold up the close.
+    let wait = deadline.saturating_duration_since(std::time::Instant::now()).max(std::time::Duration::from_secs(1));
+    let names = match tokio::time::timeout(wait, cm.running_compose_containers_under(&dir)).await {
+        Ok(Ok(names)) => names,
+        Ok(Err(e)) => {
+            tracing::warn!(block_id = %block_id, error = %e, "agent_teardown: listing Compose containers failed");
+            return Vec::new();
+        }
+        Err(_) => {
+            tracing::warn!(block_id = %block_id, "agent_teardown: Docker didn't list Compose containers in time");
+            return Vec::new();
+        }
+    };
+    for name in &names {
+        publish_shutdown(
+            state,
+            block_id,
+            "container",
+            format!("container {name} (Docker Compose, in this agent's folder) is still running"),
+            serde_json::json!({ "container": name, "outcome": "left" }),
+        );
+    }
+    names
 }
 
 /// Stop the agent's running `run_in_background` tasks, each with its process
@@ -461,6 +508,9 @@ async fn close_cli(
     };
     let (step, text, extra) = exit_line(&label, &outcome, started.elapsed());
     publish_shutdown(state, block_id, step, text, extra);
+    // 4b. What it started gets the same chance: SIGTERM to its whole tree,
+    //     then a short wait, before the release below kills what's left.
+    terminate_members(state, block_id, deadline).await;
     // 5. Only now drop the process tracker — anything the agent itself
     //    started dies with it, but the agent got to exit first. Whatever is
     //    still alive at this point is what the release kills.
@@ -483,7 +533,7 @@ async fn close_cli(
     }
     // 5b. Verify: everything in the snapshot is gone, else force it once
     //     more and report what's left.
-    let survivors = verify_gone(&before.processes).await;
+    let mut survivors = verify_gone(&before.processes).await;
     for p in &survivors {
         publish_shutdown(
             state,
@@ -492,6 +542,19 @@ async fn close_cli(
             format!("still running: {} (pid {})", short_command(&p.command), p.pid),
             serde_json::json!({ "process": { "pid": p.pid, "name": short_command(&p.command), "outcome": "survived" } }),
         );
+    }
+    // 5c. What still carries the agent's env tag got out of its tracker
+    //     (started through systemd or launchd, or a best-effort miss).
+    //     Reported, not killed: it may be an app the agent opened for the user.
+    for p in escaped(block_id, &survivors).await {
+        publish_shutdown(
+            state,
+            block_id,
+            "survivor",
+            format!("still running, outside the agent's tracking: {} (pid {})", short_command(&p.command), p.pid),
+            serde_json::json!({ "process": { "pid": p.pid, "name": short_command(&p.command), "outcome": "escaped" } }),
+        );
+        survivors.push(p);
     }
     blockcontroller::mark_closing_stopped(block_id);
     crate::backend::container_credential::revoke_block(block_id);
@@ -509,6 +572,66 @@ async fn close_cli(
     );
     survivors
 }
+
+/// The longest wait after SIGTERM to what an agent started; never past the
+/// teardown's deadline.
+const MEMBERS_GRACE_MAX: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Ask everything in the block's tree to exit and wait until it has, or the
+/// grace passes. Returns at once where the tracker has no graceful signal
+/// (Windows), nothing is left, or the deadline has passed (the release's
+/// kill follows straight away).
+async fn terminate_members(state: &AppState, block_id: &str, deadline: std::time::Instant) {
+    let grace = deadline.saturating_duration_since(std::time::Instant::now()).min(MEMBERS_GRACE_MAX);
+    if grace.is_zero() {
+        return;
+    }
+    let registry = state.process_tracker.clone();
+    let id = block_id.to_string();
+    let count = move || {
+        let (r, id) = (registry.clone(), id.clone());
+        tokio::task::spawn_blocking(move || r.member_count(&id))
+    };
+    if count().await.unwrap_or(0) == 0 {
+        return;
+    }
+    let (r, id) = (state.process_tracker.clone(), block_id.to_string());
+    if !tokio::task::spawn_blocking(move || r.terminate(&id)).await.unwrap_or(false) {
+        return;
+    }
+    let until = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < until {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if count().await.unwrap_or(0) == 0 {
+            return;
+        }
+    }
+}
+
+/// Live processes tagged with `block_id` (`process_tracker::scan`) that
+/// aren't already in `known`. Two scans [`ESCAPE_SETTLE`] apart: one the
+/// tracker's kill is still ending shows in the first only.
+async fn escaped(block_id: &str, known: &[agent_resources::ProcessEntry]) -> Vec<agent_resources::ProcessEntry> {
+    let scan = |id: String| async move {
+        tokio::task::spawn_blocking(move || crate::backend::process_tracker::scan::tagged(&id))
+            .await
+            .unwrap_or_default()
+    };
+    let first = scan(block_id.to_string()).await;
+    if first.is_empty() {
+        return Vec::new();
+    }
+    tokio::time::sleep(ESCAPE_SETTLE).await;
+    scan(block_id.to_string())
+        .await
+        .into_iter()
+        .filter(|p| first.iter().any(|f| f.pid == p.pid && f.started_at_ms == p.started_at_ms))
+        .filter(|p| !known.iter().any(|k| k.pid == p.pid))
+        .map(|p| agent_resources::ProcessEntry { pid: p.pid, command: p.command, started_at_ms: p.started_at_ms })
+        .collect()
+}
+
+const ESCAPE_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// How long the verify step waits for the tracker's release to take effect,
 /// before and after its one forced kill per survivor.

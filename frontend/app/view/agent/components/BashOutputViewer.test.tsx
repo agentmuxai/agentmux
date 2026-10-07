@@ -15,7 +15,7 @@ afterEach(() => cleanup());
 describe("BashOutputViewer", () => {
     it("follows a result that changes while mounted", () => {
         const [result, setResult] = createSignal<BashResult | undefined>(undefined);
-        const { container } = render(() => <BashOutputViewer params={{ command: "npm test" }} result={result()} />);
+        const { container } = render(() => <BashOutputViewer result={result()} />);
         expect(container.querySelector(".agent-bash-output")).toBeNull();
 
         setResult({ stdout: "<exited 1 in 2.00s>\nfirst failure", stderr: "", exitCode: undefined as any });
@@ -29,10 +29,22 @@ describe("BashOutputViewer", () => {
 
     it("strips the bashwrap prefix and shows stderr separately", () => {
         const { container } = render(() => (
-            <BashOutputViewer params={{ command: "x" }} result={{ stdout: "<exited 2 in 0.10s>\nout", stderr: "err", exitCode: undefined as any }} />
+            <BashOutputViewer result={{ stdout: "<exited 2 in 0.10s>\nout", stderr: "err", exitCode: undefined as any }} />
         ));
         expect(container.querySelector(".agent-bash-output")!.textContent).toBe("out");
         expect(container.querySelector(".agent-bash-stderr")!.textContent).toBe("err");
         expect(container.querySelector(".agent-bash-exit.exit-error")).not.toBeNull();
+    });
+
+    it("prints the output, not the command: the tool row and its hover show that", () => {
+        const { container } = render(() => <BashOutputViewer result={{ stdout: "built ok", stderr: "", exitCode: 0 } as any} />);
+        expect(container.querySelector(".agent-bash-cmd")).toBeNull();
+        expect(container.querySelector(".agent-bash-output")!.textContent).toBe("built ok");
+    });
+
+    it("says No output when the call printed nothing", () => {
+        const { container } = render(() => <BashOutputViewer result={{ stdout: "", stderr: "", exitCode: 0 } as any} />);
+        expect(container.querySelector(".agent-bash-no-output")!.textContent).toBe("No output");
+        expect(container.querySelector(".agent-bash-exit")!.textContent).toBe("Exit code: 0");
     });
 });

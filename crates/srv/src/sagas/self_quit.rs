@@ -154,6 +154,9 @@ pub struct QuitSummary {
     /// Processes still running after the quit, as `name (pid N)`
     /// (agent teardown spec §6.2 step 8, §7.3). Empty is the goal.
     pub survivors: Vec<String>,
+    /// Running Docker Compose containers from the agent's folder, left
+    /// running (`agent_teardown::compose_containers_left`).
+    pub containers_left: Vec<String>,
 }
 
 // Moved to the one inventory (spec §6.1); re-exported for existing callers.
@@ -193,6 +196,7 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
     let report = report.unwrap_or_default();
     let (released_claims, stopped_shells, crons) =
         (report.released_claims, report.stopped_shells, report.crons_targeting.clone());
+    let containers_left = report.containers_left.clone();
     let survivors: Vec<String> = report
         .survivors
         .iter()
@@ -226,7 +230,7 @@ pub async fn run_with(state: &AppState, block_id: &str, origin: QuitOrigin, deta
         "self-quit"
     );
     result?;
-    Ok(QuitSummary { status: "quit", agent, released_claims, stopped_shells, crons_targeting: crons, survivors })
+    Ok(QuitSummary { status: "quit", agent, released_claims, stopped_shells, crons_targeting: crons, survivors, containers_left })
 }
 
 #[cfg(test)]

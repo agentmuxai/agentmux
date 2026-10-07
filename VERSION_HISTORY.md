@@ -1,5 +1,41 @@
 # AgentMux Version History
 
+## 0.59.14 — 2026-10-07
+
+- feat(agents): Linux tracks every process an agent starts in its own cgroup, and closing the agent ends them all
+- feat(agents): macOS (and Linux without systemd) find and end the processes an agent starts, and closing an agent reports any that escaped tracking
+- fix(agents): Windows puts an agent's processes in its job before they run, keeps tracking after a kill, and no longer caps the list at 256
+- CI accepts the renamed review and agent bots (muxreview, muxagent) alongside their old names.
+- fix(agents): an idle Bash command's whole process group is killed on Linux and macOS, and closing an agent names Docker Compose containers left running in its folder
+- Claude agents no longer add a Co-Authored-By trailer or a "Generated with" line to commits and PR descriptions (an agent's own attribution setting still wins), and the repo's trailer check now also rejects "Generated with" lines
+- fix(agent-pane): a message sent mid-turn no longer leaves a gap above the composer
+
+## 0.59.13 — 2026-10-07
+
+- Agent pane: Qwen Code panes show the agent's replies and tool calls; Qwen writes Claude Code's stream format, which was being read as Gemini's
+- Mux Code: AgentMux installs the published @agentmuxai/muxcode 0.8.0 (the pinned 0.1.0 was never published, so installing it failed), from the public npm registry even where a machine's npm config routes the @agentmuxai scope elsewhere
+- Pi is now installed and run through the pi-acp adapter, together with the current Pi package (@earendil-works/pi-coding-agent), and checks Pi's own sign-in. Pi agents also need AgentMux's ACP client fixes before they can hold a conversation.
+- Phones can now show each host's platform, whether each agent runs on the host or in a sandbox, how many channels a machine runs, and hosts reachable only through AgentMux Cloud: the LAN fleet feed, discovery replies and a new signed cloud presence record carry this.
+- Remotes: right-click a remote pane's header for "Remote settings…", remote panes' tabs show the remote's colour, and "Edit in ssh config" opens the file at the host's line.
+- The Knowledge pane is now called Memory (Global Memory, Personal Memory, Skills and Bundles), matching the agent Stash's Memory tab; saved layouts, pins, colors and keybindings that name Knowledge keep working. The new-agent form no longer asks for an account (it uses the provider's first one) and its Memory field is now called Bundle.
+- fix: closing a window or quitting the app now lets every agent shut down gracefully (as /quit does), and a relaunch during a quit opens a fresh instance
+- Editor: "Open from remote…" (in an empty editor and its right-click menu) picks an SSH host and a path, and opens that file in an editor on the host.
+- Remote terminals: when you decline AgentMux's helper on a host (Not now, or Never), a terminal that would have survived disconnects opens as a plain SSH terminal instead of stopping.
+- Pane menu: after Paste (or any item) from a pane's right-click menu, the pane keeps keyboard focus, so you can press Enter straight away instead of clicking the terminal again
+- Groundwork for giving an agent several bundles: srv stores an ordered Bundles list per agent and adds those bundles' instructions, skills and MCP servers at launch. Nothing picks bundles into the list yet; the pickers come next.
+- Agents can start with several bundles. The new-agent form, the launch modal and the agent's Stash (its Startup tab is now Bundles) pick them in order, and each bundle's instructions go into the agent's startup file after Global Memory instead of being sent as its first message.
+- Windows: SSH connections use Windows' own ssh rather than Git Bash's, so hosts on your local network are found by name.
+- Paired devices can show whether each agent is working, waiting for you, idle, stopped or failed, and for how long: the LAN fleet feed and agent-name list carry each agent's status, and the cloud presence record carries its state
+- Memory, Connectors, Warden and Settings keep their section tabs along the top at every width instead of switching to a side rail when wide; in a wide pane the tabs stop growing and sit at the left.
+- feat(agent-pane): one-way flow while following — text only moves up, nothing overshoots or scrolls back (agent:onewayflow)
+- Pair AgentMux Mobile with this computer from the host menu's new Pair a device QR (one-time code, pinned TLS; the old QR that carried the auth key is gone), watch any agent's pane live and read-only from a paired device, manage paired devices in Settings > Paired devices, and hide an agent from them in its Stash > Devices tab.
+- With several windows open, a window you're not using no longer takes focus back from the one you are, which could make windows switch focus between each other endlessly.
+- Remote terminals: a terminal on a Windows host, where AgentMux's helper can't run, opens as a plain SSH terminal instead of reconnecting forever.
+- fix(top-bar): widget labels drop as soon as they'd squeeze a tab; tabs shrink only once widgets are icon-only
+- fix(agent-pane): the working-status text is the pane tab's color, not the theme accent
+- Panes on this computer show a "Local" connection chip in their header, so you can switch a terminal to a remote from there; Ctrl+Shift+G on a local pane no longer crashes it.
+- The retired identity-bundle and memory-bundle terms are gone from the README's alpha warning, an error message, the seeded AgentMux Development bundle and the code's comments: an agent binds accounts directly and takes bundles.
+
 ## 0.59.12 — 2026-10-06
 
 - Agent pane: tool hover panels on wide panes no longer reach far past the pane; the overshoot stops at a readable width (about 120 characters), so thin panes still get room and wide panes get none

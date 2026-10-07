@@ -640,6 +640,10 @@ declare global {
         // spacer for false (so radio groups stay aligned). When
         // unset, the regular `icon` field renders.
         checked?: boolean;
+        // Leave the menu open after this item is clicked, so the user can
+        // try several values in a row (Theme, Opacity). The menu still
+        // closes on an outside click or Esc.
+        keepOpen?: boolean;
         // Pre-formatted keyboard shortcut hint shown right-aligned
         // (e.g. "Ctrl+P" or "⌘T"). Not shown on items that have subItems.
         // For a keymodel binding, render the binding itself with keyutil's

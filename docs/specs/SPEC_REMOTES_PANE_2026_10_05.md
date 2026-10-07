@@ -1,7 +1,7 @@
 # SPEC: The Remotes pane: one place for every remote machine
 
 **Date:** 2026-10-05
-**Status:** active — shipped: R1 (#4343, #4349), R2 (#4353), R3 (#4351), R4 (#4354), R5 (#4355), the helper in every package (#4339), "Remote settings…", the tab swatch and "Edit in ssh config" at the `Host` line (#4427), and the editor's "Open from remote…" (this PR). Remains: a durable terminal falling back to plain SSH when the helper is declined (#4429).
+**Status:** implemented — R1 (#4343, #4349), R2 (#4353), R3 (#4351), R4 (#4354), R5 (#4355), the helper in every package (#4339), "Remote settings…", the tab swatch and "Edit in ssh config" at the `Host` line (#4427), the editor's "Open from remote…" (#4432), the plain-SSH fallback when the helper is declined (#4429), and when the host is Windows, which the helper can't run on (this PR).
 **Author:** Korp (narko), at the owner's request:
 - "should we have a pane called something like 'Remotes' .. those are the connections that are set, and then inside a terminal or file browser, there would be an interface to select the remote";
 - "lets use Remotes .. write the spec to file".

@@ -32,7 +32,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-bashwrap"
-version = "0.59.12"
+version = "0.59.14"
 dependencies = [
  "agentmux-common",
  "anyhow",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.59.12"
+version = "0.59.14"
 dependencies = [
  "agentmux-common",
  "ash",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.59.12"
+version = "0.59.14"
 dependencies = [
  "base64",
  "dirs 5.0.1",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.59.12"
+version = "0.59.14"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-mcp"
-version = "0.59.12"
+version = "0.59.14"
 dependencies = [
  "agentmux-common",
  "anyhow",
@@ -158,7 +158,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-remote"
-version = "0.59.12"
+version = "0.59.14"
 dependencies = [
  "libc",
  "tempfile",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-srv"
-version = "0.59.12"
+version = "0.59.14"
 dependencies = [
  "agentmux-common",
  "agentmux-remote",
@@ -234,6 +234,7 @@ dependencies = [
  "windows 0.61.3",
  "windows-sys 0.59.0",
  "winres",
+ "zbus 5.18.0",
  "zeroize",
  "zip 2.4.2",
 ]

@@ -5,7 +5,7 @@
 // Memory): the workspace-wide global bundles that every agent inherits at
 // launch.
 //
-// A "section" is a Memory bundle with is_global=true. The global bundles is
+// A "section" is a bundle with is_global=true. The global bundles is
 // the ordered list of those sections; their instructions concatenate into
 // each agent's startup instructions file at launch (backend:
 // format_global_bundle_block) — CLAUDE.md, AGENTS.md, GEMINI.md, or similar

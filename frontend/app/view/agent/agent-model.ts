@@ -901,7 +901,7 @@ export class AgentViewModel {
             // RPC throws `FOREIGN KEY constraint failed` against
             // `db_accounts`, which this try/catch silently swallows.
             // `realAccountIdOrEmpty` cross-checks against a fresh account
-            // fetch (not just UUID shape — a legacy identity-bundle id
+            // fetch (not just UUID shape — a legacy `db_identity_bundles` id
             // would pass a shape-only check too, codex P1 on this fix's
             // PR; not the synchronous loadAccounts() cache either, which
             // can still be mid-priming — reagentx P2 on the same PR), so a

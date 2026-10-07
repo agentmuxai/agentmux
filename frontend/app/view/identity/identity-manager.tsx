@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// Formerly IdentityManager — the full-CRUD Identity-bundle management
+// Formerly IdentityManager — the full-CRUD identity management
 // UI (list / create / edit / delete / per-provider binding). Deleted
 // as dead code (issue #1624 PR-C follow-up): its two intended mount
 // points never had a live caller —

@@ -42,7 +42,8 @@ import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
-import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import { mainAgentRequestStarted, mainAgentStreamedChars, mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import { createSessionStartDetector } from "./session-start";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -225,6 +226,9 @@ interface UseAgentStreamOpts {
      * backend picked up), not just from this pane's own composer send.
      */
     onTurnStartFromQueue?: () => void;
+    /** Every queued message the backend accepts, mid-turn included — see
+     *  usePendingMessageAcceptance's `onPendingLeft`. */
+    onPendingLeft?: () => void;
     /**
      * Where this pane's history load ended (Phase 5a-4,
      * `transcript-cursor.ts`). Live events are held until it settles, then
@@ -254,6 +258,7 @@ export function useAgentStream({
     provider,
     agentName,
     onTurnStartFromQueue,
+    onPendingLeft,
     transcriptSettle,
 }: UseAgentStreamOpts): Accessor<BackgroundTaskView[]> {
     // Mutable state that doesn't trigger re-renders. Kept here (not
@@ -304,9 +309,21 @@ export function useAgentStream({
     let lastUsageMessageId: string | undefined;
     // A real compaction card still waiting for the context's size after it.
     let awaitingCompactionSize: ContextCompactedNode | null = null;
+    // Fed every line in stream order: true for a new CLI session's `init`.
+    const isNewSession = createSessionStartDetector();
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
+    // Output characters the main agent streamed since the last dispatch, for
+    // the working row's counter: one OutputStreamed per batch of lines, not
+    // per delta. Flushed before any call boundary so a call's characters are
+    // never credited to the next one.
+    let pendingStreamedChars = 0;
+    const flushStreamedChars = () => {
+        if (pendingStreamedChars <= 0) return;
+        model.dispatchPane({ type: "OutputStreamed", chars: pendingStreamedChars });
+        pendingStreamedChars = 0;
+    };
 
     const memoryReinjectionController = createMemoryReinjectionController({
         contextWindow: currentContextWindow,
@@ -460,6 +477,7 @@ export function useAgentStream({
             hasNodeId,
             addNodeId,
             onTurnStartFromQueue,
+            onPendingLeft,
             onAccepted: (text) => echoLedger.accepted(text),
         });
 
@@ -603,6 +621,11 @@ export function useAgentStream({
                 // the dock reads it from here so it never depends on srv's
                 // live registry having watched the task (activity/task-outcomes.ts).
                 if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
+
+                // A new CLI session, not a compaction's own `init`
+                // (session-start.ts): a turn still holding live tokens ended
+                // without a `result`, so its tokens go.
+                if (isNewSession(rawEvent)) model.dispatchPane({ type: "StreamSessionStarted" });
 
                 // Real compaction-boundary completion data (Tier 1/2 —
                 // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
@@ -811,10 +834,18 @@ export function useAgentStream({
                     // parent_tool_use_id and have their own context and model
                     // (main-agent-usage.ts).
                     const usage = readsUsage ? mainAgentUsage(rawEvent) : null;
+                    if (readsUsage) {
+                        pendingStreamedChars += mainAgentStreamedChars(rawEvent);
+                        if (mainAgentRequestStarted(rawEvent)) {
+                            flushStreamedChars();
+                            model.dispatchPane({ type: "RequestStarted" });
+                        }
+                    }
                     // A call already counted from its message_start (its
                     // assistant frames repeat the same usage).
                     const sameCall = usage?.kind === "in" && usage.messageId != null && usage.messageId === lastUsageMessageId;
                     if (usage?.kind === "in" && !sameCall) {
+                        flushStreamedChars();
                         lastUsageMessageId = usage.messageId;
                         if (awaitingCompactionSize) {
                             // Through the raw queue: the first call after a
@@ -854,6 +885,7 @@ export function useAgentStream({
                         // for providers with no structured event (codex/gemini/copilot).
                         pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
                     } else if (usage?.kind === "out") {
+                        flushStreamedChars();
                         model.dispatchPane({ type: "TokensOut", output: usage.output });
                     }
                     // The windows Claude Code reports for the models this turn
@@ -909,6 +941,7 @@ export function useAgentStream({
                         parser.releaseHeld();
                         pushReleasedJekts();
                         queue.flushNow();
+                        flushStreamedChars();
                         finalizeTurn(event.stats ?? null);
                         // AFTER finalizeTurn — turnPhase is now genuinely
                         // Done for whatever turn just ended (real or
@@ -990,6 +1023,7 @@ export function useAgentStream({
                 }
             }
             parser.setSourceLine(null);
+            flushStreamedChars();
 
             // Schedule a single flush per animation frame
             if (queue.hasPendingNewOrUpdated()) {

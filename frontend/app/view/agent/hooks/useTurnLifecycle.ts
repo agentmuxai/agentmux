@@ -28,6 +28,7 @@ import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { isStopping, SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
+import { turnOutputTokens } from "@/app/store/agent-pane-state/turn-contribution";
 import type { Accessor } from "solid-js";
 import type { DocumentNode, SessionStats } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -82,13 +83,21 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         // PR G: turn-tokens are read from the reducer snapshot
         // instead of a dedicated signal accessor — same source of
         // truth, fewer props threaded into the hook.
-        // Prefer the result event's turn-total usage. The live
-        // turnTokens hold only the last message_start/message_delta
-        // (TokensIn/TokensOut overwrite, not accumulate), so they
-        // undercount multi-call turns; fall back to them only when
-        // session_end carries no usage (e.g. providers without a
-        // token-bearing result line).
-        const liveTokens = paneSnapshot(opts.blockId)?.turnTokens ?? null;
+        // Prefer the result event's turn-total usage; fall back to the
+        // live turnTokens only when session_end carries no usage (e.g.
+        // providers without a token-bearing result line). Their output is
+        // the turn's total over its calls (turnOutputTokens); their input
+        // is the last call's, the context size, not a turn total.
+        const live = paneSnapshot(opts.blockId)?.turnTokens ?? null;
+        const liveTokens = live
+            ? {
+                input: live.input,
+                output: turnOutputTokens(live) ?? 0,
+                freshInput: live.freshInput,
+                cacheCreation: live.cacheCreation,
+                cacheRead: live.cacheRead,
+            }
+            : null;
         const statsTokens =
             stats && (stats.input_tokens != null || stats.output_tokens != null)
                 ? {

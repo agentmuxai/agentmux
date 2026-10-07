@@ -127,7 +127,7 @@ pub(crate) fn admit_spawn(avail_commit_gb: Option<f64>, reserve_gb: f64) -> Resu
 ///   - `agent_ref.working_directory` if non-empty
 ///   - else the current process working directory
 ///
-/// Identity / memory bundle resolution and named-agent continuation
+/// Account and bundle resolution, and named-agent continuation
 /// are NOT plumbed in Phase 1.5 PR 2 — the drone Agent block
 /// always spawns fresh (per spec §8 "drone runs always allocate
 /// fresh instance_name"). The bundles can be added in a follow-up

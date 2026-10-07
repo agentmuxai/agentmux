@@ -340,10 +340,9 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &["CLAUDECODE"],
     npm_package: "@anthropic-ai/claude-code",
-    // Keep in sync with frontend/app/view/agent/providers/index.ts `pinnedVersion`,
-    // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
-    // .github/workflows/container-image.yml `claude_version` default — enforced by
-    // frontend/app/view/agent/providers/pin-consistency.test.ts.
+    // Keep in sync with the frontend catalog's `pinnedVersion`, enforced by
+    // frontend/app/view/agent/providers/pin-consistency.test.ts. Host installs and
+    // the container agents' first-start install both use this version.
     pinned_version: "2.1.288",
     // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
@@ -1055,7 +1054,7 @@ pub fn seed_transcript_retention_if_missing(
 /// `provider`'s DEFAULT auth/config dir: `~/.agentmux/shared/providers/<auth_dir_name>/`
 /// — account-wide and version/channel-independent, so one login is shared by
 /// every instance (the structural fix for the per-channel validate-spin
-/// regression). A per-identity bundle override (identity_handlers) still wins
+/// regression). A per-account auth dir (identity_handlers) still wins
 /// for explicit multi-account. Shared by agent open and `provider.ensureauthdir`.
 pub fn default_auth_dir(provider: &ProviderConfig) -> Result<String, String> {
     if let Some(paths) = agentmux_common::DataPaths::from_env() {

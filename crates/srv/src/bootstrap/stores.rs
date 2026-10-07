@@ -388,7 +388,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
                 None
             }
         };
-    // GLOBAL shared store — identity accounts, memory bundles, drone
+    // GLOBAL shared store — accounts, bundles, drone
     // definitions, MuxBus credentials. Best-effort: disabled when the shared
     // root can't be resolved. Falls back to mstore so behavior is unchanged
     // from today. See SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md.

@@ -102,7 +102,8 @@ class Model {
             clientTop: { get: () => 0 },
             scrollHeight: { get: () => m.scrollHeight() },
             scrollTop: {
-                get: () => m.top,
+                // Reading it lays out, and layout clamps to the real bottom.
+                get: () => (m.top = Math.min(m.top, m.max())),
                 set: (v: number) => {
                     m.writes.push(v);
                     if (v > m.max() + 0.5) m.overshoots++;
@@ -456,6 +457,80 @@ describe("OneWayFlow", () => {
         expect(flow.userScrolled({ scrollTop: m.top, scrollHeight: m.scrollHeight(), clientHeight: m.clientHeight })).toBe(true);
         m.top = m.max();
         expect(flow.userScrolled({ scrollTop: m.top, scrollHeight: m.scrollHeight(), clientHeight: m.clientHeight })).toBe(false);
+    });
+
+    it("a send gives up the room and lands at the bottom, even as the composer shrinks after it", () => {
+        let now = 1000;
+        const spy = vi.spyOn(performance, "now").mockImplementation(() => now);
+        try {
+            const { m, flow, fire } = setup();
+            // A tool preview shrank earlier: 80 px of room is held at the bottom.
+            m.rows[6].h -= 80;
+            m.clamp();
+            fire();
+            expect(m.spacerPx()).toBe(80);
+            // The user sends: the room goes, the view is at the true bottom.
+            flow.jumpToBottom(true);
+            expect(m.spacerPx()).toBe(0);
+            expect(m.top).toBe(m.max());
+            // The composer shrinks back to one line right after: the viewport
+            // grows by 60. That is the user's own change; no new room is held.
+            now += 100;
+            m.clientHeight += 60;
+            m.clamp();
+            fire();
+            expect(m.spacerPx()).toBe(0);
+            expect(m.top).toBe(m.max());
+            // Long after the send the one-way rule is back: a taller viewport
+            // keeps the content in place with room again.
+            now += 2000;
+            const before = m.visible();
+            m.clientHeight += 40;
+            m.clamp();
+            fire();
+            expectV1(before, m.visible());
+            expect(m.spacerPx()).toBe(40);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("a message accepted mid-turn, long after the send, is a commit too", () => {
+        let now = 1000;
+        const spy = vi.spyOn(performance, "now").mockImplementation(() => now);
+        try {
+            const { m, flow, fire } = setup();
+            flow.jumpToBottom(true); // the send
+            now += 5000; // queued for a while; the settle window is long gone
+            m.rows[6].h -= 50;
+            m.clamp();
+            fire();
+            expect(m.spacerPx()).toBe(50);
+            // The backend accepts it: the pending panel leaves (viewport +45).
+            flow.commit();
+            expect(m.spacerPx()).toBe(0);
+            m.clientHeight += 45;
+            m.clamp();
+            fire();
+            expect(m.spacerPx()).toBe(0);
+            expect(m.top).toBe(m.max());
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it("typing jumps to the bottom but is not a commit: the room stays and the rule stays on", () => {
+        const { m, flow, fire } = setup();
+        m.rows[6].h -= 80;
+        m.clamp();
+        fire();
+        flow.jumpToBottom(false);
+        expect(m.spacerPx()).toBe(80);
+        const before = m.visible();
+        m.clientHeight += 30;
+        m.clamp();
+        fire();
+        expectV1(before, m.visible());
     });
 
     it("reset drops the room", () => {

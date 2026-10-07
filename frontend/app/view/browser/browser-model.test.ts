@@ -407,3 +407,28 @@ describe("BrowserViewModel initial-URL fallback: configured start page", () => {
         vm.dispose();
     });
 });
+
+// SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5: a pane an agent opened
+// with OpenBrowser shows "Driven by <agent>", and Take over clears the key.
+describe("BrowserViewModel agent driver", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it("reports the agent driving the pane from browser:owner_agent", () => {
+        const vm = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:owner_agent": " lark " }) });
+        expect(vm.driverAgentAtom()).toBe("lark");
+    });
+
+    it("reports no driver for an ordinary pane or an empty key", () => {
+        expect(new BrowserViewModel(fakeCtx()).driverAgentAtom()).toBeUndefined();
+        const blank = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:owner_agent": "  " }) });
+        expect(blank.driverAgentAtom()).toBeUndefined();
+    });
+
+    it("Take over clears browser:owner_agent", async () => {
+        const vm = makeVM();
+        await vm.takeOver();
+        expect(ctxSetMeta).toHaveBeenCalledWith({ "browser:owner_agent": null });
+    });
+});

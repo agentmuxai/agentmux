@@ -6,12 +6,12 @@
 //! the AgentMux-isolated homes that current agents actually write to:
 //!   - ~/.claude/projects/ and ~/.config/claude-*/projects/ (global / legacy)
 //!   - <AGENTMUX_SHARED_DIR>/providers/claude/projects/ (default isolated home)
-//!   - <AGENTMUX_SHARED_DIR>/identities/<bundle_id>/claude/projects/ (per-identity, global)
+//!   - <AGENTMUX_SHARED_DIR>/identities/<account_id>/claude/projects/ (per account, global)
 //!   - <home>/channels/*/identities/*/claude/projects/ and
 //!     <home>/dev/*/(*/)?identities/*/claude/projects/ (per-channel isolated —
 //!     Step 4 of docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md.
 //!     Step 3 links these forward to the global location, but history written
-//!     before that fix landed, or for a bundle whose link creation failed
+//!     before that fix landed, or for an account whose link creation failed
 //!     (best-effort, can fail), still has real data only under these
 //!     per-channel paths — scanned here so it stays discoverable rather than
 //!     requiring a manual filesystem search.)
@@ -24,7 +24,7 @@ use std::time::UNIX_EPOCH;
 
 use super::adapter::*;
 
-/// Where Claude homes live. The homes under them — identity bundles and
+/// Where Claude homes live. The homes under them — one per account, and
 /// channels — are listed again on every discovery ([`ClaudeHistoryAdapter::base_dirs`]),
 /// because they are created while srv runs: an account added or switched
 /// after srv started used to stay invisible until the next restart.
@@ -112,7 +112,7 @@ impl ClaudeHistoryAdapter {
         // Without these, the history browse misses every AgentMux agent
         // conversation. See docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md.
         //   <shared>/providers/claude/projects/              (default, account-wide)
-        //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles, global)
+        //   <shared>/identities/<account_id>/claude/projects/ (per account, global)
         if let Some(shared) = &self.shared_dir {
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, shared.join("providers").join("claude").join("projects"));
             if let Some(entries) = read_dir_or_note(problems, &shared.join("identities")) {
@@ -142,7 +142,7 @@ impl ClaudeHistoryAdapter {
     }
 
     /// Find every `identities/` directory up to `max_depth` levels under
-    /// `root`, and for each, every `<bundle_id>/claude/projects` that
+    /// `root`, and for each, every `<account_id>/claude/projects` that
     /// exists. Bounded, not an unbounded recursive walk — channel/dev
     /// directory layouts are shallow by construction
     /// (`channels/<slug>/identities/`, `dev/<branch>/identities/` or
@@ -213,15 +213,15 @@ impl ClaudeHistoryAdapter {
         result
     }
 
-    /// Parse the identity bundle id a session's absolute file path was
-    /// discovered under, if any: `.../identities/<bundle_id>/claude/...`
+    /// Parse the account id a session's absolute file path was
+    /// discovered under, if any: `.../identities/<account_id>/claude/...`
     /// (both the always-global `<shared>/identities/...` location and the
     /// per-channel isolated `<home>/channels/*/identities/...` /
     /// `<home>/dev/*/(*/)?identities/...` locations share this same
-    /// `identities/<bundle_id>/claude/` shape — see `new()`'s scan roots).
+    /// `identities/<account_id>/claude/` shape — see `new()`'s scan roots).
     /// Empty string for any other base_dir (personal `~/.claude`, the
     /// default `<shared>/providers/claude/projects`, legacy
-    /// `~/.config/claude-*`) — those have no bundle to attribute to.
+    /// `~/.config/claude-*`) — those have no account to attribute to.
     fn identity_id_from_path(path: &Path) -> String {
         let components: Vec<String> = path
             .components()
@@ -735,7 +735,7 @@ mod tests {
         assert_eq!(session.skipped_records, 0);
     }
 
-    /// A bundle with no Claude home yet, or a root that doesn't exist, is
+    /// An account with no Claude home yet, or a root that doesn't exist, is
     /// nothing missed — only an unreadable directory is.
     #[test]
     fn a_missing_directory_is_not_a_discovery_problem() {
@@ -772,11 +772,11 @@ mod tests {
         assert!(found.problems.iter().any(|p| p.contains("-work-locked")), "{:?}", found.problems);
     }
 
-    /// An identity bundle or a channel created after the adapter is built —
+    /// An account's home or a channel created after the adapter is built —
     /// an account added or switched while srv runs — must still be found.
     /// The adapter used to list these directories once, when srv started, so
-    /// a session under a later bundle stayed invisible until a restart: on
-    /// 2026-09-24 both of an agent's bundles post-dated srv start and
+    /// a session under a later account's home stayed invisible until a restart: on
+    /// 2026-09-24 both of an agent's account homes post-dated srv start and
     /// SearchHistory answered "no history" with `truncated: false`.
     #[test]
     fn a_bundle_created_after_the_adapter_is_built_is_discovered() {
@@ -839,7 +839,7 @@ mod tests {
 
     // The actual motivating case: after Step 3
     // (SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md §4.1),
-    // an isolated bundle's projects/ is a junction pointing at the exact
+    // an isolated account home's projects/ is a junction pointing at the exact
     // global path this adapter also scans directly — without dedup by
     // canonical path, every session under it would appear twice.
     #[cfg(windows)]

@@ -99,8 +99,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     onCleanup(unsubAccounts);
 
     // Re-subscribe to this agent's own link-change event whenever the
-    // agentId prop changes — mirrors AgentLaunchModal.tsx's
-    // `identitybundlebindings:changed:<id>` pattern.
+    // agentId prop changes.
     createEffect(() => {
         const id = props.agentId;
         if (!id) return;

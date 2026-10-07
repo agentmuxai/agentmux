@@ -751,11 +751,9 @@ export interface SessionStats {
      *  because the live TurnTokens signal is nulled on session_end
      *  before the Worked footer renders. See PR #549 reagent/codex P1. */
     input_tokens?: number;
-    /** What the turn ADDED to the context (see turnAddedInput), as opposed to
-     *  `input_tokens`, which is the context re-sent on every call. Absent for
-     *  providers with no live usage; display falls back to `input_tokens`. */
-    added_input_tokens?: number;
-    /** Snapshot of TurnTokens.output at finalizeTurn (see above). */
+    /** The turn's output, summed over its calls: the result's own figure, or
+     *  the live total (turnOutputTokens) when the result has none. The
+     *  "✓ Worked · 42s · 2.4k tokens" line shows it. */
     output_tokens?: number;
     /**
      * Breakdown of input_tokens by cache status:
@@ -774,12 +772,15 @@ export interface SessionStats {
 }
 
 /**
- * Live token counts accumulated during the current turn.
- * input is set from message_start.message.usage.input_tokens.
- * output accumulates from message_delta.usage.output_tokens.
+ * Live token counts for the current turn, main agent only.
+ * input: the latest call's prompt (message_start.message.usage).
+ * output: the latest call's exact output so far (message_delta.usage).
  * freshInput/cacheCreation/cacheRead: see SessionStats' matching fields —
  * same breakdown, carried on the live per-turn signal instead of the
  * finalized one.
+ * The rest drive the working row's one counter, Claude Code's convention
+ * (SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md); read it
+ * through turnOutputTokens() in store/agent-pane-state.
  */
 export interface TurnTokens {
     input: number;
@@ -787,10 +788,17 @@ export interface TurnTokens {
     freshInput?: number;
     cacheCreation?: number;
     cacheRead?: number;
-    /** Context size (input of the last call) before this turn began, captured
-     *  at the turn's first TokensIn. `input - contextBaseline` is what the
-     *  turn added; see turnAddedInput() in store/agent-pane-state. */
-    contextBaseline?: number;
+    /** Exact output of the turn's earlier calls, summed. */
+    outputDone?: number;
+    /** Characters the latest call has streamed (text, thinking, tool input):
+     *  its output estimate, at four a token, until its exact count arrives. */
+    streamedChars?: number;
+    /** A request is in flight and nothing has streamed back yet (↑), as
+     *  opposed to the model streaming or its tools running (↓). */
+    requesting?: boolean;
+    /** The highest output total shown so far this turn: the counter never
+     *  goes down, even when a call's exact count is under its estimate. */
+    shownOutput?: number;
 }
 
 /**

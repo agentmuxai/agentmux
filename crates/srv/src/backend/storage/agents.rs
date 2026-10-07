@@ -112,7 +112,7 @@ pub struct AgentDefinition {
     #[ts(type = "number")]
     pub user_hidden: i64,
     /// Docker image to use when `agent_type == "container"`.
-    /// e.g. `"ghcr.io/agentmuxai/agent-claude:latest"`.
+    /// e.g. `"ghcr.io/agentmuxai/agent-base:latest"`.
     /// Empty string for host agents. Schema v6.
     #[serde(default)]
     pub container_image: String,
@@ -1998,7 +1998,7 @@ impl Store {
     /// it**. Matches ONLY `slug`; deliberately single-purpose after reagentx
     /// P1 on PR #2428 (round 2): a lookup that also matched another column
     /// let a coincidental cross-namespace collision return an unrelated
-    /// agent's memory/identity/bundle. Hidden rows are excluded.
+    /// agent's memory, accounts or bundle. Hidden rows are excluded.
     ///
     /// `None` means "no agent" *or* "more than one agent" — callers already
     /// treat both as "fall back to another source", so they are not
@@ -3301,7 +3301,7 @@ mod tests {
     // namespace collision (one agent's literal `instance_name` equaling a
     // DIFFERENT agent's `slug`) match both rows simultaneously, silently
     // disambiguated by recency — meaning an App-API self-lookup call could
-    // return an unrelated agent's memory/identity/bundle. This test builds
+    // return an unrelated agent's memory, accounts or bundle. This test builds
     // exactly that collision (agent A's `instance_name` == agent B's
     // `slug` == "shared-name") and proves `instance_get_by_slug` stays
     // within its own namespace: it finds ONLY the slug match (B), never

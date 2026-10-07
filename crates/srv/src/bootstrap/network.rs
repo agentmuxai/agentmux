@@ -230,6 +230,12 @@ pub async fn bind_listeners_and_network(
         });
     }
 
+    // Linux: join a delegated systemd user scope first, so each agent gets a
+    // cgroup holding everything it starts (process_tracker::cgroup_linux).
+    // Before the registry exists, so no agent can spawn outside it.
+    #[cfg(target_os = "linux")]
+    backend::process_tracker::cgroup_linux::init().await;
+
     // Tracks agent-spawned OS processes per block. Registered trackers
     // live as long as their agent pane; the background poller emits
     // delta events (`agent:process-added`/`-exited`) to the frontend.

@@ -14,7 +14,8 @@ use crate::backend::rpc_types::{
     COMMAND_GET_ALL_AGENT_CONTENT,
     COMMAND_IMPORT_AGENT_FROM_CLAW, COMMAND_IMPORT_AGENTS, COMMAND_EXPORT_AGENTS,
     COMMAND_RESEED_AGENTS,
-    COMMAND_CONTAINER_RUNTIME_AVAILABLE,
+    COMMAND_CONTAINER_RUNTIME_AVAILABLE, COMMAND_CONTAINER_IMAGE_CHECK,
+    CommandContainerImageCheckData, ContainerImageCheckResult,
     CommandListAgentDefinitionsData,
     CommandContainerRuntimeAvailableData, CommandReseedAgentsData, CommandExportAgentsData,
     ContainerRuntimeAvailableResult, ReseedAgentsResult,
@@ -333,6 +334,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             async move {
                 let available = cm.is_available().await;
                 Ok(ContainerRuntimeAvailableResult { available })
+            }
+        },
+    );
+
+    // containerimagecheck → can this image be had on this machine? Answers from
+    // the daemon's own cache first, then an anonymous registry check, so the
+    // create modal does not preselect a container that cannot start.
+    let container_manager_cic = state.container_manager.clone();
+    engine.register_typed(
+        COMMAND_CONTAINER_IMAGE_CHECK,
+        move |cmd: Option<CommandContainerImageCheckData>, _ctx| {
+            let cm = container_manager_cic.clone();
+            async move {
+                let image = cmd.unwrap_or_default().image;
+                let manager = cm.get().await;
+                let status = crate::backend::container_image::check_image_access(manager.as_ref(), &image).await;
+                Ok(ContainerImageCheckResult { status })
             }
         },
     );

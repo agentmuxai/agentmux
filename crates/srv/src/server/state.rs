@@ -39,8 +39,8 @@ pub struct AppState {
     pub app_path: String,
     pub mstore: Arc<Store>,
     /// GLOBAL shared store (`~/.agentmux/shared/store.db`). Holds durable
-    /// user content that must survive version upgrades: identity accounts,
-    /// memory bundles, drone definitions, and MuxBus credentials.
+    /// user content that must survive version upgrades: accounts,
+    /// bundles, drone definitions, and MuxBus credentials.
     /// `None` when the shared root can't be resolved (CI / unusual envs).
     /// See `docs/specs/SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md`.
     pub shared_store: Option<Arc<Store>>,
@@ -50,7 +50,7 @@ pub struct AppState {
     ///
     /// Deprecated for everything except `db_accounts` reads/writes as of
     /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` — new call sites
-    /// for agent→account links, memory bundles, drone definitions, muxbus
+    /// for agent→account links, bundles, drone definitions, muxbus
     /// creds, native memory, or cron jobs should use `identity_store`
     /// instead, which (unlike this field) is never redirected by
     /// `isolated_auth_enabled()`. `id_store` itself stays because
@@ -80,10 +80,10 @@ pub struct AppState {
     pub subagent_watcher: Arc<SubagentWatcher>,
     pub history_service: Arc<HistoryService>,
     /// Tracks every OS-level process each agent CLI has spawned, via
-    /// platform-specific mechanisms (Windows Job Objects, Linux cgroups,
-    /// macOS process groups). Surfaces the tree to the swarm pane and
+    /// platform-specific mechanisms (Windows Job Objects, Linux cgroups; a
+    /// stub on macOS). Surfaces the tree to the agent pane and
     /// provides kill-tree on pane close / host exit.
-    /// See `backend::process_tracker` + `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md`.
+    /// See `backend::process_tracker`.
     pub process_tracker: Arc<crate::backend::process_tracker::registry::AgentProcessRegistry>,
     /// Process Broker (Phase A) — unified `ProcessStatus` per block, read
     /// through instead of composing `blockcontroller`/`process_tracker`

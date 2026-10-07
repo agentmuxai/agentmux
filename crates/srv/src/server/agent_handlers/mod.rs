@@ -10,6 +10,7 @@ mod identity;
 mod instance;
 mod session;
 mod bundle;
+pub(crate) mod container_turn;
 pub(crate) mod input;
 mod side_question;
 
@@ -383,7 +384,7 @@ mod recent_sessions_tests {
         };
 
         // Seed: 1 SEEDED definition (template), 1 account + direct
-        // identity link, 1 memory bundle. Phase 3b note: seeded as a
+        // identity link, 1 bundle. Phase 3b note: seeded as a
         // template so that
         // each instance projection in `db_agents` lands on its own row
         // (`is_template = 0`, `id = inst.id`, `parent_template_id =

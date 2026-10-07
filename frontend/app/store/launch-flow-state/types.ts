@@ -7,10 +7,8 @@
  *
  * Owns the entire editable Launch-modal surface as a single state
  * object:
- *   - `form` — name, runtime, image, identity/memory/continue selections
- *   - `identities` / `bundles` — loaded bundle lists + load status
- *   - `bindings` — per-identity binding cache (push-updated via
- *     backend `identitybundlebindings:changed:<id>` events)
+ *   - `form` — name, runtime, image, account/bundle/continue selections
+ *   - `accounts` / `bundles` — loaded lists + load status
  *   - `submit` — submit-in-flight + last error
  *   - `auth` — folded-in OAuth state machine (Stage 2d) so the
  *     (auth × form-field-changed) cross-product is testable
@@ -44,7 +42,8 @@ export interface LaunchForm {
      *  directly instead of a named bundle that (hopefully) has a
      *  binding for this provider. */
     accountId: string;
-    /** Selected Memory bundle id. `""` = unselected. */
+    /** The launch's record of a bundle (the agent's first, or a continued
+     *  row's). `""` = none. */
     bundleId: string;
     /** When set, this launch is a continuation of a prior named
      *  agent — pulled from the user's "Continue agent" dropdown.
@@ -91,8 +90,8 @@ export interface LaunchFlowState {
     form: LaunchForm;
     /** All loaded accounts (every provider, not pre-filtered) — the
      *  view narrows to the agent's own provider via
-     *  `accountsForProvider`. Was `identities: ResourceList<IdentityBundle>`
-     *  before issue #1624 PR-C Part B; account lists load once and are
+     *  `accountsForProvider`. Replaced a per-identity list in issue #1624
+     *  PR-C Part B; account lists load once and are
      *  filtered client-side, so unlike bundles there's no per-selection
      *  fetch needed (see the removed `bindings`/`bindingsLoading` slices
      *  below). */
@@ -186,7 +185,7 @@ export function accountsForProvider(state: LaunchFlowState, providerId: string):
     return state.accounts.list.filter((a) => a.provider === providerId);
 }
 
-/** Real (non-blank), non-system memory bundles — excludes is_system rows
+/** Real (non-blank), non-system bundles — excludes is_system rows
  *  the same way every sibling bundle-picker filter in the app does
  *  (AgentLaunchModal's own dropdown, AgentBundlesTab, drone-view,
  *  BundleViewModel.refresh). Without this, AgentLaunchModal's default-pick

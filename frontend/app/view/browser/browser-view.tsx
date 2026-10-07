@@ -15,6 +15,7 @@ import { usePaneRectSync } from "./use-pane-rect-sync";
 import { useDragSnapshot, type DragSnapshot } from "./use-drag-snapshot";
 import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
+import { Button } from "@/app/element/ui";
 import { BrowserNavBar } from "./browser-nav-bar";
 import "./browser-view.scss";
 
@@ -235,6 +236,24 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 createPane={rectSync.createPane}
             />
 
+            <Show when={model.driverAgentAtom()}>
+                {(agent) => (
+                    <div class="browser-driven-by" role="status">
+                        <i class="fa-solid fa-robot" aria-hidden="true" />
+                        <span>
+                            Driven by <b>{agent()}</b>
+                        </span>
+                        <Button
+                            density="compact"
+                            class="browser-take-over"
+                            title="End the agent's control of this pane; its next action here will fail."
+                            onClick={() => model.takeOver().catch(() => {})}
+                        >
+                            Take over
+                        </Button>
+                    </div>
+                )}
+            </Show>
             <Show when={model.errorAtom()}>
                 <div class="browser-error">{model.errorAtom()}</div>
             </Show>

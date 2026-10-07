@@ -496,10 +496,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     if agent_mode == "container" {
                         let cm = container_manager.get().await
                             .ok_or_else(|| "Docker not available on this host; cannot start container agent".to_string())?;
-                        let container_image = {
-                            let img = obj::meta_get_string(&block.meta, "agent:container_image", "");
-                            if img.is_empty() { "ghcr.io/agentmuxai/agent-claude:latest".to_string() } else { img }
-                        };
+                        let container_image = obj::meta_get_string(&block.meta, "agent:container_image", "");
                         // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
                         let agent_id = obj::meta_get_string(&block.meta, "agentId", "");
                         let container_name = crate::backend::container::container_name_for_slug(&agent_id);
@@ -528,14 +525,34 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             );
                         }
 
-                        // Ensure container is alive (pull image if needed — P1b).
-                        cm.ensure_running(&container_name, &container_image, &volumes, &[], &mount_spec).await
-                            .map_err(|e| format!("container ensure_running failed: {e}"))?;
+                        let container_command = obj::meta_get_string(
+                            &block.meta, "agent:container_command", "claude",
+                        );
+                        let agent_provider = obj::meta_get_string(&block.meta, "agentProvider", "claude");
+
+                        // Start the container and make sure the provider CLI is
+                        // installed in it; a failure is written to the pane first.
+                        crate::server::agent_handlers::container_turn::prepare(
+                            crate::server::agent_handlers::container_turn::ContainerTurnPrep {
+                                cm: &cm,
+                                block_id: &cmd.block_id,
+                                container_name: &container_name,
+                                image: &container_image,
+                                volumes: &volumes,
+                                mount_spec: &mount_spec,
+                                provider_id: &agent_provider,
+                                container_command: &container_command,
+                                broker: &broker,
+                                filestore: &filestore,
+                                mstore: &mstore,
+                            },
+                        )
+                        .await?;
 
 
                         tracing::info!(
                             container = %container_name,
-                            image = %container_image,
+                            image = %crate::backend::container_image::resolve_container_image(&container_image),
                             "container agent turn: bollard exec (env via Docker socket, not argv)",
                         );
 
@@ -553,9 +570,6 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // directory"). cli_args are format flags + provider flags —
                         // no host paths, safe as-is. spawn_container_turn appends
                         // --resume <sid> internally.
-                        let container_command = obj::meta_get_string(
-                            &block.meta, "agent:container_command", "claude",
-                        );
                         let mut base_cmd = vec![container_command];
                         base_cmd.extend(cli_args);
 

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
-import { turnAddedInput } from "./turn-contribution";
+import { turnOutputTokens } from "./turn-contribution";
 import { plausibleReading, type ContextReading } from "./context-reading";
 import {
     AgentPaneState,
@@ -153,7 +153,7 @@ describe("agent-pane-state reducer", () => {
             expect(r.events[0]).toMatchObject({ type: "turn-inactive-reconciled", at: 200 });
         });
 
-        it("clears currentTool and turnTokens when demoting a stuck Streaming turn", () => {
+        it("clears currentTool when demoting a stuck Streaming turn, and keeps its tokens for the session_end that follows", () => {
             let s = streaming(100);
             s = update(s, { type: "ToolStart", name: "Bash", arg: "ls" }).state;
             s = update(s, { type: "TokensIn", input: 500, model: "claude-sonnet-5" }).state;
@@ -162,7 +162,7 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.turnPhase.kind).toBe("Idle");
             expect(r.state.currentTool).toBe(null);
             expect(r.state.currentToolArg).toBe(null);
-            expect(r.state.turnTokens).toBe(null);
+            expect(r.state.turnTokens).toMatchObject({ input: 500 });
         });
 
         it("demotes Streaming even with a tool active — backend turn_active=false is authoritative (unlike the timeout watchdog)", () => {
@@ -331,9 +331,7 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.currentTool).toBe(null);
             expect(r.state.turnTokens).toBe(null);
             // Stats merged from live tokens (mergeStats fallback path).
-            // No context before this turn, so nothing is credited to it beyond the
-            // first call's own input (added_input_tokens: 0); see turnAddedInput.
-            expect(r.state.sessionStats).toEqual({ input_tokens: 50, added_input_tokens: 0, output_tokens: 200 });
+            expect(r.state.sessionStats).toEqual({ input_tokens: 50, output_tokens: 200 });
             expect(r.events[0]).toMatchObject({
                 type: "turn-ended",
                 // outcome is "stopped" because RequestStop put the phase
@@ -494,82 +492,187 @@ describe("agent-pane-state reducer", () => {
             expect(s1.turnTokens).toMatchObject({ input: 50, output: 100 });
         });
 
-        it("TokensIn preserves prior output", () => {
+        it("a new call's TokensIn keeps the output so far in the turn's total", () => {
             const s0 = update(mk(), { type: "TokensOut", output: 100 }).state;
             const s1 = update(s0, { type: "TokensIn", input: 50 }).state;
-            expect(s1.turnTokens).toMatchObject({ input: 50, output: 100 });
+            expect(s1.turnTokens).toMatchObject({ input: 50, output: 0, outputDone: 100 });
+            expect(turnOutputTokens(s1.turnTokens)).toBe(100);
         });
     });
 
-    // SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md §3.4 — every call
-    // re-sends the whole conversation, so a turn's raw input is the context
-    // size, not what the turn added. The per-turn figure is the context's
-    // growth across the turn.
-    describe("Tokens: what the turn added, not the context it re-sent", () => {
-        const withContext = (ctx: number) => ({ ...mk(), context: liveReading(ctx) });
+    // SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md — one
+    // number, the turn's output, growing as it streams: ↑ while a request is in
+    // flight, ↓ otherwise. Input is the context re-sent on every call, so it
+    // isn't counted.
+    describe("Tokens: the turn's output counter", () => {
+        const call = (s: AgentPaneState, input: number) => update(s, { type: "TokensIn", input }).state;
+        const out = (s: AgentPaneState, output: number) => update(s, { type: "TokensOut", output }).state;
+        const streamed = (s: AgentPaneState, chars: number) => update(s, { type: "OutputStreamed", chars }).state;
 
-        it("the baseline is the previous turn's last context size", () => {
-            const s0 = update(withContext(40_000), { type: "TokensIn", input: 41_500 }).state;
-            expect(s0.turnTokens?.contextBaseline).toBe(40_000);
-            expect(turnAddedInput(s0.turnTokens)).toBe(1_500);
+        it("adds up the exact output of every call in the turn", () => {
+            let s = call(mk(), 40_000);
+            s = out(s, 300);
+            s = call(s, 41_000);
+            s = out(s, 200);
+            expect(turnOutputTokens(s.turnTokens)).toBe(500);
         });
 
-        it("keeps the first call's baseline across the turn's later calls", () => {
-            let s = update(withContext(40_000), { type: "TokensIn", input: 41_500 }).state;
-            s = update(s, { type: "TokensOut", output: 200 }).state;
-            s = update(s, { type: "TokensIn", input: 44_000 }).state;
-            s = update(s, { type: "TokensOut", output: 90 }).state;
-            // The reading has moved on to 44_000, the baseline must not.
-            expect(s.context?.tokens).toBe(44_000);
-            expect(s.turnTokens?.contextBaseline).toBe(40_000);
-            expect(turnAddedInput(s.turnTokens)).toBe(4_000);
+        it("counts a call still streaming at four characters a token until its exact count arrives", () => {
+            let s = call(mk(), 40_000);
+            s = streamed(s, 400);
+            expect(turnOutputTokens(s.turnTokens)).toBe(100);
+            s = out(s, 120);
+            expect(turnOutputTokens(s.turnTokens)).toBe(120);
         });
 
-        it("with no earlier context the first call stands in, so the system prompt is not credited", () => {
-            const s = update(mk(), { type: "TokensIn", input: 18_000 }).state;
-            expect(turnAddedInput(s.turnTokens)).toBe(0);
+        it("a call's repeated (cumulative) output counts once", () => {
+            let s = call(mk(), 40_000);
+            s = out(s, 50);
+            s = out(s, 120);
+            expect(turnOutputTokens(s.turnTokens)).toBe(120);
         });
 
-        it("a context that shrank (compaction) is never a negative contribution", () => {
-            let s = update(withContext(150_000), { type: "TokensIn", input: 151_000 }).state;
-            s = update(s, { type: "TokensIn", input: 30_000 }).state;
-            expect(turnAddedInput(s.turnTokens)).toBe(0);
+        it("never goes down, even when a call's exact count is under its estimate", () => {
+            let s = call(mk(), 40_000);
+            s = streamed(s, 800); // estimated 200
+            s = out(s, 150);
+            expect(turnOutputTokens(s.turnTokens)).toBe(200);
+            s = call(s, 41_000); // the first call is final at 150
+            s = streamed(s, 200); // 150 + 50
+            expect(turnOutputTokens(s.turnTokens)).toBe(200);
+            s = out(s, 100);
+            expect(turnOutputTokens(s.turnTokens)).toBe(250);
         });
 
-        it("a reading restored from history is a baseline like a live one (it is the same quantity now)", () => {
-            const seeded = update(mk(), { type: "ReconcileContextFromHistory", tokens: 40_000 }).state;
-            const s = update(seeded, { type: "TokensIn", input: 41_500 }).state;
-            expect(s.turnTokens?.contextBaseline).toBe(40_000);
+        it("shows ↑ from a tool result to the next call, and ↓ once that call streams", () => {
+            let s = call(mk(), 40_000);
+            expect(s.turnTokens?.requesting).toBe(false);
+            s = update(s, { type: "RequestStarted" }).state;
+            expect(s.turnTokens?.requesting).toBe(true);
+            s = call(s, 41_000);
+            expect(s.turnTokens?.requesting).toBe(false);
         });
 
-        it("is undefined when a provider reported no live usage", () => {
-            expect(turnAddedInput(null)).toBeUndefined();
-            expect(turnAddedInput({ input: 5, contextBaseline: undefined })).toBeUndefined();
+        it("streamed output also ends the request phase", () => {
+            let s = update(call(mk(), 40_000), { type: "RequestStarted" }).state;
+            s = streamed(s, 40);
+            expect(s.turnTokens?.requesting).toBe(false);
         });
 
-        it("TurnEnd records the contribution next to the (re-sent) result total", () => {
-            const s0 = ready(100);
-            const s1 = update({ ...s0, context: liveReading(40_000) }, { type: "TurnStart", at: 110 }).state;
-            const s2 = update(s1, { type: "TokensIn", input: 41_000 }).state;
-            const s3 = update(s2, { type: "TokensIn", input: 43_000 }).state;
-            const r = update(s3, {
-                type: "TurnEnd",
-                // What the result event reports: every call's input summed.
-                stats: { input_tokens: 84_000, output_tokens: 512 } as any,
-            });
-            expect(r.state.sessionStats).toMatchObject({
-                input_tokens: 84_000,
-                added_input_tokens: 3_000,
-                output_tokens: 512,
-            });
+        it("before the turn's first call there is nothing to count", () => {
+            const s0 = mk();
+            expect(update(s0, { type: "OutputStreamed", chars: 100 }).state).toBe(s0);
+            expect(update(s0, { type: "RequestStarted" }).state).toBe(s0);
+        });
+
+        it("TurnEnd keeps the result's output: the CLI's exact figure for the whole turn", () => {
+            let s = call(streaming(110), 41_000);
+            s = streamed(s, 2_000);
+            const r = update(s, { type: "TurnEnd", stats: { input_tokens: 84_000, output_tokens: 512 } as any });
+            expect(r.state.sessionStats).toMatchObject({ input_tokens: 84_000, output_tokens: 512 });
+        });
+
+        it("a result with no usage falls back to the live total", () => {
+            let s = call(streaming(110), 41_000);
+            s = out(s, 300);
+            s = call(s, 42_000);
+            s = out(s, 200);
+            const r = update(s, { type: "TurnEnd", stats: { cost_usd: 0.01 } as any });
+            expect(r.state.sessionStats?.output_tokens).toBe(500);
         });
 
         it("sessionTotals still add up the raw input (the cost/context accounting is unchanged)", () => {
-            const s0 = ready(100);
-            const s1 = update({ ...s0, context: liveReading(40_000) }, { type: "TurnStart", at: 110 }).state;
-            const s2 = update(s1, { type: "TokensIn", input: 41_000 }).state;
+            const s2 = call(streaming(110), 41_000);
             const r = update(s2, { type: "TurnEnd", stats: { input_tokens: 82_000, output_tokens: 10 } as any });
             expect(r.state.sessionTotals?.input_tokens).toBe(82_000);
+        });
+
+        // srv publishes `turn_active: false` when it reads the CLI's `result`
+        // line, before it forwards that line to the pane, so the reconcile
+        // lands while the stream is still delivering the turn. It used to
+        // clear turnTokens, so TurnEnd found no live tokens to fall back on.
+        describe("when the turn-ended push arrives before session_end", () => {
+            const midTurn = () => {
+                let s = call(streaming(110), 41_000);
+                s = out(s, 300);
+                return call(s, 43_000);
+            };
+            const reconciled = () => update(midTurn(), { type: "ReconcileTurnActive", at: 200, active: false }).state;
+            // A result with no usage of its own, so TurnEnd shows what it merged.
+            const noUsage = { cost_usd: 0.01 } as any;
+
+            it("the turn's live tokens are still there for its TurnEnd", () => {
+                const s = reconciled();
+                expect(s.turnPhase.kind).toBe("Idle");
+                const r = update(s, { type: "TurnEnd", stats: noUsage });
+                expect(r.state.sessionStats?.output_tokens).toBe(300);
+                expect(r.state.turnTokens).toBeNull();
+            });
+
+            it("so are they after the liveness recovery", () => {
+                const s = midTurn();
+                const recovered = update(s, {
+                    type: "StreamWatchdogTick",
+                    nowMs: (s.lastEventMs ?? 0) + LIVENESS_RECOVERY_MS + 1,
+                }).state;
+                expect(recovered.turnPhase.kind).toBe("Idle");
+                const r = update(recovered, { type: "TurnEnd", stats: noUsage });
+                expect(r.state.sessionStats?.output_tokens).toBe(300);
+            });
+
+            // The turn's last text is flushed right before its session_end
+            // (useAgentStream), which re-promotes Idle to Streaming: that
+            // promotion is the same turn, and must keep its tokens.
+            it("the final-text flush before session_end keeps the turn's tokens", () => {
+                const flushed = update(reconciled(), { type: "StreamFlushObserved", addedCount: 1, at: 250 }).state;
+                expect(flushed.turnPhase.kind).toBe("Streaming");
+                const r = update(flushed, { type: "TurnEnd", stats: noUsage });
+                expect(r.state.sessionStats?.output_tokens).toBe(300);
+            });
+
+            it("a call of the same turn that the stream delivers after the push still counts toward it", () => {
+                const late = out(call(reconciled(), 45_000), 200);
+                const r = update(late, { type: "TurnEnd", stats: noUsage });
+                expect(r.state.sessionStats?.output_tokens).toBe(500);
+            });
+
+            // The Idle phase the push leaves releases queued messages at once,
+            // so the next turn can start before this turn's session_end.
+            it("a queued message starting the next turn before session_end keeps this turn's tokens for it", () => {
+                const started = update(reconciled(), { type: "TurnStart", at: 300 }).state;
+                expect(started.turnPhase.kind).toBe("Submitting");
+                const r = update(started, { type: "TurnEnd", stats: noUsage });
+                expect(r.state.sessionStats?.output_tokens).toBe(300);
+            });
+
+            it("so does the backend's turn-active push for the next turn", () => {
+                const promoted = update(reconciled(), { type: "ReconcileTurnActive", at: 300, active: true }).state;
+                expect(promoted.turnPhase.kind).toBe("Streaming");
+                const r = update(promoted, { type: "TurnEnd", stats: noUsage });
+                expect(r.state.sessionStats?.output_tokens).toBe(300);
+            });
+
+            it("a message accepted mid-turn keeps the running turn's tokens", () => {
+                const s = midTurn();
+                const steered = update(s, { type: "TurnStart", at: 150 }).state;
+                expect(steered.turnTokens).toBe(s.turnTokens);
+            });
+
+            // A turn whose process died before its `result` must not lend its
+            // tokens to the next turn: the new session's `init` comes first in
+            // the stream.
+            it("a new CLI session in the stream drops tokens left by a turn that never got its result", () => {
+                const s = update(reconciled(), { type: "StreamSessionStarted" }).state;
+                expect(s.turnTokens).toBeNull();
+                // The next session's first call starts the count from nothing.
+                const next = update(s, { type: "TokensIn", input: 44_000 }).state;
+                expect(turnOutputTokens(next.turnTokens)).toBe(0);
+            });
+
+            it("a new CLI session with nothing held changes nothing", () => {
+                const s0 = streaming(110);
+                expect(update(s0, { type: "StreamSessionStarted" }).state).toBe(s0);
+            });
         });
     });
 

@@ -15,7 +15,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&UiScreenshotRequest { auth })
+                .json(&UiScreenshotRequest { auth, pane: pane_arg(arguments) })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -127,6 +127,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .header("X-AuthKey", auth_key)
                 .json(&UiClickRequest {
                     auth,
+                    pane: pane_arg(arguments),
                     selector: selector.to_string(),
                 })
                 .send()
@@ -153,6 +154,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .header("X-AuthKey", auth_key)
                 .json(&UiQueryRequest {
                     auth,
+                    pane: pane_arg(arguments),
                     selector: selector.to_string(),
                     limit,
                 })

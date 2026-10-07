@@ -61,7 +61,7 @@ impl Migration for M0011SharedStoreBackfill {
             }
         }
 
-        // Pass 2: memory bundles, drones, links. (Identity bundles were
+        // Pass 2: bundles, drones, links. (Identity bundles were
         // dropped in Phase 4c of SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md
         // — db_identity_bundles/db_identity_bindings no longer exist, so
         // this pass no longer backfills them.)

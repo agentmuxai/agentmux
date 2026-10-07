@@ -407,7 +407,7 @@ fn list_memory_targets_with(
 ///   - unbound / "default" → `<shared>/providers/claude` (the default home;
 ///     returned as an empty string so `memory_dir_for_cwd` applies its own
 ///     identical fallback)
-///   - a per-identity bundle → `<shared>/identities/<id>/claude`
+///   - an account → `<shared>/identities/<id>/claude`
 fn claude_config_dir_for_identity(identity_id: Option<&str>) -> String {
     match identity_id {
         Some(id) if !id.is_empty() && id != "default" => {

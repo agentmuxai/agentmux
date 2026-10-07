@@ -775,9 +775,9 @@ pub async fn run_agent_turn(
     let env_vars = crate::backend::blockcontroller::cmd_env_of(&block.meta);
     // Identity gate, MuxBus token, reserved wrapper vars, agent identity,
     // git identity, tools PATH — see `build_persistent_spawn_env`'s own doc
-    // comment. Broker hand-in lets the OAuth expiry probe (PR D, spec §4.4)
-    // publish `identitybundlebindings:changed:<bundle_id>` when it flips a
-    // token's status valid→expired etc.
+    // comment. Broker hand-in lets the identity resolver publish
+    // `identity:no-direct-links`, and its OAuth expiry probe
+    // `identityaccounts:changed` when it flips a token's status.
     //
     // Before all of that — the env build writes shared identity state — a
     // persistent pane about to spawn checks that no other AgentMux instance
@@ -1058,15 +1058,8 @@ pub async fn run_agent_turn(
             let cm = container_manager.get().await.ok_or_else(|| {
                 "Docker not available on this host; cannot start container agent".to_string()
             })?;
-            let container_image = {
-                let img =
-                    crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", "");
-                if img.is_empty() {
-                    "ghcr.io/agentmuxai/agent-claude:latest".to_string()
-                } else {
-                    img
-                }
-            };
+            let container_image =
+                crate::backend::obj::meta_get_string(&block.meta, "agent:container_image", "");
             // Use agentId (UUID) — always valid as a Docker name; display names can have spaces.
             let agent_id = crate::backend::obj::meta_get_string(&block.meta, "agentId", "");
             let container_name = crate::backend::container::container_name_for_slug(&agent_id);
@@ -1108,53 +1101,40 @@ pub async fn run_agent_turn(
                 );
             }
 
-            // Ensure container is alive (pull image if needed — P1b).
-            if let Err(e) = cm
-                .ensure_running(
-                    &container_name,
-                    &container_image,
-                    &volumes,
-                    &[],
-                    &mount_spec,
-                )
-                .await
-            {
-                // Surface the error in the agent pane before returning, so the user
-                // sees why the container failed (image not found, Docker down, etc.).
-                let error_frame = serde_json::json!({
-                    "type": "result",
-                    "is_error": true,
-                    "subtype": "error_during_execution",
-                    "error": {"message": format!("[AgentMux] container ensure_running failed: {e}")}
-                })
-                .to_string();
-                // Some(&filestore_gate): PERSIST, not just live-broadcast —
-                // same requirement as the identity spawn-gate frame above
-                // (reagent P1, PR #2164 round 2). Previously passed None
-                // here despite the comment above claiming parity with that
-                // path — codex P1 on PR #2390: muxspect's last_error_frame
-                // (which reads only the persisted `output` file) could
-                // never see this failure after the live moment passed.
-                // The agent's global zone too, for the reload (Phase 5a-3c).
-                let global_zone = crate::backend::blockcontroller::shell::resolve_global_output_zone(
-                    &Some(mstore.clone()),
-                    &block_id,
-                );
-                crate::backend::blockcontroller::shell::handle_append_block_file(
-                    &broker,
-                    &block_id,
-                    crate::backend::blockcontroller::subprocess::SUBPROCESS_OUTPUT_SUBJECT,
-                    format!("{error_frame}\n").as_bytes(),
-                    Some(&filestore_gate),
-                    global_zone.as_deref(),
-                );
-                return Err(format!("container ensure_running failed: {e}"));
-            }
+            // The command and provider the turn runs, resolved INSIDE the image
+            // (on PATH, e.g. `claude`) -- not `cli_command`/`cmd`, which is the
+            // host-resolved absolute npm path and does not exist in the
+            // container.
+            let container_command = crate::backend::obj::meta_get_string(
+                &block.meta,
+                "agent:container_command",
+                "claude",
+            );
+            let agent_provider =
+                crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude");
+
+            // Start the container (pulling the image if needed) and make sure
+            // the provider CLI is installed in it. A failure is written to the
+            // pane as a plain-language error before it is returned.
+            super::container_turn::prepare(super::container_turn::ContainerTurnPrep {
+                cm: &cm,
+                block_id: &block_id,
+                container_name: &container_name,
+                image: &container_image,
+                volumes: &volumes,
+                mount_spec: &mount_spec,
+                provider_id: &agent_provider,
+                container_command: &container_command,
+                broker: &broker,
+                filestore: &filestore_gate,
+                mstore: &mstore,
+            })
+            .await?;
 
             tracing::info!(
                 block_id = %block_id,
                 container = %container_name,
-                image = %container_image,
+                image = %crate::backend::container_image::resolve_container_image(&container_image),
                 "container agent turn: bollard exec (env via Docker socket, not argv)",
             );
 
@@ -1164,22 +1144,10 @@ pub async fn run_agent_turn(
             // turn, so cmd:cwd (host path) and host-path vars never reach
             // the container, and each queued turn uses its own env.
 
-            // Base cmd: [container_command, ...cli_args]. The command
-            // is the provider CLI resolved INSIDE the image (on PATH,
-            // e.g. `claude`) — NOT `cli_command`/`cmd`, which is the
-            // host-resolved absolute npm path and does not exist in the
-            // container (docker exec would fail "no such file or
-            // directory"). cli_args are format flags (-p, --input-format
-            // …) + provider flags — no host paths, safe as-is.
-            // spawn_container_turn appends --resume <sid> internally.
-            let container_command = crate::backend::obj::meta_get_string(
-                &block.meta,
-                "agent:container_command",
-                "claude",
-            );
-            // Provider id for the one-shot argv rebuild below.
-            let agent_provider =
-                crate::backend::obj::meta_get_string(&block.meta, "agentProvider", "claude");
+            // Base cmd: [container_command, ...cli_args]. cli_args are format
+            // flags (-p, --input-format ...) + provider flags -- no host
+            // paths, safe as-is. spawn_container_turn appends --resume <sid>
+            // internally. `agent_provider` drives the one-shot argv rebuild.
             let mut base_cmd = vec![container_command];
             base_cmd.extend(container_argv(cli_args, &agent_provider));
 

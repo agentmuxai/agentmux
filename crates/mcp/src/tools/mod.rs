@@ -34,6 +34,17 @@ pub(crate) struct ToolCtx<'a> {
     pub(crate) loop_counter: &'a AtomicU64,
 }
 
+/// The optional `pane` argument: a browser pane this agent opened with
+/// `OpenBrowser`. srv checks ownership; absent = the agent's own pane.
+fn pane_arg(arguments: &Value) -> Option<String> {
+    arguments
+        .get("pane")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// A family's answer for a tool it doesn't own.
 #[derive(Debug)]
 struct NotInFamily;

@@ -605,7 +605,7 @@ async fn open_agent_inner(
                 // Auth dir — the DEFAULT provider auth lives in the shared,
                 // instance/channel/version-independent providers area so a single
                 // login is shared everywhere (the structural fix for the per-channel
-                // validate-spin regression). The per-identity bundle override
+                // validate-spin regression). The per-account auth dir
                 // (identity_handlers) still wins for explicit multi-account.
                 let auth_dir = providers::default_auth_dir(provider)?;
                 // Create the dir AND apply its isolation guarantees in one

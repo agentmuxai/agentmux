@@ -559,6 +559,12 @@ jobs:
           bash scripts/check-hash-from-stdin.test.sh
           bash scripts/check-hash-from-stdin.sh
 
+      # The container image workflow fails when its package is still private;
+      # this is the check behind that, run against a fake registry.
+      # docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md
+      - name: Anonymous-pull check self-test
+        run: bash scripts/check-anonymous-pull.test.sh
+
       - name: Input-handler layout-read gate
         run: bash tools/lint/check-input-handler-layout-reads.sh
 

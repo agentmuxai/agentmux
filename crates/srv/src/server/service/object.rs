@@ -333,6 +333,9 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e.to_string()),
             };
+            if let Err(e) = crate::server::browser_owner::guard_client_meta_write(&oref_str, &meta_update) {
+                return WebReturnType::error(e);
+            }
             let meta_value = serde_json::to_value(&meta_update).unwrap_or(serde_json::Value::Null);
             let cmd = match oref.otype.as_str() {
                 t if t == OTYPE_WORKSPACE => agentmux_common::ipc::Command::UpdateWorkspaceMeta {

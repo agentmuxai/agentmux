@@ -402,6 +402,9 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         // navigate/back/forward/reload/eval additionally require the
         // caller's own pane to be a dedicated browser pane (checked
         // host-side in browser_api::routes::reject_if_shared_target).
+        .route("/api/v1/ui/browser/open", post(ui_handlers::handle_ui_browser_open))
+        .route("/api/v1/ui/browser/snapshot", post(ui_handlers::handle_ui_browser_snapshot))
+        .route("/api/v1/ui/browser/act", post(ui_handlers::handle_ui_browser_act))
         .route("/api/v1/ui/browser/navigate", post(ui_handlers::handle_ui_browser_navigate))
         .route("/api/v1/ui/browser/back", post(ui_handlers::handle_ui_browser_back))
         .route("/api/v1/ui/browser/forward", post(ui_handlers::handle_ui_browser_forward))
