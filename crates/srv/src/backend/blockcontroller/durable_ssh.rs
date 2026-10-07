@@ -757,6 +757,12 @@ impl Run {
                     // §6.4).
                     if !attached && windows_shell_refused(&stderr) {
                         crate::backend::remote::helper_consent::note_unsupported(&self.conn);
+                        // A record saying the helper is installed here is
+                        // stale (it can't run on Windows), and would keep the
+                        // pane durable (wants), as for a declined helper.
+                        if let Err(e) = crate::backend::remote::helper_hosts::forget_helper(&self.conn) {
+                            tracing::warn!(connection = %self.conn, error = %e, "could not forget the helper record");
+                        }
                         self.note(&format!(
                             "AgentMux's helper doesn't run on Windows hosts like {} yet, so this is a plain SSH terminal: it ends if the connection drops.",
                             self.conn
