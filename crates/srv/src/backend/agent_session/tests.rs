@@ -313,7 +313,7 @@ fn archive_on_zero_byte_state_is_noop() {
 }
 
 /// Critical scoping invariant: agents are independent, even when
-/// they share an identity bundle. Writing to AgentA must NOT
+/// they share an account. Writing to AgentA must NOT
 /// expose any data to AgentB.
 #[test]
 fn two_agents_have_independent_zones() {

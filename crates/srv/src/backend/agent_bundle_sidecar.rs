@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Which bundle is an agent's own ABF memory bundle, across channels
+//! Which bundle is an agent's own (its ABF bundle), across channels
 //! (SPEC_MEMORY_FOLLOWS_THE_AGENT_2026_09_24.md §2.1.6, phase M4).
 //!
 //! `db_agents.default_memory_id` lives in each channel's object store, so

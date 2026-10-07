@@ -21,7 +21,7 @@ export type ModalLayerRequest =
     | InstallAgentRequest
     | AgentPrereqRequest
     | AddAccountRequest
-    | NewMemoryBundleRequest
+    | NewBundleRequest
     | CreateFromTemplateRequest
     | BrowserAuthRequest
     | AgentIdentityRequest
@@ -166,8 +166,7 @@ export interface AgentPrereqRequest {
  * `submitting()` flag (which gates safeClose) tracks the in-flight
  * call. Callers only supply the chain callbacks for after-success / on-cancel.
  *
- * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md. Replaces
- * `NewIdentityBundleRequest`.
+ * Phase β of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
  */
 interface AddAccountRequest {
     kind: "add-account";
@@ -191,18 +190,18 @@ interface AddAccountRequest {
 }
 
 /**
- * "+ New" affordance on the Launch modal's Memory row creates a new
- * Memory bundle with an optional pasted-text seed (saved as a single
+ * "+ New" affordance on the Launch modal's Bundles row creates a new
+ * bundle with an optional pasted-text seed (saved as a single
  * `notes.md` context file).
  *
- * Same layer-owned-RPC contract as NewIdentityBundleRequest: the
+ * Same layer-owned-RPC contract as AddAccountRequest: the
  * UpsertMemory call lives in ModalLayer's dispatch so the layer's
  * submitting() flag tracks the in-flight RPC; caller routes after
  * success/cancel via modalLayer.replace or modalLayer.close.
  *
  * Phase γ of SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md.
  */
-export interface NewMemoryBundleRequest {
+export interface NewBundleRequest {
     kind: "new-memory";
     originBlockId: string;
     initialName?: string;

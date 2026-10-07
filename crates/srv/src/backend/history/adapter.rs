@@ -58,9 +58,9 @@ pub struct SessionMeta {
     pub git_branch: String,
     pub total_tokens: u64,
     pub subagent_count: u32,
-    /// The identity bundle id (`db_accounts.id` / the `<bundle_id>` path
+    /// The account id (`db_accounts.id` / the `<account_id>` path
     /// segment under `identities/`) this session was discovered under, if
-    /// any. Empty for sessions found via a non-bundle base_dir (personal
+    /// any. Empty for sessions found via a base_dir of no account (personal
     /// `~/.claude`, the default `<shared>/providers/claude/projects`, or
     /// legacy `~/.config/claude-*`) — those aren't attributable to a
     /// specific identity. Lets `SessionIndex` answer "this agent's

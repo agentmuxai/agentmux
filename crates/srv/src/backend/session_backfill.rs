@@ -42,7 +42,7 @@ fn largest_with_size(projects_dir: &Path, slug: &str) -> Option<(u64, String)> {
 
 /// The provider session id (jsonl stem) of the agent's **largest** session across
 /// the candidate project roots (the account-wide default and, for identity-bound
-/// agents, the identity bundle). We pick the largest, not the newest, on purpose:
+/// agents, the account's home). We pick the largest, not the newest, on purpose:
 /// an accidental fresh session (one started when a blank cross-channel open failed
 /// to resume) must never win over the real conversation. `None` when there are no
 /// session files under any root.
@@ -158,7 +158,7 @@ pub fn backfill_session_ids(reg: &Registry, shared_dir: &Path) -> usize {
         let workspace = format!("{base}/{}", rec.data.working_dir);
         let slug = project_dir_name(&workspace);
         // Candidate project roots: the account-wide default, plus the agent's
-        // identity bundle when bound to a non-default identity — identity-bound
+        // account's home when it's bound to an account — account-bound
         // agents write sessions under `identities/<id>/claude/projects` (per
         // `history::claude_adapter` discovery). [reagent #1479 P2]
         let mut dirs = vec![default_projects.clone()];
@@ -397,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn backfill_resolves_identity_bundle_sessions() {
+    fn backfill_resolves_account_home_sessions() {
         // An identity-bound agent writes sessions under
         // identities/<id>/claude/projects, NOT the default root. [reagent #1479 P2]
         let tmp = tempfile::tempdir().unwrap();

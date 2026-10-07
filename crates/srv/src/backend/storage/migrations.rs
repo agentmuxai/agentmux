@@ -56,7 +56,7 @@ use super::error::StoreError;
 ///        comment (objects.db, above run_object_schema) for the full
 ///        design; this store just needs schema parity.
 ///   v10 — db_bundle_versions: append-only version history for Global
-///        Memory bundle content — see OBJECT_SCHEMA_VERSION's v35 doc
+///        Memory entry content — see OBJECT_SCHEMA_VERSION's v35 doc
 ///        comment for the full rationale
 ///        (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md); this store
 ///        just needs schema parity, same as v9 above.
@@ -384,7 +384,7 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        `m0032_drop_catalog_fk_from_ref_tables`; a fresh install gets the
 ///        trimmed FK directly from the CREATE TABLE statements below.
 ///   v35 — db_bundle_versions: append-only version history for Global
-///        Memory bundle content (`name` + `instructions`), one row per
+///        Memory entry content (`name` + `instructions`), one row per
 ///        write through the new agent-facing Global Memory API
 ///        (`docs/specs/SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md`
 ///        Phase 0) — mirrors `db_agent_native_memory_versions`'s shape
@@ -969,7 +969,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_native_memory_versions_lookup
             ON db_agent_native_memory_versions(agent_id, filename, created_at);
 
-        -- v35: append-only version history for Global Memory bundle content
+        -- v35: append-only version history for Global Memory entry content
         -- — see OBJECT_SCHEMA_VERSION's own doc comment above for the full
         -- rationale (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md).
         -- Single `bundle_id` key, not a composite one — a Bundle's identity
@@ -1657,7 +1657,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_ss_native_memory_versions_lookup
             ON db_agent_native_memory_versions(agent_id, filename, created_at);
 
-        -- v10: append-only version history for Global Memory bundle content
+        -- v10: append-only version history for Global Memory entry content
         -- — see SHARED_STORE_SCHEMA_VERSION's own doc comment for the full
         -- rationale (SPEC_AGENT_FACING_GLOBAL_MEMORY_API_2026_09_15.md).
         CREATE TABLE IF NOT EXISTS db_bundle_versions (
@@ -1725,7 +1725,7 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 /// `~/.agentmux/shared/identity-store.db` (distinct file from
 /// `store.db` — see [`run_identity_store_schema`]'s own doc comment for
 /// why). Independent counter from `SHARED_STORE_SCHEMA_VERSION`.
-///   v1 — initial: agent→account links, memory bundles, drone
+///   v1 — initial: agent→account links, bundles, drone
 ///        definitions, muxbus credentials, per-agent M2M credentials,
 ///        native memory mirror, cron jobs. Everything
 ///        `run_shared_store_schema` already held EXCEPT `db_accounts` —
@@ -1848,7 +1848,7 @@ pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 11;
 /// This is a **near-superset** of [`run_shared_store_schema`]'s tables
 /// (v2): every one of them, INCLUDING `db_accounts` as of v2 — but
 /// `db_accounts` here is a read-through FALLBACK MIRROR only, not the
-/// authoritative write path. Unlike agent→account links, memory bundles,
+/// authoritative write path. Unlike agent→account links, bundles,
 /// drone definitions, muxbus credentials, and native memory,
 /// `db_accounts` has one genuine, intentional isolation need (Armory's
 /// disposable delete-account testing flow): a real per-account

@@ -1002,7 +1002,7 @@ pub fn seed_transcript_retention_if_missing(
 /// `provider`'s DEFAULT auth/config dir: `~/.agentmux/shared/providers/<auth_dir_name>/`
 /// — account-wide and version/channel-independent, so one login is shared by
 /// every instance (the structural fix for the per-channel validate-spin
-/// regression). A per-identity bundle override (identity_handlers) still wins
+/// regression). A per-account auth dir (identity_handlers) still wins
 /// for explicit multi-account. Shared by agent open and `provider.ensureauthdir`.
 pub fn default_auth_dir(provider: &ProviderConfig) -> Result<String, String> {
     if let Some(paths) = agentmux_common::DataPaths::from_env() {

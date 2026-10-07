@@ -16,8 +16,8 @@
 // conflated 6 agents into 3 providers, which no longer matches the
 // "one card per CLI" model the picker now shows.
 //
-// Memory bundles (added 2026-06-18): the manifest also seeds Memory bundles
-// that pre-populate the Trust Center (Identity & Memory hamburger modal).
+// Bundles (added 2026-06-18): the manifest also seeds bundles that
+// pre-populate Memory → Global and Memory → Bundles.
 // Two tiers:
 //   is_global: true  — injected into every agent's CLAUDE.md at launch
 //   is_global: false — available in the manager but not auto-injected
@@ -110,7 +110,7 @@ const CLI_DEFS = [
     },
 ];
 
-// ── Seeded Memory bundles ─────────────────────────────────────────────────────
+// ── Seeded bundles ─────────────────────────────────────────────────────
 //
 // Sourced from a5af/claw workspace patterns (CLAUDE_CONTAINER.md, agent-seed
 // startup knowledge). The "Workspace Rules" bundle is global — injected into
@@ -149,8 +149,8 @@ const MEMORY_WORKSPACE_RULES = `## Workspace Rules
 
 const MEMORY_AGENTMUX_DEV = `## AgentMux Development
 
-Context for working on the AgentMux codebase. Select this Memory bundle when
-opening an agent to work on agentmux.
+Context for working on the AgentMux codebase. Add this bundle to an agent
+that works on agentmux.
 
 ### Stack
 

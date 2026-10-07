@@ -61,8 +61,8 @@ pub const COMMAND_ENSURE_ACCOUNT_DIR: &str = "identity.ensureaccountdir";
 #[serde(rename_all = "camelCase")]
 pub struct StartProviderAuthReq {
     pub provider_id: String,
-    /// Vestigial — bundle mode (a successful auth adding an account to
-    /// an Identity bundle) was retired in Phase 4c of
+    /// Vestigial — bundle mode (a successful auth adding the account to
+    /// a named group of accounts) was retired in Phase 4c of
     /// SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md. Kept on the wire
     /// shape only; `direct_account` is always true in practice.
     #[serde(default)]

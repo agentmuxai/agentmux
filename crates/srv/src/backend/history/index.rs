@@ -527,7 +527,7 @@ pub struct SessionIndex {
     /// normalized working directory -> session_ids.
     ///
     /// The identity index below can only find sessions for an agent that has
-    /// a `db_agent_identity_links` row binding it to the identity bundle its
+    /// a `db_agent_identity_links` row binding it to the account its
     /// transcripts were written under. An agent running on ambient
     /// credentials has no such row (and its registry record's `identity_id`
     /// reads `"default"`), so for that — the common — case the identity index

@@ -1,6 +1,6 @@
 # SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings
 
-**Status:** active — §5 step 1 (the rename) shipped in PR #4425; step 2a (the backend for several bundles) in PR #4433; step 2b (the pickers) in PR #4434; steps 2c–4 remain. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06), D8–D13 on 2026-10-07.
+**Status:** active — §5 step 1 (the rename) shipped in PR #4425; step 2a (the backend for several bundles) in PR #4433; step 2b (the pickers) in PR #4434; steps 3 and 4 in agentmux-docs#157 and agentmux-landing#190; the retired terms (§3.8) in agentmux-docs#158, agentmux-landing#191 and this repo; step 2c remains. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06), D8–D13 on 2026-10-07.
 **Date:** 2026-10-06
 **Author:** agent3 (Agent3@narko), at the operator's request
 **Amends:** `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md` (the pane's name; its §6 risk "'Knowledge' suggests retrieval (RAG) more than configuration … revisit only if users are confused" is that revisit)
@@ -111,6 +111,30 @@ Two bugs sit on the way: the UI launch path (`WriteAgentConfig`) never delivers 
 - **B is not migrated** (§6 D12).
 - **Drone nodes** keep one inert `memoryId` and its **Bundle** label, because the runner doesn't use it (§6 D6).
 - **Not in this change:** the cross-channel agent registry carries no bundle binding today (A has the same gap, issue #3148), so the list is per channel, like A. Memory re-injection after compaction re-delivers Global Memory only, not the picked bundles' sections; Claude Code re-reads the startup file itself, other providers lose them until the next launch.
+
+### 3.8 Retired terms: "identity bundle" and "memory bundle"
+
+Operator, 2026-10-07: the identity-bundle and memory-bundle concepts are over, so the terms go from user-facing text and code comments everywhere. They name nothing any more: an agent binds accounts directly, at most one per provider, and takes an ordered list of **bundles**.
+
+| Term | Now |
+|---|---|
+| identity bundle, Identity bundle | the agent's **account** (or **accounts**); its **Identity** is that set |
+| per-identity bundle (an auth dir under `<shared>/identities/<id>/`) | a **per-account auth dir** |
+| memory bundle, Memory bundle | **bundle** |
+| Global Memory bundle | a **Global Memory entry** |
+
+**Kept, because they are literal names:**
+- The retired tables `db_identity_bundles` and `db_memory_bundles`, in the migrations that still look for them. Comments that describe legacy rows refer to them by that table name.
+- File names of dated specs that are cited, such as `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`.
+- The retired migrations' own history comments (m0008, m0011–m0013), which record what they did to those tables.
+
+**Not changed:** historical docs (dated specs, reports, archive, `VERSION_HISTORY.md`), as in §3.7.
+
+**Also fixed in the sweep:**
+- The README's alpha warning, which listed identity and memory bundles among the moving interfaces.
+- The seeded "AgentMux Development" bundle's own text ("Select this Memory bundle"). It is seeded once, so only new installs get the new text.
+- The comments about an `identitybundlebindings:changed` event that nothing publishes.
+- The App API docs' identity-bundle RPC row, whose commands no longer exist.
 
 ### 3.7 What does not change
 

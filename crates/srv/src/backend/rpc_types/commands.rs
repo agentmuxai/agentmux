@@ -312,7 +312,7 @@ pub const COMMAND_DELETE_AGENT_INSTANCE: &str = "deleteagentinstance";
 pub const COMMAND_AGENT_LAST_RUNTIME: &str = "agentlastruntime";
 /// v8 — list named agent instances for the launch modal's "Continue
 /// agent" dropdown. Filters to non-hidden rows with a non-empty
-/// instance_name, joined with definition + identity + memory bundles.
+/// instance_name, joined with its definition, account and bundle.
 pub const COMMAND_LIST_NAMED_AGENTS: &str = "listnamedagents";
 /// v8 — soft-delete (hide) a named agent instance from the dropdown.
 /// Row + working directory remain on disk for audit + recovery.
@@ -678,7 +678,7 @@ pub const COMMAND_SESSION_NEXT_PROMPT_SUGGESTION: &str = "session:next_prompt_su
 
 // Option E (PR 1 of 2) — agent-anchored session zones.
 // A session zone is bound to the *agent definition* (`definition_id`),
-// not the identity bundle. Every block of the same agent reads/writes
+// not the account. Every block of the same agent reads/writes
 // through `agent:<defId>:current`; archiving snapshots to
 // `agent:<defId>:archive:<ts_ms>`.
 pub const COMMAND_AGENT_SESSION_READ: &str = "agent:session:read";

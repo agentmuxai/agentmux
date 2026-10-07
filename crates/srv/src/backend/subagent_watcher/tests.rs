@@ -1060,7 +1060,7 @@ fn nearest_existing_ancestor_never_walks_above_the_home_directory() {
 }
 
 /// Regression test for the observed bug: an agent without an explicit
-/// per-identity bundle override launches under the shared default auth
+/// per-account auth dir launches under the shared default auth
 /// dir (`~/.agentmux/shared/providers/claude/`), not
 /// `derive_claude_config_dir`'s `~/.config/claude-<agent_id>` guess.
 /// `resolve_claude_config_dir` must prefer the block's real `cmd:env`
@@ -1484,7 +1484,7 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
     // End-to-end regression test for docs/retro/retro-subagent-watcher-
     // shared-dir-fanout-and-leak-2026-07-23.md Bug A: two blocks share
     // one config_dir (the common case — every agent without a per-
-    // identity bundle override resolves to the same default provider
+    // per-account auth dir resolves to the same default provider
     // path), so both watchers see the same raw filesystem event. Only
     // the block that actually owns the session (via its own persisted
     // agent:sessionid meta) may record the subagent; the other must
@@ -1525,7 +1525,7 @@ async fn live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_ses
     watcher.mstore.insert(&mut other_block).unwrap();
 
     // Both watch the SAME shared config_dir — simulating two agents
-    // without a per-identity bundle override.
+    // without a per-account auth dir.
     watcher.watch_agent("agent-owner", "block-owner", config_dir.clone());
     watcher.watch_agent("agent-other", "block-other", config_dir.clone());
 

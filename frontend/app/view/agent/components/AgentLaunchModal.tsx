@@ -238,8 +238,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // dispatch the loading lifecycle commands; the view reads via
     // `flow.state.accounts.list` etc. Issue #1624 PR-C Part B —
     // accounts source from the shared account cache
-    // (`identity-model.ts`) instead of `ListIdentityBundlesCommand`,
-    // and load once (no per-selection binding fetch needed — an
+    // (`identity-model.ts`) and load once (no per-selection binding fetch needed — an
     // account's `provider` is already known client-side).
     const loadAccountsIntoForm = async () => {
         flow.dispatch({ type: "AccountsLoading" });

@@ -13,8 +13,8 @@ follow below so the warning is never pushed below the fold. -->
 > - **Don't rely on persistence** — settings, pane layouts, and agent state
 >   may not carry over cleanly across versions, so avoid storing anything
 >   you can't easily recreate.
-> - **Interfaces are still moving** — config files, identity bundles,
->   memory bundles, and the App API can change shape without a migration
+> - **Interfaces are still moving** — config files, accounts,
+>   bundles, and the App API can change shape without a migration
 >   path during alpha.
 > - **Platform coverage varies** — Windows gets the most testing right now;
 >   macOS and Linux builds are a bit further behind.
@@ -56,7 +56,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Agents drive the workspace** — Via the App API, a running agent can open panes, rename tabs, navigate the layout, and message peer agents — over a typed local WebSocket. Agents are operators, not passengers.
 - **Interagent comms** — `SendMessage` routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
 - **Swarm** — A live two-level agent/subagent tree. Watch delegation chains and every subagent's activity in one view.
-- **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.), keychain-backed, assigned per agent at launch. Survive renames; swappable without restart.
+- **Accounts** — Sign-ins and keys for providers and services (Claude, Codex, GitHub, AWS, API keys and more), kept in Connectors → Accounts and bound to each agent, at most one per provider. Survive renames; swappable without restart.
 - **Bundles** — A collection of an agent's instructions, memory, skills and MCP servers, captured once and reused across agents (renamed from "presets"). Backend: `db_bundles`; managed in the Memory pane (widget bar or hamburger → Memory → Bundles).
 - **Memory** — The Memory pane holds **Global Memory** (instructions every agent gets at launch), each agent's **Personal Memory** (its own memory files, with history, `agent:memory:*`), Skills and Bundles. An agent's Stash shows its own Personal Memory, the same data. Deeper cross-session memory is actively in development.
 - **One-shot CLIs, AgentMux owns state** — Most provider CLIs are invoked per turn (Subprocess/ACP controllers); Claude Code runs as a persistent stream. Either way AgentMux holds the durable session state, so a 150–350MB Rust core stays flat over long sessions (no GC pauses, no heap growth).

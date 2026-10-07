@@ -557,9 +557,9 @@ fn global_memory_ui_revert(store: &Store, cmd: &CommandGlobalMemoryRevertData) -
 }
 
 /// The directory a spawned Claude agent's `CLAUDE_CONFIG_DIR` env var
-/// points at by DEFAULT (non-identity-bound agents — the common case;
-/// explicit multi-account identity bundles use a separate, per-identity
-/// dir this does not cover). Mirrors `agent_open.rs`'s own `auth_dir`
+/// points at by DEFAULT (agents not bound to an account — the common
+/// case; an agent bound to an account uses that account's own dir, which
+/// this does not cover). Mirrors `agent_open.rs`'s own `auth_dir`
 /// resolution exactly — `DataPaths::provider_auth_dir("claude")`, with the
 /// identical `~/.agentmux/shared/providers/claude` fallback when
 /// `DataPaths::from_env()` fails — so the path shown here is genuinely the

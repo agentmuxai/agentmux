@@ -775,9 +775,8 @@ pub async fn run_agent_turn(
     let env_vars = crate::backend::blockcontroller::cmd_env_of(&block.meta);
     // Identity gate, MuxBus token, reserved wrapper vars, agent identity,
     // git identity, tools PATH — see `build_persistent_spawn_env`'s own doc
-    // comment. Broker hand-in lets the OAuth expiry probe (PR D, spec §4.4)
-    // publish `identitybundlebindings:changed:<bundle_id>` when it flips a
-    // token's status valid→expired etc.
+    // comment. Broker hand-in lets the identity resolver publish its
+    // `identity:*` / `identityaccounts:changed` events.
     //
     // Before all of that — the env build writes shared identity state — a
     // persistent pane about to spawn checks that no other AgentMux instance

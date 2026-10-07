@@ -521,7 +521,7 @@ pub(super) fn read_journal_counts(path: &Path, offset: u64) -> Result<(usize, us
 pub(super) use agentmux_common::time::now_ms_u64 as now_millis;
 
 /// Derive the Claude Code config directory for a host agent. Only matches
-/// reality for an agent with an explicit per-identity bundle override —
+/// reality for an agent with an explicit per-account auth dir —
 /// prefer `resolve_claude_config_dir` when the block's meta is available.
 pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
@@ -554,7 +554,7 @@ pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
 /// only when `cmd:env` isn't set yet either.
 ///
 /// This distinction matters: `derive_claude_config_dir`'s guess only holds
-/// for an agent with an explicit per-identity bundle override. Any agent
+/// for an agent with an explicit per-account auth dir. Any agent
 /// without one launches under the shared default at
 /// `~/.agentmux/shared/providers/claude/`, a completely different path that
 /// the guess never matches — silently disabling subagent tracking for that

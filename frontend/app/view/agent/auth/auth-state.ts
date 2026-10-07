@@ -99,8 +99,8 @@ export interface AuthState {
         | "failed";
     /** Selected provider id ("claude", "codex", "openclaw", ...). */
     providerId: string;
-    /** Selected identity bundle id. Empty when no bundle picked OR
-     *  blank singleton (`needs-bundle`). */
+    /** Vestigial: the id of the retired identity grouping the connect
+     *  saved into. Empty when none (`needs-bundle`). */
     bundleId: string;
     /** When the connect is a "re-auth" or "add account" flow, the
      *  existing bundle id to update on save. Empty = create new bundle. */

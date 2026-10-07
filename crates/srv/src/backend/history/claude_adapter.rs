@@ -24,7 +24,7 @@ use std::time::UNIX_EPOCH;
 
 use super::adapter::*;
 
-/// Where Claude homes live. The homes under them — identity bundles and
+/// Where Claude homes live. The homes under them — one per account, and
 /// channels — are listed again on every discovery ([`ClaudeHistoryAdapter::base_dirs`]),
 /// because they are created while srv runs: an account added or switched
 /// after srv started used to stay invisible until the next restart.
@@ -112,7 +112,7 @@ impl ClaudeHistoryAdapter {
         // Without these, the history browse misses every AgentMux agent
         // conversation. See docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md.
         //   <shared>/providers/claude/projects/              (default, account-wide)
-        //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles, global)
+        //   <shared>/identities/<account_id>/claude/projects/ (per account, global)
         if let Some(shared) = &self.shared_dir {
             Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, shared.join("providers").join("claude").join("projects"));
             if let Some(entries) = read_dir_or_note(problems, &shared.join("identities")) {
@@ -213,7 +213,7 @@ impl ClaudeHistoryAdapter {
         result
     }
 
-    /// Parse the identity bundle id a session's absolute file path was
+    /// Parse the account id a session's absolute file path was
     /// discovered under, if any: `.../identities/<bundle_id>/claude/...`
     /// (both the always-global `<shared>/identities/...` location and the
     /// per-channel isolated `<home>/channels/*/identities/...` /
@@ -772,7 +772,7 @@ mod tests {
         assert!(found.problems.iter().any(|p| p.contains("-work-locked")), "{:?}", found.problems);
     }
 
-    /// An identity bundle or a channel created after the adapter is built —
+    /// An account's home or a channel created after the adapter is built —
     /// an account added or switched while srv runs — must still be found.
     /// The adapter used to list these directories once, when srv started, so
     /// a session under a later bundle stayed invisible until a restart: on

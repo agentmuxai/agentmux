@@ -76,7 +76,7 @@ impl OAuthProbeStatus {
 /// **macOS caveat (`claude` only):** the Claude Code CLI stores OAuth
 /// credentials in the encrypted macOS Keychain, never in
 /// `<dir>/.credentials.json` — confirmed against Claude Code's own docs
-/// and empirically on a real per-identity bundle dir on this machine (zero
+/// and empirically on a real per-account auth dir on this machine (zero
 /// `.credentials.json` present despite a working session). Unlike Linux
 /// and Windows, this is true regardless of `CLAUDE_CONFIG_DIR` — see
 /// `docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`.
