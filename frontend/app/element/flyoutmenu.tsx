@@ -194,7 +194,7 @@ const FlyoutMenu = (props: MenuProps): JSX.Element => {
         if (item.subItems) {
             return;
         }
-        onOpenChangeMenu(false);
+        if (!item.keepOpen) onOpenChangeMenu(false);
         item.onClick?.(e);
     };
 

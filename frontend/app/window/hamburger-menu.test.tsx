@@ -14,6 +14,7 @@
  */
 
 import { cleanup, render } from "@solidjs/testing-library";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
@@ -38,9 +39,11 @@ const h = vi.hoisted(() => {
         replaceBlock: vi.fn(),
         setControlShiftDelayAtom: vi.fn(),
         setIsTermMultiInput: vi.fn(),
-        settingsAtom: () => ({}),
+        // A test can swap in a reactive source (`settings.read`).
+        settingsAtom: () => settings.read(),
     };
-    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, menu: { items: [] as MenuItem[] } };
+    const settings = { read: (): Record<string, unknown> => ({}) };
+    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, menu: { items: [] as MenuItem[] } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -230,6 +233,40 @@ describe("Layouts entry", () => {
         for (const item of h.menu.items[at].subItems ?? []) {
             expect(typeof item.onClick).toBe("function");
         }
+        cleanup();
+    });
+});
+
+// Theme and Opacity stay open while the user tries values (REPORT_THEME_MENU_
+// RUNTIME_PANEL_TOOL_PREVIEW_TWEAKS_2026_10_07.md §1). A choice moves only the
+// checkmark: rebuilding the items would remount the open submenu under the
+// cursor, so the item list must survive a settings change.
+describe("Theme and Opacity", () => {
+    const sub = (label: string) => h.menu.items.find((i) => i.label === label)?.subItems ?? [];
+
+    it("keep the menu open; Layouts' items close it", () => {
+        render(() => <HamburgerMenu />);
+        expect(sub("Theme").length).toBeGreaterThan(1);
+        expect(sub("Theme").every((i) => i.keepOpen === true)).toBe(true);
+        expect(sub("Opacity").every((i) => i.keepOpen === true)).toBe(true);
+        expect(sub("Layouts").some((i) => i.keepOpen)).toBe(false);
+        cleanup();
+    });
+
+    it("move the checkmark on a settings change without rebuilding the items", () => {
+        const [cfg, setCfg] = createSignal<Record<string, unknown>>({ "window:theme": "default" });
+        h.settings.read = cfg;
+        createRoot((dispose) => {
+            render(() => <HamburgerMenu />);
+            const before = h.menu.items;
+            expect(sub("Theme").filter((i) => i.checked)).toHaveLength(1);
+
+            setCfg({ "window:theme": "__none__" });
+            expect(h.menu.items).toBe(before);
+            expect(sub("Theme").filter((i) => i.checked)).toHaveLength(0);
+            dispose();
+        });
+        h.settings.read = () => ({});
         cleanup();
     });
 });
