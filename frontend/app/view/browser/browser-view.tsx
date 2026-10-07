@@ -15,6 +15,7 @@ import { usePaneRectSync } from "./use-pane-rect-sync";
 import { useDragSnapshot, type DragSnapshot } from "./use-drag-snapshot";
 import { useFreezeFrame } from "./use-freeze-frame";
 import { useBrowserAuth } from "./use-browser-auth";
+import { Button } from "@/app/element/ui";
 import { BrowserNavBar } from "./browser-nav-bar";
 import "./browser-view.scss";
 
@@ -242,14 +243,14 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         <span>
                             Driven by <b>{agent()}</b>
                         </span>
-                        <button
-                            type="button"
+                        <Button
+                            density="compact"
                             class="browser-take-over"
                             title="End the agent's control of this pane; its next action here will fail."
                             onClick={() => model.takeOver().catch(() => {})}
                         >
                             Take over
-                        </button>
+                        </Button>
                     </div>
                 )}
             </Show>

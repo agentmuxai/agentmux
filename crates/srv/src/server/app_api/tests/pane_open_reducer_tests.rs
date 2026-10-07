@@ -1050,3 +1050,134 @@ fn an_unknown_view_names_files_among_the_supported_ones() {
     let err = pane::build_pane_meta(&cmd).unwrap_err();
     assert!(err.starts_with("INVALID_VIEW") && err.contains("files"), "{err}");
 }
+
+// ── OpenBrowser and agent-owned browser panes ───────────────────────────────
+// SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3, end to end through the
+// real HTTP routes. No CEF host is registered in tests, and every Browser*
+// handler checks ownership BEFORE contacting the host, so the status says
+// what the ownership check decided: 503 (host not registered) means the
+// caller got through; 403 and 404 mean it was stopped.
+
+/// A fake agent registered on `block_id`, with a valid signed identity.
+fn signed_agent_on(state: &AppState, block_id: &str) -> (String, serde_json::Value) {
+    let agent_id = format!("browser-owner-agent-{}", uuid::Uuid::new_v4());
+    let key = state.mstore.agent_jekt_key_ensure(&agent_id).unwrap();
+    crate::backend::reactive::handler::get_global_handler()
+        .register_agent(&agent_id, block_id, None)
+        .unwrap();
+    let ts_secs = agentmux_common::time::now_secs();
+    let sig = agentmux_common::jekt_sign::sign_jekt(&key, "ui-automation-identity", &agent_id, "__srv__", ts_secs, "");
+    (agent_id.clone(), serde_json::json!({ "agent_id": agent_id, "ts_secs": ts_secs, "sig": sig }))
+}
+
+async fn post_json(app: &axum::Router, uri: &str, body: serde_json::Value) -> (axum::http::StatusCode, serde_json::Value) {
+    use tower::ServiceExt;
+    let req = axum::http::Request::builder()
+        .uri(uri)
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+fn merged(auth: &serde_json::Value, extra: serde_json::Value) -> serde_json::Value {
+    let mut b = auth.clone();
+    for (k, v) in extra.as_object().unwrap() {
+        b[k] = v.clone();
+    }
+    b
+}
+
+async fn stand_in_pane(state: &AppState, tab_id: &str) -> String {
+    let mut cmd = editor_open_cmd(Some(tab_id.to_string()), "/tmp/unused.txt", None, None);
+    cmd.view = "sysinfo".into();
+    cmd.file = None;
+    open_pane(state, cmd).await.expect("open a stand-in pane").block_id
+}
+
+#[tokio::test]
+async fn open_browser_gives_the_agent_a_pane_only_it_can_drive_until_the_user_takes_over() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    let app = crate::server::build_router(state.clone());
+
+    // OpenBrowser refuses anything but an http(s) URL.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "file:///etc/passwd" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // OpenBrowser opens a browser pane owned by the caller.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://example.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().expect("pane id").to_string();
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert_eq!(block.meta.get("view").and_then(|v| v.as_str()), Some("browser"));
+    assert_eq!(block.meta.get("browser:owner_agent").and_then(|v| v.as_str()), Some(agent.as_str()));
+
+    let eval = |auth: &serde_json::Value, pane: &str| merged(auth, serde_json::json!({ "pane": pane, "script": "1" }));
+
+    // The owner gets past the ownership check (and stops at the missing host).
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+
+    // Another agent may not drive it.
+    let other_own = stand_in_pane(&state, &tab_id).await;
+    let (_, other) = signed_agent_on(&state, &other_own);
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", eval(&other, &pane)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+
+    // A pane that isn't a browser pane is refused, even a real one.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &other_own)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // A client can't make itself the owner by writing the meta key.
+    let oref = format!("block:{pane}");
+    let mut forged = crate::backend::obj::MetaMapType::new();
+    forged.insert("browser:owner_agent".into(), serde_json::json!(agent));
+    assert!(crate::server::browser_owner::guard_client_meta_write(&oref, &forged).is_err());
+
+    // The user's Take over (a client clearing the key) ends ownership...
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&oref, &clear).unwrap();
+    crate::server::service::update_object_meta(&state.mstore, &oref, &clear).unwrap();
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+
+    // ...for good: even with the key written straight back (bypassing the
+    // client guard), the owner map no longer agrees.
+    crate::server::service::update_object_meta(&state.mstore, &oref, &forged).unwrap();
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // A closed pane is 404.
+    crate::backend::wcore::delete_block(&state.mstore, &tab_id, &pane).unwrap();
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Without `pane`, the tools still act on the caller's own pane, as before.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "script": "1" }))).await;
+    assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+}
