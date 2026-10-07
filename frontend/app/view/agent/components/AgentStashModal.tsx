@@ -73,7 +73,7 @@ interface AgentStashModalProps {
 }
 
 // Icons are the same choice as the matching section of the Connectors and
-// Knowledge panes (connectors.tsx, knowledge.tsx), for visual parity since
+// Memory panes (connectors.tsx, memory.tsx), for visual parity since
 // this modal is the per-agent-scoped analogue of them.
 type StashTabDef = TabItem<StashTabId> & { icon: string };
 
@@ -85,7 +85,7 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
         { id: "memory", label: "Personal Memory", icon: "brain" },
         { id: "mcp", label: "MCP Servers", icon: "plug" },
         { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
-        // layer-group: same icon Knowledge uses for "Bundles" —
+        // layer-group: same icon Memory uses for "Bundles" —
         // this tab picks a bundle as startup instructions, so it's the same
         // concept scoped to one agent.
         { id: "startup", label: "Startup", icon: "layer-group" },

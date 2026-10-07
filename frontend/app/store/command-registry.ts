@@ -21,7 +21,7 @@ import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom";
-import { openConnectors, openKnowledge } from "@/app/view/section-pane/panes";
+import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -399,12 +399,22 @@ export function registerDefaultCommands(): void {
         execute: () => openConnectors(),
     });
     commandRegistry.register({
-        id: "app:knowledge",
-        label: "Knowledge",
+        id: "app:memory",
+        label: "Memory",
         category: "App",
-        icon: "book",
-        keywords: "memory global personal skills bundles abf armory",
-        execute: () => openKnowledge(),
+        icon: "brain",
+        keywords: "global personal memory skills bundles abf armory knowledge",
+        execute: () => openMemory(),
+    });
+    // Memory's former command, for a keybinding or the macOS menu of an older
+    // build that still names it.
+    commandRegistry.register({
+        id: "app:knowledge",
+        label: "Memory",
+        category: "App",
+        icon: "brain",
+        hidden: true,
+        execute: () => openMemory(),
     });
     // The Armory's old command, for a keybinding that still names it. Remove
     // with the Armory (SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md).

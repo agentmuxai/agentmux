@@ -49,7 +49,10 @@ export function widgetColorView(view: string | null | undefined): string | undef
 export function widgetHueFor(view: string | null | undefined): number | undefined {
     const key = widgetColorView(view);
     if (!key) return undefined;
-    const chosen = getSettingsKeyAtom("pane:colors")()?.[key];
+    const colors = getSettingsKeyAtom("pane:colors")();
+    // A color the user saved under the view's former id (an alias) still counts.
+    const names = [key, ...(colorManifest(view)?.aliases ?? [])];
+    const chosen = names.map((name) => colors?.[name]).find((v) => v !== undefined);
     if (chosen === null) return undefined;
     if (typeof chosen === "number") return chosen;
     return colorManifest(view)?.defaultHue;

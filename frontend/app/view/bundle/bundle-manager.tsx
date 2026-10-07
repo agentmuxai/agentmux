@@ -4,14 +4,9 @@
 // BundleManager — the context-free Armory Bundle Format (ABF) management UI.
 //
 // This is the full list / create / edit / delete lifecycle for ABF
-// bundles, extracted out of the `view: "memory"` block pane so the exact
-// same UI can render in two places without depending on the Agent-pane
-// block, `nodeModel`, or any ViewModel-from-BlockRegistry context:
-//
-//   1. The existing `view: "memory"` settings pane — `bundle-view.tsx`
-//      renders <BundleManagerBody/> with the pane's BlockRegistry model.
-//   2. The window-scoped bundle manager modal (a later PR) — renders
-//      <BundleManager/>, which owns its own block-free model.
+// bundles, context-free: it doesn't depend on an Agent-pane block,
+// `nodeModel`, or any ViewModel-from-BlockRegistry context. <BundleManager/>
+// owns its own block-free model; the Memory pane's Bundles section renders it.
 //
 // Everything here drives purely off the `bundle_*` RPCs (via
 // BundleViewModel) plus the `memories:changed` MPS event, so two live
@@ -276,7 +271,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                             <label class="bundle-view-field">
                                 <span class="bundle-view-field-label">
                                     Name *
-                                    <FieldHelp text="The bundle's display name — shown in Knowledge → Bundles and in the agent launch picker. Required." />
+                                    <FieldHelp text="The bundle's display name — shown in Memory → Bundles and in the agent launch picker. Required." />
                                 </span>
                                 <input
                                     class="bundle-view-input"

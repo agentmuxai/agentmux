@@ -261,15 +261,15 @@
             }
         }
     },
-    "defwidget@knowledge": {
+    "defwidget@memory": {
         "display:order": 3,
         "display:pinned": true,
-        "icon": "book",
-        "label": "Knowledge",
-        "description": "Global and personal memory, skills and bundles: what agents know",
+        "icon": "brain",
+        "label": "Memory",
+        "description": "Global and Personal Memory, Skills and Bundles: what agents know and carry",
         "blockdef": {
             "meta": {
-                "view": "knowledge"
+                "view": "memory"
             }
         }
     },

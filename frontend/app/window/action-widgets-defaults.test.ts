@@ -3,7 +3,7 @@
 
 /**
  * The widget bar a fresh install shows (crates/srv/src/config/widgets.json),
- * and the Armory widget's move to Connectors and Knowledge.
+ * and the Armory widget's move to Connectors and Memory (then named Knowledge).
  * SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md §4.3, §4.8.
  */
 
@@ -32,7 +32,7 @@ describe("the default widget bar", () => {
         expect(getPinnedKeys({}, wmap)).toEqual([
             "agent",
             "swarm",
-            "knowledge",
+            "memory",
             "files",
             "connectors",
             "terminal",
@@ -66,25 +66,25 @@ describe("the default widget bar", () => {
 });
 
 describe("a pinned list saved with the Armory", () => {
-    it("reads armory as connectors and knowledge, in its place", () => {
+    it("reads armory as connectors and memory, in its place", () => {
         expect(getPinnedKeys({ "widget:pinned": ["agent", "armory", "sysinfo"] }, wmap)).toEqual([
             "agent",
             "connectors",
-            "knowledge",
+            "memory",
             "sysinfo",
         ]);
     });
 
     it("doesn't list a pane twice when it's already pinned", () => {
-        expect(getPinnedKeys({ "widget:pinned": ["knowledge", "armory"] }, wmap)).toEqual(["knowledge", "connectors"]);
+        expect(getPinnedKeys({ "widget:pinned": ["knowledge", "armory"] }, wmap)).toEqual(["memory", "connectors"]);
     });
 });
 
 describe("handleWidgetSelect", () => {
-    it("focuses an open Connectors or Knowledge pane instead of opening another", async () => {
+    it("focuses an open Connectors or Memory pane instead of opening another", async () => {
         await handleWidgetSelect(wmap["defwidget@connectors"]);
-        await handleWidgetSelect(wmap["defwidget@knowledge"]);
-        expect(store.openOrFocusPaneByView.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["connectors", "knowledge"]);
+        await handleWidgetSelect(wmap["defwidget@memory"]);
+        expect(store.openOrFocusPaneByView.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["connectors", "memory"]);
         expect(store.createBlock).not.toHaveBeenCalled();
     });
 

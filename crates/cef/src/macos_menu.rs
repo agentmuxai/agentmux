@@ -314,7 +314,7 @@ unsafe fn install_inner(state: Arc<AppState>) {
     let app_menu = add_submenu(main, name);
     add_cmd(app_menu, target, "Settings…", "dev:open_settings", "", 0);
     add_cmd(app_menu, target, "Connectors…", "app:connectors", "", 0);
-    add_cmd(app_menu, target, "Knowledge…", "app:knowledge", "", 0);
+    add_cmd(app_menu, target, "Memory…", "app:memory", "", 0);
     add_sep(app_menu);
     // Docs live here (no "Help" menu — see the SCTSearchManager note below).
     add_cmd(app_menu, target, &format!("{name} Help"), "help:docs", "", 0);

@@ -57,8 +57,8 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 - **Interagent comms** — `SendMessage` routes one agent's output into another agent's input, so you can build hand-offs and reactive pipelines.
 - **Swarm** — A live two-level agent/subagent tree. Watch delegation chains and every subagent's activity in one view.
 - **Identity bundles** — Named credential sets (GitHub PAT, AWS profile, Anthropic key, etc.), keychain-backed, assigned per agent at launch. Survive renames; swappable without restart.
-- **Bundles** — Capture an agent's instructions and context files once and reuse them across agents (renamed from "presets"). Backend: `db_bundles`; managed from the Armory tab (hamburger → Armory → Bundles).
-- **Native memory** — Agents read and write their own memory files (`agent:memory:*`). Deeper cross-session memory is actively in development.
+- **Bundles** — A collection of an agent's instructions, memory, skills and MCP servers, captured once and reused across agents (renamed from "presets"). Backend: `db_bundles`; managed in the Memory pane (widget bar or hamburger → Memory → Bundles).
+- **Memory** — The Memory pane holds **Global Memory** (instructions every agent gets at launch), each agent's **Personal Memory** (its own memory files, with history, `agent:memory:*`), Skills and Bundles. An agent's Stash shows its own Personal Memory, the same data. Deeper cross-session memory is actively in development.
 - **One-shot CLIs, AgentMux owns state** — Most provider CLIs are invoked per turn (Subprocess/ACP controllers); Claude Code runs as a persistent stream. Either way AgentMux holds the durable session state, so a 150–350MB Rust core stays flat over long sessions (no GC pauses, no heap growth).
 - **Reducer stack** — A multi-layer reducer architecture (launcher / host / sidecar / frontend) with structured event logs, so "what mutated this state?" has one place to look.
 - **Browser pane** — Native `CefBrowserView` embedded as a child window of the AgentMux frame — full Chromium fidelity (links, popups, DRM) without iframe limitations.
@@ -172,7 +172,7 @@ full rollout plan: `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17
 
 | Surface | How to reach it |
 |---|---|
-| **Agent setup** | Vault icon in an Agent pane's header → Accounts / Memories / MCP Servers / Skills / Startup tabs. Accounts assigns the credential bundle for this instance; Memories browses native memory; MCP Servers and Skills bind agent-private or global entries; Startup selects an Armory Bundle as Session Context's startup instructions. Replaces the old Forge concept. |
+| **Agent setup** | The Stash (backpack icon) in an Agent pane's header → Accounts / Personal Memory / MCP Servers / Skills / Startup tabs. Accounts sets the account this agent signs in with; Personal Memory shows its own memory files (the same data as Memory → Personal); MCP Servers and Skills bind agent-private or global entries; Startup picks a Bundle as the agent's startup instructions. Replaces the old Forge concept. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens the Settings pane (Appearance, Window & Panes, Terminal, Sounds, Network, Advanced); a footer button opens the raw `settings.json` in your default editor as an escape hatch. |
 | **DevTools** | Hamburger menu (≡) in the top tab bar → DevTools. Toggles Chromium DevTools (no longer a widget). |
 

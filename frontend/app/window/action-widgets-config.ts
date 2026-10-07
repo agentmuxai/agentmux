@@ -56,10 +56,22 @@ export function widgetIconStyle(widget: WidgetConfigType): JSX.CSSProperties {
     return tint ? { "--widget-tint": tint } : {};
 }
 
+/** Pinned short-names saved under an older name, read as the widget that
+ *  replaced them: the Armory became Connectors and Memory, Knowledge became
+ *  Memory. */
+const RENAMED_PINS: Record<string, string[]> = {
+    armory: ["connectors", "memory"],
+    knowledge: ["memory"],
+};
+
+function currentPinNames(pinned: readonly string[]): string[] {
+    return pinned.flatMap((shortName) => RENAMED_PINS[shortName] ?? [shortName]);
+}
+
 /** True if `shortName` is individually pinned via widget:pinned — i.e. promoted out of its parent group. */
 function isIndividuallyPinned(shortName: string, settings: Record<string, any>): boolean {
     const pinned: string[] | undefined = settings?.["widget:pinned"];
-    return pinned !== undefined && pinned.includes(shortName);
+    return pinned !== undefined && currentPinNames(pinned).includes(shortName);
 }
 
 /**
@@ -116,9 +128,8 @@ export function getChildWidgets(
  * Return the effective pinned short-names (no "defwidget@" prefix), in order.
  *
  * Priority:
- *  1. widget:pinned is set → authoritative, except that "armory" reads as
- *     "connectors" and "knowledge", the two panes that replaced it
- *     (SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md §4.3). A grouped child listed here IS
+ *  1. widget:pinned is set → authoritative, except that a renamed widget
+ *     reads as the one that replaced it (`RENAMED_PINS`). A grouped child listed here IS
  *     honored (not stripped) — that's exactly how an individual child gets
  *     promoted out of its parent group onto the bar (see
  *     getEffectiveGroupedChildKeys).
@@ -134,7 +145,7 @@ export function getPinnedKeys(
 ): string[] {
     const pinned: string[] | undefined = settings["widget:pinned"];
     if (pinned !== undefined) {
-        const keys = pinned.flatMap((shortName) => (shortName === "armory" ? ["connectors", "knowledge"] : [shortName]));
+        const keys = currentPinNames(pinned);
         return [...new Set(keys)].filter((shortName) => wmap[`defwidget@${shortName}`] != null);
     }
     const grouped = getGroupedChildKeys(wmap);
@@ -243,8 +254,8 @@ export function buildPaneWidgetMenuItems(
 // ── Widget actions ────────────────────────────────────────────────────────────
 
 /** Views whose widget focuses the pane already open in this tab instead of
- *  opening another: there's one Connectors and one Knowledge to manage. */
-const FOCUS_EXISTING_VIEWS = new Set(["connectors", "knowledge"]);
+ *  opening another: there's one Connectors and one Memory to manage. */
+const FOCUS_EXISTING_VIEWS = new Set(["connectors", "memory"]);
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {
     const view = widget.blockdef?.meta?.["view"] as string | undefined;

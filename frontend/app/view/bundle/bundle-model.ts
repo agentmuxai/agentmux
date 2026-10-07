@@ -161,8 +161,7 @@ export function draftToWire(d: BundleDraft): BundleUpsertInput {
 }
 
 /** The bundle editor's state: the list, the selection and the in-flight
- *  draft, for the context-free `BundleManager`. (The `view: "memory"` pane is
- *  a native pane tab with no model — `memoryPaneTab`, bundle.tsx.) */
+ *  draft, for the context-free `BundleManager`. */
 export class BundleViewModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bundle create/edit/delete made elsewhere refreshes this list without

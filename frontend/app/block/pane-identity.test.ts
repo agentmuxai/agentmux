@@ -68,6 +68,16 @@ describe("widgetHueFor", () => {
         expect(widgetHueFor("t-old")).toBe(60);
     });
 
+    it("keeps a color the user saved under the view's former id, an alias", () => {
+        setSettings({ "pane:colors": { "t-old": 90 } });
+        expect(widgetHueFor("t-term")).toBe(90);
+        setSettings({ "pane:colors": { "t-old": null } });
+        expect(widgetHueFor("t-term")).toBeUndefined();
+        // A color saved under the current id wins over the old one.
+        setSettings({ "pane:colors": { "t-term": 30, "t-old": 90 } });
+        expect(widgetHueFor("t-term")).toBe(30);
+    });
+
     it("gives a legacy view the color of the view it stands in for", () => {
         expect(widgetHueFor("t-legacy")).toBe(240);
         setSettings({ "pane:colors": { "t-term": 60, "t-legacy": 300 } });

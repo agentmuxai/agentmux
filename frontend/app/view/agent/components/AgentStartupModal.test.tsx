@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const listMemories = vi.fn();
 const getAgentContent = vi.fn();
 const setAgentContent = vi.fn();
-const openKnowledge = vi.fn();
+const openMemory = vi.fn();
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
@@ -24,7 +24,7 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/view/section-pane/panes", () => ({
-    openKnowledge: (...args: unknown[]) => openKnowledge(...args),
+    openMemory: (...args: unknown[]) => openMemory(...args),
 }));
 
 import { AgentStartupModal } from "./AgentStartupModal";
@@ -46,7 +46,7 @@ describe("AgentStartupModal", () => {
         listMemories.mockReset();
         getAgentContent.mockReset();
         setAgentContent.mockReset();
-        openKnowledge.mockReset();
+        openMemory.mockReset();
     });
 
     afterEach(() => {
@@ -93,20 +93,20 @@ describe("AgentStartupModal", () => {
         });
     });
 
-    it("shows the Knowledge → Bundles edit note only once a bundle is selected", async () => {
+    it("shows the Memory → Bundles edit note only once a bundle is selected", async () => {
         listMemories.mockResolvedValue([mkBundle({ id: "bundle-1", name: "Code Reviewer" })]);
         getAgentContent.mockResolvedValue(null);
 
         render(() => <AgentStartupModal agentId="agent-1" />);
         await screen.findByRole("combobox");
-        expect(screen.queryByText(/Knowledge → Bundles/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Memory → Bundles/)).not.toBeInTheDocument();
 
         setAgentContent.mockResolvedValue({});
         const select = screen.getByRole("combobox");
         fireEvent.change(select, { target: { value: "bundle-1" } });
 
         await waitFor(() => {
-            expect(screen.getByText(/Knowledge → Bundles/)).toBeInTheDocument();
+            expect(screen.getByText(/Memory → Bundles/)).toBeInTheDocument();
         });
     });
 
