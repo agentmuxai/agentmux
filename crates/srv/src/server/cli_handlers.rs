@@ -746,15 +746,15 @@ pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
     cmd
 }
 
-/// Run the provider auth-check CLI against `auth_env` and parse the verdict.
-/// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
-/// stale-credential self-heal can re-run the exact same check after refreshing.
 /// `pi --list-models` exits 0 either way; it is signed in when it lists
 /// models rather than "No models available".
 fn pi_lists_models(success: bool, stdout: &str, stderr: &str) -> bool {
     success && !stdout.contains("No models available") && !stderr.contains("No models available")
 }
 
+/// Run the provider auth-check CLI against `auth_env` and parse the verdict.
+/// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
+/// stale-credential self-heal can re-run the exact same check after refreshing.
 async fn run_auth_check(
     cli_path: &str,
     auth_check_args: &[String],
