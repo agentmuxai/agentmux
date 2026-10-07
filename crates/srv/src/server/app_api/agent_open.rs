@@ -1101,15 +1101,9 @@ pub(super) fn write_agent_config_files(
         }
     }
 
-    // Inject Global Memory (global bundles) into CLAUDE.md. All agents get
-    // these regardless of their own bundles. Each section carries a
-    // `# [Workspace] <name>` heading (see format_global_bundle_block) so the
-    // rules are attributable to the workspace and ordered per the Memory
-    // pane's Global section's sort_order. Operator Config entries targeted
-    // at another agent kind are left out. The bundles picked for this agent
-    // follow, as `# [Bundle] <name>` sections in list order
-    // (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6);
-    // `WriteAgentConfig` composes the same text.
+    // Global Memory (minus Operator Config for another agent kind), then the
+    // agent's picked bundles in list order, go into CLAUDE.md; WriteAgentConfig
+    // composes the same text (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
     let global_bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
         id_store.bundle_list_global().unwrap_or_default(),
         &agent.agent_type,
