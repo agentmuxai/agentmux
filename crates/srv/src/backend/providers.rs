@@ -469,13 +469,14 @@ static KIMI: ProviderConfig = ProviderConfig {
     cli_command: "kimi",
     controller_type: ControllerType::Subprocess,
     app_server: None,
+    // No `-p ""` placeholder: kimi 1.37 rejects an empty --prompt ("Prompt
+    // cannot be empty") before reading stdin. Without -p, --print reads the
+    // prompt from stdin, which is how the turn delivers it.
     launch_args: &[
         "--print",
         "--output-format",
         "stream-json",
         "--yolo",
-        "-p",
-        "",
     ],
     persistent_launch_args: None,
     resume_flag: None,
@@ -1169,6 +1170,16 @@ mod tests {
         assert_eq!(p.styled_output_format, "qwen-stream-json");
         assert!(p.launch_args.contains(&"--include-partial-messages"));
         assert!(crate::backend::blockcontroller::subprocess::persists_user_record(p.styled_output_format));
+    }
+
+    #[test]
+    fn kimi_takes_its_prompt_from_stdin_with_no_empty_prompt_flag() {
+        // kimi 1.37 exits "Invalid value for --prompt: Prompt cannot be empty"
+        // on `-p ""`, before reading stdin; `--print` alone reads stdin.
+        let p = get_provider("kimi").unwrap();
+        assert!(p.launch_args.contains(&"--print"));
+        assert!(!p.launch_args.contains(&"-p"), "{:?}", p.launch_args);
+        assert!(!p.launch_args.contains(&""), "{:?}", p.launch_args);
     }
 
     #[test]

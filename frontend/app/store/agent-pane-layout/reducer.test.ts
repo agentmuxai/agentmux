@@ -456,3 +456,42 @@ describe("agent-pane-layout reducer", () => {
         });
     });
 });
+
+describe("RowsMeasured", () => {
+    const base = (): AgentPaneLayoutState => apply(initialState(), { type: "NodesChanged", orderedIds: ["a", "b", "c"] });
+    const rows = [
+        { nodeId: "a", state: "collapsed" as const, cssPx: 30 },
+        { nodeId: "gone", state: "collapsed" as const, cssPx: 40 },
+        { nodeId: "b", state: "expanded" as const, cssPx: 120 },
+        { nodeId: "c", state: "collapsed" as const, cssPx: Number.NaN },
+        { nodeId: "a", state: "collapsed" as const, cssPx: 35 },
+    ];
+
+    it("gives the same state and events as the same RowMeasured commands one by one", () => {
+        let s = base();
+        const events = [];
+        for (const r of rows) {
+            const res = update(s, { type: "RowMeasured", ...r });
+            s = res.state;
+            events.push(...res.events);
+        }
+        const batched = update(base(), { type: "RowsMeasured", rows });
+        expect(batched.events).toEqual(events);
+        expect(batched.state.heights).toEqual(s.heights);
+        expect(positions(batched.state)).toEqual(positions(s));
+    });
+
+    it("returns the same state when nothing changes", () => {
+        const s = apply(base(), { type: "RowMeasured", nodeId: "a", state: "collapsed", cssPx: 30 });
+        const res = update(s, { type: "RowsMeasured", rows: [{ nodeId: "a", state: "collapsed", cssPx: 30 }] });
+        expect(res.state).toBe(s);
+        expect(res.events).toEqual([]);
+    });
+
+    it("leaves the previous state's heights untouched", () => {
+        const s = base();
+        const before = new Map(s.heights);
+        update(s, { type: "RowsMeasured", rows: [{ nodeId: "a", state: "collapsed", cssPx: 99 }] });
+        expect(s.heights).toEqual(before);
+    });
+});

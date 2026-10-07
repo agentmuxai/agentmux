@@ -269,8 +269,15 @@ impl HistoryService {
         let adapters: Vec<Box<dyn HistoryAdapter>> =
             vec![Box::new(ClaudeHistoryAdapter::new())];
 
+        // Saved beside the shared agent registry, so every channel and build
+        // on the machine reuses one cache; entries are only trusted while the
+        // transcript's mtime is unchanged.
+        let mut index = SessionIndex::new(adapters);
+        if let Some(shared) = crate::registry::resolve_global_shared_root() {
+            index = index.with_cache_file(shared.join("history").join("session-meta-cache.json"));
+        }
         HistoryService {
-            index: Arc::new(SessionIndex::new(adapters)),
+            index: Arc::new(index),
             records: record::AgentRecords::global(),
             warm_pending: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             warm_started_early: Arc::new(std::sync::atomic::AtomicBool::new(false)),

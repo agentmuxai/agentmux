@@ -405,7 +405,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Kimi Code CLI",
         cliCommand: "kimi",
         defaultArgs: [],
-        styledArgs: ["--print", "--output-format", "stream-json", "--yolo", "-p", ""],
+        styledArgs: ["--print", "--output-format", "stream-json", "--yolo"],
         outputFormat: "raw",
         styledOutputFormat: "kimi-stream-json",
         authType: "api-key",
@@ -421,7 +421,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "KIMI_SHARE_DIR",
         authDirName: "kimi",
         supportedVendors: ["moonshot"],
-        launchArgs: ["--print", "--output-format", "stream-json", "--yolo", "-p", ""],
+        // No `-p ""`: kimi 1.37 rejects an empty prompt before reading stdin;
+        // without -p, --print reads the prompt from stdin.
+        launchArgs: ["--print", "--output-format", "stream-json", "--yolo"],
         resumeFlag: null,
         sessionIdField: "session_id",
         controllerType: "subprocess",

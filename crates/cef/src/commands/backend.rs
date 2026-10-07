@@ -88,6 +88,18 @@ pub fn fe_log_structured(args: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Null
 }
 
+/// `fe_log_batch`: the page's console lines, batched by `frontend/log/log-pipe.ts`
+/// so logging never floods the IPC connections; each entry is written exactly
+/// as `fe_log_structured` writes one.
+pub fn fe_log_batch(args: &serde_json::Value) -> serde_json::Value {
+    if let Some(entries) = args.get("entries").and_then(|v| v.as_array()) {
+        for entry in entries {
+            fe_log_structured(entry);
+        }
+    }
+    serde_json::Value::Null
+}
+
 /// Restart the agentmux-srv backend sidecar.
 ///
 /// Phase B.1: in launcher-managed runs (`AGENTMUX_BACKEND_PID` env

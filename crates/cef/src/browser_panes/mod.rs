@@ -32,6 +32,8 @@
 //! - `close`: close/lifecycle (`close`, `close_with`, `drain_closed_label`,
 //!   `replay_pending_create`, `reclaim_focus_after_pane_destroy`).
 //! - `navigation`: `navigate`, `go_back`, `go_forward`, `reload`, `resize`.
+//! - `bounds`: `set_rects`, a window's panes moved in one UI-thread step
+//!   (`browser_panes_set_rects`).
 //! - `zoom`: `zoom_in`/`zoom_out`/`step_zoom`/`apply_zoom`/`reapply_zoom`,
 //!   `next_zoom_factor`.
 //! - `clip`: focus + the Win32/X11 overlay-clip airspace workaround
@@ -45,6 +47,7 @@ use crate::browser_pane::CreateBrowserPaneTask;
 use crate::reducer::RegisterResult;
 use crate::state::AppState;
 
+pub(crate) mod bounds;
 mod clip;
 mod close;
 pub(crate) mod media_grants;

@@ -75,6 +75,48 @@ impl Drop for TimedConn<'_> {
     }
 }
 
+/// Connections that only read, for a file-backed store. In WAL mode a reader
+/// sees every committed write and never waits for a writer, so reads taken
+/// through these don't queue behind the writer's mutex — which, on the global
+/// transcript store, every agent's appends share, and which a write holds while
+/// it waits up to `busy_timeout` for another srv instance's write lock
+/// (REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md). Opened on demand and kept for
+/// reuse, at most `READERS_KEPT` idle.
+pub(super) struct ReaderPool {
+    path: std::path::PathBuf,
+    idle: Mutex<Vec<Connection>>,
+}
+
+/// Idle reader connections kept for reuse; more may be open at a busy moment.
+const READERS_KEPT: usize = 4;
+
+impl ReaderPool {
+    fn new(path: &Path) -> Self {
+        Self { path: path.to_path_buf(), idle: Mutex::new(Vec::new()) }
+    }
+
+    fn take(&self) -> Result<Connection, StoreError> {
+        if let Some(conn) = self.idle.lock().unwrap().pop() {
+            return Ok(conn);
+        }
+        // Not SQLITE_OPEN_READ_ONLY: a read-only connection can't create the
+        // WAL index if it's missing. `query_only` refuses writes instead.
+        let conn = Connection::open_with_flags(
+            &self.path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA query_only=1;")?;
+        Ok(conn)
+    }
+
+    fn give_back(&self, conn: Connection) {
+        let mut idle = self.idle.lock().unwrap();
+        if idle.len() < READERS_KEPT {
+            idle.push(conn);
+        }
+    }
+}
+
 /// SQLite-backed file storage with write-through cache.
 pub struct FileStore {
     pub(super) conn: Mutex<Connection>,
@@ -87,6 +129,9 @@ pub struct FileStore {
     /// `None` in memory, or if it couldn't start (SQLite's automatic
     /// checkpoints stay on then).
     pub(super) _checkpointer: Option<super::checkpointer::Checkpointer>,
+    /// Read-only connections for a file-backed store (`ReaderPool`); `None` in
+    /// memory, where every connection is its own database.
+    pub(super) readers: Option<ReaderPool>,
 }
 
 impl FileStore {
@@ -102,6 +147,7 @@ impl FileStore {
             store.conn.lock().unwrap().execute_batch("PRAGMA wal_autocheckpoint=0;")?;
             store._checkpointer = Some(checkpointer);
         }
+        store.readers = Some(ReaderPool::new(path));
         Ok(store)
     }
 
@@ -119,6 +165,7 @@ impl FileStore {
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,
             _checkpointer: None,
+            readers: None,
         })
     }
 
@@ -217,6 +264,7 @@ impl FileStore {
             cache_total_bytes: Mutex::new(0),
             cache_max_bytes: MAX_CACHE_BYTES,
             _checkpointer: None,
+            readers: None,
         })
     }
 
@@ -253,11 +301,38 @@ impl FileStore {
         &self,
         f: impl FnOnce(&Transaction<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
+        if let Some(pool) = &self.readers {
+            let mut conn = pool.take()?;
+            let out = {
+                let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                let out = f(&tx)?;
+                tx.commit()?;
+                out
+            };
+            pool.give_back(conn);
+            return Ok(out);
+        }
         let mut conn = self.lock_conn();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
         let out = f(&tx)?;
         tx.commit()?;
         Ok(out)
+    }
+
+    /// Run a read on its own connection: a pooled reader for a file-backed
+    /// store (`ReaderPool`), the store's connection otherwise. For a single
+    /// read that needs no snapshot across statements; several reads that must
+    /// agree go through [`Self::read_txn`].
+    #[track_caller]
+    pub(super) fn read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T, StoreError>) -> Result<T, StoreError> {
+        if let Some(pool) = &self.readers {
+            let conn = pool.take()?;
+            let out = f(&conn)?;
+            pool.give_back(conn);
+            return Ok(out);
+        }
+        let conn = self.lock_conn();
+        f(&conn)
     }
 
     /// Evict the least-recently-used cache entries until `cache_total_bytes <= cache_max_bytes`.

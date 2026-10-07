@@ -162,6 +162,18 @@ impl Migration for M0021BackfillAgentBundles {
             if !def.memory_id.is_empty() {
                 continue;
             }
+            // Only in the global registry: there's no row here to bind a
+            // bundle to, so a bundle minted now would be orphaned. Every
+            // fresh channel used to mint one per such agent into the shared
+            // store ("AgentA — ABF (11)" on one host). The agent's bundle is
+            // provisioned in a channel that has its row.
+            let local = mstore
+                .agent_def_has_local_row(&def.id)
+                .map_err(|e| MigrationError(format!("backfill_agent_bundles: look up {}: {}", def.id, e)))?;
+            if !local {
+                tracing::debug!(agent_id = %def.id, "backfill_agent_bundles: definition only in the global registry; nothing here to bind a bundle to");
+                continue;
+            }
             use crate::backend::agent_bundle_sidecar as sc;
             let recorded = sidecar.as_ref().and_then(|fs| sc::get(fs, &def.id).ok().flatten());
             if let Some(existing) = recorded.filter(|id| matches!(bundle_store.bundle_get(id), Ok(Some(_)))) {
@@ -208,7 +220,10 @@ impl Migration for M0021BackfillAgentBundles {
             // that one is the agent's, and this one goes.
             let mut bundle_id = bundle_id;
             if let Some(fs) = sidecar.as_ref() {
-                match sc::claim(fs, &def.id, &bundle_id) {
+                // A recorded bundle this channel can't find is replaced, not
+                // obeyed (see `claim_unless_live`).
+                let live = |id: &str| matches!(bundle_store.bundle_get(id), Ok(Some(_)));
+                match sc::claim_unless_live(fs, &def.id, &bundle_id, &live) {
                     Ok(winner) if winner != bundle_id && matches!(bundle_store.bundle_get(&winner), Ok(Some(_))) => {
                         if let Err(e) = bundle_store.bundle_delete(&bundle_id) {
                             tracing::warn!(
@@ -386,6 +401,66 @@ mod tests {
             let abf: Vec<String> =
                 shared.bundle_list().unwrap().into_iter().map(|b| b.name).filter(|n| n.contains("RoamingAgent")).collect();
             assert_eq!(abf, vec!["RoamingAgent — ABF".to_string()], "no second bundle minted");
+        });
+    }
+
+    /// A definition that only resolves through the global registry gets no
+    /// bundle here: nothing could point at it.
+    #[test]
+    fn a_global_only_definition_gets_no_orphaned_bundle() {
+        with_isolated_home(|home| {
+            use crate::registry::{DefinitionRecord, DefinitionRecordV1, DEF_MAX_SUPPORTED_SCHEMA};
+            let def_dir = home.join("shared").join("agents").join("definitions");
+            crate::registry::DefinitionStore::open(def_dir)
+                .unwrap()
+                .upsert(&DefinitionRecord {
+                    schema_version: DEF_MAX_SUPPORTED_SCHEMA,
+                    data: DefinitionRecordV1 {
+                        id: "test-GlobalOnly".to_string(),
+                        name: "GlobalOnly".to_string(),
+                        provider: "claude".to_string(),
+                        ..Default::default()
+                    },
+                })
+                .unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
+            let ch = tempfile::NamedTempFile::new().unwrap();
+            let s = Store::open(ch.path()).unwrap();
+            assert!(!s.agent_def_has_local_row("test-GlobalOnly").unwrap());
+
+            M0021BackfillAgentBundles.up(&ctx_for(ch.path(), shared_tmp.path())).unwrap();
+
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let abf: Vec<String> =
+                shared.bundle_list().unwrap().into_iter().map(|b| b.name).filter(|n| n.contains("GlobalOnly")).collect();
+            assert!(abf.is_empty(), "minted an orphan: {abf:?}");
+        });
+    }
+
+    /// The sidecar recorded a bundle this channel can't see (it lived in an
+    /// isolated channel's store): the channel's new bundle replaces the
+    /// record, and the next channel binds that one instead of minting again.
+    #[test]
+    fn a_recorded_bundle_missing_here_is_replaced_then_reused() {
+        with_isolated_home(|_home| {
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
+            let (ch1, ch2) = (tempfile::NamedTempFile::new().unwrap(), tempfile::NamedTempFile::new().unwrap());
+            let (s1, s2) = (Store::open(ch1.path()).unwrap(), Store::open(ch2.path()).unwrap());
+            let id = insert_def(&s1, "PinnedAgent");
+            insert_def(&s2, "PinnedAgent");
+            let global = crate::backend::agent_bundle_sidecar::open_global().unwrap();
+            crate::backend::agent_bundle_sidecar::claim(&global, &id, "bundle-in-an-isolated-store").unwrap();
+
+            M0021BackfillAgentBundles.up(&ctx_for(ch1.path(), shared_tmp.path())).unwrap();
+            let b1 = s1.agent_def_get(&id).unwrap().unwrap().memory_id;
+            assert!(!b1.is_empty() && b1 != "bundle-in-an-isolated-store");
+            assert_eq!(crate::backend::agent_bundle_sidecar::get(&global, &id).unwrap().as_deref(), Some(b1.as_str()));
+
+            M0021BackfillAgentBundles.up(&ctx_for(ch2.path(), shared_tmp.path())).unwrap();
+            assert_eq!(s2.agent_def_get(&id).unwrap().unwrap().memory_id, b1, "the second channel reuses it");
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let abf = shared.bundle_list().unwrap().into_iter().filter(|b| b.name.contains("PinnedAgent")).count();
+            assert_eq!(abf, 1, "one bundle, not one per channel");
         });
     }
 

@@ -917,6 +917,19 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// Whether this channel's store has its own row for definition `id`, as
+    /// opposed to the definition only resolving through the global registry
+    /// overlay. Only a local row can have its `default_memory_id` set.
+    pub fn agent_def_has_local_row(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let found: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)",
+            params![id],
+            |r| r.get(0),
+        )?;
+        Ok(found)
+    }
+
     /// Set `db_agents.default_memory_id` on a LOCAL agent — but only if
     /// it's currently empty. Exists because `agent_def_update`'s SET clause
     /// deliberately never touches this column (readonly-after-creation, see

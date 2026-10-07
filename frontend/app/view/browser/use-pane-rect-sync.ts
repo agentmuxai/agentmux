@@ -9,6 +9,7 @@ import { paneReflowActive, notifyPaneReflow } from "@/app/platform/pane-anim";
 import { usePaneTabVisibility } from "@/app/block/pane-tab-visibility";
 import { focusManager } from "@/app/store/focusManager";
 import type { BrowserViewModel } from "./browser-model";
+import { paneRectBatcher } from "./pane-rect-batcher";
 
 export interface PaneRect {
     x: number;
@@ -48,8 +49,8 @@ function releaseNativePane(blockId: string, token: symbol | null): boolean {
  * Syncs the native browser-pane HWND's position/size to this pane's
  * placeholder div, and owns pane creation. A native browser-pane HWND
  * can't be moved by CSS, so this polls (ResizeObserver + a safety-net
- * interval) and pushes `browser_pane_resize` whenever the placeholder's
- * rect changes, plus a settle loop after layout reflows
+ * interval) and hands the window's `pane-rect-batcher` the placeholder's rect
+ * whenever it changes, plus a settle loop after layout reflows
  * (docs/specs/SPEC_PANE_REFLOW_ANIMATION_2026_05_29.md).
  */
 export function usePaneRectSync(params: {
@@ -62,6 +63,8 @@ export function usePaneRectSync(params: {
     // The tab's one visibility signal (Pane Tab contract Phase 3): the native
     // page is collapsed whenever the tab isn't "active".
     const visibility = usePaneTabVisibility(model.blockId);
+    // Every pane in this window shares one host request per batch.
+    const rects = paneRectBatcher(windowLabel, () => getApi().browserPanes);
 
     let resizeObserver: ResizeObserver | null = null;
     let positionInterval: ReturnType<typeof setInterval> | null = null;
@@ -146,7 +149,7 @@ export function usePaneRectSync(params: {
             return;
         }
         lastSentRect = rect;
-        getApi().browserPanes.resize(model.blockId, rect).catch(() => {});
+        rects.set(model.blockId, rect);
         // Keep the overlay-clip short-circuit registry in sync with the
         // host's actual HWND rect. Cheap (two property reads + a Map write).
         registerPaneRect(model.blockId, paneRectCss());
@@ -268,6 +271,9 @@ export function usePaneRectSync(params: {
         // that haven't reached the backend yet get no-op'd there instead of
         // racing a mid-destruction HWND. See SPEC_BROWSER_PANE_LIFECYCLE.md §5.
         if (paneCreated() && releaseNativePane(model.blockId, ownerToken)) {
+            // Only the owner drops the unsent rect: a newer mount of this
+            // block shares the key and may have queued its own.
+            rects.forget(model.blockId);
             getApi().browserPanes.close(model.blockId, windowLabel).catch(() => {});
         } else if (paneCreated()) {
             diag(`view-unmount — a newer mount owns the page, leaving it open`);

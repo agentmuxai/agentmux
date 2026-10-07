@@ -316,8 +316,7 @@ impl FileStore {
     /// holds them — so nothing is ever indexed or served as zeros.
     #[track_caller]
     pub fn read_bytes_db(&self, zone_id: &str, name: &str, offset: i64, len: i64) -> Result<Vec<u8>, StoreError> {
-        let conn = self.lock_conn();
-        super::counter::read_bytes_exact(&conn, zone_id, name, offset, len)?.ok_or_else(|| {
+        self.read_conn(|conn| super::counter::read_bytes_exact(conn, zone_id, name, offset, len))?.ok_or_else(|| {
             StoreError::Other(format!("{zone_id}/{name}: bytes {offset}..{} not stored yet", offset + len))
         })
     }

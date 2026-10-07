@@ -126,6 +126,9 @@ export type AgentPaneLayoutCommand =
     | { type: "ExpansionResolved"; nodeId: string; to: Expansion }
     // ── measurement ingest (normalized ÷zoom at the boundary) ───────
     | { type: "RowMeasured"; nodeId: string; state: ExpansionState; cssPx: number }
+    // Several rows measured in one ResizeObserver callback, applied in order
+    // as RowMeasured each: one heights copy and one relayout for all of them.
+    | { type: "RowsMeasured"; rows: ReadonlyArray<{ nodeId: string; state: ExpansionState; cssPx: number }> }
     | { type: "EstimateSet"; nodeId: string; state: ExpansionState; cssPx: number }
     | { type: "MeasurementInvalidated"; nodeId: string }
     // ── viewport / zoom ─────────────────────────────────────────────

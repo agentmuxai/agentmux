@@ -232,3 +232,24 @@ Add benchmarking to CI/CD:
 - [TAURI_MIGRATION_STATUS.md](../../docs/TAURI_MIGRATION_STATUS.md) - Migration progress
 - [BUILD.md](../../BUILD.md) - Build instructions
 - [Taskfile.yml](../../Taskfile.yml) - Build tasks
+
+## Agent-open latency (`agent-open.mjs`)
+
+Opens agents from My Agents in a running instance and checks each open's `[agent-open]` trace against a budget, so an open-latency regression fails a run instead of reaching users (`docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md`).
+
+```bash
+# A dev build (CDP on by default), or a release instance started with AGENTMUX_CDP_PORT
+node scripts/benchmarks/agent-open.mjs --agents Maka,Lzop,Parko --port 9222
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--agents A,B,…` | (required) | Agents to open, by their name in My Agents |
+| `--port N` | `$AGENTMUX_CDP_PORT` or 9222 | The instance's CDP port |
+| `--read-budget MS` | 1000 | Transcript read (`history_read − history_start`) |
+| `--reveal-budget MS` | 1500 | Loading cover lifted (`revealed`) |
+| `--paint-budget MS` | none | First rows painted (`painted`); the spec's target is 300 |
+| `--timeout MS` | 30000 | Wait per open for its trace before failing it as stalled |
+| `--json` | off | Machine-readable results |
+
+Prints one row per agent and p50/p95/max per phase. Exit code 0 when every open completed within budget; 1 when any missed a budget, stalled (no trace within `--timeout`) or didn't complete normally (outcome `failed`, `timeout`, `closed` or `superseded`, no transcript read, or never revealed); 2 on a setup error, including an agent that isn't in My Agents. An agent that's already open isn't opened again: the picker's "already open" prompt is dismissed and the agent is reported as skipped. Each open starts the agent in that instance, taking it over from any other instance, so run it against a dev build or a throwaway instance.
