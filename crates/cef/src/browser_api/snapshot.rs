@@ -156,6 +156,29 @@ fn quote(s: &str) -> String {
 /// element's DOM facts prove it isn't a secret field.
 pub const VALUE_ROLES: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton", "slider", "textarea"];
 
+/// The nodes of the subtree rooted at the element with `backend_id`, in
+/// document order (empty if it isn't in `nodes`).
+pub fn subtree(nodes: &[Value], backend_id: i64) -> Vec<&Value> {
+    let by_id: HashMap<&str, &Value> =
+        nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
+    let Some(root) = nodes.iter().find(|n| n.get("backendDOMNodeId").and_then(|v| v.as_i64()) == Some(backend_id)) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        out.push(n);
+        if let Some(kids) = n.get("childIds").and_then(|v| v.as_array()) {
+            for k in kids.iter().rev() {
+                if let Some(c) = k.as_str().and_then(|id| by_id.get(id)) {
+                    stack.push(c);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Render `Accessibility.getFullAXTree`'s `nodes` as an indented list, one
 /// line per meaningful node, with a reference on each interactive one.
 /// `scope_backend_id` narrows the snapshot to the subtree of that element.
@@ -353,6 +376,20 @@ mod tests {
         let s = render(&nodes, &HashMap::new(), None, "");
         assert!(!s.text.contains("123456"), "{}", s.text);
         assert!(s.text.contains("[value hidden"), "{}", s.text);
+    }
+
+    #[test]
+    fn subtree_collects_one_branch_in_document_order() {
+        let nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2", "3"]),
+            n("2", Some("1"), "form", "", Some(2), &["4", "5"]),
+            n("3", Some("1"), "textbox", "Outside", Some(3), &[]),
+            n("4", Some("2"), "textbox", "A", Some(4), &[]),
+            n("5", Some("2"), "textbox", "B", Some(5), &[]),
+        ];
+        let ids: Vec<i64> = subtree(&nodes, 2).iter().filter_map(|n| n["backendDOMNodeId"].as_i64()).collect();
+        assert_eq!(ids, vec![2, 4, 5]);
+        assert!(subtree(&nodes, 99).is_empty());
     }
 
     #[test]

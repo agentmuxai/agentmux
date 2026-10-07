@@ -113,7 +113,7 @@ const CLICK_POINT: &str = r#"function () {
 
 /// Focus and select the current contents, so inserted text replaces them.
 const PREPARE_FILL: &str = r#"function () {
-  if (this.disabled) return { error: "the field is disabled" };
+  if (this.disabled || (this.matches && this.matches(":disabled"))) return { error: "the field is disabled" };
   if (this.readOnly) return { error: "the field is read-only" };
   this.scrollIntoView({ block: "center", inline: "center" });
   this.focus();
@@ -147,12 +147,13 @@ const SET_VALUE: &str = r#"function (v) {
 /// Choose an option of a native <select> by its label or value.
 const SELECT_OPTION: &str = r#"function (want) {
   if (this.tagName !== "SELECT") return { error: "not a <select>; click the control to open it, then click the option" };
+  if (this.disabled || this.matches(":disabled")) return { error: "the dropdown is disabled" };
   const w = String(want).trim().toLowerCase();
   const opts = Array.from(this.options);
   const hit = opts.find(o => o.label.trim().toLowerCase() === w || o.text.trim().toLowerCase() === w)
     || opts.find(o => o.value.toLowerCase() === w);
   if (!hit) return { error: "no option " + JSON.stringify(want) + "; options: " + JSON.stringify(opts.slice(0, 40).map(o => o.label.trim() || o.value)) };
-  if (hit.disabled) return { error: "that option is disabled" };
+  if (hit.disabled || hit.matches(":disabled")) return { error: "that option is disabled" };
   this.value = hit.value;
   this.dispatchEvent(new Event("input", { bubbles: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
@@ -357,10 +358,16 @@ pub async fn snapshot_route(
     let nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     let mut facts = HashMap::new();
     let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let wanted = nodes
+    // A scoped snapshot renders only its subtree, so it looks up facts only there.
+    let in_scope: Vec<&Value> = match scope {
+        Some(b) => snapshot::subtree(&nodes, b),
+        None => nodes.iter().collect(),
+    };
+    let wanted = in_scope
         .iter()
+        .copied()
         .filter(|n| snapshot::VALUE_ROLES.contains(&role_of(n).as_str()))
-        .chain(nodes.iter().filter(|n| role_of(n) == "button"));
+        .chain(in_scope.iter().copied().filter(|n| role_of(n) == "button"));
     for n in wanted {
         if facts.len() >= MAX_DESCRIBES {
             break;
@@ -488,7 +495,14 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
         }
         other => Err(format!("unknown action {other:?}: use click, fill, select or check")),
     }?;
-    Ok(redact_secret(after, &facts))
+    // The page's own handlers may have turned the field into a secret one
+    // during the action: decide on its facts from before and after.
+    let facts_after = describe(cdp, backend).await;
+    let after = redact_secret(after, &facts);
+    Ok(match facts_after {
+        Some(f) => redact_secret(after, &f),
+        None => after,
+    })
 }
 
 /// A secret field's value never reaches the agent, whatever the action
