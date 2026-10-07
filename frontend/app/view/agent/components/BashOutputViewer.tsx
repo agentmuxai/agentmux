@@ -2,19 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * BashOutputViewer - Displays bash command and output with exit code
+ * BashOutputViewer — a finished Bash call's output and exit code. The command
+ * itself is in the tool row and its hover, so it isn't printed again here
+ * (REPORT_THEME_MENU_RUNTIME_PANEL_TOOL_PREVIEW_TWEAKS_2026_10_07.md §3).
  */
 
 import clsx from "clsx";
 import { Show, createMemo, type JSX } from "solid-js";
-import type { BashParams, BashResult } from "../types";
+import type { BashResult } from "../types";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { parseExitPrefix } from "../tool-meta/bash-exit";
-import { BashCommandView } from "./shell-highlight/ShellCommand";
 
 interface BashOutputViewerProps {
-    params: BashParams;
     result?: BashResult;
 }
 
@@ -58,8 +58,7 @@ export const BashOutputViewer = (props: BashOutputViewerProps): JSX.Element => {
 
     return (
         <div class="agent-bash">
-            <BashCommandView command={props.params.command} />
-            <Show when={view().hasOutput}>
+            <Show when={view().hasOutput} fallback={<div class="agent-bash-no-output">No output</div>}>
                 <Show when={view().stdoutCap.hiddenLines > 0}>
                     <OutputHiddenMarker hidden={view().stdoutCap.hiddenLines} noun="line" from="tail" />
                 </Show>

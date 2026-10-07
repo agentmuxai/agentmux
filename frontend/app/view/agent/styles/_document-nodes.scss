@@ -1051,6 +1051,14 @@ $transcript-preview-max-height: calc(50vh / 3);
             }
         }
 
+        // A finished call that printed nothing, so the panel isn't just an exit code.
+        .agent-bash-no-output {
+            padding: var(--space-0-5) var(--space-1-5);
+            font-size: var(--text-xs);
+            font-style: italic;
+            color: var(--secondary-text-color);
+        }
+
         .agent-bash-exit {
             padding: var(--space-0-5) var(--space-1-5);
             font-size: var(--text-xs);
