@@ -146,6 +146,12 @@ spacer' = max(0, spacer + ceil(wanted + clientHeight − scrollHeight))
 - It shrinks only when it is below the viewport. As the reader scrolls up, the formula with the reader's `scrollTop`
   needs less room, and the spare part is off-screen when it goes. `/clear`, a width or zoom change, and a pane reset
   set it to 0.
+- **A send is a commit point.** Sending a message, or a queued message starting its turn, gives up the room and lands at
+  the true bottom, and for `COMMIT_SETTLE_MS` (600 ms) after it layout changes settle at the bottom without new room:
+  the composer shrinking back to one line and the queued-message panel coming and going are the user's own changes
+  (§1). Without this, a message sent mid-turn left a gap between it and the composer that the agent's output then
+  filled slowly (owner report, 2026-10-07). Each keystroke while typing still jumps to the bottom but is not a commit,
+  or the rule would be off for as long as the user types.
 - It is not a row. It is not measured by the head's measure RO or the tail's height cache, so it never leaks into the
   layout slice. It is not observed, so writing its height does not re-trigger the observer.
 - It covers what the first draft needed three mechanisms for: per-row floors, the overlay chrome for the working row

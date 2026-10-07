@@ -51,6 +51,13 @@ export interface UsePendingMessageAcceptanceOptions {
      */
     onTurnStartFromQueue?: () => void;
     /**
+     * Every acceptance, mid-turn ones included: the pending entry (and with
+     * the last one, the pending-messages panel) leaves, which changes the
+     * transcript's height under the user's own action. The one-way scroll path
+     * treats it as a commit (SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md R3).
+     */
+    onPendingLeft?: () => void;
+    /**
      * The text of each message promoted to a `user_message` node — for
      * `useAgentStream`'s echo ledger, which pairs it with the message's
      * transcript record (Phase 5a-4, `transcript-cursor.ts`).
@@ -87,6 +94,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
                 type: "PendingMessageAccepted",
                 id: messageId,
             });
+            opts.onPendingLeft?.();
             // Queue-drain case: the prior turn ended (phase Done/Idle/
             // Disconnected) and the backend is now picking up the next
             // queued message. Re-enter Submitting so the working

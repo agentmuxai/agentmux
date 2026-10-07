@@ -1133,9 +1133,18 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // (typing / sent / queued-turn) only feeds the transition log.
     const jumpToBottom = (reason?: string): void => {
         if (!scrollRef) return;
+        // "accepted" (a queued message the backend picked up, even mid-turn)
+        // is not a jump: it only marks a commit point for the one-way path, and
+        // only while following, so a reader scrolled up is never pulled down.
+        if (reason === "accepted") {
+            if (oneWayFlow && props.viewState.stickToBottom()) oneWayFlow.commit();
+            return;
+        }
         transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
         noteOneWay(paneTag(), `pin:jump:${reason ?? "unspecified"}`);
-        if (oneWayFlow) oneWayFlow.jumpToBottom();
+        // A send or a queued turn starting is a commit point (it gives up
+        // spacer room); each keystroke while typing is not.
+        if (oneWayFlow) oneWayFlow.jumpToBottom(reason === "sent" || reason === "queued-turn");
         else scrollToTrueBottom();
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
