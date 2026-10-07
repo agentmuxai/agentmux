@@ -340,23 +340,7 @@
     }
 }
 
-// ── QR fallback for mobile pairing (LAN-discovery reliability, Phase C) ────
-
-.status-bar-qr-toggle-btn {
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-    color: var(--main-text-color);
-    cursor: default;
-    font-size: 0.85em;
-    padding: 2px 8px;
-    opacity: 0.8;
-
-    &:hover {
-        opacity: 1;
-        border-color: var(--accent-color);
-    }
-}
+// ── Pair a device (PairDevicePanel): the pairing QR, its canvas and note ────
 
 .status-bar-qr-panel {
     display: flex;
