@@ -230,6 +230,18 @@ pub fn login_refused(stderr: &str) -> bool {
     .any(|p| stderr.contains(p))
 }
 
+/// The host's shell is Windows' (`cmd` or PowerShell), which can't run the
+/// helper: it answered the attach command that it doesn't know it.
+pub fn windows_shell_refused(stderr: &str) -> bool {
+    [
+        "is not recognized as an internal or external command",
+        "is not recognized as a name of a cmdlet",
+        "is not recognized as the name of a cmdlet",
+    ]
+    .iter()
+    .any(|p| stderr.contains(p))
+}
+
 /// How a pane's run ended, when the pane should show it done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Done {
@@ -740,6 +752,19 @@ impl Run {
                     attached,
                     stderr,
                 } => {
+                    // A Windows host: the helper doesn't run there, so the
+                    // pane is a plain SSH terminal (remote terminals spec
+                    // §6.4).
+                    if !attached && windows_shell_refused(&stderr) {
+                        crate::backend::remote::helper_consent::note_unsupported(&self.conn);
+                        self.note(&format!(
+                            "AgentMux's helper doesn't run on Windows hosts like {} yet, so this is a plain SSH terminal: it ends if the connection drops.",
+                            self.conn
+                        ))
+                        .await;
+                        self.plain.store(true, Ordering::SeqCst);
+                        return None;
+                    }
                     if !attached && code == Some(EXIT_COMMAND_NOT_FOUND) {
                         // No helper on the host (yet): install it once, then
                         // attach again; a failed install stops the pane.
@@ -1632,6 +1657,101 @@ elif ' attach ' in remote:
         ));
         assert!(!login_refused("Connection reset by peer"));
         assert!(!login_refused(""));
+    }
+
+    /// A Windows host: its `cmd` doesn't know the helper's command.
+    const FAKE_SSH_WINDOWS: &str = r#"
+import os, sys
+with open(os.environ['FAKE_SSH_LOG4'], 'ab') as log:
+    log.write((sys.argv[-1].split()[1] + '\n').encode())
+sys.stderr.write("'~' is not recognized as an internal or external command,\noperable program or batch file.\n")
+sys.exit(1)
+"#;
+
+    /// A Windows host makes the pane a plain SSH terminal at once, instead
+    /// of reconnecting for ever: the run says so and ends without a `done`,
+    /// for the controller to restart the pane (its `plain` flag).
+    #[tokio::test]
+    async fn a_windows_host_turns_the_pane_into_a_plain_ssh_terminal() {
+        let Some(python) = python() else {
+            eprintln!("skipped: no python to stand in for ssh");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("fake_ssh_windows.py");
+        std::fs::write(&script, FAKE_SSH_WINDOWS).unwrap();
+        let ssh_path = if cfg!(windows) {
+            let cmd = dir.path().join("fake_ssh_windows.cmd");
+            std::fs::write(
+                &cmd,
+                format!("@\"{}\" \"{}\" %*\r\n", python.display(), script.display()),
+            )
+            .unwrap();
+            cmd
+        } else {
+            let sh = dir.path().join("fake_ssh_windows");
+            std::fs::write(
+                &sh,
+                format!(
+                    "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
+                    python.display(),
+                    script.display()
+                ),
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&sh, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            sh
+        };
+        std::env::set_var("FAKE_SSH_LOG4", dir.path().join("log"));
+
+        let state = crate::server::tests::test_state();
+        let block = "durable-windows-block";
+        let plain = Arc::new(AtomicBool::new(false));
+        let run = Run {
+            block_id: block.to_string(),
+            conn: "windowshost".to_string(),
+            host: HostSsh {
+                dest: SshDest {
+                    destination: "windowshost".to_string(),
+                    port: None,
+                },
+                ssh_path,
+                control_dir: None,
+                env: Vec::new(),
+            },
+            session: "amx-windows".to_string(),
+            size: (80, 24),
+            broker: Some(state.broker.clone()),
+            filestore: Some(state.filestore.clone()),
+            _askpass_grant: None,
+            plain: plain.clone(),
+        };
+        let (_input_tx, input_rx) = mpsc::unbounded_channel();
+        let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
+        let ended = tokio::time::timeout(
+            Duration::from_secs(15),
+            run.run(input_rx, leave_rx, Box::new(|_| panic!("no done: the pane is restarted"))),
+        )
+        .await
+        .expect("the run ends at once, without reconnecting");
+        assert_eq!(ended, None);
+        assert!(plain.load(Ordering::SeqCst), "the pane is to become a plain terminal");
+        assert!(crate::backend::remote::helper_consent::plain_instead("windowshost"));
+        let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
+        assert_eq!(log, "attach\n", "tried once, no install");
+        let term = state.filestore.read_file(block, "term").unwrap().unwrap();
+        assert!(String::from_utf8_lossy(&term).contains("plain SSH terminal"));
+    }
+
+    #[test]
+    fn windows_shells_are_told_by_their_answer() {
+        assert!(windows_shell_refused("'~' is not recognized as an internal or external command,"));
+        assert!(windows_shell_refused("The term '~/x' is not recognized as a name of a cmdlet, function"));
+        assert!(!windows_shell_refused("bash: ~/.agentmux-remote/bin/x: No such file or directory"));
     }
 
     /// The host refuses the login (stderr is the point); each run logs its

@@ -151,8 +151,12 @@ fn declined() -> std::sync::MutexGuard<'static, HashSet<String>> {
 /// Whether a durable pane on `connection` runs as a plain SSH terminal
 /// instead, because the user doesn't want the helper there (§4.9: "Not now,
 /// or Never: the pane falls back"): the host is set to Never, or the user
-/// answered "Not now" for it since srv started. Set to Always, never.
+/// answered "Not now" for it since srv started. Set to Always, never. Also
+/// a host the helper can't run on (a Windows host), whatever the setting.
 pub fn plain_instead(connection: &str) -> bool {
+    if unsupported().contains(&host_key(connection)) {
+        return true;
+    }
     let Some(deps) = DEPS.get() else {
         return false;
     };
@@ -161,6 +165,21 @@ pub fn plain_instead(connection: &str) -> bool {
         Policy::resolve(&host, &global),
         declined().contains(&host_key(connection)),
     )
+}
+
+/// Hosts found since srv started to be ones the helper can't run on.
+fn unsupported() -> std::sync::MutexGuard<'static, HashSet<String>> {
+    static UNSUPPORTED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    UNSUPPORTED
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+/// `connection`'s host can't run the helper (a Windows host, spec §6.4 of
+/// the remote-terminals spec): its durable panes run as plain SSH terminals.
+pub fn note_unsupported(connection: &str) {
+    unsupported().insert(host_key(connection));
 }
 
 /// [`plain_instead`] from the host's policy and whether the user answered
@@ -355,6 +374,13 @@ mod tests {
         assert!(declined().contains(host), "Not now, however the host is spelled");
         note_answer(host, a(true, true));
         assert!(!declined().contains(host), "a later Install");
+    }
+
+    #[test]
+    fn a_host_the_helper_cant_run_on_gets_a_plain_terminal_whatever_the_setting() {
+        assert!(!plain_instead("me@windows-host"));
+        note_unsupported(" me@windows-host ");
+        assert!(plain_instead("me@windows-host"));
     }
 
     #[test]
