@@ -1185,6 +1185,14 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         return null;
     });
 
+    // The pane's identity color, exactly what its tab's underline shows
+    // (PaneChrome's tabColors), for content that should match the tab: the
+    // agent pane's working-status text. Unset when the pane has none, so
+    // consumers fall back with var(--block-identity-color, <default>).
+    const blockIdentityColor = createMemo(() =>
+        props.preview ? undefined : computeBlockIdentityColor(blockData()?.meta, isLightThemeActive())
+    );
+
     createEffect(() => {
         if (!manageConnection) {
             return;
@@ -1352,6 +1360,7 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
                     "--magnified-block-opacity": magnifiedBlockOpacity(),
                     "--magnified-block-blur": `${magnifiedBlockBlur()}px`,
                     "--block-agent-color": blockAgentColor() ?? "transparent",
+                    "--block-identity-color": blockIdentityColor(),
                 } as JSX.CSSProperties
             }
             inert={props.preview || undefined}

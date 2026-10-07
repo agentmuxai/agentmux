@@ -4,11 +4,12 @@
 /**
  * useWidgetBarResponsive — responsive 3-tier collapse for the widget bar.
  *
- * SPEC: SPEC_TOPBAR_PROGRESSIVE_COLLAPSE_2026_06_05.md
+ * SPEC: SPEC_TOPBAR_PROGRESSIVE_COLLAPSE_2026_06_05.md, with the triggers from
+ * SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md (top-bar-tier.ts).
  *
- * Tier 1 (wide):    labels + "more" text visible
- * Tier 2 (medium):  icon-only — labels hidden, all icons stay on bar
- * Tier 3 (narrow):  overflow — icons + "…more" button for hidden widgets
+ * Tier 1 (wide):    labels + "more" text visible; tabs at their natural width
+ * Tier 2 (medium):  icon-only — labels hidden, all icons stay on bar; tabs shrink
+ * Tier 3 (narrow):  tabs at their floor; icons + "…more" button for hidden widgets
  *
  * Each tier uses its own hidden measurement mirror so the decision is never
  * based on the already-collapsed visible bar (no oscillation). Extracted
@@ -16,17 +17,82 @@
  */
 
 import { createSignal, onCleanup, onMount } from "solid-js";
+import { decideTopBarTier } from "./top-bar-tier";
 
-// Minimum tab strip reserved before widget labels are dropped (tier 1→2).
-const MIN_TAB_WIDTH = 120;
-// Per-tab comfortable width — labels collapse when each tab would fall
-// below this. Deliberately above --ws-tab-min (60 px) so labels drop
-// first, then tabs continue shrinking.
-const TAB_COLLAPSE_RESERVE_PX = 100;
-// Tighter reserves used for the tier 2→3 threshold (icon-only bar is
-// narrower, so tabs can afford to be a bit squeezed before overflow).
-const MIN_TAB_WIDTH_ICON_ONLY = 80;
-const TAB_COLLAPSE_RESERVE_ICON_PX = 70;
+// Fallbacks for the tab bar's CSS variables (tabbar.scss), used only if a
+// computed value can't be read: the natural width before a tab is measured
+// (TAB_STANDARD_WIDTH), the floor (--ws-tab-min) and the drag gutter.
+const TAB_NATURAL_FALLBACK_PX = 232;
+const TAB_FLOOR_FALLBACK_PX = 60;
+const DRAG_GUTTER_FALLBACK_PX = 32;
+
+const px = (v: string | null | undefined, fallback: number): number => {
+    const n = parseFloat(v ?? "");
+    return Number.isFinite(n) ? n : fallback;
+};
+
+/** An element's layout width plus margins, unrounded, in its own CSS px. */
+function outerWidth(el: HTMLElement): number {
+    const cs = getComputedStyle(el);
+    let w = px(cs.width, el.offsetWidth);
+    if (cs.boxSizing !== "border-box") {
+        w += px(cs.paddingLeft, 0) + px(cs.paddingRight, 0) + px(cs.borderLeftWidth, 0) + px(cs.borderRightWidth, 0);
+    }
+    return w + px(cs.marginLeft, 0) + px(cs.marginRight, 0);
+}
+
+/**
+ * The tab bar's width with every tab at its natural width, and with every tab
+ * at its floor: tabs plus separators, the drag gutter after the last tab, and
+ * anything else in the tab bar (the hamburger on Windows/Linux). Read from the
+ * same inline `--tab-natural-width` and CSS variables the layout uses.
+ */
+function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { naturalPx: number; floorPx: number } {
+    const style = getComputedStyle(tabBar);
+    const floor = px(style.getPropertyValue("--ws-tab-min"), TAB_FLOOR_FALLBACK_PX);
+    const max = px(style.getPropertyValue("--ws-tab-max"), Infinity);
+    let natural = 0;
+    let tabs = 0;
+    for (const w of tabScroll.querySelectorAll<HTMLElement>(":scope > .tab-drop-wrapper")) {
+        tabs++;
+        natural += Math.min(max, Math.max(floor, px(w.style.getPropertyValue("--tab-natural-width"), TAB_NATURAL_FALLBACK_PX)));
+    }
+    // Exact widths, not offsetWidth: separators are fractional at a non-100%
+    // zoom (v-separator's --snap-chrome), and rounding each one would add up
+    // past the tolerance with many tabs.
+    let separators = 0;
+    for (const sep of tabScroll.querySelectorAll<HTMLElement>(":scope > .tab-separator")) separators += outerWidth(sep);
+    const fill = tabScroll.querySelector<HTMLElement>(":scope > .tab-bar-fill");
+    const gutter = fill ? px(getComputedStyle(fill).minWidth, DRAG_GUTTER_FALLBACK_PX) : DRAG_GUTTER_FALLBACK_PX;
+    // Everything in the tab bar that isn't the scrolling strip (the hamburger).
+    const rest = Math.max(0, tabBar.clientWidth - tabScroll.offsetWidth);
+    const fixed = rest + separators + gutter;
+    return { naturalPx: fixed + natural, floorPx: fixed + tabs * floor };
+}
+
+/**
+ * Width a flex row spends on everything except `keep`: its padding, the gaps
+ * between its laid-out children, every child's margins, and the width of every
+ * in-flow child not in `keep`. Hidden and absolutely positioned children take
+ * no space.
+ */
+function spentAround(row: HTMLElement, keep: readonly Element[]): number {
+    const style = getComputedStyle(row);
+    let spent = px(style.paddingLeft, 0) + px(style.paddingRight, 0);
+    let laidOut = 0;
+    for (const child of row.children) {
+        const el = child as HTMLElement;
+        if (el.getClientRects().length === 0) continue;
+        const cs = getComputedStyle(el);
+        if (cs.position === "absolute" || cs.position === "fixed") continue;
+        laidOut++;
+        // A kept child's margins still take room; only its own width is shared.
+        spent += px(cs.marginLeft, 0) + px(cs.marginRight, 0);
+        if (!keep.includes(el)) spent += el.offsetWidth;
+    }
+    const gap = px(style.columnGap, 0);
+    return spent + gap * Math.max(0, laidOut - 1);
+}
 
 export function useWidgetBarResponsive(opts: {
     containerRef: () => HTMLDivElement | undefined;
@@ -63,55 +129,75 @@ export function useWidgetBarResponsive(opts: {
         const container = containerRef();
         const header = container?.closest(".window-header") as HTMLElement | null;
         if (!header || !mirrorRef || !iconMirrorRef) return;
-        const buttons = container?.parentElement?.querySelector(
-            ".window-action-buttons"
-        ) as HTMLElement | null;
+        const tabBar = header.querySelector(".tab-bar") as HTMLElement | null;
         const tabScroll = header.querySelector(".tab-bar-scroll") as HTMLElement | null;
+        // The status area that holds the widget bar (a direct child of the header).
+        const statusArea = container?.parentElement as HTMLElement | null;
+        // The widgets give up space first, then the tabs, then the widgets
+        // again: labels drop the moment a tab would go below its natural
+        // width, and icons overflow only once tabs are at their floor.
+        // SPEC_TOPBAR_LABELS_DROP_BEFORE_TABS_SHRINK_2026_10_07.md.
         const measure = () => {
-            const labeledW  = mirrorRef?.offsetWidth ?? 0;
+            const labeledW = mirrorRef?.offsetWidth ?? 0;
             const iconOnlyW = iconMirrorRef?.offsetWidth ?? 0;
-            const headerW   = header.clientWidth;
-            if (labeledW === 0 || headerW === 0) return;
-            const buttonsW = buttons?.offsetWidth ?? 0;
-            const tabCount = tabScroll?.querySelectorAll(".tab").length ?? 0;
-            const tabsNeeded = Math.max(MIN_TAB_WIDTH, tabCount * TAB_COLLAPSE_RESERVE_PX);
-            setTooNarrow(labeledW + buttonsW + tabsNeeded > headerW);
-            const tabsNeededIconOnly = Math.max(MIN_TAB_WIDTH_ICON_ONLY, tabCount * TAB_COLLAPSE_RESERVE_ICON_PX);
-            const isTooIconOnly = iconOnlyW + buttonsW + tabsNeededIconOnly > headerW;
-            if (isTooIconOnly) {
-                const pinnedCount = pinnedWidgets().length;
-                if (pinnedCount > 0) {
-                    // Always-mounted More button probe gives reliable moreBtnW even
-                    // before the live More button mounts on first tier-3 entry.
-                    const mirrorMoreW = iconMirrorMoreRef?.offsetWidth ?? 0;
-                    const moreBtnW = moreButtonRef()?.offsetWidth || mirrorMoreW;
-                    // Mirror 2 includes the More button only when unpinned widgets exist;
-                    // strip it from iconOnlyW in that case to get pure per-icon width.
-                    const iconsOnlyW = moreWidgets().length > 0
-                        ? Math.max(0, iconOnlyW - mirrorMoreW)
-                        : iconOnlyW;
-                    const perIconW = iconsOnlyW / pinnedCount;
-                    const availableForIcons = Math.max(0, headerW - buttonsW - tabsNeededIconOnly - moreBtnW);
-                    const fitsCount = Math.max(0, Math.floor(availableForIcons / Math.max(1, perIconW)));
-                    setClipCount(Math.max(0, pinnedCount - fitsCount));
-                } else {
-                    setClipCount(0);
-                }
-            } else {
-                setClipCount(0);
-            }
+            if (labeledW === 0 || !container || !tabBar || !tabScroll || !statusArea || header.clientWidth === 0) return;
+            const strip = measureTabStrip(tabBar, tabScroll);
+            const pinnedCount = pinnedWidgets().length;
+            // Always-mounted More button probe gives reliable moreBtnW even
+            // before the live More button mounts on first tier-3 entry.
+            const mirrorMoreW = iconMirrorMoreRef?.offsetWidth ?? 0;
+            const moreBtnW = moreButtonRef()?.offsetWidth || mirrorMoreW;
+            // The icon-only mirror includes the More button only when unpinned
+            // widgets exist; strip it to get the pure per-icon width.
+            const iconsOnlyW = moreWidgets().length > 0 ? Math.max(0, iconOnlyW - mirrorMoreW) : iconOnlyW;
+            // The room the tab bar and the widget bar share: the header minus
+            // everything else in it and in the status area. Computed from the
+            // header, not from the live bars, so it is right even when the
+            // live widget bar overflows (a jump straight to a narrow window)
+            // and doesn't depend on the tier currently shown.
+            const sharedPx =
+                header.clientWidth - spentAround(header, [tabBar, statusArea]) - spentAround(statusArea, [container]);
+            const tier = decideTopBarTier({
+                sharedPx,
+                labeledPx: labeledW,
+                iconOnlyPx: iconOnlyW,
+                tabsNaturalPx: strip.naturalPx,
+                tabsFloorPx: strip.floorPx,
+                pinnedCount,
+                perIconPx: pinnedCount > 0 ? iconsOnlyW / pinnedCount : 1,
+                moreButtonPx: moreBtnW,
+            });
+            setTooNarrow(tier.tooNarrow);
+            setClipCount(pinnedCount > 0 ? tier.clipCount : 0);
         };
-        const ro = new ResizeObserver(measure);
+        // One measurement per frame: a rename or a reorder touches several tabs.
+        let raf: number | null = null;
+        const schedule = () => {
+            if (raf !== null) return;
+            raf = requestAnimationFrame(() => {
+                raf = null;
+                measure();
+            });
+        };
+        const ro = new ResizeObserver(schedule);
         ro.observe(header);
         ro.observe(mirrorRef);
         ro.observe(iconMirrorRef);
         if (iconMirrorMoreRef) ro.observe(iconMirrorMoreRef);
-        const mo = tabScroll ? new MutationObserver(measure) : null;
-        if (mo && tabScroll) mo.observe(tabScroll, { childList: true });
+        // Re-check after a tier change lands (idempotent: the decision doesn't
+        // depend on the tier shown), and when anything beside the bars resizes.
+        if (tabBar) ro.observe(tabBar);
+        if (container) ro.observe(container);
+        if (statusArea) ro.observe(statusArea);
+        // Tabs added or removed, and a tab's natural width changing (its
+        // wrapper's inline --tab-natural-width), without the header resizing.
+        const mo = tabScroll ? new MutationObserver(schedule) : null;
+        if (mo && tabScroll) mo.observe(tabScroll, { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
         measure();
         onCleanup(() => {
             ro.disconnect();
             mo?.disconnect();
+            if (raf !== null) cancelAnimationFrame(raf);
         });
     });
 
