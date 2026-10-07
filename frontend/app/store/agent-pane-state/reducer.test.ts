@@ -571,6 +571,51 @@ describe("agent-pane-state reducer", () => {
             const r = update(s2, { type: "TurnEnd", stats: { input_tokens: 82_000, output_tokens: 10 } as any });
             expect(r.state.sessionTotals?.input_tokens).toBe(82_000);
         });
+
+        // srv publishes `turn_active: false` when it reads the CLI's `result`
+        // line, before it forwards that line to the pane, so the reconcile
+        // lands first and clears turnTokens. Without the snapshot, TurnEnd
+        // found no live tokens and the footer showed every call's input summed.
+        describe("when the turn-ended push arrives before session_end", () => {
+            const midTurn = () => {
+                let s: AgentPaneState = { ...streaming(110), context: liveReading(40_000) };
+                s = update(s, { type: "TokensIn", input: 41_000 }).state;
+                s = update(s, { type: "TokensOut", output: 300 }).state;
+                return update(s, { type: "TokensIn", input: 43_000 }).state;
+            };
+            const resultStats = { input_tokens: 84_000, output_tokens: 512 } as any;
+
+            it("TurnEnd still records what the turn added", () => {
+                const reconciled = update(midTurn(), { type: "ReconcileTurnActive", at: 200, active: false }).state;
+                expect(reconciled.turnPhase.kind).toBe("Idle");
+                expect(reconciled.turnTokens).toBeNull();
+                const r = update(reconciled, { type: "TurnEnd", stats: resultStats });
+                expect(r.state.sessionStats).toMatchObject({ input_tokens: 84_000, added_input_tokens: 3_000 });
+                expect(r.state.endedTurnTokens).toBeNull();
+            });
+
+            it("so does a session_end that follows the liveness recovery", () => {
+                const s = midTurn();
+                const recovered = update(s, {
+                    type: "StreamWatchdogTick",
+                    nowMs: (s.lastEventMs ?? 0) + LIVENESS_RECOVERY_MS + 1,
+                }).state;
+                expect(recovered.turnPhase.kind).toBe("Idle");
+                const r = update(recovered, { type: "TurnEnd", stats: resultStats });
+                expect(r.state.sessionStats?.added_input_tokens).toBe(3_000);
+            });
+
+            it("a turn whose session_end never came doesn't lend its tokens to the next turn", () => {
+                const reconciled = update(midTurn(), { type: "ReconcileTurnActive", at: 200, active: false }).state;
+                // The next turn's first call: the stale snapshot goes.
+                const next = update(reconciled, { type: "TokensIn", input: 44_000 }).state;
+                expect(next.endedTurnTokens).toBeNull();
+                expect(next.turnTokens?.contextBaseline).toBe(43_000);
+                // And a new user turn drops it too.
+                const started = update(reconciled, { type: "TurnStart", at: 300 }).state;
+                expect(started.endedTurnTokens).toBeNull();
+            });
+        });
     });
 
     // docs/reports/REPORT_AGENT_PANE_CONTEXT_METER_2026_10_05.md — one

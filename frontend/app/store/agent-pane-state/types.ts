@@ -281,6 +281,18 @@ export interface AgentPaneState {
     currentToolArg: string | null;
     turnTokens: TurnTokens | null;
     /**
+     * `turnTokens` as they stood when the turn was ended early, to Idle, by
+     * `ReconcileTurnActive(false)` or the liveness recovery, kept for the
+     * `TurnEnd` that may still follow. srv publishes `turn_active: false` as
+     * soon as it reads the CLI's `result` line, before it forwards the line,
+     * so on a persistent Claude pane the reconcile usually lands first.
+     * Without this, `TurnEnd` found no live tokens and the footer showed
+     * every call's input summed instead of what the turn added.
+     * Cleared by `TurnEnd`, `TurnStart`, `TurnReset` and the next `TokensIn`
+     * (a new turn's call, so that turn's `session_end` never came).
+     */
+    endedTurnTokens: TurnTokens | null;
+    /**
      * True for the duration of a turn started specifically to send a
      * manual "/compact" (the composer's "Compact now" button, or a user
      * typing it) — set on `TurnStart` when `command.content === "/compact"`,
@@ -477,6 +489,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentTool: null,
     currentToolArg: null,
     turnTokens: null,
+    endedTurnTokens: null,
     pendingCompactTurn: false,
     context: null,
     contextSeedable: true,

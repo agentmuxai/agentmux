@@ -457,6 +457,9 @@ export function update(
                             ...state,
                             currentTool: null,
                             currentToolArg: null,
+                            // A late session_end still merges them (see the
+                            // field's doc comment).
+                            endedTurnTokens: state.turnTokens ?? state.endedTurnTokens,
                             turnTokens: null,
                             turnPhase: { kind: "Idle" },
                         },
@@ -592,6 +595,10 @@ export function update(
                     ...state,
                     currentTool: null,
                     currentToolArg: null,
+                    // srv sends this push before it forwards the `result` line,
+                    // so the turn's session_end usually comes next: keep its
+                    // tokens for that TurnEnd (see the field's doc comment).
+                    endedTurnTokens: state.turnTokens ?? state.endedTurnTokens,
                     turnTokens: null,
                     turnPhase: { kind: "Idle" },
                     // Same reasoning as the other authoritative terminal
@@ -741,6 +748,8 @@ export function update(
                 state: {
                     ...state,
                     sessionStats: null, // clear stale stats from prior turn
+                    // Kept only for the prior turn's own TurnEnd.
+                    endedTurnTokens: null,
                     lastEventMs: command.at,
                     failure: null,
                     // Submitting until the first stream event /
@@ -785,7 +794,9 @@ export function update(
             const stoppingWasSet = state.turnPhase.kind === "Interrupting";
             // Merge stats with live turn-tokens (mirrors prior finalizeTurn
             // logic — see PR #549 reagent/codex P1 reference).
-            const merged = mergeStats(command.stats, state.turnTokens);
+            // `endedTurnTokens`: the turn was already ended to Idle by the
+            // backend's turn-ended push, which usually beats this event.
+            const merged = mergeStats(command.stats, state.turnTokens ?? state.endedTurnTokens);
             // Codex P1 on #991: when an `InterruptTimeoutElapsed` has
             // already forced us to `Done.interrupted` (clearing `stopping`
             // in the process), a late backend `TurnEnd` ack would see
@@ -844,6 +855,7 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
+                    endedTurnTokens: null,
                     turnPhase: {
                         kind: "Done",
                         outcome,
@@ -877,6 +889,7 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
+                    endedTurnTokens: null,
                     context: null,
                     contextSeedable: false,
                     // TurnReset is a wholesale clear → Idle. The
@@ -970,7 +983,9 @@ export function update(
             // something to show, or nothing at all, before — not on every
             // call of a turn that keeps reporting the same impossibility.
             const withLive = withReading(
-                { ...state, turnTokens: next, lastContextModel: model, contextSeedable: false },
+                // A call while a snapshot is still held belongs to a new turn,
+                // so the snapshot's own session_end never came: drop it.
+                { ...state, turnTokens: next, endedTurnTokens: null, lastContextModel: model, contextSeedable: false },
                 reading,
                 prevReading == null || plausibleReading(prevReading) != null,
             );
