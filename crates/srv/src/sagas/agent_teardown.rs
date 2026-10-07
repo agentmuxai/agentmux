@@ -486,7 +486,7 @@ async fn close_cli(
     }
     // 5b. Verify: everything in the snapshot is gone, else force it once
     //     more and report what's left.
-    let survivors = verify_gone(&before.processes).await;
+    let mut survivors = verify_gone(&before.processes).await;
     for p in &survivors {
         publish_shutdown(
             state,
@@ -495,6 +495,19 @@ async fn close_cli(
             format!("still running: {} (pid {})", short_command(&p.command), p.pid),
             serde_json::json!({ "process": { "pid": p.pid, "name": short_command(&p.command), "outcome": "survived" } }),
         );
+    }
+    // 5c. What still carries the agent's env tag got out of its tracker
+    //     (started through systemd or launchd, or a best-effort miss).
+    //     Reported, not killed: it may be an app the agent opened for the user.
+    for p in escaped(block_id, &survivors).await {
+        publish_shutdown(
+            state,
+            block_id,
+            "survivor",
+            format!("still running, outside the agent's tracking: {} (pid {})", short_command(&p.command), p.pid),
+            serde_json::json!({ "process": { "pid": p.pid, "name": short_command(&p.command), "outcome": "escaped" } }),
+        );
+        survivors.push(p);
     }
     blockcontroller::mark_closing_stopped(block_id);
     crate::backend::container_credential::revoke_block(block_id);
@@ -547,6 +560,31 @@ async fn terminate_members(state: &AppState, block_id: &str, deadline: std::time
         }
     }
 }
+
+/// Live processes tagged with `block_id` (`process_tracker::scan`) that
+/// aren't already in `known`. Two scans [`ESCAPE_SETTLE`] apart: one the
+/// tracker's kill is still ending shows in the first only.
+async fn escaped(block_id: &str, known: &[agent_resources::ProcessEntry]) -> Vec<agent_resources::ProcessEntry> {
+    let scan = |id: String| async move {
+        tokio::task::spawn_blocking(move || crate::backend::process_tracker::scan::tagged(&id))
+            .await
+            .unwrap_or_default()
+    };
+    let first = scan(block_id.to_string()).await;
+    if first.is_empty() {
+        return Vec::new();
+    }
+    tokio::time::sleep(ESCAPE_SETTLE).await;
+    scan(block_id.to_string())
+        .await
+        .into_iter()
+        .filter(|p| first.iter().any(|f| f.pid == p.pid && f.started_at_ms == p.started_at_ms))
+        .filter(|p| !known.iter().any(|k| k.pid == p.pid))
+        .map(|p| agent_resources::ProcessEntry { pid: p.pid, command: p.command, started_at_ms: p.started_at_ms })
+        .collect()
+}
+
+const ESCAPE_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
 
 /// How long the verify step waits for the tracker's release to take effect,
 /// before and after its one forced kill per survivor.

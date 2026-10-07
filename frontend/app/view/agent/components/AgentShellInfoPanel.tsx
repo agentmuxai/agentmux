@@ -15,7 +15,8 @@
  * a later phase.
  *
  * Nothing here is a liveness signal — the counts come from the per-block
- * tracker, which is real only on Windows today (`confidence`); elsewhere the
+ * tracker (`confidence`: high on Windows and on Linux with a delegated
+ * cgroup, best effort on macOS and other Linux); where there is none the
  * shell half still works, since it comes from `controllerstatus`.
  */
 
@@ -182,13 +183,20 @@ export const AgentShellInfoPanel = (props: AgentShellInfoPanelProps): JSX.Elemen
                 <Show
                     when={agentProcs.confidence() !== "none"}
                     fallback={
-                        <span class="agent-shell-info-muted" title="Agent process tracking needs Windows Job Objects; other platforms report nothing yet.">
+                        <span class="agent-shell-info-muted" title="This agent's processes aren't tracked.">
                             process tracking unavailable
                         </span>
                     }
                 >
                     <Show when={agentProcs.list().length > 0}>
-                        <span class="agent-shell-info-count" title={procTitle(agentProcs.list())}>
+                        <span
+                            class="agent-shell-info-count"
+                            title={
+                                (agentProcs.confidence() === "best_effort"
+                                    ? "Best effort: found by scanning for processes this agent started; one that clears its environment can be missed.\n"
+                                    : "") + procTitle(agentProcs.list())
+                            }
+                        >
                             {agentProcs.confidence() === "best_effort" ? "≈" : ""}
                             {agentProcs.list().length} started by the agent
                         </span>

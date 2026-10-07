@@ -505,11 +505,19 @@ phase changes one resource kind behind the same entry point.
     App Server included; terminals a person types in keep a stub tracker.
   - A graceful close SIGTERMs the whole cgroup after the CLI exits and waits
     up to 2 s before the release's `cgroup.kill` (the Phase 3 step on Linux).
-  - No delegation (no systemd user manager): the stub, as before.
+  - No delegation (no systemd user manager): the best-effort tracker below.
+- **Phase 4, macOS and Linux without delegation** (2026-10-07):
+  `process_tracker::scan::ScanTracker`, BestEffort. An agent's processes are
+  the descendants of its CLI plus every process whose environment carries its
+  `AGENTMUX_BLOCKID` (inherited through `setsid` and reparenting), found in a
+  shared process-table snapshot.
+- **Escape report, every OS** (§6.2 step 8): after a graceful close, live
+  processes still carrying the agent's tag are added to the survivors
+  ("still running, outside the agent's tracking") and reported, not killed:
+  one may be an app the agent opened for the user.
 - **Not yet:**
   - Stopping foreground descendants on Stop (§5). They need telling apart
     from background tasks in the tracker.
   - The close dialog reading `AgentResources`.
   - The `AgentResources` MCP tool.
-  - Phase 3 on Windows; Phase 4 on macOS and Linux without delegation;
-    Windows `CREATE_SUSPENDED`.
+  - Phase 3 on Windows; Windows `CREATE_SUSPENDED`.
