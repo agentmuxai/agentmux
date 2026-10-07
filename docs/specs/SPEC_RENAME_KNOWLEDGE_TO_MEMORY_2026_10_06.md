@@ -1,6 +1,6 @@
 # SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings
 
-**Status:** active — §5 step 1 (the rename) shipped in PR #4425; step 2a (the backend for several bundles) in PR #4433; steps 2b–4 remain. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06), D8–D12 on 2026-10-07.
+**Status:** active — §5 step 1 (the rename) shipped in PR #4425; step 2a (the backend for several bundles) in PR #4433; step 2b (the pickers) in PR #4434; steps 2c–4 remain. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06), D8–D13 on 2026-10-07.
 **Date:** 2026-10-06
 **Author:** agent3 (Agent3@narko), at the operator's request
 **Amends:** `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md` (the pane's name; its §6 risk "'Knowledge' suggests retrieval (RAG) more than configuration … revisit only if users are confused" is that revisit)
@@ -101,7 +101,7 @@ Two bugs sit on the way: the UI launch path (`WriteAgentConfig`) never delivers 
 
 - **The list is** the agent's own bundle (A) first, always, and not removable: it holds the skills and servers bound to just this agent. After it come the bundles the user picks, in order. A and the picks together replace B and C.
 - **Stored** in a new per-channel table, `db_agent_bundles (agent_id, bundle_id, position)`, holding the picks only. The table is additive and created on every open, so the schema version isn't bumped and an older build still opens the database. A stays in `default_memory_id`, as today. `AgentDefinition` gets no new field (it is built in full in about a hundred places); the list has its own store calls and two RPCs, `getagentbundles` and `setagentbundles`.
-- **Picked in** the new-agent form (**Bundles**, a multi-select), the launch modal (the same list, saved to the agent), and the Stash, whose Startup tab becomes **Bundles**: add, remove and reorder, with the agent's own bundle shown first and fixed.
+- **Picked in** one control, `BundleListEditor`: the picks in order, each with move up, move down and remove, then an "Add a bundle…" select of the rest (§6 D13). It's used in the new-agent form (**Bundles**, sent with `agentdefcreatefromtemplate`'s `bundle_ids`), the launch modal (saved to the agent when Launch is clicked; a bundle is no longer required to launch), and the Stash, whose Startup tab becomes **Bundles** (saved on each change). The launch modal and the Stash show the agent's own bundle first, fixed.
 - **At launch, in list order:**
   - **Instructions** go into the startup file, after Global Memory: one section per bundle with instructions, `# [Bundle] <name>` then the text, joined by the same `---` rule, reusing `global_bundle_sections`. They're no longer sent as a first message.
   - **Skills and MCP servers** are the union over the list, by id, as `managed_union_bundle_refs` does for A today. When two bundles name the same MCP server, the first wins, and the launch logs the duplicate.
@@ -172,4 +172,6 @@ It never adopted Knowledge and still says **Armory**: `FeaturesPage.tsx:60, 109,
 - **D11. Provider.** Unchanged (the agent's, else A's). The provider is resolved on the shared agent registry, which can't see the per-channel list, and a picked bundle silently switching an agent's provider would surprise.
 - **D12. Migrating B.** Not migrated. The form and launch modal preselected the first bundle on their own, and B never did anything at launch, so copying it would put an arbitrary bundle's instructions into every agent's startup file. Only C, which the user chose and which took effect, moves into the list.
 
-D8–D12 were taken on the recommendations (operator, 2026-10-07: "use best judgement").
+- **D13. The multi-select is an ordered list**, not checkboxes, because order decides which bundle wins a clash. The app had no multi-select control; this one is built from the line-style `Select` and `IconButton`.
+
+D8–D13 were taken on the recommendations (operator, 2026-10-07: "use best judgement").

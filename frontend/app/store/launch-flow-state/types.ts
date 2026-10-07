@@ -188,7 +188,7 @@ export function accountsForProvider(state: LaunchFlowState, providerId: string):
 
 /** Real (non-blank), non-system memory bundles — excludes is_system rows
  *  the same way every sibling bundle-picker filter in the app does
- *  (AgentLaunchModal's own dropdown, AgentStartupModal, drone-view,
+ *  (AgentLaunchModal's own dropdown, AgentBundlesTab, drone-view,
  *  BundleViewModel.refresh). Without this, AgentLaunchModal's default-pick
  *  effect (`firstReal = realBundles(flow.state)[0]`) could auto-select a
  *  system Global Memory entry as bundleId — an id with no matching
@@ -243,7 +243,6 @@ export function canSubmit(
     if (state.submit.inFlight) return false;
     if (!opts.nameValid) return false;
     if (state.form.accountId === "") return false;
-    if (state.form.bundleId === "") return false;
     if (!opts.authReady) return false;
     return true;
 }

@@ -364,6 +364,8 @@ export const AgentApi = {
             name: string;
             identity_id?: string;
             memory_id?: string;
+            /** The new agent's Bundles list, in order. */
+            bundle_ids?: string[];
             /** Runtime to persist on the cloned definition ("host" |
              *  "container"). Omitted → backend keeps the template's. */
             agent_type?: string;

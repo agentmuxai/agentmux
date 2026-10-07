@@ -40,11 +40,13 @@ pub struct CommandSetAgentBundlesData {
     pub bundle_ids: Vec<String>,
 }
 
-/// Result of both: the agent's picked bundle ids, in order, as stored.
+/// Result of both: the agent's picked bundle ids, in order, as stored, and
+/// its own bundle's id ('' when it has none), which launch puts first.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct AgentBundlesResult {
     pub bundle_ids: Vec<String>,
+    pub own_bundle_id: String,
 }
 
 /// Response for `deletememory` and `deletesystemmemory` — both take the

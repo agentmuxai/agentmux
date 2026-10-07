@@ -9,8 +9,8 @@
  *  - the name field opens empty, with the same ghost text for every provider
  *  - a duplicate-name refusal is shown in words
  *  - there's no account field: the provider's first account is submitted
- *    (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6); the bundle field reads
- *    "Bundle"
+ *    (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6)
+ *  - the Bundles field starts empty and submits the picks in order
  *  - clicking Create fires onSubmit with the form snapshot
  *  - the Create button is disabled while submitting, and until the accounts
  *    and the provider have loaded
@@ -170,7 +170,7 @@ describe("AgentCreateFromTemplateModalPanel", () => {
                 onCancel={vi.fn()}
             />
         ));
-        // Bundles auto-pick once loaded.
+        // Lists load.
         await flush();
         await flush();
         await flush();
@@ -188,10 +188,10 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         });
         const args = onSubmit.mock.calls[0][0];
         expect(args.name).toBe("Mary");
-        // The account is the first one for the template's provider; the
-        // bundle the first non-blank one.
+        // The account is the first one for the template's provider. No
+        // bundle is picked for the user.
         expect(args.accountId).toBe("id-work");
-        expect(args.bundleId).toBe("mem-notes");
+        expect(args.bundleIds).toEqual([]);
         // No Docker → runtime defaults to host (never a mode that
         // can't actually start).
         expect(args.agentType).toBe("host");
@@ -557,14 +557,35 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             expect(submit().disabled).toBe(false);
         });
 
-        it("has no account field, and labels its bundle field Bundle", async () => {
+        it("has no account field, and a Bundles field", async () => {
             render(() => (
                 <AgentCreateFromTemplateModalPanel template={template} onSubmit={vi.fn()} onCancel={vi.fn()} />
             ));
             await flush();
             expect(screen.queryByTestId("create-from-template-identity-select")).toBeNull();
             expect(screen.queryByText("Identity")).toBeNull();
-            expect(screen.getByText("Bundle")).toBeTruthy();
+            expect(screen.getByRole("group", { name: "Bundles" })).toBeTruthy();
+        });
+
+        it("submits the bundles picked, in order", async () => {
+            render(() => (
+                <AgentCreateFromTemplateModalPanel template={template} onSubmit={accountSubmit} onCancel={vi.fn()} />
+            ));
+            await flush();
+            await flush();
+            const add = () => screen.getByTestId("bundle-list-editor-add") as HTMLSelectElement;
+            const real = Array.from(add().options).filter((o) => o.value);
+            expect(real.length).toBeGreaterThanOrEqual(1);
+            // Pick every bundle, then move the last to the front.
+            for (const option of real) fireEvent.change(add(), { target: { value: option.value } });
+            const picked = real.map((o) => o.value);
+            if (picked.length > 1) {
+                const ups = screen.getAllByRole("button", { name: "Move up" });
+                fireEvent.click(ups[ups.length - 1]);
+                picked.unshift(...picked.splice(picked.length - 1, 1));
+            }
+            await submittedAccount();
+            expect(accountSubmit.mock.calls[0][0].bundleIds).toEqual(picked);
         });
     });
 

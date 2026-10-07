@@ -172,7 +172,7 @@ full rollout plan: `docs/specs/SPEC_PANE_TABS_UNIVERSAL_CMUX_REDESIGN_2026_09_17
 
 | Surface | How to reach it |
 |---|---|
-| **Agent setup** | The Stash (backpack icon) in an Agent pane's header → Accounts / Personal Memory / MCP Servers / Skills / Startup tabs. Accounts sets the account this agent signs in with; Personal Memory shows its own memory files (the same data as Memory → Personal); MCP Servers and Skills bind agent-private or global entries; Startup picks a Bundle as the agent's startup instructions. Replaces the old Forge concept. |
+| **Agent setup** | The Stash (backpack icon) in an Agent pane's header → Accounts / Personal Memory / MCP Servers / Skills / Bundles tabs. Accounts sets the account this agent signs in with; Personal Memory shows its own memory files (the same data as Memory → Personal); MCP Servers and Skills bind agent-private or global entries; Bundles lists, in order, the bundles the agent starts with. Replaces the old Forge concept. |
 | **Settings** | Hamburger menu (≡) in the top tab bar → Settings. Opens the Settings pane (Appearance, Window & Panes, Terminal, Sounds, Network, Advanced); a footer button opens the raw `settings.json` in your default editor as an escape hatch. |
 | **DevTools** | Hamburger menu (≡) in the top tab bar → DevTools. Toggles Chromium DevTools (no longer a widget). |
 
