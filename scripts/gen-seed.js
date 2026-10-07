@@ -184,7 +184,7 @@ task changeset -- patch "fix(scope): short description"
 
 ### muxreview Bot
 
-All PRs are auto-reviewed by reagent (Claude Opus). Address P1 findings before
+All PRs are auto-reviewed by muxreview (Claude Opus). Address P1 findings before
 merging. P2 findings should also be fixed if feasible.
 
 ### Critical Rule
