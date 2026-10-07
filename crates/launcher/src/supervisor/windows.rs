@@ -198,19 +198,11 @@ pub(crate) async fn run_windows(
                         std::process::exit(0);
                     }
                     Err(ForwardError::Fatal(reason)) => {
-                        // Fatal forward failure: the port file IS
-                        // readable, so the host got far enough to
-                        // publish it, but the HTTP path is dead
-                        // (connect refused, write failed). Most often
-                        // the instance is quitting: its host is gone
-                        // and its launcher holds the pipe until srv has
-                        // closed every agent. Wait for it to let go and
-                        // start fresh. Otherwise a hung host, a port
-                        // collision, or ERROR_ACCESS_DENIED that wasn't
-                        // really "another instance" (namespace
-                        // conflict): surface the dialog so the user
-                        // sees that something is genuinely broken
-                        // rather than a silent no-op. (codex P2 PR #598.)
+                        // The host published its port but doesn't answer.
+                        // Usually the instance is quitting (its launcher holds
+                        // the pipe until srv has closed every agent): wait and
+                        // start fresh. Still held after that: hung, so show the
+                        // dialog rather than a silent no-op (#598).
                         log(&format!("forward fatal: {} — waiting for the instance to finish quitting", reason));
                         if let Some(pipe) = crate::second_instance::wait_to_claim(|| {
                             ipc::server::bind_first_pipe_instance(&pipe_path).ok()
