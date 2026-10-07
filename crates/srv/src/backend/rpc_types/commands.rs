@@ -468,6 +468,13 @@ pub const COMMAND_FLEET_GROUP_LIST: &str = "fleet.group.list";
 pub const COMMAND_FLEET_GROUP_UPDATE: &str = "fleet.group.update";
 pub const COMMAND_FLEET_GROUP_DELETE: &str = "fleet.group.delete";
 
+// Pairing a device with the viewer listener (backend::viewer, agentmux-mobile's
+// SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2).
+pub const COMMAND_VIEWER_PAIR_START: &str = "viewer.pair-start";
+pub const COMMAND_VIEWER_DEVICES: &str = "viewer.devices";
+pub const COMMAND_VIEWER_REVOKE: &str = "viewer.revoke";
+pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
+
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
 /// Reorder a Pane Tab within its own pane, or move it into a different

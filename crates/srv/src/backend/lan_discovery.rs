@@ -832,12 +832,18 @@ impl LanDiscovery {
         self.identity_response_with(
             crate::backend::fleet_source::install_id().as_deref(),
             crate::backend::fleet_source::latest_channels_running(),
+            crate::backend::viewer::advertised_viewer_port(),
         )
     }
 
-    /// [`Self::build_identity_response`] with the install id and channel
-    /// count given, so a test needs no WAN identity or fleet feed.
-    fn identity_response_with(&self, install_id: Option<&str>, channels_running: Option<u32>) -> serde_json::Value {
+    /// [`Self::build_identity_response`] with the install id, channel count
+    /// and viewer port given, so a test needs no WAN identity or fleet feed.
+    fn identity_response_with(
+        &self,
+        install_id: Option<&str>,
+        channels_running: Option<u32>,
+        viewer_port: Option<u16>,
+    ) -> serde_json::Value {
         let mut response = probe_response_json(
             &self.instance_id,
             &self.hostname,
@@ -860,6 +866,12 @@ impl LanDiscovery {
         if let Some(n) = channels_running {
             response["channels_running"] = json!(n);
         }
+        // The viewer listener's port while it is up, so a paired device finds
+        // it again after an address change (agentmux-mobile's
+        // SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2).
+        if let Some(port) = viewer_port {
+            response["viewer_port"] = json!(port);
+        }
         response
     }
 
@@ -871,11 +883,17 @@ impl LanDiscovery {
         self.probe_response_with(
             crate::backend::fleet_source::install_id().as_deref(),
             crate::backend::fleet_source::latest_channels_running(),
+            crate::backend::viewer::advertised_viewer_port(),
         )
     }
 
-    fn probe_response_with(&self, install_id: Option<&str>, channels_running: Option<u32>) -> serde_json::Value {
-        let mut response = self.identity_response_with(install_id, channels_running);
+    fn probe_response_with(
+        &self,
+        install_id: Option<&str>,
+        channels_running: Option<u32>,
+        viewer_port: Option<u16>,
+    ) -> serde_json::Value {
+        let mut response = self.identity_response_with(install_id, channels_running, viewer_port);
         lan_instances::attach_siblings(&mut response, &self.sibling_entries(), lan_instances::MAX_REPLY_BYTES);
         response
     }

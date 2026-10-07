@@ -455,7 +455,14 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 12;
 ///        the user left off instead of on the definition's defaults. Written
 ///        only when the user picked something. Item 2 of
 ///        `SPEC_RUNTIME_MENU_REMAINING_GAPS_2026_10_01.md`.
-pub const OBJECT_SCHEMA_VERSION: i64 = 42;
+///   v43 — db_viewer_devices: the devices paired with this channel's viewer
+///        listener, each with the SHA-256 of its viewer token (never the
+///        token), its name, its optional public key and when it was paired
+///        and last seen; plus db_agents.hide_from_devices, an agent's opt-out
+///        from the viewer routes. agentmux-mobile's
+///        SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2, §4.3. See
+///        `storage/viewer_devices.rs`.
+pub const OBJECT_SCHEMA_VERSION: i64 = 43;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -1127,6 +1134,17 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_jekt_held_target ON db_jekt_held (target_uid, sent_at_ms);
 
+        -- v43: devices paired with the viewer listener. See
+        -- OBJECT_SCHEMA_VERSION's v43 doc comment above.
+        CREATE TABLE IF NOT EXISTS db_viewer_devices (
+            device_id    TEXT PRIMARY KEY,
+            token_hash   TEXT NOT NULL UNIQUE,
+            device_name  TEXT NOT NULL,
+            device_key   TEXT NOT NULL DEFAULT '',
+            created_ms   INTEGER NOT NULL,
+            last_seen_ms INTEGER NOT NULL DEFAULT 0
+        );
+
         -- The bundles picked for an agent, in order; its own bundle
         -- (db_agents.default_memory_id) is not listed here
         -- (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). No FK: a
@@ -1361,6 +1379,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // v42: the Runtime menu choices the user last made for the agent. See
         // OBJECT_SCHEMA_VERSION's v42 doc comment above.
         "ALTER TABLE db_agents ADD COLUMN last_runtime TEXT NOT NULL DEFAULT ''",
+        // v43: an agent hidden from paired devices. See
+        // OBJECT_SCHEMA_VERSION's v43 doc comment above.
+        "ALTER TABLE db_agents ADD COLUMN hide_from_devices INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

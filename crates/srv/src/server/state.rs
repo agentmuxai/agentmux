@@ -122,6 +122,10 @@ pub struct AppState {
     /// `/agentmux/fleet/events` (`backend::fleet_feed`). Its change-detection
     /// task is started by `main.rs` once the shutdown token exists.
     pub fleet_feed: Arc<crate::backend::fleet_feed::FleetFeed>,
+    /// Paired devices' read-only view: pairing codes, the certificate, the
+    /// feed hub and the feed caps (`backend::viewer`). Its routes are served
+    /// only by the viewer listener (`server::build_viewer_router`).
+    pub viewer: Arc<crate::backend::viewer::ViewerService>,
     /// Language Server Protocol supervisor — owns the lifecycle of LSP
     /// server child processes (one per workspace/language) and proxies
     /// LSP messages between the editor pane and the server.

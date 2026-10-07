@@ -109,6 +109,16 @@ cron = "0.12"
 # on Linux/FreeBSD), and set to NSFileManager on macOS so it never scripts
 # Finder. See docs/specs/SPEC_FILE_BROWSER_PANE_2026_10_01.md §7.3, §9.1.5.
 trash = "5.2"
+# The viewer listener: TLS with a self-signed certificate a paired device pins
+# by fingerprint, serving the read-only feed (backend/viewer). rustls and
+# tokio-rustls are already in the tree through reqwest, on ring; these keep
+# ring (no aws-lc build) and add rcgen to make the certificate. hyper and
+# hyper-util (already under axum) serve the router over the TLS stream.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
 
 [target.'cfg(windows)'.dependencies]
 # Read-only COM access to Windows Defender Firewall and the network list, to

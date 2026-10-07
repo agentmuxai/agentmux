@@ -237,6 +237,8 @@ async fn main() {
         state.local_web_url.clone(),
     );
     let presence_id_store = Arc::clone(&state.id_store);
+    let viewer = Arc::clone(&state.viewer);
+    let viewer_router = server::build_viewer_router(state.clone());
     let routers = build_routers(state);
     let router = routers.full;
 
@@ -255,6 +257,10 @@ async fn main() {
     // (DHCP renewal, Wi-Fi↔Ethernet handoff, VPN up/down) without a restart.
     // See `backend::lan_listeners`.
     net.lan_listeners.set_router(routers.lan);
+    // The viewer listener (backend::viewer) comes up beside the LAN
+    // listeners, on its own port of the same range.
+    net.lan_listeners
+        .set_viewer(viewer_router, viewer, backend::lan_ports::LAN_PORT_RANGE);
     net.lan_listeners
         .apply(config_watcher_for_lan.get_settings().network_lan_discovery);
     Arc::clone(&net.lan_listeners).spawn_reconcile_loop();

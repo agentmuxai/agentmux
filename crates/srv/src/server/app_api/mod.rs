@@ -53,7 +53,8 @@ pub(crate) mod pane;
 // `dev_server::handle_register_dev_server` directly, same pattern as
 // `pane`'s `handle_close_pane` just above.
 pub(crate) mod dev_server;
-mod blockfile;
+// pub(crate): the viewer feed reads transcripts through `read_range`.
+pub(crate) mod blockfile;
 pub(crate) mod session;
 mod identity;
 pub(crate) mod bundle;
@@ -81,6 +82,7 @@ mod voice;
 pub(crate) mod fleet;
 mod attachments;
 pub(crate) mod connections;
+pub(crate) mod viewer;
 
 /// Register all App API handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -102,6 +104,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     fleet::register(engine, state);
     attachments::register(engine, state);
     connections::register(engine, state);
+    viewer::register(engine, state);
 }
 
 #[cfg(test)]

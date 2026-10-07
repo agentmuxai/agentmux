@@ -627,22 +627,25 @@ mod tests {
         let d = discovery(Some(dir.path().to_path_buf()));
         let install_id = "mw3am46w5weex4a4fqrc3avnua";
 
-        let reply = d.probe_response_with(Some(install_id), Some(99));
+        let reply = d.probe_response_with(Some(install_id), Some(99), Some(29799));
         let size = serde_json::to_vec(&reply).unwrap().len();
         assert!(size <= MAX_REPLY_BYTES, "reply is {size} bytes");
         assert_eq!(reply["install_id"], install_id);
         assert_eq!(reply["channels_running"], 99);
+        assert_eq!(reply["viewer_port"], 29799);
         let kept = reply["siblings"].as_array().unwrap().len();
         assert!(kept > 0 && kept < MAX_SIBLINGS, "siblings are trimmed first: kept {kept}");
 
-        let identity = d.identity_response_with(Some(install_id), Some(3));
+        let identity = d.identity_response_with(Some(install_id), Some(3), Some(29702));
         assert_eq!(identity["install_id"], install_id);
         assert_eq!(identity["channels_running"], 3);
+        assert_eq!(identity["viewer_port"], 29702);
 
         // Unknown: the fields are left out, not sent empty.
-        let bare = d.identity_response_with(None, None);
+        let bare = d.identity_response_with(None, None, None);
         assert!(bare.get("install_id").is_none());
         assert!(bare.get("channels_running").is_none());
+        assert!(bare.get("viewer_port").is_none());
     }
 
     fn probe_bytes() -> Vec<u8> {

@@ -17,12 +17,13 @@
 //! and this install's id; and (owner decision D1, 2026-10-07, agentmux-mobile's
 //! SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §3.2, §13.1) each agent's
 //! state and since when (`agent_status`, `backend::agent_state`), with this
-//! machine's clock (`now_ms`). The cloud presence publisher
+//! machine's clock (`now_ms`); and, while it is up, the viewer listener's port
+//! (same spec §13.2), which opens nothing by itself. The cloud presence publisher
 //! (`muxbus::wan_presence`) reads the same snapshot.
 
 use std::collections::BTreeMap;
 use std::convert::Infallible;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -61,6 +62,9 @@ pub struct FleetSnapshot {
     /// This channel plus the other running channels of this machine, 1..=99.
     pub channels_running: u32,
     pub agent_status: Arc<BTreeMap<String, AgentStatus>>,
+    /// The viewer listener's port while it is up (`backend::viewer`), so a
+    /// paired device finds it again after an address change.
+    pub viewer_port: Option<u16>,
 }
 
 /// What one look at the instance found: each reachable agent with its kind,
@@ -89,6 +93,8 @@ struct FleetBody<'a> {
     agent_kinds: &'a BTreeMap<String, AgentKind>,
     now_ms: u64,
     agent_status: &'a BTreeMap<String, AgentStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    viewer_port: Option<u16>,
 }
 
 pub struct FleetFeed {
@@ -103,6 +109,8 @@ pub struct FleetFeed {
     /// This install's WAN instance id; `None` without a WAN identity store.
     install_id: Option<String>,
     tx: watch::Sender<FleetSnapshot>,
+    /// Where the viewer port is read from on each look; 0 = not up.
+    viewer_port: Arc<AtomicU16>,
     streams: Arc<AtomicUsize>,
     heartbeat: Duration,
 }
@@ -142,6 +150,7 @@ impl FleetFeed {
             agent_kinds: Arc::new(BTreeMap::new()),
             channels_running: 1,
             agent_status: Arc::new(BTreeMap::new()),
+            viewer_port: None,
         });
         Self {
             epoch,
@@ -151,9 +160,16 @@ impl FleetFeed {
             os: crate::backend::host_os::local_os(),
             install_id: None,
             tx,
+            viewer_port: Arc::new(AtomicU16::new(0)),
             streams: Arc::new(AtomicUsize::new(0)),
             heartbeat: HEARTBEAT_INTERVAL,
         }
+    }
+
+    /// Read the viewer port from `port` (`ViewerService::advertised_port_handle`).
+    pub fn with_viewer_port(mut self, port: Arc<AtomicU16>) -> Self {
+        self.viewer_port = port;
+        self
     }
 
     /// Set the install id the body reports (`fleet_source::install_id`).
@@ -219,23 +235,26 @@ impl FleetFeed {
             agent_kinds: &snapshot.agent_kinds,
             now_ms,
             agent_status: &snapshot.agent_status,
+            viewer_port: snapshot.viewer_port,
         })
         .unwrap_or_default()
     }
 
     /// Record the current fleet; bumps `rev` and wakes every stream only if
-    /// it differs from the last one (names, kinds, channel count or any
-    /// agent's state). Returns whether it did.
+    /// it differs from the last one (names, kinds, channel count, any
+    /// agent's state or the viewer port). Returns whether it did.
     pub fn observe_fleet(&self, observation: FleetObservation) -> bool {
         let (names, kinds) = normalize_agents(observation.agents);
         let channels_running = observation.channels_running.clamp(1, 99);
         let mut status = observation.agent_status;
         status.retain(|name, _| names.contains(name));
+        let viewer_port = Some(self.viewer_port.load(Ordering::Relaxed)).filter(|p| *p != 0);
         self.tx.send_if_modified(|current| {
             if *current.agents == names
                 && *current.agent_kinds == kinds
                 && current.channels_running == channels_running
                 && *current.agent_status == status
+                && current.viewer_port == viewer_port
             {
                 return false;
             }
@@ -244,6 +263,7 @@ impl FleetFeed {
             current.agent_kinds = Arc::new(kinds);
             current.channels_running = channels_running;
             current.agent_status = Arc::new(status);
+            current.viewer_port = viewer_port;
             true
         })
     }
@@ -570,6 +590,22 @@ mod tests {
         assert!(f.observe_fleet(observation(&[("AgentX", None)], 3)), "kind no longer known");
         assert_eq!(f.snapshot().rev, 5);
         assert!(f.snapshot().agent_kinds.is_empty());
+    }
+
+    #[test]
+    fn the_viewer_port_is_reported_while_up_and_its_change_bumps_rev() {
+        let port = Arc::new(AtomicU16::new(0));
+        let f = FleetFeed::new("h".into(), "c".into(), "v".into()).with_viewer_port(port.clone());
+        assert!(f.observe_fleet(observation(&[("AgentX", None)], 1)));
+        assert!(!keys_of(&f.body_json(&f.snapshot())).contains(&"viewer_port".to_string()));
+        port.store(29702, Ordering::Relaxed);
+        assert!(f.observe_fleet(observation(&[("AgentX", None)], 1)), "the port came up");
+        let v: serde_json::Value = serde_json::from_str(&f.body_json(&f.snapshot())).unwrap();
+        assert_eq!(v["viewer_port"], 29702);
+        assert!(!f.observe_fleet(observation(&[("AgentX", None)], 1)));
+        port.store(0, Ordering::Relaxed);
+        assert!(f.observe_fleet(observation(&[("AgentX", None)], 1)), "and went down");
+        assert_eq!(f.snapshot().viewer_port, None);
     }
 
     #[test]

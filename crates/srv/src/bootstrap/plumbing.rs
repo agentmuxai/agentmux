@@ -130,13 +130,20 @@ pub fn build_app_state(
     // docs/specs/SPEC_NATIVE_CONTAINER_DEV_PROXY_2026_09_19.md.
     let dev_proxy = crate::backend::dev_proxy::DevProxyRegistry::new();
 
+    // The viewer (backend::viewer): its certificate lives in this instance's
+    // data directory, and its port is advertised on the fleet feed and the
+    // UDP replies while a viewer listener is up.
+    let viewer = crate::backend::viewer::ViewerService::new(Some(base::get_mux_data_dir()), &broker);
+    viewer.install_global();
+
     let fleet_feed = Arc::new(
         crate::backend::fleet_feed::FleetFeed::new(
             net.hostname.clone(),
             crate::backend::reactive::registry::local_channel_id(),
             version.clone(),
         )
-        .with_install_id(crate::backend::fleet_source::install_id()),
+        .with_install_id(crate::backend::fleet_source::install_id())
+        .with_viewer_port(viewer.advertised_port_handle()),
     );
 
     AppState {
@@ -163,6 +170,7 @@ pub fn build_app_state(
         lan_discovery: net.lan_discovery.clone(),
         lan_listeners: net.lan_listeners.clone(),
         fleet_feed,
+        viewer,
         lsp_supervisor: net.lsp_supervisor.clone(),
         local_web_url: net.local_web_url.clone(),
         // Bounded request timeout: cross-instance reactive-inject forwards
