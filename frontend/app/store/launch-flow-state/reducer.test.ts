@@ -462,9 +462,11 @@ describe("launch-flow-state reducer", () => {
             expect(canSubmit(s, baseAuth)).toBe(false);
         });
 
-        it("blocks when bundleId empty", () => {
+        // A bundle is optional: the agent's Bundles list may be empty
+        // (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
+        it("does not need a bundle", () => {
             let s = dispatch(initialState(), { type: "AccountChanged", accountId: "a" }).state;
-            expect(canSubmit(s, baseAuth)).toBe(false);
+            expect(canSubmit(s, baseAuth)).toBe(true);
         });
 
         it("blocks when authReady false", () => {

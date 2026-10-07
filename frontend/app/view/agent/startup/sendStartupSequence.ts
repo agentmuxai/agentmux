@@ -20,8 +20,7 @@ export interface StartupSequenceDeps {
     workDir: () => string;
     version: () => string;
     peerAgents: () => AgentDefinition[];
-    getAgentContent: (contentType: "startup" | "startup_bundle_id") => Promise<{ content?: string } | null>;
-    getBundle: (id: string) => Promise<{ instructions?: string } | null>;
+    getAgentContent: (contentType: "startup") => Promise<{ content?: string } | null>;
     listIdentities: () => Promise<Array<{ provider: string; account_id: string }>>;
     loadAccounts: () => Parameters<typeof resolveAccounts>[1];
     send: (payload: string) => Promise<void>;
@@ -42,25 +41,17 @@ export async function sendStartupSequence(d: StartupSequenceDeps): Promise<void>
         if (!agent) return;
 
         // Gather inputs in parallel where possible
-        const [startupContentResult, startupBundleIdResult, version, identityLinks] = await Promise.all([
+        const [startupContentResult, version, identityLinks] = await Promise.all([
             d.getAgentContent("startup").catch(() => null),
-            d.getAgentContent("startup_bundle_id").catch(() => null),
             Promise.resolve(d.version()),
             d.listIdentities().catch(() => []),
         ]);
 
-        // If this agent has a Bundle selected as its startup source
-        // (AgentStartupModal, Armory → Bundles content), its
-        // `instructions` take precedence over the legacy freeform
-        // "startup" blob — which has no live authoring UI anywhere, see
-        // docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md §5. Falls back to
-        // the freeform blob when no bundle is selected (or it no longer
-        // resolves, e.g. deleted), preserving any seed-manifest content.
-        const startupBundleId = startupBundleIdResult?.content?.trim() || null;
-        const startupBundle = startupBundleId ? await d.getBundle(startupBundleId).catch(() => null) : null;
-        const startupContent = startupBundle?.instructions?.trim()
-            ? startupBundle.instructions
-            : (startupContentResult?.content ?? null);
+        // A bundle's instructions are no longer sent here: the agent's Bundles
+        // list goes into its startup file at launch
+        // (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). The freeform
+        // "startup" blob still is, which keeps seed-manifest content.
+        const startupContent = startupContentResult?.content ?? null;
 
         // Resolve assigned accounts from the same db_agent_identity_links
         // rows spawn-time credential resolution and the agent pane's own

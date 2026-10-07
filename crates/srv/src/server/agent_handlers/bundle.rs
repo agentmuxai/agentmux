@@ -353,7 +353,7 @@ fn register_agent_bundles(engine: &WshRpcEngine, state: &AppState) {
             let bundle_ids = mstore
                 .agent_bundle_ids(&cmd.agent_id)
                 .map_err(|e| format!("getagentbundles: {e}"))?;
-            Ok(AgentBundlesResult { bundle_ids })
+            Ok(AgentBundlesResult { bundle_ids, own_bundle_id: own_bundle_id(&mstore, &cmd.agent_id) })
         }
     });
     let mstore = state.mstore.clone();
@@ -363,9 +363,13 @@ fn register_agent_bundles(engine: &WshRpcEngine, state: &AppState) {
             let bundle_ids = mstore
                 .agent_bundles_set(&cmd.agent_id, &cmd.bundle_ids)
                 .map_err(|e| format!("setagentbundles: {e}"))?;
-            Ok(AgentBundlesResult { bundle_ids })
+            Ok(AgentBundlesResult { bundle_ids, own_bundle_id: own_bundle_id(&mstore, &cmd.agent_id) })
         }
     });
+}
+
+fn own_bundle_id(mstore: &Store, agent_id: &str) -> String {
+    mstore.agent_def_get(agent_id).ok().flatten().map(|def| def.memory_id).unwrap_or_default()
 }
 
 /// The Armory's "Bring Global Memory from…" step for an isolated channel

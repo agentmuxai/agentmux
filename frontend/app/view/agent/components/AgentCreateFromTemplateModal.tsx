@@ -6,7 +6,7 @@
  * (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md).
  *
  * Opens when the user clicks a card in the picker's Templates section.
- * Collects a name and a bundle (the account is the provider's first), then in `onSubmit` the layer
+ * Collects a name and its bundles (the account is the provider's first), then in `onSubmit` the layer
  * clones the seeded template into a new user-owned definition via
  * `agentdefcreatefromtemplate`, immediately launches it with the
  * picked bindings, and closes.
@@ -25,6 +25,7 @@
 import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 
 import { Button, Select, TextInput } from "@/app/element/ui";
+import { BundleListEditor } from "./BundleListEditor";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
@@ -39,7 +40,8 @@ import type { AgentDefinition, Bundle } from "@/app/store/rpc-api";
 interface CreateFromTemplateFormData {
     name: string;
     accountId: string;
-    bundleId: string;
+    /** The agent's Bundles list, in order; empty for none. */
+    bundleIds: string[];
     /** Where the new agent runs. Chosen here at instantiation time —
      *  it is NOT a property of the template (a template is runtime-
      *  agnostic). "container" requires a reachable Docker runtime. */
@@ -89,7 +91,7 @@ export const AgentCreateFromTemplateModalPanel = (
 ): JSX.Element => {
     const [name, setName] = createSignal(props.initialName ?? "");
     const [accountId, setAccountId] = createSignal("");
-    const [bundleId, setBundleId] = createSignal("");
+    const [bundleIds, setBundleIds] = createSignal<string[]>([]);
     const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
     // The account list has been fetched (or failed to): Create waits for it,
     // since the first account is used without a field to show it.
@@ -284,11 +286,6 @@ export const AgentCreateFromTemplateModalPanel = (
     createEffect(() => {
         setAccountId(accounts()[0]?.id ?? "");
     });
-    createEffect(() => {
-        if (bundleId()) return;
-        const first = realBundles()[0];
-        if (first) setBundleId(first.id);
-    });
 
     const canSubmit = () =>
         name().trim().length > 0
@@ -305,7 +302,7 @@ export const AgentCreateFromTemplateModalPanel = (
             await props.onSubmit({
                 name: name().trim(),
                 accountId: accountId(),
-                bundleId: bundleId(),
+                bundleIds: bundleIds(),
                 agentType: runtime(),
                 modelVendorBaseUrl: supportsCustomEndpoint() ? modelVendorBaseUrl().trim() : "",
                 model: modelOptions().length > 0 ? model() : "",
@@ -431,21 +428,21 @@ export const AgentCreateFromTemplateModalPanel = (
                         </span>
                     </label>
                 </Show>
-                <label class="agent-new-bundle-modal-field">
-                    <span class="agent-new-bundle-modal-label">Bundle</span>
-                    <Select
-                        class="agent-new-bundle-modal-input"
-                        value={bundleId()}
-                        onChange={(v) => setBundleId(v)}
+                {/* Several controls, so a group, not a <label>. Starts empty:
+                    the agent gets Global Memory and its own bundle. */}
+                <div class="agent-new-bundle-modal-field" role="group" aria-labelledby="create-from-template-bundles-label">
+                    <span class="agent-new-bundle-modal-label" id="create-from-template-bundles-label">Bundles</span>
+                    <BundleListEditor
+                        bundles={realBundles()}
+                        value={bundleIds()}
+                        onChange={setBundleIds}
                         disabled={submitting()}
-                        data-testid="create-from-template-memory-select"
-                    >
-                        <option value="">(vanilla CLI)</option>
-                        <For each={realBundles()}>
-                            {(m) => <option value={m.id}>{m.name}</option>}
-                        </For>
-                    </Select>
-                </label>
+                        testId="create-from-template-bundles"
+                    />
+                    <span class="agent-new-bundle-modal-hint">
+                        In order: when two bundles name the same skill or MCP server, the first wins.
+                    </span>
+                </div>
                 <Show when={error()}>
                     <div class="agent-new-bundle-modal-error" data-testid="create-from-template-error">
                         {error()}

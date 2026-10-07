@@ -9,6 +9,10 @@
 //! puts it in front of the picks. The table is per channel, like the agent's
 //! own bundle (#3148); bundles themselves live in the identity store, so a
 //! listed id can name a bundle deleted elsewhere, and readers skip it.
+//!
+//! The Stash's old Startup tab stored one bundle as `startup_bundle_id`
+//! agent content. Reading the list folds that pick in and removes it, which
+//! covers existing agents and one an older build writes later.
 
 use rusqlite::params;
 
@@ -16,9 +20,37 @@ use super::bundles::{Bundle, GLOBAL_SECTION_SEPARATOR};
 use super::error::StoreError;
 use super::store::Store;
 
+/// The agent content type the old Startup tab stored its one bundle under.
+pub const STARTUP_BUNDLE_CONTENT_TYPE: &str = "startup_bundle_id";
+
 impl Store {
     /// The bundles picked for `agent_id`, in order. Not the agent's own.
     pub fn agent_bundle_ids(&self, agent_id: &str) -> Result<Vec<String>, StoreError> {
+        self.agent_bundles_fold_startup_pick(agent_id);
+        self.agent_bundle_ids_stored(agent_id)
+    }
+
+    /// Append an old Startup-tab pick to the list, then remove it. Best
+    /// effort: on a failure the pick stays, to be folded on a later read.
+    fn agent_bundles_fold_startup_pick(&self, agent_id: &str) {
+        let Ok(Some(content)) = self.agent_content_get(agent_id, STARTUP_BUNDLE_CONTENT_TYPE) else {
+            return;
+        };
+        let pick = content.content.trim().to_string();
+        if !pick.is_empty() {
+            let mut ids = self.agent_bundle_ids_stored(agent_id).unwrap_or_default();
+            if !ids.contains(&pick) {
+                ids.push(pick);
+                if let Err(e) = self.agent_bundles_set(agent_id, &ids) {
+                    tracing::warn!(agent_id, error = %e, "agent bundles: Startup pick not folded in");
+                    return;
+                }
+            }
+        }
+        let _ = self.agent_content_delete(agent_id, STARTUP_BUNDLE_CONTENT_TYPE);
+    }
+
+    fn agent_bundle_ids_stored(&self, agent_id: &str) -> Result<Vec<String>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT bundle_id FROM db_agent_bundles WHERE agent_id = ?1 ORDER BY position",
@@ -175,6 +207,37 @@ mod tests {
         s.agent_bundles_set("a1", &ids(&["b1"])).unwrap();
         assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1"]));
         assert!(s.agent_bundle_ids("nobody").unwrap().is_empty());
+    }
+
+    fn set_startup_pick(s: &Store, id: &str) {
+        s.agent_content_set(&crate::backend::storage::content::AgentContent {
+            agent_id: "a1".into(),
+            content_type: STARTUP_BUNDLE_CONTENT_TYPE.into(),
+            content: id.into(),
+            updated_at: 1,
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn an_old_startup_pick_is_folded_into_the_list_once() {
+        let s = store_with_agent("own");
+        s.agent_bundles_set("a1", &ids(&["b1"])).unwrap();
+        set_startup_pick(&s, "b2");
+        assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1", "b2"]));
+        assert!(s.agent_content_get("a1", STARTUP_BUNDLE_CONTENT_TYPE).unwrap().is_none());
+        // Removing it afterwards sticks: the pick is gone, not re-folded.
+        s.agent_bundles_set("a1", &ids(&["b1"])).unwrap();
+        assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1"]));
+        // Already listed, or the own bundle, or blank: nothing added.
+        for pick in ["b1", "own", " "] {
+            set_startup_pick(&s, pick);
+            assert_eq!(s.agent_bundle_ids("a1").unwrap(), ids(&["b1"]), "pick {pick:?}");
+            assert!(s.agent_content_get("a1", STARTUP_BUNDLE_CONTENT_TYPE).unwrap().is_none());
+        }
+        // The launch path reads through the fold too.
+        set_startup_pick(&s, "b3");
+        assert_eq!(s.agent_bundle_chain("a1"), ids(&["own", "b1", "b3"]));
     }
 
     #[test]
