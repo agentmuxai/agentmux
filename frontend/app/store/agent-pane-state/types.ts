@@ -762,7 +762,8 @@ export type AgentPaneCommand =
     // this is the same split, just on the dispatched command.
     | { type: "TokensIn"; input: number; model?: string; freshInput?: number; cacheCreation?: number; cacheRead?: number }
     | { type: "TokensOut"; output: number }
-    /** The stream shows a new CLI session starting (`system/init`): any turn
+    /** The stream shows a new CLI session starting (`system/init`, not the one
+     *  a compaction writes mid-turn; view/agent/session-start.ts): any turn
      *  still holding tokens ended without a `result` (the process died), so
      *  they belong to no turn that is coming. */
     | { type: "StreamSessionStarted" }
