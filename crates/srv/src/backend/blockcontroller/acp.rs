@@ -48,6 +48,77 @@ pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
 
+// ---- ACP v1 messages (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md) ----
+// Checked against @agentclientprotocol/sdk 0.26.0 (`PROTOCOL_VERSION = 1`).
+
+/// `initialize`: the protocol version and what this client can do. AgentMux
+/// offers no file system or terminal to the agent; it runs its own tools.
+fn initialize_params() -> serde_json::Value {
+    serde_json::json!({
+        "protocolVersion": 1,
+        "clientCapabilities": {
+            "fs": { "readTextFile": false, "writeTextFile": false },
+            "terminal": false,
+        },
+        "clientInfo": { "name": "AgentMux", "version": env!("CARGO_PKG_VERSION") },
+    })
+}
+
+/// `session/new`, or `session/load` of `resume` when the agent can load one.
+fn session_request(resume: Option<&str>, load_session: bool, cwd: &str) -> (&'static str, serde_json::Value) {
+    match resume.filter(|_| load_session) {
+        Some(sid) => (
+            "session/load",
+            serde_json::json!({ "sessionId": sid, "cwd": cwd, "mcpServers": [] }),
+        ),
+        None => ("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] })),
+    }
+}
+
+/// `session/prompt` params: the prompt is an array of content blocks.
+fn prompt_params(session_id: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": session_id,
+        "prompt": [{ "type": "text", "text": text }],
+    })
+}
+
+/// The reply to a request the agent sends us, if `json` is one (it has both
+/// `method` and `id`). AgentMux approves tool use by default, as it does for
+/// every harness: the first `allow_always` option, else `allow_once`, else
+/// cancelled. Anything else (`fs/*`, `terminal/*`, which this client does not
+/// offer) gets "method not found", so the agent never waits on us.
+fn reply_to_agent_request(json: &serde_json::Value) -> Option<serde_json::Value> {
+    let method = json.get("method")?.as_str()?;
+    let id = json.get("id")?.clone();
+    if id.is_null() {
+        return None;
+    }
+    if method == "session/request_permission" {
+        let options = json
+            .pointer("/params/options")
+            .and_then(|o| o.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let pick = |kind: &str| {
+            options
+                .iter()
+                .find(|o| o.get("kind").and_then(|k| k.as_str()) == Some(kind))
+                .and_then(|o| o.get("optionId").cloned())
+        };
+        let outcome = match pick("allow_always").or_else(|| pick("allow_once")) {
+            Some(option_id) => serde_json::json!({ "outcome": "selected", "optionId": option_id }),
+            None => serde_json::json!({ "outcome": "cancelled" }),
+        };
+        return Some(serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": outcome } }));
+    }
+    Some(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": -32601, "message": format!("AgentMux does not offer {method}") },
+    }))
+}
+
 /// Remove `resolved_id` from the set of outstanding (sent, not yet
 /// resolved) prompts and report whether the set is now EMPTY — i.e.
 /// whether every prompt sent so far has now been resolved, by either a
@@ -850,6 +921,70 @@ impl Controller for AcpController {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn initialize_states_protocol_version_1_and_offers_no_fs_or_terminal() {
+        let p = super::initialize_params();
+        assert_eq!(p["protocolVersion"], 1);
+        assert_eq!(p["clientCapabilities"]["fs"]["readTextFile"], false);
+        assert_eq!(p["clientCapabilities"]["terminal"], false);
+        assert_eq!(p["clientInfo"]["name"], "AgentMux");
+    }
+
+    #[test]
+    fn a_session_is_loaded_only_when_the_agent_can_and_there_is_one() {
+        let (m, p) = super::session_request(Some("s1"), true, "C:/w");
+        assert_eq!(m, "session/load");
+        assert_eq!(p, serde_json::json!({ "sessionId": "s1", "cwd": "C:/w", "mcpServers": [] }));
+        assert_eq!(super::session_request(Some("s1"), false, "C:/w").0, "session/new");
+        let (m, p) = super::session_request(None, true, "C:/w");
+        assert_eq!(m, "session/new");
+        assert_eq!(p, serde_json::json!({ "cwd": "C:/w", "mcpServers": [] }));
+    }
+
+    #[test]
+    fn the_prompt_is_an_array_of_content_blocks() {
+        assert_eq!(
+            super::prompt_params("s1", "hi"),
+            serde_json::json!({ "sessionId": "s1", "prompt": [{ "type": "text", "text": "hi" }] })
+        );
+    }
+
+    #[test]
+    fn permission_requests_are_approved_preferring_allow_always() {
+        let req = |options: serde_json::Value| {
+            serde_json::json!({ "jsonrpc": "2.0", "id": 7, "method": "session/request_permission",
+                "params": { "sessionId": "s", "toolCall": { "toolCallId": "t" }, "options": options } })
+        };
+        let both = req(serde_json::json!([
+            { "optionId": "once", "kind": "allow_once", "name": "Allow" },
+            { "optionId": "always", "kind": "allow_always", "name": "Always" },
+            { "optionId": "no", "kind": "reject_once", "name": "Reject" },
+        ]));
+        assert_eq!(
+            super::reply_to_agent_request(&both).unwrap(),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 7, "result": { "outcome": { "outcome": "selected", "optionId": "always" } } })
+        );
+        let once = req(serde_json::json!([{ "optionId": "once", "kind": "allow_once", "name": "Allow" }]));
+        assert_eq!(super::reply_to_agent_request(&once).unwrap()["result"]["outcome"]["optionId"], "once");
+        let reject = req(serde_json::json!([{ "optionId": "no", "kind": "reject_once", "name": "Reject" }]));
+        assert_eq!(
+            super::reply_to_agent_request(&reject).unwrap()["result"]["outcome"],
+            serde_json::json!({ "outcome": "cancelled" })
+        );
+    }
+
+    #[test]
+    fn other_agent_requests_get_method_not_found_and_notifications_get_nothing() {
+        let fs = serde_json::json!({ "jsonrpc": "2.0", "id": "a", "method": "fs/read_text_file", "params": {} });
+        let reply = super::reply_to_agent_request(&fs).unwrap();
+        assert_eq!(reply["id"], "a");
+        assert_eq!(reply["error"]["code"], -32601);
+        let note = serde_json::json!({ "jsonrpc": "2.0", "method": "session/update", "params": {} });
+        assert!(super::reply_to_agent_request(&note).is_none());
+        let response = serde_json::json!({ "jsonrpc": "2.0", "id": 3, "result": {} });
+        assert!(super::reply_to_agent_request(&response).is_none());
+    }
 
     /// Identity M4b-2 (spec §6.5.8): `agent.open` stores `cmd:args` as an
     /// array and `cmd:env` as an object; ACP read only JSON strings, so
