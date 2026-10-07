@@ -408,6 +408,7 @@ impl ShellNodeRunner {
             child_cmd.process_group(0);
         }
 
+        crate::backend::process_tracker::registry::place_spawn(&block_id, &mut child_cmd, false);
         let mut child = match child_cmd.spawn() {
             Ok(c) => c,
             Err(e) => {

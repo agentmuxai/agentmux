@@ -10,21 +10,21 @@
 //! place what's still running on their machine, and kill it reliably
 //! when they're done.
 //!
-//! The API is a platform-agnostic trait. Only Windows has a real impl
-//! today; every other platform gets the no-op `StubTracker`. The Linux and
-//! macOS mechanisms below are planned, not built:
+//! The API is a platform-agnostic trait. Windows and Linux have real impls;
+//! macOS gets the no-op `StubTracker` (as does Linux without a delegated
+//! cgroup, see `cgroup_linux::init`):
 //!
 //! | Platform | Impl            | Mechanism                                  | Confidence |
 //! |----------|-----------------|--------------------------------------------|------------|
 //! | Windows  | `JobObjectTracker` | `CreateJobObject` + `AssignProcessToJobObject` + `TerminateJobObject` | high       |
-//! | Linux    | `StubTracker` (planned: cgroup v2) | `systemd-run --user --scope` + `cgroup.procs` / `cgroup.kill` | none (planned: high) |
+//! | Linux    | `CgroupTracker` | cgroup v2 per agent in srv's delegated user scope; `cgroup.procs` / `cgroup.kill` | high |
 //! | macOS    | `StubTracker` (planned: process group) | `POSIX_SPAWN_SETPGROUP` + `killpg`                 | none (planned: best-effort) |
 //! | other    | `StubTracker`   | no-op                                                          | none       |
 //!
 //! The frontend's swarm panel surfaces the confidence level so users know
 //! when tracking may miss escaped descendants.
 //!
-//! See `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md` for the design.
+//! See `docs/analysis/agent-spawned-process-tracking-2026-10-07.md`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -33,6 +33,9 @@ pub mod registry;
 
 #[cfg(windows)]
 pub mod windows;
+
+#[cfg(target_os = "linux")]
+pub mod cgroup_linux;
 
 // `stub` is defined inline below; there is no `stub.rs`. A file-form
 // `pub mod stub;` here would collide with it (E0428) and break `task dev`.
@@ -52,6 +55,17 @@ pub struct TrackedProcess {
     /// Parent PID, if the platform exposes it. Drives
     /// [`agent_started`]'s ancestry walk.
     pub parent_pid: Option<u32>,
+    /// The executable alone (path or name), which [`agent_started`]
+    /// classifies by: `command` may be a whole argv (`/bin/bash -c npm
+    /// test`). Empty means `command` is the executable.
+    #[serde(skip)]
+    pub exe: String,
+}
+
+impl TrackedProcess {
+    fn image(&self) -> String {
+        image_name(if self.exe.is_empty() { &self.command } else { &self.exe })
+    }
 }
 
 /// Lowercased executable name without directory or `.exe` suffix —
@@ -67,7 +81,7 @@ fn image_name(command: &str) -> String {
 /// use `powershell`/`cmd`).
 fn is_shell(p: &TrackedProcess) -> bool {
     matches!(
-        image_name(&p.command).as_str(),
+        p.image().as_str(),
         "bash" | "sh" | "dash" | "zsh" | "fish" | "cmd" | "powershell" | "pwsh" | "nu"
     )
 }
@@ -93,7 +107,7 @@ pub fn agent_started(members: Vec<TrackedProcess>, roots: &HashSet<u32>) -> Vec<
     let by_pid: HashMap<u32, &TrackedProcess> = members.iter().map(|p| (p.pid, p)).collect();
     let keep: HashSet<u32> = members
         .iter()
-        .filter(|p| !roots.contains(&p.pid) && image_name(&p.command) != "conhost")
+        .filter(|p| !roots.contains(&p.pid) && p.image() != "conhost")
         .filter(|p| {
             let mut cur = *p;
             // Bounded walk: a PID-reuse cycle can't spin forever.
@@ -158,6 +172,28 @@ pub trait TrackerHandle: Send + Sync {
     fn set_below_normal_priority(&self, _on: bool) -> Result<(), String> {
         Ok(())
     }
+
+    /// Ask every member to exit (SIGTERM): the graceful step a teardown
+    /// takes before [`kill_tree`](Self::kill_tree). `false` where the
+    /// platform has no graceful signal for a whole tree yet (Windows), so
+    /// there is nothing to wait for.
+    fn terminate(&self) -> bool {
+        false
+    }
+
+    /// How many processes the tree holds right now, the agent's own CLI and
+    /// plumbing included: what a teardown waits to reach zero.
+    fn member_count(&self) -> usize {
+        self.list_members().len()
+    }
+
+    /// Where a child about to be spawned joins the tree before it execs
+    /// (Linux: the cgroup's `cgroup.procs`), so nothing it forks can slip
+    /// out between spawn and [`assign_process`](Self::assign_process).
+    /// `None`: only the after-spawn assignment.
+    fn spawn_target(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 /// How reliable this platform's tracker is.
@@ -179,9 +215,12 @@ pub enum TrackingConfidence {
 /// Call once per agent pane; reuse the handle across multiple turns of
 /// the `SubprocessController` so children from any turn are all tracked
 /// under the same umbrella.
-pub fn new_tracker(block_id: &str) -> Arc<dyn TrackerHandle> {
+/// `agent`: the block runs an agent, not a terminal a person types in (see
+/// `AgentProcessRegistry::ensure_tracker_kind`). Only Linux tells them apart.
+pub fn new_tracker(block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
     #[cfg(windows)]
     {
+        let _ = agent;
         match windows::JobObjectTracker::new(block_id) {
             Ok(t) => Arc::new(t),
             Err(e) => {
@@ -194,9 +233,19 @@ pub fn new_tracker(block_id: &str) -> Arc<dyn TrackerHandle> {
             }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        let _ = block_id;
+        if let Some(root) = cgroup_linux::root().filter(|_| agent) {
+            match cgroup_linux::CgroupTracker::new(root, block_id) {
+                Ok(t) => return Arc::new(t),
+                Err(e) => tracing::warn!(block_id = %block_id, error = %e, "[process-tracker] cgroup tracker init failed"),
+            }
+        }
+        Arc::new(stub::StubTracker)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = (block_id, agent);
         Arc::new(stub::StubTracker)
     }
 }
@@ -240,6 +289,7 @@ mod tests {
             rss_bytes: 0,
             started_at_ms: 0,
             parent_pid: parent,
+            exe: String::new(),
         }
     }
 
@@ -313,6 +363,19 @@ mod tests {
         let mut members = idle_claude();
         members.push(proc(60, Some(1), r"C:\Users\u\.local\bin\claude.exe"));
         assert!(agent_started(members, &HashSet::from([10, 60])).is_empty());
+    }
+
+    /// Linux and macOS report the whole argv as `command`; the shell is
+    /// recognised from `exe`.
+    #[test]
+    fn a_shell_reported_with_its_argv_is_still_a_shell() {
+        let argv = |pid, parent, exe: &str, command: &str| TrackedProcess { exe: exe.to_string(), ..proc(pid, parent, command) };
+        let members = vec![
+            argv(10, Some(1), "/usr/bin/node", "node /usr/lib/claude/cli.js --input-format stream-json"),
+            argv(20, Some(10), "/bin/bash", "/bin/bash -c npm test"),
+            argv(21, Some(20), "/usr/bin/node", "node /repo/node_modules/.bin/vitest"),
+        ];
+        assert_eq!(pids(&agent_started(members, &HashSet::from([10]))), vec![20, 21]);
     }
 
     #[test]

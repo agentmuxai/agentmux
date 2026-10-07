@@ -222,6 +222,7 @@ impl AcpController {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
+        crate::backend::process_tracker::registry::place_spawn(&self.block_id, &mut cmd, true);
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "ACP process spawn failed");
             format!("failed to spawn ACP process: {e}")

@@ -447,9 +447,9 @@ pub const COMMAND_AGENT_OPEN_PANES: &str = "agent.open-panes";
 /// Returns `AgentKillResult { ok: bool }`.
 pub const COMMAND_AGENT_KILL_PROCESS: &str = "agent.kill-process";
 /// Terminate the entire process tree for a given block.
-/// On Windows: `TerminateJobObject`. On Linux: `cgroup.kill`. On
-/// macOS: `killpg`. Returns `AgentKillResult { ok: true }` even when
-/// there are no members (idempotent).
+/// On Windows: `TerminateJobObject`. On Linux: `cgroup.kill`. Nothing on
+/// the stub tracker (macOS). Returns `AgentKillResult { ok: true }` even
+/// when there are no members (idempotent).
 pub const COMMAND_AGENT_KILL_TREE: &str = "agent.kill-tree";
 /// Create or upsert an agent definition. Broadcasts `agents:changed` on
 /// success so all open frontends refresh My Agents without a restart.

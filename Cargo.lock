@@ -234,6 +234,7 @@ dependencies = [
  "windows 0.61.3",
  "windows-sys 0.59.0",
  "winres",
+ "zbus 5.18.0",
  "zeroize",
  "zip 2.4.2",
 ]
