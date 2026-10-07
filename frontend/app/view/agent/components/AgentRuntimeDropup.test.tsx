@@ -461,9 +461,16 @@ describe("AgentRuntimeDropup — the Mode section doesn't promise prompting that
         expect(text).not.toMatch(/prompt all/i);
         expect(text).not.toMatch(/AI classifier/i);
         expect(text).not.toMatch(/read-only/i);
-        expect(rows.find((r) => /^Default/.test(r))).toMatch(/allowed automatically/);
+        expect(rows.find((r) => /^Default/.test(r))).toMatch(/auto-approved/);
         expect(rows.find((r) => /^Plan/.test(r))).toMatch(/does NOT stop edits/);
         expect(rows.find((r) => /^Bypass/.test(r))).toContain("no prompts");
+    });
+
+    it("keeps the full explanation as the row's tooltip", async () => {
+        await open("host");
+        const plan = screen.getAllByRole("option").find((o) => /^Plan/.test(o.textContent ?? ""))!;
+        expect(plan.getAttribute("title")).toMatch(/plan is approved automatically/);
+        expect(plan.querySelector(".agent-runtime-dropup-text .agent-runtime-dropup-description")?.textContent).toMatch(/does NOT stop edits/);
     });
 
     it("a container agent has no one to ask, so the CLI refuses: Default says so, and Plan really is read-only", async () => {

@@ -162,7 +162,7 @@ export function permissionModeText(
     mode: PermissionMode,
     autoAnswersPrompts: boolean,
     providerId = "claude",
-): { label: string; note?: string } {
+): { label: string; note?: string; detail?: string } {
     if (providerId !== "claude") {
         // Gemini, Kimi and Qwen get `--yolo` for every non-default mode and Codex
         // gets no permission flag at all (buildRuntimeArgs.ts), and none of their
@@ -182,9 +182,17 @@ export function permissionModeText(
             case "bypass":
                 return { label: "Bypass (no prompts)" };
             case "default":
-                return { label: "Default", note: "unapproved writes and commands are refused (there is no one to ask)" };
+                return {
+                    label: "Default",
+                    note: "unapproved writes and commands refused",
+                    detail: "unapproved writes and commands are refused (there is no one to ask)",
+                };
             case "acceptEdits":
-                return { label: "Accept Edits", note: "edits are allowed; other unapproved commands are refused" };
+                return {
+                    label: "Accept Edits",
+                    note: "edits allowed; other commands refused",
+                    detail: "edits are allowed; other unapproved commands are refused",
+                };
             case "auto":
                 return { label: "Auto (AI classifier)" };
             case "plan":
@@ -197,19 +205,26 @@ export function permissionModeText(
         case "default":
             return {
                 label: "Default",
-                note: "writes and commands are asked about, and every ask is allowed automatically — same as Bypass for now",
+                note: "every ask auto-approved, like Bypass",
+                detail: "writes and commands are asked about, and every ask is allowed automatically — same as Bypass for now",
             };
         case "acceptEdits":
             return {
                 label: "Accept Edits",
-                note: "edits are not asked about; any other ask is allowed automatically — same as Bypass for now",
+                note: "other asks auto-approved, like Bypass",
+                detail: "edits are not asked about; any other ask is allowed automatically — same as Bypass for now",
             };
         case "auto":
-            return { label: "Auto", note: "the CLI's classifier decides what to ask; every ask is allowed automatically" };
+            return {
+                label: "Auto",
+                note: "classifier asks; all auto-approved",
+                detail: "the CLI's classifier decides what to ask; every ask is allowed automatically",
+            };
         case "plan":
             return {
                 label: "Plan",
-                note: "writes are asked about and allowed automatically, so this does NOT stop edits; the plan is approved automatically",
+                note: "does NOT stop edits; plan auto-approved",
+                detail: "writes are asked about and allowed automatically, so this does NOT stop edits; the plan is approved automatically",
             };
     }
 }

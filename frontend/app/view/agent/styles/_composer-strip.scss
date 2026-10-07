@@ -246,12 +246,25 @@
 // express — see docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
 .menu.agent-runtime-dropup-panel {
     min-width: 180px;
+    // Capped, so a long label or note wraps inside the panel instead of
+    // widening it past the pane (and the window on a narrow one).
+    max-width: min(300px, calc(100vw - 16px));
     font-size: 10px;
 
     .agent-runtime-dropup-row {
         padding: 2px var(--space-1-5);
         min-height: 0;
+        // The check icon lines up with the label, the first line.
+        align-items: flex-start;
     }
+}
+
+// The row's label, with its description on a second line.
+.agent-runtime-dropup-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 // Explicit close affordance — the panel deliberately stays open across
@@ -313,13 +326,9 @@
 }
 
 .agent-runtime-dropup-description {
-    margin-left: var(--space-1);
     color: var(--secondary-text-color);
     font-size: 9px;
     opacity: 0.8;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
 
 // Shell toggle — deliberately accent-colored at rest (not just when open) so
@@ -736,7 +745,9 @@
 }
 
 // A section whose options do not apply to this pane (e.g. effort on Haiku).
+// Built from runtime text such as a full model id, so it wraps too.
 .agent-runtime-dropup-note {
+    overflow-wrap: anywhere;
     padding: 2px var(--space-2);
     font-size: 10px;
     color: var(--secondary-text-color);
