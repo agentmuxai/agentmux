@@ -67,7 +67,12 @@ work as for the other controllers.
   reports `loadSession` and the pane has a session id, else `session/new
   { cwd, mcpServers: [] }`. A failed `session/load` falls back to
   `session/new`.
-- A prompt sent before the session exists stays queued, as today.
+- A prompt sent before the session exists (the startup message is sent right
+  after launch) is queued, joined to any earlier queued text, and sent once
+  the session opens; it is never sent with an empty session id.
+- A `session/load` the agent refuses is not shown in the pane: the client
+  recovers by opening a new session, so it is logged, not rendered as an
+  error that ended a turn.
 
 ### 4. The prompt shape (srv)
 

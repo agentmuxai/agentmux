@@ -430,6 +430,10 @@ impl AcpController {
                 if line.is_empty() {
                     continue;
                 }
+                // A failed `session/load` the handshake recovers from (it
+                // opens a new session): not shown, or the pane reads it as
+                // an error that ended a turn.
+                let mut recovered_error = false;
                 // Parse as JSON to check for session/update notifications
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                     // A request from the agent (permission, fs, terminal):
@@ -462,6 +466,7 @@ impl AcpController {
                             Some((session_request(resume.as_deref(), can_load, &inner.session_cwd), loading))
                         } else if is(inner.session_request_id) && json.get("error").is_some() && inner.loading_session.is_some() {
                             inner.loading_session = None;
+                            recovered_error = true;
                             Some((session_request(None, false, &inner.session_cwd), None))
                         } else {
                             None
@@ -638,7 +643,9 @@ impl AcpController {
                 }
 
                 // Persist + broadcast via the shared helper (same as subprocess/host_spawn.rs)
-                if let Some(ref broker) = broker_clone {
+                if recovered_error {
+                    tracing::info!(block_id = %block_id_stdout, "[acp] session/load refused; opening a new session");
+                } else if let Some(ref broker) = broker_clone {
                     let line_with_newline = format!("{}\n", line);
                     super::shell::handle_append_block_file(
                         broker,
@@ -868,8 +875,22 @@ impl Controller for AcpController {
             }
 
             let session_id = {
-                let inner = self.inner.lock().unwrap();
-                inner.session_id.clone().unwrap_or_default()
+                let mut inner = self.inner.lock().unwrap();
+                match inner.session_id.clone() {
+                    Some(sid) => sid,
+                    None => {
+                        // The handshake hasn't opened the session yet (the
+                        // startup message is sent right after launch): queue
+                        // it; the stdout reader sends it once the session
+                        // exists. Sent with no session id, the agent would
+                        // reject it and the message would be lost.
+                        inner.pending_prompt = Some(match inner.pending_prompt.take() {
+                            Some(earlier) => format!("{earlier}\n\n{message}"),
+                            None => message,
+                        });
+                        return Ok(());
+                    }
+                }
             };
             // Not built via make_request: the id must be captured so it can
             // be tracked as outstanding (see outstanding_prompt_ids's doc
@@ -1240,6 +1261,22 @@ mod tests {
     /// `send_input` marks the turn active via `mark_turn_active_returning_was_active`
     /// — pins the call-site contract that `turn_active` flips true once a
     /// message is actually sent to an already-running process.
+    /// A message sent before the handshake has opened the session (the
+    /// startup message, sent right after launch) is queued for the stdout
+    /// reader to send once the session exists, never sent with an empty
+    /// session id (ReAgent on #4447).
+    #[tokio::test]
+    async fn a_message_before_the_session_exists_is_queued_not_sent() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        assert!(c.send_input(BlockInputUnion::data(b"startup".to_vec()), None).is_ok());
+        assert!(c.send_input(BlockInputUnion::data(b"second".to_vec()), None).is_ok());
+        assert!(rx.try_recv().is_err(), "nothing goes to the agent before the session exists");
+        assert_eq!(c.inner.lock().unwrap().pending_prompt.as_deref(), Some("startup\n\nsecond"));
+        assert!(!c.health_monitor.is_active_turn());
+    }
+
     #[tokio::test]
     async fn send_input_marks_the_turn_active() {
         let c = controller();
@@ -1247,7 +1284,11 @@ mod tests {
         // turn-active logic when `is_running()` is true (otherwise it
         // stashes the message as `pending_prompt` for the next start()).
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         assert!(!c.health_monitor.is_active_turn());
         let res = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
@@ -1264,7 +1305,11 @@ mod tests {
     async fn repeated_send_input_while_active_does_not_error() {
         let c = controller();
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
         assert!(c.send_input(BlockInputUnion::data(b"second".to_vec()), None).is_ok());
@@ -1294,7 +1339,11 @@ mod tests {
             None,
         );
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok());
 
@@ -1335,7 +1384,11 @@ mod tests {
         );
         let (tx, rx) = mpsc::channel::<String>(8);
         drop(rx); // Receiver gone — try_send fails with TrySendError::Closed.
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         let res = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
         assert!(res.is_err(), "send_input should surface the enqueue failure, got {res:?}");
@@ -1376,7 +1429,11 @@ mod tests {
     async fn send_input_does_not_roll_back_an_already_active_turn_on_a_failed_steering_send() {
         let c = controller();
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         // First send succeeds — turn is now genuinely active.
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
