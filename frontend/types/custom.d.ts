@@ -151,6 +151,8 @@ declare global {
     type BrowserPaneHostApi = {
         create(blockId: string, url: string, windowLabel: string, rect: HostRect): Promise<void>;
         resize(blockId: string, rect: HostRect): Promise<void>;
+        /** Move several of this window's panes in one step; resolves once they have moved. */
+        setRects(windowLabel: string, rects: ({ blockId: string } & HostRect)[]): Promise<void>;
         close(blockId: string, windowLabel: string): Promise<void>;
         navigate(blockId: string, url: string): Promise<void>;
         goBack(blockId: string): Promise<void>;

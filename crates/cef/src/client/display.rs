@@ -145,6 +145,17 @@ impl AgentMuxHandler {
             vec![]
         };
 
+        // Same list for the same page as last time: nothing to tell the page.
+        let page_url = b
+            .main_frame()
+            .map(|f| CefString::from(&ImplFrame::url(&f)).to_string())
+            .unwrap_or_default();
+        let sent = (page_url, urls.clone());
+        if self.sent_favicons.get(&b.identifier()) == Some(&sent) {
+            return;
+        }
+        self.sent_favicons.insert(b.identifier(), sent);
+
         let block_id_short: String = block_id.chars().take(7).collect();
         tracing::info!(
             "[browser-pane:diag][{}] emit-favicon-urls count={} first={:?}",

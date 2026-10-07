@@ -207,6 +207,11 @@ pub struct AgentMuxHandler {
     /// one browser only. `on_after_created` takes that label's pending entry
     /// instead of the queue head (see `creation_labels`). Consumed once.
     creation_label: Option<String>,
+    /// The favicon URLs last sent for each pane browser (by `Browser::identifier()`)
+    /// and the page they were sent for. CEF reports favicons again on every
+    /// viewport change of some pages, i.e. every frame of a window drag; a
+    /// report that repeats the same list for the same page isn't sent again.
+    sent_favicons: HashMap<i32, (String, Vec<String>)>,
 }
 
 impl AgentMuxHandler {
@@ -237,6 +242,7 @@ impl AgentMuxHandler {
             pending_popups: 0,
             popup_browser_ids: std::collections::HashSet::new(),
             creation_label,
+            sent_favicons: HashMap::new(),
         }))
     }
 

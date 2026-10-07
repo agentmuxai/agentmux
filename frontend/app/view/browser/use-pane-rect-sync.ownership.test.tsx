@@ -63,7 +63,19 @@ afterEach(() => {
 });
 
 describe("usePaneRectSync — the native page follows the tab's visibility", () => {
-    const lastResize = () => calls.filter((c) => c.cmd === "browser_pane_resize").at(-1)?.args;
+    // Rects go to the host in batches (pane-rect-batcher.ts): the newest one
+    // sent for this block, from whichever command carried it.
+    const lastResize = (blockId = "v1") => {
+        for (let i = calls.length - 1; i >= 0; i--) {
+            const { cmd, args } = calls[i];
+            if (cmd === "browser_panes_set_rects") {
+                const hit = args.rects.find((r: any) => r.block_id === blockId);
+                if (hit) return hit;
+            }
+            if (cmd === "browser_pane_resize" && args.block_id === blockId) return args;
+        }
+        return undefined;
+    };
 
     it("collapses the page while its tab is dormant or its window tab is hidden, and restores it", async () => {
         // jsdom lays nothing out; give the placeholder a real rect.
@@ -73,10 +85,13 @@ describe("usePaneRectSync — the native page follows the tab's visibility", () 
         await flush();
 
         setVisibility("dormant");
+        await flush();
         expect(lastResize()).toMatchObject({ width: 0, height: 0 });
         setVisibility("active");
+        await flush();
         expect(lastResize()).toMatchObject({ x: 10, y: 20, width: 300, height: 200 });
         setVisibility("windowHidden");
+        await flush();
         expect(lastResize()).toMatchObject({ width: 0, height: 0 });
         vi.restoreAllMocks();
     });
