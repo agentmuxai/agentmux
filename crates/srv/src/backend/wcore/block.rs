@@ -53,6 +53,9 @@ pub fn delete_block(
     tab.blockids.retain(|id| id != block_id);
     store.update(&mut tab)?;
     store.delete::<Block>(block_id)?;
+    // An agent's ownership of a browser pane ends with the pane
+    // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
+    crate::server::browser_owner::forget(block_id);
     Ok(())
 }
 

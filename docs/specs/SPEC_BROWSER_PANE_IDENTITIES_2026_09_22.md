@@ -1,7 +1,11 @@
 # Spec: Browser pane identities — shared by default, private (unique incognito) per pane tab, named profiles later
 
 **Status:** proposed — nothing in this spec is implemented. Written
-2026-09-22 against `main` @ `575947270` (v0.56.12). Every file:line
+2026-09-22 against `main` @ `575947270` (v0.56.12). **Amended
+2026-10-07:** the identity control is a profile button next to the
+bookmarks button (§5.3), with a profile manager and a per-profile
+"Agents may use this profile" switch; agents open panes through
+`OpenBrowser`, private by default (§5.2). Every file:line
 citation below was read on that commit; spot-verify before trusting.
 
 ## 0. The ask, verbatim
@@ -302,16 +306,41 @@ through the existing MCP pane-open tool schema
 an agent runs "log into service X as a second account without
 disturbing the user's session".
 
+**Amended 2026-10-07: agents get their browser panes through `OpenBrowser`**
+(`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md`), which defaults to
+`private`. An agent may name a profile (`profile:<id>`, Phase 3) only if
+the human switched on **Agents may use this profile** for it (§5.3); a
+logged-in profile is effectively a credential, so the switch is off for
+every profile until the human turns it on. An agent can't open a
+`shared` pane on its own: asking for one shows the human a confirmation
+in the pane first.
+
 ### 5.3 Frontend UX
 
 **Creating.** Two entry points, both reusing existing primitives:
 
 - Widget bar: the new "Private Browser" widget (§5.1).
-- Browser nav bar `FlyoutMenu` (`frontend/app/view/browser/browser-nav-bar.tsx`,
-  the same primitive as the bookmark menu): a new **Identity** group —
-  `Shared (default) ✓` / `Private — this pane only`. Selecting the
-  other one shows a one-line confirm ("Reopens this pane logged out.
-  Continue?") then does the recreate (§3.2).
+- **A profile button in the browser nav bar, next to the bookmarks
+  button** (operator, 2026-10-07; replaces the earlier "Identity group
+  inside the nav bar menu" design). Like Chrome's avatar button, it
+  both shows and changes the pane's identity:
+  - **Face:** the incognito glyph (`fa-user-secret`) for `private`; a
+    coloured initial for a named profile; a neutral person glyph for
+    `shared`.
+  - **Menu** (a `FlyoutMenu`, the same primitive as the bookmark menu,
+    `frontend/app/view/browser/browser-nav-bar.tsx`): `Shared (default)`,
+    `Private — this pane only`, then each named profile (Phase 3), then
+    **Manage profiles…**. Choosing another identity shows a one-line
+    confirm ("Reopens this pane logged out." or "Reopens this pane as
+    *Work*.") then does the recreate (§3.2).
+  - **Manage profiles…** (Phase 3) opens a small panel: add, rename,
+    recolour and delete profiles (delete wipes that profile's cookies
+    and storage, with a confirm), and per profile an **Agents may use
+    this profile** switch, off by default (§5.2 amendment). It also lists
+    the panes currently using each profile.
+  - **An agent-driven pane** (`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md`)
+    shows the same button next to its "Driven by <agent>" badge, so the
+    human sees whose session the agent is acting in.
 
 **Seeing.** Because `browser:show_controls=false` hides the nav bar,
 the indicator lives in pane chrome:
