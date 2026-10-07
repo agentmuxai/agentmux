@@ -318,6 +318,13 @@
         }
     }
 
+    // Reduced motion: no fade either, the same as the path above.
+    @media (prefers-reduced-motion: reduce) {
+        .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
+            transition: none;
+        }
+    }
+
     .agent-document[data-one-way][data-follow-state="following"] {
         overflow-anchor: none;
     }
