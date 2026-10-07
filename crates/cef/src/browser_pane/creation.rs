@@ -72,6 +72,18 @@ wrap_task! {
             }
 
             #[cfg(target_os = "windows")]
+            if crate::browser_pane::views_spike::enabled() {
+                crate::browser_pane::views_spike::create(
+                    self.state.clone(),
+                    self.block_id.clone(),
+                    self.label.clone(),
+                    self.url.clone(),
+                    self.rect.clone(),
+                    self.window_label.clone(),
+                );
+                return;
+            }
+            #[cfg(target_os = "windows")]
             {
                 // Resolve the parent HWND from the pane's TARGET `window_label`,
                 // NOT `find_own_top_level_window` (which returns the process's

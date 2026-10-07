@@ -175,7 +175,14 @@ fn apply(state: &Arc<AppState>, window_label: &str, rects: &[PaneBounds]) {
         return;
     }
     #[cfg(target_os = "windows")]
-    apply_windows(state, &live);
+    {
+        // Views spike: those panes move as overlays, the rest as wrapper HWNDs.
+        let (views, hwnds): (Vec<_>, Vec<_>) =
+            live.into_iter().partition(|(_, label)| crate::browser_pane::views_spike::is_views_pane(label));
+        let views: Vec<(String, Rect)> = views.into_iter().map(|(r, label)| (label, r.rect())).collect();
+        crate::browser_pane::views_spike::apply(state, &views);
+        apply_windows(state, &hwnds);
+    }
     #[cfg(not(target_os = "windows"))]
     for (r, label) in &live {
         crate::browser_pane::creation_views::resize_browser_pane_view(state, label, r.rect());
@@ -234,7 +241,7 @@ fn apply_windows(state: &Arc<AppState>, live: &[(&PaneBounds, String)]) {
         }
     }
 
-    tracing::debug!(panes = moved.len(), ms = started.elapsed().as_secs_f64() * 1000.0, "[pane-bounds] moved");
+    tracing::info!(panes = moved.len(), ms = started.elapsed().as_secs_f64() * 1000.0, "[pane-bounds] moved");
     for label in moved {
         if let Some(host) = state.get_browser(label).and_then(|b| b.host()) {
             host.notify_move_or_resize_started();

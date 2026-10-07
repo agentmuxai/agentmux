@@ -265,6 +265,11 @@ pub(crate) fn resolve_pane_label(state: &Arc<AppState>, browser: &Browser) -> Op
 ///    Chromium's internal focus-steals on page load don't yank keyboard
 ///    focus away from the main window.
 pub fn on_after_created_browser_pane(state: &Arc<AppState>, browser: &Browser) {
+    // Views spike: the pane has no HWND of its own; its handle is the main window's.
+    #[cfg(target_os = "windows")]
+    if crate::browser_pane::views_spike::is_views_browser(state, browser) {
+        return;
+    }
     #[cfg(target_os = "windows")]
     {
         if let Some(host) = browser.host() {
@@ -493,7 +498,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
     }
 
     #[cfg(target_os = "windows")]
-    {
+    if !crate::browser_pane::views_spike::is_views_browser(state, browser) {
         if let Some(host) = browser.host() {
             let wh = host.window_handle();
             if !wh.0.is_null() {

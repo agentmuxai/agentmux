@@ -31,6 +31,12 @@ impl BrowserPaneManager {
         // to call notify_move_or_resize_started (a CEF-side hint, unrelated
         // to which HWND owns the actual on-screen rect).
         #[cfg(target_os = "windows")]
+        if let Some(label) = state.live_browser_pane_label(block_id).filter(|l| crate::browser_pane::views_spike::is_views_pane(l)) {
+            let mut task = crate::browser_pane::views_spike::ApplyViewsPaneTask::new(state.clone(), label, rect);
+            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+            return;
+        }
+        #[cfg(target_os = "windows")]
         if let Some(browser) = self.live_browser(state, block_id) {
             let resized = state
                 .live_browser_pane_label(block_id)

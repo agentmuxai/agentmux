@@ -96,6 +96,10 @@ impl BrowserPaneManager {
         // legacy lock; each iteration now snapshots independently.
         let labels = state.live_browser_pane_labels();
         for label in &labels {
+            // Views spike: no HWND of its own to clip (not ported).
+            if crate::browser_pane::views_spike::is_views_pane(label) {
+                continue;
+            }
             let browser = match state.get_browser(label) {
                 Some(b) => b,
                 None => continue,
@@ -422,7 +426,7 @@ impl BrowserPaneManager {
             if let Some(host) = browser.host() {
                 host.set_focus(1);
                 #[cfg(target_os = "windows")]
-                {
+                if !state.live_browser_pane_label(block_id).is_some_and(|l| crate::browser_pane::views_spike::is_views_pane(&l)) {
                     let hwnd = host.window_handle();
                     if !hwnd.0.is_null() {
                         // Tell the subclass this focus request is intentional

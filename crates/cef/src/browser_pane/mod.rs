@@ -15,6 +15,8 @@ pub mod trace;
 pub mod hwnd;
 #[cfg(target_os = "windows")]
 pub mod wrapper;
+#[cfg(target_os = "windows")]
+pub mod views_spike;
 #[cfg(not(target_os = "windows"))]
 pub mod creation_views;
 

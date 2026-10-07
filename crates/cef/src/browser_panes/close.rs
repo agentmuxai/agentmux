@@ -79,7 +79,12 @@ impl BrowserPaneManager {
         state.media_grants.lock().clear_pane(block_id);
         crate::browser_panes::media_prompt::cancel_pane_any_thread(block_id);
         #[cfg(target_os = "windows")]
-        {
+        if crate::browser_pane::views_spike::is_views_pane(&label) {
+            // Views spike: there is no HWND to take and destroy (its handle is
+            // the main window's).
+            let mut task = crate::browser_pane::views_spike::CloseViewsPaneTask::new(state.clone(), label.clone());
+            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+        } else {
             let ops = AppStateCloseOps(state);
             Self::close_with(&label, &ops);
             // Keyboard-focus orphaning fix: destroying the pane's native HWND

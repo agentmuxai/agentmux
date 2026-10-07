@@ -36,9 +36,11 @@ impl AgentMuxHandler {
         let owned_title = CefString::from(display_title_str.as_str());
         let title: Option<&CefString> = if had_title { Some(&owned_title) } else { None };
 
-        // Update the window title via CEF Views.
+        // Update the window title via CEF Views. Never for a pane: a Views-hosted
+        // pane's BrowserView belongs to the main window, whose title it would set.
         let mut browser = browser.cloned();
-        if let Some(browser_view) = browser_view_get_for_browser(browser.as_mut()) {
+        if self.is_browser_pane {
+        } else if let Some(browser_view) = browser_view_get_for_browser(browser.as_mut()) {
             if let Some(window) = browser_view.window() {
                 window.set_title(title);
             }
@@ -51,7 +53,7 @@ impl AgentMuxHandler {
         // cases. Preserve the existing title by skipping the Win32 update
         // when title is None.
         #[cfg(target_os = "windows")]
-        if title.is_some() {
+        if title.is_some() && !self.is_browser_pane {
             if let Some(browser) = browser.as_ref() {
                 if let Some(host) = browser.host() {
                     let hwnd = host.window_handle();

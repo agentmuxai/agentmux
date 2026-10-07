@@ -1,7 +1,7 @@
 # Browser panes during a window resize: why they ghost, and what to rebuild
 
 **Date:** 2026-10-06
-**Status:** analysis. Measurements in §2, how it works today in §3, causes in §4, options in §5, recommendation and plan in §6. §5.1 is implemented in the PR that adds this doc; results in §8.
+**Status:** analysis. Measurements in §2, how it works today in §3, causes in §4, options in §5, recommendation and plan in §6. §5.1 is implemented in the PR that adds this doc; results in §8. The §5.2 spike is in §9.
 **Author:** Agent4
 **Trigger:** Repo owner, 2026-10-06: *"when resizing a window tab full of browser panes, there is heavy latency. The DOM on each pane appears as a slow moving ghost lagging behind the resize. So the browser pane is actually quite touchy, and it may need a rethink. There are a lot of edge case patches like panels that expand over the DOM. Take a serious look at the current structure. Write a report that puts performance above all else."*
 **Related:** `ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md` (the DOM side of resize, now at or near 60 fps), `SPEC_NATIVE_BROWSER_PANE_2026_04_17.md` and `reports/BROWSER_PANE_DEFINITIVE_2026_04_17.md` (why panes are native), `ANALYSIS_BROWSER_PANE_AIRSPACE_ARCHITECTURE_2026_05_30.md`, `SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md`, `architecture/PANE_LAYOUT_AND_REFLOW_ARCHITECTURE.md`.
@@ -219,3 +219,35 @@ Also fixed in this PR:
 A `PrintWindow` capture taken right after the last step of the fast drag now shows every native pane on its own placeholder, all in step with each other and the DOM. Before, the panes sat about 200 px behind, over the neighbouring DOM panes.
 
 **What's left** is the host's move itself: about 2 ms per pane, so ~20 ms for nine, which caps updates near 45 a second. That cost lives in Chromium's handling of each child window's resize. Moving panes into the window's own compositor (§5.2) is the way past it, and the per-pane GPU cost of §2.4 is unchanged by this PR.
+
+## 9. The §5.2 spike: Windows panes as CEF Views overlays
+
+**Branch `agent4/pane-views-spike`, not merged.** With `AGENTMUX_PANE_VIEWS=1`, `CreateBrowserPaneTask` on Windows creates the pane the way Linux and macOS do: a `BrowserView` added with `add_overlay_view(…, DockingMode::CUSTOM, …)`. The code is in `browser_pane/views_spike.rs`.
+- **Moves:** the batched `browser_panes_set_rects` path calls `set_size`/`set_position` for each pane, then one `Window::layout()`. Rects are converted from physical px to DIP by the display's scale factor.
+- **HWND paths:** every Windows code path that acts on a pane's own HWND skips a Views pane, because for a Views pane `host.window_handle()` is the main window's HWND. That covers:
+  - the z-order raise and focus-redirect subclass in `on_after_created_browser_pane`, and the subclass reinstall after navigation;
+  - `SetWindowRgn` clipping and `SetFocus` (`clip.rs`);
+  - the close path, which takes and destroys the browser's HWND (`close.rs`).
+- **Close:** a closed pane's controller is hidden and kept, never destroyed. Destroying it while Chromium still holds the view is the FATAL that `detach_browser_pane_view` works around on the other platforms.
+- **Not ported:** clipping under DOM overlays, and focus handling beyond returning focus to the page after creation.
+
+**Measured**, the same build and the same tab of nine browser panes on `https://agentmux.ai/`, with the §2 fast drag (30 px every 16 ms). The run-to-run range is shown:
+
+| | Native child windows | Views overlays |
+|---|---|---|
+| Frames presented (`SkiaOutputSurfaceImplOnGpu::SwapBuffers`) in ~2 s of drag | 736 | **122–124** |
+| GPU process main thread busy | 69–72% | **52–53%** |
+| Host time to move all 9 panes, p50 / p90 / max | 12.5 / 14.2 / 16.2 ms | **9.4 / 11.8** / 30 ms |
+| `browser_panes_set_rects` request → reply, p50 / p90 | 20–24 / 24–35 ms | 23–27 / 37–42 ms |
+| Rect batches per drag | 19–22 | 29–31 |
+
+- **Compositing is the real gain.** With native child windows the GPU process presents about ten separate outputs (the app plus nine panes), each about 37 times a second. With Views overlays it presents one output for the whole window at about 60 fps. The GPU main thread does a quarter less work, which leaves room for more panes or for other work.
+- **The move itself is only modestly cheaper** (p50 9.4 against 12.5 ms), and the round trip seen by the page didn't improve. Something besides the move sets that round trip, and it's the next thing to trace if this path goes ahead.
+- **Trail at the end of a drag looks similar** in single `PrintWindow` captures: some panes are a step behind in both. A finer, per-pane measurement is needed before claiming either is tighter.
+
+**Side finding, all platforms:** `AgentMuxHandler::on_title_change` sets the title of the window that owns the browser's `BrowserView`. For a Views-hosted pane, which is every pane on Linux and macOS today, that window is the main window, so a page title can become the main window's title. The spike guards both title updates with `!self.is_browser_pane`. That guard belongs in main independently of the spike.
+
+**What decides go or no-go:**
+1. **Airspace.** A Views overlay draws above the app's own `BrowserView`, so DOM menus can't cover it. Windows would need what macOS has (a mask on the overlay's layer, which `CefView` doesn't expose: a small patch in the `agentmuxai/cef` fork) or Linux's approach of hiding the whole pane. **Whether the fork patch is feasible is the deciding question**, and the next step if this goes ahead.
+2. **Input and focus.** Clicking, typing, IME, scrolling, popups and DevTools in a Views pane on Windows are unverified. They need a hands-on pass.
+3. **DPI.** Under the same window width the two paths lay the page out differently (only the native path shows horizontal scrollbars at DPR 1.25). The cause is unexplained.
