@@ -6,7 +6,7 @@
 // The CDP driving itself needs a running instance and isn't tested here.
 
 import { describe, expect, it } from "vitest";
-import { overBudget, parseTrace, phasesOf } from "./agent-open.mjs";
+import { assess, overBudget, parseTrace, phasesOf } from "./agent-open.mjs";
 
 // A real line from a v0.59.11 open (cef-debug.log), as the console reports it.
 const LINE =
@@ -35,5 +35,22 @@ describe("agent-open benchmark", () => {
         // The v0.59.10 stall: a 17 s read behind the cover.
         expect(overBudget({ read: 17108, painted: 17500, revealed: 17629 }, args)).toEqual(["read 17108 > 1000", "revealed 17629 > 1500"]);
         expect(overBudget({ read: 236, painted: 854, revealed: 937 }, { ...args, paintBudget: 300 })).toEqual(["painted 854 > 300"]);
+    });
+
+    it("fails an open that didn't complete, had no read, or never revealed", () => {
+        const args = { readBudget: 1000, revealBudget: 1500, paintBudget: null };
+        expect(assess(parseTrace(LINE), args)).toEqual([]);
+        // A launch that failed before any history read: a failure, not a skipped row.
+        expect(assess(parseTrace('[agent-open] agent="X" source=my-agents outcome=failed total=900'), args)).toEqual([
+            "outcome=failed",
+            "no history read in the trace",
+        ]);
+        // Read, then closed before the cover lifted.
+        expect(assess(parseTrace('[agent-open] agent="X" source=my-agents outcome=closed history_start=100 history_read=300 total=400'), args)).toEqual([
+            "outcome=closed",
+            "never revealed",
+        ]);
+        expect(assess(parseTrace(LINE.replace("outcome=quiet", "outcome=timeout")), args)).toEqual(["outcome=timeout"]);
+        expect(assess(parseTrace(LINE.replace("outcome=quiet", "outcome=unsettled")), args)).toEqual([]);
     });
 });

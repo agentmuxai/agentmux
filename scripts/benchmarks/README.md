@@ -252,4 +252,4 @@ node scripts/benchmarks/agent-open.mjs --agents Maka,Lzop,Parko --port 9222
 | `--timeout MS` | 30000 | Wait per open before reporting it skipped |
 | `--json` | off | Machine-readable results |
 
-Prints one row per agent and p50/p95/max per phase. Exit code 0 when every measured open is within budget, 1 when any isn't, 2 on a setup error. An agent that's already open is focused rather than opened and is reported as skipped. Each open starts the agent in that instance, taking it over from any other instance, so run it against a dev build or a throwaway instance.
+Prints one row per agent and p50/p95/max per phase. Exit code 0 when every open completed within budget; 1 when any missed a budget or didn't complete normally (outcome `failed`, `timeout`, `closed` or `superseded`, no transcript read, or never revealed); 2 on a setup error. An agent that's already open is focused rather than opened and is reported as skipped. Each open starts the agent in that instance, taking it over from any other instance, so run it against a dev build or a throwaway instance.

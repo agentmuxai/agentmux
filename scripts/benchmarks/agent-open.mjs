@@ -79,12 +79,29 @@ export function phasesOf(t) {
     };
 }
 
+/** Outcomes of an open that completed (open-trace.ts `OpenOutcome`). */
+const COMPLETED_OUTCOMES = new Set(["quiet", "unsettled"]);
+
 export function overBudget(p, args) {
     const misses = [];
     if (p.read > args.readBudget) misses.push(`read ${p.read} > ${args.readBudget}`);
     if (p.revealed !== undefined && p.revealed > args.revealBudget) misses.push(`revealed ${p.revealed} > ${args.revealBudget}`);
     if (args.paintBudget != null && p.painted !== undefined && p.painted > args.paintBudget) misses.push(`painted ${p.painted} > ${args.paintBudget}`);
     return misses;
+}
+
+/**
+ * Why a traced open fails, or [] when it passes. An open that didn't complete
+ * (outcome failed, timeout, closed, superseded), has no transcript read, or
+ * never revealed is a failure in its own right, whatever its timings.
+ */
+export function assess(trace, args) {
+    const misses = [];
+    if (!COMPLETED_OUTCOMES.has(trace.outcome)) misses.push(`outcome=${trace.outcome ?? "?"}`);
+    const p = phasesOf(trace);
+    if (!p) return [...misses, "no history read in the trace"];
+    if (p.revealed === undefined) misses.push("never revealed");
+    return [...misses, ...overBudget(p, args)];
 }
 
 function percentile(xs, q) {
@@ -148,7 +165,10 @@ async function openAgent(cdp, name, timeout) {
     const started = Date.now();
     while (Date.now() - started < timeout) {
         const line = cdp.lines.slice(seen).find((l) => l.includes(`agent="${name}"`) && l.includes("source=my-agents"));
-        if (line) return { name, status: "measured", phases: phasesOf(parseTrace(line)) };
+        if (line) {
+            const trace = parseTrace(line);
+            return { name, status: "traced", outcome: trace.outcome, trace, phases: phasesOf(trace) };
+        }
         await new Promise((r) => setTimeout(r, 100));
     }
     return { name, status: "skipped (no trace: already open, or still opening)" };
@@ -164,21 +184,25 @@ async function main() {
     }
     cdp.ws.close();
 
-    const measured = results.filter((r) => r.status === "measured" && r.phases);
-    for (const r of measured) r.misses = overBudget(r.phases, args);
+    // Every open that produced a trace counts; only those that produced none
+    // (already open, not in My Agents) are left out.
+    const measured = results.filter((r) => r.status === "traced");
+    for (const r of measured) r.misses = assess(r.trace, args);
     if (args.json) {
         console.log(JSON.stringify({ budgets: { read: args.readBudget, revealed: args.revealBudget, painted: args.paintBudget }, results }, null, 1));
     } else {
         console.log(["agent".padEnd(16), "read", "lines", "painted", "revealed", "result"].join("\t"));
         for (const r of results) {
-            if (!r.phases) {
+            if (r.status !== "traced") {
                 console.log(`${r.name.padEnd(16)}\t\t\t\t\t${r.status}`);
                 continue;
             }
-            const p = r.phases;
-            console.log([r.name.padEnd(16), p.read, p.lines, p.painted, p.revealed, r.misses.length ? `OVER: ${r.misses.join("; ")}` : "ok"].join("\t"));
+            const p = r.phases ?? {};
+            const cell = (v) => (v === undefined ? "-" : v);
+            const verdict = r.misses.length ? `FAIL: ${r.misses.join("; ")}` : `ok (${r.outcome})`;
+            console.log([r.name.padEnd(16), cell(p.read), cell(p.lines), cell(p.painted), cell(p.revealed), verdict].join("\t"));
         }
-        const col = (k) => measured.map((r) => r.phases[k]).filter((x) => Number.isFinite(x));
+        const col = (k) => measured.map((r) => r.phases?.[k]).filter((x) => Number.isFinite(x));
         for (const k of ["read", "painted", "revealed"]) {
             const xs = col(k);
             if (xs.length) console.log(`${k}: p50 ${percentile(xs, 0.5)} ms, p95 ${percentile(xs, 0.95)} ms, max ${Math.max(...xs)} ms`);
