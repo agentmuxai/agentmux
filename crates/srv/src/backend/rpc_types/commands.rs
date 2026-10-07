@@ -353,6 +353,12 @@ pub const COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE: &str = "agentdefcreatefromtemp
 /// Response: `{ "available": bool }`.
 pub const COMMAND_CONTAINER_RUNTIME_AVAILABLE: &str = "containerruntimeavailable";
 
+/// Whether a container image can be had on this machine: already in the
+/// Docker daemon, or readable from its registry without credentials. Lets the
+/// create modal avoid preselecting a container that cannot start.
+/// Request `{ image }` (empty = the default image); response `{ status }`.
+pub const COMMAND_CONTAINER_IMAGE_CHECK: &str = "containerimagecheck";
+
 /// Two-tier picker (Phase 2 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md
 /// Q2 Decision Y). Set the `user_hidden` flag on a seeded template so
 /// it disappears from the default `+ New from template` list. Idempotent;
@@ -447,9 +453,9 @@ pub const COMMAND_AGENT_OPEN_PANES: &str = "agent.open-panes";
 /// Returns `AgentKillResult { ok: bool }`.
 pub const COMMAND_AGENT_KILL_PROCESS: &str = "agent.kill-process";
 /// Terminate the entire process tree for a given block.
-/// On Windows: `TerminateJobObject`. On Linux: `cgroup.kill`. On
-/// macOS: `killpg`. Returns `AgentKillResult { ok: true }` even when
-/// there are no members (idempotent).
+/// On Windows: `TerminateJobObject`. On Linux: `cgroup.kill`. Nothing on
+/// the stub tracker (macOS). Returns `AgentKillResult { ok: true }` even
+/// when there are no members (idempotent).
 pub const COMMAND_AGENT_KILL_TREE: &str = "agent.kill-tree";
 /// Create or upsert an agent definition. Broadcasts `agents:changed` on
 /// success so all open frontends refresh My Agents without a restart.

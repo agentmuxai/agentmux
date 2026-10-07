@@ -218,7 +218,8 @@ impl PersistentSubprocessController {
         // itself is made where the child is installed, below.
         Self::restart_spawn_still_permitted_locked(&mut self.inner.lock().unwrap())?;
 
-        let mut child = cmd.spawn().map_err(|e| {
+        // In the block's tracker before it runs (`spawn_tracked`).
+        let mut child = crate::backend::process_tracker::registry::spawn_tracked(&self.block_id, &mut cmd, crate::backend::process_tracker::registry::Join::Agent).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
             format!("failed to spawn persistent process: {e}")
         })?;
@@ -424,13 +425,6 @@ impl PersistentSubprocessController {
             working_dir = %config.working_dir,
             "persistent process spawned"
         );
-
-        // Assign the persistent CLI to this block's process tracker.
-        // Matches `SubprocessController`'s identical path — both controller
-        // types share the same swarm-pane visibility story.
-        if pid != 0 {
-            crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
-        }
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<KillRequest>();
         let stdin = child.stdin.take()

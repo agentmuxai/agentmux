@@ -418,11 +418,15 @@ impl Controller for AppServerController {
         if self.inner.lock().unwrap().process.is_some() {
             return Ok(());
         }
-        let command = self.command_from_meta(&block_meta)?;
+        let mut command = self.command_from_meta(&block_meta)?;
+        crate::backend::process_tracker::registry::place_spawn(&self.block_id, &mut command, true);
         let process = Arc::new(
             AppServerProcess::spawn(command, AppServerLimits::default())
                 .map_err(|error| error.to_string())?,
         );
+        if let Some(pid) = process.pid() {
+            crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
+        }
         let process_for_task = process.clone();
         let weak = self.self_ref.lock().unwrap().clone();
         self.inner.lock().unwrap().process = Some(process.clone());

@@ -72,7 +72,10 @@ describe("tool descriptors — parity with the pre-migration facts", () => {
             const call = p.parseStreamEvent({ type: "tool_call", tool: r.name, id: "x", params: r.params } as any) as ToolNode;
             const done: ToolNode = { ...call, status: "success" };
             // `range` is the line-range chip (tool-meta/file-range.ts): only a Write has one before its result.
-            expect(toolHeaderParts(done)).toEqual({ icon: r.icon, label: r.label, detail: r.detail, range: r.range ?? null });
+            // detailIsPath came later (the row's left-side path ellipsis); tool-header.test.ts covers it.
+            expect(toolHeaderParts(done)).toEqual({
+                icon: r.icon, label: r.label, detail: r.detail, range: r.range ?? null, detailIsPath: expect.any(Boolean),
+            });
             expect(call.summary).toBe(r.summary);
             expect(isContentFirstTool(done)).toBe(r.contentFirst);
             expect(startsAtTop(done)).toBe(r.top);

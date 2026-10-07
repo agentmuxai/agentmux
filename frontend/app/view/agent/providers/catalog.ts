@@ -117,9 +117,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // behavior-gate for providers whose CLI genuinely never prints one.
         npmPackage: "@anthropic-ai/claude-code",
         // Keep in sync with crates/srv/src/backend/providers.rs `pinned_version`,
-        // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
-        // .github/workflows/container-image.yml `claude_version` default — enforced by
-        // ./pin-consistency.test.ts.
+        // enforced by ./pin-consistency.test.ts.
         pinnedVersion: "2.1.288",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
@@ -186,7 +184,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
             // family already relied on by context-window.ts's 1M band. Unlike the
             // alias rows above, a concrete id does NOT self-resolve, so
             // `setProviderModels` refreshes this row's `value` as well as its label.
-            { value: "claude-fable-5-1", label: "Fable 5.1", description: "Most capable for long-horizon work" },
+            { value: "claude-fable-5-1", label: "Fable 5.1", description: "Long-horizon work" },
         ],
     },
     codex: {
@@ -561,13 +559,13 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         systemPrereqs: [],
         // From `agy models` (agy 1.1.11); the newest of each family.
         models: [
-            { value: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)", default: true, description: "Fast frontier model, balanced reasoning" },
-            { value: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)", description: "Fast frontier model, more reasoning" },
+            { value: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)", default: true, description: "Fast, balanced" },
+            { value: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)", description: "Fast, more reasoning" },
             { value: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)", description: "Fastest, least reasoning" },
-            { value: "gemini-3.1-pro-high", label: "Gemini 3.1 Pro (High)", description: "Deep reasoning and complex coding" },
+            { value: "gemini-3.1-pro-high", label: "Gemini 3.1 Pro (High)", description: "Deepest reasoning" },
             { value: "gemini-3.1-pro-low", label: "Gemini 3.1 Pro (Low)", description: "Pro model, lighter reasoning" },
-            { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Thinking)", description: "Anthropic's Sonnet, served by Antigravity" },
-            { value: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 (Thinking)", description: "Anthropic's Opus, served by Antigravity" },
+            { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 (Thinking)", description: "Anthropic, via Antigravity" },
+            { value: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 (Thinking)", description: "Anthropic, via Antigravity" },
             { value: "gpt-oss-120b-medium", label: "GPT-OSS 120B (Medium)", description: "OpenAI's open-weight model" },
         ],
     },

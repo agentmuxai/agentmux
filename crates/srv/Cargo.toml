@@ -120,6 +120,11 @@ rcgen = { version = "0.13", default-features = false, features = ["crypto", "rin
 hyper = { version = "1", features = ["http1", "server"] }
 hyper-util = { version = "0.1", features = ["tokio", "service"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Agent process tracking (process_tracker::cgroup_linux): ask the systemd user
+# manager for srv's delegated scope. Same zbus 5 the launcher already uses.
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
 [target.'cfg(windows)'.dependencies]
 # Read-only COM access to Windows Defender Firewall and the network list, to
 # tell whether LAN peers can reach us (backend/lan_firewall_windows.rs,

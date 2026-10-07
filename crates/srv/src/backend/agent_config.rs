@@ -638,6 +638,26 @@ pub fn build_settings_with_hooks(
         settings_obj.insert("permissions".to_string(), Value::Object(perms_obj));
     }
 
+    // No AI attribution in commits or PR descriptions: the repos' checks
+    // (`.github/workflows/no-coauthor-trailers.yml`) reject Co-Authored-By
+    // trailers and "Generated with" lines, and Claude Code adds both by
+    // default. An empty string hides each. An agent's own string `commit` or
+    // `pr` wins; a field it leaves out or sets to a non-string is replaced
+    // with "", and so is a non-object `attribution`, because Claude Code falls
+    // back to its default attribution for any of those.
+    let attribution = settings_obj.entry("attribution").or_insert_with(|| json!({}));
+    if !attribution.is_object() {
+        *attribution = json!({});
+    }
+    if let Value::Object(fields) = attribution {
+        for field in ["commit", "pr"] {
+            let value = fields.entry(field).or_insert_with(|| Value::String(String::new()));
+            if !value.is_string() {
+                *value = Value::String(String::new());
+            }
+        }
+    }
+
     match serde_json::to_string_pretty(&Value::Object(settings_obj)) {
         Ok(s) => Some(s),
         Err(e) => {
@@ -2511,6 +2531,39 @@ mod tests {
         assert_eq!(settings.len(), 2, "a settings.json SessionStart hook is kept, not dropped");
         assert_eq!(commands(&settings[0]), vec!["my-settings-start"]);
         assert_eq!(commands(&settings[1]), ours);
+    }
+
+    /// Claude Code adds a Co-Authored-By trailer and a "Generated with" line
+    /// unless `attribution` is empty; the repos' checks reject both.
+    #[test]
+    fn test_build_settings_hides_attribution_unless_the_agent_sets_it() {
+        let attribution = |settings: Option<&str>| -> Value {
+            let parsed: Value = serde_json::from_str(&build_settings_with_hooks(settings, None).unwrap()).unwrap();
+            parsed["attribution"].clone()
+        };
+        assert_eq!(attribution(None), json!({ "commit": "", "pr": "" }));
+        assert_eq!(attribution(Some(r#"{"model":"opus"}"#)), json!({ "commit": "", "pr": "" }));
+        assert_eq!(
+            attribution(Some(r#"{"attribution":{"commit":"Agent: Aria","pr":"Agent: Aria"}}"#)),
+            json!({ "commit": "Agent: Aria", "pr": "Agent: Aria" }),
+            "an agent's own attribution wins"
+        );
+        assert_eq!(
+            attribution(Some(r#"{"attribution":{"commit":"Agent: Aria"}}"#)),
+            json!({ "commit": "Agent: Aria", "pr": "" }),
+            "a field the agent leaves out is still hidden, not Claude Code's default"
+        );
+        for malformed in [r#"null"#, r#"[]"#, r#""text""#, r#"{"commit":null,"pr":7}"#] {
+            assert_eq!(
+                attribution(Some(&format!(r#"{{"attribution":{malformed}}}"#))),
+                json!({ "commit": "", "pr": "" }),
+                "a malformed attribution ({malformed}) is replaced, not passed through"
+            );
+        }
+        assert_eq!(
+            attribution(Some(r#"{"attribution":{"commit":"Agent: Aria","pr":false}}"#)),
+            json!({ "commit": "Agent: Aria", "pr": "" }),
+        );
     }
 
     #[test]

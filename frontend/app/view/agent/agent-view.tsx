@@ -836,6 +836,10 @@ export const AgentPresentationView = ({
         // this closure is safe regardless of declaration order since the
         // closure only runs later, on a live `agent-message-accepted` event.
         onTurnStartFromQueue: () => scrollToBottomFn?.("queued-turn"),
+        // Not a jump: a commit point for the one-way scroll path (the
+        // pending-messages panel leaving, even mid-turn). See the list's
+        // jumpToBottom for what "accepted" does.
+        onPendingLeft: () => scrollToBottomFn?.("accepted"),
     });
 
     // Mutable ref to the scrollToBottom function exposed by

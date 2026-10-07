@@ -222,7 +222,10 @@ impl AcpController {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn().map_err(|e| {
+        // In the block's tracker before it runs (`spawn_tracked`); closes the
+        // Process Broker Phase B gap for ACP agent panes
+        // (SPEC_PROCESS_BROKER_PHASE_B_SHELL_ACP_REGISTRATION_2026_07_31.md).
+        let mut child = crate::backend::process_tracker::registry::spawn_tracked(&self.block_id, &mut cmd, crate::backend::process_tracker::registry::Join::Agent).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "ACP process spawn failed");
             format!("failed to spawn ACP process: {e}")
         })?;
@@ -236,14 +239,6 @@ impl AcpController {
             args = ?cli_args,
             "ACP agent process spawned"
         );
-
-        // Assign to this block's process tracker — same path SubprocessController
-        // and PersistentSubprocessController already use. Closes the Process
-        // Broker Phase B coverage gap for ACP-type agent panes (see
-        // docs/specs/SPEC_PROCESS_BROKER_PHASE_B_SHELL_ACP_REGISTRATION_2026_07_31.md).
-        if pid != 0 {
-            crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
-        }
 
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();
         let stdin = child.stdin.take()

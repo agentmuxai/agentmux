@@ -408,7 +408,10 @@ impl ShellNodeRunner {
             child_cmd.process_group(0);
         }
 
-        let mut child = match child_cmd.spawn() {
+        // Joins the agent's tracker before it runs, so the shell and everything
+        // it starts (`task dev` → task.exe/node) end with the agent on every
+        // teardown path (agent_teardown spec §6.5).
+        let mut child = match crate::backend::process_tracker::registry::spawn_tracked(&block_id, &mut child_cmd, crate::backend::process_tracker::registry::Join::Adopted) {
             Ok(c) => c,
             Err(e) => {
                 publish_chunk(&broker, &block_id, &shell_id, "system", &format!("[spawn error: {e}]"), now_ms());
@@ -419,12 +422,6 @@ impl ShellNodeRunner {
 
         let pid = child.id();
         tracing::info!(shell_id = %shell_id, pid = ?pid, capture_stdin = self.capture_stdin, "shell.spawn");
-        // Join the agent's tracker, so the shell and everything it starts
-        // (`task dev` → task.exe/node) end with the agent on every teardown
-        // path, not only an explicit stop (agent_teardown spec §6.5).
-        if let Some(pid) = pid {
-            crate::backend::process_tracker::registry::track_adopted(&block_id, pid);
-        }
 
         // Spawn stdin relay only when capture_stdin=true.
         let stdin_tx: Option<mpsc::UnboundedSender<String>> = if self.capture_stdin {

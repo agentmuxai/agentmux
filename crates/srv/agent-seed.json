@@ -7,7 +7,7 @@
       "icon": "\u2716",
       "provider": "claude",
       "agent_type": "container",
-      "container_image": "ghcr.io/agentmuxai/agent-claude:latest",
+      "container_image": "ghcr.io/agentmuxai/agent-base:latest",
       "description": "Anthropic's coding agent",
       "working_directory": "",
       "shell": "pwsh",

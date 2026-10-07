@@ -29,6 +29,7 @@ import { BundleListEditor } from "./BundleListEditor";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { containerImageNote, shouldPreselectContainer, type ContainerImageState } from "../defaults/container-default";
 import { PROVIDERS } from "../providers/catalog";
 import { familyKey, getProvider } from "../providers";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
@@ -217,14 +218,44 @@ export const AgentCreateFromTemplateModalPanel = (
     // mid-flow sees the option unlock within a few seconds, no restart.
     onMount(() => onCleanup(watchCapability("docker")));
 
-    // Default-pick the runtime once the probe lands: honour the
-    // template's suggested mode when container is genuinely usable,
-    // otherwise fall back to host. Never auto-selects a mode that can't
-    // run. Skipped once the user has made an explicit choice.
+    // Can the container's image be had? Asked once Docker is known to answer,
+    // because the default below should not be a container that will fail to
+    // download its image. Only a definite refusal counts against the container;
+    // an error or a slow answer is treated as "unknown" and does not.
+    const [imageAccess, setImageAccess] = createSignal<ContainerImageState>(undefined);
+    let imageCheckStarted = false;
+    createEffect(() => {
+        if (imageCheckStarted || !canPickContainer()) return;
+        imageCheckStarted = true;
+        void (async () => {
+            try {
+                const r = await RpcApi.ContainerImageCheckCommand(
+                    TabRpcClient,
+                    { image: props.template.container_image ?? "" },
+                    { timeout: 10000 },
+                );
+                setImageAccess(r?.status ?? "unknown");
+            } catch {
+                setImageAccess("unknown");
+            }
+        })();
+    });
+
+    // Default-pick the runtime once the probes land: honour the template's
+    // suggested mode when container is genuinely usable, otherwise fall back
+    // to host. Never auto-selects a mode that can't run. Skipped once the user
+    // has made an explicit choice.
     createEffect(() => {
         if (runtimeTouched) return;
         setRuntime(
-            canPickContainer() && props.template.agent_type === "container" ? "container" : "host",
+            shouldPreselectContainer({
+                templateType: props.template.agent_type,
+                containerSupported: containerSupported(),
+                dockerAvailable: isAvailable("docker"),
+                image: imageAccess(),
+            })
+                ? "container"
+                : "host",
         );
     });
 
@@ -382,6 +413,13 @@ export const AgentCreateFromTemplateModalPanel = (
                         <span class="agent-new-bundle-modal-hint">
                             Isolated Docker sandbox — the agent only sees its workspace.
                         </span>
+                    </Show>
+                    <Show when={containerSupported() && containerImageNote(imageAccess())}>
+                        {(note) => (
+                            <span class="agent-new-bundle-modal-hint" data-testid="create-from-template-image-note">
+                                {note()}
+                            </span>
+                        )}
                     </Show>
                     <Show when={!containerSupported()}>
                         <span class="agent-new-bundle-modal-hint">

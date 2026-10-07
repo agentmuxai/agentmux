@@ -43,6 +43,7 @@ import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import { createSessionStartDetector } from "./session-start";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -225,6 +226,9 @@ interface UseAgentStreamOpts {
      * backend picked up), not just from this pane's own composer send.
      */
     onTurnStartFromQueue?: () => void;
+    /** Every queued message the backend accepts, mid-turn included — see
+     *  usePendingMessageAcceptance's `onPendingLeft`. */
+    onPendingLeft?: () => void;
     /**
      * Where this pane's history load ended (Phase 5a-4,
      * `transcript-cursor.ts`). Live events are held until it settles, then
@@ -254,6 +258,7 @@ export function useAgentStream({
     provider,
     agentName,
     onTurnStartFromQueue,
+    onPendingLeft,
     transcriptSettle,
 }: UseAgentStreamOpts): Accessor<BackgroundTaskView[]> {
     // Mutable state that doesn't trigger re-renders. Kept here (not
@@ -304,6 +309,8 @@ export function useAgentStream({
     let lastUsageMessageId: string | undefined;
     // A real compaction card still waiting for the context's size after it.
     let awaitingCompactionSize: ContextCompactedNode | null = null;
+    // Fed every line in stream order: true for a new CLI session's `init`.
+    const isNewSession = createSessionStartDetector();
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
@@ -460,6 +467,7 @@ export function useAgentStream({
             hasNodeId,
             addNodeId,
             onTurnStartFromQueue,
+            onPendingLeft,
             onAccepted: (text) => echoLedger.accepted(text),
         });
 
@@ -603,6 +611,11 @@ export function useAgentStream({
                 // the dock reads it from here so it never depends on srv's
                 // live registry having watched the task (activity/task-outcomes.ts).
                 if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
+
+                // A new CLI session, not a compaction's own `init`
+                // (session-start.ts): a turn still holding live tokens ended
+                // without a `result`, so its tokens go.
+                if (isNewSession(rawEvent)) model.dispatchPane({ type: "StreamSessionStarted" });
 
                 // Real compaction-boundary completion data (Tier 1/2 —
                 // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).

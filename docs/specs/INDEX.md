@@ -305,6 +305,7 @@ partial list.
 | [`SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03`](SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md) | SPEC — Composer strip: left-justified, tiered wrap (up to 3 levels) |
 | [`SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02`](SPEC_COMPOSER_STRIP_MODE_TOPLEVEL_2026_07_02.md) | SPEC — Promote Mode to the composer strip; retire the nested "Controls" panel under Log |
 | [`SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30`](SPEC_COMPOSER_STRIP_TWO_LINE_RESPONSIVE_2026_07_30.md) | SPEC — Composer strip: two-line wrap when the pane narrows |
+| [`SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07`](SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md) | SPEC: container agents that work for everyone, not only for people who can already pull our image |
 | [`SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07`](SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07.md) | Pasting into a terminal from the right-click menu should leave the terminal ready for Enter |
 | [`SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10`](SPEC_COPY_BUTTON_FALSE_POSITIVE_FIX_2026_08_10.md) | SPEC: Copy Button Silently Failing (Three Stacked Bugs) |
 | [`SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30`](SPEC_CRATES_DIRECTORY_REORGANIZATION_2026_09_30.md) | Move the Rust crates under `crates/`, with a merge freeze and a rebase plan |

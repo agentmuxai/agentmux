@@ -494,9 +494,47 @@ phase changes one resource kind behind the same entry point.
     - Containers stop on close, quit and app exit (§6.7). They are not
       removed: `ensure_running` restarts them and the volume keeps state.
       A container another live pane uses is kept.
+- **Phase 4, Linux** (2026-10-07): a cgroup v2 tracker
+  (`process_tracker::cgroup_linux`), High confidence, replacing process
+  groups as the baseline (§6.4): sessions can't hold an agent's tree, since
+  Claude Code and bashwrap each start new ones
+  (`docs/analysis/agent-spawned-process-tracking-2026-10-07.md` §3).
+  - srv puts itself in a delegated systemd user scope at startup
+    (`agentmux-srv-<pid>.scope`) and gives each agent block a cgroup.
+  - Agent spawns join it before exec (`registry::place_spawn`), the Codex
+    App Server included; terminals a person types in keep a stub tracker.
+  - A graceful close SIGTERMs the whole cgroup after the CLI exits and waits
+    up to 2 s before the release's `cgroup.kill` (the Phase 3 step on Linux).
+  - No delegation (no systemd user manager): the best-effort tracker below.
+- **Phase 4, macOS and Linux without delegation** (2026-10-07):
+  `process_tracker::scan::ScanTracker`, BestEffort. An agent's processes are
+  the descendants of its CLI plus every process whose environment carries its
+  `AGENTMUX_BLOCKID` (inherited through `setsid` and reparenting), found in a
+  shared process-table snapshot.
+- **Escape report, every OS** (§6.2 step 8): after a graceful close, live
+  processes still carrying the agent's tag are added to the survivors
+  ("still running, outside the agent's tracking") and reported, not killed:
+  one may be an app the agent opened for the user.
+- **Windows** (2026-10-07):
+  - Agent-side spawns start `CREATE_SUSPENDED`, are assigned to the job,
+    then resumed (`registry::spawn_tracked`, §6.4), so nothing escapes
+    between spawn and assignment. Every tokio spawn site uses it.
+  - `kill_tree` keeps the job open, so a respawned CLI is still tracked;
+    the PID list is no longer capped at 256.
+  - A Job Object that can't be created is logged as an error and the agent
+    falls back to the best-effort tracker, not the stub.
+- **Leftovers** (2026-10-07):
+  - bashwrap's idle-kill on Unix SIGKILLs the command's whole process group
+    (the PTY child leads it), so a `nohup`'d child no longer survives it.
+  - A graceful close reports running Docker Compose containers whose
+    project directory is inside the agent's working directory (`/quit`'s
+    `containers_left`); they belong to the Docker daemon, so no tracker ends
+    them, and they're left running. Plain `docker run` containers carry no
+    such link and aren't reported.
 - **Not yet:**
   - Stopping foreground descendants on Stop (§5). They need telling apart
     from background tasks in the tracker.
   - The close dialog reading `AgentResources`.
   - The `AgentResources` MCP tool.
-  - Phases 3 and 4.
+  - Phase 3 on Windows: agents run without a console, so there's no
+    CTRL_BREAK to send; the job's kill is still immediate.

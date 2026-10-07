@@ -503,7 +503,7 @@ pub(crate) async fn run_windows(
     host_env.push(("AGENTMUX_IPC_HASH", std::ffi::OsString::from(&dir_hash)));
     // "host" stage covers process-spawn latency (begin → spawn_host_supervised
     // returning a live Child), including the suspend → job-assign → resume
-    // dance (see resume_main_thread's Toolhelp32 snapshot walk in
+    // dance (see agentmux_common::win32::resume_main_thread's Toolhelp32 snapshot walk in
     // host_spawn.rs) — not full first-paint. The first-paint signal
     // (splash_event_name) is consumed exclusively by the splash's own wait;
     // having the supervisor also wait on it risks double-signaling semantics

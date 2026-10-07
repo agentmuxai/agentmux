@@ -490,6 +490,23 @@ export function buildSettingsWithHooks(
         }
     }
     settingsObj["hooks"] = hooksObj;
+    // No AI attribution in commits or PR descriptions: the repos' checks
+    // (`.github/workflows/no-coauthor-trailers.yml`) reject Co-Authored-By
+    // trailers and "Generated with" lines, and Claude Code adds both by
+    // default. An empty string hides each. An agent's own string `commit` or
+    // `pr` wins; a field it leaves out or sets to a non-string is replaced
+    // with "", and so is a non-object `attribution`, because Claude Code falls
+    // back to its default attribution for any of those.
+    const attribution = settingsObj["attribution"];
+    const fields =
+        attribution != null && typeof attribution === "object" && !Array.isArray(attribution)
+            ? (attribution as Record<string, unknown>)
+            : {};
+    settingsObj["attribution"] = {
+        ...fields,
+        commit: typeof fields.commit === "string" ? fields.commit : "",
+        pr: typeof fields.pr === "string" ? fields.pr : "",
+    };
 
     try {
         return JSON.stringify(settingsObj, null, 2);

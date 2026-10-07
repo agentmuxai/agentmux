@@ -445,7 +445,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         >
                             {/* One text run (no whitespace between spans) so
                                 the row's textContent reads "🌐 solid docs". */}
-                            <span class="agent-tool-name">
+                            <span class="agent-tool-name" classList={{ "agent-tool-name--path": header().detailIsPath }}>
                                 <span class="agent-tool-icon">{header().icon}</span>
                                 <Show when={header().label}>
                                     {" "}
@@ -461,7 +461,19 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                     {" "}
                                     <Show
                                         when={isBash()}
-                                        fallback={<span class="agent-tool-detail">{header().detail}</span>}
+                                        fallback={
+                                            <Show
+                                                when={header().detailIsPath}
+                                                fallback={<span class="agent-tool-detail">{header().detail}</span>}
+                                            >
+                                                {/* Cut from the left so the file name stays: the span runs
+                                                    right-to-left for the ellipsis, the <bdi> keeps the path
+                                                    itself reading left to right. */}
+                                                <span class="agent-tool-detail agent-tool-detail--path">
+                                                    <bdi>{header().detail}</bdi>
+                                                </span>
+                                            </Show>
+                                        }
                                     >
                                         <span class="agent-tool-detail agent-shell-inline">
                                             <ShellTokens command={header().detail} />

@@ -30,6 +30,13 @@ use bollard::container::{
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
+use crate::backend::container_cli::{
+    check_says_present, install_failure_detail, reap_argv, reap_says_gone, CliInstall, InstallLimits,
+};
+use crate::backend::container_image::{CONTAINER_CLI_DIR,
+    classify_pull_error, cli_install_failure_message, docker_error_message, docker_unreachable_message, is_legacy_agent_image,
+    looks_like_daemon_unreachable, pull_failure_message, PullFailure, DEFAULT_AGENT_IMAGE,
+};
 
 /// Where the agent CLI's config dir lives inside the image (`CLAUDE_CONFIG_DIR`).
 pub const CONTAINER_CLAUDE_DIR: &str = "/home/agent/.claude";
@@ -263,6 +270,13 @@ struct ContainerManagerInner {
     /// Per-container `(uid, gid)` of the user execs run as, resolved once and
     /// cached — see [`ContainerManager::exec_identity`].
     exec_identities: Mutex<HashMap<String, (u64, u64)>>,
+    /// `(container, install marker)` pairs already confirmed installed, so a
+    /// running agent pays the check once, not on every turn. Dropped when the
+    /// container is created or removed.
+    cli_ready: Mutex<std::collections::HashSet<String>>,
+    /// Serializes `provision_cli` per container: two quick messages must not
+    /// run two `npm install`s into the same directory.
+    cli_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Dev-proxy routing table, wired in post-construction by
     /// [`ContainerManager::attach_dev_proxy_registry`] (called by
     /// `ContainerRuntimeHandle`, which re-attaches after every reconnect
@@ -359,6 +373,38 @@ pub enum ContainerError {
     NoId { name: String },
     #[error("Docker is not available on this host: {0}")]
     NotAvailable(String),
+    /// The image could not be downloaded. `detail` is the daemon's own text,
+    /// kept for logs; the pane gets [`ContainerError::user_message`].
+    #[error("could not pull image {image}: {detail}")]
+    ImagePull {
+        image: String,
+        kind: PullFailure,
+        detail: String,
+    },
+    /// The provider CLI could not be installed in the container.
+    #[error("could not install {command} in the container: {detail}")]
+    CliInstall { command: String, detail: String },
+}
+
+impl ContainerError {
+    /// What to tell the person using the agent: what happened and what to do
+    /// next, never the raw Docker error.
+    pub fn user_message(&self) -> String {
+        match self {
+            Self::ImagePull { image, kind, detail } => pull_failure_message(image, *kind, detail),
+            Self::Docker(e) => {
+                let text = e.to_string();
+                if looks_like_daemon_unreachable(&text) {
+                    docker_unreachable_message()
+                } else {
+                    docker_error_message(&text)
+                }
+            }
+            Self::NotAvailable(_) => docker_unreachable_message(),
+            Self::NoId { .. } => docker_error_message("the container was created without an id"),
+            Self::CliInstall { command, detail } => cli_install_failure_message(command, detail),
+        }
+    }
 }
 
 impl ContainerManager {
@@ -374,6 +420,8 @@ impl ContainerManager {
                 docker,
                 ensure_locks: Mutex::new(HashMap::new()),
                 exec_identities: Mutex::new(HashMap::new()),
+                cli_ready: Mutex::new(std::collections::HashSet::new()),
+                cli_locks: Mutex::new(HashMap::new()),
                 dev_proxy: std::sync::OnceLock::new(),
             }),
         })
@@ -516,9 +564,9 @@ impl ContainerManager {
                 // has the image locally. Unlike `docker run`, the Engine's
                 // create_container does NOT auto-pull — it returns 404 if the image
                 // is absent. pull_image is a no-op when the image already exists.
-                self.pull_image(image).await?;
+                let image = self.pull_with_fallback(image).await?;
                 // Create and start.
-                self.create_and_start(container_name, image, volumes, env_vars, spec).await?;
+                self.create_and_start(container_name, &image, volumes, env_vars, spec).await?;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
@@ -796,6 +844,180 @@ impl ContainerManager {
         Ok(info.exit_code)
     }
 
+    /// Run `argv` in the container and collect its output and exit code.
+    async fn exec_collect(
+        &self,
+        container_name: &str,
+        argv: &[String],
+        limit: std::time::Duration,
+    ) -> Result<ExecOutcome, ContainerError> {
+        const KEEP_BYTES: usize = 16 * 1024;
+        let session = self.exec(container_name, argv, None, &[], false).await?;
+        let exec_id = session.exec_id.clone();
+        let mut stream = session.output;
+        let mut output = String::new();
+        let drain = async {
+            while let Some(item) = stream.next().await {
+                let chunk = item?;
+                output.push_str(&String::from_utf8_lossy(&chunk.into_bytes()));
+                if output.len() > KEEP_BYTES {
+                    let mut cut = output.len() - KEEP_BYTES;
+                    while !output.is_char_boundary(cut) {
+                        cut += 1;
+                    }
+                    output.drain(..cut);
+                }
+            }
+            Ok::<(), bollard::errors::Error>(())
+        };
+        let timed_out = match tokio::time::timeout(limit, drain).await {
+            Ok(result) => {
+                result?;
+                false
+            }
+            Err(_) => true,
+        };
+        let exit = if timed_out { None } else { self.inspect_exec(&exec_id).await? };
+        Ok(ExecOutcome { exec_id, exit, output, timed_out })
+    }
+
+    /// Poll until the exec has stopped running, or `limit` passes. True when it
+    /// is confirmed finished.
+    async fn wait_exec_finished(&self, exec_id: &str, limit: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + limit;
+        loop {
+            match self.docker_exec_running(exec_id).await {
+                Some(false) => return true,
+                Some(true) => {}
+                None => return false,
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    /// Whether the exec is still running; `None` when Docker can't say.
+    async fn docker_exec_running(&self, exec_id: &str) -> Option<bool> {
+        self.inner.docker.inspect_exec(exec_id).await.ok().map(|i| i.running == Some(true))
+    }
+
+    /// Kill any `npm install` into the CLI directory and wait until none is left.
+    /// True only when that is confirmed.
+    async fn reap_cli_install(&self, container_name: &str) -> bool {
+        match self
+            .exec_collect(container_name, &reap_argv(), std::time::Duration::from_secs(30))
+            .await
+        {
+            Ok(out) => out.exit == Some(0) && reap_says_gone(&out.output),
+            Err(e) => {
+                tracing::warn!(container = container_name, error = %e, "could not check for a running CLI install");
+                false
+            }
+        }
+    }
+
+    /// Make sure the provider CLI is usable in this container, installing it on
+    /// first use. `on_install_start` runs just before an install begins (the
+    /// caller shows "Installing ..." then), never when nothing needs installing.
+    pub async fn provision_cli(
+        &self,
+        container_name: &str,
+        install: &CliInstall,
+        on_install_start: impl FnOnce(),
+    ) -> Result<CliProvision, ContainerError> {
+        self.provision_cli_with(container_name, install, InstallLimits::default(), on_install_start).await
+    }
+
+    /// [`provision_cli`](Self::provision_cli) with explicit time limits.
+    async fn provision_cli_with(
+        &self,
+        container_name: &str,
+        install: &CliInstall,
+        limits: InstallLimits,
+        on_install_start: impl FnOnce(),
+    ) -> Result<CliProvision, ContainerError> {
+        let key = install.cache_key(container_name);
+        if self.inner.cli_ready.lock().await.contains(&key) {
+            return Ok(CliProvision::Present);
+        }
+
+        let lock = {
+            let mut locks = self.inner.cli_locks.lock().await;
+            locks.entry(container_name.to_string()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+        };
+        let guard = lock.lock().await;
+        let result = self.provision_cli_locked(container_name, install, &key, limits, on_install_start).await;
+        drop(guard);
+        {
+            let mut locks = self.inner.cli_locks.lock().await;
+            if Arc::strong_count(&lock) <= 2 {
+                locks.remove(container_name);
+            }
+        }
+        result
+    }
+
+    async fn provision_cli_locked(
+        &self,
+        container_name: &str,
+        install: &CliInstall,
+        key: &str,
+        limits: InstallLimits,
+        on_install_start: impl FnOnce(),
+    ) -> Result<CliProvision, ContainerError> {
+        if self.inner.cli_ready.lock().await.contains(key) {
+            return Ok(CliProvision::Present);
+        }
+        let check = self
+            .exec_collect(container_name, &install.check_argv(), std::time::Duration::from_secs(30))
+            .await?;
+        if check.exit == Some(0) && check_says_present(&check.output) {
+            self.inner.cli_ready.lock().await.insert(key.to_string());
+            return Ok(CliProvision::Present);
+        }
+
+        on_install_start();
+
+        // An earlier attempt may still be running (it timed out, or srv restarted
+        // under it). A second npm into the same volume could corrupt it, so
+        // nothing starts until the first is confirmed gone.
+        let fail = |detail: String| ContainerError::CliInstall { command: install.command.clone(), detail };
+        if !self.reap_cli_install(container_name).await {
+            return Err(fail("an earlier install is still running; wait a minute and try again".to_string()));
+        }
+
+        tracing::info!(container = container_name, command = %install.command, specs = ?install.specs, "installing the provider CLI in the container");
+        let started = std::time::Instant::now();
+        let run = self
+            .exec_collect(container_name, &install.install_argv(limits), limits.run)
+            .await?;
+        if run.exit == Some(0) {
+            self.inner.cli_ready.lock().await.insert(key.to_string());
+            return Ok(CliProvision::Installed { seconds: started.elapsed().as_secs_f64() });
+        }
+
+        // The host-side limit passed while the install was still running. Stop
+        // it and confirm it is gone BEFORE returning: the caller's lock is held
+        // until then, so a retry cannot start a second install on top of it.
+        let stopped = if run.timed_out {
+            let reaped = self.reap_cli_install(container_name).await;
+            let finished = self.wait_exec_finished(&run.exec_id, std::time::Duration::from_secs(30)).await;
+            Some(reaped && finished)
+        } else {
+            None
+        };
+        let detail = install_failure_detail(run.exit, run.timed_out, stopped, &run.output);
+        tracing::warn!(container = container_name, command = %install.command, detail = %detail, "provider CLI install failed");
+        Err(fail(detail))
+    }
+
+    async fn forget_cli_ready(&self, container_name: &str) {
+        let prefix = format!("{container_name}\u{0}");
+        self.inner.cli_ready.lock().await.retain(|k| !k.starts_with(&prefix));
+    }
+
     /// Best-effort interruption of the turn's process(es) inside a container.
     ///
     /// Docker/bollard has no "kill exec" API, so we `pkill` the matching process
@@ -848,6 +1070,7 @@ impl ContainerManager {
             }))
             .await?;
         tracing::info!(container = container_name, "removed container");
+        self.forget_cli_ready(container_name).await;
         self.cleanup_dev_proxy_routes(container_name).await;
         Ok(())
     }
@@ -977,6 +1200,29 @@ impl ContainerManager {
             .any(|h| h == "host.docker.internal:host-gateway")
     }
 
+    /// Running Docker Compose containers whose project directory is `dir` or
+    /// inside it (Compose's `com.docker.compose.project.working_dir` label):
+    /// the ones an agent working there may have started. Names only.
+    pub async fn running_compose_containers_under(&self, dir: &std::path::Path) -> Result<Vec<String>, ContainerError> {
+        const WORKING_DIR: &str = "com.docker.compose.project.working_dir";
+        let mut filters = HashMap::new();
+        filters.insert("label", vec![WORKING_DIR]);
+        filters.insert("status", vec!["running"]);
+        let list = self.inner.docker
+            .list_containers(Some(ListContainersOptions { all: false, filters, ..Default::default() }))
+            .await?;
+        Ok(list
+            .into_iter()
+            .filter(|c| {
+                c.labels
+                    .as_ref()
+                    .and_then(|l| l.get(WORKING_DIR))
+                    .is_some_and(|wd| std::path::Path::new(wd).starts_with(dir))
+            })
+            .filter_map(|c| c.names.and_then(|n| n.first().map(|n| n.trim_start_matches('/').to_string())))
+            .collect())
+    }
+
     /// Returns the container status string ("running", "exited", …) or `None` if not found.
     async fn find_container(&self, name: &str) -> Result<Option<String>, ContainerError> {
         let mut filters = HashMap::new();
@@ -999,6 +1245,29 @@ impl ContainerManager {
             }
         }
         Ok(None)
+    }
+
+    /// Pull `image`; a legacy image that the registry refuses or no longer has
+    /// is replaced by the public base image. Returns the image to run.
+    async fn pull_with_fallback(&self, image: &str) -> Result<String, ContainerError> {
+        match self.pull_image(image).await {
+            Ok(()) => Ok(image.to_string()),
+            Err(ContainerError::ImagePull { kind, .. }) if kind.is_unavailable_image() && is_legacy_agent_image(image) => {
+                tracing::warn!(
+                    image = image,
+                    fallback = DEFAULT_AGENT_IMAGE,
+                    "legacy agent image can't be pulled; using the public base image"
+                );
+                self.pull_image(DEFAULT_AGENT_IMAGE).await?;
+                Ok(DEFAULT_AGENT_IMAGE.to_string())
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Whether the daemon already has `image`.
+    pub async fn has_image_locally(&self, image: &str) -> bool {
+        self.inner.docker.inspect_image(image).await.is_ok()
     }
 
     /// Pull `image` via the Docker socket (create_image API).
@@ -1038,7 +1307,7 @@ impl ContainerManager {
                 }
                 Err(e) => {
                     tracing::warn!(image = image, error = %e, "image pull error");
-                    return Err(ContainerError::Docker(e));
+                    return Err(pull_error(image, &e));
                 }
             }
         }
@@ -1063,6 +1332,7 @@ impl ContainerManager {
         // PR #2883). The cache is keyed by name, so evict here, at the one
         // place a name starts pointing at a new container.
         self.inner.exec_identities.lock().await.remove(container_name);
+        self.forget_cli_ready(container_name).await;
 
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
@@ -1100,6 +1370,7 @@ impl ContainerManager {
                 ..Default::default()
             });
         }
+        all_mounts.push(cli_dir_mount(container_name));
         all_mounts.extend(mounts);
 
         let config: Config<String> = Config {
@@ -1342,6 +1613,46 @@ impl ContainerRuntimeHandle {
             Some(mgr) => mgr.check_available().await.is_ok(),
             None => false,
         }
+    }
+}
+
+/// What a collected exec produced.
+struct ExecOutcome {
+    exec_id: String,
+    exit: Option<i64>,
+    output: String,
+    timed_out: bool,
+}
+
+/// Whether `provision_cli` found the CLI in place or had to install it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CliProvision {
+    Present,
+    Installed { seconds: f64 },
+}
+
+/// The per-agent volume the provider CLI is installed into.
+fn cli_dir_mount(container_name: &str) -> Mount {
+    Mount {
+        target: Some(CONTAINER_CLI_DIR.to_string()),
+        source: Some(format!("agentmux-cli-{container_name}")),
+        typ: Some(MountTypeEnum::VOLUME),
+        read_only: Some(false),
+        ..Default::default()
+    }
+}
+
+/// Map a bollard pull error to [`ContainerError::ImagePull`].
+fn pull_error(image: &str, e: &bollard::errors::Error) -> ContainerError {
+    let status = match e {
+        bollard::errors::Error::DockerResponseServerError { status_code, .. } => Some(*status_code),
+        _ => None,
+    };
+    let detail = e.to_string();
+    ContainerError::ImagePull {
+        image: image.to_string(),
+        kind: classify_pull_error(status, &detail),
+        detail,
     }
 }
 
@@ -1768,6 +2079,216 @@ mod tests {
 
         // cleanup
         cm.remove(name, true).await.expect("remove");
+    }
+
+    fn server_error(status_code: u16, message: &str) -> bollard::errors::Error {
+        bollard::errors::Error::DockerResponseServerError { status_code, message: message.to_string() }
+    }
+
+    #[test]
+    fn a_refused_pull_becomes_a_plain_message_not_a_docker_api_error() {
+        let err = pull_error(
+            "ghcr.io/agentmuxai/agent-claude:latest",
+            &server_error(500, "Head \"https://ghcr.io/v2/agentmuxai/agent-claude/manifests/latest\": denied"),
+        );
+        assert!(matches!(&err, ContainerError::ImagePull { kind: PullFailure::Denied, .. }), "{err:?}");
+        let msg = err.user_message();
+        assert!(msg.contains("ghcr.io/agentmuxai/agent-claude:latest"), "{msg}");
+        assert!(msg.contains("refused access"), "{msg}");
+        assert!(!msg.contains("Docker API error") && !msg.contains("manifests/latest"), "{msg}");
+    }
+
+    #[test]
+    fn a_missing_image_and_an_unreachable_registry_each_get_their_own_message() {
+        let missing = pull_error("x/y:1", &server_error(404, "manifest for x/y:1 not found"));
+        assert!(missing.user_message().contains("was not found"), "{}", missing.user_message());
+
+        let offline = pull_error("x/y:1", &server_error(500, "Get \"https://registry-1.docker.io/v2/\": dial tcp: lookup registry-1.docker.io: no such host"));
+        assert!(offline.user_message().contains("couldn't reach the registry"), "{}", offline.user_message());
+    }
+
+    #[test]
+    fn the_image_pull_error_keeps_the_daemons_text_for_logs() {
+        let err = pull_error("x/y:1", &server_error(500, "denied: some detail"));
+        assert!(err.to_string().contains("some detail"), "{err}");
+    }
+
+    #[test]
+    fn a_stopped_daemon_and_an_install_failure_read_plainly() {
+        let down = ContainerError::NotAvailable("connect failed".into()).user_message();
+        assert!(down.contains("Docker isn't responding"), "{down}");
+
+        let install = ContainerError::CliInstall { command: "claude".into(), detail: "npm error code ENOTFOUND".into() }.user_message();
+        assert!(install.contains("couldn't install claude"), "{install}");
+        assert!(install.contains("ENOTFOUND"), "{install}");
+        assert!(install.starts_with("Couldn't start the container"), "{install}");
+    }
+
+    #[test]
+    fn the_cli_directory_is_a_per_agent_named_volume_outside_the_drift_set() {
+        let mount = cli_dir_mount("agentmux-abc");
+        assert_eq!(mount.target.as_deref(), Some("/home/agent/.agentmux/cli"));
+        assert_eq!(mount.source.as_deref(), Some("agentmux-cli-agentmux-abc"));
+        assert_eq!(mount.typ, Some(MountTypeEnum::VOLUME));
+        assert!(
+            !ContainerManager::owned_mount_targets().contains(&CONTAINER_CLI_DIR.to_string()),
+            "adding it to the drift set would recreate every existing container"
+        );
+    }
+
+    /// Docker-gated: an install that outruns the host-side limit is killed and
+    /// confirmed gone before `provision_cli` returns, and leaves the volume
+    /// usable: no marker, no live tree, and a retry installs cleanly. Same setup
+    /// as the other install test (AGENTMUX_ITEST_BASE_IMAGE, network to npm).
+    #[tokio::test]
+    #[ignore]
+    async fn itest_provision_cli_timeout_stops_the_install_before_returning() {
+        let image = std::env::var("AGENTMUX_ITEST_BASE_IMAGE").expect("set AGENTMUX_ITEST_BASE_IMAGE to a built base image");
+        let cm = ContainerManager::connect().expect("connect to docker");
+        cm.check_available().await.expect("docker daemon must be reachable");
+
+        let name = "agentmux-itest-provision-timeout";
+        let _ = cm.remove(name, true).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        let install = CliInstall::for_provider("claude", "claude").unwrap();
+
+        // The host gives up after 3 s; the script's own limit is far away, so
+        // only the host-side backstop can stop it.
+        let tight = InstallLimits {
+            run: std::time::Duration::from_secs(3),
+            script: std::time::Duration::from_secs(600),
+        };
+        let err = cm.provision_cli_with(name, &install, tight, || {}).await.unwrap_err();
+        let msg = err.user_message();
+        assert!(msg.contains("was stopped"), "{msg}");
+
+        // Confirmed gone: nothing from the install is still running.
+        let alive = cm
+            .exec_collect(
+                name,
+                &["sh".into(), "-c".into(), "pgrep -f '[n]pm install --prefix' >/dev/null && echo alive || echo gone".into()],
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("pgrep");
+        assert!(alive.output.contains("gone"), "{}", alive.output);
+
+        // The volume is not left looking installed.
+        let state = cm
+            .exec_collect(
+                name,
+                &["sh".into(), "-c".into(), "ls -A /home/agent/.agentmux/cli | tr '\\n' ' '".into()],
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("ls");
+        assert!(!state.output.contains(".installed-") && !state.output.contains("node_modules"), "{}", state.output);
+
+        // And the retry the pane suggests installs cleanly.
+        let retry = cm.provision_cli(name, &install, || {}).await.expect("retry installs");
+        assert!(matches!(retry, CliProvision::Installed { .. }), "{retry:?}");
+
+        // The script's own limit is the other path: it kills npm itself.
+        let _ = cm.remove(name, true).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        let script_limited = InstallLimits {
+            run: std::time::Duration::from_secs(300),
+            script: std::time::Duration::from_secs(2),
+        };
+        let err = cm.provision_cli_with(name, &install, script_limited, || {}).await.unwrap_err();
+        assert!(err.user_message().contains("took too long"), "{}", err.user_message());
+
+        cm.remove(name, true).await.expect("cleanup");
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+    }
+
+    /// Docker-gated: a legacy image the registry refuses falls back to the base
+    /// image. Needs the base image already present under its published name
+    /// (`docker tag <built-image> ghcr.io/agentmuxai/agent-base:latest`), so the
+    /// fallback pull is satisfied locally, and network access so the legacy pull
+    /// is really refused. Run with:
+    ///   cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_legacy_image_falls_back
+    #[tokio::test]
+    #[ignore]
+    async fn itest_legacy_image_falls_back_to_the_base_image() {
+        let cm = ContainerManager::connect().expect("connect to docker");
+        cm.check_available().await.expect("docker daemon must be reachable");
+        assert!(cm.has_image_locally(DEFAULT_AGENT_IMAGE).await, "tag a built base image as {DEFAULT_AGENT_IMAGE} first");
+
+        let legacy_but_absent = "ghcr.io/agentmuxai/agent-claude:itest-no-such-tag";
+        assert!(!cm.has_image_locally(legacy_but_absent).await);
+        let chosen = cm.pull_with_fallback(legacy_but_absent).await.expect("fallback");
+        assert_eq!(chosen, DEFAULT_AGENT_IMAGE);
+
+        // A custom image gets no fallback: its refusal is reported as it is.
+        let err = cm.pull_with_fallback("ghcr.io/agentmuxai/agent-claude-not-legacy:itest").await.unwrap_err();
+        assert!(matches!(err, ContainerError::ImagePull { kind: PullFailure::Denied, .. }), "{err:?}");
+        println!("{}", err.user_message());
+    }
+
+    /// Docker-gated: installs the pinned CLI into a container made from the real
+    /// base image, then proves it is idempotent and that a turn-style command finds
+    /// the binary. Needs a built base image, named by AGENTMUX_ITEST_BASE_IMAGE
+    /// (`docker build -f docker/Dockerfile.agent-agentmux -t <tag> .`) and network
+    /// access to npm. Run with:
+    ///   AGENTMUX_ITEST_BASE_IMAGE=<tag> cargo test -p agentmux-srv --bin agentmux-srv -- --ignored --nocapture itest_provision_cli
+    #[tokio::test]
+    #[ignore]
+    async fn itest_provision_cli_installs_once_and_a_turn_can_run_it() {
+        let image = std::env::var("AGENTMUX_ITEST_BASE_IMAGE").expect("set AGENTMUX_ITEST_BASE_IMAGE to a built base image");
+        let cm = ContainerManager::connect().expect("connect to docker");
+        cm.check_available().await.expect("docker daemon must be reachable");
+
+        let name = "agentmux-itest-provision-cli";
+        let _ = cm.remove(name, true).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+
+        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        let install = CliInstall::for_provider("claude", "claude").unwrap();
+
+        let mut announced = 0;
+        let first = cm.provision_cli(name, &install, || announced += 1).await.expect("first provision");
+        assert!(matches!(first, CliProvision::Installed { .. }), "{first:?}");
+        assert_eq!(announced, 1, "the install is announced once");
+
+        // Same manager: answered from the in-memory cache, nothing announced.
+        let again = cm.provision_cli(name, &install, || announced += 1).await.expect("second provision");
+        assert_eq!(again, CliProvision::Present);
+        assert_eq!(announced, 1);
+
+        // A fresh manager has no cache: the marker on the volume answers.
+        let fresh = ContainerManager::connect().expect("connect");
+        let after_restart = fresh.provision_cli(name, &install, || announced += 1).await.expect("provision after restart");
+        assert_eq!(after_restart, CliProvision::Present);
+        assert_eq!(announced, 1, "a marker on the volume means no reinstall");
+
+        // A turn-style command (the PATH append the wrapper does) runs the CLI.
+        let out = fresh
+            .exec_collect(
+                name,
+                &["sh".into(), "-c".into(), format!("PATH=\"$PATH:{}\"; export PATH; claude --version", crate::backend::container_cli::cli_bin_dir())],
+                std::time::Duration::from_secs(60),
+            )
+            .await
+            .expect("run claude");
+        assert_eq!(out.exit, Some(0), "{}", out.output);
+        assert!(out.output.contains(&install.version), "{}", out.output);
+
+        // The container is recreated (an image update, say): the volume keeps the install.
+        cm.remove(name, true).await.expect("remove");
+        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        let recreated = cm.provision_cli(name, &install, || announced += 1).await.expect("provision after recreate");
+        assert_eq!(recreated, CliProvision::Present);
+        assert_eq!(announced, 1, "the volume survives the container");
+
+        cm.remove(name, true).await.expect("cleanup");
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
     }
 
     /// Docker-gated integration test for the dev-proxy network attachment

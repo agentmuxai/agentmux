@@ -1,21 +1,16 @@
 // Drift guard for CLI version pins duplicated across registries.
 //
-// The pinned CLI version for each npm-installed provider lives in FOUR
+// The pinned CLI version for each npm-installed provider lives in TWO
 // places that must agree (the follow-up SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG
-// §"Single-source-of-truth" recommended and this test implements). A fifth,
-// the CEF host's own installer (`crates/cef/src/commands/providers.rs`
-// CLAUDE_VERSION etc.), was removed on 2026-09-26 along with that unused
-// installer — srv's install.* commands are the only installer:
+// §"Single-source-of-truth" recommended and this test implements). Until
+// 2026-10-07 the container image build carried two more copies (a workflow
+// input and a Dockerfile ARG); the image no longer contains the CLI, so those
+// are gone and the tests below check they stay gone:
 //
 //   1. frontend/app/view/agent/providers/catalog.ts `pinnedVersion`
-//      (re-exported as PROVIDERS via ./index — the module was a single
-//      index.ts at pin #4 below's time; split for readability 2026-07-xx,
-//      the pin moved but nothing re-audited references to the old path)
+//      (re-exported as PROVIDERS via ./index)
 //   2. crates/srv/src/backend/providers.rs        `pinned_version`
-//   3. .github/workflows/container-image.yml        `claude_version` default
-//      (claude only — the container image is a Claude agent image)
-//   4. docker/Dockerfile.agent-agentmux              `ARG CLAUDE_VERSION=`
-//      (claude only, same reason as #3 — added 2026-08-27, see history below)
+//      (also what container agents install on first start)
 //
 // History: the 2026-07-02 pin bump (2.1.185 → 2.1.198) updated the frontend
 // and srv pins but missed the (since removed) CEF host installer and the
@@ -85,22 +80,28 @@ describe("CLI pin consistency across registries", () => {
         });
     }
 
-    it("claude: container-image.yml workflow default agrees", () => {
+    // The container image is the public base image: it must not carry Claude
+    // Code (proprietary license, redistribution not cleared), and so has no pin
+    // of its own to drift. The CLI is installed on first start from the pin above.
+    it("claude: the published container image does not bundle Claude Code or pin its version", () => {
+        const dockerfile = read("docker/Dockerfile.agent-agentmux");
+        const instructions = dockerfile
+            .split("\n")
+            .filter((line) => !line.trimStart().startsWith("#"))
+            .join("\n");
+        expect(instructions).not.toMatch(/claude-code/);
+        expect(instructions).not.toMatch(/CLAUDE_VERSION/);
+
         const yml = read(".github/workflows/container-image.yml");
-        const m = yml.match(/claude_version:[\s\S]*?default: '([^']+)'/);
-        if (!m) throw new Error("claude_version default not found in container-image.yml");
-        expect(m[1]).toBe(PROVIDERS.claude.pinnedVersion);
+        expect(yml).not.toMatch(/claude_version/);
+        expect(yml).not.toMatch(/CLAUDE_VERSION/);
+        expect(yml).toMatch(/IMAGE_NAME: agentmuxai\/agent-base$/m);
     });
 
-    // Added 2026-08-27 — this location shipped a real, undetected drift risk
-    // (docs/spec-claude-code-versioning.md's own hand-maintained checklist
-    // had warned about it since the doc was first written, but nothing
-    // machine-checked it until now). See this file's header comment.
-    it("claude: Dockerfile.agent-agentmux ARG default agrees", () => {
+    it("claude: the image has the directory the first-start install writes to", () => {
         const dockerfile = read("docker/Dockerfile.agent-agentmux");
-        const m = dockerfile.match(/ARG CLAUDE_VERSION=([^\s\n]+)/);
-        if (!m) throw new Error("ARG CLAUDE_VERSION not found in docker/Dockerfile.agent-agentmux");
-        expect(m[1]).toBe(PROVIDERS.claude.pinnedVersion);
+        expect(dockerfile).toMatch(/mkdir -p \/home\/agent\/\.agentmux\/cli/);
+        expect(dockerfile).toMatch(/chown -R agent:agent \/home\/agent\/\.agentmux/);
     });
 
     // Launch argv is duplicated the same way: srv's `launch_args` /

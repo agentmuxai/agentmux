@@ -279,6 +279,17 @@ export interface AgentPaneState {
     /** First significant argument of the active tool (file path, command, etc.).
      *  Cleared alongside currentTool on ToolEnd / TurnEnd / TurnReset. */
     currentToolArg: string | null;
+    /**
+     * The current turn's live usage, from the stream. Its lifetime follows the
+     * stream's own order: set by `TokensIn`, cleared by that turn's `TurnEnd`,
+     * or by `StreamSessionStarted` when the process died before a `result`.
+     * Nothing outside the stream clears it on a normal turn end:
+     * `ReconcileTurnActive`, the liveness recovery and `TurnStart` all leave
+     * it alone, because srv sends the turn-ended push before it forwards the
+     * `result` line, so the turn's `session_end` (and sometimes earlier calls)
+     * still follow, and a queued message or the next turn can start in that
+     * gap. Hard ends (disconnect, failure, timeouts, reset) clear it.
+     */
     turnTokens: TurnTokens | null;
     /**
      * True for the duration of a turn started specifically to send a
@@ -711,9 +722,10 @@ export type AgentPaneCommand =
       }
     /**
      * Stream produced session_end (or fallback timer fired). Final
-     * stats merged with current turn-tokens. Clears currentTool,
-     * turnTokens, and transitions the phase to Done (interrupting →
-     * Done.stopped, otherwise Done.completed).
+     * stats merged with current turn-tokens, which are still there when
+     * the backend's turn-ended push already moved the phase to Idle.
+     * Clears currentTool and turnTokens, and transitions the phase to
+     * Done (interrupting → Done.stopped, otherwise Done.completed).
      */
     | {
           type: "TurnEnd";
@@ -750,6 +762,11 @@ export type AgentPaneCommand =
     // this is the same split, just on the dispatched command.
     | { type: "TokensIn"; input: number; model?: string; freshInput?: number; cacheCreation?: number; cacheRead?: number }
     | { type: "TokensOut"; output: number }
+    /** The stream shows a new CLI session starting (`system/init`, not the one
+     *  a compaction writes mid-turn; view/agent/session-start.ts): any turn
+     *  still holding tokens ended without a `result` (the process died), so
+     *  they belong to no turn that is coming. */
+    | { type: "StreamSessionStarted" }
     /** The main agent's model sent `stop_reason: end_turn`; see `modelEndedTurn` on the Streaming phase. */
     | { type: "ModelEndedTurn" }
     /** The main agent's model began a new message; it is working again. */

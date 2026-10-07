@@ -78,6 +78,8 @@ interface OptionRow {
     value: string;
     label: string;
     description?: string;
+    /** The full explanation, shown as the row's tooltip (the description is its short form). */
+    detail?: string;
     current: boolean;
     color?: string;
 }
@@ -237,7 +239,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         const rows: Row[] = [];
         const options: OptionRow[] = [];
 
-        const addSection = <T extends { value: string; label: string; menuLabel?: string; description?: string }>(
+        const addSection = <T extends { value: string; label: string; menuLabel?: string; description?: string; detail?: string }>(
             section: Section,
             opts: readonly T[],
             currentValue: string,
@@ -250,6 +252,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     value: o.value,
                     label: o.menuLabel ?? o.label,
                     description: o.description,
+                    detail: o.detail,
                     current: currentValue === o.value,
                     color: withColor ? PERMISSION_COLORS[o.value as PermissionMode] : undefined,
                 };
@@ -267,7 +270,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
             "mode",
             MODE_OPTIONS.map((o) => {
                 const t = permissionModeText(o.value, autoAnswers, props.providerId);
-                return { ...o, menuLabel: t.label, description: t.note };
+                return { ...o, menuLabel: t.label, description: t.note, detail: t.detail };
             }),
             r.permissionMode,
             true,
@@ -493,6 +496,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                         classList={{ active: optIndex() === selectedOptIndex() }}
                                         role="option"
                                         aria-selected={row.current}
+                                        title={row.detail}
                                         onMouseEnter={() => setSelectedOptIndex(optIndex())}
                                         // These rows are plain non-focusable divs — without this, a
                                         // mousedown here blurs the trigger and shifts
@@ -512,10 +516,15 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                             class={`fa-solid fa-fw menu-item-icon menu-item-check${row.current ? " fa-check" : ""}`}
                                             style={row.color ? { color: row.color } : undefined}
                                         />
-                                        <span class="label">{row.label}</span>
-                                        <Show when={row.description}>
-                                            <span class="agent-runtime-dropup-description">{row.description}</span>
-                                        </Show>
+                                        {/* Label, then its description on a line of its own, so the
+                                            panel can cap its width and wrap instead of growing past the
+                                            pane. */}
+                                        <span class="agent-runtime-dropup-text">
+                                            <span class="label">{row.label}</span>
+                                            <Show when={row.description}>
+                                                <span class="agent-runtime-dropup-description">{row.description}</span>
+                                            </Show>
+                                        </span>
                                     </div>
                                 );
                             }}

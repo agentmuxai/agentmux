@@ -25,6 +25,16 @@ import { Follower } from "./follower";
 /** How often to look again while the user is touching a following pane: just past the 250 ms input window. */
 export const RECHECK_MS = 300;
 
+/**
+ * After the user commits (a send, or a queued message starting its turn), the
+ * layout keeps changing for a moment: the composer shrinks back to one line,
+ * the queued-message panel comes and goes. Those are the user's own changes
+ * (spec §1), so for this long they land at the true bottom instead of being
+ * held in place with spacer room, which left a gap between the user's message
+ * and the composer for the agent to fill slowly.
+ */
+export const COMMIT_SETTLE_MS = 600;
+
 /** Below this, a move is sub-pixel noise, not something to compensate. */
 export const MOVE_EPSILON_PX = 0.5;
 
@@ -83,6 +93,8 @@ export class OneWayFlow {
     /** Screen top (CSS px from the viewport's top edge) of each row visible at the last observation. */
     private baseline: Map<Element, number> | null = null;
     private lastWidth = -1;
+    /** Until when layout changes settle at the bottom without spacer room (see COMMIT_SETTLE_MS). */
+    private settleUntil = Number.NEGATIVE_INFINITY;
     /** scrollHeight / clientHeight at the last observation, for the geometry of frame-step writes. */
     private lastGeo = { scrollHeight: 0, clientHeight: 0 };
     private readonly follower: Follower;
@@ -128,11 +140,19 @@ export class OneWayFlow {
         this.rows.clear();
     }
 
-    /** Typing, send, a queued turn, the jump button: straight to the bottom. */
-    jumpToBottom(): void {
+    /**
+     * Typing, send, a queued turn, the jump button: straight to the bottom.
+     * With `commit` (a send, a queued message starting its turn; not each
+     * keystroke) it is a commit point (spec §1): any spacer room is given up,
+     * and layout changes for COMMIT_SETTLE_MS after it settle at the bottom
+     * too. Typing doesn't open the window, or the one-way rule would be off
+     * for as long as the user types.
+     */
+    jumpToBottom(commit = false): void {
         const el = this.scroller;
         if (!el) return;
         this.follower.stop();
+        if (commit) this.commit();
         const ch = el.clientHeight; // perf:allow-layout-read — user-initiated jump
         const sh = el.scrollHeight; // perf:allow-layout-read — user-initiated jump
         const target = Math.max(0, sh - ch);
@@ -141,6 +161,19 @@ export class OneWayFlow {
             this.host.wrote({ scrollTop: el.scrollTop, scrollHeight: sh, clientHeight: ch }); // perf:allow-layout-read — after a scrollTop write, which does not invalidate layout
         }
         this.baseline = this.readVisible(el, ch);
+    }
+
+    /**
+     * A commit point without a jump (a queued message accepted mid-turn): give
+     * up spacer room and let layout changes for COMMIT_SETTLE_MS settle at the
+     * bottom. Callers only use it while the pane follows.
+     */
+    commit(): void {
+        this.settleUntil = performance.now() + COMMIT_SETTLE_MS;
+        if (this.spacerPx > 0) {
+            this.host.note?.(`spacer:release-${this.spacerPx}`);
+            this.setSpacer(0);
+        }
     }
 
     /** `/clear` or a fresh session in the pane: no room is owed to anything. */
@@ -198,7 +231,22 @@ export class OneWayFlow {
                 sh = el.scrollHeight; // perf:allow-layout-read — once, after a width change
             }
         }
-        if (this.active()) {
+        if (this.active() && performance.now() < this.settleUntil) {
+            // Just after the user committed: their own layout changes move the
+            // content, and we stay at the true bottom with no room held.
+            if (this.spacerPx > 0) {
+                sh -= this.spacerPx;
+                this.setSpacer(0);
+            }
+            const bottom = Math.max(0, sh - ch);
+            if (Math.abs(bottom - live) > MOVE_EPSILON_PX) {
+                el.scrollTop = bottom;
+                live = el.scrollTop; // perf:allow-layout-read — after the spacer write: one layout, inside the RO callback
+                this.host.wrote({ scrollTop: live, scrollHeight: sh, clientHeight: ch });
+            }
+            this.lastGeo = { scrollHeight: sh, clientHeight: ch };
+            this.follower.update(live, sh - ch, ch);
+        } else if (this.active()) {
             let wanted = live;
             if (this.baseline) {
                 const d = largestDownwardMove(this.baseline, this.readTops(el, this.baseline.keys()));
