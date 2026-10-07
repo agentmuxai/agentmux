@@ -391,6 +391,12 @@
     opacity: 0.8;
 }
 
+// "Open from remote…" (open-from-remote-modal.tsx).
+.editor-empty-actions {
+    position: relative;
+    z-index: 1;
+}
+
 .editor-empty-hint {
     position: relative;
     z-index: 1;

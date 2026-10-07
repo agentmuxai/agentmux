@@ -22,8 +22,8 @@
  *                   docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md.
  *   - MCP Servers — the standalone MCP Server primitive (AgentMcpModal).
  *   - Skills      — the standalone Skill primitive (AgentSkillsModal).
- *   - Startup     — select an existing Bundle as Session Context's
- *                   "Startup Instructions" (AgentStartupModal).
+ *   - Bundles     — the agent's Bundles list, its own bundle first
+ *                   (AgentBundlesTab). Replaced the Startup tab.
  *   - Registration — this agent's live jekt/muxbus delivery status:
  *                   local registration, any OTHER instance/channel on this
  *                   host also claiming the same identity, and any recent
@@ -47,10 +47,10 @@ import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
 import { AgentRegistrationPanel } from "./AgentRegistrationPanel";
 import { AgentSkillsModal } from "./AgentSkillsModal";
-import { AgentStartupModal } from "./AgentStartupModal";
+import { AgentBundlesTab } from "./AgentBundlesTab";
 import "./AgentStashModal.scss";
 
-type StashTabId = "accounts" | "memory" | "mcp" | "skills" | "startup" | "registration";
+type StashTabId = "accounts" | "memory" | "mcp" | "skills" | "bundles" | "registration";
 
 interface AgentStashModalProps {
     agentId: string;
@@ -73,7 +73,7 @@ interface AgentStashModalProps {
 }
 
 // Icons are the same choice as the matching section of the Connectors and
-// Knowledge panes (connectors.tsx, knowledge.tsx), for visual parity since
+// Memory panes (connectors.tsx, memory.tsx), for visual parity since
 // this modal is the per-agent-scoped analogue of them.
 type StashTabDef = TabItem<StashTabId> & { icon: string };
 
@@ -85,10 +85,8 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
         { id: "memory", label: "Personal Memory", icon: "brain" },
         { id: "mcp", label: "MCP Servers", icon: "plug" },
         { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
-        // layer-group: same icon Knowledge uses for "Bundles" —
-        // this tab picks a bundle as startup instructions, so it's the same
-        // concept scoped to one agent.
-        { id: "startup", label: "Startup", icon: "layer-group" },
+        // layer-group: the icon the Memory pane's Bundles section uses.
+        { id: "bundles", label: "Bundles", icon: "layer-group" },
         // tower-broadcast: distinct from "key" (Accounts, auth identity) —
         // this tab is about jekt/muxbus delivery identity, a different
         // concept (issue #2696).
@@ -144,8 +142,8 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
                     <AgentSkillsModal agentId={props.agentId} />
                 </Show>
 
-                <Show when={activeTab() === "startup"}>
-                    <AgentStartupModal agentId={props.agentId} />
+                <Show when={activeTab() === "bundles"}>
+                    <AgentBundlesTab agentId={props.agentId} />
                 </Show>
 
                 <Show when={activeTab() === "registration"}>

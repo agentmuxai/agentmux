@@ -181,3 +181,23 @@ describe("split — a view's splitBlockDef replaces copying its meta", () => {
         }
     });
 });
+
+describe("buildPaneContextMenu — Paste", () => {
+    it("pastes into the pane, then gives it focus for the next keystroke", async () => {
+        const { readText } = await import("@/util/clipboard");
+        vi.mocked(readText).mockResolvedValue("echo hi");
+        const calls: string[] = [];
+        const viewModel = {
+            paste: vi.fn(() => calls.push("paste")),
+            giveFocus: vi.fn(() => {
+                calls.push("focus");
+                return true;
+            }),
+        } as unknown as ViewModel;
+        const paste = buildPaneContextMenu(termBlock, opts(), viewModel).find((i) => i.label === "Paste")!;
+        paste.click!();
+        await new Promise((r) => setTimeout(r, 0));
+        expect(viewModel.paste).toHaveBeenCalledWith("echo hi");
+        expect(calls).toEqual(["paste", "focus"]);
+    });
+});

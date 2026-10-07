@@ -16,10 +16,9 @@ import { dronePaneTab } from "@/app/view/drone/drone";
 import { editorPaneTab } from "@/app/view/editor/editor";
 import { filesPaneTab } from "@/app/view/files/files";
 import { identityPaneTab } from "@/app/view/identity/identity-pane";
-import { knowledgePaneTab } from "@/app/view/knowledge/knowledge";
 import { launcherPaneTab } from "@/app/view/launcher/launcher";
 import { mediaPaneTab } from "@/app/view/media/media";
-import { memoryPaneTab } from "@/app/view/bundle/bundle";
+import { memoryPaneTab } from "@/app/view/memory/memory";
 import { remotesPaneTab } from "@/app/view/remotes/remotes";
 import { settingsPaneTab } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
@@ -52,14 +51,13 @@ const builtins = [
     launcherPaneTab, // native — Phase 2c (no header)
     swarmPaneTab, // native — Phase 2c
     remotesPaneTab, // native (SPEC_REMOTES_PANE_2026_10_05.md)
-    memoryPaneTab, // native — Phase 2c
     mediaPaneTab, // native — Phase 2c
     identityPaneTab, // native — Phase 2c
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c
     toolchainPaneTab, // native — Phase 2c
     connectorsPaneTab, // native (the Armory's Accounts and MCP servers)
-    knowledgePaneTab, // native (the rest of the Armory)
+    memoryPaneTab, // native (the rest of the Armory; was Knowledge)
     // Moves a saved Armory block (or "trust") onto one of the two above.
     armoryPaneTab,
     settingsPaneTab, // native — Phase 2c

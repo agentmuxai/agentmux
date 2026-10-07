@@ -18,9 +18,9 @@
 // reconstitute the same agent elsewhere) rather than a config fragment
 // meant to be mixed into agents of any provider.
 //
-// This module is the ViewModel for `view: "memory"` panes. It owns the
-// list of memories, the currently-selected one, and the in-flight edit
-// draft. CRUD goes through the v7 RPC commands
+// This module is the ViewModel for the context-free `BundleManager` (the
+// Memory pane's Bundles section). It owns the list of bundles, the
+// currently-selected one, and the in-flight edit draft. CRUD goes through the v7 RPC commands
 // (listmemories / upsertmemory / deletememory).
 
 import { RpcApi } from "@/app/store/rpc-api";
@@ -161,8 +161,7 @@ export function draftToWire(d: BundleDraft): BundleUpsertInput {
 }
 
 /** The bundle editor's state: the list, the selection and the in-flight
- *  draft, for the context-free `BundleManager`. (The `view: "memory"` pane is
- *  a native pane tab with no model — `memoryPaneTab`, bundle.tsx.) */
+ *  draft, for the context-free `BundleManager`. */
 export class BundleViewModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bundle create/edit/delete made elsewhere refreshes this list without

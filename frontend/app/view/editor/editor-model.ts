@@ -54,6 +54,8 @@ import { openPendingFiles } from "./pending-open-files";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { readZoom } from "@/app/store/zoom-factor";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
+import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { openRemoteFile } from "./open-from-remote";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -181,6 +183,9 @@ export class EditorViewModel {
     // the user explicitly turns it off via the right-click menu.
     private _wordWrap = createSignal<boolean>(true);
     wordWrapAtom: Accessor<boolean> = this._wordWrap[0];
+    /** "Open from remote…" is showing its picker (open-from-remote-modal.tsx). */
+    private _openFromRemote = createSignal<boolean>(false);
+    openFromRemoteAtom: Accessor<boolean> = this._openFromRemote[0];
 
     // Per-tab editor mode: "preview" | "source" | "split".
     // Not persisted — tabs return to their language-appropriate default on reopen.
@@ -194,6 +199,9 @@ export class EditorViewModel {
     private ctx: PaneTabHostContext;
     zoomAtom!: Accessor<number>;
 
+    /** The line pane.open asked the initial file to open at, until the view
+     *  has moved the cursor there (takeOpenAtLine). */
+    private _openAtLine: { path: string; line: number } | null = null;
     /** Tabs that started loading via openFile — used so concurrent dispatches
      *  for the same path don't double-fetch. */
     private _loadingPaths = new Set<string>();
@@ -466,6 +474,13 @@ export class EditorViewModel {
         // with that one file.
         const restored = hydrateDocTabs(meta?.[DOC_TABS_META], deserializeEditorBuffer);
         const legacyFile = meta?.[META_LEGACY_FILE];
+        // A line to open `file` at, once (pane.open's `line`). Kept in the
+        // meta until the loaded file uses it (takeOpenAtLine), so an editor
+        // unmounted mid-load still lands there when it comes back.
+        const openAt = readOpenAtLine(meta, legacyFile);
+        if (openAt != null && typeof legacyFile === "string") {
+            this._openAtLine = { path: canonicalizePath(legacyFile), line: openAt };
+        }
         if (restored) {
             this._docTabsWritten = JSON.stringify(meta?.[DOC_TABS_META]);
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
@@ -497,6 +512,17 @@ export class EditorViewModel {
         // Reuse: pending files are handled by the reactive createEffect
         // above (covers this initial-mount case too — no separate one-shot
         // check needed here, and having both would double-open).
+    }
+
+    /** The line to put the cursor on now that `path`'s content is in the
+     *  editor, once; undefined for any other file or while it is loading. */
+    takeOpenAtLine(path: string | undefined): number | undefined {
+        const pending = this._openAtLine;
+        if (!pending || !path || this.loadingAtom() || canonicalizePath(path) !== pending.path) return undefined;
+        this._openAtLine = null;
+        // Used: a reload of the pane opens where the user left it instead.
+        void this.persistMeta({ [META_OPEN_AT_LINE]: null });
+        return pending.line;
     }
 
     // ── Event subscription (used by editor-view.tsx for CodeMirror state
@@ -1340,7 +1366,19 @@ export class EditorViewModel {
                 checked: this.wordWrapAtom(),
                 click: () => void this.toggleWordWrap(),
             },
+            { type: "separator" },
+            { label: "Open from remote…", click: () => this.setOpenFromRemote(true) },
         ];
+    }
+
+    /** Shows or hides the "Open from remote…" picker. */
+    setOpenFromRemote(open: boolean): void {
+        this._openFromRemote[1](open);
+    }
+
+    /** Opens `path` on `host` (open-from-remote.ts), from the picker. */
+    openFromRemote(host: string, path: string): Promise<void> {
+        return openRemoteFile(this, host, path);
     }
 
     setTreeWidth(width: number): void {

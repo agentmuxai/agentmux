@@ -148,6 +148,15 @@ import type { CommandDeleteAgentSkillData } from "@/types/rpc/CommandDeleteAgent
 import type { CommandListAgentSkillsData } from "@/types/rpc/CommandListAgentSkillsData";
 import type { CommandUpdateAgentSkillData } from "@/types/rpc/CommandUpdateAgentSkillData";
 
+// An agent's Bundles list (agent_handlers/bundle.rs).
+export type { AgentBundlesResult } from "@/types/rpc/AgentBundlesResult";
+export type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBundlesData";
+export type { CommandSetAgentBundlesData } from "@/types/rpc/CommandSetAgentBundlesData";
+
+import type { AgentBundlesResult } from "@/types/rpc/AgentBundlesResult";
+import type { CommandGetAgentBundlesData } from "@/types/rpc/CommandGetAgentBundlesData";
+import type { CommandSetAgentBundlesData } from "@/types/rpc/CommandSetAgentBundlesData";
+
 /**
  * What a `createagentskill` caller may send.
  *
@@ -355,6 +364,8 @@ export const AgentApi = {
             name: string;
             identity_id?: string;
             memory_id?: string;
+            /** The new agent's Bundles list, in order. */
+            bundle_ids?: string[];
             /** Runtime to persist on the cloned definition ("host" |
              *  "container"). Omitted → backend keeps the template's. */
             agent_type?: string;
@@ -407,6 +418,16 @@ export const AgentApi = {
 
     ListAgentSkillsCommand(client: RpcClient, data: CommandListAgentSkillsData, opts?: RpcOpts): Promise<AgentSkill[]> {
         return client.rpcCall("listagentskills", data, opts);
+    },
+
+    /** The bundles picked for an agent, in order; not its own bundle. */
+    GetAgentBundlesCommand(client: RpcClient, data: CommandGetAgentBundlesData, opts?: RpcOpts): Promise<AgentBundlesResult> {
+        return client.rpcCall("getagentbundles", data, opts);
+    },
+
+    /** Replace an agent's picked bundles; returns the list as stored. */
+    SetAgentBundlesCommand(client: RpcClient, data: CommandSetAgentBundlesData, opts?: RpcOpts): Promise<AgentBundlesResult> {
+        return client.rpcCall("setagentbundles", data, opts);
     },
 
     CreateAgentSkillCommand(client: RpcClient, data: CreateAgentSkillInput, opts?: RpcOpts): Promise<AgentSkill> {

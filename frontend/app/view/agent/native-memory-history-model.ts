@@ -5,7 +5,7 @@
  * NativeMemoryHistoryModel — view model for one native memory file's version
  * history: list, diff any two versions, revert to a prior version, plus the
  * file's current content. Mounted from two places — the agent's own Stash
- * "Memory" tab (`AgentNativeMemoryModal`) and Armory's Personal Memory full
+ * "Memory" tab (`AgentNativeMemoryModal`) and the Memory pane's Personal section's full
  * view (`NativeMemoryFileView`) — both reading the identical
  * `agent:memory:history/diff/revert` RPCs, so there is one source of truth
  * and two entry points, per

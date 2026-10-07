@@ -105,6 +105,14 @@ pub fn agent_mode_of_block(mstore: &Store, block_id: &str) -> String {
     }
 }
 
+/// The [`agent_kind`] of the agent on `block_id`, or `None` when the block
+/// can't be read, for a caller that would rather say nothing than guess (the
+/// LAN fleet feed's `agent_kinds`).
+pub fn agent_kind_of_block(mstore: &Store, block_id: &str) -> Option<&'static str> {
+    let block = mstore.get::<crate::backend::obj::Block>(block_id).ok()??;
+    Some(agent_kind(&crate::backend::obj::meta_get_string(&block.meta, "agentMode", "host")))
+}
+
 /// The embedded manifest, parsed once for [`global_bundles_for_agent`].
 /// `None` if it doesn't parse — `embedded_manifest_parses` pins that it does.
 fn embedded_manifest() -> Option<&'static SeedManifest> {

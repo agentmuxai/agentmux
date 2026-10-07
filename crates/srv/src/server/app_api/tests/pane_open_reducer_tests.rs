@@ -66,6 +66,7 @@ async fn docked_pane_open_block_is_in_reducer_and_tears_off() {
         stack_onto_block_id: None,
         reuse_editor_pane: None,
         select: None,
+        line: None,
         connection: None,
         auth: None,
     };
@@ -164,6 +165,7 @@ async fn stack_onto_block_id_creates_the_block_as_a_tab_of_that_pane() {
         stack_onto_block_id: Some(anchor.clone()),
         reuse_editor_pane: None,
         select: None,
+        line: None,
         connection: None,
         auth: None,
     };
@@ -534,6 +536,7 @@ async fn skip_placement_creates_block_without_touching_the_layout_tree() {
         stack_onto_block_id: None,
         reuse_editor_pane: None,
         select: None,
+        line: None,
         connection: None,
         auth: None,
     };
@@ -574,6 +577,7 @@ fn editor_open_cmd(
         stack_onto_block_id: None,
         reuse_editor_pane,
         select: None,
+        line: None,
         connection: None,
         auth: None,
     }
@@ -1021,6 +1025,22 @@ fn files_view_meta_takes_the_folder_and_the_selection() {
     let meta = pane::build_pane_meta(&cmd).unwrap();
     let home = dirs::home_dir().unwrap().to_string_lossy().into_owned();
     assert_eq!(meta["files:path"], home.as_str(), "defaults to home");
+}
+
+/// `line` on an editor open (Remotes' "Edit in ssh config",
+/// SPEC_REMOTES_PANE_2026_10_05.md §4.3) becomes the one-shot `editor:line`;
+/// line 0 or no line is no request.
+#[test]
+fn editor_meta_carries_the_line_to_open_at() {
+    let mut cmd = editor_open_cmd(None, "/home/u/.ssh/config", None, None);
+    cmd.line = Some(12);
+    let meta = pane::build_pane_meta(&cmd).unwrap();
+    assert_eq!(meta["editor:line"], 12);
+
+    cmd.line = Some(0);
+    assert!(!pane::build_pane_meta(&cmd).unwrap().contains_key("editor:line"));
+    cmd.line = None;
+    assert!(!pane::build_pane_meta(&cmd).unwrap().contains_key("editor:line"));
 }
 
 #[test]

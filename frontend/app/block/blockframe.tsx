@@ -45,6 +45,7 @@ import { BlockFrameProps } from "./blocktypes";
 import { PaneSizeBadge } from "./pane-size-badge";
 import { TitleBar } from "./titlebar";
 import { redactSecrets } from "@/app/errors/redact";
+import { remoteSettingsMenuItems } from "@/app/view/remotes/open-remotes";
 
 const NumActiveConnColors = 8;
 
@@ -213,6 +214,9 @@ function handleHeaderContextMenu(
 
     // Header-only: pane color submenu
     menu.push(...buildPaneColorSubmenu(blockData));
+
+    // Header-only: a pane on a remote links to that host's row in Remotes
+    menu.push(...remoteSettingsMenuItems(blockData.oid, blockData.meta?.connection));
 
     // Header-only: view-specific settings (font size, theme, etc.)
     const extraItems = viewModel?.getSettingsMenuItems?.();

@@ -352,6 +352,11 @@ pub struct CommandAgentDefCreateFromTemplateData {
     #[serde(default)]
     #[ts(optional)]
     pub memory_id: Option<String>,
+    /// The new agent's Bundles list, in order (`setagentbundles`). Absent
+    /// from an older frontend: the list starts empty.
+    #[serde(default)]
+    #[ts(optional)]
+    pub bundle_ids: Option<Vec<String>>,
     /// Runtime to persist on the cloned definition: "host" or
     /// "container". Empty/absent → keep the template's `agent_type`.
     /// Runtime is chosen at instantiation time, not a property of the

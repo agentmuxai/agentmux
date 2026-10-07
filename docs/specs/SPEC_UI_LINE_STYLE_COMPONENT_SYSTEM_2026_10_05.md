@@ -2,6 +2,7 @@
 
 **Date:** 2026-10-05
 **Status:** active — PR 1 (tokens, components, CI ratchet) in PR #4365, PR 2 (Settings) in PR #4366; the other migrations in §8 follow.
+**Amended 2026-10-06:** the Knowledge pane is renamed **Memory** (view `memory`; `knowledge` still opens it). See `SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md`.
 **Owner:** Agent4
 **Builds on:** `SPEC_DESIGN_SYSTEM_2026_04_23.md` (tokens and mixins, which landed), `SPEC_HARD_CORNERS_2026_05_26.md`, `SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md` (popup menus, still unbuilt)
 

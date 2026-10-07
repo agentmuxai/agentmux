@@ -36,6 +36,11 @@ pub(crate) fn purge_bundle_component_refs(
             "bundle delete: component refs left behind"
         ),
     }
+    // And out of this channel's agents' Bundles lists; a list on another
+    // channel skips it at launch.
+    if let Err(e) = mstore.agent_bundles_forget_bundle(bundle_id) {
+        tracing::warn!(bundle_id, error = %e, "bundle delete: left in agents' Bundles lists");
+    }
 }
 
 /// Bind an imported bundle's components into the ref tables.

@@ -117,10 +117,9 @@ impl Policy {
 pub const SETTING_STOP_KEEPS_BACKGROUND: &str = "agent:stopkeepsbackground";
 
 /// App exit's overall cap (spec §11 O3), the leftover-shell sweep included:
-/// every agent closes concurrently under it. It fits inside the launcher's
-/// upgrade quiesce (10 s, pinned there). On a normal quit the launcher's
-/// backstop (Windows J0 / Unix group kill) may end srv sooner; whatever this
-/// hasn't closed by then, the backstop takes, as before.
+/// every agent closes concurrently under it. The launcher waits longer than
+/// this for srv to exit on every quit (`SRV_EXIT_WAIT`, `quiesce_srv`), so
+/// it force-kills srv only if the teardown overran.
 pub const APP_EXIT_CAP: std::time::Duration = agentmux_common::process::SRV_APP_EXIT_CAP;
 
 /// The grace the leftover-shell sweep gives its kill tasks. [reagent #1422 P2]
@@ -151,11 +150,38 @@ pub struct TeardownReport {
     pub before: AgentResources,
 }
 
+/// Every teardown and window close in flight. Each runs as its own task, so
+/// a caller that stops waiting can't cut it short: an HTTP handler whose
+/// client hung up (the host gives `CloseWindow` 2 s) or srv's servers
+/// stopping on quit. [`app_exit`] waits for all of them.
+static CLOSES: std::sync::LazyLock<tokio_util::task::TaskTracker> =
+    std::sync::LazyLock::new(tokio_util::task::TaskTracker::new);
+
+/// Run `fut` to completion as a tracked task, even if the caller is dropped
+/// first; [`app_exit`] waits for it. `None` if it panicked.
+pub(crate) async fn detached<T: Send + 'static>(fut: impl std::future::Future<Output = T> + Send + 'static) -> Option<T> {
+    CLOSES.spawn(fut).await.ok()
+}
+
 /// Tear down every block in `block_ids` concurrently, under ONE deadline:
-/// ten agents take one grace period, not ten.
+/// ten agents take one grace period, not ten. Each runs [`detached`].
 pub async fn run_many(state: &AppState, block_ids: &[String], policy: Policy) -> Vec<TeardownReport> {
     let deadline = std::time::Instant::now() + blockcontroller::SHUTDOWN_GRACE;
-    futures_util::future::join_all(block_ids.iter().map(|id| run_one(state, id, policy, deadline))).await
+    let teardowns = block_ids.iter().map(|id| {
+        let (st, id) = (state.clone(), id.clone());
+        async move {
+            let report = detached({
+                let id = id.clone();
+                async move { run_one(&st, &id, policy, deadline).await }
+            })
+            .await;
+            report.unwrap_or_else(|| {
+                tracing::error!(block_id = %id, "agent_teardown: teardown panicked");
+                TeardownReport { agent: id.clone(), block_id: id, ..Default::default() }
+            })
+        }
+    });
+    futures_util::future::join_all(teardowns).await
 }
 
 /// [`run_many`] for one block.
@@ -221,9 +247,10 @@ pub fn replace_now(ctrl: &dyn blockcontroller::Controller) -> Result<(), String>
 }
 
 /// App exit (`main.rs`, after the servers stop): tear down every live agent
-/// with `Policy::app_exit()`, concurrently, under [`APP_EXIT_CAP`]. Then stop
-/// any `Shell()` session left over (one whose agent is already gone, or whose
-/// teardown hit the cap). Returns how many controllers it closed.
+/// with `Policy::app_exit()`, concurrently, and wait for every close already
+/// in flight, all under [`APP_EXIT_CAP`]. Then stop any `Shell()` session left
+/// over (one whose agent is already gone, or whose teardown hit the cap).
+/// Returns how many controllers it closed.
 pub async fn app_exit(state: &AppState) -> usize {
     // Durable SSH panes detach rather than end their sessions: they live on
     // on their hosts for the next start to reattach (durable_ssh.rs).
@@ -236,7 +263,15 @@ pub async fn app_exit(state: &AppState) -> usize {
         tokio::task::spawn_blocking(move || without_sub_blocks(&st, ids)).await.unwrap_or(all)
     };
     let cap = APP_EXIT_CAP.saturating_sub(SHELL_SWEEP_GRACE);
-    if tokio::time::timeout(cap, run_many(state, &ids, Policy::app_exit())).await.is_err() {
+    let all_closed = async {
+        run_many(state, &ids, Policy::app_exit()).await;
+        // And every close already in flight: its controller has left the
+        // registry, so the list above doesn't have it (a window closed just
+        // before the quit, whose host stopped waiting for the reply).
+        CLOSES.close();
+        CLOSES.wait().await;
+    };
+    if tokio::time::timeout(cap, all_closed).await.is_err() {
         tracing::warn!(agents = ids.len(), "app exit: teardown hit the cap; the launcher's backstop takes the rest");
     }
     // The kill tasks run taskkill/killpg asynchronously; give them a brief

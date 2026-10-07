@@ -495,30 +495,15 @@ pub(crate) async fn run_unix(
                     // zero user windows remain and the UI thread is provably
                     // dead, so there is nothing to reconcile.
                     //
-                    // SIGTERM first, brief grace, then the hard SIGKILL
-                    // backstop — not a straight SIGKILL. Host is presumed
-                    // wedged by this whole scenario (its UI thread didn't
-                    // answer probes), but srv is NOT — nothing here indicates
-                    // srv itself is unresponsive, only that the host lost
-                    // track of its windows. A bare group-SIGKILL of srv would
-                    // orphan its tracked agent shells: each is spawned into
-                    // ITS OWN process group (`shell_node.rs`'s own
-                    // `.process_group(0)`, same mechanism, different scoping
-                    // purpose), so they are NOT members of srv's group and a
-                    // signal to srv's group alone never reaches them. Giving
-                    // srv a moment to catch SIGTERM lets its own handler
-                    // (`crates/srv/src/main.rs` → `shell_sessions.stop_all()`)
-                    // run first — `stop_all()` reaches every tracked shell by
-                    // its own pid/pgid directly (`shell_node.rs::kill_tree`),
-                    // independent of ambient process-group membership, so it
-                    // closes exactly the gap a launcher-level group-kill
-                    // can't. Same 1500ms grace `terminate_child_gracefully`
-                    // uses elsewhere in this file, for consistency.
+                    // The host's group: SIGTERM first, brief grace, then the
+                    // hard SIGKILL. srv is NOT presumed wedged (only the host
+                    // lost track of its windows), so it is stopped by the
+                    // cleanup below like on any quit: `quiesce_srv` lets it
+                    // close every agent gracefully, and only then kills its
+                    // group if it had to be forced.
                     crate::host_spawn::kill_process_group_gracefully(&host_child);
-                    crate::host_spawn::kill_process_group_gracefully(&srv_child);
                     tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                     crate::host_spawn::kill_process_group_forcefully(&host_child);
-                    crate::host_spawn::kill_process_group_forcefully(&srv_child);
                     break TEARDOWN_BACKSTOP_EXIT_CODE;
                 }
             }
@@ -772,24 +757,35 @@ pub(crate) async fn run_unix(
     // next startup's LSD-3 compensation pass.
     saga_coord.cancel_all_in_flight("launcher shutting down").await;
 
-    // 6. Cleanup. SIGTERM both children so the host reaps its render
-    //    subprocesses (and srv shuts down cleanly), wait a short grace
-    //    window, then SIGKILL any survivor. Dropping the stdin keepalive
-    //    is srv's secondary shutdown trigger (parent-watch EOF).
-    log("terminating children (SIGTERM → grace → SIGKILL)");
-    terminate_child_gracefully(&host_child);
-    terminate_child_gracefully(&srv_child);
-    drop(_srv_stdin_keepalive);
-    let _ = tokio::time::timeout(
-        std::time::Duration::from_millis(1500),
-        async {
-            let _ = host_child.wait().await;
-            let _ = srv_child.wait().await;
-        },
-    )
-    .await;
-    let _ = host_child.start_kill();
-    let _ = srv_child.start_kill();
+    // 6. Cleanup, both children at once. The host: SIGTERM so it reaps its
+    //    render subprocesses, a short grace, then SIGKILL. srv: the one stop
+    //    path (`quiesce_srv`), which lets it close every agent gracefully
+    //    first (`agent_teardown::app_exit`) before any force-kill.
+    log("stopping children (host: SIGTERM → grace → SIGKILL; srv: quiesce)");
+    let srv_pgid = srv_child.id();
+    let stop_host = async {
+        terminate_child_gracefully(&host_child);
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), host_child.wait()).await;
+        let _ = host_child.start_kill();
+    };
+    let stop_srv = crate::upgrade::quiesce_srv(
+        &mut srv_child,
+        _srv_stdin_keepalive,
+        agentmux_common::process::SRV_EXIT_WAIT,
+    );
+    let ((), srv_stopped) = tokio::join!(stop_host, stop_srv);
+    match srv_stopped {
+        Ok((_, crate::upgrade::QuiesceOutcome::ExitedAfterForceKill)) => {
+            // Killed mid-teardown: its agent CLIs share its process group
+            // and would outlive it.
+            log("WARN: srv didn't exit in time — killed it and its process group");
+            if let Some(pgid) = srv_pgid {
+                crate::host_spawn::kill_group_forcefully(pgid);
+            }
+        }
+        Ok((_, outcome)) => log(&format!("srv stopped ({outcome:?})")),
+        Err(e) => log(&format!("WARN: stopping srv failed: {e}")),
+    }
     log(&format!("launcher exiting with code {}", exit_code));
     std::process::exit(exit_code);
 }

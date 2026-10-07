@@ -368,16 +368,16 @@ fn ratios(sizes: &[f64]) -> Vec<f64> {
 
 /// Where a saved Armory pane goes, by its section (and, for the old Memory
 /// section, its Global/Personal subsection): its pane, `connectors` or
-/// `knowledge`, and that pane's section. Mirrors `armoryTarget` in
+/// `memory`, and that pane's section. Mirrors `armoryTarget` in
 /// frontend/app/view/section-pane/panes.ts.
 fn armory_target(section: Option<&str>, subsection: Option<&str>) -> (&'static str, &'static str) {
     match section {
         Some("mcp") => ("connectors", "mcp"),
-        Some("memory") if subsection == Some("personal") => ("knowledge", "personal"),
-        Some("memory") => ("knowledge", "global"),
-        Some("native_memory") => ("knowledge", "personal"),
-        Some("skills") => ("knowledge", "skills"),
-        Some("bundles") => ("knowledge", "bundles"),
+        Some("memory") if subsection == Some("personal") => ("memory", "personal"),
+        Some("memory") => ("memory", "global"),
+        Some("native_memory") => ("memory", "personal"),
+        Some("skills") => ("memory", "skills"),
+        Some("bundles") => ("memory", "bundles"),
         _ => ("connectors", "accounts"),
     }
 }
@@ -430,6 +430,14 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
         let (pane, section) = armory_target(meta_str(meta, "armory:section"), meta_str(meta, "armory:memory:subsection"));
         view_type = pane.to_string();
         config.insert("section".into(), Value::String(section.to_string()));
+    }
+    // Memory was named Knowledge; a block saved then still says so, and keeps
+    // its section under the old key until it's next changed.
+    if view_type == "knowledge" {
+        view_type = "memory".to_string();
+        if let Some(section) = meta_str(meta, "memory:section").or_else(|| meta_str(meta, "knowledge:section")) {
+            config.insert("section".into(), Value::String(section.to_string()));
+        }
     }
     match view_type.as_str() {
         "agent" => {
@@ -511,7 +519,7 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
                 config.insert("sysinfo_type".into(), Value::String(kind.to_string()));
             }
         }
-        "connectors" | "knowledge" => {
+        "connectors" | "memory" => {
             if let Some(section) = meta_str(meta, &format!("{view_type}:section")) {
                 config.insert("section".into(), Value::String(section.to_string()));
             }
@@ -587,7 +595,7 @@ const MAX_TREE_DEPTH: usize = 32;
 
 /// Views that need no config to open, beyond their type.
 const PLAIN_VIEWS: &[&str] = &[
-    "swarm", "settings", "help", "drone", "workflows", "warden", "toolchain", "launcher", "memory", "identity",
+    "swarm", "settings", "help", "drone", "workflows", "warden", "toolchain", "launcher", "identity",
 ];
 
 /// How to turn a file into panes.
@@ -943,20 +951,22 @@ impl PlanBuilder<'_> {
                 }
                 self.summary.push("System info".to_string());
             }
-            // Files saved before the Armory was split say "armory".
-            "connectors" | "knowledge" | "armory" => {
+            // Files saved before the Armory was split say "armory", and ones
+            // saved before Memory was renamed say "knowledge".
+            "connectors" | "memory" | "knowledge" | "armory" => {
                 let (pane, section) = match kind {
                     "armory" => {
                         let (pane, section) = armory_target(cfg_str(view, "section"), None);
                         (pane, Some(section))
                     }
+                    "knowledge" => ("memory", cfg_str(view, "section")),
                     pane => (pane, cfg_str(view, "section")),
                 };
                 meta.insert("view".into(), pane.into());
                 if let Some(s) = section {
                     meta.insert(format!("{pane}:section"), Value::String(s.to_string()));
                 }
-                self.summary.push(if pane == "connectors" { "Connectors" } else { "Knowledge" }.to_string());
+                self.summary.push(if pane == "connectors" { "Connectors" } else { "Memory" }.to_string());
             }
             k if PLAIN_VIEWS.contains(&k) => {
                 meta.insert("view".into(), Value::String(k.to_string()));

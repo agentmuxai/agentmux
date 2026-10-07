@@ -21,6 +21,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 
 import { createLaunchFlowStore, accountsForProvider, realBundles } from "@/app/store/launch-flow-state";
+import { BundleListEditor } from "./BundleListEditor";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { buildInstanceSlug, slugifyInstanceName } from "../defaults/instance-slug";
@@ -47,7 +48,11 @@ export interface LaunchOverrides {
      *  blocks Launch until the user picks or creates one. Issue #1624
      *  PR-C Part B — was `identityId` (a bundle id). */
     accountId: string;
-    /** Selected Memory bundle id. Required (non-empty) at submit. */
+    /** The launch's own record of a bundle (`db_agents.memory_id`): the
+     *  first of the agent's Bundles list, else a continued row's, else ''.
+     *  Read back by the Continue and Recent lists; launch doesn't use it.
+     *  The list itself is saved to the agent before the launch
+     *  (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). */
     bundleId: string;
     /** v8 — when set, this launch is a continuation of a prior named
      *  agent. The id is recorded as `parent_instance_id` on the new
@@ -125,6 +130,9 @@ interface LaunchFormState {
     image: string;
     accountId: string;
     bundleId: string;
+    /** The Bundles list being edited, carried through the `+ New bundle`
+     *  round-trip. Absent: load the agent's saved list. */
+    bundleIds?: string[];
     /** Continuation context. `null` = "— New agent —". Round-trip
      *  preserved alongside the form fields so Continue mode survives
      *  the `+ New bundle` flow (otherwise an ambient-creds
@@ -214,8 +222,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const setAccountId = (v: string) =>
         flow.dispatch({ type: "AccountChanged", accountId: v });
     const bundleId = () => flow.state.form.bundleId;
-    const setBundleId = (v: string) =>
-        flow.dispatch({ type: "BundleChanged", bundleId: v });
     const submitting = () => flow.state.submit.inFlight;
     const error = () => flow.state.submit.error;
 
@@ -279,6 +285,30 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     );
     const hasUserBundles = createMemo(() => realBundles(flow.state).length > 0);
 
+    // The agent's Bundles list: what it was handed back from the `+ New
+    // bundle` round-trip, else the saved one. Launch saves it only when it
+    // was edited, so a list that hasn't loaded (or failed to) never
+    // overwrites the saved one; the editor waits for the load.
+    const [picks, setPicks] = createSignal<string[]>(props.initialFormState?.bundleIds ?? []);
+    const [picksEdited, setPicksEdited] = createSignal(props.initialFormState?.bundleIds !== undefined);
+    const [picksReady, setPicksReady] = createSignal(picksEdited());
+    const [ownBundleId, setOwnBundleId] = createSignal(props.agent.memory_id ?? "");
+    void RpcApi.GetAgentBundlesCommand(TabRpcClient, { agent_id: props.agent.id })
+        .then((r) => {
+            if (!picksEdited()) setPicks(r.bundle_ids);
+            setOwnBundleId(r.own_bundle_id);
+        })
+        .catch(() => {
+            /* left as it is: Launch saves only what the user then picks */
+        })
+        .finally(() => setPicksReady(true));
+    const editPicks = (ids: string[]) => {
+        setPicks(ids);
+        setPicksEdited(true);
+    };
+    const pickableBundles = createMemo(() => realBundles(flow.state).filter((b) => b.id !== ownBundleId()));
+    const ownBundleName = () => bundles().find((b) => b.id === ownBundleId())?.name;
+
     // Auto-pick the first available account for this provider when
     // nothing is selected yet — saves a click for users with existing
     // accounts. Gated on `!isContinue()` so legacy-continuation rows
@@ -288,12 +318,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         if (accountId()) return;
         const first = accountsForProvider(flow.state, provider()?.id ?? "")[0];
         if (first) setAccountId(first.id);
-    });
-    createEffect(() => {
-        if (isContinue()) return;
-        if (bundleId()) return;
-        const firstReal = realBundles(flow.state)[0];
-        if (firstReal) setBundleId(firstReal.id);
     });
 
     // "+ New ..." buttons delegate to picker-injected callbacks that
@@ -309,6 +333,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         image: image(),
         accountId: accountId(),
         bundleId: bundleId(),
+        bundleIds: picks(),
         // Capture continuation context so the `+ New bundle` round-trip
         // restores Continue mode on return; without this the launch
         // modal flips to New and an ambient-creds continuation's auth
@@ -334,7 +359,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         continuedRow,
         isContinue,
         continueLocksIdentity,
-        continueLocksBundle,
         handleContinueSelect,
         viewMode,
         enterNewMode,
@@ -428,7 +452,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         !submitting()
         && slugifyInstanceName(name()).length > 0
         && accountId() !== ""
-        && bundleId() !== ""
         && authReady();
 
     const resolvedImage = () => {
@@ -442,13 +465,17 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         flow.dispatch({ type: "SubmitClicked" });
         try {
             const row = continuedRow();
+            const bundleIds = picksEdited()
+                ? (await RpcApi.SetAgentBundlesCommand(TabRpcClient, { agent_id: props.agent.id, bundle_ids: picks() }))
+                      .bundle_ids
+                : picks();
             await props.onSubmit({
                 instanceName: name().trim(),
                 agentType: runtime(),
                 environment: runtime() === "container" ? "docker" : "local",
                 containerImage: runtime() === "container" ? resolvedImage() : undefined,
                 accountId: accountId(),
-                bundleId: bundleId(),
+                bundleId: bundleIds[0] ?? bundleId(),
                 // v8 — when continuing a past agent, thread the id +
                 // working directory through. Launch flow uses
                 // workDirOverride to skip allocate_agent_workdir.
@@ -634,9 +661,9 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         <legend class="agent-launch-modal-label">Profile</legend>
                         <span class="agent-launch-modal-hint">
                             A Profile groups the agent's <strong>Identity</strong> (credentials
-                            for Claude, Codex, GitHub, AWS, …) with its <strong>Bundle</strong>
-                            (instructions, context, MCP servers, skills). Both are required —
-                            pick existing ones or create new ones below.
+                            for Claude, Codex, GitHub, AWS, …), which is required, with its{" "}
+                            <strong>Bundles</strong> (instructions, MCP servers, skills), in order:
+                            the first wins when two name the same one.
                         </span>
 
                         <div class="agent-launch-modal-bundle-row">
@@ -692,22 +719,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                             </Show>
                         </div>
 
-                        {/*
-                         * Preset dropdown — companion to Identity.
-                         * The wire selection rides through to the
-                         * backend via `bundleId` on LaunchOverrides;
-                         * the spawn-time content-injection layer
-                         * (instructions, context files, MCP servers,
-                         * skills — presets are provider-agnostic) ships
-                         * in PR-F.4 and will start consuming the
-                         * selection. Until then, picking a non-blank
-                         * preset is visible UX scaffolding that records
-                         * the user's intent without changing runtime
-                         * behavior.
-                         */}
-
+                        {/* The agent's Bundles list, saved to it on Launch
+                            (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). */}
                         <div class="agent-launch-modal-bundle-row">
-                            <span class="agent-launch-modal-bundle-row-label">Bundle</span>
+                            <span class="agent-launch-modal-bundle-row-label">Bundles</span>
                             <Show
                                 when={hasUserBundles()}
                                 fallback={
@@ -715,46 +730,29 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                         icon="plus"
                                         class="agent-launch-modal-bundle-empty-btn"
                                         onClick={handleNewBundle}
-                                        disabled={
-                                            submitting() ||
-                                            continueLocksBundle() ||
-                                            !props.onRequestNewBundle
-                                        }
-                                        title={
-                                            props.onRequestNewBundle
-                                                ? undefined
-                                                : "Coming soon"
-                                        }
+                                        disabled={submitting() || !props.onRequestNewBundle}
+                                        title={props.onRequestNewBundle ? undefined : "Coming soon"}
                                     >
                                         New bundle...
                                     </Button>
                                 }
                             >
-                                <Select
-                                    class="agent-launch-modal-input"
-                                    value={bundleId()}
-                                    onChange={(v) => setBundleId(v)}
-                                    disabled={submitting() || continueLocksBundle()}
-                                    aria-label="Bundle"
-                                >
-                                    <Show when={!bundleId()}>
-                                        <option value="" disabled>— Pick a bundle —</option>
-                                    </Show>
-                                    {/* is_system entries are AgentMux-controlled workspace policy,
-                                        not a selectable per-agent bundle — bundle_memory_upsert
-                                        would refuse any later edit anyway. reagent P1, PR #2782. */}
-                                    <For each={(bundles() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
-                                        {(memory) => (
-                                            <option value={memory.id}>{memory.name}</option>
-                                        )}
-                                    </For>
-                                </Select>
+                                <div class="agent-launch-modal-bundle-list">
+                                    <BundleListEditor
+                                        bundles={pickableBundles()}
+                                        value={picks()}
+                                        onChange={editPicks}
+                                        own={ownBundleName()}
+                                        disabled={submitting() || !picksReady()}
+                                        testId="agent-launch-bundles"
+                                    />
+                                </div>
                                 <IconButton
                                     icon="plus"
                                     tone="neutral"
                                     class="agent-launch-modal-bundle-new-btn"
                                     onClick={handleNewBundle}
-                                    disabled={submitting() || continueLocksBundle() || !props.onRequestNewBundle}
+                                    disabled={submitting() || !props.onRequestNewBundle}
                                     label={props.onRequestNewBundle ? "New bundle..." : "Coming soon"}
                                 />
                             </Show>

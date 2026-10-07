@@ -9,6 +9,7 @@ import { MOS } from "@/app/store/global";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
 import { addWidgetAsPaneTab, effectiveStack, setActiveBlockInStack } from "@/layout/lib/layoutStack";
+import { fireAndForget } from "@/util/util";
 import { META_REMOTES_EXPAND } from "./remotes-sections";
 
 /** Open Remotes in the pane holding `fromBlockId` (switching to its Remotes
@@ -27,4 +28,15 @@ export async function openRemotesInPane(fromBlockId: string, connection?: string
         return;
     }
     await addWidgetAsPaneTab(model, node.id, { meta: { view: "remotes", ...expand } });
+}
+
+/** The pane header's "Remote settings…" (§4.1), for a pane on a remote: Remotes
+ *  in this pane with that host's row expanded. Nothing for a local pane. */
+export function remoteSettingsMenuItems(blockId: string, connection: string | null | undefined): ContextMenuItem[] {
+    const conn = connection?.trim();
+    if (!conn || conn === "local") return [];
+    return [
+        { type: "separator" },
+        { label: "Remote settings…", click: () => fireAndForget(() => openRemotesInPane(blockId, conn)) },
+    ];
 }

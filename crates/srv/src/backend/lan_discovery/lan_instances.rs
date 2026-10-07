@@ -610,6 +610,41 @@ mod tests {
         assert!(d.build_identity_response().get("siblings").is_none());
     }
 
+    #[test]
+    fn the_reply_carries_install_id_and_channel_count_and_stays_one_datagram() {
+        let _env = env_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let now = agentmux_common::time::now_ms_u64();
+        let pid = another_live_pid();
+        // As many siblings as a reply lists, each with the longest channel
+        // name a record may carry, so the byte budget is what limits them.
+        for i in 0..MAX_SIBLINGS {
+            let channel = format!("{i:02}{}", "c".repeat(MAX_CHANNEL_LEN - 2));
+            let mut r = record(&channel, pid, now);
+            r.lan_key = "k".repeat(64);
+            write_record(dir.path(), &r).unwrap();
+        }
+        let d = discovery(Some(dir.path().to_path_buf()));
+        let install_id = "mw3am46w5weex4a4fqrc3avnua";
+
+        let reply = d.probe_response_with(Some(install_id), Some(99));
+        let size = serde_json::to_vec(&reply).unwrap().len();
+        assert!(size <= MAX_REPLY_BYTES, "reply is {size} bytes");
+        assert_eq!(reply["install_id"], install_id);
+        assert_eq!(reply["channels_running"], 99);
+        let kept = reply["siblings"].as_array().unwrap().len();
+        assert!(kept > 0 && kept < MAX_SIBLINGS, "siblings are trimmed first: kept {kept}");
+
+        let identity = d.identity_response_with(Some(install_id), Some(3));
+        assert_eq!(identity["install_id"], install_id);
+        assert_eq!(identity["channels_running"], 3);
+
+        // Unknown: the fields are left out, not sent empty.
+        let bare = d.identity_response_with(None, None);
+        assert!(bare.get("install_id").is_none());
+        assert!(bare.get("channels_running").is_none());
+    }
+
     fn probe_bytes() -> Vec<u8> {
         serde_json::to_vec(&json!({"type": UDP_PROBE_TYPE, "v": UDP_PROTOCOL_VERSION})).unwrap()
     }

@@ -62,7 +62,7 @@ vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 // declares it for the built-ins.
 import { registerPaneTab } from "@/app/block/pane-tab-registry";
 import { stubPaneTab } from "@/app/block/pane-tab-test-utils";
-for (const view of ["term", "agent", "swarm", "knowledge", "warden"]) {
+for (const view of ["term", "agent", "swarm", "memory", "warden"]) {
     registerPaneTab(stubPaneTab(view, { capabilities: { paneZoom: {} } }));
 }
 registerPaneTab(stubPaneTab("editor", { capabilities: { paneZoom: { baseFontSize: 13 } } }));
@@ -127,11 +127,11 @@ describe("zoomAllPanesIn/Out", () => {
 
     // Codex review, PR #3090: warden-view.tsx reads/writes the identical
     // "term:zoom" meta key and applies it as CSS zoom exactly like
-    // knowledge/swarm (both already included) — leaving it out of
+    // memory/swarm (both already included) — leaving it out of
     // getBlockZoom's allowlist was an oversight, not a deliberate
     // exclusion (unlike browser, which is excluded on purpose — see the
     // spec's Non-goals). A warden pane must be part of the batch.
-    it("includes warden panes in the batch — they already speak term:zoom identically to knowledge/swarm", () => {
+    it("includes warden panes in the batch — they already speak term:zoom identically to memory/swarm", () => {
         setBlock("t1", "term");
         setBlock("w1", "warden");
 

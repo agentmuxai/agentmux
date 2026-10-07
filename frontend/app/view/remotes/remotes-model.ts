@@ -250,16 +250,22 @@ export class RemotesViewModel {
         }
     }
 
-    /** Open the ssh config file defining `name` in an editor beside this pane. */
+    /** Open the ssh config file defining `name` in an editor beside this pane,
+     *  at its `Host` line. */
     async editInSshConfig(name: string): Promise<void> {
         const where = await RpcApi.RemoteSshLocateCommand(TabRpcClient, { connection: name });
         if (!where) throw new Error(`your ssh config doesn't define ${name}`);
         await TabRpcClient.rpcCall(
             "pane.open",
-            { view: "editor", file: where.path, split_direction: "right", split_reference_block_id: this.blockId },
+            {
+                view: "editor",
+                file: where.path,
+                line: where.line,
+                split_direction: "right",
+                split_reference_block_id: this.blockId,
+            },
             {}
         );
-        this.setNotice(`${name} is defined on line ${where.line} of ${where.path}.`);
     }
 
     dispose(): void {

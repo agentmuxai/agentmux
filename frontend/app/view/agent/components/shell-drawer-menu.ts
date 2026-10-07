@@ -19,7 +19,7 @@ export const SHELL_PASTE_MAX_BYTES = 1024 * 1024;
 
 export interface ShellDrawerMenuDeps {
     /** The live xterm, or undefined while loading / after a failed start. */
-    getTerminal: () => { getSelection(): string; paste(text: string): void } | undefined;
+    getTerminal: () => { getSelection(): string; paste(text: string): void; focus?(): void } | undefined;
     /** True while an agent holds the shell — human input is dropped then. */
     isAgentLocked: () => boolean;
     readClipboard: () => Promise<string | null | undefined>;
@@ -67,7 +67,10 @@ export async function pasteClipboardIntoShell(deps: ShellDrawerMenuDeps): Promis
         // terminal.paste (not a raw write): applies bracketed-paste wrapping
         // when the shell enabled it, then flows out through the drawer's
         // sendDataHandler like typed input.
-        deps.getTerminal()?.paste(text);
+        const term = deps.getTerminal();
+        term?.paste(text);
+        // The next keystroke (usually Enter) belongs to the shell.
+        term?.focus?.();
     } catch (e) {
         console.error("[shell-drawer] paste failed:", e);
     }

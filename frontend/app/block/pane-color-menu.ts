@@ -5,6 +5,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { setBlockMeta } from "@/app/store/block-meta";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
+import { widgetColorKeys } from "./pane-identity";
 
 export interface PaneHueOption {
     label: string;
@@ -89,6 +90,9 @@ export function setHue(blockId: string, hue: number | null, agentId?: string): v
  */
 export function setWidgetHue(view: string, hue: number | null | undefined): void {
     const next: Record<string, number | null> = { ...getSettingsKeyAtom("pane:colors")() };
+    // A color saved under the widget's former id goes too, or it would keep
+    // applying after a reset.
+    for (const former of widgetColorKeys(view).slice(1)) delete next[former];
     if (hue === undefined) delete next[view];
     else next[view] = hue;
     // A null value deletes the key on disk; SettingsType has no null.

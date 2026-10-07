@@ -30,6 +30,59 @@ pub(crate) enum ForwardError {
     Fatal(String),
 }
 
+impl ForwardError {
+    pub(crate) fn reason(&self) -> &str {
+        match self {
+            Self::Transient(r) | Self::Fatal(r) => r,
+        }
+    }
+}
+
+/// How long a relaunch keeps at it when the running instance's host didn't
+/// take its `open_new_window`: long enough for an instance that is quitting
+/// to let go of the single-instance socket/pipe (its launcher holds on until
+/// srv has closed every agent, up to `SRV_EXIT_WAIT`, via
+/// `upgrade::quiesce_srv`).
+pub(crate) const QUITTING_INSTANCE_WAIT: std::time::Duration =
+    std::time::Duration::from_secs(agentmux_common::process::SRV_EXIT_WAIT.as_secs() + 5);
+
+/// What [`await_running_instance`] ended with.
+pub(crate) enum Handoff<T> {
+    /// The old instance quit; this launcher holds the socket/pipe now.
+    Claimed(T),
+    /// The host answered and took the request.
+    Forwarded,
+    /// Neither within [`QUITTING_INSTANCE_WAIT`]; the last forward error.
+    GaveUp(ForwardError),
+}
+
+/// A relaunch whose forward failed with `first`: the running instance is
+/// starting (no port file yet) or quitting (its host is gone; a clean exit
+/// deletes the port file). Until [`QUITTING_INSTANCE_WAIT`] passes, take the
+/// socket/pipe as soon as the old launcher lets go of it, or forward as soon
+/// as the host answers. Shared by both supervisors.
+pub(crate) fn await_running_instance<T>(
+    mut try_claim: impl FnMut() -> Option<T>,
+    mut try_forward: impl FnMut() -> Result<(), ForwardError>,
+    first: ForwardError,
+) -> Handoff<T> {
+    let until = std::time::Instant::now() + QUITTING_INSTANCE_WAIT;
+    let mut last = first;
+    loop {
+        if let Some(claimed) = try_claim() {
+            return Handoff::Claimed(claimed);
+        }
+        if std::time::Instant::now() >= until {
+            return Handoff::GaveUp(last);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        match try_forward() {
+            Ok(()) => return Handoff::Forwarded,
+            Err(e) => last = e,
+        }
+    }
+}
+
 /// Forward an arbitrary host IPC command over the same authenticated
 /// localhost channel `forward_open_new_window` uses.
 ///
@@ -215,13 +268,31 @@ pub(crate) fn forward_open_new_window_or_log(data_dir: &std::path::Path, dir_has
 /// the running instance, unless it was started by a login entry, which only
 /// asks that AgentMux be running (SPEC_START_WITH_OS_2026_09_25.md §3.6).
 /// Not used by the macOS reopen handler, which is a user asking for a window.
+/// Returns the forward's error, if any, for [`await_running_instance`].
 #[cfg(not(target_os = "windows"))]
-fn forward_for_second_instance(data_dir: &std::path::Path, dir_hash: &str) {
+fn forward_for_second_instance(data_dir: &std::path::Path, dir_hash: &str) -> Option<ForwardError> {
     if !crate::autostart::second_instance_opens_window(&std::env::args().collect::<Vec<_>>()) {
         log("login start: AgentMux is already running — exiting without opening a window");
-        return;
+        return None;
     }
-    forward_open_new_window_or_log(data_dir, dir_hash);
+    match forward_open_new_window(data_dir, dir_hash) {
+        Ok(()) => {
+            log("forwarded open_new_window to existing instance");
+            None
+        }
+        Err(e) => Some(e),
+    }
+}
+
+/// The socket, once the launcher that held it has exited: unlink its file
+/// and bind. `None` while it still answers. Called under the recovery lock.
+#[cfg(not(target_os = "windows"))]
+fn claim_after_quit(socket_path: &str) -> Option<tokio::net::UnixListener> {
+    if std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
+        return None;
+    }
+    let _ = std::fs::remove_file(socket_path);
+    crate::ipc::server::bind_first_unix_socket(socket_path).ok()
 }
 
 /// Bind the launcher's IPC socket with single-instance enforcement +
@@ -336,7 +407,24 @@ pub(crate) fn bind_socket_with_recovery(
                     socket_path
                 );
             }
-            forward_for_second_instance(data_dir, dir_hash);
+            if let Some(first) = forward_for_second_instance(data_dir, dir_hash) {
+                log(&format!(
+                    "[ipc] open_new_window not taken ({}) — waiting for the instance to start or finish quitting",
+                    first.reason()
+                ));
+                match await_running_instance(
+                    || claim_after_quit(socket_path),
+                    || forward_open_new_window(data_dir, dir_hash),
+                    first,
+                ) {
+                    Handoff::Claimed(listener) => {
+                        log("[ipc] the previous instance has quit — starting");
+                        return listener;
+                    }
+                    Handoff::Forwarded => log("forwarded open_new_window to existing instance"),
+                    Handoff::GaveUp(e) => log(&format!("open_new_window forward failed: {}", e.reason())),
+                }
+            }
             log(&format!(
                 "[ipc] second-instance detected — existing launcher owns {}",
                 socket_path
@@ -373,7 +461,7 @@ pub(crate) fn bind_socket_with_recovery(
                             socket_path
                         );
                     }
-                    forward_for_second_instance(data_dir, dir_hash);
+                    let _ = forward_for_second_instance(data_dir, dir_hash);
                     log(&format!(
                         "[ipc] post-recovery bind lost the race to a fresh launcher on {} — exiting as second instance",
                         socket_path
@@ -403,4 +491,44 @@ pub(crate) fn bind_socket_with_recovery(
         }
     }
     // `lock_file` drops here; flock auto-released on close.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{await_running_instance, ForwardError, Handoff};
+
+    /// A relaunch during a quit takes the socket/pipe as soon as the old
+    /// instance lets go of it, not after the whole wait.
+    #[test]
+    fn a_relaunch_claims_as_soon_as_the_old_instance_lets_go() {
+        let mut tries = 0;
+        let started = std::time::Instant::now();
+        let out = await_running_instance(
+            || {
+                tries += 1;
+                (tries == 3).then_some("socket")
+            },
+            || Err(ForwardError::Transient("port file gone".into())),
+            ForwardError::Transient("port file gone".into()),
+        );
+        assert!(matches!(out, Handoff::Claimed("socket")));
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    /// A relaunch while the instance is still starting forwards once its
+    /// host answers.
+    #[test]
+    fn a_relaunch_forwards_once_the_host_answers() {
+        let mut forwards = 0;
+        let out = await_running_instance(
+            || None::<()>,
+            || {
+                forwards += 1;
+                if forwards == 2 { Ok(()) } else { Err(ForwardError::Transient("not yet".into())) }
+            },
+            ForwardError::Transient("not yet".into()),
+        );
+        assert!(matches!(out, Handoff::Forwarded));
+        assert_eq!(forwards, 2);
+    }
 }

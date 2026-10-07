@@ -3,7 +3,7 @@
 
 /**
  * A pane with a rail of sections, each one manager component: the shape of
- * the Connectors and Knowledge panes (connectors.tsx, knowledge.tsx), which
+ * the Connectors and Memory panes (connectors.tsx, memory.tsx), which
  * replaced the Armory. The selected section lives in block meta under the
  * pane's own key, so it names the pane, survives a remount, and lets an entry
  * point open the pane on a given section (panes.ts).
@@ -30,6 +30,9 @@ export interface SectionPaneSpec<Id extends string> {
     view: string;
     /** Block meta key holding the selected section id. */
     sectionKey: string;
+    /** Keys that held it before the pane was renamed, read when `sectionKey`
+     *  holds nothing and cleared on the next selection. */
+    legacySectionKeys?: readonly string[];
     /** Section shown when the meta holds none, or an unknown id. */
     defaultSection: Id;
     /** The rail's accessible name. */
@@ -57,7 +60,8 @@ export class SectionPaneModel<Id extends string> {
         const meta = ctx.meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<Id>(() => {
-            const s = (meta() as Record<string, unknown> | undefined)?.[spec.sectionKey];
+            const m = meta() as Record<string, unknown> | undefined;
+            const s = [spec.sectionKey, ...(spec.legacySectionKeys ?? [])].map((k) => m?.[k]).find((v) => v != null);
             return spec.sections.some((sec) => sec.id === s) ? (s as Id) : spec.defaultSection;
         });
         this.viewName = createMemo<string>(
@@ -66,7 +70,8 @@ export class SectionPaneModel<Id extends string> {
     }
 
     selectSection(id: Id): void {
-        this.setMeta({ [this.spec.sectionKey]: id });
+        const cleared = Object.fromEntries((this.spec.legacySectionKeys ?? []).map((k) => [k, null]));
+        this.setMeta({ ...cleared, [this.spec.sectionKey]: id });
     }
 }
 

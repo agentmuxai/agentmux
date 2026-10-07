@@ -88,7 +88,7 @@ export const MemoryAdoptionApprovalWindow = (): JSX.Element => {
     if (!meta) {
         return (
             <div class="memory-adoption-approval-window memory-adoption-approval-window-error">
-                <p>This window is missing its request and can't be used. Close it and try again from Knowledge → Personal.</p>
+                <p>This window is missing its request and can't be used. Close it and try again from Memory → Personal.</p>
             </div>
         );
     }

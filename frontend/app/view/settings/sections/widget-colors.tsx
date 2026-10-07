@@ -11,7 +11,7 @@ import { For, Show, type JSX } from "solid-js";
 
 import { setWidgetHue } from "@/app/block/pane-color-menu";
 import { paneRoleColor } from "@/app/block/pane-color-scheme";
-import { isLightThemeActive, widgetHueFor } from "@/app/block/pane-identity";
+import { isLightThemeActive, storedWidgetHue, widgetHueFor } from "@/app/block/pane-identity";
 import { listPaneTabs, type PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { Button } from "@/app/element/ui";
 import { getSettingsKeyAtom } from "@/app/store/block-atom-cache";
@@ -42,7 +42,7 @@ export function WidgetColorsSettings(p: { id: string; label: string; description
 function WidgetColorRow(p: { manifest: PaneTabManifest }): JSX.Element {
     const view = () => p.manifest.view;
     const builtIn = () => p.manifest.defaultHue ?? null;
-    const stored = () => getSettingsKeyAtom("pane:colors")()?.[view()];
+    const stored = () => storedWidgetHue(view());
     // The swatch shown as selected: the user's color, else the built-in one.
     const selected = () => (stored() === undefined ? builtIn() : stored());
     const preview = (role: "pill" | "identity") => paneRoleColor(widgetHueFor(view()), undefined, isLightThemeActive(), role);

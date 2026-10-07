@@ -108,16 +108,21 @@ pub(super) fn list_drives() -> Vec<EditorDrive> {
     drives
 }
 
-/// Prepend global memory bundle content into the `# Bundle` section of a
-/// CLAUDE.md string, mirroring the injection done by `write_agent_config_files`
-/// in the `agent.open` RPC path.  If the file has no `BUNDLE_SECTION_HEADING` section, a new
-/// one is inserted before `# Available Skills` (or at the end of the file).
-fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>, agent_mode: &str) -> String {
+/// Prepend Global Memory, then `agent_block` (the agent's picked bundles,
+/// `format_agent_bundle_block`), into the `BUNDLE_SECTION_HEADING` section of
+/// a CLAUDE.md string, mirroring the injection done by
+/// `write_agent_config_files` in the `agent.open` RPC path.  If the file has
+/// no such section, a new one is inserted before `# Available Skills` (or at
+/// the end of the file).
+fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>, agent_mode: &str, agent_block: &str) -> String {
     let bundles = crate::backend::operator_config_seed::global_bundles_for_agent(
         id_store.bundle_list_global().unwrap_or_default(),
         agent_mode,
     );
-    let bundle_block = crate::backend::storage::format_global_bundle_block(&bundles);
+    let bundle_block = crate::backend::storage::join_startup_blocks(
+        &crate::backend::storage::format_global_bundle_block(&bundles),
+        agent_block,
+    );
     if bundle_block.is_empty() {
         return claude_md.to_string();
     }
@@ -243,6 +248,19 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     "WriteAgentConfig"
                 );
                 let agent_mode = cmd.agent_type.clone().unwrap_or_else(|| "host".to_string());
+                // The bundles picked for the agent go into its startup file
+                // after Global Memory. An older frontend sends no agent id:
+                // then there are none.
+                let agent_block = cmd
+                    .agent_id
+                    .as_deref()
+                    .filter(|id| !id.is_empty())
+                    .map(|id| {
+                        crate::backend::storage::format_agent_bundle_block(
+                            &crate::backend::storage::agent_picked_bundles(&mstore, &id_store, id),
+                        )
+                    })
+                    .unwrap_or_default();
 
                 // Host-tier + LAN-tier jekt sender signing keys — see
                 // `agent_config::inject_jekt_signing_keys_into_mcp_json`'s doc
@@ -359,7 +377,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // pre-existing, non-AgentMux-authored file's
                         // content. See
                         // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
-                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode);
+                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode, &agent_block);
                         crate::backend::agent_config::write_claude_md_respecting_ownership(
                             base_path, &content,
                         )
@@ -380,7 +398,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // agent launched from the picker would silently
                         // receive no workspace-wide Global Bundle content at
                         // all.
-                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode);
+                        let content = inject_global_bundles(&file.content, &id_store, &agent_mode, &agent_block);
                         // Never overwrites a pre-existing file (codex P1, PR
                         // #2788) — a simpler exists-guard than CLAUDE.md's
                         // full ownership-aware materialization above; see
@@ -1074,6 +1092,47 @@ mod tests {
     use crate::backend::rpc_types::{
         CommandReadEditorFileResult, CreateScratchFileReq, DeleteEditorFileReq, DirEntry,
     };
+
+    /// The picker launch path puts the agent's picked bundles after Global
+    /// Memory under `# Memory`, as `agent.open` does, and still adds them
+    /// when there is no Global Memory.
+    #[test]
+    fn the_startup_file_gets_global_memory_then_the_picked_bundles() {
+        use crate::backend::storage::store::{Bundle, Store};
+        let id_store = std::sync::Arc::new(Store::open_in_memory().unwrap());
+        let file = "# Agent\n\n# Memory\nown notes\n";
+        let picks = "# [Bundle] Writer\n\nwrite plainly";
+
+        let only_picks = super::inject_global_bundles(file, &id_store, "host", picks);
+        assert_eq!(only_picks, "# Agent\n\n# Memory\n# [Bundle] Writer\n\nwrite plainly\n\n---\n\nown notes\n");
+
+        id_store
+            .bundle_upsert(&Bundle {
+                id: "g1".into(),
+                name: "Rules".into(),
+                description: String::new(),
+                is_blank: false,
+                is_global: true,
+                provider: String::new(),
+                model: String::new(),
+                instructions: "global rule".into(),
+                instructions_by_provider: "{}".into(),
+                context_files: "[]".into(),
+                mcp_servers: "[]".into(),
+                skills: "[]".into(),
+                sort_order: 0,
+                created_at: 0,
+                updated_at: 0,
+                is_system: false,
+            })
+            .unwrap();
+        let both = super::inject_global_bundles(file, &id_store, "host", picks);
+        let global = both.find("# [Workspace] Rules").unwrap();
+        let writer = both.find("# [Bundle] Writer").unwrap();
+        let own = both.find("own notes").unwrap();
+        assert!(global < writer && writer < own, "{both}");
+        assert_eq!(super::inject_global_bundles(file, &id_store, "host", ""), both.replace("\n\n---\n\n# [Bundle] Writer\n\nwrite plainly", ""));
+    }
 
     /// The editor's "only under your home folder" rule, in a WSL distro: under
     /// a distro user's home, never its system folders or the Windows drives
