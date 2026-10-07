@@ -120,6 +120,7 @@ pub mod container;
 pub mod container_cli;
 pub mod container_credential;
 pub mod container_image;
+pub mod registry_probe;
 pub mod cron;
 pub mod dev_proxy;
 pub mod shell_node;

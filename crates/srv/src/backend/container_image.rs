@@ -11,9 +11,8 @@
 //!
 //! Spec: docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md.
 
-use std::time::Duration;
-
 use crate::backend::container::ContainerManager;
+use crate::backend::registry_probe::probe_anonymous;
 use crate::backend::rpc_types::ContainerImageAccess;
 
 /// The public base image: everything a container agent needs except the
@@ -275,91 +274,6 @@ fn split_challenge_params(s: &str) -> Vec<&str> {
     parts.into_iter().filter(|p| !p.is_empty()).collect()
 }
 
-const MANIFEST_ACCEPT: &str = "application/vnd.oci.image.index.v1+json, \
-     application/vnd.oci.image.manifest.v1+json, \
-     application/vnd.docker.distribution.manifest.list.v2+json, \
-     application/vnd.docker.distribution.manifest.v2+json";
-
-/// Ask the image's registry, without credentials, whether its manifest can be
-/// read: the same question the daemon's pull answers. `Unknown` for anything
-/// that isn't a definite answer (offline, a proxy, an unfamiliar registry).
-pub async fn probe_anonymous(image: &str) -> ContainerImageAccess {
-    let Some(image_ref) = parse_image_ref(image) else {
-        return ContainerImageAccess::Unknown;
-    };
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_secs(6))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-    else {
-        return ContainerImageAccess::Unknown;
-    };
-    let url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        image_ref.registry, image_ref.repo, image_ref.reference
-    );
-
-    let first = match client.get(&url).header("Accept", MANIFEST_ACCEPT).send().await {
-        Ok(r) => r,
-        Err(_) => return ContainerImageAccess::Unknown,
-    };
-    match first.status().as_u16() {
-        200 => return ContainerImageAccess::Public,
-        404 => return ContainerImageAccess::NotFound,
-        401 => {}
-        403 => return ContainerImageAccess::Denied,
-        _ => return ContainerImageAccess::Unknown,
-    }
-
-    let challenge = first
-        .headers()
-        .get("www-authenticate")
-        .and_then(|v| v.to_str().ok())
-        .and_then(parse_bearer_challenge);
-    let Some(challenge) = challenge else {
-        return ContainerImageAccess::Denied;
-    };
-
-    let mut query: Vec<(&str, String)> = Vec::new();
-    if let Some(service) = challenge.service {
-        query.push(("service", service));
-    }
-    query.push(("scope", challenge.scope.unwrap_or_else(|| format!("repository:{}:pull", image_ref.repo))));
-    let token = match client.get(&challenge.realm).query(&query).send().await {
-        Ok(r) if r.status().is_success() => r
-            .json::<serde_json::Value>()
-            .await
-            .ok()
-            .and_then(|v| {
-                v.get("token")
-                    .or_else(|| v.get("access_token"))
-                    .and_then(|t| t.as_str())
-                    .map(str::to_string)
-            }),
-        Ok(r) if matches!(r.status().as_u16(), 401 | 403) => return ContainerImageAccess::Denied,
-        _ => None,
-    };
-    let Some(token) = token else {
-        return ContainerImageAccess::Unknown;
-    };
-
-    match client
-        .get(&url)
-        .header("Accept", MANIFEST_ACCEPT)
-        .bearer_auth(token)
-        .send()
-        .await
-    {
-        Ok(r) => match r.status().as_u16() {
-            200 => ContainerImageAccess::Public,
-            401 | 403 => ContainerImageAccess::Denied,
-            404 => ContainerImageAccess::NotFound,
-            _ => ContainerImageAccess::Unknown,
-        },
-        Err(_) => ContainerImageAccess::Unknown,
-    }
-}
-
 /// Whether `image` can be had here. A stored legacy image is also checked
 /// against the base image it falls back to, so the answer matches what a
 /// start would actually do.
@@ -574,19 +488,5 @@ mod tests {
         assert_eq!(better_access(Denied, Unknown), Unknown);
         assert_eq!(better_access(NotFound, Denied), Denied);
         assert_eq!(better_access(Local, Public), Local);
-    }
-
-    /// Hits the real registry. Run by hand:
-    /// `cargo test -p agentmux-srv --bin agentmux-srv -- --ignored probe_real`
-    #[tokio::test]
-    #[ignore]
-    async fn probe_real_registries() {
-        let public = probe_anonymous("docker.io/library/alpine:latest").await;
-        let private = probe_anonymous("ghcr.io/agentmuxai/agent-claude:latest").await;
-        let missing = probe_anonymous("docker.io/library/agentmux-no-such-image-xyz:latest").await;
-        println!("alpine={public:?} agent-claude={private:?} missing={missing:?}");
-        assert_eq!(public, ContainerImageAccess::Public);
-        assert_eq!(private, ContainerImageAccess::Denied);
-        assert!(matches!(missing, ContainerImageAccess::Denied | ContainerImageAccess::NotFound));
     }
 }

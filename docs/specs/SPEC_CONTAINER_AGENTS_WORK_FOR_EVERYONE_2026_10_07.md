@@ -80,7 +80,16 @@ The message begins "Couldn't start the container ..." and `muxspect_handlers::cl
 
 A new RPC, `containerimagecheck { image }`, answers whether an image can be had: `local` (the daemon has it), `public` (an anonymous registry check succeeds), `denied`, `not_found`, or `unknown` (no answer: offline, a proxy, a registry that does not speak the token flow). Only `denied` and `not_found` count against the container. `unknown` never does, because a false "no" would take away a working default.
 
-The registry check is a small anonymous request (`backend/container_image.rs`): the manifest URL, the bearer-token challenge if one is returned, a second request with the anonymous token. It runs in srv, so the renderer needs no network access and the answer matches what the daemon-side pull will do.
+The registry check is a small anonymous request (`backend/registry_probe.rs`): the manifest URL, the bearer-token challenge if one is returned, a second request with the anonymous token. It runs in srv, so the renderer needs no network access and the answer matches what the daemon-side pull will do.
+
+The image name is user data (an imported or custom template can name any registry), and the registry chooses its own token endpoint, so the check treats both as hostile and cannot be used to make srv send requests into the local network:
+
+- It only contacts https hosts. A token endpoint must be https, carry no credentials and use the default port. The registry host named by the image gets the same checks.
+- A host is refused if its name is local (`localhost`, a single label, `.local`, `.internal`, `.localdomain`, `.lan`, `.home.arpa`), if it is an IP literal in a loopback, private, link-local (including the cloud metadata address), carrier-grade NAT, unique-local, multicast, reserved or documentation range, or an IPv6 form that carries one of those (IPv4-mapped, IPv4-compatible, NAT64, 6to4, Teredo).
+- A name is also resolved, and refused if any address it resolves to is in those ranges. The connection is then pinned to the addresses that were checked, so the name cannot resolve differently between the check and the request.
+- Redirects are never followed, for the manifest or the token endpoint; a redirect is just "no answer".
+- The token response is read only up to 64 KiB, and every request and the whole check have a time limit.
+- A refused host is `unknown`, with no request sent, so it never takes the sandbox away. Corporate registries on private addresses therefore get the default path and the daemon's own pull decides.
 
 `AgentCreateFromTemplateModal` runs the check once Docker is known to be available, and `containerPreselect()` (new, in `frontend/app/view/agent/defaults/container-default.ts`) decides the default: container only if the template is a container template, the CLI supports containers, Docker answers, and the image is not `denied`/`not_found`. When it declines because of the image, the Runtime row says why and the host option is already selected: a one-click fallback is the existing dropdown. The container option stays selectable, since the user may know better.
 
@@ -102,7 +111,7 @@ For a stored legacy image the check also tries the base image, mirroring the run
 ## 4. Phases
 
 1. **Pull errors and message mapping.** `ImagePull`, classification, `user_message()`, the shared turn-prepare helper, the muxspect prefix. Useful on its own.
-2. **Image check and create flow.** `container_image.rs`, the RPC and its generated types, `container-default.ts`, the modal.
+2. **Image check and create flow.** `container_image.rs`, `registry_probe.rs`, the RPC and its generated types, `container-default.ts`, the modal.
 3. **Base image and install.** Dockerfile, CLI provisioning (script builders, install, frames, cache), the `PATH` append, the legacy fallback, defaults in the seed and catalog, workflow and script, pin tests, `docs/spec-claude-code-versioning.md`.
 
 ## 5. Test plan
