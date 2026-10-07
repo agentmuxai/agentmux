@@ -79,7 +79,7 @@ impl CliInstall {
 
     /// argv for the install. Everything variable is a positional parameter,
     /// never spliced into the script text.
-    pub fn install_argv(&self) -> Vec<String> {
+    pub fn install_argv(&self, limits: InstallLimits) -> Vec<String> {
         let mut argv = vec![
             "sh".into(),
             "-c".into(),
@@ -88,24 +88,110 @@ impl CliInstall {
             CONTAINER_CLI_DIR.into(),
             self.marker(),
             self.command.clone(),
+            limits.script.as_secs().max(1).to_string(),
         ];
         argv.extend(self.specs.iter().cloned());
         argv
     }
 }
 
+/// How long an install may run. The script limits npm itself (`script`), which
+/// kills the whole process group; the host side (`run`) is the backstop for a
+/// script that does not return, and is followed by [`reap_argv`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InstallLimits {
+    pub run: std::time::Duration,
+    pub script: std::time::Duration,
+}
+
+impl Default for InstallLimits {
+    fn default() -> Self {
+        Self {
+            run: std::time::Duration::from_secs(600),
+            script: std::time::Duration::from_secs(540),
+        }
+    }
+}
+
+/// Regex (in `pkill -f` / `pgrep -f` form) matching the install's `npm`. The
+/// bracket keeps the reap script's own command line, which contains this text,
+/// from matching itself.
+const NPM_INSTALL_PATTERN: &str = "[n]pm install --prefix /home/agent/.agentmux/cli";
+
+/// argv that kills any `npm install` into [`CONTAINER_CLI_DIR`] and waits for
+/// it to be gone. Prints `gone` and exits 0 only once none is left.
+pub fn reap_argv() -> Vec<String> {
+    vec![
+        "sh".into(),
+        "-c".into(),
+        REAP_SCRIPT.into(),
+        "agentmux-cli-reap".into(),
+        NPM_INSTALL_PATTERN.into(),
+    ]
+}
+
+/// `$1` the process pattern.
+const REAP_SCRIPT: &str = r#"pkill -KILL -f "$1" || true
+i=0
+while pgrep -f "$1" >/dev/null 2>&1; do
+    i=$((i+1))
+    if [ "$i" -gt 20 ]; then echo alive; exit 1; fi
+    sleep 0.5
+done
+echo gone"#;
+
+/// Whether the reap script's output says nothing is left running.
+pub fn reap_says_gone(output: &str) -> bool {
+    output.lines().any(|l| l.trim() == "gone")
+}
+
+/// Why an install did not finish, in words for the pane.
+///
+/// `stopped` is whether the host-side backstop confirmed the install is no
+/// longer running; `None` when the backstop did not apply.
+pub fn install_failure_detail(exit: Option<i64>, timed_out: bool, stopped: Option<bool>, output: &str) -> String {
+    if timed_out {
+        return match stopped {
+            Some(true) => "the install took too long and was stopped".to_string(),
+            _ => "the install took too long and could not be stopped; wait a minute before trying again".to_string(),
+        };
+    }
+    // `timeout` exits 124 when it had to kill npm.
+    if exit == Some(124) || exit == Some(137) {
+        return "the install took too long and was stopped".to_string();
+    }
+    let tail = output_tail(output, 600);
+    if !tail.is_empty() {
+        return tail;
+    }
+    format!("the install exited with status {}", exit.map_or("unknown".to_string(), |c| c.to_string()))
+}
+
 /// `$1` command, `$2` install dir, `$3` marker.
 const CHECK_SCRIPT: &str = r#"if command -v "$1" >/dev/null 2>&1 || [ -f "$2/$3" ]; then echo present; else echo missing; fi"#;
 
-/// `$1` install dir, `$2` marker, `$3` command, the rest `name@version`.
+/// `$1` install dir, `$2` marker, `$3` command, `$4` seconds npm may run, the
+/// rest `name@version`.
+///
+/// npm installs into a staging directory inside the volume, so an attempt that
+/// dies half-way never leaves a half-written `node_modules` where the CLI is
+/// looked up. Only a verified install replaces the live tree, and the marker is
+/// written last, so "marker present" always means "complete". The marker of an
+/// older pin goes before the swap for the same reason.
 const INSTALL_SCRIPT: &str = r#"set -eu
-DIR="$1"; MARKER="$2"; BIN="$3"; shift 3
+DIR="$1"; MARKER="$2"; BIN="$3"; LIMIT="$4"; shift 4
+STAGE="$DIR/.staging"
 mkdir -p "$DIR"
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
 export npm_config_cache=/tmp/agentmux-npm-cache npm_config_update_notifier=false
-trap 'rm -rf /tmp/agentmux-npm-cache' EXIT
-npm install --prefix "$DIR" --no-audit --no-fund --no-progress --loglevel=error "$@"
-"$DIR/node_modules/.bin/$BIN" --version >/dev/null
+trap 'rm -rf /tmp/agentmux-npm-cache "$STAGE"' EXIT
+timeout -k 15 "$LIMIT" npm install --prefix "$STAGE" --no-audit --no-fund --no-progress --loglevel=error "$@"
+"$STAGE/node_modules/.bin/$BIN" --version >/dev/null
 rm -f "$DIR"/.installed-*
+rm -rf "$DIR/node_modules"
+mv "$STAGE/node_modules" "$DIR/node_modules"
+"$DIR/node_modules/.bin/$BIN" --version >/dev/null
 : > "$DIR/$MARKER""#;
 
 /// The directory the turn wrapper appends to `PATH`.
@@ -175,13 +261,14 @@ mod tests {
     #[test]
     fn the_scripts_get_their_inputs_as_positional_parameters() {
         let install = claude();
-        let argv = install.install_argv();
+        let argv = install.install_argv(InstallLimits::default());
         assert_eq!(&argv[..2], ["sh", "-c"]);
         assert_eq!(argv[2], INSTALL_SCRIPT);
         assert_eq!(argv[4], CONTAINER_CLI_DIR);
         assert_eq!(argv[5], install.marker());
         assert_eq!(argv[6], "claude");
-        assert_eq!(&argv[7..], install.specs.as_slice());
+        assert_eq!(argv[7], "540", "npm's own limit is the script limit");
+        assert_eq!(&argv[8..], install.specs.as_slice());
         // Nothing variable is part of the script text.
         assert!(!INSTALL_SCRIPT.contains("claude-code"));
         assert!(!INSTALL_SCRIPT.contains(&install.version));
@@ -193,11 +280,69 @@ mod tests {
 
     #[test]
     fn the_install_verifies_the_binary_before_writing_the_marker() {
-        let verify = INSTALL_SCRIPT.find("--version").expect("verifies");
+        let verify = INSTALL_SCRIPT.rfind("--version").expect("verifies");
         let marker = INSTALL_SCRIPT.find(": > ").expect("writes the marker");
-        assert!(verify < marker);
+        assert!(verify < marker, "the marker is the last step, after the final check");
         assert!(INSTALL_SCRIPT.starts_with("set -eu"), "any failed step ends the script");
         assert!(INSTALL_SCRIPT.contains("rm -f \"$DIR\"/.installed-*"), "an older pin's marker goes");
+    }
+
+    #[test]
+    fn the_install_builds_in_a_staging_dir_and_swaps_only_after_it_verified() {
+        let npm = INSTALL_SCRIPT.find("npm install --prefix \"$STAGE\"").expect("npm installs into staging");
+        let verify = INSTALL_SCRIPT.find("\"$STAGE/node_modules/.bin/$BIN\" --version").expect("verifies the staged binary");
+        let drop_marker = INSTALL_SCRIPT.find("rm -f \"$DIR\"/.installed-*").expect("drops the old marker");
+        let drop_live = INSTALL_SCRIPT.find("rm -rf \"$DIR/node_modules\"").expect("drops the live tree");
+        let swap = INSTALL_SCRIPT.find("mv \"$STAGE/node_modules\"").expect("swaps");
+        let write_marker = INSTALL_SCRIPT.find(": > ").expect("writes the marker");
+        assert!(npm < verify && verify < drop_marker && drop_marker < drop_live && drop_live < swap && swap < write_marker);
+        assert!(INSTALL_SCRIPT.contains("rm -rf \"$STAGE\"\n"), "a half-written earlier attempt is cleared first");
+        assert!(INSTALL_SCRIPT.contains("timeout -k 15 \"$LIMIT\" npm install"), "npm limits itself");
+    }
+
+    #[test]
+    fn the_reap_script_kills_the_install_and_waits_until_it_is_gone() {
+        let argv = reap_argv();
+        assert_eq!(argv[2], REAP_SCRIPT);
+        assert!(REAP_SCRIPT.contains("pkill -KILL -f \"$1\""));
+        assert!(REAP_SCRIPT.contains("pgrep -f \"$1\""), "it checks, not just signals");
+        assert!(REAP_SCRIPT.contains("echo alive; exit 1"), "and fails when something survives");
+        // The bracket keeps the script's own command line from matching itself.
+        assert!(argv[4].starts_with("[n]pm install --prefix /home/agent/.agentmux/cli"));
+        assert!(!argv[4].replace('[', "").replace(']', "").is_empty());
+    }
+
+    #[test]
+    fn reap_output_is_read_by_line() {
+        assert!(reap_says_gone("gone\n"));
+        assert!(!reap_says_gone("alive\n"));
+        assert!(!reap_says_gone(""));
+    }
+
+    #[test]
+    fn a_timeout_reads_as_stopped_only_when_the_backstop_confirmed_it() {
+        let stopped = install_failure_detail(None, true, Some(true), "");
+        assert!(stopped.contains("was stopped"), "{stopped}");
+        for unconfirmed in [Some(false), None] {
+            let msg = install_failure_detail(None, true, unconfirmed, "");
+            assert!(msg.contains("could not be stopped"), "{msg}");
+            assert!(msg.contains("wait"), "tells the person not to retry at once: {msg}");
+        }
+    }
+
+    #[test]
+    fn the_scripts_own_timeout_and_a_kill_read_as_too_slow() {
+        for code in [124, 137] {
+            let msg = install_failure_detail(Some(code), false, None, "npm warn something");
+            assert!(msg.contains("took too long"), "{msg}");
+        }
+    }
+
+    #[test]
+    fn an_ordinary_failure_shows_npms_own_last_words_or_the_status() {
+        assert_eq!(install_failure_detail(Some(1), false, None, "npm error code ENOTFOUND\n"), "npm error code ENOTFOUND");
+        assert_eq!(install_failure_detail(Some(1), false, None, ""), "the install exited with status 1");
+        assert_eq!(install_failure_detail(None, false, None, ""), "the install exited with status unknown");
     }
 
     #[test]
@@ -243,7 +388,7 @@ mod tests {
         let npm = bin.join("npm");
         std::fs::write(
             &npm,
-            "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nP=\"$2\"\nmkdir -p \"$P/node_modules/.bin\"\nprintf '#!/bin/sh\\necho 1.2.3\\n' > \"$P/node_modules/.bin/fakecli\"\nchmod +x \"$P/node_modules/.bin/fakecli\"\n",
+            "#!/bin/sh\nwhile [ \"$1\" != \"--prefix\" ]; do shift; done\nP=\"$2\"\nif [ -e \"$P/../.hang\" ]; then sleep 30; fi\nmkdir -p \"$P/node_modules/.bin\"\nprintf '#!/bin/sh\\necho 1.2.3\\n' > \"$P/node_modules/.bin/fakecli\"\nchmod +x \"$P/node_modules/.bin/fakecli\"\n",
         )
         .unwrap();
         std::fs::set_permissions(&npm, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -265,7 +410,7 @@ mod tests {
         let (_, before) = run(CHECK_SCRIPT, &["fakecli", &dir_s, ".installed-x"]);
         assert!(!check_says_present(&before), "{before}");
 
-        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-x", "fakecli", "fake@1.2.3"]);
+        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-x", "fakecli", "60", "fake@1.2.3"]);
         assert!(ok, "install should succeed");
         assert!(cli_dir.join(".installed-x").is_file());
 
@@ -273,15 +418,38 @@ mod tests {
         assert!(check_says_present(&after), "{after}");
 
         // A new pin leaves the old marker behind no longer.
-        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-y", "fakecli", "fake@2.0.0"]);
+        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-y", "fakecli", "60", "fake@2.0.0"]);
         assert!(ok);
         assert!(!cli_dir.join(".installed-x").exists());
         assert!(cli_dir.join(".installed-y").is_file());
 
         // A binary that is not produced fails the script and writes no marker.
-        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-z", "missingcli", "fake@3.0.0"]);
+        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-z", "missingcli", "60", "fake@3.0.0"]);
         assert!(!ok, "a missing binary must fail the install");
         assert!(!cli_dir.join(".installed-z").exists());
+        assert!(!cli_dir.join(".staging").exists(), "staging is cleaned up on failure");
+
+        // A half-written earlier attempt (stale staging, junk in the staging tree)
+        // does not leak into a retry.
+        std::fs::create_dir_all(cli_dir.join(".staging/node_modules/junk")).unwrap();
+        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-w", "fakecli", "60", "fake@4.0.0"]);
+        assert!(ok);
+        assert!(cli_dir.join(".installed-w").is_file());
+        assert!(!cli_dir.join("node_modules/junk").exists(), "stale staging content is not installed");
+
+        // A hanging npm (the fake sleeps while `.hang` exists) is killed by the
+        // script's own limit: the script fails, no marker is written, and the
+        // previous good install is left as it was.
+        std::fs::write(cli_dir.join(".hang"), "").unwrap();
+        let started = std::time::Instant::now();
+        let (ok, _) = run(INSTALL_SCRIPT, &[&dir_s, ".installed-v", "fakecli", "1", "fake@5.0.0"]);
+        assert!(!ok, "the script gives up on a hanging npm");
+        assert!(started.elapsed() < std::time::Duration::from_secs(20), "it did not wait for the sleep");
+        assert!(!cli_dir.join(".installed-v").exists());
+        assert!(cli_dir.join(".installed-w").is_file(), "the previous install and its marker are intact");
+        assert!(cli_dir.join("node_modules/.bin/fakecli").exists());
+        assert!(!cli_dir.join(".staging").exists());
+        std::fs::remove_file(cli_dir.join(".hang")).unwrap();
 
         let _ = std::fs::remove_dir_all(&dir);
     }

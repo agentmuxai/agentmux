@@ -30,7 +30,9 @@ use bollard::container::{
 use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum};
-use crate::backend::container_cli::{check_says_present, output_tail, CliInstall};
+use crate::backend::container_cli::{
+    check_says_present, install_failure_detail, reap_argv, reap_says_gone, CliInstall, InstallLimits,
+};
 use crate::backend::container_image::{CONTAINER_CLI_DIR, 
     classify_pull_error, cli_install_failure_message, docker_error_message, docker_unreachable_message, is_legacy_agent_image,
     looks_like_daemon_unreachable, pull_failure_message, PullFailure, DEFAULT_AGENT_IMAGE,
@@ -876,7 +878,44 @@ impl ContainerManager {
             Err(_) => true,
         };
         let exit = if timed_out { None } else { self.inspect_exec(&exec_id).await? };
-        Ok(ExecOutcome { exit, output, timed_out })
+        Ok(ExecOutcome { exec_id, exit, output, timed_out })
+    }
+
+    /// Poll until the exec has stopped running, or `limit` passes. True when it
+    /// is confirmed finished.
+    async fn wait_exec_finished(&self, exec_id: &str, limit: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + limit;
+        loop {
+            match self.docker_exec_running(exec_id).await {
+                Some(false) => return true,
+                Some(true) => {}
+                None => return false,
+            }
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
+    }
+
+    /// Whether the exec is still running; `None` when Docker can't say.
+    async fn docker_exec_running(&self, exec_id: &str) -> Option<bool> {
+        self.inner.docker.inspect_exec(exec_id).await.ok().map(|i| i.running == Some(true))
+    }
+
+    /// Kill any `npm install` into the CLI directory and wait until none is left.
+    /// True only when that is confirmed.
+    async fn reap_cli_install(&self, container_name: &str) -> bool {
+        match self
+            .exec_collect(container_name, &reap_argv(), std::time::Duration::from_secs(30))
+            .await
+        {
+            Ok(out) => out.exit == Some(0) && reap_says_gone(&out.output),
+            Err(e) => {
+                tracing::warn!(container = container_name, error = %e, "could not check for a running CLI install");
+                false
+            }
+        }
     }
 
     /// Make sure the provider CLI is usable in this container, installing it on
@@ -886,6 +925,17 @@ impl ContainerManager {
         &self,
         container_name: &str,
         install: &CliInstall,
+        on_install_start: impl FnOnce(),
+    ) -> Result<CliProvision, ContainerError> {
+        self.provision_cli_with(container_name, install, InstallLimits::default(), on_install_start).await
+    }
+
+    /// [`provision_cli`](Self::provision_cli) with explicit time limits.
+    async fn provision_cli_with(
+        &self,
+        container_name: &str,
+        install: &CliInstall,
+        limits: InstallLimits,
         on_install_start: impl FnOnce(),
     ) -> Result<CliProvision, ContainerError> {
         let key = install.cache_key(container_name);
@@ -898,7 +948,7 @@ impl ContainerManager {
             locks.entry(container_name.to_string()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
         };
         let guard = lock.lock().await;
-        let result = self.provision_cli_locked(container_name, install, &key, on_install_start).await;
+        let result = self.provision_cli_locked(container_name, install, &key, limits, on_install_start).await;
         drop(guard);
         {
             let mut locks = self.inner.cli_locks.lock().await;
@@ -914,6 +964,7 @@ impl ContainerManager {
         container_name: &str,
         install: &CliInstall,
         key: &str,
+        limits: InstallLimits,
         on_install_start: impl FnOnce(),
     ) -> Result<CliProvision, ContainerError> {
         if self.inner.cli_ready.lock().await.contains(key) {
@@ -928,27 +979,38 @@ impl ContainerManager {
         }
 
         on_install_start();
+
+        // An earlier attempt may still be running (it timed out, or srv restarted
+        // under it). A second npm into the same volume could corrupt it, so
+        // nothing starts until the first is confirmed gone.
+        let fail = |detail: String| ContainerError::CliInstall { command: install.command.clone(), detail };
+        if !self.reap_cli_install(container_name).await {
+            return Err(fail("an earlier install is still running; wait a minute and try again".to_string()));
+        }
+
         tracing::info!(container = container_name, command = %install.command, specs = ?install.specs, "installing the provider CLI in the container");
         let started = std::time::Instant::now();
         let run = self
-            .exec_collect(container_name, &install.install_argv(), std::time::Duration::from_secs(600))
+            .exec_collect(container_name, &install.install_argv(limits), limits.run)
             .await?;
         if run.exit == Some(0) {
             self.inner.cli_ready.lock().await.insert(key.to_string());
             return Ok(CliProvision::Installed { seconds: started.elapsed().as_secs_f64() });
         }
-        let detail = if run.timed_out {
-            "the install took longer than 10 minutes".to_string()
+
+        // The host-side limit passed while the install was still running. Stop
+        // it and confirm it is gone BEFORE returning: the caller's lock is held
+        // until then, so a retry cannot start a second install on top of it.
+        let stopped = if run.timed_out {
+            let reaped = self.reap_cli_install(container_name).await;
+            let finished = self.wait_exec_finished(&run.exec_id, std::time::Duration::from_secs(30)).await;
+            Some(reaped && finished)
         } else {
-            let tail = output_tail(&run.output, 600);
-            if tail.is_empty() {
-                format!("the install exited with status {}", run.exit.map_or("unknown".to_string(), |c| c.to_string()))
-            } else {
-                tail
-            }
+            None
         };
+        let detail = install_failure_detail(run.exit, run.timed_out, stopped, &run.output);
         tracing::warn!(container = container_name, command = %install.command, detail = %detail, "provider CLI install failed");
-        Err(ContainerError::CliInstall { command: install.command.clone(), detail })
+        Err(fail(detail))
     }
 
     async fn forget_cli_ready(&self, container_name: &str) {
@@ -1556,6 +1618,7 @@ impl ContainerRuntimeHandle {
 
 /// What a collected exec produced.
 struct ExecOutcome {
+    exec_id: String,
     exit: Option<i64>,
     output: String,
     timed_out: bool,
@@ -2071,6 +2134,76 @@ mod tests {
             !ContainerManager::owned_mount_targets().contains(&CONTAINER_CLI_DIR.to_string()),
             "adding it to the drift set would recreate every existing container"
         );
+    }
+
+    /// Docker-gated: an install that outruns the host-side limit is killed and
+    /// confirmed gone before `provision_cli` returns, and leaves the volume
+    /// usable: no marker, no live tree, and a retry installs cleanly. Same setup
+    /// as the other install test (AGENTMUX_ITEST_BASE_IMAGE, network to npm).
+    #[tokio::test]
+    #[ignore]
+    async fn itest_provision_cli_timeout_stops_the_install_before_returning() {
+        let image = std::env::var("AGENTMUX_ITEST_BASE_IMAGE").expect("set AGENTMUX_ITEST_BASE_IMAGE to a built base image");
+        let cm = ContainerManager::connect().expect("connect to docker");
+        cm.check_available().await.expect("docker daemon must be reachable");
+
+        let name = "agentmux-itest-provision-timeout";
+        let _ = cm.remove(name, true).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
+        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running");
+        let install = CliInstall::for_provider("claude", "claude").unwrap();
+
+        // The host gives up after 3 s; the script's own limit is far away, so
+        // only the host-side backstop can stop it.
+        let tight = InstallLimits {
+            run: std::time::Duration::from_secs(3),
+            script: std::time::Duration::from_secs(600),
+        };
+        let err = cm.provision_cli_with(name, &install, tight, || {}).await.unwrap_err();
+        let msg = err.user_message();
+        assert!(msg.contains("was stopped"), "{msg}");
+
+        // Confirmed gone: nothing from the install is still running.
+        let alive = cm
+            .exec_collect(
+                name,
+                &["sh".into(), "-c".into(), "pgrep -f '[n]pm install --prefix' >/dev/null && echo alive || echo gone".into()],
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("pgrep");
+        assert!(alive.output.contains("gone"), "{}", alive.output);
+
+        // The volume is not left looking installed.
+        let state = cm
+            .exec_collect(
+                name,
+                &["sh".into(), "-c".into(), "ls -A /home/agent/.agentmux/cli | tr '\\n' ' '".into()],
+                std::time::Duration::from_secs(30),
+            )
+            .await
+            .expect("ls");
+        assert!(!state.output.contains(".installed-") && !state.output.contains("node_modules"), "{}", state.output);
+
+        // And the retry the pane suggests installs cleanly.
+        let retry = cm.provision_cli(name, &install, || {}).await.expect("retry installs");
+        assert!(matches!(retry, CliProvision::Installed { .. }), "{retry:?}");
+
+        // The script's own limit is the other path: it kills npm itself.
+        let _ = cm.remove(name, true).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        cm.ensure_running(name, &image, &[], &[], &ContainerMountSpec::default()).await.expect("recreate");
+        let script_limited = InstallLimits {
+            run: std::time::Duration::from_secs(300),
+            script: std::time::Duration::from_secs(2),
+        };
+        let err = cm.provision_cli_with(name, &install, script_limited, || {}).await.unwrap_err();
+        assert!(err.user_message().contains("took too long"), "{}", err.user_message());
+
+        cm.remove(name, true).await.expect("cleanup");
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-cli-{name}"), None).await;
+        let _ = cm.inner.docker.remove_volume(&format!("agentmux-claude-{name}"), None).await;
     }
 
     /// Docker-gated: a legacy image the registry refuses falls back to the base
