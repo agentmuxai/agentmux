@@ -44,13 +44,29 @@ pub(crate) fn get(fs: &FileStore, uid: &str) -> Result<Option<String>, StoreErro
 /// Returns the id now recorded — the caller's, or the one another channel
 /// recorded first.
 pub(crate) fn claim(fs: &FileStore, uid: &str, memory_id: &str) -> Result<String, StoreError> {
+    claim_unless_live(fs, uid, memory_id, &|_| true)
+}
+
+/// [`claim`], but a recorded bundle `is_live` says doesn't exist (for the
+/// caller) is replaced by `memory_id`. A channel whose bundles live in a store
+/// others can't see (an isolated dev channel) could record an id first; with
+/// plain first-wins every other channel then failed to find it, minted its
+/// own bundle, lost the claim to the invisible one, and couldn't bind its
+/// own — 17 orphaned bundles per fresh channel on one host
+/// (AgentA had 11).
+pub(crate) fn claim_unless_live(
+    fs: &FileStore,
+    uid: &str,
+    memory_id: &str,
+    is_live: &dyn Fn(&str) -> bool,
+) -> Result<String, StoreError> {
     let Some(zone) = zone(uid) else { return Ok(memory_id.to_string()) };
     fs.zone_txn(&zone, |z| {
         let mut s: Sidecar = match z.read(FILE)? {
             Some(b) => serde_json::from_slice(&b).map_err(|e| StoreError::Other(format!("bundle sidecar unreadable: {e}")))?,
             None => Sidecar::default(),
         };
-        if !s.memory_id.is_empty() {
+        if !s.memory_id.is_empty() && is_live(&s.memory_id) {
             return Ok(s.memory_id);
         }
         s.memory_id = memory_id.to_string();
@@ -88,5 +104,16 @@ mod tests {
         assert_eq!(claim(&fs, "agent-a", "b2").unwrap(), "b1", "another channel's later bundle doesn't replace it");
         assert_eq!(get(&fs, "agent-a").unwrap().as_deref(), Some("b1"));
         assert_eq!(get(&fs, "agent-b").unwrap(), None);
+    }
+
+    #[test]
+    fn a_recorded_bundle_the_caller_cant_find_is_replaced() {
+        let fs = FileStore::open_in_memory().unwrap();
+        assert_eq!(claim(&fs, "agent-a", "invisible").unwrap(), "invisible");
+        let live = |id: &str| id != "invisible";
+        assert_eq!(claim_unless_live(&fs, "agent-a", "b2", &live).unwrap(), "b2");
+        assert_eq!(get(&fs, "agent-a").unwrap().as_deref(), Some("b2"));
+        // A live record still wins.
+        assert_eq!(claim_unless_live(&fs, "agent-a", "b3", &live).unwrap(), "b2");
     }
 }

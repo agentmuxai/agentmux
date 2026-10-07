@@ -935,6 +935,19 @@ impl Store {
     /// backfilling across the whole agent population must check
     /// `agent_def_get` first and skip (with a log) anything that only
     /// resolves via the global registry.
+    /// Whether this channel's store has its own row for definition `id`, as
+    /// opposed to the definition only resolving through the global registry
+    /// overlay. Only a local row can have its `default_memory_id` set.
+    pub fn agent_def_has_local_row(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let found: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_agents WHERE id = ?1)",
+            params![id],
+            |r| r.get(0),
+        )?;
+        Ok(found)
+    }
+
     pub fn agent_def_set_memory_id_if_empty(
         &self,
         id: &str,
