@@ -1135,7 +1135,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
         transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
         noteOneWay(paneTag(), `pin:jump:${reason ?? "unspecified"}`);
-        if (oneWayFlow) oneWayFlow.jumpToBottom();
+        // A send or a queued turn starting is a commit point (it gives up
+        // spacer room); each keystroke while typing is not.
+        if (oneWayFlow) oneWayFlow.jumpToBottom(reason === "sent" || reason === "queued-turn");
         else scrollToTrueBottom();
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
