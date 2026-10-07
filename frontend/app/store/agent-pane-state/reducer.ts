@@ -571,8 +571,9 @@ export function update(
             // TurnStart racing a backend that hasn't marked the turn active yet,
             // which would arrive here as a stale active:false), Interrupting to
             // INTERRUPT_TIMEOUT, and Done/Idle/Disconnected are already correct.
-            // Clears currentTool/turnTokens exactly like the liveness watchdog's
-            // recovery, but on an authoritative signal rather than a timeout.
+            // Clears currentTool like the liveness watchdog's recovery, but on
+            // an authoritative signal rather than a timeout. Both keep
+            // turnTokens for the turn's own TurnEnd (see below).
             //
             // `pendingCompactionPing` is cleared REGARDLESS of whether
             // turnPhase itself changes below (reagent P1 + codex P2 on PR

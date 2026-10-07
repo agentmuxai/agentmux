@@ -606,6 +606,16 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.sessionStats?.added_input_tokens).toBe(3_000);
             });
 
+            // The turn's last text is flushed right before its session_end
+            // (useAgentStream), which re-promotes Idle to Streaming: that
+            // promotion is the same turn, and must keep its tokens.
+            it("the final-text flush before session_end keeps the turn's tokens", () => {
+                const flushed = update(reconciled(), { type: "StreamFlushObserved", addedCount: 1, at: 250 }).state;
+                expect(flushed.turnPhase.kind).toBe("Streaming");
+                const r = update(flushed, { type: "TurnEnd", stats: resultStats });
+                expect(r.state.sessionStats?.added_input_tokens).toBe(3_000);
+            });
+
             it("a call of the same turn that the stream delivers after the push still counts toward it", () => {
                 const late = update(reconciled(), { type: "TokensIn", input: 45_000 }).state;
                 const r = update(late, { type: "TurnEnd", stats: resultStats });

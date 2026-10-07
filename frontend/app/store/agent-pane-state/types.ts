@@ -722,9 +722,10 @@ export type AgentPaneCommand =
       }
     /**
      * Stream produced session_end (or fallback timer fired). Final
-     * stats merged with current turn-tokens. Clears currentTool,
-     * turnTokens, and transitions the phase to Done (interrupting →
-     * Done.stopped, otherwise Done.completed).
+     * stats merged with current turn-tokens, which are still there when
+     * the backend's turn-ended push already moved the phase to Idle.
+     * Clears currentTool and turnTokens, and transitions the phase to
+     * Done (interrupting → Done.stopped, otherwise Done.completed).
      */
     | {
           type: "TurnEnd";
