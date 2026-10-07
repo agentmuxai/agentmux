@@ -623,7 +623,9 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@agentmuxai/muxcode",
-    pinned_version: "0.1.0",
+    // The first version published to npm (0.1.0 never was, so the installer
+    // 404ed). Every version pinned here must be published first.
+    pinned_version: "0.8.0",
     base_url_env_var: None,
     supported_vendors: &["ollama", "anthropic", "openai"],
     // Confirmed by design intent: this provider's own doc comment above

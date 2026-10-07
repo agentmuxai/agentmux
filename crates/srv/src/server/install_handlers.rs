@@ -737,7 +737,7 @@ fn spawn_install_task(
         // also unconditional: the user's only signal of progress
         // during long installs is the per-package fetch/extract
         // chatter, so we always pay for the noise to gain the signal.
-        let npm_args: Vec<String> = vec![
+        let mut npm_args: Vec<String> = vec![
             "install".to_string(),
             pkg_arg.clone(),
             "--prefix".to_string(),
@@ -747,6 +747,9 @@ fn spawn_install_task(
             "--progress=false".to_string(),
             "--loglevel=verbose".to_string(),
         ];
+        // AgentMux's own packages come from the public registry whatever the
+        // machine's .npmrc routes their scope to (cli_install.rs).
+        npm_args.extend(crate::backend::cli_install::npm_registry_args(&npm_package));
 
         emit_line(
             &broker,
