@@ -21,7 +21,7 @@ jobs:
       # Shared by both steps so the self-test actually exercises the same
       # pattern the real check uses, not an independent hardcoded copy that
       # could silently drift and keep passing after PATTERN regresses.
-      PATTERN: '(?m)^(Co-authored-by:\s*.+<.+@.+>|[^\w\n]*Generated with\s+\S.*)\s*$'
+      PATTERN: '(?m)^(Co-authored-by:\s*.+<.+@.+>|[^\w\n]*Generated with[ \t]+\S.*)\s*$'
     steps:
       - name: Self-test (negative control — must run before the real check)
         run: |
@@ -42,6 +42,9 @@ jobs:
           echo '{"commit":{"message":"docs: reject Generated with attribution lines in PRs"}}' \
             | jq -e '.commit.message | test(env.PATTERN; "i") | not' >/dev/null \
             || { echo "::error::self-test failed: prose mention of Generated with was incorrectly matched"; exit 1; }
+          echo '{"commit":{"message":"## Generated with\n\nThe parser output below."}}' \
+            | jq -e '.commit.message | test(env.PATTERN; "i") | not' >/dev/null \
+            || { echo "::error::self-test failed: a Generated with heading followed by a paragraph was matched"; exit 1; }
 
       - name: Check commits and PR description for Co-Authored-By trailers and Generated with lines
         env:
