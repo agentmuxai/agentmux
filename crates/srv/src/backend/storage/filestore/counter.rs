@@ -564,8 +564,7 @@ impl FileStore {
     #[allow(dead_code)] // read by the transcript RPCs in 5a-3
     #[track_caller]
     pub fn line_state(&self, zone_id: &str, name: &str) -> Result<Option<LineState>, StoreError> {
-        let conn = self.lock_conn();
-        Ok(read_row(&conn, zone_id, name)?.map(|r| r.state()))
+        self.read_conn(|conn| Ok(read_row(conn, zone_id, name)?.map(|r| r.state())))
     }
 
     /// Start an epoch for a file that has none (written before this code, or

@@ -27,6 +27,8 @@ mod tests_atomic;
 mod tests_counter;
 #[cfg(test)]
 mod tests_replace;
+#[cfg(test)]
+mod tests_readers;
 
 #[allow(unused_imports)]
 pub use core::{FileStore, DEFAULT_FLUSH_SECS, MAX_CACHE_BYTES};
