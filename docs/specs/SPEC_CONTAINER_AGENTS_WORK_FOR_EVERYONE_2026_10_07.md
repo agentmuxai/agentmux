@@ -1,7 +1,7 @@
 # SPEC: container agents that work for everyone, not only for people who can already pull our image
 
 **Date:** 2026-10-07
-**Status:** implemented in this PR. The one step it cannot do itself is making the new image package public (section 7).
+**Status:** implemented — PR #0000 (this document ships with its code). The one step it cannot do itself is making the new image package public (section 7). Verified 2026-10-07.
 **Author:** Agent1@narko
 **Related:** `docs/spec-claude-code-versioning.md` (how CLI pins are kept in step), `docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md` (container is the default runtime), `docs/specs/container-agent-runtime.md` (history), `docs/specs/SPEC_LAUNCH_CONTEXT_WORKSPACE_RULE_AND_STARTUP_FILES_2026_09_30.md` section 6.3 (the pane's CLI install row this reuses)
 
