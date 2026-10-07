@@ -29,7 +29,7 @@ beforeEach(() => {
     setConfig.mockReset();
     setSettings({});
     unregister = [
-        registerPaneTab({ apiVersion: 1, view: "t-term", label: "Terminal", icon: "terminal", defaultHue: 240, create }),
+        registerPaneTab({ apiVersion: 1, view: "t-term", aliases: ["t-was"], label: "Terminal", icon: "terminal", defaultHue: 240, create }),
         registerPaneTab({ apiVersion: 1, view: "t-plain", label: "Plain", icon: "square", create }),
         registerPaneTab({ apiVersion: 1, view: "t-legacy", legacyOf: "t-term", label: "Legacy", icon: "square", create }),
     ];
@@ -83,6 +83,16 @@ describe("Widget colors", () => {
         expect(reset("Terminal").style.visibility).toBe("hidden");
         expect(reset("Plain").style.visibility).toBe("visible");
         fireEvent.click(reset("Plain"));
+        expect(written()).toEqual({ "pane:colors": null });
+    });
+
+    it("shows a color saved under the widget's former id as set, with Reset", () => {
+        setSettings({ "pane:colors": { "t-was": 30 } });
+        renderSection();
+        expect(swatch("Terminal", "Coral").getAttribute("aria-pressed")).toBe("true");
+        const reset = screen.getAllByText("Reset").find((b) => row("Terminal").contains(b)) as HTMLElement;
+        expect(reset.style.visibility).toBe("visible");
+        fireEvent.click(reset);
         expect(written()).toEqual({ "pane:colors": null });
     });
 

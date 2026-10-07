@@ -18,9 +18,9 @@
 // reconstitute the same agent elsewhere) rather than a config fragment
 // meant to be mixed into agents of any provider.
 //
-// This module is the ViewModel for `view: "memory"` panes. It owns the
-// list of memories, the currently-selected one, and the in-flight edit
-// draft. CRUD goes through the v7 RPC commands
+// This module is the ViewModel for the context-free `BundleManager` (the
+// Memory pane's Bundles section). It owns the list of bundles, the
+// currently-selected one, and the in-flight edit draft. CRUD goes through the v7 RPC commands
 // (listmemories / upsertmemory / deletememory).
 
 import { RpcApi } from "@/app/store/rpc-api";

@@ -1,14 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// BundleSummaryPanel — the read-only summary surface that the
-// agent-settings Identity / Memory tabs now render (PR 5 of
-// docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md, §5 decision 3).
-//
-// Before this PR the `view: "identity"` / `view: "memory"` panes
-// rendered the full-CRUD `IdentityManagerBody` / `BundleManagerBody`.
-// §4 of the spec consolidated all bundle CRUD into the Armory pane;
-// the per-agent settings tabs are now *consumers*, not editors.
+// BundleSummaryPanel — a read-only summary of a bundle or an identity, with a
+// link to where it's managed (PR 5 of
+// docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md, §5 decision 3, put
+// all bundle editing in one place; today that's Memory → Bundles, and
+// Connectors → Accounts for identities). Its callers show it, they don't edit.
 //
 // This panel is CRUD-free: it shows a short pointer explaining that
 // bundles are app-wide data managed in one place, plus a "Manage in
