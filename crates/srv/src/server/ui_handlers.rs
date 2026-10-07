@@ -753,6 +753,75 @@ pub(crate) async fn handle_ui_browser_open(
         .into_response()
 }
 
+/// Proxy a browser-pane request to the host and pass its `data` through:
+/// the shared tail of the snapshot and act handlers.
+async fn proxy_data(state: &AppState, route: &str, body: serde_json::Value) -> axum::response::Response {
+    let host = match get_host_ipc(state).await {
+        Ok(h) => h,
+        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
+    };
+    let host_resp = match proxy_to_host(state, &host, route, body).await {
+        Ok(v) => v,
+        Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
+    };
+    if host_resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = host_resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown host error")
+            .to_string();
+        return err_response(StatusCode::BAD_REQUEST, err);
+    }
+    let data = host_resp.get("data").cloned().unwrap_or(serde_json::Value::Null);
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+/// `POST /api/v1/ui/browser/snapshot` — backs `BrowserSnapshot`
+/// (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §4.1).
+pub(crate) async fn handle_ui_browser_snapshot(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<agentmux_common::api_types::UiBrowserSnapshotRequest>,
+) -> impl IntoResponse {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
+        Ok(b) => b,
+        Err((code, e)) => return err_response(code, e),
+    };
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser snapshot");
+    proxy_data(&state, "snapshot", json!({ "block_id": block_id, "scope": req.scope })).await
+}
+
+/// `POST /api/v1/ui/browser/act` — backs `BrowserClick`, `BrowserFill`,
+/// `BrowserSelect` and `BrowserCheck` (spec §4.2).
+pub(crate) async fn handle_ui_browser_act(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<agentmux_common::api_types::UiBrowserActRequest>,
+) -> impl IntoResponse {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
+        Ok(b) => b,
+        Err((code, e)) => return err_response(code, e),
+    };
+    // The typed text isn't logged: it can be anything the agent was given.
+    tracing::info!(
+        agent_id = %req.auth.agent_id, block_id = %block_id, action = %req.action, r#ref = %req.ref_,
+        "[ui-automation] browser act"
+    );
+    proxy_data(
+        &state,
+        "act",
+        json!({
+            "block_id": block_id,
+            "ref": req.ref_,
+            "action": req.action,
+            "text": req.text,
+            "option": req.option,
+            "checked": req.checked,
+        }),
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::{prune_old_screenshots, SCREENSHOT_RETENTION};

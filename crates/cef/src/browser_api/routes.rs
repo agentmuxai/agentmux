@@ -701,6 +701,15 @@ pub async fn dispatch_key(
     }
 
     if let Some(text) = &req.text {
+        // Never type into a password, one-time-code or card field
+        // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1). Only for a
+        // dedicated browser pane: AgentMux's own panes have no such fields.
+        if !scope_to_block {
+            if let Err(e) = super::act::refuse_typing_into_secret_field(&mut cdp).await {
+                let _ = cdp.close().await;
+                return ok_body(ApiResponse::err(e));
+            }
+        }
         // Input.insertText is atomic and handles IME / composition
         // correctly. Preferred over key-by-key dispatch for strings.
         if let Err(e) = cdp
@@ -957,6 +966,22 @@ fn reject_if_shared_target(scope_to_block: bool, op: &str, block_id: &str) -> Re
         ));
     }
     Ok(())
+}
+
+/// `authorized` for the sibling `act` module's routes.
+pub(super) fn authorized_pub(headers: &HeaderMap, expected: &str) -> bool {
+    authorized(headers, expected)
+}
+
+/// A CDP session for `block_id`, which must be a dedicated browser pane:
+/// `op` acts on the whole page (see `reject_if_shared_target`).
+pub(super) async fn open_dedicated_pane(state: &Arc<AppState>, block_id: &str, op: &str) -> Result<CdpSession, String> {
+    let (cdp, scope_to_block) = open_cdp_for_block(state, block_id).await?;
+    if let Err(e) = reject_if_shared_target(scope_to_block, op, block_id) {
+        let _ = cdp.close().await;
+        return Err(e);
+    }
+    Ok(cdp)
 }
 
 fn authorized(headers: &HeaderMap, expected: &str) -> bool {
