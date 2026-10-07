@@ -34,6 +34,7 @@ vi.mock("@/store/global", () => ({
     lanFirewallAtom: () => null,
     setLanDiscoveryErrorAtom: vi.fn(),
     settingsAtom: () => ({}),
+    viewerPairedAtom: () => null,
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -165,6 +166,28 @@ describe("HostPopoverPanel — Instance row and Data-path link", () => {
         platform = os;
         renderPanel();
         expect(screen.getByRole("button", { name: DATA_DIR })).toHaveAttribute("data-tip", label);
+    });
+});
+
+describe("HostPopoverPanel — pairing a device", () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    // The old QR carried the instance's full auth key in an
+    // `agentmux://connect` link; "Pair a device" replaces it (agentmux-mobile's
+    // SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.2).
+    it("offers Pair a device and no longer shows the auth-key QR", () => {
+        renderPanel(muxbus, { lanDiscoveryEnabled: () => true });
+        expect(screen.getByRole("button", { name: "Pair a device" })).toBeEnabled();
+        expect(screen.queryByRole("button", { name: "Show QR code" })).not.toBeInTheDocument();
+        expect(document.body.innerHTML).not.toContain("agentmux://connect");
+    });
+
+    it("explains that pairing needs LAN discovery while it is off", () => {
+        renderPanel();
+        expect(screen.getByRole("button", { name: "Pair a device" })).toBeDisabled();
+        expect(screen.getByText(/Turn on LAN discovery to pair a device/)).toBeInTheDocument();
     });
 });
 

@@ -45,6 +45,10 @@ vi.mock("./sections/recording-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     RecordingSection: () => <div data-testid="recording-section" />,
 }));
+vi.mock("./sections/devices-section", async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    DevicesSection: () => <div data-testid="devices-section" />,
+}));
 vi.mock("./sections/advanced-section", async (importOriginal) => ({
     ...(await importOriginal<object>()),
     AdvancedSection: () => <div data-testid="advanced-section" />,
@@ -64,11 +68,11 @@ describe("SettingsView section tabs", () => {
         return { ...result, model };
     }
 
-    it("orders the tabs as Appearance, Window & Panes, Terminal, Sounds, Notifications & Tray, Recording, Advanced", () => {
+    it("orders the tabs as Appearance, Window & Panes, Terminal, Sounds, Notifications & Tray, Recording, Paired devices, Advanced", () => {
         renderSettings();
         const tabs = screen.getByRole("tablist", { name: "Settings section" });
         const labels = Array.from(tabs.querySelectorAll('[role="tab"]')).map((el) => el.textContent);
-        expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Advanced"]);
+        expect(labels).toEqual(["Appearance", "Window & Panes", "Terminal", "Sounds", "Notifications & Tray", "Recording", "Paired devices", "Advanced"]);
     });
 
     it("defaults to the Appearance section visible", () => {

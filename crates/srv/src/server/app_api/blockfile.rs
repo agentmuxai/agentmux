@@ -139,310 +139,316 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(
         COMMAND_BLOCKFILE_READ_RANGE,
         move |cmd: CommandBlockfileReadRangeData, _ctx| {
-            let broker = broker.clone();
-            let filestore = filestore.clone();
-            let global_store = global_store.clone();
-            let mstore = mstore.clone();
-            async move {
-
-                tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, offset = cmd.offset, limit = cmd.limit, "blockfile:read_range");
-                let started = std::time::Instant::now();
-                let mut clock = ReadRangeClock::default();
-
-                let limit = cmd.limit.min(10_000) as usize;
-                let offset = cmd.offset as usize;
-                let end = offset.saturating_add(limit);
-
-                // Cross-channel fallback: when this channel has no local `output`
-                // for the block, read the agent's GLOBAL transcript zone
-                // (`agent:<defId>:current`) instead. `read_block` is the zone for
-                // every FileStore call below — the local block_id normally, the
-                // agent zone when the agent ran in another build/channel.
-                let source = global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename);
-                let stream = match &source {
-                    Some((_, zone)) => format!("g:{zone}"),
-                    None => format!("b:{}", cmd.block_id),
-                };
-                let (filestore, read_block) = source.unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
-                clock.source_ms = ms_since(started);
-
-                // Generation (Phase 5a-3): read before and after the lines. A
-                // replace always mints a new one, so the same value on both
-                // sides proves every line came from that generation — only then
-                // does the response name it. `expect_gen` turns any other
-                // outcome into `gen_mismatch` instead of lines of another file.
-                let transcript = cmd.filename == crate::backend::agent_session::OUTPUT_FILE;
-                let lap = std::time::Instant::now();
-                let gen_before = if transcript { db_generation(&filestore, &read_block).await } else { None };
-                clock.gen_before_ms = ms_since(lap);
-                let mismatch = |gen: Option<String>| BlockfileReadRangeResult {
-                    stream: Some(stream.clone()),
-                    gen,
-                    gen_mismatch: Some(true),
-                    ..Default::default()
-                };
-                if let Some(expected) = &cmd.expect_gen {
-                    if gen_before.as_deref() != Some(expected.as_str()) {
-                        return Ok(mismatch(gen_before));
-                    }
-                }
-                let finish = |mut result: BlockfileReadRangeResult, gen_after: Option<String>| {
-                    if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
-                        trim_to_last_turns(&mut result, offset as u64, turns as usize);
-                    }
-                    if let Some(bytes) = cmd.tail_bytes.filter(|b| *b > 0) {
-                        trim_to_tail_bytes(&mut result, offset as u64, bytes as usize);
-                    }
-                    if gen_before.is_some() && gen_after == gen_before {
-                        result.stream = Some(stream.clone());
-                        result.gen = gen_before.clone();
-                        result
-                    } else if cmd.expect_gen.is_some() {
-                        mismatch(gen_after)
-                    } else {
-                        result
-                    }
-                };
-
-                // Fast path: output.idx — a lazily-built, self-validating byte-offset
-                // index of every non-blank line in `output`. It lets us seek directly
-                // to the requested line range instead of loading the whole file.
-                //
-                // The index is a pure cache of `output`: its 8-byte header records
-                // the `output` size it was built for. If that equals `output`'s
-                // current size (and it is labelled with `output`'s generation) the
-                // index is fresh; otherwise THIS path extends it (`extend_output_idx`,
-                // #2838): it scans just the bytes appended since, re-deriving the
-                // last indexed line so a straddling partial line isn't
-                // double-counted, and rebuilds from byte 0 only when the index
-                // can't be a base (missing, shrunk, another generation's).
-                //
-                // Gated to non-circular files: circular `output` (terminal ring buffers)
-                // drops early bytes, so absolute byte offsets wouldn't map cleanly.
-                use crate::backend::blockcontroller::shell::{extend_output_idx, read_via_index, read_via_stale_index};
-                if cmd.filename == "output" {
-                    // Runs on the blocking pool (#2841). A full rebuild is a
-                    // streaming scan of `output`, which reaches hundreds of MB
-                    // on a long-lived agent, and every index/output read below
-                    // is blocking file I/O as well — none of it may occupy a
-                    // Tokio runtime worker. The closure body is unchanged; only
-                    // where it runs is.
-                    let idx_clock = std::sync::Arc::new(std::sync::Mutex::new(IndexClock::default()));
-                    let idx_result: Option<BlockfileReadRangeResult> = {
-                        let filestore = filestore.clone();
-                        let read_block = read_block.clone();
-                        let idx_clock = idx_clock.clone();
-                        let spawned = std::time::Instant::now();
-                        let compute = move || -> Option<BlockfileReadRangeResult> {
-                        idx_clock.lock().unwrap().queued_ms = ms_since(spawned);
-                        let run = std::time::Instant::now();
-                        let out_stat = filestore.stat(&read_block, "output").ok()??;
-                        if out_stat.opts.circular {
-                            return None; // circular files: fall back to slow path
-                        }
-                        // Everything the answer rests on — the index judged fresh,
-                        // its entries, the output bytes they point at — comes from
-                        // ONE database snapshot (Codex on #3634), never the stale
-                        // per-process `stat` cache. A missing or stale index is
-                        // rebuilt once, for the output as a snapshot saw it, and read
-                        // again in a new snapshot; if that still doesn't match
-                        // (replaced again meanwhile), the slow path below answers.
-                        // A missing or stale index is brought up to date by
-                        // extending it from its last line — scanning only the
-                        // bytes appended since, as `line_count` did before it
-                        // answered from the counter (5a-3b). A full rebuild on
-                        // every read of a grown file cost seconds on a large
-                        // agent zone. `extend_output_idx` still rebuilds when
-                        // the index can't be a base (another generation's,
-                        // shrunk, missing).
-                        let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
-                            Some(read) => read,
-                            None => {
-                                let extend = std::time::Instant::now();
-                                let extended = extend_output_idx(&filestore, &read_block);
-                                idx_clock.lock().unwrap().extend_ms = Some(ms_since(extend));
-                                // A failed extension leaves an index that
-                                // may be far behind: its prefix isn't a
-                                // stand-in for the read, so take the
-                                // whole-file path below (#4384).
-                                extended?;
-                                match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
-                                    Some(read) => read,
-                                    // The extension succeeded, so only an
-                                    // append that landed since (an agent's
-                                    // spawn writing to the transcript its pane
-                                    // is opening) can make this miss: serve
-                                    // the indexed prefix, a few lines short at
-                                    // most, rather than read the whole file
-                                    // below (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
-                                    None => {
-                                        let read = read_via_stale_index(&filestore, &read_block, offset as u64, limit as u64)?;
-                                        idx_clock.lock().unwrap().stale = true;
-                                        read
-                                    }
-                                }
-                            }
-                        };
-                        idx_clock.lock().unwrap().run_ms = ms_since(run);
-                        let total_lines = read.total;
-
-                        // Empty result cases — answered from the index, no output read.
-                        if read.line_offsets.is_empty() {
-                            return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, ..Default::default() });
-                        }
-                        let raw = read.raw;
-                        let text = String::from_utf8_lossy(&raw);
-                        let lines: Vec<String> = text
-                            .lines()
-                            .filter(|l| !l.trim().is_empty())
-                            .map(|l| l.to_string())
-                            .collect();
-
-                        // Receive-time stamps for the returned lines, from the
-                        // output.tsidx sidecar in the same snapshot as the lines
-                        // (`read_via_index`; only a window of the sidecar is
-                        // read). Best-effort: no stamps is never a failed read.
-                        // Offsets and lines must pair up one to one.
-                        let stamps = read.stamps.filter(|s| s.len() == lines.len());
-
-                        Some(BlockfileReadRangeResult { lines, total: total_lines, stamps, ..Default::default() })
-                        };
-                        // A panic in the scan must degrade to the slow path
-                        // below, not fail the read — but it is logged rather
-                        // than silently swallowed.
-                        match tokio::task::spawn_blocking(compute).await {
-                            Ok(v) => v,
-                            Err(e) => {
-                                tracing::warn!(
-                                    block_id = %cmd.block_id,
-                                    error = %e,
-                                    "blockfile:read_range: output.idx task failed; falling back"
-                                );
-                                None
-                            }
-                        }
-                    };
-                    clock.index = Some(std::mem::take(&mut *idx_clock.lock().unwrap()));
-                    if let Some(result) = idx_result {
-                        let lap = std::time::Instant::now();
-                        let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
-                        clock.gen_after_ms = ms_since(lap);
-                        let result = finish(result, gen_after);
-                        clock.log_done(&cmd.block_id, offset, limit, "index", started, &result);
-                        return Ok(result);
-                    }
-                }
-
-                // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
-                // MPS broker ring buffer (MAX_PERSIST = 4096 events).
-                //
-                // If FileStore has the file and it is non-empty, read from disk.
-                // Otherwise fall back to ring buffer for backward compatibility.
-                let filestore_lines = match filestore.stat(&read_block, &cmd.filename) {
-                    Ok(Some(ref wf)) if wf.size > 0 => {
-                        if !whole_file_read_allowed(&cmd.filename, wf.opts.circular, wf.size) {
-                            tracing::warn!(
-                                block_id = %cmd.block_id,
-                                size = wf.size,
-                                total_ms = ms_since(started),
-                                "blockfile:read_range: output.idx can't serve this read and the transcript is too large to read whole; refusing"
-                            );
-                            return Err(format!(
-                                "blockfile:read_range: the transcript index for {} is unavailable right now; retry",
-                                cmd.block_id
-                            ));
-                        }
-                        if wf.size >= WHOLE_FILE_WARN_BYTES {
-                            tracing::warn!(
-                                block_id = %cmd.block_id,
-                                filename = %cmd.filename,
-                                size = wf.size,
-                                "blockfile:read_range: reading the whole file (no usable output.idx)"
-                            );
-                        }
-                        match filestore.read_file(&read_block, &cmd.filename) {
-                            Ok(Some(bytes)) => {
-                                let text = String::from_utf8_lossy(&bytes);
-                                let lines: Vec<String> = text.lines()
-                                    .filter(|l| !l.trim().is_empty())
-                                    .map(|l| l.to_string())
-                                    .collect();
-                                Some(lines)
-                            }
-                            Ok(None) => None,
-                            Err(e) => {
-                                tracing::warn!(
-                                    block_id = %cmd.block_id,
-                                    filename = %cmd.filename,
-                                    error = %e,
-                                    "blockfile:read_range: filestore read failed, falling back to ring buffer"
-                                );
-                                None
-                            }
-                        }
-                    }
-                    Ok(_) => None, // file absent or empty → fall back
-                    Err(e) => {
-                        tracing::warn!(
-                            block_id = %cmd.block_id,
-                            error = %e,
-                            "blockfile:read_range: filestore stat failed, falling back to ring buffer"
-                        );
-                        None
-                    }
-                };
-
-                let all_lines = if let Some(lines) = filestore_lines {
-                    lines
-                } else {
-                    // Fallback: reconstruct from MPS event ring buffer.
-                    // The ring buffer holds at most MAX_PERSIST = 4096 events;
-                    // older events are evicted. Offset 0 = oldest retained line.
-                    let scope = format!("block:{}", cmd.block_id);
-                    let events = broker.read_event_history(
-                        crate::backend::mps::EVENT_BLOCK_FILE,
-                        &scope,
-                        usize::MAX, // broker clamps to MAX_PERSIST internally
-                    );
-
-                    let mut lines: Vec<String> = Vec::new();
-                    for event in events {
-                        let Some(ref event_data) = event.data else { continue };
-                        let ev_filename = event_data.get("filename")
-                            .and_then(|v| v.as_str()).unwrap_or("");
-                        if ev_filename != cmd.filename {
-                            continue;
-                        }
-                        let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) else { continue };
-                        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) else { continue };
-                        let text = String::from_utf8_lossy(&bytes);
-                        for line in text.lines() {
-                            if !line.trim().is_empty() {
-                                lines.push(line.to_string());
-                            }
-                        }
-                    }
-                    lines
-                };
-
-                let total = all_lines.len() as u64;
-                let clamped_offset = offset.min(all_lines.len());
-                let clamped_end = end.min(all_lines.len());
-                let lines: Vec<String> = if clamped_offset >= clamped_end {
-                    Vec::new()
-                } else {
-                    all_lines[clamped_offset..clamped_end].to_vec()
-                };
-
-                let lap = std::time::Instant::now();
-                let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
-                clock.gen_after_ms = ms_since(lap);
-                let result = finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after);
-                clock.log_done(&cmd.block_id, offset, limit, "whole_file", started, &result);
-                Ok(result)
-            }
+            read_range(broker.clone(), filestore.clone(), global_store.clone(), mstore.clone(), cmd)
         },
     );
+}
+
+/// `blockfile:read_range`, also called in-process: the viewer feed reads its
+/// snapshot through it (`server::http_viewer`), so the feed gets the same
+/// bounded read the pane does and never a whole-file one.
+pub(crate) async fn read_range(
+    broker: Arc<crate::backend::mps::Broker>,
+    filestore: Arc<crate::backend::storage::filestore::FileStore>,
+    global_store: Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    mstore: Arc<crate::backend::storage::store::Store>,
+    cmd: CommandBlockfileReadRangeData,
+) -> Result<BlockfileReadRangeResult, String> {
+    tracing::info!(block_id = %cmd.block_id, filename = %cmd.filename, offset = cmd.offset, limit = cmd.limit, "blockfile:read_range");
+    let started = std::time::Instant::now();
+    let mut clock = ReadRangeClock::default();
+
+    let limit = cmd.limit.min(10_000) as usize;
+    let offset = cmd.offset as usize;
+    let end = offset.saturating_add(limit);
+
+    // Cross-channel fallback: when this channel has no local `output`
+    // for the block, read the agent's GLOBAL transcript zone
+    // (`agent:<defId>:current`) instead. `read_block` is the zone for
+    // every FileStore call below — the local block_id normally, the
+    // agent zone when the agent ran in another build/channel.
+    let source = global_output_source(&filestore, &global_store, &mstore, &cmd.block_id, &cmd.filename);
+    let stream = match &source {
+        Some((_, zone)) => format!("g:{zone}"),
+        None => format!("b:{}", cmd.block_id),
+    };
+    let (filestore, read_block) = source.unwrap_or_else(|| (filestore.clone(), cmd.block_id.clone()));
+    clock.source_ms = ms_since(started);
+
+    // Generation (Phase 5a-3): read before and after the lines. A
+    // replace always mints a new one, so the same value on both
+    // sides proves every line came from that generation — only then
+    // does the response name it. `expect_gen` turns any other
+    // outcome into `gen_mismatch` instead of lines of another file.
+    let transcript = cmd.filename == crate::backend::agent_session::OUTPUT_FILE;
+    let lap = std::time::Instant::now();
+    let gen_before = if transcript { db_generation(&filestore, &read_block).await } else { None };
+    clock.gen_before_ms = ms_since(lap);
+    let mismatch = |gen: Option<String>| BlockfileReadRangeResult {
+        stream: Some(stream.clone()),
+        gen,
+        gen_mismatch: Some(true),
+        ..Default::default()
+    };
+    if let Some(expected) = &cmd.expect_gen {
+        if gen_before.as_deref() != Some(expected.as_str()) {
+            return Ok(mismatch(gen_before));
+        }
+    }
+    let finish = |mut result: BlockfileReadRangeResult, gen_after: Option<String>| {
+        if let Some(turns) = cmd.tail_turns.filter(|t| *t > 0) {
+            trim_to_last_turns(&mut result, offset as u64, turns as usize);
+        }
+        if let Some(bytes) = cmd.tail_bytes.filter(|b| *b > 0) {
+            trim_to_tail_bytes(&mut result, offset as u64, bytes as usize);
+        }
+        if gen_before.is_some() && gen_after == gen_before {
+            result.stream = Some(stream.clone());
+            result.gen = gen_before.clone();
+            result
+        } else if cmd.expect_gen.is_some() {
+            mismatch(gen_after)
+        } else {
+            result
+        }
+    };
+
+    // Fast path: output.idx — a lazily-built, self-validating byte-offset
+    // index of every non-blank line in `output`. It lets us seek directly
+    // to the requested line range instead of loading the whole file.
+    //
+    // The index is a pure cache of `output`: its 8-byte header records
+    // the `output` size it was built for. If that equals `output`'s
+    // current size (and it is labelled with `output`'s generation) the
+    // index is fresh; otherwise THIS path extends it (`extend_output_idx`,
+    // #2838): it scans just the bytes appended since, re-deriving the
+    // last indexed line so a straddling partial line isn't
+    // double-counted, and rebuilds from byte 0 only when the index
+    // can't be a base (missing, shrunk, another generation's).
+    //
+    // Gated to non-circular files: circular `output` (terminal ring buffers)
+    // drops early bytes, so absolute byte offsets wouldn't map cleanly.
+    use crate::backend::blockcontroller::shell::{extend_output_idx, read_via_index, read_via_stale_index};
+    if cmd.filename == "output" {
+        // Runs on the blocking pool (#2841). A full rebuild is a
+        // streaming scan of `output`, which reaches hundreds of MB
+        // on a long-lived agent, and every index/output read below
+        // is blocking file I/O as well — none of it may occupy a
+        // Tokio runtime worker. The closure body is unchanged; only
+        // where it runs is.
+        let idx_clock = std::sync::Arc::new(std::sync::Mutex::new(IndexClock::default()));
+        let idx_result: Option<BlockfileReadRangeResult> = {
+            let filestore = filestore.clone();
+            let read_block = read_block.clone();
+            let idx_clock = idx_clock.clone();
+            let spawned = std::time::Instant::now();
+            let compute = move || -> Option<BlockfileReadRangeResult> {
+            idx_clock.lock().unwrap().queued_ms = ms_since(spawned);
+            let run = std::time::Instant::now();
+            let out_stat = filestore.stat(&read_block, "output").ok()??;
+            if out_stat.opts.circular {
+                return None; // circular files: fall back to slow path
+            }
+            // Everything the answer rests on — the index judged fresh,
+            // its entries, the output bytes they point at — comes from
+            // ONE database snapshot (Codex on #3634), never the stale
+            // per-process `stat` cache. A missing or stale index is
+            // rebuilt once, for the output as a snapshot saw it, and read
+            // again in a new snapshot; if that still doesn't match
+            // (replaced again meanwhile), the slow path below answers.
+            // A missing or stale index is brought up to date by
+            // extending it from its last line — scanning only the
+            // bytes appended since, as `line_count` did before it
+            // answered from the counter (5a-3b). A full rebuild on
+            // every read of a grown file cost seconds on a large
+            // agent zone. `extend_output_idx` still rebuilds when
+            // the index can't be a base (another generation's,
+            // shrunk, missing).
+            let read = match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
+                Some(read) => read,
+                None => {
+                    let extend = std::time::Instant::now();
+                    let extended = extend_output_idx(&filestore, &read_block);
+                    idx_clock.lock().unwrap().extend_ms = Some(ms_since(extend));
+                    // A failed extension leaves an index that
+                    // may be far behind: its prefix isn't a
+                    // stand-in for the read, so take the
+                    // whole-file path below (#4384).
+                    extended?;
+                    match read_via_index(&filestore, &read_block, offset as u64, limit as u64) {
+                        Some(read) => read,
+                        // The extension succeeded, so only an
+                        // append that landed since (an agent's
+                        // spawn writing to the transcript its pane
+                        // is opening) can make this miss: serve
+                        // the indexed prefix, a few lines short at
+                        // most, rather than read the whole file
+                        // below (docs/reports/REPORT_AGENT_OPEN_STALL_RCA_2026_10_05.md).
+                        None => {
+                            let read = read_via_stale_index(&filestore, &read_block, offset as u64, limit as u64)?;
+                            idx_clock.lock().unwrap().stale = true;
+                            read
+                        }
+                    }
+                }
+            };
+            idx_clock.lock().unwrap().run_ms = ms_since(run);
+            let total_lines = read.total;
+
+            // Empty result cases — answered from the index, no output read.
+            if read.line_offsets.is_empty() {
+                return Some(BlockfileReadRangeResult { lines: vec![], total: total_lines, ..Default::default() });
+            }
+            let raw = read.raw;
+            let text = String::from_utf8_lossy(&raw);
+            let lines: Vec<String> = text
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(|l| l.to_string())
+                .collect();
+
+            // Receive-time stamps for the returned lines, from the
+            // output.tsidx sidecar in the same snapshot as the lines
+            // (`read_via_index`; only a window of the sidecar is
+            // read). Best-effort: no stamps is never a failed read.
+            // Offsets and lines must pair up one to one.
+            let stamps = read.stamps.filter(|s| s.len() == lines.len());
+
+            Some(BlockfileReadRangeResult { lines, total: total_lines, stamps, ..Default::default() })
+            };
+            // A panic in the scan must degrade to the slow path
+            // below, not fail the read — but it is logged rather
+            // than silently swallowed.
+            match tokio::task::spawn_blocking(compute).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!(
+                        block_id = %cmd.block_id,
+                        error = %e,
+                        "blockfile:read_range: output.idx task failed; falling back"
+                    );
+                    None
+                }
+            }
+        };
+        clock.index = Some(std::mem::take(&mut *idx_clock.lock().unwrap()));
+        if let Some(result) = idx_result {
+            let lap = std::time::Instant::now();
+            let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
+            clock.gen_after_ms = ms_since(lap);
+            let result = finish(result, gen_after);
+            clock.log_done(&cmd.block_id, offset, limit, "index", started, &result);
+            return Ok(result);
+        }
+    }
+
+    // Phase 1.3: Prefer FileStore (persistent, no size cap) over the
+    // MPS broker ring buffer (MAX_PERSIST = 4096 events).
+    //
+    // If FileStore has the file and it is non-empty, read from disk.
+    // Otherwise fall back to ring buffer for backward compatibility.
+    let filestore_lines = match filestore.stat(&read_block, &cmd.filename) {
+        Ok(Some(ref wf)) if wf.size > 0 => {
+            if !whole_file_read_allowed(&cmd.filename, wf.opts.circular, wf.size) {
+                tracing::warn!(
+                    block_id = %cmd.block_id,
+                    size = wf.size,
+                    total_ms = ms_since(started),
+                    "blockfile:read_range: output.idx can't serve this read and the transcript is too large to read whole; refusing"
+                );
+                return Err(format!(
+                    "blockfile:read_range: the transcript index for {} is unavailable right now; retry",
+                    cmd.block_id
+                ));
+            }
+            if wf.size >= WHOLE_FILE_WARN_BYTES {
+                tracing::warn!(
+                    block_id = %cmd.block_id,
+                    filename = %cmd.filename,
+                    size = wf.size,
+                    "blockfile:read_range: reading the whole file (no usable output.idx)"
+                );
+            }
+            match filestore.read_file(&read_block, &cmd.filename) {
+                Ok(Some(bytes)) => {
+                    let text = String::from_utf8_lossy(&bytes);
+                    let lines: Vec<String> = text.lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .map(|l| l.to_string())
+                        .collect();
+                    Some(lines)
+                }
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::warn!(
+                        block_id = %cmd.block_id,
+                        filename = %cmd.filename,
+                        error = %e,
+                        "blockfile:read_range: filestore read failed, falling back to ring buffer"
+                    );
+                    None
+                }
+            }
+        }
+        Ok(_) => None, // file absent or empty → fall back
+        Err(e) => {
+            tracing::warn!(
+                block_id = %cmd.block_id,
+                error = %e,
+                "blockfile:read_range: filestore stat failed, falling back to ring buffer"
+            );
+            None
+        }
+    };
+
+    let all_lines = if let Some(lines) = filestore_lines {
+        lines
+    } else {
+        // Fallback: reconstruct from MPS event ring buffer.
+        // The ring buffer holds at most MAX_PERSIST = 4096 events;
+        // older events are evicted. Offset 0 = oldest retained line.
+        let scope = format!("block:{}", cmd.block_id);
+        let events = broker.read_event_history(
+            crate::backend::mps::EVENT_BLOCK_FILE,
+            &scope,
+            usize::MAX, // broker clamps to MAX_PERSIST internally
+        );
+
+        let mut lines: Vec<String> = Vec::new();
+        for event in events {
+            let Some(ref event_data) = event.data else { continue };
+            let ev_filename = event_data.get("filename")
+                .and_then(|v| v.as_str()).unwrap_or("");
+            if ev_filename != cmd.filename {
+                continue;
+            }
+            let Some(data64) = event_data.get("data64").and_then(|v| v.as_str()) else { continue };
+            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data64) else { continue };
+            let text = String::from_utf8_lossy(&bytes);
+            for line in text.lines() {
+                if !line.trim().is_empty() {
+                    lines.push(line.to_string());
+                }
+            }
+        }
+        lines
+    };
+
+    let total = all_lines.len() as u64;
+    let clamped_offset = offset.min(all_lines.len());
+    let clamped_end = end.min(all_lines.len());
+    let lines: Vec<String> = if clamped_offset >= clamped_end {
+        Vec::new()
+    } else {
+        all_lines[clamped_offset..clamped_end].to_vec()
+    };
+
+    let lap = std::time::Instant::now();
+    let gen_after = if transcript { db_generation(&filestore, &read_block).await } else { None };
+    clock.gen_after_ms = ms_since(lap);
+    let result = finish(BlockfileReadRangeResult { lines, total, ..Default::default() }, gen_after);
+    clock.log_done(&cmd.block_id, offset, limit, "whole_file", started, &result);
+    Ok(result)
 }
 
 fn ms_since(t: std::time::Instant) -> u64 {
@@ -964,6 +970,28 @@ fn counted_line_count(
     let state = if state.counted.is_some() { state } else { fs.init_line_counter(zone, OUTPUT_FILE).ok()?? };
     let counted = state.counted?;
     Some(BlockfileLineCountResult { count: counted.lines, stream: Some(stream), gen: Some(counted.gen) })
+}
+
+/// Where `block_id`'s transcript stands, from the same source `read_range`
+/// reads it from (the block's own `output`, or the agent's global zone): its
+/// stream, generation and line count. `None` while it doesn't exist or can't
+/// be counted. For the viewer feed, which reads the tail through `read_range`.
+pub(crate) async fn transcript_position(
+    filestore: &Arc<crate::backend::storage::filestore::FileStore>,
+    global_store: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
+    mstore: &Arc<crate::backend::storage::store::Store>,
+    block_id: &str,
+) -> Option<(String, String, u64)> {
+    use crate::backend::agent_session::OUTPUT_FILE;
+    let (fs, zone, stream) = match global_output_source(filestore, global_store, mstore, block_id, OUTPUT_FILE) {
+        Some((gfs, zone)) => (gfs, zone.clone(), format!("g:{zone}")),
+        None => (filestore.clone(), block_id.to_string(), format!("b:{block_id}")),
+    };
+    let counted = tokio::task::spawn_blocking(move || counted_line_count(&fs, &zone, stream))
+        .await
+        .ok()
+        .flatten()?;
+    Some((counted.stream?, counted.gen?, counted.count))
 }
 
 /// The valid generation of a transcript's `output`, read from the database on

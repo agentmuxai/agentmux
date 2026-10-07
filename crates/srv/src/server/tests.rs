@@ -86,6 +86,7 @@ pub(crate) fn test_state() -> AppState {
             "test-channel".to_string(),
             "0.28.20".to_string(),
         )),
+        viewer: crate::backend::viewer::ViewerService::new(None, &broker),
         lsp_supervisor: Arc::new(crate::backend::lsp::LspSupervisor::new(event_bus.clone())),
         process_tracker,
         process_broker,
