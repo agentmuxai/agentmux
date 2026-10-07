@@ -57,6 +57,30 @@ function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { natural
     return { naturalPx: fixed + natural, floorPx: fixed + tabs * floor };
 }
 
+/**
+ * Width a flex row spends on everything except `keep`: its padding, the gaps
+ * between its laid-out children, every child's margins, and the width of every
+ * in-flow child not in `keep`. Hidden and absolutely positioned children take
+ * no space.
+ */
+function spentAround(row: HTMLElement, keep: readonly Element[]): number {
+    const style = getComputedStyle(row);
+    let spent = px(style.paddingLeft, 0) + px(style.paddingRight, 0);
+    let laidOut = 0;
+    for (const child of row.children) {
+        const el = child as HTMLElement;
+        if (el.getClientRects().length === 0) continue;
+        const cs = getComputedStyle(el);
+        if (cs.position === "absolute" || cs.position === "fixed") continue;
+        laidOut++;
+        // A kept child's margins still take room; only its own width is shared.
+        spent += px(cs.marginLeft, 0) + px(cs.marginRight, 0);
+        if (!keep.includes(el)) spent += el.offsetWidth;
+    }
+    const gap = px(style.columnGap, 0);
+    return spent + gap * Math.max(0, laidOut - 1);
+}
+
 export function useWidgetBarResponsive(opts: {
     containerRef: () => HTMLDivElement | undefined;
     moreButtonRef: () => HTMLDivElement | undefined;
@@ -94,6 +118,8 @@ export function useWidgetBarResponsive(opts: {
         if (!header || !mirrorRef || !iconMirrorRef) return;
         const tabBar = header.querySelector(".tab-bar") as HTMLElement | null;
         const tabScroll = header.querySelector(".tab-bar-scroll") as HTMLElement | null;
+        // The status area that holds the widget bar (a direct child of the header).
+        const statusArea = container?.parentElement as HTMLElement | null;
         // The widgets give up space first, then the tabs, then the widgets
         // again: labels drop the moment a tab would go below its natural
         // width, and icons overflow only once tabs are at their floor.
@@ -101,7 +127,7 @@ export function useWidgetBarResponsive(opts: {
         const measure = () => {
             const labeledW = mirrorRef?.offsetWidth ?? 0;
             const iconOnlyW = iconMirrorRef?.offsetWidth ?? 0;
-            if (labeledW === 0 || !container || !tabBar || !tabScroll || header.clientWidth === 0) return;
+            if (labeledW === 0 || !container || !tabBar || !tabScroll || !statusArea || header.clientWidth === 0) return;
             const strip = measureTabStrip(tabBar, tabScroll);
             const pinnedCount = pinnedWidgets().length;
             // Always-mounted More button probe gives reliable moreBtnW even
@@ -111,10 +137,15 @@ export function useWidgetBarResponsive(opts: {
             // The icon-only mirror includes the More button only when unpinned
             // widgets exist; strip it to get the pure per-icon width.
             const iconsOnlyW = moreWidgets().length > 0 ? Math.max(0, iconOnlyW - mirrorMoreW) : iconOnlyW;
+            // The room the tab bar and the widget bar share: the header minus
+            // everything else in it and in the status area. Computed from the
+            // header, not from the live bars, so it is right even when the
+            // live widget bar overflows (a jump straight to a narrow window)
+            // and doesn't depend on the tier currently shown.
+            const sharedPx =
+                header.clientWidth - spentAround(header, [tabBar, statusArea]) - spentAround(statusArea, [container]);
             const tier = decideTopBarTier({
-                // Swapping the live widget bar for a mirror gives the tab bar's
-                // width in that tier, whatever else the header holds.
-                sharedPx: tabBar.clientWidth + container.offsetWidth,
+                sharedPx,
                 labeledPx: labeledW,
                 iconOnlyPx: iconOnlyW,
                 tabsNaturalPx: strip.naturalPx,
@@ -140,6 +171,11 @@ export function useWidgetBarResponsive(opts: {
         ro.observe(mirrorRef);
         ro.observe(iconMirrorRef);
         if (iconMirrorMoreRef) ro.observe(iconMirrorMoreRef);
+        // Re-check after a tier change lands (idempotent: the decision doesn't
+        // depend on the tier shown), and when anything beside the bars resizes.
+        if (tabBar) ro.observe(tabBar);
+        if (container) ro.observe(container);
+        if (statusArea) ro.observe(statusArea);
         // Tabs added or removed, and a tab's natural width changing (its
         // wrapper's inline --tab-natural-width), without the header resizing.
         const mo = tabScroll ? new MutationObserver(schedule) : null;
