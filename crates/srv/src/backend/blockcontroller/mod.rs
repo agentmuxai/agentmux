@@ -963,6 +963,48 @@ pub fn resync_controller(
                 config.as_ref().map(|c| c.get_full_config()).as_deref(),
             ) =>
         {
+            // When the user declines the helper, the pane restarts as a plain
+            // SSH terminal: the same resync, forced, which then finds the
+            // pane no longer durable (durable_ssh::wants).
+            let fallback: durable_ssh::Fallback = {
+                let (block_id, tab_id, rt_opts) = (block_id.to_string(), tab_id.to_string(), rt_opts.clone());
+                let (broker, event_bus, mstore, filestore) =
+                    (broker.clone(), event_bus.clone(), mstore.clone(), filestore.clone());
+                let (id_store, identity_store, registry) = (id_store.clone(), identity_store.clone(), registry.clone());
+                let (boot_id, auth_key, config) = (boot_id.clone(), auth_key.to_string(), config.clone());
+                Arc::new(move || {
+                    let Some(block) = mstore.as_ref().and_then(|s| s.get::<Block>(&block_id).ok().flatten()) else {
+                        return false;
+                    };
+                    // Still durable: a restart would only start the same
+                    // durable controller again. Leave the pane stopped.
+                    if durable_ssh::wants(&block.meta, config.as_ref().map(|c| c.get_full_config()).as_deref()) {
+                        tracing::warn!(block_id = %block_id, "durable ssh: still durable, not falling back");
+                        return false;
+                    }
+                    if let Err(e) = resync_controller(
+                        &block,
+                        &tab_id,
+                        rt_opts.clone(),
+                        true,
+                        true,
+                        broker.clone(),
+                        event_bus.clone(),
+                        mstore.clone(),
+                        filestore.clone(),
+                        id_store.clone(),
+                        identity_store.clone(),
+                        registry.clone(),
+                        boot_id.clone(),
+                        &auth_key,
+                        config.clone(),
+                    ) {
+                        tracing::warn!(block_id = %block_id, error = %e, "durable ssh: plain terminal fallback failed");
+                        return false;
+                    }
+                    true
+                })
+            };
             let ctrl = Arc::new(durable_ssh::DurableSshController::new(
                 block_id.to_string(),
                 broker,
@@ -971,6 +1013,7 @@ pub fn resync_controller(
                 filestore,
                 auth_key.to_string(),
                 config.clone(),
+                Some(fallback),
             ));
             register_controller(block_id, ctrl.clone());
             ctrl.start(block_meta.clone(), rt_opts, force)
