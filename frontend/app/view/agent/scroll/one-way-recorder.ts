@@ -64,6 +64,9 @@ export interface Violation {
     /** Blank space below the last row in the previous frame, px (overshoot only). */
     gapBefore: number;
     causes: string[];
+    /** Geometry of the two frames, for diagnosis: [prev, cur]. */
+    scrollTop?: [number, number];
+    scrollHeight?: [number, number];
 }
 
 export interface FrameResult {
@@ -102,14 +105,19 @@ export function inferCauses(prev: FrameSample, cur: FrameSample): string[] {
     }
     const before = new Map(prev.rows.map((r) => [r.id, r]));
     const shrinks: { type: string; px: number }[] = [];
+    const grows: { type: string; px: number }[] = [];
     for (const r of cur.rows) {
         const p = before.get(r.id);
         if (!p) continue;
         const d = p.bottom - p.top - (r.bottom - r.top);
         if (d > MOVE_TOLERANCE_PX) shrinks.push({ type: r.type, px: d });
+        else if (-d > MOVE_TOLERANCE_PX) grows.push({ type: r.type, px: -d });
     }
     shrinks.sort((a, b) => b.px - a.px);
     for (const s of shrinks.slice(0, 2)) causes.push(`row-shrink:${s.type}:${Math.round(s.px)}`);
+    // A row that grew moves every row below it down unless compensated.
+    grows.sort((a, b) => b.px - a.px);
+    for (const g of grows.slice(0, 2)) causes.push(`row-grow:${g.type}:${Math.round(g.px)}`);
     const now = new Set(cur.rows.map((r) => r.id));
     const removed = prev.rows.filter((r) => !now.has(r.id) && visible(r, prev.clientHeight)).length;
     if (removed > 0) causes.push(`row-removed:${removed}`);
@@ -162,6 +170,8 @@ export function checkFrame(prev: FrameSample, cur: FrameSample, events: readonly
             rows: moved,
             gapBefore,
             causes: [...inferCauses(prev, cur), ...events],
+            scrollTop: [+prev.scrollTop.toFixed(1), +cur.scrollTop.toFixed(1)],
+            scrollHeight: [prev.scrollHeight, cur.scrollHeight],
         },
     };
 }
@@ -203,6 +213,20 @@ const emptyStats = (pane: string): RecorderStats => ({
     recent: [],
 });
 
+/**
+ * Where a frame is sampled. "ro" (default): just before paint. The one-way
+ * path's observer reports the end of each of its runs (sampleOneWayFrame), and
+ * the last report in a frame is that frame's sample: the state after its
+ * compensation, including runs in later ResizeObserver rounds caused by other
+ * observers. In a frame where it doesn't run, a hidden 1 px probe resized every
+ * frame gives the sample from the ResizeObserver phase. Each frame is compared
+ * at the start of the next one. "post-paint":
+ * a high-priority task right after the frame, which can see a state a later task
+ * produced but that was never painted. Switch with __agentmuxOneWay.setSampling.
+ */
+export type Sampling = "ro" | "post-paint";
+let sampling: Sampling = "ro";
+
 /** Run `fn` right after the current frame is painted (approximately). */
 function afterPaint(fn: () => void): void {
     const sched = (globalThis as { scheduler?: { postTask?: (f: () => void, o: object) => unknown } }).scheduler;
@@ -223,6 +247,12 @@ class OneWayRecorder {
     private running = false;
     private logTimes: number[] = [];
     private bottomPad = 0;
+    private probe: HTMLElement | null = null;
+    private probeRO: ResizeObserver | null = null;
+    private probeWide = false;
+    /** This frame's sample so far (ro mode); compared at the next frame's start. */
+    private frame: FrameSample | null = null;
+    private frameFromFlow = false;
     stats: RecorderStats;
     private readonly detachInput: () => void;
 
@@ -257,9 +287,33 @@ class OneWayRecorder {
         this.running = true;
         this.prev = null;
         this.bottomPad = parseFloat(getComputedStyle(this.el).paddingBottom) || 0;
+        if (sampling === "ro" && typeof ResizeObserver !== "undefined") {
+            // Created now, so after the one-way path's observer: in a round where
+            // both have work, this one runs second and sees the compensated state.
+            const probe = document.createElement("div");
+            probe.setAttribute("aria-hidden", "true");
+            probe.style.cssText = "position:fixed;left:-10px;top:-10px;width:1px;height:1px;pointer-events:none;visibility:hidden;";
+            document.body.appendChild(probe);
+            this.probe = probe;
+            this.probeRO = new ResizeObserver(() => {
+                if (!this.frameFromFlow) this.frame = this.read();
+            });
+            this.probeRO.observe(probe);
+        }
         const loop = (): void => {
             if (!this.running) return;
-            afterPaint(() => this.sample());
+            if (this.probe) {
+                // The previous frame is painted: compare its sample.
+                const done = this.frame;
+                this.frame = null;
+                this.frameFromFlow = false;
+                if (done) this.check(done);
+                // Resize the probe so the observer fires in this frame's RO phase.
+                this.probeWide = !this.probeWide;
+                this.probe.style.width = this.probeWide ? "2px" : "1px";
+            } else {
+                afterPaint(() => this.sample());
+            }
             this.raf = requestAnimationFrame(loop);
         };
         this.raf = requestAnimationFrame(loop);
@@ -270,6 +324,10 @@ class OneWayRecorder {
         if (this.raf != null) cancelAnimationFrame(this.raf);
         this.raf = null;
         this.prev = null;
+        this.probeRO?.disconnect();
+        this.probeRO = null;
+        this.probe?.remove();
+        this.probe = null;
     }
 
     dispose(): void {
@@ -320,9 +378,19 @@ class OneWayRecorder {
         };
     }
 
+    /** The one-way observer finished a run: this is the frame's latest pre-paint state. */
+    sampleFromFlow(): void {
+        if (!this.running || !this.probe) return;
+        this.frame = this.read();
+        this.frameFromFlow = true;
+    }
+
     private sample(): void {
         if (!this.running) return;
-        const cur = this.read();
+        this.check(this.read());
+    }
+
+    private check(cur: FrameSample | null): void {
         const events = this.events;
         this.events = [];
         if (!cur) {
@@ -409,6 +477,12 @@ export function attachOneWayRecorder(pane: string, el: HTMLElement): () => void 
 }
 
 /** Record that the code itself did something that can move the content (a pin, a hold, a glide). */
+/** The one-way observer finished a run in this frame (see Sampling). */
+export function sampleOneWayFrame(pane: string): void {
+    if (!enabled) return;
+    recorders.get(pane)?.sampleFromFlow();
+}
+
 export function noteOneWay(pane: string, label: string): void {
     if (!enabled) return;
     recorders.get(pane)?.note(label);
@@ -426,6 +500,12 @@ export const oneWayRecorder = {
         for (const r of recorders.values()) r.stop();
     },
     isEnabled: (): boolean => enabled,
+    /** Where frames are sampled (see Sampling); restarts running recorders. */
+    setSampling(mode: Sampling): void {
+        sampling = mode;
+        if (enabled) for (const r of recorders.values()) { r.stop(); r.start(); }
+    },
+    getSampling: (): Sampling => sampling,
     reset(): void {
         for (const r of recorders.values()) r.reset();
     },

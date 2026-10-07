@@ -68,7 +68,13 @@ export interface OneWayHost {
     reducedMotion(): boolean;
     /** Our own scrollTop write, with the geometry it produced (the scroll handler trusts it). */
     wrote(geo: { scrollTop: number; scrollHeight: number; clientHeight: number }): void;
-    /** After every observation: overflow state, held-tool collapse, the layout slice's viewport. */
+    /**
+     * Before every observation is measured: the host's own layout changes that
+     * belong to this frame (collapsing a held-open tool that scrolled off the
+     * top). Run first so whatever they move is compensated in the same frame.
+     */
+    prepare?(): void;
+    /** After every observation: overflow state, the recorder's sample. Must not change layout. */
     observed?(geo: { scrollTop: number; scrollHeight: number; clientHeight: number }): void;
     /** Recorder note (one-way-recorder.ts). */
     note?(label: string): void;
@@ -80,8 +86,16 @@ export class OneWayFlow {
     private spacerPx = 0;
     private readonly ro: ResizeObserver | null;
     private readonly rows = new Set<Element>();
-    /** Screen top (CSS px from the viewport's top edge) of each row visible at the last observation. */
-    private baseline: Map<Element, number> | null = null;
+    /**
+     * Screen top (CSS px from the viewport's top edge) of every mounted row at
+     * the last observation, by node id, not by element: a row that moves from
+     * the live tail into the virtualized head is a new element at a possibly
+     * different spot, and that move must be compared like any other. Every row,
+     * not only the visible ones: the follower can scroll a row into view
+     * between observations (no resize, so no observation), and a later growth
+     * above it must still be caught.
+     */
+    private baseline: Map<string, number> | null = null;
     private lastWidth = -1;
     /** scrollHeight / clientHeight at the last observation, for the geometry of frame-step writes. */
     private lastGeo = { scrollHeight: 0, clientHeight: 0 };
@@ -106,18 +120,20 @@ export class OneWayFlow {
         this.scroller = scroller;
         this.spacerEl = spacer;
         this.ro?.observe(scroller);
-        for (const c of containers) if (c) this.ro?.observe(c);
+        for (const c of containers) if (c) this.ro?.observe(c, { box: "border-box" });
     }
 
     observeRow(el: Element): void {
         this.rows.add(el);
-        this.ro?.observe(el);
+        // Border box, not the default content box: a row whose padding or
+        // border changes (a tool's status styling) moves every row below it
+        // without its content box changing size.
+        this.ro?.observe(el, { box: "border-box" });
     }
 
     unobserveRow(el: Element): void {
         this.rows.delete(el);
         this.ro?.unobserve(el);
-        this.baseline?.delete(el);
     }
 
     dispose(): void {
@@ -176,6 +192,7 @@ export class OneWayFlow {
     private onResize(): void {
         const el = this.scroller;
         if (!el || this.disposed || !el.isConnected) return;
+        this.host.prepare?.();
         // ResizeObserver callback: layout is clean, these reads are free.
         const ch = el.clientHeight; // perf:allow-layout-read — ResizeObserver callback (layout clean)
         const cw = el.clientWidth; // perf:allow-layout-read — ResizeObserver callback (layout clean)
@@ -201,7 +218,10 @@ export class OneWayFlow {
         if (this.active()) {
             let wanted = live;
             if (this.baseline) {
-                const d = largestDownwardMove(this.baseline, this.readTops(el, this.baseline.keys()));
+                // Only rows on screen now count. A row that moved down and is
+                // on screen now was on screen before too, so this is exactly the
+                // set that can show a downward move.
+                const d = largestDownwardMove(this.baseline, this.readOnScreen(el, ch));
                 if (d > 0) {
                     wanted = live + d;
                     this.host.note?.(`comp:${Math.round(d)}`);
@@ -280,26 +300,35 @@ export class OneWayFlow {
         return { top: r.top + el.clientTop * zoom, zoom: zoom || 1 };
     }
 
-    private readTops(el: HTMLElement, rows: Iterable<Element>): Map<Element, number> {
+    /** A row's identity across remounts: its node id, else the element itself. */
+    private static key(row: Element): string | null {
+        return (row as HTMLElement).dataset?.nodeId ?? null;
+    }
+
+    /** Screen top and bottom of every mounted row, by node id. */
+    private readRows(el: HTMLElement): Map<string, { top: number; bottom: number }> {
         const { top, zoom } = this.zoom(el);
-        const out = new Map<Element, number>();
-        for (const row of rows) {
-            if (!row.isConnected) continue;
-            out.set(row, (row.getBoundingClientRect().top - top) / zoom);
+        const out = new Map<string, { top: number; bottom: number }>();
+        for (const row of this.rows) {
+            const id = OneWayFlow.key(row);
+            if (id === null || out.has(id) || !row.isConnected) continue;
+            const r = row.getBoundingClientRect();
+            if (r.height > 0) out.set(id, { top: (r.top - top) / zoom, bottom: (r.bottom - top) / zoom });
         }
         return out;
     }
 
-    private readVisible(el: HTMLElement, clientHeight: number): Map<Element, number> {
-        const { top, zoom } = this.zoom(el);
-        const out = new Map<Element, number>();
-        for (const row of this.rows) {
-            if (!row.isConnected) continue;
-            const r = row.getBoundingClientRect();
-            const t = (r.top - top) / zoom;
-            const b = (r.bottom - top) / zoom;
-            if (b > 0 && t < clientHeight && r.height > 0) out.set(row, t);
-        }
+    /** Tops of the rows on screen now. */
+    private readOnScreen(el: HTMLElement, clientHeight: number): Map<string, number> {
+        const out = new Map<string, number>();
+        for (const [id, r] of this.readRows(el)) if (r.bottom > 0 && r.top < clientHeight) out.set(id, r.top);
+        return out;
+    }
+
+    /** The record for the next comparison: every mounted row's top. */
+    private readVisible(el: HTMLElement, _clientHeight: number): Map<string, number> {
+        const out = new Map<string, number>();
+        for (const [id, r] of this.readRows(el)) out.set(id, r.top);
         return out;
     }
 }

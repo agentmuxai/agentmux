@@ -36,6 +36,12 @@ describe("one-way-soak parseArgs", () => {
         expect(o.keep).toBe(true);
     });
 
+    it("reads --motion and rejects anything else", () => {
+        expect(parseArgs([]).motion).toBe("os");
+        expect(parseArgs(["--motion", "full"]).motion).toBe("full");
+        expect(() => parseArgs(["--motion", "fast"])).toThrow(/--motion/);
+    });
+
     it("rejects a negative number", () => {
         expect(() => parseArgs(["--minutes", "-1"])).toThrow(/non-negative/);
     });
