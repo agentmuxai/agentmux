@@ -221,6 +221,7 @@ async fn route_command(
         "report_first_paint" => Ok(commands::backend::report_first_paint(state, args)),
         "fe_log" => Ok(commands::backend::fe_log(args)),
         "fe_log_structured" => Ok(commands::backend::fe_log_structured(args)),
+        "fe_log_batch" => Ok(commands::backend::fe_log_batch(args)),
 
         // ---- Tier 2: Core functionality ----
         "get_backend_info" => Ok(commands::backend::get_backend_info(state)),
@@ -536,6 +537,13 @@ async fn route_command(
                 block_id, x, y, w, h
             );
             state.browser_panes.resize(block_id, cef::Rect { x, y, width: w, height: h }, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_panes_set_rects" => {
+            // One batch per window per frame from the page's pane-rect-batcher;
+            // answers once the panes have moved (browser_panes::bounds).
+            let (window_label, rects) = crate::browser_panes::bounds::parse_set_rects_args(args)?;
+            state.browser_panes.set_rects(state, &window_label, rects).await;
             Ok(serde_json::json!(true))
         }
         "browser_pane_close" => {

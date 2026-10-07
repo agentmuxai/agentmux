@@ -15,6 +15,12 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     resize: async (blockId, rect) => {
         await invokeCommand("browser_pane_resize", { block_id: blockId, ...rect });
     },
+    setRects: async (windowLabel, rects) => {
+        await invokeCommand("browser_panes_set_rects", {
+            window_label: windowLabel,
+            rects: rects.map(({ blockId, x, y, width, height }) => ({ block_id: blockId, x, y, width, height })),
+        });
+    },
     close: async (blockId, windowLabel) => {
         await invokeCommand("browser_pane_close", { block_id: blockId, window_label: windowLabel });
     },

@@ -1010,6 +1010,7 @@ impl AgentMuxHandler {
         // cleanly so its budget is reset. Without this the map would
         // accumulate one stale entry per closed browser over a session.
         self.crash_history.remove(&browser.identifier());
+        self.sent_favicons.remove(&browser.identifier());
         self.memory_pause_history.remove(&browser.identifier());
         self.unresponsive_reports.remove(&browser.identifier());
         self.terminated_unresponsive.remove(&browser.identifier());

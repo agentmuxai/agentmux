@@ -41,7 +41,7 @@ export function initPerf(): void {
 }
 
 /** Self-IPCs that must not be measured — see PERF_IPC_BLOCKLIST. */
-const PERF_IPC_BLOCKLIST = new Set(["fe_log_structured", "fe_log"]);
+const PERF_IPC_BLOCKLIST = new Set(["fe_log_structured", "fe_log", "fe_log_batch"]);
 
 /**
  * Called by the `invokeCommand` wrapper after each completed

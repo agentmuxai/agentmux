@@ -371,13 +371,13 @@ export class BrowserViewModel {
         void getApi().listen<{ block_id: string; title: string }>(
             "browser-pane-title-change",
             (payload) => {
-                const matched = payload.block_id === this.blockId;
-                this.diag(`title-change arrive payload-block=${(payload.block_id ?? "").slice(0, 7)} match=${matched} title=${JSON.stringify(payload.title)}`);
+                // Only the pane the event is for logs it (see the favicon listener below).
+                if (payload.block_id !== this.blockId) return;
+                this.diag(`title-change arrive title=${JSON.stringify(payload.title)}`);
                 if (this.closed) {
                     this.diag(`post-close-event-dropped name=browser-pane-title-change`);
                     return;
                 }
-                if (!matched) return;
                 this._dispatch({ type: "TitleChanged", title: payload.title }, "title-change");
             },
         ).then((unsub) => {
@@ -390,13 +390,14 @@ export class BrowserViewModel {
         void getApi().listen<{ block_id: string; urls: string[] }>(
             "browser-pane-favicon-urls",
             (payload) => {
-                const matched = payload.block_id === this.blockId;
-                this.diag(`favicon-urls arrive payload-block=${(payload.block_id ?? "").slice(0, 7)} match=${matched} count=${payload.urls?.length ?? 0} first=${JSON.stringify(payload.urls?.[0])}`);
+                // Every pane in the window hears every pane's event: only the
+                // pane it is for logs it, or N panes log N lines per event.
+                if (payload.block_id !== this.blockId) return;
+                this.diag(`favicon-urls arrive count=${payload.urls?.length ?? 0} first=${JSON.stringify(payload.urls?.[0])}`);
                 if (this.closed) {
                     this.diag(`post-close-event-dropped name=browser-pane-favicon-urls`);
                     return;
                 }
-                if (!matched) return;
                 this._dispatch({ type: "FaviconUrlsReceived", urls: payload.urls }, "favicon-urls");
             },
         ).then((unsub) => {
