@@ -10,8 +10,8 @@
 // view-model — account CRUD goes through the module-level RPC + cache, so the
 // blockId/nodeModel it carries for the ViewModel interface are inert here) and
 // composes the already-built `AccountsTab` + `AccountForm` so styling and the
-// add/edit/delete lifecycle come for free. Identity-bundle and Memory
-// management remain in their own Armory tabs.
+// add/edit/delete lifecycle come for free. Bundles and memory are managed
+// in the Memory pane.
 //
 // AgentMux Cloud is also surfaced here as a "virtual first-class account": it
 // is a single app-wide session (the `muxbus.*` singleton), NOT a pluralizable

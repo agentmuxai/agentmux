@@ -661,7 +661,7 @@ impl SubagentWatcher {
                 }
 
                 for changed_path in paths {
-                    // Agents without a per-identity bundle override all
+                    // Agents without a per-account auth dir all
                     // resolve to the same shared default Claude config dir
                     // (see resolve_claude_config_dir's doc comment), so this
                     // watcher's notify subscription can legitimately be on a

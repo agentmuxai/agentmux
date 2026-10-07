@@ -43,7 +43,7 @@ describe("looksLikeRealAccountId", () => {
 
 describe("realAccountIdOrEmpty", () => {
     const REAL_ID = "550e8400-e29b-41d4-a716-446655440000";
-    // A pre-#1624-PR-C identity-bundle id — UUID-shaped, but not an
+    // A pre-#1624-PR-C `db_identity_bundles` id — UUID-shaped, but not an
     // account id (codex P1 on #2464: looksLikeRealAccountId alone can't
     // tell these apart from a real account id).
     const LEGACY_BUNDLE_ID = "6ba7b810-9dad-11d1-80b4-00c04fd430c8";

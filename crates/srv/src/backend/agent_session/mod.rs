@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Agent-anchored session zones: one zone per agent definition, keyed by
-//! `definition_id` (not identity bundle or block).
+//! `definition_id` (not account or block).
 //!
 //! Zone names: active = `agent:<defId>:current`,
 //! archived = `agent:<defId>:archive:<unix_ms>`. Each zone holds

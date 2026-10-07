@@ -466,7 +466,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
 };
 
 /**
- * BundleManager — context-free standalone Memory-bundle manager.
+ * BundleManager — context-free standalone bundle manager.
  *
  * Constructs its OWN block-free BundleViewModel and renders the shared
  * body. Use this wherever Memory CRUD is needed outside an Agent-pane

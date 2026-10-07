@@ -10,7 +10,7 @@
 // This panel is CRUD-free: it shows a short pointer explaining that
 // bundles are app-wide data managed in one place, plus a "Manage in
 // Memory" button that opens Memory → Bundles (Connectors → Accounts
-// for identity bundles).
+// for accounts).
 //
 // Per-agent bundle resolution — DATA GAP, CLOSED (2026-08-15) for the one
 // live remaining consumer. `view: "identity"` blocks stopped rendering
@@ -69,13 +69,13 @@ export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element 
     const [boundBundle] = createResource(boundBundleId, (id) =>
         RpcApi.GetBundleCommand(TabRpcClient, { id }).catch(() => undefined),
     );
-    // Identity items are still called "identity bundles"; the config
+    // Identity items are accounts; the config
     // collections are "Bundles" (ABF names only the file format). `title` is
     // the heading; `sentenceLabel` reads naturally
     // in running prose below.
-    const title = props.kind === "Identity" ? "Identity bundles" : "Bundles";
-    const sentenceLabel = props.kind === "Identity" ? "Identity bundles" : "Bundles";
-    const lowerPlural = props.kind === "Identity" ? "identities" : "bundles";
+    const title = props.kind === "Identity" ? "Accounts" : "Bundles";
+    const sentenceLabel = props.kind === "Identity" ? "Accounts" : "Bundles";
+    const lowerPlural = props.kind === "Identity" ? "accounts" : "bundles";
 
     return (
         <div class="bundle-summary">

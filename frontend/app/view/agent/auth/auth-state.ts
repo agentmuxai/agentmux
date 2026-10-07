@@ -99,8 +99,10 @@ export interface AuthState {
         | "failed";
     /** Selected provider id ("claude", "codex", "openclaw", ...). */
     providerId: string;
-    /** Selected identity bundle id. Empty when no bundle picked OR
-     *  blank singleton (`needs-bundle`). */
+    /** The id this connect produced: on a direct-account flow, the newly
+     *  saved account's id (`foldPolled` puts `status.accountId` here and
+     *  `PreLaunchAuthPanel` passes it to `onAccountCreated`). The name is
+     *  kept from the retired grouping mode. Empty until there is one. */
     bundleId: string;
     /** When the connect is a "re-auth" or "add account" flow, the
      *  existing bundle id to update on save. Empty = create new bundle. */

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AgentNewBundleModalPanel — creates a new Memory bundle from the
+ * AgentNewBundleModalPanel — creates a new bundle from the
  * Launch modal's "+ New" affordance.
  *
- * Memory bundles are organized text content (notes, instructions,
+ * A bundle made here starts as organized text content (notes, instructions,
  * project context files). The modal supports three seed modes:
  *   - Empty: just create the bundle; user adds content later from
  *     the Memory pane.

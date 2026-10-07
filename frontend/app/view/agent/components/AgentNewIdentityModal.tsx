@@ -4,8 +4,8 @@
 /**
  * AgentAddAccountModalPanel — adds a manual/API-key account from the
  * Launch modal's "+ Add account" affordance. Issue #1624 PR-C Part B:
- * accounts are provider-scoped (unlike the old provider-agnostic
- * Identity bundle this modal used to create), so the form only needs
+ * accounts are provider-scoped (unlike the provider-agnostic credential
+ * group this modal used to create), so the form only needs
  * a name + API key for the caller-supplied provider. OAuth Connect no
  * longer routes through this modal — it starts directly from the
  * launch modal's auth panel, which mints the account backend-side.

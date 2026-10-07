@@ -84,7 +84,7 @@ export interface PreLaunchAuthPanelProps {
     /** Called when the user clicks "+ Add account" for a manual
      *  (API-key) account — separate from OAuth Connect, which no
      *  longer needs any pre-step (issue #1624 PR-C Part B removed the
-     *  "+ New identity bundle" interposition; OAuth starts directly). */
+     *  "+ New identity" pre-step; OAuth starts directly). */
     onRequestAddAccount?: () => void;
     /** Inline-disabled flag mirroring the modal's submitting state.
      *  Prevents starting a Connect mid-launch. */
@@ -196,7 +196,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     // longer requires a pre-selected account — the backend mints one
     // directly (`direct_account: true` in auth-flow-controller.ts's
     // `connect()`). This used to gate on `identityId() === ""` and
-    // route through a "+ New identity bundle" interposition
+    // route through a "+ New identity" pre-step
     // (docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md §4.5's "OAuth never
     // starts without a bundle id" invariant) — that invariant no
     // longer applies; the per-account isolation dir is resolved

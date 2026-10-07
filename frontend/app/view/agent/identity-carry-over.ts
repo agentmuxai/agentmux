@@ -5,7 +5,7 @@
 // like a real account id worth reusing on a continuation/reattach launch.
 //
 // ONLY account ids — this is NOT a general-purpose "is this a real id"
-// check, and is not valid for memory bundle ids (`db_bundles` seeds a
+// check, and is not valid for bundle ids (`db_bundles` seeds a
 // permanent `id='blank'` row and reserves a `seed-*` id prefix for
 // workspace-default bundles — both legitimate, both non-UUID; see
 // storage/bundles.rs / app_api/bundle/mod.rs), so never apply this check to
@@ -30,7 +30,7 @@ export function looksLikeRealAccountId(id: string | null | undefined): boolean {
 }
 
 // A UUID shape alone isn't sufficient to trust a carried-over account id:
-// pre-#1624-PR-C identity-bundle ids were ALSO UUID-formatted, just not
+// pre-#1624-PR-C `db_identity_bundles` ids were ALSO UUID-formatted, just not
 // account ids (codex P1 on #2464) — a legacy row carrying one would pass
 // `looksLikeRealAccountId` but still fail to resolve as a real account,
 // hitting the same FOREIGN KEY failure this module exists to prevent.

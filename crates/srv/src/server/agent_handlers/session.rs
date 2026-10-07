@@ -95,7 +95,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Identity filter is pushed INTO `instance_list_named`
                 // (codex P2 #3 on PR #1096): when a chain has
-                // continuations with different identity bundles, the
+                // continuations under different accounts, the
                 // ranking must run on identity-matching rows so the
                 // newest match wins. Post-query filtering would drop
                 // the chain entirely if the newest row used a

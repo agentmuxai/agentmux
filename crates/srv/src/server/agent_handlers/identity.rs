@@ -724,8 +724,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- v8: named agent continuation ----
 
     // listnamedagents — powers the launch modal's "Continue agent"
-    // dropdown. Joins instance rows with the definition / identity /
-    // memory bundle names so the frontend renders without follow-ups.
+    // dropdown. Joins instance rows with the definition, account and
+    // bundle names so the frontend renders without follow-ups.
     let mstore = state.mstore.clone();
     let id_store_lna = state.id_store.clone();
     let identity_store_lna = state.identity_store.clone();

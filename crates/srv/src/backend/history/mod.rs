@@ -478,7 +478,7 @@ impl HistoryService {
             .map_err(|e| format!("failed to resolve agent's linked identities: {e}"))?;
 
         // An account linked to several agents holds all of their transcripts
-        // under one identity bundle, so its sessions are not all this
+        // under one account's home, so its sessions are not all this
         // owner's: `SearchHistory` would return another agent's conversation,
         // the ungoverned disclosure `search_for_agent`'s doc rules out. From
         // such an account keep only sessions in the owner's own working
@@ -512,11 +512,11 @@ impl HistoryService {
 
         // An agent with no bound account has no link row at all — its
         // registry record's `identity_id` reads "default" while its
-        // transcripts are written under a channel identity bundle nothing
+        // transcripts are written under a channel's default home nothing
         // points at — so the identity lookup above finds nothing for the
         // common case. The working directory is recorded inside the
         // transcript (`cwd`) and on the agent's own row, so it resolves the
-        // sessions the identity bundle cannot.
+        // sessions the account lookup cannot.
         if let Some(dir) = &owner.working_directory {
             merged.extend(self.index.list_for_working_directory(dir));
         }
@@ -658,7 +658,7 @@ impl HistoryService {
 
     /// This agent's own sessions — the actual "fast Conversation History
     /// lookup" protocol §4.4 asks for, resolving `agent_id` to its bound
-    /// identity bundle(s) (`Store::agent_identity_list_for_agent`, the
+    /// account(s) (`Store::agent_identity_list_for_agent`, the
     /// same `db_agent_identity_links` table `identity_auth_dirs.rs`
     /// already keys off) and querying `SessionIndex::list_for_identity`'s
     /// O(sessions for this identity) HashMap-backed path instead of
@@ -1276,7 +1276,7 @@ mod tests {
 
     /// The dominant real-world failure: an agent with no bound account has
     /// NO `db_agent_identity_links` row (its registry record's `identity_id`
-    /// reads "default"), so identity-bundle resolution finds nothing — while
+    /// reads "default"), so account resolution finds nothing — while
     /// its transcripts sit on disk, recording the directory it ran in. Before
     /// the working-directory index this returned a confident, empty history.
     #[test]

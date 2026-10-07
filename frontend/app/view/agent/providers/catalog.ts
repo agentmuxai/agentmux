@@ -304,7 +304,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     // OPENAI_BASE_URL=https://openrouter.ai/api/v1 + OPENAI_API_KEY (+ OPENAI_MODEL)
     // to run any OpenRouter model. The Qwen OAuth free tier was retired
     // (2026-04-15), so this is treated as api-key.
-    // Auth: the intended path is an env-injected key from the identity bundle
+    // Auth: the intended path is an env-injected key from the agent's account
     // (OPENAI_API_KEY/OPENROUTER_API_KEY), not an interactive CLI login. We use
     // the Gemini-parent `auth status`/`auth` convention for the check/login:
     // `auth status` fails-closed (prompts for auth) rather than reporting a

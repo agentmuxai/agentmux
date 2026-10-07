@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Append-only version history for Global Memory bundle content — mirrors
+//! Append-only version history for Global Memory entry content — mirrors
 //! `agent_native_memory_versions.rs`'s shape exactly, adapted for a single
 //! `bundle_id` key instead of that table's composite `(agent_id, filename)`
 //! (a Bundle's identity is already a single id). See

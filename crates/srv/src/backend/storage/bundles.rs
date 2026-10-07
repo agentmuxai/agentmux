@@ -1094,7 +1094,7 @@ impl Store {
     fn bundle_delete_unobserved(&self, id: &str) -> Result<bool, StoreError> {
         if id == "blank" {
             return Err(StoreError::Other(
-                "cannot delete the blank Memory singleton".to_string(),
+                "cannot delete the blank bundle".to_string(),
             ));
         }
         // Seeded bundles (IDs prefixed "seed-") are workspace defaults that
@@ -1102,7 +1102,7 @@ impl Store {
         // tombstone table and avoids the re-creation loop.
         if id.starts_with("seed-") {
             return Err(StoreError::Other(
-                "cannot delete a seeded Memory bundle; toggle is_global or clear its instructions instead".to_string(),
+                "cannot delete a seeded bundle; toggle is_global or clear its instructions instead".to_string(),
             ));
         }
         let conn = self.conn.lock().unwrap();

@@ -368,7 +368,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         tracing::warn!(path = %file.path, error = %e, "writeagentconfig: not writing a config file under a folder linking outside the workdir");
                         continue;
                     }
-                    // Inject global memory bundles into CLAUDE.md so agents
+                    // Inject Global Memory into CLAUDE.md so agents
                     // launched from the picker receive the same workspace rules
                     // as agents launched via the agent.open RPC.
                     if file.path == "CLAUDE.md" {
@@ -393,7 +393,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // filename membership against the provider registry,
                     // not a literal string match.
                     if crate::backend::providers::is_known_startup_instructions_filename(&file.path) {
-                        // Still gets the same global-memory-bundle injection
+                        // Still gets the same Global Memory injection
                         // CLAUDE.md gets above — otherwise a Codex/Gemini/etc.
                         // agent launched from the picker would silently
                         // receive no workspace-wide Global Bundle content at
