@@ -89,6 +89,14 @@ pub fn wants(meta: &MetaMapType, config: Option<&crate::backend::wconfig::FullCo
     {
         return false;
     }
+    // The user doesn't want the helper on this host (Never, or "Not now"
+    // since srv started) and it isn't there: a plain SSH terminal
+    // (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+    if crate::backend::remote::helper_consent::plain_instead(&conn)
+        && !crate::backend::remote::helper_hosts::known(&conn)
+    {
+        return false;
+    }
     let conn_setting = config.and_then(|c| {
         c.connections
             .iter()
@@ -265,8 +273,16 @@ pub struct DurableSshController {
     auth_key: String,
     /// Settings, for whether the pane is still durable ([`wants`]).
     config: Option<Arc<crate::backend::wconfig::ConfigState>>,
+    /// Restarts the pane as a plain SSH terminal, when the user declines the
+    /// helper ([`Fallback`]).
+    fallback: Option<Fallback>,
     inner: Mutex<Inner>,
 }
+
+/// Restarts a pane through `resync_controller`, which then picks the plain
+/// shell controller because [`wants`] has turned false. Built by
+/// `resync_controller` itself, which holds everything a restart needs.
+pub type Fallback = Arc<dyn Fn() + Send + Sync>;
 
 impl DurableSshController {
     pub fn new(
@@ -277,6 +293,7 @@ impl DurableSshController {
         filestore: Option<Arc<FileStore>>,
         auth_key: String,
         config: Option<Arc<crate::backend::wconfig::ConfigState>>,
+        fallback: Option<Fallback>,
     ) -> Self {
         Self {
             block_id,
@@ -286,6 +303,7 @@ impl DurableSshController {
             filestore,
             auth_key,
             config,
+            fallback,
             inner: Mutex::new(Inner {
                 status: STATUS_INIT.to_string(),
                 version: 0,
@@ -430,7 +448,10 @@ impl Controller for DurableSshController {
             broker: self.broker.clone(),
             filestore: self.filestore.clone(),
             _askpass_grant: askpass_grant,
+            plain: Arc::new(AtomicBool::new(false)),
         };
+        let plain = run.plain.clone();
+        let fallback = self.fallback.clone();
         let this = super::get_controller(&self.block_id);
         let shown = this.clone();
         tokio::spawn(async move {
@@ -447,6 +468,17 @@ impl Controller for DurableSshController {
             // whoever asked.
             if let Some(done) = ended {
                 show_done(this.as_ref(), done);
+            } else if plain.load(Ordering::SeqCst) {
+                match fallback {
+                    Some(restart) => restart(),
+                    None => show_done(
+                        this.as_ref(),
+                        Done {
+                            code: EXIT_COMMAND_NOT_FOUND,
+                            session_over: true,
+                        },
+                    ),
+                }
             }
         });
         Ok(())
@@ -630,6 +662,9 @@ struct Run {
     filestore: Option<Arc<FileStore>>,
     /// The askpass grant behind `host`'s prompts (revoked on drop).
     _askpass_grant: Option<crate::backend::remote::askpass::Revoke>,
+    /// Set when the run ends because the user declined the helper: the pane
+    /// becomes a plain SSH terminal.
+    plain: Arc<AtomicBool>,
 }
 
 /// How one `ssh` ended.
@@ -718,6 +753,17 @@ impl Run {
                         installed_once = true;
                         match self.install_helper().await {
                             Ok(()) => continue,
+                            // The user doesn't want the helper here: the
+                            // pane falls back to a plain SSH terminal.
+                            Err(_) if crate::backend::remote::helper_consent::plain_instead(&self.conn) => {
+                                self.note(&format!(
+                                    "AgentMux's helper isn't on {}, so this is a plain SSH terminal: it ends if the connection drops.",
+                                    self.conn
+                                ))
+                                .await;
+                                self.plain.store(true, Ordering::SeqCst);
+                                return None;
+                            }
                             Err(line) => {
                                 self.note(&line).await;
                                 return over(EXIT_COMMAND_NOT_FOUND);
@@ -1216,6 +1262,7 @@ time.sleep(5)
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
             _askpass_grant: None,
+            plain: Arc::new(AtomicBool::new(false)),
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -1329,6 +1376,7 @@ sys.exit(0 if remote[1] == 'end' else 255)
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
             _askpass_grant: None,
+            plain: Arc::new(AtomicBool::new(false)),
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -1456,6 +1504,7 @@ elif ' attach ' in remote:
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
             _askpass_grant: None,
+            plain: Arc::new(AtomicBool::new(false)),
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (_leave_tx, leave_rx) = watch::channel(Leave::Stay);
@@ -1485,6 +1534,25 @@ elif ' attach ' in remote:
             text.contains("Installing AgentMux's helper on freshhost") && text.contains("ready"),
             "{text:?}"
         );
+    }
+
+    /// "Not now" to the helper makes the host's durable panes plain SSH
+    /// terminals until srv restarts; an Install puts them back
+    /// (SPEC_REMOTES_PANE_2026_10_05.md §4.9).
+    #[test]
+    fn a_host_the_user_declined_the_helper_on_is_not_durable() {
+        use crate::backend::remote::helper_consent::{install_answering_yes, note_answer, Answer};
+        install_answering_yes();
+        let mut meta = MetaMapType::new();
+        meta.insert(super::super::META_KEY_CONNECTION.into(), serde_json::json!("declined-durable-host"));
+        meta.insert(META_KEY_DURABLE.into(), serde_json::json!(true));
+        assert!(wants(&meta, None));
+
+        let answer = |approve| Answer { answered: true, approve, remember: false };
+        note_answer("declined-durable-host", answer(false));
+        assert!(!wants(&meta, None), "Not now: a plain SSH terminal");
+        note_answer("declined-durable-host", answer(true));
+        assert!(wants(&meta, None), "Install: durable again");
     }
 
     #[test]
@@ -1627,6 +1695,7 @@ sys.exit(255)
             broker: Some(state.broker.clone()),
             filestore: Some(state.filestore.clone()),
             _askpass_grant: None,
+            plain: Arc::new(AtomicBool::new(false)),
         };
         let (_input_tx, input_rx) = mpsc::unbounded_channel();
         let (leave_tx, leave_rx) = watch::channel(Leave::Stay);
