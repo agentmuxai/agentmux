@@ -21,7 +21,7 @@ import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
-import { turnAddedInput } from "@/app/store/agent-pane-state/turn-contribution";
+import { turnOutputTokens } from "@/app/store/agent-pane-state/turn-contribution";
 import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
 import { SlashAutocomplete } from "./SlashAutocomplete";
@@ -42,16 +42,17 @@ function ingToEd(_phrase: string): string {
     return "Worked";
 }
 
-/** "\u2191in \u2193out" for ONE turn. `input` is what the turn added to the
- *  context, not the context it re-sent on every call (see turnAddedInput). */
-function fmtTokens(input: number, output: number): string {
-    return `\u2191${formatCompactNumber(input)} \u2193${formatCompactNumber(output)}`;
+/** One turn's output: "2.4k tokens". Claude Code's convention: one number,
+ *  the model's output; input is the context re-sent on every call, which the
+ *  composer's context meter shows. SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md. */
+function fmtOutputTokens(output: number): string {
+    return `${formatCompactNumber(output)} tokens`;
 }
 
-/** Live readout: the turn's contribution, falling back to the raw input only
- *  where there is no baseline to subtract (a provider with no live usage). */
+/** Live readout: "\u2193 2.4k tokens" while the model streams or its tools run,
+ *  "\u2191 2.4k tokens" while a request is in flight. The number only grows. */
 function fmtTurnTokens(t: TurnTokens): string {
-    return fmtTokens(turnAddedInput(t) ?? t.input, t.output);
+    return `${t.requesting ? "\u2191" : "\u2193"} ${fmtOutputTokens(turnOutputTokens(t) ?? 0)}`;
 }
 
 // \u2500\u2500 Composer draft persistence \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -87,8 +88,8 @@ interface AgentWorkingRowProps {
      *  until one exists. */
     activitySummary?: string | null;
     sessionStats?: SessionStats | null;
-    /** Live token counts for the turn in progress; the right zone shows what
-     *  the turn has added (not the context it re-sends) next to the elapsed
+    /** Live token counts for the turn in progress; the right zone shows its
+     *  output so far, with ↑/↓ for the request phase, next to the elapsed
      *  time. */
     turnTokens?: TurnTokens | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
@@ -291,9 +292,9 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
             const s = Math.round(stats.duration_ms / 1000);
             parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
         }
-        if (stats.input_tokens != null || stats.output_tokens != null) {
-            parts.push(fmtTokens(stats.added_input_tokens ?? stats.input_tokens ?? 0, stats.output_tokens ?? 0));
-        }
+        // The turn's output: the result's exact figure (summed over its calls),
+        // where the live row showed it growing.
+        if (stats.output_tokens != null) parts.push(fmtOutputTokens(stats.output_tokens));
         return parts.join("  ·  ");
     });
 

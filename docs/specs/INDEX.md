@@ -873,6 +873,7 @@ partial list.
 | [`SPEC_AGENT_STATUS_LABELS_2026_06_27`](SPEC_AGENT_STATUS_LABELS_2026_06_27.md) | Agent Status Labels — Richer Working State UX |
 | [`SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04`](SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) | Agent API: System Management Surface (reload, process/render diagnostics, saga health) |
 | [`SPEC_AGENT_TOOL_STORE_2026_04_15`](SPEC_AGENT_TOOL_STORE_2026_04_15.md) | Spec: Agent Tool Store — managed CLI tool availability for agent panes |
+| [`SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07`](SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md) | Agent pane: one turn token counter, Claude Code's convention |
 | [`SPEC_AGENT_UX_STREAMING_SCROLL_OVERLAY_2026_04_15`](SPEC_AGENT_UX_STREAMING_SCROLL_OVERLAY_2026_04_15.md) | SPEC: Agent Pane — Status Line, Auto-Scroll, and Tool Overlay |
 | [`SPEC_AGENT_VERIFICATION_ROUND_2026_04_16`](SPEC_AGENT_VERIFICATION_ROUND_2026_04_16.md) | SPEC: Agent Startup Verification Round |
 | [`SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08`](SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md) | SPEC: Working-Indicator Shimmer + Mic Button Relocation |

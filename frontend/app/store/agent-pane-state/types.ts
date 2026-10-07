@@ -766,6 +766,12 @@ export type AgentPaneCommand =
      *  still holding tokens ended without a `result` (the process died), so
      *  they belong to no turn that is coming. */
     | { type: "StreamSessionStarted" }
+    /** Characters the main agent's latest call streamed (text, thinking, tool
+     *  input) since the last one: its output estimate until `TokensOut`. */
+    | { type: "OutputStreamed"; chars: number }
+    /** The main agent's tool results went back: a request is in flight (↑)
+     *  until the next call's `TokensIn`. */
+    | { type: "RequestStarted" }
     /** The main agent's model sent `stop_reason: end_turn`; see `modelEndedTurn` on the Streaming phase. */
     | { type: "ModelEndedTurn" }
     /** The main agent's model began a new message; it is working again. */

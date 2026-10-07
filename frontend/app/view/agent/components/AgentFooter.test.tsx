@@ -652,8 +652,9 @@ describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_
 
 /**
  * SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md: the loading row shows the
- * pane's ambient summary instead of "tool · arg", reports the turn's own
- * contribution in ↑in ↓out (not the context re-sent), and has no shimmer overlay.
+ * pane's ambient summary instead of "tool · arg", reports the turn's output as
+ * one counter (SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md),
+ * and has no shimmer overlay.
  */
 describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
     it("shows the ambient summary in the left zone", () => {
@@ -678,40 +679,59 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
     });
 
-    it("shows what the turn added, not the context it re-sent, next to the elapsed time", () => {
+    // SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md: one
+    // number, the turn's output, as Claude Code shows it.
+    it("shows the turn's output as one counter, ↓ while the model streams, next to the elapsed time", () => {
         const { container } = render(() => (
             <AgentWorkingRow
                 loading={true}
                 activitySummary="Fix the login redirect loop"
-                // 180k of context re-sent on the last call, 40k of it before the turn began.
-                turnTokens={{ input: 180_000, output: 1_200, contextBaseline: 40_000 }}
+                // 180k of context re-sent on the last call: input, not counted.
+                turnTokens={{ input: 180_000, output: 200, outputDone: 1_000 }}
             />
         ));
 
         const right = container.querySelector(".agent-working-row-right")?.textContent ?? "";
-        expect(right).toMatch(/^↑140k ↓1\.2k {2}·  \d+s$/);
+        expect(right).toMatch(/^↓ 1\.2k tokens {2}·  \d+s$/);
         expect(right).not.toContain("180k");
     });
 
-    it("falls back to the raw input only where there is no baseline", () => {
+    it("shows ↑ while a request is in flight", () => {
         const { container } = render(() => (
-            <AgentWorkingRow loading={true} turnTokens={{ input: 5_000, output: 300 }} />
+            <AgentWorkingRow loading={true} turnTokens={{ input: 5_000, output: 300, requesting: true }} />
         ));
 
-        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^↑5\.0k ↓300 {2}·  \d+s$/);
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^↑ 300 tokens {2}·  \d+s$/);
     });
 
-    it("the Worked summary shows the contribution, not the summed re-sent input", () => {
+    it("counts a call still streaming from its characters, at four a token", () => {
         const { container } = render(() => (
-            <AgentWorkingRow
-                loading={false}
-                sessionStats={{ input_tokens: 840_000, added_input_tokens: 3_000, output_tokens: 512, duration_ms: 42_000 }}
-            />
+            <AgentWorkingRow loading={true} turnTokens={{ input: 5_000, output: 0, outputDone: 100, streamedChars: 400 }} />
+        ));
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^↓ 200 tokens/);
+    });
+
+    it("shows no token counter before the turn's first call", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} turnTokens={null} />);
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^\d+s$/);
+    });
+
+    it("the Worked summary shows that turn's output, with no input figure", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} sessionStats={{ input_tokens: 840_000, output_tokens: 2_400, duration_ms: 42_000 }} />
         ));
 
         const left = container.querySelector(".agent-working-row-left")?.textContent ?? "";
-        expect(left).toContain("↑3.0k ↓512");
+        expect(left).toBe("✓ Worked  ·  42s  ·  2.4k tokens");
         expect(left).not.toContain("840k");
+    });
+
+    it("the Worked summary leaves the token count out when the turn reported none", () => {
+        const { container } = render(() => <AgentWorkingRow loading={false} sessionStats={{ duration_ms: 42_000 }} />);
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  42s");
     });
 
     it("renders one solid-color left zone: no shimmer or typing overlay classes", () => {
