@@ -19,8 +19,17 @@ pub const EXIT_CONNECTION_FAILED: u32 = 255;
 
 /// The `ssh` to run: the first on `PATH`, then (Windows) the OpenSSH client
 /// Windows installs, which an inherited `PATH` can lack.
+///
+/// On Windows an MSYS2 or Cygwin build on `PATH` (Git for Windows' own
+/// `usr/bin/ssh.exe`, there when AgentMux is started from Git Bash) is passed
+/// over: it resolves names with its own POSIX resolver, which can't find a
+/// machine on the local network by name ("Could not resolve hostname"), and
+/// it doesn't use Windows' ssh-agent.
 pub fn binary() -> Option<PathBuf> {
-    if let Ok(p) = which::which("ssh") {
+    if let Some(p) = which::which_all("ssh")
+        .ok()
+        .and_then(|mut all| all.find(|p| !is_posix_layer_build(p)))
+    {
         return Some(p);
     }
     #[cfg(windows)]
@@ -32,6 +41,15 @@ pub fn binary() -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// An `ssh.exe` built for MSYS2 or Cygwin: its runtime DLL sits beside it.
+/// Never true off Windows.
+fn is_posix_layer_build(ssh: &Path) -> bool {
+    cfg!(windows)
+        && ssh
+            .parent()
+            .is_some_and(|dir| dir.join("msys-2.0.dll").is_file() || dir.join("cygwin1.dll").is_file())
 }
 
 /// What to say when there is no `ssh`, with how to get it on this platform.
@@ -186,6 +204,23 @@ pub fn control_dir(config_home: &Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Git for Windows' and Cygwin's ssh are passed over for the native one.
+    #[cfg(windows)]
+    #[test]
+    fn an_msys_or_cygwin_ssh_is_told_from_a_native_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let (msys, cygwin, native) = (dir.path().join("msys"), dir.path().join("cygwin"), dir.path().join("native"));
+        for d in [&msys, &cygwin, &native] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join("ssh.exe"), b"").unwrap();
+        }
+        std::fs::write(msys.join("msys-2.0.dll"), b"").unwrap();
+        std::fs::write(cygwin.join("cygwin1.dll"), b"").unwrap();
+        assert!(is_posix_layer_build(&msys.join("ssh.exe")));
+        assert!(is_posix_layer_build(&cygwin.join("ssh.exe")));
+        assert!(!is_posix_layer_build(&native.join("ssh.exe")));
+    }
 
     fn dest(d: &str, port: Option<u16>) -> SshDest {
         SshDest {
