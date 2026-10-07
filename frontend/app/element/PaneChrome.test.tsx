@@ -100,6 +100,8 @@ vi.mock("@/app/store/contextmenu", () => ({
 // not getObjectValue's non-reactive snapshot). A plain-Map-returning mock
 // would pass even with the bug, since it re-reads current state on every
 // call regardless of whether Solid actually tracked a dependency.
+// `connections.<host>` in settings, for the remote swatch on a tab.
+let testConnections: Record<string, any> = {};
 const objectSignals = new Map<string, ReturnType<typeof createSignal<any>>>();
 function signalFor(oref: string) {
     let sig = objectSignals.get(oref);
@@ -119,7 +121,7 @@ vi.mock("@/app/store/global", () => ({
         getObjectValue: (oref: string) => signalFor(oref)[0](),
     },
     atoms: {
-        fullConfigAtom: () => ({ widgets: {}, settings: {} }),
+        fullConfigAtom: () => ({ widgets: {}, settings: {}, connections: testConnections }),
         tabAtom: () => ({ meta: {} }),
     },
     // pane-tab-picker.ts surfaces a failed add as a toast — unused on the
@@ -213,6 +215,7 @@ function fakeLayoutModel(blockStack: string[]): any {
 
 beforeEach(() => {
     objectSignals.clear();
+    testConnections = {};
     headerCalls.length = 0;
     showContextMenu.mockClear();
     buildPaneWidgetMenuItemsMock.mockClear();
@@ -355,6 +358,22 @@ describe("renderPaneChromeShell — tab derivation", () => {
 // since-removed bg:activebordercolor tier) collapsed every pill's underline
 // to one shared value instead of each block's own color. Fixed by switching
 // to computeBlockActiveBorderColor, a pure per-block helper.
+describe("renderPaneChromeShell — remote swatch on a tab", () => {
+    it("a tab on a remote with a colour shows it; a local tab and an uncoloured remote show none", () => {
+        testConnections = { db1: { "display:color": "#e5484d" }, web2: {} };
+        setObjectValue("block:b1", { meta: { view: "term", connection: "db1" } });
+        setObjectValue("block:b2", { meta: { view: "term" } });
+        setObjectValue("block:b3", { meta: { view: "term", connection: "web2" } });
+        mockLayoutModel = fakeLayoutModel(["b1", "b2", "b3"]);
+        render(() => renderPaneChromeShell(fakeNodeModel(), <div>content</div>) as any);
+
+        const swatch = (id: string) => screen.getByTestId(`tab-${id}`).querySelector<HTMLElement>(".pane-tab-swatch");
+        expect(swatch("b1")?.style.background).toBe("rgb(229, 72, 77)");
+        expect(swatch("b2")).toBeNull();
+        expect(swatch("b3")).toBeNull();
+    });
+});
+
 describe("renderPaneChromeShell — per-tab pane color", () => {
     it("each stack member's own color survives independently — no collapse to a shared value", () => {
         setObjectValue("block:b1", { meta: { "frame:hue": 10 } });

@@ -24,6 +24,7 @@ import { settingsAtom } from "@/store/global";
 import { focusManager } from "@/app/store/focusManager";
 import { userIsTypingElsewhereIn } from "./editor-focus-guard";
 import type { EditorMode, EditorViewModel } from "./editor-model";
+import { cursorAtLine } from "./open-at-line";
 import { SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
 import { FileTree } from "./file-tree";
@@ -476,6 +477,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         // Focus that was in the now-destroyed CodeMirror has already fallen
         // back to <body>, so the guard never blocks restoring it.
         model.cmViewRef.current = cmView;
+        // Opened at a line (pane.open's `line`): the cursor goes there once.
+        const openAt = model.takeOpenAtLine(model.filePathAtom());
+        if (openAt) cmView.dispatch(cursorAtLine(cmView.state, openAt));
         if (!userIsTypingElsewhereIn(rootRef, document.activeElement)) {
             focusManager.claimFocusOnMount(model.blockId, () => model.giveFocus());
         }

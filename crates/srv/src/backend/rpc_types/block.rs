@@ -768,6 +768,13 @@ pub struct CommandPaneOpenData {
     /// unaffected. SPEC_FILE_BROWSER_PANE_2026_10_01.md §8.1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub select: Option<Vec<String>>,
+    /// `editor` only: a 1-based line to put the cursor on and scroll to once
+    /// the file is open, written to `block.meta["editor:line"]` (a one-shot
+    /// request the editor clears). Set by Remotes' "Edit in ssh config"
+    /// (SPEC_REMOTES_PANE_2026_10_05.md §4.3). Omitted from serialization when
+    /// absent, like `select`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
 }
 
 /// Response from pane.open.
@@ -1006,6 +1013,7 @@ mod app_api_manifest_contract_tests {
             stack_onto_block_id: None,
             reuse_editor_pane: None,
             select: None,
+            line: None,
             connection: None,
             auth: None,
         };

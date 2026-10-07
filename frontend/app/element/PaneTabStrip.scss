@@ -414,6 +414,16 @@
     }
 }
 
+// The remote's colour on a tab whose pane runs there (PaneChrome's
+// renderLabel; SPEC_REMOTES_PANE_2026_10_05.md §4.8). Same mark as the
+// connection chip's swatch.
+.pane-tab-swatch {
+    flex: 0 0 auto;
+    width: 4px;
+    height: 12px;
+    border-radius: var(--radius-sm);
+}
+
 .pane-tab-label {
     flex: 1;
     min-width: 0;

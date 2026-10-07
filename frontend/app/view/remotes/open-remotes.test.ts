@@ -27,7 +27,7 @@ vi.mock("@/layout/lib/layoutStack", () => ({
     setActiveBlockInStack: h.setActiveBlockInStack,
 }));
 
-import { openRemotesInPane } from "./open-remotes";
+import { openRemotesInPane, remoteSettingsMenuItems } from "./open-remotes";
 
 describe("openRemotesInPane", () => {
     beforeEach(() => {
@@ -50,5 +50,30 @@ describe("openRemotesInPane", () => {
         expect(h.addWidgetAsPaneTab).not.toHaveBeenCalled();
         expect(h.setBlockMeta).toHaveBeenCalledWith("remotes-1", { "remotes:expand": "db1" });
         expect(h.setActiveBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "remotes-1");
+    });
+});
+
+describe("remoteSettingsMenuItems", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        h.views = new Map([["term-1", "term"]]);
+        h.stack = ["term-1"];
+    });
+
+    it("offers nothing for a local pane", () => {
+        expect(remoteSettingsMenuItems("term-1", undefined)).toEqual([]);
+        expect(remoteSettingsMenuItems("term-1", "")).toEqual([]);
+        expect(remoteSettingsMenuItems("term-1", "local")).toEqual([]);
+    });
+
+    it("opens Remotes in this pane on the pane's host", async () => {
+        const items = remoteSettingsMenuItems("term-1", "db1");
+        const item = items.find((i) => i.label === "Remote settings…");
+        expect(item).toBeDefined();
+        item!.click!();
+        await vi.waitFor(() => expect(h.addWidgetAsPaneTab).toHaveBeenCalled());
+        expect(h.addWidgetAsPaneTab).toHaveBeenCalledWith(expect.anything(), "node-1", {
+            meta: { view: "remotes", "remotes:expand": "db1" },
+        });
     });
 });
