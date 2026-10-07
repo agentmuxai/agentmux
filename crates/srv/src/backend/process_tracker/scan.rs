@@ -50,6 +50,9 @@ fn with_snapshot<T>(after: Option<std::time::Instant>, f: impl FnOnce(&sysinfo::
         Some(t) => after.is_some_and(|a| t < a) || t.elapsed() >= SNAPSHOT_TTL,
     };
     if stale {
+        // Stamped with when the scan STARTED: a process spawned while it ran
+        // may be missing from it, so it must not satisfy a later `after`.
+        let started = std::time::Instant::now();
         snap.sys.refresh_processes_specifics(
             sysinfo::ProcessesToUpdate::All,
             true,
@@ -58,7 +61,7 @@ fn with_snapshot<T>(after: Option<std::time::Instant>, f: impl FnOnce(&sysinfo::
                 .with_environ(sysinfo::UpdateKind::Always)
                 .with_memory(),
         );
-        snap.at = Some(std::time::Instant::now());
+        snap.at = Some(started);
     }
     f(&snap.sys)
 }
@@ -294,17 +297,50 @@ mod tests {
         t.inner.members(true).into_iter().map(|p| p.command).collect()
     }
 
-    /// The tag finds a `setsid` daemon even after the shell that started it
-    /// exited (reparented to init), and `kill_tree` ends it.
+    /// The tag finds a detached process (a double fork, so reparented to
+    /// init or launchd once its shell exits; `setsid` isn't on every Unix),
+    /// and `kill_tree` ends it.
     #[test]
     fn a_detached_tagged_process_is_found_and_killed() {
         let block = format!("scan-test-detached-{}", std::process::id());
         let tracker = ScanTracker::new(&block);
-        let mut sh = spawn("setsid sleep 4001 >/dev/null 2>&1 < /dev/null &", Some(&block));
+        let mut sh = spawn("(sleep 4001 >/dev/null 2>&1 < /dev/null &)", Some(&block));
         let _ = sh.wait();
-        assert!(wait_for(|| commands(&tracker).iter().any(|c| c == "sleep 4001")), "{:?}", commands(&tracker));
+        let found = || commands(&tracker).iter().any(|c| c.contains("4001"));
+        assert!(wait_for(found), "members: {:?}; tagged: {:?}", commands(&tracker), tagged(&block));
         tracker.kill_tree();
         assert!(wait_for(|| commands(&tracker).is_empty()), "left: {:?}", commands(&tracker));
+    }
+
+    /// A scan asked for "after now" sees a process spawned just before the
+    /// call, even while other threads keep the shared snapshot busy (a scan
+    /// that started before the spawn but finished after it doesn't count).
+    #[test]
+    fn a_fresh_scan_sees_a_just_spawned_process_under_concurrent_scans() {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let busy: Vec<_> = (0..6)
+            .map(|_| {
+                let stop = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        let _ = tagged("scan-test-busy-nothing");
+                        std::thread::sleep(std::time::Duration::from_micros(200));
+                    }
+                })
+            })
+            .collect();
+        let tracker = ScanTracker::new(&format!("scan-test-race-{}", std::process::id()));
+        for _ in 0..200 {
+            let mut child = spawn("exec sleep 4041", None);
+            let assigned = tracker.assign_process(child.id());
+            let _ = child.kill();
+            let _ = child.wait();
+            assert!(assigned.is_ok(), "{assigned:?}");
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for t in busy {
+            let _ = t.join();
+        }
     }
 
     /// A root that exited is forgotten: a later process reusing its PID is
@@ -346,7 +382,7 @@ mod tests {
     #[test]
     fn drop_kills_what_is_left() {
         let block = format!("scan-test-drop-{}", std::process::id());
-        let mut sh = spawn("trap '' TERM; setsid sleep 4021 >/dev/null 2>&1 < /dev/null &", Some(&block));
+        let mut sh = spawn("trap '' TERM; (sleep 4021 >/dev/null 2>&1 < /dev/null &)", Some(&block));
         let _ = sh.wait();
         let tracker = ScanTracker::new(&block);
         assert!(wait_for(|| tracker.member_count() == 1));
