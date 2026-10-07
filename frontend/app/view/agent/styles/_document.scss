@@ -299,4 +299,49 @@
             transition: none;
         }
     }
+
+    // One-way flow (agent:onewayflow): rows fade in without the rise. A rise is
+    // a transform, and a transform extends the scroll range, so a pin taken
+    // while it runs lands past the real bottom and is pulled back: the
+    // overshoot. While following, the app keeps every visible row in place
+    // (scroll/one-way-flow.ts), so the browser's own anchoring is off then;
+    // a reader who scrolled away keeps it.
+    // SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md R1, R2.
+    .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
+        transform: none;
+        transition: opacity 180ms cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    @starting-style {
+        .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
+            transform: none;
+        }
+    }
+
+    // Reduced motion: quicker, not gone (owner, 2026-10-07): a shorter fade,
+    // and the follower's approach is quicker too (scroll/follower.ts).
+    @media (prefers-reduced-motion: reduce) {
+        .agent-document[data-one-way] .agent-document-streaming-buffer[data-animate] .agent-document-row:not([data-node-type="user_message"]) {
+            transition: opacity 90ms cubic-bezier(0.2, 0, 0, 1);
+        }
+    }
+
+    .agent-document[data-one-way][data-follow-state="following"] {
+        overflow-anchor: none;
+    }
+
+    // Room left by content that got shorter (or a taller viewport) while
+    // following, filled by the next content. Its height is set by
+    // one-way-flow.ts; display:none at 0 so it adds no flex gap, and the
+    // negative margin cancels the gap it adds when shown. R3.
+    .agent-document-bottom-spacer {
+        flex: none;
+        margin-top: -4px;
+        pointer-events: none;
+        overflow-anchor: none;
+
+        &:not([style*="height"]) {
+            display: none;
+        }
+    }
 }
