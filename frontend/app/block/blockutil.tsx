@@ -135,13 +135,22 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
         if (holder) holder.current = el;
     });
 
+    // Shown on a local pane too, as "Local": the header is where a pane is
+    // switched to a remote, and the picker opens beside this chip.
     return (
-        <Show when={!isLocal()}>
-            <div
-                ref={(el) => setBtnEl(el)}
-                class={clsx("connection-button")}
-                onClick={clickHandler}
-                title={getTitleText()}
+        <div
+            ref={(el) => setBtnEl(el)}
+            class={clsx("connection-button", { "connection-button--local": isLocal() })}
+            onClick={clickHandler}
+            title={isLocal() ? "On this computer. Click to run it on a remote." : getTitleText()}
+        >
+            <Show
+                when={!isLocal()}
+                fallback={
+                    <span class="connection-icon-box">
+                        <i class={util.makeIconClass("laptop", false)} />
+                    </span>
+                }
             >
                 <span class={clsx("fa-stack connection-icon-box", shouldSpin ? "fa-spin" : null)}>
                     {getConnIcon()}
@@ -155,12 +164,12 @@ export function ConnectionButton(props: ConnectionButtonProps): JSX.Element {
                         }}
                     />
                 </span>
-                <Show when={display()?.color}>
-                    <span class="connection-swatch" style={{ background: display()!.color }} />
-                </Show>
-                <div class="connection-name ellipsis">{display()?.name ?? props.connection}</div>
-            </div>
-        </Show>
+            </Show>
+            <Show when={display()?.color}>
+                <span class="connection-swatch" style={{ background: display()!.color }} />
+            </Show>
+            <div class="connection-name ellipsis">{isLocal() ? "Local" : (display()?.name ?? props.connection)}</div>
+        </div>
     );
 }
 
