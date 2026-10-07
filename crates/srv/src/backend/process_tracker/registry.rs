@@ -92,6 +92,68 @@ pub fn place_spawn(block_id: &str, cmd: &mut tokio::process::Command, create: bo
     let _ = (block_id, cmd, create);
 }
 
+/// How a spawn joins its block's tracker (see [`spawn_tracked`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Join {
+    /// The agent's own process: starts the block's tracker if needed and is
+    /// recorded as a root ([`track_spawned_agent`]).
+    Agent,
+    /// Started on an agent's behalf (`Shell()`, `!cmd`): joins an existing
+    /// tracker only ([`track_adopted`]).
+    Adopted,
+}
+
+/// Spawn `cmd` for `block_id` already inside the block's tracker, so nothing
+/// it starts can escape between spawn and assignment: on Linux it joins the
+/// cgroup before exec ([`place_spawn`]); on Windows it starts suspended, is
+/// assigned to the job, then resumed. The one way an agent-side tokio spawn
+/// should start (the Codex App Server, which spawns internally, uses
+/// [`place_spawn`] and [`track_spawned_agent`]).
+pub fn spawn_tracked(block_id: &str, cmd: &mut tokio::process::Command, join: Join) -> std::io::Result<tokio::process::Child> {
+    place_spawn(block_id, cmd, join == Join::Agent);
+    #[cfg(windows)]
+    let suspended = start_suspended(block_id, cmd, join == Join::Agent);
+    let mut child = cmd.spawn()?;
+    if let Some(pid) = child.id() {
+        match join {
+            Join::Agent => track_spawned_agent(block_id, pid),
+            Join::Adopted => track_adopted(block_id, pid),
+        }
+        // Resumed whether or not the assignment worked: a child left
+        // suspended would never run.
+        #[cfg(windows)]
+        if suspended {
+            if let Err(e) = agentmux_common::win32::resume_main_thread(pid) {
+                let _ = child.start_kill();
+                return Err(std::io::Error::other(format!("resume suspended child {pid}: {e}")));
+            }
+        }
+    }
+    Ok(child)
+}
+
+/// Make `cmd` start suspended when the block has (or, `create`, gets) a Job
+/// Object to put it in first. Agent-side spawns set no creation flag but
+/// `CREATE_NO_WINDOW`, which this keeps.
+#[cfg(windows)]
+fn start_suspended(block_id: &str, cmd: &mut tokio::process::Command, create: bool) -> bool {
+    use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+    let Some(registry) = global() else { return false };
+    if block_id.is_empty() {
+        return false;
+    }
+    let tracker = if create {
+        Some(registry.ensure_tracker_kind(block_id, true))
+    } else {
+        registry.inner.lock().get(block_id).map(|e| e.tracker.clone())
+    };
+    if !tracker.is_some_and(|t| t.confidence() == TrackingConfidence::High) {
+        return false;
+    }
+    cmd.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    true
+}
+
 /// [`place_spawn`] for an agent's PTY spawn, which has no pre-exec hook: the
 /// command is wrapped to join first (`cgroup_linux::join_before_exec_pty`).
 pub fn place_pty_spawn(block_id: &str, cmd: &mut portable_pty::CommandBuilder) {
@@ -567,5 +629,49 @@ mod tests {
         assert!(shell.try_wait().ok().flatten().is_some(), "releasing the agent's tracker must end the adopted shell");
         let _ = agent.kill();
         let _ = agent.wait();
+    }
+
+    /// `spawn_tracked`'s Windows path: a child started suspended is in the
+    /// job before it runs, and runs once resumed (it never stays stuck).
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn a_suspended_child_is_assigned_then_resumed_and_runs() {
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        let tracker = super::super::windows::JobObjectTracker::new("test-suspended").unwrap();
+        let mut cmd = tokio::process::Command::new("cmd");
+        cmd.args(["/C", "exit 7"]).creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        let mut child = cmd.spawn().expect("spawn suspended");
+        let pid = child.id().unwrap();
+        tracker.assign_process(pid).unwrap();
+        assert!(tracker.list_members().iter().any(|p| p.pid == pid), "in the job before it runs");
+        agentmux_common::win32::resume_main_thread(pid).unwrap();
+        let status = tokio::time::timeout(std::time::Duration::from_secs(10), child.wait())
+            .await
+            .expect("the resumed child ran and exited")
+            .unwrap();
+        assert_eq!(status.code(), Some(7));
+    }
+
+    /// After `kill_tree` the job stays usable: a respawned process is still
+    /// assigned and listed.
+    #[test]
+    #[cfg(windows)]
+    fn a_job_still_tracks_after_kill_tree() {
+        let spawn = || {
+            std::process::Command::new("cmd")
+                .args(["/C", "ping -n 30 127.0.0.1 > nul"])
+                .spawn()
+                .expect("failed to spawn a disposable test child")
+        };
+        let tracker = super::super::windows::JobObjectTracker::new("test-kill-keeps-job").unwrap();
+        let mut first = spawn();
+        tracker.assign_process(first.id()).unwrap();
+        tracker.kill_tree();
+        let _ = first.wait();
+        let mut second = spawn();
+        tracker.assign_process(second.id()).expect("the job still accepts processes");
+        assert!(tracker.list_members().iter().any(|p| p.pid == second.id()));
+        tracker.kill_tree();
+        let _ = second.wait();
     }
 }

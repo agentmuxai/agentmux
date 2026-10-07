@@ -320,14 +320,10 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     proc.current_dir(dir);
                 }
 
-                crate::backend::process_tracker::registry::place_spawn(&cmd.blockid, &mut proc, false);
-                let mut child = proc.spawn()
+                // Joins the agent's tracker before it runs: a `!cmd` that
+                // backgrounds a child ends with the agent (agent_teardown spec §6.5).
+                let mut child = crate::backend::process_tracker::registry::spawn_tracked(&cmd.blockid, &mut proc, crate::backend::process_tracker::registry::Join::Adopted)
                     .map_err(|e| format!("shellexec: spawn failed ({}): {e}", shell.display()))?;
-                // Join the agent's tracker: a `!cmd` that backgrounds a child
-                // ends with the agent (agent_teardown spec §6.5).
-                if let Some(pid) = child.id() {
-                    crate::backend::process_tracker::registry::track_adopted(&cmd.blockid, pid);
-                }
 
                 // Capture the PID before taking stdout/stderr (id() requires
                 // the Child to still have its stdio handles on some platforms).

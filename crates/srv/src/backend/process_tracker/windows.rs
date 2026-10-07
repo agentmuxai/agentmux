@@ -8,21 +8,18 @@
 //! 1. `JobObjectTracker::new(block_id)` creates an anonymous job and sets
 //!    `KILL_ON_JOB_CLOSE`, so anything in the job dies automatically if
 //!    AgentMux itself crashes without calling `kill_tree`.
-//! 2. The caller gets the tracker handle and, when spawning the agent
-//!    CLI, calls `assign_process(child_pid)` immediately after spawn.
-//!    Every `CreateProcess` descendant of that PID inherits the job
-//!    automatically — no per-process tagging.
+//! 2. Agent-side tokio spawns go through `registry::spawn_tracked`: the
+//!    child starts `CREATE_SUSPENDED`, `assign_process(pid)` puts it in the
+//!    job, then it is resumed, so nothing it starts can escape the job.
+//!    Every `CreateProcess` descendant inherits the job automatically.
+//!    Spawns that can't start suspended (ConPTY, the Codex App Server) are
+//!    assigned right after spawn.
 //! 3. `list_members` queries the job for its current PID set and
 //!    enriches each with command line + RSS via `PROCESS_QUERY_LIMITED_INFORMATION`
 //!    + `GetModuleFileNameEx` / `GetProcessMemoryInfo`.
-//! 4. `kill_tree` → `TerminateJobObject`. One call nukes everything.
-//!
-//! The only non-trivial thing: there's a ~1ms race window between
-//! `CreateProcess` and our `AssignProcessToJobObject`. A child the CLI
-//! creates in that window escapes the job. In practice the CLI doesn't
-//! spawn anything before it reads stdin, so this is a theoretical
-//! concern — but worth a future move to `CREATE_SUSPENDED` + assign +
-//! `ResumeThread` if we see escapes.
+//! 4. `kill_tree` → `TerminateJobObject`: everything in the job dies, and
+//!    the job stays open for whatever the block starts next. `Drop` closes
+//!    it, which `KILL_ON_JOB_CLOSE` turns into the same kill.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -57,8 +54,7 @@ pub struct JobObjectTracker {
 
 struct Inner {
     job: HANDLE,
-    /// Closed-idempotent flag. `kill_tree` + `Drop` both call
-    /// `CloseHandle`; the second caller must no-op.
+    /// Set by `Drop`, the only place the job handle is closed.
     closed: bool,
 }
 
@@ -152,43 +148,37 @@ impl JobObjectTracker {
     }
 
     fn query_pids(&self) -> Vec<u32> {
-        // Buffer sized for up to 256 PIDs. If we overflow we'll log and
-        // truncate — an agent with >256 descendants is an edge case we
-        // can widen later.
-        const MAX_PIDS: usize = 256;
-        #[repr(C)]
-        struct Buf {
-            header: JOBOBJECT_BASIC_PROCESS_ID_LIST,
-            rest: [usize; MAX_PIDS - 1],
-        }
-        let mut buf: Buf = unsafe { zeroed() };
-        let mut returned: u32 = 0;
-        let ok = unsafe {
-            QueryInformationJobObject(
-                self.inner.lock().unwrap().job,
-                JobObjectBasicProcessIdList,
-                &mut buf as *mut _ as *mut _,
-                size_of::<Buf>() as u32,
-                &mut returned,
-            )
-        };
-        if ok == 0 {
-            return Vec::new();
-        }
-        let count = buf.header.NumberOfProcessIdsInList as usize;
-        let count = count.min(MAX_PIDS);
-        let mut pids = Vec::with_capacity(count);
-        // NumberOfAssignedProcesses is the total in the job; the first
-        // entry is inlined in the header, then `rest` continues. Treat
-        // as a flat array of `usize` starting at `header.ProcessIdList[0]`.
-        let first_slot = &buf.header.ProcessIdList[0] as *const usize;
-        for i in 0..count {
-            let p = unsafe { *first_slot.add(i) } as u32;
-            if p != 0 {
-                pids.push(p);
+        // The list's length is fixed at the call: start with room for 256 and,
+        // if the job holds more, retry with room for all of them.
+        let header = size_of::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
+        let mut slots = 256usize;
+        for _ in 0..4 {
+            // `usize` words: the header's two u32 counts, then the PID list.
+            let words = header / size_of::<usize>() + slots;
+            let mut buf: Vec<usize> = vec![0; words];
+            let ok = unsafe {
+                QueryInformationJobObject(
+                    self.inner.lock().unwrap().job,
+                    JobObjectBasicProcessIdList,
+                    buf.as_mut_ptr().cast(),
+                    (words * size_of::<usize>()) as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            // SAFETY: `buf` is at least a header long and suitably aligned.
+            let list = unsafe { &*(buf.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
+            let (assigned, listed) = (list.NumberOfAssignedProcesses as usize, list.NumberOfProcessIdsInList as usize);
+            if ok == 0 && assigned <= slots {
+                return Vec::new();
             }
+            if assigned > listed {
+                slots = assigned + 16;
+                continue;
+            }
+            let first = list.ProcessIdList.as_ptr();
+            return (0..listed.min(slots)).map(|i| unsafe { *first.add(i) } as u32).filter(|p| *p != 0).collect();
         }
-        pids
+        Vec::new()
     }
 }
 
@@ -217,7 +207,7 @@ impl TrackerHandle for JobObjectTracker {
 
     fn kill_tree(&self) {
         unsafe {
-            let mut inner = self.inner.lock().unwrap();
+            let inner = self.inner.lock().unwrap();
             if inner.closed {
                 return;
             }
@@ -230,8 +220,8 @@ impl TrackerHandle for JobObjectTracker {
             } else {
                 tracing::info!(block_id = %self.block_id, "[process-tracker] killed job tree");
             }
-            CloseHandle(inner.job);
-            inner.closed = true;
+            // The job stays open: the block may start processes again (a
+            // respawned CLI) and they must still be tracked. Drop closes it.
         }
     }
 
