@@ -355,3 +355,77 @@ describe("showJsContextMenu — pane overlay registration and close paths", () =
         expect(esc.defaultPrevented).toBe(false);
     });
 });
+
+// ── showJsContextMenu — focus ───────────────────────────────────────────────
+//
+// SPEC_CONTEXT_MENU_PASTE_KEEPS_TERMINAL_FOCUS_2026_10_07: pressing a menu row
+// blurred the focused terminal to <body>, so after "Paste" the next Enter went
+// nowhere until the user clicked the terminal again.
+
+describe("showJsContextMenu — focus", () => {
+    let input: HTMLTextAreaElement;
+    beforeEach(() => {
+        closeJsContextMenu();
+        input = document.createElement("textarea");
+        document.body.appendChild(input);
+        input.focus();
+    });
+    afterEach(() => {
+        closeJsContextMenu();
+        input.remove();
+    });
+
+    const items: NativeContextMenuItem[] = [{ id: "paste", label: "Paste" }];
+    const row = () =>
+        [...document.querySelectorAll("#cef-context-menu-overlay .menu-item")].find((e) =>
+            e.textContent?.includes("Paste"),
+        ) as HTMLElement;
+    const mousedown = (el: Element) => {
+        const ev = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+        el.dispatchEvent(ev);
+        return ev;
+    };
+
+    test("pressing a row or the backdrop doesn't take focus", () => {
+        showJsContextMenu(items, { x: 40, y: 40 }, null);
+        expect(mousedown(row()).defaultPrevented).toBe(true);
+        expect(mousedown(document.getElementById("cef-context-menu-overlay")!).defaultPrevented).toBe(true);
+    });
+
+    test("after an item runs, focus that fell to <body> goes back to the opener", async () => {
+        const onClick = vi.fn();
+        showJsContextMenu(items, { x: 40, y: 40 }, onClick);
+        input.blur(); // what the browser did on the row's mousedown before the fix
+        row().click();
+        await Promise.resolve();
+        expect(onClick).toHaveBeenCalledWith("paste");
+        expect(document.activeElement).toBe(input);
+    });
+
+    test("Escape also hands focus back", async () => {
+        showJsContextMenu(items, { x: 40, y: 40 }, null);
+        input.blur();
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        await Promise.resolve();
+        expect(document.getElementById("cef-context-menu-overlay")).toBeNull();
+        expect(document.activeElement).toBe(input);
+    });
+
+    test("an item that moves focus on purpose keeps it", async () => {
+        const other = document.createElement("input");
+        document.body.appendChild(other);
+        showJsContextMenu(items, { x: 40, y: 40 }, () => other.focus());
+        row().click();
+        await Promise.resolve();
+        expect(document.activeElement).toBe(other);
+        other.remove();
+    });
+
+    test("an opener that went away isn't refocused", async () => {
+        showJsContextMenu(items, { x: 40, y: 40 }, () => input.remove());
+        input.blur();
+        row().click();
+        await Promise.resolve();
+        expect(document.activeElement).toBe(document.body);
+    });
+});
