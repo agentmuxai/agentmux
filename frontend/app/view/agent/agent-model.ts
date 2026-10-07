@@ -695,6 +695,8 @@ export class AgentViewModel {
                 auto_allocate: autoAllocate,
                 // Picks which Operator Config entries the startup file gets.
                 agent_type: agentMode,
+                // The bundles picked for the agent follow Global Memory there.
+                agent_id: agent.id,
             });
             const finalWorkDir = writeResult?.working_dir || writeWorkDir;
             markAgentOpen(blockId, "config");

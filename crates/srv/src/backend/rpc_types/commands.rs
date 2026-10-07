@@ -247,6 +247,10 @@ pub const COMMAND_LIST_MEMORIES: &str = "listmemories";
 pub const COMMAND_GET_MEMORY: &str = "getmemory";
 pub const COMMAND_UPSERT_MEMORY: &str = "upsertmemory";
 pub const COMMAND_DELETE_MEMORY: &str = "deletememory";
+/// An agent's Bundles list: the bundles picked for it, in order, not its own
+/// (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6).
+pub const COMMAND_GET_AGENT_BUNDLES: &str = "getagentbundles";
+pub const COMMAND_SET_AGENT_BUNDLES: &str = "setagentbundles";
 /// v9 — set the global-bundle section order. `ids` is the full ordered list
 /// of global bundle ids; each row's `sort_order` becomes its index.
 pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";

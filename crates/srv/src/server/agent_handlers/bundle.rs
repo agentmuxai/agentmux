@@ -9,6 +9,8 @@ use serde_json::json;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
+    COMMAND_GET_AGENT_BUNDLES, COMMAND_SET_AGENT_BUNDLES,
+    AgentBundlesResult, CommandGetAgentBundlesData, CommandSetAgentBundlesData,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
@@ -29,6 +31,7 @@ use super::super::AppState;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_global_memory_import(engine, state);
     register_global_memory_sections(engine, state);
+    register_agent_bundles(engine, state);
     // ---- Bundle CRUD ----
 
     let mstore = state.id_store.clone();
@@ -335,6 +338,34 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             }
         },
     );
+}
+
+/// `getagentbundles` / `setagentbundles`: an agent's Bundles list, the
+/// bundles picked for it in order (`Store::agent_bundle_ids`). Its own bundle
+/// isn't in it: launch always puts that first. Window-scoped, like
+/// `setagentcontent`: the new-agent form, the launch modal and the Stash call
+/// these before the agent runs.
+fn register_agent_bundles(engine: &WshRpcEngine, state: &AppState) {
+    let mstore = state.mstore.clone();
+    engine.register_typed(COMMAND_GET_AGENT_BUNDLES, move |cmd: CommandGetAgentBundlesData, _ctx| {
+        let mstore = mstore.clone();
+        async move {
+            let bundle_ids = mstore
+                .agent_bundle_ids(&cmd.agent_id)
+                .map_err(|e| format!("getagentbundles: {e}"))?;
+            Ok(AgentBundlesResult { bundle_ids })
+        }
+    });
+    let mstore = state.mstore.clone();
+    engine.register_typed(COMMAND_SET_AGENT_BUNDLES, move |cmd: CommandSetAgentBundlesData, _ctx| {
+        let mstore = mstore.clone();
+        async move {
+            let bundle_ids = mstore
+                .agent_bundles_set(&cmd.agent_id, &cmd.bundle_ids)
+                .map_err(|e| format!("setagentbundles: {e}"))?;
+            Ok(AgentBundlesResult { bundle_ids })
+        }
+    });
 }
 
 /// The Armory's "Bring Global Memory from…" step for an isolated channel

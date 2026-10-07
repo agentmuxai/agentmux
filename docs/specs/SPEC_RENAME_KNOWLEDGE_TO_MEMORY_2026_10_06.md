@@ -1,6 +1,6 @@
 # SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings
 
-**Status:** active — §5 step 1 (the rename) shipped in PR #4425; steps 2–4 remain. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06).
+**Status:** active — §5 step 1 (the rename) shipped in PR #4425; step 2a (the backend for several bundles) in PR #4433; steps 2b–4 remain. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06), D8–D12 on 2026-10-07.
 **Date:** 2026-10-06
 **Author:** agent3 (Agent3@narko), at the operator's request
 **Amends:** `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md` (the pane's name; its §6 risk "'Knowledge' suggests retrieval (RAG) more than configuration … revisit only if users are confused" is that revisit)
@@ -85,11 +85,32 @@ The form opened from a template card in the agent picker (`AgentCreateFromTempla
 - **Remove the Identity field.** Today it picks the provider account the agent signs in with, and preselects the provider's first account (`setAccountId(accounts()[0]?.id ?? "")`). Without the field, that first account is still used, silently; the account can be changed later in the agent's Stash (Accounts). With no account, the agent launches as today's "No auth" and signs in through the usual pre-launch sign-in panel.
 - **Memory → Bundles, multi-select.** Pick any number of bundles, in order. None selected is today's "(vanilla CLI)".
 
-**Agents take one bundle today.** The agent record holds a single bundle id, under its old name `memory_id` (`crates/srv/src/agents/types.rs`, `rpc_types/agent.rs`, `rpc_types/instance.rs`), and only Global Memory combines several bundles (`format_global_brain_block` joins them with `---`). Several bundles per agent is therefore a new capability, delivered as its own phase (§5 step 2):
+**What "the agent's bundle" is today.** Not one thing. An inventory of the code found four per-agent bindings, plus the global ones (the same three-way split `ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md` §2.2 and `SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md` §1.3 call "unreconciled"):
 
-- **Data:** the agent record gains an ordered `bundle_ids` list. `memory_id` stays readable for old records and clients, as the first entry, and a migration fills `bundle_ids` from it.
-- **Launch:** combine bundles in the order picked. Instructions are joined as Global Memory joins its bundles. MCP servers and skills are the union, and when two bundles name the same server or skill, the first bundle wins and the launch notes the duplicate.
-- **Everywhere one bundle is shown or passed today:** the Stash, the bundle summary, the launch modal, Drone nodes, ABF export of an agent, and the App API's agent fields. Each shows or takes the list.
+| | Binding | Stored | At launch |
+|---|---|---|---|
+| A | The agent's **own** bundle ("&lt;Name&gt; — ABF"), created with the agent, never changed | `db_agents.default_memory_id`; `AgentDefinition.memory_id` on the wire | Its skills and MCP servers are added (`managed_union_bundle_refs`), and it gives the provider when the agent has none |
+| B | The bundle **picked for a launch**: the new-agent form, the launch modal | `db_agents.memory_id`; `AgentInstance.memory_id` | **Nothing.** Only read back by `bundle.self.get` / `PresetGet` and the Continue and Recent lists |
+| C | The **Startup** bundle, picked in the Stash's Startup tab | `db_agent_content`, content type `startup_bundle_id` | Its instructions are sent as the agent's first message (`sendStartupSequence.ts`) |
+| D | A Drone node's bundle | the Drone graph's `agent_ref.memoryId` | Nothing: the runner ignores it |
+| G | Global Memory (`is_global` bundles) | `db_bundles.is_global` | Composed into the startup file (`format_global_bundle_block`) |
+
+Two bugs sit on the way: the UI launch path (`WriteAgentConfig`) never delivers a bundle's MCP servers, only the App API's `agent.open` does; and deleting a bundle leaves its id on agents.
+
+**The design: one ordered Bundles list per agent.** What the user picks is what the agent gets.
+
+- **The list is** the agent's own bundle (A) first, always, and not removable: it holds the skills and servers bound to just this agent. After it come the bundles the user picks, in order. A and the picks together replace B and C.
+- **Stored** in a new per-channel table, `db_agent_bundles (agent_id, bundle_id, position)`, holding the picks only. The table is additive and created on every open, so the schema version isn't bumped and an older build still opens the database. A stays in `default_memory_id`, as today. `AgentDefinition` gets no new field (it is built in full in about a hundred places); the list has its own store calls and two RPCs, `getagentbundles` and `setagentbundles`.
+- **Picked in** the new-agent form (**Bundles**, a multi-select), the launch modal (the same list, saved to the agent), and the Stash, whose Startup tab becomes **Bundles**: add, remove and reorder, with the agent's own bundle shown first and fixed.
+- **At launch, in list order:**
+  - **Instructions** go into the startup file, after Global Memory: one section per bundle with instructions, `# [Bundle] <name>` then the text, joined by the same `---` rule, reusing `global_bundle_sections`. They're no longer sent as a first message.
+  - **Skills and MCP servers** are the union over the list, by id, as `managed_union_bundle_refs` does for A today. When two bundles name the same MCP server, the first wins, and the launch logs the duplicate.
+  - **Provider:** unchanged: the agent's own, else its own bundle's (A). A picked bundle never changes the provider (§6 D11).
+- **Deleting a bundle** removes it from this channel's lists. A launch skips a listed bundle that no longer exists (one deleted on another channel, or by an older build).
+- **Compatibility.** `memory_id` (A) and B's `db_agents.memory_id` stay as they are; B goes on being written and read back (`bundle.self.get` / `PresetGet`, Continue, Recent) but still does nothing at launch. A `startup_bundle_id` (C) is folded into the list the first time the list is read, appended if it isn't there already, and the row removed. That one mechanism covers existing agents and a pick an older build writes later, so there is no separate data migration. The new-agent form's RPC (`agentdefcreatefromtemplate`) takes `bundle_ids`; `memory_id` is still accepted and means B, as today.
+- **B is not migrated** (§6 D12).
+- **Drone nodes** keep one inert `memoryId` and its **Bundle** label, because the runner doesn't use it (§6 D6).
+- **Not in this change:** the cross-channel agent registry carries no bundle binding today (A has the same gap, issue #3148), so the list is per channel, like A. Memory re-injection after compaction re-delivers Global Memory only, not the picked bundles' sections; Claude Code re-reads the startup file itself, other providers lose them until the next launch.
 
 ### 3.7 What does not change
 
@@ -128,7 +149,10 @@ It never adopted Knowledge and still says **Armory**: `FeaturesPage.tsx:60, 109,
 ## 5. Delivery
 
 1. **agentmux PR, the rename:** §3.1–3.5, §3.6's Identity removal and the field's new label, and §4.1, with tests. The existing tests cover the contract values; add migration tests for each old value in §3.2 (alias, section key, pinned key, hidden key, color key, command id, layout type).
-2. **agentmux PR, several bundles per agent:** the rest of §3.6 (data, migration, launch combination, the list everywhere), with tests. The field becomes multi-select here.
+2. **agentmux PRs, several bundles per agent** (§3.6):
+   - **2a, backend:** `db_agent_bundles`, the list RPCs (`getagentbundles`, `setagentbundles`), launch composition on both paths (`agent.open`, and `WriteAgentConfig`, which gains an optional agent id), skills and MCP over the list, and bundle and agent deletion. Inert until something writes a list, so it changes nothing on its own. With tests.
+   - **2b, the switch:** the new-agent form's **Bundles** multi-select, the launch modal's list, the Stash's **Bundles** tab in place of Startup, the fold of `startup_bundle_id` into the list, and the first-message startup removed. These go together, so no build sends a bundle's instructions twice or loses a Startup pick. New pickers start empty. With tests.
+   - **2c, a pre-existing bug:** the UI launch path delivers the bundles' MCP servers too.
 3. **agentmux-docs PR:** §4.2 and §4.3, once (1) and (2) have merged, so the docs match the shipped UI.
 4. **agentmux-landing PR:** §4.4.
 
@@ -139,5 +163,13 @@ It never adopted Knowledge and still says **Armory**: `FeaturesPage.tsx:60, 109,
 - **D3. Docs URLs.** Swap the slugs as in §4.2 (recommended); or leave `/memory/` as Bundles and put the Memory pane at another slug. That would keep "memory" ambiguous on the site.
 - **D4. Icon.** `brain` (recommended: the Personal section already uses it, and "book" reads as documentation); or keep `book`.
 - **D5. No account.** Without the Identity field, use the provider's first account silently (recommended, it's today's default), or always start with no account and sign in at launch.
-- **D6. Where else several bundles appear.** The launch modal and Drone nodes take the list too (recommended, one model everywhere), or only the new-agent form does.
+- **D6. Where else several bundles appear.** The launch modal and the Stash take the list too, so there's one model. Drone nodes keep their single, inert field: the runner ignores it, so a list there would promise something nothing does.
 - **D7. Duplicates across bundles.** First bundle wins, and the launch notes it (recommended); or refuse the combination when two bundles define the same MCP server or skill.
+- **D8. Bundle instructions** go into the startup file, after Global Memory, so they last through compaction like Global Memory does, rather than being sent as a first message.
+- **D9. The Stash's Startup tab** becomes the agent's Bundles list, so a bundle is picked in one place.
+- **D10. The agent's own bundle** stays, first and fixed, holding what's bound to just this agent.
+
+- **D11. Provider.** Unchanged (the agent's, else A's). The provider is resolved on the shared agent registry, which can't see the per-channel list, and a picked bundle silently switching an agent's provider would surprise.
+- **D12. Migrating B.** Not migrated. The form and launch modal preselected the first bundle on their own, and B never did anything at launch, so copying it would put an arbitrary bundle's instructions into every agent's startup file. Only C, which the user chose and which took effect, moves into the list.
+
+D8–D12 were taken on the recommendations (operator, 2026-10-07: "use best judgement").

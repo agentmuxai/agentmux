@@ -1127,6 +1127,19 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_jekt_held_target ON db_jekt_held (target_uid, sent_at_ms);
 
+        -- The bundles picked for an agent, in order; its own bundle
+        -- (db_agents.default_memory_id) is not listed here
+        -- (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). No FK: a
+        -- bundle lives in the identity store, and an agent's rows go with
+        -- it in purge_agent_dependents. Additive, applied on every open,
+        -- so no version bump.
+        CREATE TABLE IF NOT EXISTS db_agent_bundles (
+            agent_id  TEXT NOT NULL,
+            bundle_id TEXT NOT NULL,
+            position  INTEGER NOT NULL,
+            PRIMARY KEY (agent_id, bundle_id)
+        );
+
         -- v21: trust-on-first-use pin of a remote agent_id's LAN public key
         -- (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2, reagentx P0).
         -- Distinct from db_agent_lan_keys (this instance's OWN agents'

@@ -538,6 +538,11 @@ pub struct CommandWriteAgentConfigData {
     #[serde(default)]
     #[ts(optional)]
     pub agent_type: Option<String>,
+    /// The agent definition's id. The bundles picked for it go into the
+    /// startup file after Global Memory. Absent from an older frontend: none.
+    #[serde(default)]
+    #[ts(optional)]
+    pub agent_id: Option<String>,
 }
 
 /// Result of WriteAgentConfigCommand. Returns the final working
