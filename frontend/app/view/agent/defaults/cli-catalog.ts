@@ -58,7 +58,7 @@ const CLI_CATALOG: CliCatalogEntry[] = [
             "Anthropic's coding agent. Strong at reasoning through long sessions and explaining its thinking as it works. Good when you want it to read widely across a codebase before changing anything. Best if you already use Claude.",
         hostSupported: true,
         containerSupported: true,
-        containerImage: "ghcr.io/agentmuxai/agent-claude:latest",
+        containerImage: "ghcr.io/agentmuxai/agent-base:latest",
     },
     {
         provider: "codex",

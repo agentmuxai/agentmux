@@ -229,6 +229,9 @@ export type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAge
 export type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
 export type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
 export type { CommandContainerRuntimeAvailableData } from "@/types/rpc/CommandContainerRuntimeAvailableData";
+export type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
+export type { ContainerImageAccess } from "@/types/rpc/ContainerImageAccess";
+export type { ContainerImageCheckResult } from "@/types/rpc/ContainerImageCheckResult";
 export type { CommandReseedAgentsData } from "@/types/rpc/CommandReseedAgentsData";
 export type { CommandExportAgentsData } from "@/types/rpc/CommandExportAgentsData";
 export type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
@@ -249,6 +252,8 @@ import type { CommandGetAllAgentContentData } from "@/types/rpc/CommandGetAllAge
 import type { CommandImportAgentFromClawData } from "@/types/rpc/CommandImportAgentFromClawData";
 import type { CommandImportAgentDefinitionsData } from "@/types/rpc/CommandImportAgentDefinitionsData";
 import type { CommandContainerRuntimeAvailableData } from "@/types/rpc/CommandContainerRuntimeAvailableData";
+import type { CommandContainerImageCheckData } from "@/types/rpc/CommandContainerImageCheckData";
+import type { ContainerImageCheckResult } from "@/types/rpc/ContainerImageCheckResult";
 import type { CommandReseedAgentsData } from "@/types/rpc/CommandReseedAgentsData";
 import type { CommandExportAgentsData } from "@/types/rpc/CommandExportAgentsData";
 import type { ContainerRuntimeAvailableResult } from "@/types/rpc/ContainerRuntimeAvailableResult";
@@ -390,6 +395,17 @@ export const AgentApi = {
         opts?: RpcOpts,
     ): Promise<{ available: boolean }> {
         return client.rpcCall("containerruntimeavailable", {}, opts);
+    },
+
+    // Whether a container image can be had here: already in the Docker daemon,
+    // or readable from its registry without credentials. Empty `image` means
+    // the default image. Only "denied" and "not_found" mean it cannot start.
+    ContainerImageCheckCommand(
+        client: RpcClient,
+        data: CommandContainerImageCheckData,
+        opts?: RpcOpts,
+    ): Promise<ContainerImageCheckResult> {
+        return client.rpcCall("containerimagecheck", data, opts);
     },
 
     CreateAgentDefinitionCommand(client: RpcClient, data: AgentDefinitionCreateInput, opts?: RpcOpts): Promise<AgentDefinition> {

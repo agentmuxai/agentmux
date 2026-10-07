@@ -43,12 +43,19 @@ use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInn
 ///
 /// The prompt file is removed after the CLI exits, and the CLI's own exit
 /// status is preserved for `inspect_exec` to classify the turn.
+///
+/// The directory the provider CLI is installed into on first start is appended
+/// to `PATH`, after the image's own, so a CLI baked into an older image still
+/// wins over the installed one.
 fn container_turn_exec(prompt_path: &str, cmd: Vec<String>) -> Vec<String> {
     let mut out = vec![
         "sh".to_string(),
         "-c".to_string(),
         // $1 = prompt path, "$@" (after shift) = the CLI and its args.
-        r#"F="$1"; shift; "$@" < "$F"; rc=$?; rm -f "$F"; exit $rc"#.to_string(),
+        format!(
+            r#"PATH="$PATH:{}"; export PATH; F="$1"; shift; "$@" < "$F"; rc=$?; rm -f "$F"; exit $rc"#,
+            crate::backend::container_cli::cli_bin_dir()
+        ),
         // $0 for the script -- a label only.
         "agentmux-turn".to_string(),
         prompt_path.to_string(),
@@ -101,6 +108,17 @@ mod turn_exec_tests {
         let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
         assert!(argv[2].contains("rc=$?"), "captures status before rm");
         assert!(argv[2].contains("exit $rc"), "and re-raises it: {}", argv[2]);
+    }
+
+    /// The installed CLI is found after the image's own `PATH`, not before it.
+    #[test]
+    fn appends_the_install_dir_to_path_after_the_images_own() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
+        assert!(
+            argv[2].starts_with(r#"PATH="$PATH:/home/agent/.agentmux/cli/node_modules/.bin"; export PATH;"#),
+            "{}",
+            argv[2]
+        );
     }
 
     /// Passed as "$@", so the CLI argv survives verbatim and in order.

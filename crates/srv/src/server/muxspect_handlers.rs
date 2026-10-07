@@ -111,7 +111,9 @@ fn classify_last_error_source(message: &str) -> &'static str {
         || message.starts_with("could not isolate this agent's")
     {
         "identity"
-    } else if message.starts_with("container exec failed") || message.starts_with("container ensure_running failed")
+    } else if message.starts_with("container exec failed")
+        || message.starts_with("container ensure_running failed")
+        || message.starts_with("Couldn't start the container")
     {
         "container_spawn"
     } else if message.starts_with("queued message could not be sent") {
@@ -1405,6 +1407,10 @@ mod tests {
         );
         assert_eq!(
             classify_last_error_source("container ensure_running failed: image not found"),
+            "container_spawn"
+        );
+        assert_eq!(
+            classify_last_error_source("Couldn't start the container for this agent: the registry refused access to x."),
             "container_spawn"
         );
         assert_eq!(

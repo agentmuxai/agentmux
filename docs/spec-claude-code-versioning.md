@@ -6,62 +6,64 @@
 
 ## Problem
 
-The container image for `ghcr.io/agentmuxai/agent-claude` previously defaulted to
-installing whatever `@anthropic-ai/claude-code@latest` resolved to at image build
-time. This meant two builds triggered minutes apart could embed different Claude Code
-versions, breaking reproducibility and making regressions harder to bisect.
+Claude Code used to be installed with `@anthropic-ai/claude-code@latest` at container
+image build time, so two builds minutes apart could embed different versions. It was
+then pinned in the image build.
 
-## Version pins (four matching-string locations, plus one curated label — five sync points total)
+As of 2026-10-07 the published container image (`ghcr.io/agentmuxai/agent-base`) no
+longer contains Claude Code at all (proprietary license; redistribution is not
+cleared). AgentMux installs the pinned version from npm into the agent's container the
+first time it starts (`crates/srv/src/backend/container_cli.rs`), so the pin that
+matters for containers is the same one host installs use. See
+`docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md`.
+
+## Version pins (two matching-string locations, plus one curated label)
 
 | File | Location | Purpose |
 |------|----------|---------|
-| `docker/Dockerfile.agent-agentmux` line 36 | `ARG CLAUDE_VERSION=2.1.288` | Fallback for local `docker build` without passing the arg |
-| `.github/workflows/container-image.yml` line 16 | `default: '2.1.288'` | Default used when CI is triggered via `workflow_dispatch` without an explicit version input |
-| `crates/srv/src/backend/providers.rs` | `pinned_version: "2.1.288"` (CLAUDE static) | Version the backend sidecar installs |
-| `frontend/app/view/agent/providers/catalog.ts` (re-exported via `./index`) | `pinnedVersion: "2.1.288"` (PROVIDERS.claude) | Version surfaced in the UI. Corrected 2026-08-27 — this file used to be a single `providers/index.ts`, split into `types.ts`/`catalog.ts`/`model-overlay.ts` for readability; the pin moved with it but this doc wasn't updated at the time. |
-| `frontend/app/view/agent/providers/catalog.ts` (same object) | `models: [{ value: "opus", label: "Opus 5.5", ... }]` | The curated UI label for the `opus` family alias — **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
-
-The CI workflow's "Resolve Claude Code version" step (`id: claude_ver`) has a special case:
-- Input non-empty and not `"latest"` → use the input value verbatim (shell injection safe via `env:`)
-- Input empty or `"latest"` → resolve via `npm view @anthropic-ai/claude-code version` at build time
+| `crates/srv/src/backend/providers.rs` | `pinned_version: "2.1.288"` (CLAUDE static) | Version the backend installs for host agents, and into a container agent's container on first start |
+| `frontend/app/view/agent/providers/catalog.ts` (re-exported via `./index`) | `pinnedVersion: "2.1.288"` (PROVIDERS.claude) | Version surfaced in the UI |
+| `frontend/app/view/agent/providers/catalog.ts` (same object) | `models: [{ value: "opus", label: "Opus 5.5", ... }]` | The curated UI label for the `opus` family alias: **not itself version-locked to the CLI pin**, but should be re-checked on every pin bump per the field's own doc comment ("kept in sync on a pin bump"): whichever concrete snapshot Anthropic's API currently resolves `--model opus` to. |
 
 `frontend/app/view/agent/providers/pin-consistency.test.ts` enforces agreement
-across the **four matching-version-string** locations (the first four rows
-above), including the Dockerfile `ARG` — added 2026-08-27, closing a gap this
-doc itself had warned about (in this same paragraph) for over a month without
-it becoming a test. (A fifth, the CEF host's own installer pin, was removed on
-2026-09-26 with that unused installer.) It does **not**, and structurally
-cannot, check the fifth row (the model `label`) — that's not a version string to compare, it's a
-semantic claim about upstream state; see `SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`
-§3.3 for the open question of whether/how to make that check less manual too.
-All four version pins must still be updated together, and the test only
-catches a *mismatch* — not a location someone forgot to touch at all. (That
-drift-in-a-warning — plus this doc having separately drifted on the frontend
-file path, plus this exact paragraph ALSO originally mis-stated "all six" as
-if the label were part of the same check when it was first corrected — is
-exactly the kind of thing `SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`
-generalizes a fix for: prefer a durable check over a doc a human has to
-remember to re-read accurately, since even three successive edits to this
-same paragraph, by the same author, in the same review cycle, kept
-introducing a version of the same imprecision.)
+across the two version-string locations. It also checks that the image build
+(`docker/Dockerfile.agent-agentmux` and `.github/workflows/container-image.yml`) does
+not bundle Claude Code or grow a pin of its own again. It does **not**, and
+structurally cannot, check the model `label` row: that is a semantic claim about
+upstream state, not a version string; see
+`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md` section 3.3 for the open question of
+making that check less manual. Both pins must still be updated together, and the test
+only catches a *mismatch*, not a location someone forgot to touch at all.
+
+An existing container keeps the version it installed until its marker changes: a bump
+changes the install marker, so the next start of each container installs the new
+version into its volume. A container whose image still has a baked-in `claude` (the
+retired `agent-claude` image) keeps that one.
 
 ## How to bump
 
 1. Check the latest release: `npm view @anthropic-ai/claude-code version`
-2. In `docker/Dockerfile.agent-agentmux`: update `ARG CLAUDE_VERSION=<new>`
-3. In `.github/workflows/container-image.yml`: update `default: '<new>'`
-4. In `crates/srv/src/backend/providers.rs`: update the CLAUDE static's `pinned_version`
-5. In `frontend/app/view/agent/providers/catalog.ts`: update `PROVIDERS.claude.pinnedVersion`
-6. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
-   matches what the pinned CLI currently resolves that alias to (e.g. `opus` → "Opus 5")
+2. In `crates/srv/src/backend/providers.rs`: update the CLAUDE static's `pinned_version`
+3. In `frontend/app/view/agent/providers/catalog.ts`: update `PROVIDERS.claude.pinnedVersion`
+4. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
+   matches what the pinned CLI currently resolves that alias to (e.g. `opus` -> "Opus 5")
    — a label can go stale even when the alias `value` itself never changes.
-7. Run `pin-consistency.test.ts` to confirm the four version pins agree
-   (includes the Dockerfile `ARG` as of 2026-08-27; does not check the label
-   from step 6 — that one's on you).
-8. Open a PR and merge it.
-9. To publish the image, either:
-    - **Push a `v*` git tag** (e.g. `git tag v0.50.0 && git push origin v0.50.0`) — this triggers the workflow automatically and publishes both the semver tag and `:latest`.
-    - **Manually dispatch** the `Container Agent Image` workflow — this builds and pushes a `dispatch-<sha>` tag only; `:latest` is *not* updated by a manual dispatch.
+5. Run `pin-consistency.test.ts` to confirm the two version pins agree (it does not
+   check the label from step 4; that one's on you).
+6. Open a PR and merge it. No image needs publishing: container agents install the new
+   pin on their next start.
+
+## Publishing the base image
+
+The base image only changes when its contents do (system packages, the `agentmux-mcp`
+and `agentmux-bashwrap` binaries). Either:
+- **Push a `v*` git tag**: publishes the semver tags and `:latest`.
+- **Manually dispatch** the `Container Agent Image` workflow: pushes a `dispatch-<sha>`
+  tag, and also `:latest` when the `tag_latest` input is on.
+
+The workflow's last step pulls the image anonymously and fails, naming the UI step, if
+the package is not public. A new package is private until an organization owner changes
+its visibility in the GitHub UI (there is no API for it).
 
 ## Version history
 

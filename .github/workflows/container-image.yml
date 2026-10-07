@@ -1,22 +1,32 @@
 name: Container Agent Image
 
+# Builds the PUBLIC base image container agents run in (ghcr.io/agentmuxai/agent-base).
+# It carries no provider CLI: AgentMux installs the pinned Claude Code from npm on the
+# user's machine the first time an agent's container starts. Redistributing Claude
+# Code in an image is not cleared, which is also why the old agent-claude package is
+# no longer built here.
+#
+# AgentMux pulls the image without credentials, so the package must be public. A new
+# GHCR package is private by default and only an organization owner can change that,
+# in the GitHub UI. The last step fails, naming that step, until it is done.
+#
+# docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md
+
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
     inputs:
-      claude_version:
-        # Keep in sync with the Claude pin in crates/srv/src/backend/providers.rs
-        # and frontend/app/view/agent/providers/catalog.ts — enforced by
-        # frontend/app/view/agent/providers/pin-consistency.test.ts.
-        description: 'Claude Code version to pin (empty = latest)'
+      tag_latest:
+        description: 'Also publish :latest (a release tag push always does)'
+        type: boolean
         required: false
-        default: '2.1.288'
+        default: false
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: agentmuxai/agent-claude
+  IMAGE_NAME: agentmuxai/agent-base
 
 jobs:
   build-and-push:
@@ -28,13 +38,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Install Node 24
-        # Pins the Node version used to run `npm view` below — previously
-        # unpinned and drifting with whatever ubuntu-latest happened to ship.
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
 
       - name: Set up QEMU (arm64 cross-compilation)
         uses: docker/setup-qemu-action@v3
@@ -65,25 +68,10 @@ jobs:
             # publish :latest on every version-tag push (github.ref is always
             # refs/tags/vX.Y.Z here; the previous refs/heads/main check was
             # never true in this workflow and suppressed :latest entirely)
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.tag_latest) }}
             # workflow_dispatch does not push a semver tag so type=semver emits nothing;
             # produce a dispatch-<sha> tag so manual runs actually push an image.
             type=raw,value=dispatch-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
-
-      - name: Resolve Claude Code version
-        id: claude_ver
-        # Bind the workflow_dispatch input to an env var before the shell sees it
-        # to prevent shell injection — direct ${{ }} expansion happens before the
-        # shell runs, so an attacker-controlled value like `"; cmd; echo "` would
-        # execute arbitrary code.  Using env: isolates it as a plain variable.
-        env:
-          CLAUDE_VERSION_INPUT: ${{ github.event.inputs.claude_version }}
-        run: |
-          if [ -n "$CLAUDE_VERSION_INPUT" ] && [ "$CLAUDE_VERSION_INPUT" != "latest" ]; then
-            echo "version=$CLAUDE_VERSION_INPUT" >> $GITHUB_OUTPUT
-          else
-            echo "version=$(npm view @anthropic-ai/claude-code version)" >> $GITHUB_OUTPUT
-          fi
 
       - name: Build and push
         uses: docker/build-push-action@v5
@@ -101,5 +89,15 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            CLAUDE_VERSION=${{ steps.claude_ver.outputs.version }}
+
+      # Anonymous, like the daemon's own pull: no login in this step. Fails with
+      # the exact UI step when the package is still private. Checks the first tag
+      # this run pushed.
+      - name: Anonymous pull must work (the package must be public)
+        env:
+          PUSHED_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          docker logout "$REGISTRY" >/dev/null 2>&1 || true
+          image="$(printf '%s\n' "$PUSHED_TAGS" | head -n 1)"
+          bash scripts/check-anonymous-pull.sh "$image" \
+            "https://github.com/orgs/agentmuxai/packages/container/package/agent-base"
