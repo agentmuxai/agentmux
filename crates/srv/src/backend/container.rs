@@ -977,6 +977,29 @@ impl ContainerManager {
             .any(|h| h == "host.docker.internal:host-gateway")
     }
 
+    /// Running Docker Compose containers whose project directory is `dir` or
+    /// inside it (Compose's `com.docker.compose.project.working_dir` label):
+    /// the ones an agent working there may have started. Names only.
+    pub async fn running_compose_containers_under(&self, dir: &std::path::Path) -> Result<Vec<String>, ContainerError> {
+        const WORKING_DIR: &str = "com.docker.compose.project.working_dir";
+        let mut filters = HashMap::new();
+        filters.insert("label", vec![WORKING_DIR]);
+        filters.insert("status", vec!["running"]);
+        let list = self.inner.docker
+            .list_containers(Some(ListContainersOptions { all: false, filters, ..Default::default() }))
+            .await?;
+        Ok(list
+            .into_iter()
+            .filter(|c| {
+                c.labels
+                    .as_ref()
+                    .and_then(|l| l.get(WORKING_DIR))
+                    .is_some_and(|wd| std::path::Path::new(wd).starts_with(dir))
+            })
+            .filter_map(|c| c.names.and_then(|n| n.first().map(|n| n.trim_start_matches('/').to_string())))
+            .collect())
+    }
+
     /// Returns the container status string ("running", "exited", …) or `None` if not found.
     async fn find_container(&self, name: &str) -> Result<Option<String>, ContainerError> {
         let mut filters = HashMap::new();

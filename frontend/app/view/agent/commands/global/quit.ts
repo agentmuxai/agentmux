@@ -29,6 +29,8 @@ export type QuitSummary = {
     crons_targeting: string[];
     /** Processes still running after the quit, as `name (pid N)`; absent from older servers. */
     survivors?: string[];
+    /** Docker Compose containers from the agent's folder, left running; absent from older servers. */
+    containers_left?: string[];
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -42,6 +44,13 @@ export function quitNoticeMessage(s: QuitSummary): string {
         parts.push(
             `${plural(s.survivors.length, "process is", "processes are")} still running ` +
                 `(${s.survivors.join(", ")}); end ${s.survivors.length === 1 ? "it" : "them"} from Task Manager or \`kill\`.`
+        );
+    }
+    if (s.containers_left?.length) {
+        parts.push(
+            `${plural(s.containers_left.length, "Docker container", "Docker containers")} from its folder still ` +
+                `${s.containers_left.length === 1 ? "runs" : "run"} (${s.containers_left.join(", ")}); ` +
+                `\`docker compose down\` there if you're done with ${s.containers_left.length === 1 ? "it" : "them"}.`
         );
     }
     if (s.crons_targeting.length > 0) {

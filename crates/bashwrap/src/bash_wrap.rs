@@ -404,16 +404,12 @@ fn detach_declared_background_session(_args: &Args) {}
 /// (independent of shell job control) and force-kills every process in it.
 /// No new dependency needed — this is a plain `std::process::Command`.
 ///
-/// Unix: not implemented here. portable-pty's Unix `ChildKiller` sends
-/// SIGHUP (its own doc comment: "we send the SIGHUP signal instead of
-/// trying to kill") to what its source suggests is the child's process
-/// group, which — if the pty child is a session/group leader, the normal
-/// case for an interactive shell — should already reach pipeline
-/// descendants without a supplemental step. All evidence for this bug
-/// (PR #2156 / RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md) is
-/// Windows-specific; adding an unverified Unix code path (which would need
-/// a new `libc` dependency for a process-group `kill(-pid, ...)`) is
-/// deferred until there's an actual repro to design against.
+/// Unix: SIGKILL to the child's process group. portable-pty makes the PTY
+/// child a session and group leader (`setsid`), so its pgid is its pid and
+/// the group holds the command, its pipeline and what it backgrounded with
+/// `&`. portable-pty's own `ChildKiller` only SIGHUPs the one pid, which a
+/// `nohup`'d child ignores. A child that started its own session is out of
+/// reach here; the agent's process tracker ends it with the agent.
 fn kill_process_tree(pid: u32) {
     #[cfg(windows)]
     {
@@ -445,9 +441,13 @@ fn kill_process_tree(pid: u32) {
             }
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(unix)]
     {
-        let _ = pid; // no supplemental step on this platform — see doc comment above
+        // SAFETY: kill(2) on a process group id we spawned and a constant
+        // signal. ESRCH (already gone) is fine.
+        unsafe {
+            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
+        }
     }
 }
 
