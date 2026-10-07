@@ -1725,13 +1725,14 @@ impl Controller for ShellController {
         // can't reach it via PTY-hangup/session-leader-death SIGHUP. But
         // that same detachment also removes it from THIS process's group
         // — so the group-wide kill just above (intended to reach it on a
-        // genuine STOP, e.g. pane close) no longer can either. On
-        // macOS (and Linux without a delegated cgroup), nothing else fills
-        // that gap: `process_tracker::new_tracker` returns the no-op
-        // `StubTracker` there, so `delete_controller`'s `registry.remove()`
-        // does nothing for it. Without this step, `stop()` (the real,
+        // genuine STOP, e.g. pane close) no longer can either. The agent's
+        // tracker reaches it (a cgroup on Linux, the best-effort
+        // `ScanTracker` on macOS and Linux without delegation, by its env
+        // tag), but only when the block's tracker is released; a terminal
+        // block has the no-op stub. This step doesn't wait for either.
+        // Without it, `stop()` (the real,
         // unmodified deletion path — used by `delete_tab`/`delete_block`/
-        // `wcore::tab`) would leak it forever on Linux/macOS (reagentx
+        // `wcore::tab`) would leave it running past the stop on Unix (reagentx
         // finding, PR #2683). Kill each `Running`, known-pid declared-
         // background task's own (detached) process group explicitly, by
         // pid from the durable registry — the one piece of state that
@@ -1817,9 +1818,10 @@ impl Controller for ShellController {
         // declared-background descendant the way stop()'s `-(pid)` /
         // a whole-job close would.
         //
-        // On macOS (and Linux without a delegated cgroup) this is the
-        // primary path: the tracker there is the no-op `StubTracker`, so
-        // `kill_pid` returns `false`.
+        // The primary path for a terminal block on Unix, whose tracker is the
+        // no-op stub (`kill_pid` returns `false`). An agent block's tracker
+        // (cgroup, or `ScanTracker` on macOS and Linux without delegation)
+        // SIGKILLs the pid itself and returns `true`.
         #[cfg(unix)]
         {
             // SAFETY: kill() is a well-defined POSIX syscall.

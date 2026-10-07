@@ -542,10 +542,11 @@ pub fn take_controller(block_id: &str) -> Option<Arc<dyn Controller>> {
 /// its Process Broker entry. The second half of [`delete_controller`]; a
 /// graceful close calls it only after the process has exited.
 pub fn release_block_processes(block_id: &str) {
-    // Drop the process tracker for this block: on Windows the job's
-    // `KILL_ON_JOB_CLOSE`, on Linux the cgroup tracker's `Drop`
-    // (`cgroup.kill`) end the whole descendant tree. Nothing on the stub
-    // (macOS, Linux terminals). No-op if the tracker global isn't initialized.
+    // Drop the process tracker for this block: the Windows job's
+    // `KILL_ON_JOB_CLOSE`, the Linux cgroup tracker's `Drop` (`cgroup.kill`)
+    // and the `ScanTracker`'s `Drop` (its tagged tree, best effort: macOS,
+    // Linux without delegation) end the whole descendant tree. Nothing on the
+    // stub (Unix terminals). No-op if the tracker global isn't initialized.
     if let Some(registry) = crate::backend::process_tracker::registry::global() {
         registry.remove(block_id);
     }
