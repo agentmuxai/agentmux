@@ -220,8 +220,9 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
 /// A workspace the reducer tracks goes through the `delete_workspace` saga
 /// (reducer and store stay consistent, durable provenance). One it never
 /// knew — the usual case when its window diverged too (#2051) — would make
-/// the saga's reducer dispatch error out, so its agents are closed here and
-/// the store cascades directly.
+/// the saga's reducer dispatch error out, so its agents are closed here, the
+/// store cascades directly, and each block's close is finished as the saga
+/// would (`close_pane::finish_close`).
 async fn close_workspace(state: &AppState, ws_id: String) {
     let st = state.clone();
     let done = crate::sagas::agent_teardown::detached(async move {
@@ -232,7 +233,11 @@ async fn close_workspace(state: &AppState, ws_id: String) {
             let block_ids = store_block_ids(&st.mstore, &ws_id);
             crate::sagas::agent_teardown::run_many(&st, &block_ids, crate::sagas::agent_teardown::Policy::close())
                 .await;
-            crate::backend::wcore::delete_workspace(&st.mstore, &ws_id).map_err(|e| e.to_string())
+            let deleted = crate::backend::wcore::delete_workspace(&st.mstore, &ws_id).map_err(|e| e.to_string());
+            for block_id in &block_ids {
+                crate::sagas::close_pane::finish_close(&st, block_id).await;
+            }
+            deleted
         };
         if let Err(e) = result {
             tracing::warn!(workspace_id = %ws_id, reducer_knows_ws, "CloseWindow: workspace delete failed: {}", e);
