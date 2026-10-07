@@ -63,7 +63,7 @@ describe("PROVIDERS", () => {
             qwen: "QWEN.md",
             copilot: "AGENTS.md",
             openclaw: "AGENTS.md",
-            pi: ".pi/APPEND_SYSTEM.md",
+            pi: "AGENTS.md",
             antigravity: "GEMINI.md",
             muxcode: "CLAUDE.md",
             kimi: undefined,

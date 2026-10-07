@@ -71,6 +71,13 @@ is not worth it unless the adapter proves unreliable.
 4. **Pins and prereqs:** Node 22.19.0 (pi's `engines`). The old-name pin is
    gone.
 5. **Card:** the description was already corrected (#4403).
+6. **Startup instructions go to `AGENTS.md`.** pi 1.0.4 treats
+   `.pi/APPEND_SYSTEM.md` (the earlier target) and `.pi/SYSTEM.md` as
+   trust-protected; in RPC mode, which pi-acp uses, a project with no saved
+   trust decision skips them, so AgentMux's instructions were never read.
+   `AGENTS.md` is a context file pi always loads, so no trust decision is
+   needed (trusting every project would also load any repo's own `.pi`
+   settings and extensions unasked).
 
 ## Tests
 
