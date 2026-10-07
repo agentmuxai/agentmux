@@ -36,15 +36,31 @@ pub struct RefTable {
 }
 
 /// Per-host store of each pane's latest reference table, by block id.
+/// Bounded: past `MAX_TABLES` panes, the least recently snapshotted is
+/// dropped (its agent just takes a new snapshot).
 #[derive(Default)]
-pub struct RefTables(std::sync::Mutex<HashMap<String, RefTable>>);
+pub struct RefTables(std::sync::Mutex<(u64, HashMap<String, (u64, RefTable)>)>);
+
+const MAX_TABLES: usize = 64;
 
 impl RefTables {
     fn put(&self, block_id: &str, table: RefTable) {
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).insert(block_id.to_string(), table);
+        let mut g = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        g.0 += 1;
+        let stamp = g.0;
+        g.1.insert(block_id.to_string(), (stamp, table));
+        while g.1.len() > MAX_TABLES {
+            let oldest = g.1.iter().min_by_key(|(_, (t, _))| *t).map(|(k, _)| k.clone());
+            match oldest {
+                Some(k) => {
+                    g.1.remove(&k);
+                }
+                None => break,
+            }
+        }
     }
     fn get(&self, block_id: &str) -> Option<RefTable> {
-        self.0.lock().unwrap_or_else(|p| p.into_inner()).get(block_id).cloned()
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).1.get(block_id).map(|(_, t)| t.clone())
     }
 }
 
@@ -296,10 +312,11 @@ fn fail<T>(msg: impl Into<String>) -> (StatusCode, Json<ApiResponse<T>>) {
     (StatusCode::OK, Json(ApiResponse::err(msg.into())))
 }
 
-/// Facts are looked up for roles where the accessibility tree can't tell a
-/// secret field or a file input apart from an ordinary one.
-const FACT_ROLES: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton", "button", "textarea"];
-const MAX_DESCRIBES: usize = 400;
+/// Facts are looked up where the accessibility tree can't tell a secret field
+/// or a file input apart from an ordinary one: value-bearing fields first
+/// (a field without facts has its value hidden, `snapshot::render`), then
+/// buttons (a file input's role).
+const MAX_DESCRIBES: usize = 600;
 
 /// `POST /agentmux/browser/snapshot`.
 pub async fn snapshot_route(
@@ -315,10 +332,21 @@ pub async fn snapshot_route(
         Err(e) => return fail(e),
     };
     let scope = match &req.scope {
-        Some(r) => match state.browser_api.ref_tables.get(&req.block_id).and_then(|t| t.refs.get(r).copied()) {
-            Some(b) => Some(b),
-            None => return fail(format!("unknown reference {r:?}; take a snapshot without scope first")),
-        },
+        Some(r) => {
+            let table = state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default();
+            let now = page_url(&mut cdp).await;
+            match table.refs.get(r).copied() {
+                Some(b) if table.url == now => Some(b),
+                Some(_) => {
+                    let _ = cdp.close().await;
+                    return fail(format!("the page changed since {r} was handed out; take a snapshot without scope first"));
+                }
+                None => {
+                    let _ = cdp.close().await;
+                    return fail(format!("unknown reference {r:?}; take a snapshot without scope first"));
+                }
+            }
+        }
         None => None,
     };
     let _ = cdp.call("Accessibility.enable", json!({})).await;
@@ -328,13 +356,14 @@ pub async fn snapshot_route(
     };
     let nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     let mut facts = HashMap::new();
-    for n in &nodes {
+    let role_of = |n: &Value| n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let wanted = nodes
+        .iter()
+        .filter(|n| snapshot::VALUE_ROLES.contains(&role_of(n).as_str()))
+        .chain(nodes.iter().filter(|n| role_of(n) == "button"));
+    for n in wanted {
         if facts.len() >= MAX_DESCRIBES {
             break;
-        }
-        let role = n.pointer("/role/value").and_then(|v| v.as_str()).unwrap_or("");
-        if !FACT_ROLES.contains(&role) {
-            continue;
         }
         if let Some(b) = n.get("backendDOMNodeId").and_then(|v| v.as_i64()) {
             if let Some(f) = describe(&mut cdp, b).await {
@@ -342,32 +371,23 @@ pub async fn snapshot_route(
             }
         }
     }
-    let rendered = snapshot::render(&nodes, &facts, scope);
     let url = page_url(&mut cdp).await;
-    // A scoped snapshot adds to the table rather than replacing it, so the
-    // references from the full snapshot stay usable.
+    let prefix = match &req.scope {
+        Some(r) => format!("{r}."),
+        None => String::new(),
+    };
+    let rendered = snapshot::render(&nodes, &facts, scope, &prefix);
+    // A scoped snapshot adds its references to the full snapshot's table, so
+    // those stay usable; but never across a navigation.
     let mut table = match scope {
         Some(_) => state.browser_api.ref_tables.get(&req.block_id).unwrap_or_default(),
         None => RefTable::default(),
     };
-    if scope.is_some() {
-        // Scoped refs are numbered from e1 again; namespace them so they
-        // can't collide with the full snapshot's.
-        let prefix = req.scope.clone().unwrap_or_default();
-        let mut text = rendered.text.clone();
-        for (r, b) in rendered.refs.iter().rev() {
-            let scoped = format!("{prefix}.{r}");
-            text = text.replace(&format!("[ref={r}]"), &format!("[ref={scoped}]"));
-            table.refs.insert(scoped, *b);
-        }
-        table.url = url.clone();
-        let refs = rendered.refs.len();
-        state.browser_api.ref_tables.put(&req.block_id, table);
-        let _ = cdp.close().await;
-        return (StatusCode::OK, Json(ApiResponse::ok(SnapshotData { url, snapshot: text, refs, truncated: rendered.truncated })));
+    if table.url != url {
+        table = RefTable::default();
     }
     table.url = url.clone();
-    table.refs = rendered.refs.iter().cloned().collect();
+    table.refs.extend(rendered.refs.iter().cloned());
     state.browser_api.ref_tables.put(&req.block_id, table);
     let _ = cdp.close().await;
     (
@@ -380,7 +400,6 @@ pub async fn snapshot_route(
         })),
     )
 }
-
 /// `POST /agentmux/browser/act`.
 pub async fn act_route(
     State(state): State<Arc<AppState>>,

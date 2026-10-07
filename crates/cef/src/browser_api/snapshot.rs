@@ -152,10 +152,24 @@ fn quote(s: &str) -> String {
     serde_json::to_string(&clipped).unwrap_or_else(|_| "\"\"".to_string())
 }
 
+/// Roles that carry a typed value, which the snapshot shows only once the
+/// element's DOM facts prove it isn't a secret field.
+pub const VALUE_ROLES: &[&str] = &["textbox", "searchbox", "combobox", "spinbutton", "slider", "textarea"];
+
 /// Render `Accessibility.getFullAXTree`'s `nodes` as an indented list, one
 /// line per meaningful node, with a reference on each interactive one.
 /// `scope_backend_id` narrows the snapshot to the subtree of that element.
-pub fn render(nodes: &[Value], facts: &HashMap<i64, DomFacts>, scope_backend_id: Option<i64>) -> Snapshot {
+/// References are named `{ref_prefix}e1`, `{ref_prefix}e2`, …
+///
+/// A value-bearing field without DOM facts (`facts` has no entry: the
+/// lookup was capped or failed) is treated as possibly secret: its value is
+/// hidden. Fail closed.
+pub fn render(
+    nodes: &[Value],
+    facts: &HashMap<i64, DomFacts>,
+    scope_backend_id: Option<i64>,
+    ref_prefix: &str,
+) -> Snapshot {
     let by_id: HashMap<&str, &Value> =
         nodes.iter().filter_map(|n| Some((n.get("nodeId")?.as_str()?, n))).collect();
     let root = match scope_backend_id {
@@ -167,7 +181,7 @@ pub fn render(nodes: &[Value], facts: &HashMap<i64, DomFacts>, scope_backend_id:
     };
     let mut out = Snapshot { text: String::new(), refs: Vec::new(), truncated: false };
     if let Some(root) = root {
-        walk(root, &by_id, facts, 0, "", false, &mut out);
+        walk(root, &by_id, facts, ref_prefix, 0, "", false, &mut out);
     }
     if out.truncated {
         out.text.push_str("- … snapshot truncated at 40 KB: pass `scope` (a reference) to read one part of the page\n");
@@ -179,6 +193,7 @@ fn walk(
     node: &Value,
     by_id: &HashMap<&str, &Value>,
     facts: &HashMap<i64, DomFacts>,
+    ref_prefix: &str,
     depth: usize,
     parent_name: &str,
     hide_text: bool,
@@ -200,7 +215,7 @@ fn walk(
     let mut child_depth = depth;
     let mut name_for_children = parent_name;
     if !transparent {
-        let line = line_for(node, role, name, backend, facts, out);
+        let line = line_for(node, role, name, backend, facts, ref_prefix, out);
         let indent = "  ".repeat(depth);
         if out.text.len() + indent.len() + line.len() + 1 > MAX_SNAPSHOT_BYTES {
             out.truncated = true;
@@ -215,7 +230,7 @@ fn walk(
     if let Some(children) = node.get("childIds").and_then(|v| v.as_array()) {
         for c in children {
             if let Some(child) = c.as_str().and_then(|id| by_id.get(id)) {
-                walk(child, by_id, facts, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), out);
+                walk(child, by_id, facts, ref_prefix, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), out);
             }
         }
     }
@@ -227,6 +242,7 @@ fn line_for(
     name: &str,
     backend: Option<i64>,
     facts: &HashMap<i64, DomFacts>,
+    ref_prefix: &str,
     out: &mut Snapshot,
 ) -> String {
     let fact = backend.and_then(|b| facts.get(&b));
@@ -240,7 +256,7 @@ fn line_for(
     }
     if let Some(b) = backend {
         if INTERACTIVE_ROLES.contains(&role) || file {
-            let r = format!("e{}", out.refs.len() + 1);
+            let r = format!("{ref_prefix}e{}", out.refs.len() + 1);
             line.push_str(&format!(" [ref={r}]"));
             out.refs.push((r, b));
         }
@@ -274,9 +290,12 @@ fn line_for(
     }
     if secret {
         line.push_str(" [secret: ask the user to fill this]");
-    } else if matches!(role, "textbox" | "searchbox" | "combobox" | "spinbutton" | "slider" | "textarea") {
-        if let Some(v) = value_text(node) {
-            line.push_str(&format!(" value={}", quote(&v)));
+    } else if VALUE_ROLES.contains(&role) {
+        match (fact, value_text(node)) {
+            (Some(_), Some(v)) => line.push_str(&format!(" value={}", quote(&v))),
+            // Not checked: it could be a secret field, so its value stays hidden.
+            (None, Some(v)) if !v.is_empty() => line.push_str(" [value hidden: not checked; take a scoped snapshot to see it]"),
+            _ => {}
         }
     }
     line
@@ -319,6 +338,37 @@ mod tests {
             .collect()
     }
 
+    /// Facts for every backend id given, as plain text inputs.
+    fn plain(ids: &[i64]) -> HashMap<i64, DomFacts> {
+        ids.iter().map(|b| (*b, DomFacts { local_name: "input".into(), attrs: HashMap::new() })).collect()
+    }
+
+    #[test]
+    fn a_field_whose_type_was_not_checked_never_shows_its_value() {
+        // Fail closed: no facts (the lookup was capped or failed) means it
+        // could be a password field.
+        let mut f = n("2", Some("1"), "textbox", "Code", Some(20), &[]);
+        f["value"] = json!({ "type": "string", "value": "123456" });
+        let nodes = vec![n("1", None, "RootWebArea", "", Some(1), &["2"]), f];
+        let s = render(&nodes, &HashMap::new(), None, "");
+        assert!(!s.text.contains("123456"), "{}", s.text);
+        assert!(s.text.contains("[value hidden"), "{}", s.text);
+    }
+
+    #[test]
+    fn scoped_references_carry_their_prefix_from_the_start() {
+        // A page can't spoof a reference by putting "[ref=e1]" in its text:
+        // references are generated with their final names, never rewritten.
+        let nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2"]),
+            n("2", Some("1"), "form", "Login [ref=e1]", Some(2), &["3"]),
+            n("3", Some("2"), "button", "Go", Some(3), &[]),
+        ];
+        let s = render(&nodes, &HashMap::new(), Some(2), "e4.");
+        assert_eq!(s.text, "- form \"Login [ref=e1]\"\n  - button \"Go\" [ref=e4.e1]\n");
+        assert_eq!(s.refs, vec![("e4.e1".to_string(), 3)]);
+    }
+
     #[test]
     fn a_form_renders_with_references_on_what_can_be_acted_on() {
         let mut email = n("4", Some("2"), "textbox", "Email", Some(40), &[]);
@@ -337,7 +387,7 @@ mod tests {
             n("6", Some("2"), "button", "Continue", Some(60), &[]),
             n("7", Some("3"), "StaticText", "Submit a file", None, &[]),
         ];
-        let s = render(&nodes, &HashMap::new(), None);
+        let s = render(&nodes, &plain(&[40]), None, "");
         assert_eq!(
             s.text,
             "- heading \"Submit a file\" [level=1]\n\
@@ -361,9 +411,8 @@ mod tests {
             n("5", Some("4"), "StaticText", "Lark", None, &[]),
             n("6", Some("2"), "StaticText", "Your name", None, &[]),
         ];
-        let s = render(&nodes, &HashMap::new(), None);
-        assert_eq!(s.text, "- textbox \"Your name\" [ref=e1] value=\"Lark\"
-");
+        let s = render(&nodes, &plain(&[40]), None, "");
+        assert_eq!(s.text, "- textbox \"Your name\" [ref=e1] value=\"Lark\"\n");
     }
 
     #[test]
@@ -372,7 +421,7 @@ mod tests {
         pw["value"] = json!({ "type": "string", "value": "hunter2" });
         let nodes = vec![n("1", None, "RootWebArea", "", Some(1), &["2"]), pw];
         let f = facts(&[(20, "input", &[("type", "password")])]);
-        let s = render(&nodes, &f, None);
+        let s = render(&nodes, &f, None, "");
         assert!(s.text.contains("[secret"), "{}", s.text);
         assert!(!s.text.contains("hunter2"), "{}", s.text);
     }
@@ -384,7 +433,7 @@ mod tests {
             n("2", Some("1"), "button", "Select the file", Some(20), &[]),
         ];
         let f = facts(&[(20, "input", &[("type", "file")])]);
-        let s = render(&nodes, &f, None);
+        let s = render(&nodes, &f, None, "");
         assert_eq!(s.text, "- file input \"Select the file\" [ref=e1]\n");
     }
 
@@ -396,7 +445,7 @@ mod tests {
             n("3", Some("1"), "link", "Elsewhere", Some(3), &[]),
             n("4", Some("2"), "button", "Go", Some(4), &[]),
         ];
-        let s = render(&nodes, &HashMap::new(), Some(2));
+        let s = render(&nodes, &HashMap::new(), Some(2), "");
         assert_eq!(s.text, "- form \"Login\"\n  - button \"Go\" [ref=e1]\n");
     }
 
@@ -409,7 +458,7 @@ mod tests {
         for (i, k) in kids.iter().enumerate() {
             nodes.push(n(k, Some("root"), "link", &format!("Link number {i} with a fairly long name"), Some(10 + i as i64), &[]));
         }
-        let s = render(&nodes, &HashMap::new(), None);
+        let s = render(&nodes, &HashMap::new(), None, "");
         assert!(s.truncated);
         assert!(s.text.len() <= MAX_SNAPSHOT_BYTES + 200);
         assert!(s.text.ends_with("pass `scope` (a reference) to read one part of the page\n"));
