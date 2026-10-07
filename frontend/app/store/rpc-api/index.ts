@@ -30,10 +30,12 @@ import { ReactiveApi } from "./reactive";
 import { SessionApi } from "./session";
 import { SkillApi } from "./skill";
 import { VoiceApi } from "./voice";
+import { ViewerApi } from "./viewer";
 import { NotifyApi } from "./notify";
 import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
+export type { ViewerDeviceInfo, ViewerPairStartResult } from "./viewer";
 export type {
     CheckCliAuthResult,
     CommandCheckCliAuthData,
@@ -350,4 +352,5 @@ export const RpcApi = {
     ...VoiceApi,
     ...NotifyApi,
     ...AttachmentsApi,
+    ...ViewerApi,
 };

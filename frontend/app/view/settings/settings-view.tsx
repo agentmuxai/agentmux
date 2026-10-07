@@ -15,6 +15,7 @@ import { TerminalSection } from "./sections/terminal-section";
 import { SoundsSection } from "./sections/sounds-section";
 import { NotificationsSection } from "./sections/notifications-section";
 import { RecordingSection } from "./sections/recording-section";
+import { DevicesSection } from "./sections/devices-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
 
@@ -54,6 +55,7 @@ const RAIL: TabItem<SettingsSection>[] = [
     { id: "sounds",     label: SETTINGS_SECTION_LABELS.sounds,     icon: "volume-high" },
     { id: "notifications", label: SETTINGS_SECTION_LABELS.notifications, icon: "bell" },
     { id: "recording",  label: SETTINGS_SECTION_LABELS.recording,  icon: "microphone" },
+    { id: "devices",    label: SETTINGS_SECTION_LABELS.devices,    icon: "mobile-screen" },
     { id: "advanced",   label: SETTINGS_SECTION_LABELS.advanced,   icon: "sliders" },
 ];
 
@@ -116,6 +118,9 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
                         </Match>
                         <Match when={section() === "recording"}>
                             <RecordingSection />
+                        </Match>
+                        <Match when={section() === "devices"}>
+                            <DevicesSection />
                         </Match>
                         <Match when={section() === "advanced"}>
                             <AdvancedSection />

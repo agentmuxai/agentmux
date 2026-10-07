@@ -378,6 +378,23 @@
     max-width: 190px;
 }
 
+// "Pair a device" (PairDevicePanel.tsx): the two buttons sit side by side,
+// and its notes read like the LAN rows' own warnings.
+.status-bar-pair .status-bar-popover-row {
+    gap: var(--space-1);
+}
+
+.status-bar-pair-note {
+    padding: 2px 12px;
+    font-size: 0.85em;
+    opacity: 0.75;
+}
+
+.status-bar-pair-note--warn {
+    opacity: 1;
+    color: var(--warning-color);
+}
+
 // The restart button is an element/ui Button (danger, compact) spanning
 // the popover.
 .status-bar-restart-btn {

@@ -43,6 +43,7 @@ import { createSignal, createUniqueId, Show, type JSX } from "solid-js";
 
 import { densityClass, tabId, tabPanelId, Tabs, type TabItem, type UiDensity } from "@/app/element/ui";
 import { AgentIdentityLinksPanel } from "@/app/view/identity/agent-identity-links-panel";
+import { AgentDevicesPanel } from "./AgentDevicesPanel";
 import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
 import { AgentRegistrationPanel } from "./AgentRegistrationPanel";
@@ -50,7 +51,7 @@ import { AgentSkillsModal } from "./AgentSkillsModal";
 import { AgentBundlesTab } from "./AgentBundlesTab";
 import "./AgentStashModal.scss";
 
-type StashTabId = "accounts" | "memory" | "mcp" | "skills" | "bundles" | "registration";
+type StashTabId = "accounts" | "memory" | "mcp" | "skills" | "bundles" | "registration" | "devices";
 
 interface AgentStashModalProps {
     agentId: string;
@@ -91,6 +92,8 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
         // this tab is about jekt/muxbus delivery identity, a different
         // concept (issue #2696).
         { id: "registration", label: "Registration", icon: "tower-broadcast" },
+        // Whether a paired device may watch this agent.
+        { id: "devices", label: "Devices", icon: "mobile-screen" },
     ];
 
     const [activeTab, setActiveTab] = createSignal<StashTabId>(props.initialTab ?? "accounts");
@@ -148,6 +151,10 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
 
                 <Show when={activeTab() === "registration"}>
                     <AgentRegistrationPanel agentId={props.agentId} />
+                </Show>
+
+                <Show when={activeTab() === "devices"}>
+                    <AgentDevicesPanel agentId={props.agentId} />
                 </Show>
 
                 {/* Future primitives: Briefs */}

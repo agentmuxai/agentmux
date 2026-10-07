@@ -47,7 +47,7 @@ import {
     uiContext,
 } from "./window-identity";
 import { allConnStatus } from "./conn-status";
-import { flashErrors, notifications, notificationPopoverMode } from "./flash-notifications";
+import { flashErrors, notifications, notificationPopoverMode, pushNotification } from "./flash-notifications";
 
 // ---------------------------------------------------------------------------
 // Global signals (replace Jotai atoms)
@@ -122,6 +122,14 @@ export interface LanFirewall {
     localRulesIgnored: boolean;
 }
 export const [lanFirewallAtom, setLanFirewallAtom] = createSignal<LanFirewall | null>(null);
+// The device that paired most recently while this window was open, from srv's
+// `viewer:paired` (crates/srv/src/server/http_viewer.rs). The host popover's
+// pairing QR closes when it changes.
+export interface ViewerPaired {
+    deviceId: string;
+    deviceName: string;
+}
+export const [viewerPairedAtom, setViewerPairedAtom] = createSignal<ViewerPaired | null>(null);
 
 // List of all open AgentMux window labels in this process. Updated by
 // app-init's window-instances-changed listener whenever a window opens
@@ -320,6 +328,23 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                     status,
                     adapters: Array.isArray(d?.adapters) ? d.adapters : [],
                     localRulesIgnored: d?.localRulesIgnored === true,
+                });
+            },
+        },
+        {
+            eventType: "viewer:paired",
+            handler: (event) => {
+                const d = event.data as { device_id?: string; device_name?: string } | null | undefined;
+                if (!d?.device_id) return;
+                const deviceName = String(d.device_name || "A device");
+                setViewerPairedAtom({ deviceId: d.device_id, deviceName });
+                pushNotification({
+                    icon: "fa-mobile-screen",
+                    title: "Device paired",
+                    message: `${deviceName} can now watch this computer's agents. Settings > Paired devices can revoke it.`,
+                    timestamp: new Date().toISOString(),
+                    type: "info",
+                    expiration: Date.now() + 8000,
                 });
             },
         },
