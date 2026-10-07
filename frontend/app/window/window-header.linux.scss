@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Linux-specific window header styles.
-// WebKitGTK does NOT divide flex space by CSS zoom factor,
-// so no width compensation is needed — 100vw is correct.
+// Linux runs on CEF (Chromium), where CSS zoom scales the header's own width:
+// a plain 100vw at zoom 0.8 is 80% of the window, so the right-side widgets
+// and window controls drift left (off-screen past 1.0). Divide by the zoom,
+// as on Windows. (`100vw` was right on the old WebKitGTK webview, #175.)
 
 .window-header {
     // Was 60px for a dedicated left drag strip; drag now lives on .tab-bar-fill
@@ -30,7 +32,7 @@
     display: flex;
     flex-direction: row;
     align-items: end;
-    width: 100vw;
+    width: calc(100vw / var(--zoomfactor, 1));
     height: 33px;
     zoom: var(--zoomfactor);
     cursor: default;
