@@ -47,15 +47,20 @@ checked against the ACP SDK's schema (`@agentclientprotocol/sdk` 0.26.0,
 
 ### 1. Start the ACP controller (frontend)
 
-Both launch paths in `agent-model.ts` write `controller: "acp"` when
+Both launch paths in `agent-model.ts` pick the controller with
+`launchController` (`launch-args.ts`): `"acp"` when
 `provider.controllerType === "acp"`, else persistent/subprocess as today.
+A container agent always gets `"subprocess"`, the per-turn path that execs
+into its container: the ACP and persistent controllers spawn on the host,
+so either would escape the sandbox. This matches `agent_open.rs`.
 
 ### 2. Route messages to it (srv)
 
-`run_agent_turn` and `agent.send` gain an `AcpController` branch that calls
-its `send_input` with the message (as `input_data`), the same entry point
-`agent.open`-started panes already use. Session-id hydration and registration
-work as for the other controllers.
+`run_agent_turn` and `agent.send` gain an `AcpController` branch that sends
+through `AcpController::send_message` (its `send_input`, then the same
+message-accepted event the other controllers emit). If the agent's process
+has exited, the branch first starts the controller again from the pane's
+meta; `start` forgets the old session, so the message waits for the new one.
 
 ### 3. The ACP v1 handshake (srv)
 
@@ -92,8 +97,12 @@ it.
 
 ### 6. Show errors (frontend)
 
-The ACP translator renders a JSON-RPC `error` as `**Error:** <message>`, and,
-when it ends a prompt, as a turn end.
+The ACP translator renders a JSON-RPC `error` as `**Error:** <message>`. An
+error alone doesn't end the turn: it may answer only a steering prompt while
+the first still runs. srv writes `{"result":{"stopReason":"error"}}` after an
+error that did end it (no prompt left outstanding, or `session/new` refused,
+which also drops the queued prompt), and the translator ends the turn on that
+as on any `stopReason`.
 
 ## Out of scope
 

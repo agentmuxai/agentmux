@@ -27,7 +27,7 @@ import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, historyTabLabel, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
 import { cancelComposerFocusRequest, focusComposer, requestComposerFocus } from "./composer-focus";
-import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY } from "./launch-args";
+import { isPersistentLaunch, launchController, PROVIDER_FLAGS_META_KEY } from "./launch-args";
 import { recallRuntime } from "./remembered-runtime";
 import { buildPaneArgs } from "./buildRuntimeArgs";
 import type { AgentContent, AgentDefinition, AgentSkill } from "@/app/store/rpc-api";
@@ -343,10 +343,10 @@ export class AgentViewModel {
             await this.ctx.setMeta({
                 agentId: agentId,
                 agentOutputFormat: provider.styledOutputFormat,
-                // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
-                // without it they ran as plain subprocesses and never spoke ACP
+// ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
+                // a container agent keeps the per-turn path into its container
                 // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
-                controller: provider.controllerType === "acp" ? "acp" : isPersistent ? "persistent" : "subprocess",
+                controller: launchController(provider, undefined),
                 cmd: cliBin,
                 "cmd:args": cliArgs,
                 "cmd:env": envVars,
@@ -836,10 +836,10 @@ export class AgentViewModel {
                 // here — it is a one-shot launch intent, not a durable arg.
                 [PROVIDER_FLAGS_META_KEY]: paneFlags,
                 ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
-                // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
-                // without it they ran as plain subprocesses and never spoke ACP
+// ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
+                // a container agent keeps the per-turn path into its container
                 // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
-                controller: provider.controllerType === "acp" ? "acp" : isPersistent ? "persistent" : "subprocess",
+                controller: launchController(provider, agentMode),
                 cmd: cliBin,
                 "cmd:args": cliArgs,
                 "cmd:cwd": finalWorkDir,

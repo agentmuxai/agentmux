@@ -48,6 +48,12 @@ pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
 
+/// Written to the output after an error that ended the turn (no prompt left
+/// running, or the session couldn't open). The translator ends a turn on a
+/// `stopReason`; it can't tell from an error alone, which may answer only a
+/// mid-turn steering prompt while the first one still runs.
+const TURN_ENDED_BY_ERROR: &str = r#"{"jsonrpc":"2.0","result":{"stopReason":"error"}}"#;
+
 // ---- ACP v1 messages (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md) ----
 // Checked against @agentclientprotocol/sdk 0.26.0 (`PROTOCOL_VERSION = 1`).
 
@@ -261,7 +267,7 @@ impl AcpController {
         }
     }
 
-    fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.stdin_tx.is_some()
     }
@@ -434,6 +440,10 @@ impl AcpController {
                 // opens a new session): not shown, or the pane reads it as
                 // an error that ended a turn.
                 let mut recovered_error = false;
+                // An error that ended the turn: a turn end follows it (below),
+                // since the error itself doesn't say whether other prompts are
+                // still running.
+                let mut turn_ended_by_error = false;
                 // Parse as JSON to check for session/update notifications
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                     // A request from the agent (permission, fs, terminal):
@@ -473,6 +483,12 @@ impl AcpController {
                         };
                         if is(inner.session_request_id) && json.get("result").is_some() {
                             loaded = inner.loading_session.take();
+                        }
+                        if next.is_none() && is(inner.session_request_id) && json.get("error").is_some() {
+                            // session/new refused (pi: "Authentication
+                            // required"): the queued prompt can't run.
+                            inner.pending_prompt = None;
+                            turn_ended_by_error = true;
                         }
                         if let Some(((method, params), loading)) = next {
                             let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
@@ -604,6 +620,9 @@ impl AcpController {
                             let mut outstanding = outstanding_prompt_ids_clone.lock().unwrap();
                             resolve_prompt_and_check_idle(&mut outstanding, resolved_id)
                         };
+                        if turn_is_over && json.get("error").is_some() {
+                            turn_ended_by_error = true;
+                        }
                         if turn_is_over {
                             health_clone.set_active_turn(false);
                             // Publish the flip so live controllerstatus
@@ -655,6 +674,17 @@ impl AcpController {
                         filestore_clone.as_ref(),
                         global_output_zone.as_deref(),
                     );
+                    if turn_ended_by_error {
+                        let end = format!("{}\n", TURN_ENDED_BY_ERROR);
+                        super::shell::handle_append_block_file(
+                            broker,
+                            &block_id_stdout,
+                            ACP_OUTPUT_SUBJECT,
+                            end.as_bytes(),
+                            filestore_clone.as_ref(),
+                            global_output_zone.as_deref(),
+                        );
+                    }
                 }
             }
         });
@@ -812,7 +842,16 @@ impl Controller for AcpController {
         // read, so an `agent.open` launch lost both (spec §6.5.8).
         let args = meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
         let resume = super::super::obj::meta_get_string(&block_meta, super::core::META_SESSION_ID, "");
-        self.inner.lock().unwrap().resume_session_id = Some(resume).filter(|s| !s.is_empty());
+        {
+            // A restart (the agent exited) starts a new handshake: a prompt
+            // must wait for the new session, never go to the old one.
+            let mut inner = self.inner.lock().unwrap();
+            inner.resume_session_id = Some(resume).filter(|s| !s.is_empty());
+            inner.session_id = None;
+            inner.init_request_id = None;
+            inner.session_request_id = None;
+            inner.loading_session = None;
+        }
         let mut env_vars = self.spawn_env(&block_meta);
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);

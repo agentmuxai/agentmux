@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    launchController,
     isPersistentLaunch,
     parseProviderFlags,
     selectLaunchArgs,
@@ -182,5 +183,32 @@ describe("withoutOverriddenFlags", () => {
         expect(withoutOverriddenFlags("", { model: true })).toBe("");
         expect(withoutOverriddenFlags(undefined, { model: true })).toBe("");
         expect(withoutOverriddenFlags(null, { model: true })).toBe("");
+    });
+});
+
+
+// SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md: ACP harnesses need srv's
+// AcpController, but a container agent always keeps the per-turn path into
+// its container. The persistent and ACP controllers spawn on the host, so
+// either would escape the sandbox.
+describe("launchController", () => {
+    const acp = { controllerType: "acp", launchArgs: [] } as any;
+    const persistent = { controllerType: "persistent", launchArgs: [], persistentLaunchArgs: ["--x"] } as any;
+    const subprocess = { controllerType: "subprocess", launchArgs: [] } as any;
+
+    it("starts an ACP harness on the ACP controller", () => {
+        expect(launchController(acp, "host")).toBe("acp");
+        expect(launchController(acp, undefined)).toBe("acp");
+    });
+
+    it("keeps every container agent on the subprocess path", () => {
+        for (const p of [acp, persistent, subprocess]) {
+            expect(launchController(p, "container")).toBe("subprocess");
+        }
+    });
+
+    it("otherwise follows the provider", () => {
+        expect(launchController(persistent, "host")).toBe("persistent");
+        expect(launchController(subprocess, "host")).toBe("subprocess");
     });
 });
