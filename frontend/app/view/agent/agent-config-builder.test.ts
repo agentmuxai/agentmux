@@ -397,6 +397,13 @@ describe("buildSettingsWithHooks — attribution", () => {
     });
 
     it("keeps an agent's own attribution", () => {
-        expect(attribution(JSON.stringify({ attribution: { commit: "Agent: Aria", pr: "" } }))).toEqual({ commit: "Agent: Aria", pr: "" });
+        expect(attribution(JSON.stringify({ attribution: { commit: "Agent: Aria", pr: "Agent: Aria" } }))).toEqual({
+            commit: "Agent: Aria",
+            pr: "Agent: Aria",
+        });
+    });
+
+    it("still hides a field the agent leaves out, rather than Claude Code's default", () => {
+        expect(attribution(JSON.stringify({ attribution: { commit: "Agent: Aria" } }))).toEqual({ commit: "Agent: Aria", pr: "" });
     });
 });

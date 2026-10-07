@@ -641,10 +641,14 @@ pub fn build_settings_with_hooks(
     // No AI attribution in commits or PR descriptions: the repos' checks
     // (`.github/workflows/no-coauthor-trailers.yml`) reject Co-Authored-By
     // trailers and "Generated with" lines, and Claude Code adds both by
-    // default. An empty string hides each. An agent's own `attribution` wins.
-    settings_obj
-        .entry("attribution")
-        .or_insert_with(|| json!({ "commit": "", "pr": "" }));
+    // default. An empty string hides each. An agent's own `commit` or `pr`
+    // wins; a field it leaves out is filled in, because Claude Code falls
+    // back to its default attribution for an omitted one.
+    if let Value::Object(attribution) = settings_obj.entry("attribution").or_insert_with(|| json!({})) {
+        for field in ["commit", "pr"] {
+            attribution.entry(field).or_insert_with(|| Value::String(String::new()));
+        }
+    }
 
     match serde_json::to_string_pretty(&Value::Object(settings_obj)) {
         Ok(s) => Some(s),
@@ -2532,9 +2536,14 @@ mod tests {
         assert_eq!(attribution(None), json!({ "commit": "", "pr": "" }));
         assert_eq!(attribution(Some(r#"{"model":"opus"}"#)), json!({ "commit": "", "pr": "" }));
         assert_eq!(
-            attribution(Some(r#"{"attribution":{"commit":"Agent: Aria","pr":""}}"#)),
-            json!({ "commit": "Agent: Aria", "pr": "" }),
+            attribution(Some(r#"{"attribution":{"commit":"Agent: Aria","pr":"Agent: Aria"}}"#)),
+            json!({ "commit": "Agent: Aria", "pr": "Agent: Aria" }),
             "an agent's own attribution wins"
+        );
+        assert_eq!(
+            attribution(Some(r#"{"attribution":{"commit":"Agent: Aria"}}"#)),
+            json!({ "commit": "Agent: Aria", "pr": "" }),
+            "a field the agent leaves out is still hidden, not Claude Code's default"
         );
     }
 
