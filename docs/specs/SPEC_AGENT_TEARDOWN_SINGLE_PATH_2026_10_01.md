@@ -494,9 +494,22 @@ phase changes one resource kind behind the same entry point.
     - Containers stop on close, quit and app exit (§6.7). They are not
       removed: `ensure_running` restarts them and the volume keeps state.
       A container another live pane uses is kept.
+- **Phase 4, Linux** (2026-10-07): a cgroup v2 tracker
+  (`process_tracker::cgroup_linux`), High confidence, replacing process
+  groups as the baseline (§6.4): sessions can't hold an agent's tree, since
+  Claude Code and bashwrap each start new ones
+  (`docs/analysis/agent-spawned-process-tracking-2026-10-07.md` §3).
+  - srv puts itself in a delegated systemd user scope at startup
+    (`agentmux-srv-<pid>.scope`) and gives each agent block a cgroup.
+  - Agent spawns join it before exec (`registry::place_spawn`), the Codex
+    App Server included; terminals a person types in keep a stub tracker.
+  - A graceful close SIGTERMs the whole cgroup after the CLI exits and waits
+    up to 2 s before the release's `cgroup.kill` (the Phase 3 step on Linux).
+  - No delegation (no systemd user manager): the stub, as before.
 - **Not yet:**
   - Stopping foreground descendants on Stop (§5). They need telling apart
     from background tasks in the tracker.
   - The close dialog reading `AgentResources`.
   - The `AgentResources` MCP tool.
-  - Phases 3 and 4.
+  - Phase 3 on Windows; Phase 4 on macOS and Linux without delegation;
+    Windows `CREATE_SUSPENDED`.

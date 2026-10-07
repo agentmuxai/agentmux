@@ -147,6 +147,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/launcher/src/srv_spawner.rs", "&backend_path", 2,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/srv/src/backend/process_tracker/cgroup_linux.rs", "\"sh\"", 1,
+     "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade.rs", "\"sleep\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/launcher/src/upgrade.rs", "\"cmd\"", 1,

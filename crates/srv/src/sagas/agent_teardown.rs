@@ -461,6 +461,9 @@ async fn close_cli(
     };
     let (step, text, extra) = exit_line(&label, &outcome, started.elapsed());
     publish_shutdown(state, block_id, step, text, extra);
+    // 4b. What it started gets the same chance: SIGTERM to its whole tree,
+    //     then a short wait, before the release below kills what's left.
+    terminate_members(state, block_id, deadline).await;
     // 5. Only now drop the process tracker — anything the agent itself
     //    started dies with it, but the agent got to exit first. Whatever is
     //    still alive at this point is what the release kills.
@@ -508,6 +511,38 @@ async fn close_cli(
         "agent_shutdown"
     );
     survivors
+}
+
+/// The wait after SIGTERM to what an agent started: what's left of the
+/// teardown's deadline, within these bounds.
+const MEMBERS_GRACE_MIN: std::time::Duration = std::time::Duration::from_millis(500);
+const MEMBERS_GRACE_MAX: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Ask everything in the block's tree to exit and wait until it has, or the
+/// grace passes. Returns at once where the tracker has no graceful signal
+/// (Windows) or nothing is left.
+async fn terminate_members(state: &AppState, block_id: &str, deadline: std::time::Instant) {
+    let registry = state.process_tracker.clone();
+    let id = block_id.to_string();
+    let count = move || {
+        let (r, id) = (registry.clone(), id.clone());
+        tokio::task::spawn_blocking(move || r.member_count(&id))
+    };
+    if count().await.unwrap_or(0) == 0 {
+        return;
+    }
+    let (r, id) = (state.process_tracker.clone(), block_id.to_string());
+    if !tokio::task::spawn_blocking(move || r.terminate(&id)).await.unwrap_or(false) {
+        return;
+    }
+    let grace = deadline.saturating_duration_since(std::time::Instant::now()).clamp(MEMBERS_GRACE_MIN, MEMBERS_GRACE_MAX);
+    let until = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < until {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if count().await.unwrap_or(0) == 0 {
+            return;
+        }
+    }
 }
 
 /// How long the verify step waits for the tracker's release to take effect,

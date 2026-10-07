@@ -179,6 +179,7 @@ impl SubprocessController {
         cmd.stderr(std::process::Stdio::piped());
 
         // Spawn
+        crate::backend::process_tracker::registry::place_spawn(&self.block_id, &mut cmd, true);
         let spawned = cmd.spawn();
         if spawned.is_err() {
             // The turn was marked active (and published) above; a spawn that

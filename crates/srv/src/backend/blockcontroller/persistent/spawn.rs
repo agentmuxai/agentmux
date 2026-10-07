@@ -218,6 +218,7 @@ impl PersistentSubprocessController {
         // itself is made where the child is installed, below.
         Self::restart_spawn_still_permitted_locked(&mut self.inner.lock().unwrap())?;
 
+        crate::backend::process_tracker::registry::place_spawn(&self.block_id, &mut cmd, true);
         let mut child = cmd.spawn().map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, "persistent process spawn failed");
             format!("failed to spawn persistent process: {e}")

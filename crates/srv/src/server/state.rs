@@ -80,10 +80,10 @@ pub struct AppState {
     pub subagent_watcher: Arc<SubagentWatcher>,
     pub history_service: Arc<HistoryService>,
     /// Tracks every OS-level process each agent CLI has spawned, via
-    /// platform-specific mechanisms (Windows Job Objects, Linux cgroups,
-    /// macOS process groups). Surfaces the tree to the swarm pane and
+    /// platform-specific mechanisms (Windows Job Objects, Linux cgroups; a
+    /// stub on macOS). Surfaces the tree to the agent pane and
     /// provides kill-tree on pane close / host exit.
-    /// See `backend::process_tracker` + `agentmux-ai/AGENT_SPAWNED_PROCESSES_SPEC.md`.
+    /// See `backend::process_tracker`.
     pub process_tracker: Arc<crate::backend::process_tracker::registry::AgentProcessRegistry>,
     /// Process Broker (Phase A) — unified `ProcessStatus` per block, read
     /// through instead of composing `blockcontroller`/`process_tracker`
