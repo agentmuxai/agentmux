@@ -60,7 +60,7 @@ pub struct SessionMeta {
     pub subagent_count: u32,
     /// The account id (`db_accounts.id` / the `<account_id>` path
     /// segment under `identities/`) this session was discovered under, if
-    /// any. Empty for sessions found via a base_dir of no account (personal
+    /// any. Empty for sessions found not under an account's home (personal
     /// `~/.claude`, the default `<shared>/providers/claude/projects`, or
     /// legacy `~/.config/claude-*`) — those aren't attributable to a
     /// specific identity. Lets `SessionIndex` answer "this agent's

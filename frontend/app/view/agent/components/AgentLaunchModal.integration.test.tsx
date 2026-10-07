@@ -55,8 +55,8 @@ vi.mock("@/app/store/rpc-api", () => {
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
 // Issue #1624 PR-C Part B — the launch modal sources accounts from the
-// shared account cache instead of `the old identity RPCs`/
-// `ListIdentityBindingsCommand`.
+// shared account cache instead of the old per-identity list and
+// binding RPCs.
 vi.mock("@/app/view/identity/identity-model", () => ({
     refreshAccountCache: vi.fn(),
     subscribeAccountChanges: vi.fn(() => () => {}),
