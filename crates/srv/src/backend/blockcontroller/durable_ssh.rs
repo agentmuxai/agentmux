@@ -242,6 +242,19 @@ pub fn windows_shell_refused(stderr: &str) -> bool {
     .any(|p| stderr.contains(p))
 }
 
+/// The host's answer to `cmd /c echo %OS%`: Windows, not Windows, or `None`
+/// when ssh itself failed (exit 255, or no exit code) and the host never
+/// answered.
+fn windows_answer(out: &crate::backend::remote::host::HostOutput) -> Option<bool> {
+    if out.stdout.contains("Windows_NT") {
+        return Some(true);
+    }
+    match out.code {
+        Some(code) if code != EXIT_SSH_FAILED => Some(false),
+        _ => None,
+    }
+}
+
 /// How a pane's run ended, when the pane should show it done.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Done {
@@ -713,8 +726,8 @@ impl Run {
         let mut attempt = 0u32;
         let mut noted_drop = false;
         let mut installed_once = false;
-        // Whether this run has asked the host if it is Windows (once).
-        let mut platform_asked = false;
+        // Whether the host has answered if it is Windows (asked until it has).
+        let mut platform_known = false;
         loop {
             let how = *leave_rx.borrow();
             if how != Leave::Stay {
@@ -759,15 +772,18 @@ impl Run {
                     // §6.4).
                     // Its English answer says so at once; in another language
                     // (localised, and not POSIX's 127) the host is asked,
-                    // once per run.
+                    // until it answers (a failed ask is asked again).
                     let windows = !attached
                         && (windows_shell_refused(&stderr)
-                            || (!platform_asked
+                            || (!platform_known
                                 && code != Some(EXIT_COMMAND_NOT_FOUND)
                                 && code != Some(EXIT_SSH_FAILED)
-                                && {
-                                    platform_asked = true;
-                                    self.host_is_windows().await
+                                && match self.host_is_windows().await {
+                                    Some(answer) => {
+                                        platform_known = true;
+                                        answer
+                                    }
+                                    None => false,
                                 }));
                     if windows {
                         crate::backend::remote::helper_consent::note_unsupported(&self.conn);
@@ -1095,12 +1111,15 @@ impl Run {
 
     /// Whether the host is Windows, asked in a way no language changes: from
     /// `cmd` or PowerShell, `cmd /c echo %OS%` prints `Windows_NT`; a POSIX
-    /// host has no `cmd`.
-    async fn host_is_windows(&self) -> bool {
-        self.host
+    /// host has no `cmd`. `None` when there was no answer from the host
+    /// (ssh failed or timed out), so it can be asked again.
+    async fn host_is_windows(&self) -> Option<bool> {
+        let out = self
+            .host
             .run("cmd /c echo %OS%", None, Duration::from_secs(15))
             .await
-            .is_ok_and(|out| out.stdout.contains("Windows_NT"))
+            .ok()?;
+        windows_answer(&out)
     }
 
     fn ssh_command(&self, remote: &str) -> tokio::process::Command {
@@ -1862,6 +1881,20 @@ sys.exit(1)
         assert!(crate::backend::remote::helper_consent::plain_instead("windowshost-de"));
         let log = std::fs::read_to_string(dir.path().join("log")).unwrap();
         assert_eq!(log, "attach\ncmd\n", "one attach, then the host asked once");
+    }
+
+    #[test]
+    fn only_a_reply_from_the_host_settles_whether_it_is_windows() {
+        use crate::backend::remote::host::HostOutput;
+        let out = |code: Option<i32>, stdout: &str| HostOutput {
+            code,
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+        };
+        assert_eq!(windows_answer(&out(Some(0), "Windows_NT\"\n")), Some(true));
+        assert_eq!(windows_answer(&out(Some(127), "")), Some(false), "a POSIX shell without cmd");
+        assert_eq!(windows_answer(&out(Some(255), "")), None, "ssh failed: ask again");
+        assert_eq!(windows_answer(&out(None, "")), None, "killed: ask again");
     }
 
     #[test]
