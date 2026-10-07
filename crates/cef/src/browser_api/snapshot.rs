@@ -95,8 +95,9 @@ pub fn is_secret(f: &DomFacts) -> bool {
             || w.starts_with("otp")
             || w.contains("onetimecode")
             || w.contains("onetimepassword")
-            || w == "cvc"
-            || w == "cvv"
+            // card_cvc, payment-cvv and card[cvc] squash to one word.
+            || w.contains("cvc")
+            || w.contains("cvv")
             || w.contains("cardnumber")
             || w.contains("ccnumber")
             || w.contains("securitycode")
@@ -514,6 +515,9 @@ mod tests {
         assert!(is_secret(&f("input", &[("id", "otp-input")])));
         assert!(is_secret(&f("input", &[("name", "card-number")])));
         assert!(is_secret(&f("input", &[("name", "cvc")])));
+        assert!(is_secret(&f("input", &[("name", "card_cvc")])));
+        assert!(is_secret(&f("input", &[("name", "payment-cvv")])));
+        assert!(is_secret(&f("input", &[("name", "card[cvc]")])));
         assert!(!is_secret(&f("input", &[("type", "email"), ("name", "email")])));
         assert!(!is_secret(&f("input", &[("name", "detection_name"), ("autocomplete", "off")])));
         assert!(!is_secret(&f("textarea", &[("name", "comments")])));

@@ -61,7 +61,7 @@ Returns a compact, text-first view of the page's **accessibility tree**, the way
 - button "Continue" [ref=e21]
 ```
 
-- Source: CDP `Accessibility.getFullAXTree` (plus `DOM.describeNode` for input types and file inputs), including same-origin iframes. Cross-origin iframes are listed with their URL and snapshotted separately by frame.
+- Source: CDP `Accessibility.getFullAXTree` (plus `DOM.describeNode` for input types and file inputs), including same-origin iframes. Cross-origin iframes are listed with their URL and snapshotted separately by frame. **As built in B2, the snapshot covers the top frame only**: a form inside any iframe gets no references, so the agent can't act in it and hands it to the user (`BrowserHandoff`). Typing into a focused frame the guard can't inspect is refused (§5.1). Joining child-frame trees with `f1e12`-style references is a follow-up.
 - **References** map to CDP `backendNodeId`s in a per-pane table. They're valid until the next snapshot or navigation, and a reference whose node has left the DOM fails too; either way the error says "take a new snapshot", never a guess. References inside a frame carry its prefix (`f1e12`), as Playwright MCP's do.
 - Shows what an agent needs to fill a form correctly: `required`, `invalid` and the field's validation message, `disabled`, `readonly`, the options of a `select`, the `autocomplete` hint, and whether a field is a password, one-time-code or card field (§5.1).
 - Size-capped (default 40 KB). `scope` (a reference from the previous snapshot) narrows it to that element's subtree; its references are named `<scope>.eN` and added to the full snapshot's.

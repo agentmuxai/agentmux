@@ -154,7 +154,10 @@ const SELECT_OPTION: &str = r#"function (want) {
     || opts.find(o => o.value.toLowerCase() === w);
   if (!hit) return { error: "no option " + JSON.stringify(want) + "; options: " + JSON.stringify(opts.slice(0, 40).map(o => o.label.trim() || o.value)) };
   if (hit.disabled || hit.matches(":disabled")) return { error: "that option is disabled" };
-  this.value = hit.value;
+  // By index, not value: two options can share a value, and setting the
+  // value would pick the first of them, not the one matched by its label.
+  this.selectedIndex = opts.indexOf(hit);
+  if (this.selectedOptions[0] !== hit) return { error: "the page didn't take that option" };
   this.dispatchEvent(new Event("input", { bubbles: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return { ok: true };
@@ -483,10 +486,12 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
             let text = req.text.clone().ok_or("fill needs `text`")?;
             call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
             // Focusing ran the page's own handlers, which could have turned
-            // the field into a secret one: check again before writing.
+            // the field into a secret one, or moved focus to one (insertText
+            // types wherever focus is): check both before writing.
             if describe(cdp, backend).await.as_ref().is_some_and(snapshot::is_secret) {
                 return Err(SECRET_REFUSAL.to_string());
             }
+            refuse_typing_into_secret_field(cdp).await?;
             if text.is_empty() {
                 call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
             } else {
