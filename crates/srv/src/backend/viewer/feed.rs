@@ -21,6 +21,7 @@ use base64::Engine as _;
 use serde::Serialize;
 use tokio::sync::mpsc;
 
+use crate::backend::agent_state::AgentStatus;
 use crate::backend::mps::{self, MuxEvent, StreamPos};
 
 /// A stream more than this far behind is reset and closed.
@@ -265,6 +266,26 @@ pub fn apply_append(cursor: &mut Cursor, pos: &[StreamPos], records: &[u8]) -> A
     AppendStep::Send { line, lines }
 }
 
+/// Whether a feed sends a `status` event now, given the state it last sent
+/// (`shown`, updated here) and the state now: `Some(Some(_))` sends a state,
+/// `Some(None)` sends `state: null` so the device drops a chip it shows, `None`
+/// sends nothing. Right after a snapshot (`after_snapshot`) a known state is
+/// always sent; otherwise only a change of state or `since_ms` is. An agent
+/// that has never had a state gets no event at all.
+pub fn status_step(
+    shown: &mut Option<AgentStatus>,
+    now: Option<AgentStatus>,
+    after_snapshot: bool,
+) -> Option<Option<AgentStatus>> {
+    let send = match (&*shown, &now) {
+        (_, Some(now)) => after_snapshot || shown.as_ref() != Some(now),
+        (Some(_), None) => true,
+        (None, None) => false,
+    };
+    *shown = now;
+    send.then_some(now)
+}
+
 /// A frame as the device gets it: as written, or, over
 /// [`MAX_FRAME_BYTES`], an `amx_truncated` frame with its size and head.
 pub fn device_frame(line: String) -> String {
@@ -365,6 +386,25 @@ mod tests {
         let huge = format!("{}\n", "x".repeat(5 * 1024 * 1024));
         assert!(wire_size(huge.as_bytes()) <= MAX_FRAME_BYTES + 2);
         assert_eq!(wire_size(b"ab\ncd\n"), 3 + 3 + 1);
+    }
+
+    #[test]
+    fn status_is_sent_after_a_snapshot_on_change_and_once_when_it_goes() {
+        use crate::backend::agent_state::AgentState;
+        let working = AgentStatus { state: AgentState::Working, since_ms: 100 };
+        let idle = AgentStatus { state: AgentState::Idle, since_ms: 200 };
+        let mut shown = None;
+        assert_eq!(status_step(&mut shown, None, true), None, "no state yet: no event, even after a snapshot");
+        assert_eq!(status_step(&mut shown, None, false), None);
+        assert_eq!(status_step(&mut shown, Some(working), true), Some(Some(working)));
+        assert_eq!(status_step(&mut shown, Some(working), false), None, "unchanged");
+        assert_eq!(status_step(&mut shown, Some(working), true), Some(Some(working)), "every snapshot gets one");
+        assert_eq!(status_step(&mut shown, Some(idle), false), Some(Some(idle)));
+        let restarted = AgentStatus { state: AgentState::Idle, since_ms: 900 };
+        assert_eq!(status_step(&mut shown, Some(restarted), false), Some(Some(restarted)), "since_ms alone counts");
+        assert_eq!(status_step(&mut shown, None, false), Some(None), "gone: null, once");
+        assert_eq!(status_step(&mut shown, None, false), None);
+        assert_eq!(status_step(&mut shown, None, true), None);
     }
 
     #[test]

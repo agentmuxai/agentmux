@@ -624,32 +624,127 @@ async fn an_agent_hidden_while_watched_is_reset_and_closed() {
     let (_, block, def) = register_defined(&state, "viewer-hide-live");
     append(&state, &block, "{\"a\":1}");
     let lease = state.viewer.open_feed("dev").unwrap();
-    let check = state.clone();
-    let check_block = block.clone();
-    let stream = feed_stream(
-        FeedSource::of(&state, &block),
-        "claude".into(),
-        None,
-        lease,
-        std::time::Duration::from_millis(50),
-        move || agent_hidden(&check, &check_block),
-    );
+    let timing = FeedTiming { heartbeat: std::time::Duration::from_millis(50), status_poll: std::time::Duration::from_secs(3600) };
+    let stream = feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &block));
     let mut stream = Box::pin(stream);
-    assert_eq!(next_bytes(&mut stream).await.unwrap(), "retry: 3000
-
-");
+    assert_eq!(next_bytes(&mut stream).await.unwrap(), "retry: 3000\n\n");
     assert!(next_bytes(&mut stream).await.unwrap().starts_with("event: snapshot"));
-    assert_eq!(next_bytes(&mut stream).await.unwrap(), ": hb
-
-", "a quiet feed sends heartbeats");
+    assert_eq!(next_bytes(&mut stream).await.unwrap(), ": hb\n\n", "a quiet feed sends heartbeats");
     state.mstore.agent_hide_from_devices_set(&def, true).unwrap();
     let mut last = String::new();
     while let Some(chunk) = next_bytes(&mut stream).await {
         last = chunk;
     }
-    assert_eq!(last, "event: reset
-data: {\"reason\":\"hidden\"}
-
-");
+    assert_eq!(last, "event: reset\ndata: {\"reason\":\"hidden\"}\n\n");
     assert_eq!(state.viewer.open_feeds(), 0);
+}
+
+// ---- Status ----
+
+/// An agent with a controller that reports `turn_active`, so it has a state.
+fn register_working(state: &AppState, prefix: &str) -> (String, String) {
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+    let (name, block, _) = register_defined(state, prefix);
+    register_stub(&block, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+    (name, block)
+}
+
+#[tokio::test]
+async fn agents_carry_state_and_since_ms_when_known() {
+    let state = test_state();
+    let (_, token) = pair_device(&state, "Pixel");
+    let (busy, busy_block) = register_working(&state, "viewer-status-busy");
+    let (quiet, _, _) = register_defined(&state, "viewer-status-none");
+    let before = agentmux_common::time::now_ms_u64();
+    let auth = format!("Bearer {token}");
+    let resp = viewer_router(&state)
+        .oneshot(request(Method::GET, "/agentmux/viewer/agents", Some(("Authorization", &auth)), None))
+        .await
+        .unwrap();
+    crate::backend::blockcontroller::delete_controller(&busy_block);
+    let json = json_of(resp).await;
+    let now_ms = json["now_ms"].as_u64().unwrap();
+    let agents = json["agents"].as_array().unwrap();
+    let entry = agents.iter().find(|a| a["name"] == busy.as_str()).unwrap();
+    assert_eq!(entry["state"], "working");
+    let since = entry["since_ms"].as_u64().unwrap();
+    assert!(since <= now_ms, "{since} <= {now_ms}");
+    assert!(now_ms >= before);
+    // The same since_ms the LAN feed reports: one shared tracker.
+    let shared = crate::backend::agent_state::agent_status_of_block(&state.mstore, &busy_block);
+    assert!(shared.is_none(), "the controller is gone now, so the tracker forgot it");
+    let none = agents.iter().find(|a| a["name"] == quiet.as_str()).unwrap();
+    assert!(none.get("state").is_none() && none.get("since_ms").is_none(), "no state, no fields: {none}");
+}
+
+#[tokio::test]
+async fn a_feed_sends_status_after_the_snapshot() {
+    let state = test_state();
+    let (_, token) = pair_device(&state, "Pixel");
+    let (name, block) = register_working(&state, "viewer-status-feed");
+    append(&state, &block, "{\"a\":1}");
+    let (_, mut body) = open_feed(&state, &name, &token, None).await;
+    let (event, _, _) = next_event(&mut body).await.unwrap();
+    assert_eq!(event, "snapshot");
+    let (event, id, status) = next_event(&mut body).await.unwrap();
+    crate::backend::blockcontroller::delete_controller(&block);
+    assert_eq!((event.as_str(), id), ("status", None));
+    assert_eq!(status["state"], "working");
+    let since = status["since_ms"].as_u64().unwrap();
+    assert!(since <= status["now_ms"].as_u64().unwrap());
+}
+
+#[tokio::test]
+async fn an_agent_without_a_state_gets_no_status_event() {
+    let state = test_state();
+    let (_, block, _) = register_defined(&state, "viewer-status-absent");
+    append(&state, &block, "{\"a\":1}");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let timing = FeedTiming { heartbeat: std::time::Duration::from_secs(3600), status_poll: std::time::Duration::from_millis(20) };
+    let mut stream = Box::pin(feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &block)));
+    next_bytes(&mut stream).await.unwrap();
+    assert!(next_bytes(&mut stream).await.unwrap().starts_with("event: snapshot"));
+    let more = tokio::time::timeout(std::time::Duration::from_millis(300), stream.next()).await;
+    assert!(more.is_err(), "nothing until there is a state");
+}
+
+#[tokio::test]
+async fn a_feed_follows_state_changes_and_says_when_the_state_is_gone() {
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING};
+    let state = test_state();
+    let (_, block) = register_working(&state, "viewer-status-change");
+    append(&state, &block, "{\"a\":1}");
+    let lease = state.viewer.open_feed("dev").unwrap();
+    let timing = FeedTiming { heartbeat: std::time::Duration::from_secs(3600), status_poll: std::time::Duration::from_millis(20) };
+    let mut stream = Box::pin(feed_stream(FeedSource::of(&state, &block), "claude".into(), None, lease, timing, AgentProbe::of(&state, &block)));
+    next_bytes(&mut stream).await.unwrap();
+    assert!(next_bytes(&mut stream).await.unwrap().starts_with("event: snapshot"));
+    let first = next_bytes(&mut stream).await.unwrap();
+    assert!(first.starts_with("event: status\ndata: {") && first.contains("\"state\":\"working\""), "{first}");
+
+    // Tests share the controller registry and the since tracker but not a
+    // store, so another test's route can make this block's `since_ms` start
+    // over; such a repeat of the same state is skipped here.
+    // The turn ends: idle.
+    register_stub(&block, BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, false);
+    let mut idle = next_bytes(&mut stream).await.unwrap();
+    while idle.contains("\"state\":\"working\"") {
+        idle = next_bytes(&mut stream).await.unwrap();
+    }
+    assert!(idle.contains("\"state\":\"idle\""), "{idle}");
+
+    // The controller goes away: the state is gone, said once as null.
+    crate::backend::blockcontroller::delete_controller(&block);
+    let mut gone = next_bytes(&mut stream).await.unwrap();
+    while gone.contains("\"state\":\"idle\"") {
+        gone = next_bytes(&mut stream).await.unwrap();
+    }
+    let data: serde_json::Value = serde_json::from_str(gone.lines().nth(1).unwrap().strip_prefix("data: ").unwrap()).unwrap();
+    assert_eq!(data["state"], serde_json::Value::Null);
+    assert_eq!(data["since_ms"], serde_json::Value::Null);
+    assert!(data["now_ms"].as_u64().unwrap() > 0);
+    let more = tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
+    assert!(more.is_err(), "nothing more while there is no state");
 }

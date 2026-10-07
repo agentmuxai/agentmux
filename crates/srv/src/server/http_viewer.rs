@@ -33,6 +33,9 @@ use crate::backend::viewer::{pairing, FeedLease, FeedRefused};
 
 /// Heartbeat comment on a quiet feed.
 pub(crate) const FEED_HEARTBEAT: Duration = Duration::from_secs(15);
+/// How often a feed looks at its agent's state. One controller lookup and one
+/// block read, so a second is cheap and keeps the device's chip current.
+pub(crate) const STATUS_POLL: Duration = Duration::from_secs(1);
 /// The snapshot: the last 50 turns or 256 KB, whichever is smaller.
 const SNAPSHOT_TAIL_TURNS: u32 = 50;
 const SNAPSHOT_TAIL_BYTES: u64 = 256 * 1024;
@@ -233,12 +236,17 @@ async fn handle_viewer_agents(State(state): State<AppState>) -> Response {
             if let Some(kind) = crate::backend::operator_config_seed::agent_kind_of_block(&state.mstore, &block_id) {
                 agent["kind"] = json!(kind);
             }
-            // phase 1 wiring: add `state` and `since_ms` here from
-            // `backend::agent_state` once it lands; both left out until then.
+            // The state the LAN feed reports, from the same tracker, so both
+            // give the same `since_ms`. An agent with no known state has neither.
+            if let Some(status) = crate::backend::agent_state::agent_status_of_block(&state.mstore, &block_id) {
+                agent["state"] = json!(status.state);
+                agent["since_ms"] = json!(status.since_ms);
+            }
             agent
         })
         .collect();
-    Json(json!({ "now_ms": agentmux_common::time::now_ms(), "agents": list })).into_response()
+    // Read after the states, so no `since_ms` is later than it.
+    Json(json!({ "now_ms": agentmux_common::time::now_ms_u64(), "agents": list })).into_response()
 }
 
 /// `GET /agentmux/viewer/agents/:name/feed`: the agent's transcript as
@@ -268,15 +276,13 @@ async fn handle_viewer_feed(
     };
     let last_event_id = headers.get("last-event-id").and_then(|v| v.to_str().ok()).map(str::to_string);
     let provider = provider_of(&state, &agent.block_id);
-    let hidden_state = state.clone();
-    let hidden_block = agent.block_id.clone();
     let stream = feed_stream(
         FeedSource::of(&state, &agent.block_id),
         provider,
         last_event_id,
         lease,
-        FEED_HEARTBEAT,
-        move || agent_hidden(&hidden_state, &hidden_block),
+        FeedTiming::default(),
+        AgentProbe::of(&state, &agent.block_id),
     );
     (
         [(header::CONTENT_TYPE, "text/event-stream"), (header::CACHE_CONTROL, "no-cache")],
@@ -287,6 +293,39 @@ async fn handle_viewer_feed(
 
 fn not_found() -> Response {
     (StatusCode::NOT_FOUND, Json(json!({ "error": "no such agent" }))).into_response()
+}
+
+/// A feed's clocks.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FeedTiming {
+    pub heartbeat: Duration,
+    pub status_poll: Duration,
+}
+
+impl Default for FeedTiming {
+    fn default() -> Self {
+        Self { heartbeat: FEED_HEARTBEAT, status_poll: STATUS_POLL }
+    }
+}
+
+/// What a feed asks about its agent while it runs: whether it has been hidden
+/// from paired devices, and its state.
+pub(crate) struct AgentProbe {
+    pub hidden: Box<dyn Fn() -> bool + Send>,
+    pub status: Box<dyn Fn() -> Option<crate::backend::agent_state::AgentStatus> + Send>,
+}
+
+impl AgentProbe {
+    /// The agent in `block_id`: hidden per its definition, and its state from
+    /// the tracker the LAN feed uses (`agent_state::agent_status_of_block`).
+    pub(crate) fn of(state: &AppState, block_id: &str) -> Self {
+        let (hidden_state, hidden_block) = (state.clone(), block_id.to_string());
+        let (mstore, status_block) = (state.mstore.clone(), block_id.to_string());
+        Self {
+            hidden: Box::new(move || agent_hidden(&hidden_state, &hidden_block)),
+            status: Box::new(move || crate::backend::agent_state::agent_status_of_block(&mstore, &status_block)),
+        }
+    }
 }
 
 /// Where a feed reads its agent's transcript from.
@@ -412,11 +451,26 @@ fn reset_event(reason: &str) -> Bytes {
     feed::sse_event("reset", None, &json!({ "reason": reason }))
 }
 
+/// `status` `{state, since_ms, now_ms}`; `state` and `since_ms` are null when
+/// a state the device was shown has gone (it drops its chip).
+fn status_event(status: Option<crate::backend::agent_state::AgentStatus>) -> Bytes {
+    feed::sse_event(
+        "status",
+        None,
+        &json!({
+            "state": status.map(|s| s.state),
+            "since_ms": status.map(|s| s.since_ms),
+            "now_ms": agentmux_common::time::now_ms_u64(),
+        }),
+    )
+}
+
 /// One feed: `retry`, then a `snapshot` (or, for a reconnect whose
 /// `Last-Event-ID` still holds, the lines it missed as one `append`), then an
 /// `append` per published transcript append, `reset` + `snapshot` when the
 /// transcript is rewritten or the feed loses its place, and a heartbeat on a
-/// quiet stream. Ends with `reset` when the device falls more than 1 MB
+/// quiet stream. A `status` follows each `snapshot` and every change of the
+/// agent's state ([`feed::status_step`]). Ends with `reset` when the device falls more than 1 MB
 /// behind or the agent is hidden, and silently when the device is revoked
 /// (its lease's token) or goes away. The lease is held until the stream is
 /// dropped.
@@ -425,11 +479,13 @@ pub(crate) fn feed_stream(
     provider: String,
     last_event_id: Option<String>,
     lease: FeedLease,
-    heartbeat: Duration,
-    hidden: impl Fn() -> bool + Send + 'static,
+    timing: FeedTiming,
+    probe: AgentProbe,
 ) -> impl Stream<Item = Result<Bytes, Infallible>> + Send + 'static {
     async_stream::stream! {
         let lease = lease;
+        // The state last sent to the device; `None` until one exists.
+        let mut shown = None;
         // Subscribed before anything is read, so nothing published between
         // the read and the first event is missed.
         let mut sub = source.hub.subscribe(&source.block_id);
@@ -451,8 +507,9 @@ pub(crate) fn feed_stream(
                 Some(snapshot) => {
                     let cursor = snapshot.cursor.clone();
                     yield Ok(snapshot_event(snapshot, &provider));
-                    // phase 1 wiring: send one `status` event here, from
-                    // `backend::agent_state`, once it lands.
+                    if let Some(status) = feed::status_step(&mut shown, (probe.status)(), true) {
+                        yield Ok(status_event(status));
+                    }
                     Some(cursor)
                 }
                 None => None,
@@ -462,10 +519,10 @@ pub(crate) fn feed_stream(
             yield Ok(reset_event("unavailable"));
         }
 
-        let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + heartbeat, heartbeat);
+        let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + timing.heartbeat, timing.heartbeat);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        // phase 1 wiring: watch `backend::agent_state` here and send a
-        // `status` event on each change of this agent's state.
+        let mut status_tick = tokio::time::interval_at(tokio::time::Instant::now() + timing.status_poll, timing.status_poll);
+        status_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         while let Some(current) = cursor.as_mut() {
             // What to do after this event: keep going, resync from a fresh
             // snapshot after a `reset`, or stop.
@@ -486,8 +543,13 @@ pub(crate) fn feed_stream(
                         AppendStep::Resync(reason) => resync = Some(reason.to_string()),
                     },
                 },
+                _ = status_tick.tick() => {
+                    if let Some(status) = feed::status_step(&mut shown, (probe.status)(), false) {
+                        yield Ok(status_event(status));
+                    }
+                }
                 _ = tick.tick() => {
-                    if hidden() {
+                    if (probe.hidden)() {
                         yield Ok(reset_event("hidden"));
                         break;
                     }
@@ -500,6 +562,9 @@ pub(crate) fn feed_stream(
                     Some(snapshot) => {
                         cursor = Some(snapshot.cursor.clone());
                         yield Ok(snapshot_event(snapshot, &provider));
+                        if let Some(status) = feed::status_step(&mut shown, (probe.status)(), true) {
+                            yield Ok(status_event(status));
+                        }
                     }
                     None => {
                         yield Ok(reset_event("unavailable"));
