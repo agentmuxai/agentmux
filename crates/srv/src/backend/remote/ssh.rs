@@ -28,18 +28,36 @@ pub const EXIT_CONNECTION_FAILED: u32 = 255;
 /// doesn't use Windows' ssh-agent. A native client older than 8.4 is not
 /// preferred: an agent's ssh relies on `SSH_ASKPASS_REQUIRE=force`
 /// (askpass.rs) to keep its prompts out of the agent's terminal. With no such
-/// client, the order is the plain one above.
+/// client, the order is the plain one above. For anything an agent can drive;
+/// the user's own pane uses [`binary_for_user`].
 pub fn binary() -> Option<PathBuf> {
-    #[cfg(windows)]
-    let windows_client = {
-        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
-        Some(Path::new(&root).join(r"System32\OpenSSH\ssh.exe")).filter(|p| p.is_file())
-    };
-    #[cfg(not(windows))]
-    let windows_client = None;
-    pick(which::which_all("ssh").into_iter().flatten(), windows_client, |p| {
+    pick(on_path(), windows_client(), |p| {
         !cfg!(windows) || (!is_posix_layer_build(p) && forces_askpass(p))
     })
+}
+
+/// [`binary`] for the user's own interactive ssh pane, whose prompts are the
+/// user's to answer in it: a native client is preferred whatever its version
+/// (Windows 10's inbox OpenSSH is 8.1), still for its name resolution.
+pub fn binary_for_user() -> Option<PathBuf> {
+    pick(on_path(), windows_client(), |p| !cfg!(windows) || !is_posix_layer_build(p))
+}
+
+fn on_path() -> impl Iterator<Item = PathBuf> {
+    which::which_all("ssh").into_iter().flatten()
+}
+
+/// Windows' own OpenSSH client, if installed; `None` elsewhere.
+fn windows_client() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        Some(Path::new(&root).join(r"System32\OpenSSH\ssh.exe")).filter(|p| p.is_file())
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
 }
 
 /// [`binary`]'s order: the first `preferred` ssh on `PATH`, then Windows'
