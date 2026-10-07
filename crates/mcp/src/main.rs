@@ -37,9 +37,9 @@ use agentmux_common::api_types::{
     ShellInputResponse, ShellStatusRequest, ShellStatusResponse, ShellStopRequest,
     ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest,
     UiBrowserDispatchKeyRequest, UiBrowserEvalRequest, UiBrowserFocusElementRequest,
-    UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest, UiBrowserOpenRequest,
-    UiClickRequest,
-    UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse, WindowFocusRequest,
+    UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest,
+    UiBrowserOpenRequest, UiClickRequest, UiQueryRequest, UiScreenshotRequest,
+    UiScreenshotResponse, WindowFocusRequest,
     WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest, QuitSelfRequest,
     RegisterDevServerRequest, RegisterDevServerResponse,
 };

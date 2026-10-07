@@ -41,7 +41,7 @@ use serde_json::json;
 
 use agentmux_common::api_types::{
     UiAutomationAuth, UiBrowserDispatchKeyRequest, UiBrowserEvalRequest, UiBrowserFocusElementRequest,
-    UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest, UiClickRequest,
+    UiBrowserFocusInfoRequest, UiBrowserHistoryRequest, UiBrowserNavigateRequest, UiBrowserOpenRequest, UiClickRequest,
     UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse,
 };
 
@@ -134,22 +134,25 @@ pub(crate) fn target_block_id(
     caller: Option<&crate::server::caller::Caller>,
     auth: &UiAutomationAuth,
     pane: Option<&str>,
-) -> Result<String, String> {
-    let own = verified_block_id(state, caller, auth)?;
+) -> Result<String, (StatusCode, String)> {
+    use crate::server::browser_owner::{self, Denied};
+    let own = verified_block_id(state, caller, auth).map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
     let Some(pane) = pane.map(str::trim).filter(|p| !p.is_empty()) else {
         return Ok(own);
     };
     let block = state
         .mstore
         .get::<crate::backend::obj::Block>(pane)
-        .map_err(|e| format!("load pane {pane:?}: {e}"))?;
-    crate::server::browser_owner::check(
-        block.as_ref(),
-        crate::server::browser_owner::owner_of(pane).as_deref(),
-        &auth.agent_id,
-        pane,
-    )?;
-    Ok(pane.to_string())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("load pane {pane:?}: {e}")))?;
+    match browser_owner::check(block.as_ref(), browser_owner::owner_of(pane).as_deref(), &auth.agent_id, pane) {
+        Ok(()) => Ok(pane.to_string()),
+        Err(Denied::NotFound(m)) => {
+            // The pane is gone: drop any owner entry it left behind.
+            browser_owner::forget(pane);
+            Err((StatusCode::NOT_FOUND, m))
+        }
+        Err(Denied::Forbidden(m)) => Err((StatusCode::FORBIDDEN, m)),
+    }
 }
 
 async fn get_host_ipc(state: &AppState) -> Result<HostIpc, String> {
@@ -232,7 +235,7 @@ pub(crate) async fn handle_ui_screenshot(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -325,7 +328,7 @@ pub(crate) async fn handle_ui_click(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -371,7 +374,7 @@ pub(crate) async fn handle_ui_query(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -441,7 +444,7 @@ pub(crate) async fn handle_ui_browser_navigate(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -472,7 +475,7 @@ pub(crate) async fn handle_ui_browser_back(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -493,7 +496,7 @@ pub(crate) async fn handle_ui_browser_forward(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -514,7 +517,7 @@ pub(crate) async fn handle_ui_browser_reload(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -544,7 +547,7 @@ pub(crate) async fn handle_ui_browser_eval(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -589,7 +592,7 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -622,7 +625,7 @@ pub(crate) async fn handle_ui_browser_focus_element(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -654,7 +657,7 @@ pub(crate) async fn handle_ui_browser_focus_info(
 ) -> impl IntoResponse {
     let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
-        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+        Err((code, e)) => return err_response(code, e),
     };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
@@ -677,40 +680,6 @@ pub(crate) async fn handle_ui_browser_focus_info(
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{prune_old_screenshots, SCREENSHOT_RETENTION};
-
-    #[test]
-    fn prune_old_screenshots_deletes_only_stale_pngs() {
-        let dir = tempfile::tempdir().unwrap();
-
-        let fresh = dir.path().join("fresh.png");
-        std::fs::write(&fresh, b"png").unwrap();
-
-        let stale = dir.path().join("stale.png");
-        std::fs::write(&stale, b"png").unwrap();
-        let old_time = std::time::SystemTime::now() - (SCREENSHOT_RETENTION * 2);
-        let file = std::fs::File::options().write(true).open(&stale).unwrap();
-        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
-            .unwrap();
-
-        // Non-PNG files must never be touched, however old.
-        let other = dir.path().join("notes.txt");
-        std::fs::write(&other, b"keep me").unwrap();
-        let file = std::fs::File::options().write(true).open(&other).unwrap();
-        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
-            .unwrap();
-
-        prune_old_screenshots(dir.path());
-
-        assert!(fresh.exists(), "fresh screenshot must survive pruning");
-        assert!(!stale.exists(), "stale screenshot must be pruned");
-        assert!(other.exists(), "non-png files must never be pruned");
-    }
-}
-
-
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser pane
 /// next to the caller's own pane and records the caller as its owner, so the
 /// `Browser*`/`UI*` tools accept it as `pane`
@@ -718,7 +687,7 @@ mod tests {
 pub(crate) async fn handle_ui_browser_open(
     State(state): State<AppState>,
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
-    Json(req): Json<agentmux_common::api_types::UiBrowserOpenRequest>,
+    Json(req): Json<UiBrowserOpenRequest>,
 ) -> impl IntoResponse {
     let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
         Ok(b) => b,
@@ -782,4 +751,37 @@ pub(crate) async fn handle_ui_browser_open(
         Json(json!({ "ok": true, "data": { "pane": result.block_id } })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prune_old_screenshots, SCREENSHOT_RETENTION};
+
+    #[test]
+    fn prune_old_screenshots_deletes_only_stale_pngs() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let fresh = dir.path().join("fresh.png");
+        std::fs::write(&fresh, b"png").unwrap();
+
+        let stale = dir.path().join("stale.png");
+        std::fs::write(&stale, b"png").unwrap();
+        let old_time = std::time::SystemTime::now() - (SCREENSHOT_RETENTION * 2);
+        let file = std::fs::File::options().write(true).open(&stale).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+
+        // Non-PNG files must never be touched, however old.
+        let other = dir.path().join("notes.txt");
+        std::fs::write(&other, b"keep me").unwrap();
+        let file = std::fs::File::options().write(true).open(&other).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+
+        prune_old_screenshots(dir.path());
+
+        assert!(fresh.exists(), "fresh screenshot must survive pruning");
+        assert!(!stale.exists(), "stale screenshot must be pruned");
+        assert!(other.exists(), "non-png files must never be pruned");
+    }
 }

@@ -636,6 +636,7 @@ partial list.
 | [`SPEC_AGENT_CLAUDE_IDENTITY_LOOKUP_2026_09_24`](SPEC_AGENT_CLAUDE_IDENTITY_LOOKUP_2026_09_24.md) | SPEC: an agent's own current Claude identity, in one read — no AgentMux RPC, no guessing |
 | [`SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24`](SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md) | SPEC: Agent concept consolidation — DRY rethink |
 | [`SPEC_AGENT_DELETE_2026_09_16`](SPEC_AGENT_DELETE_2026_09_16.md) | SPEC: Agent Row Actions Menu — Delete + Duplicate (My Agents picker) |
+| [`SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07`](SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md) | SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop |
 | [`SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21`](SPEC_AGENT_GENERIC_PANE_OPEN_TOOL_2026_08_21.md) | Spec: `OpenPane` — a general-purpose, agent-facing "open any pane" MCP tool |
 | [`SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02`](SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md) | SPEC — Versioned model dropdowns (CLI-aware), Claude CLI pin-to-latest, single-toggle Log |
 | [`SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10`](SPEC_AGENT_PANE_LIFECYCLE_CONTROL_2026_09_10.md) | SPEC: Agent Pane Lifecycle Control — Close / Maximize / Minimize / Split / Float |

@@ -14,13 +14,16 @@
 //!   has no entry for it;
 //! - a duplicated pane copies the meta key but gets a new block id, which
 //!   the map doesn't know;
-//! - the human's Take over clears the meta key, which ends ownership at once;
+//! - the human's Take over clears the meta key; the client-write guard
+//!   (`guard_client_meta_write`) then drops the map entry, so ownership ends
+//!   for good, and no client can set the key at all;
+//! - deleting the block drops its entry (`wcore::delete_block`);
 //! - after srv restarts the map is empty, so agents reopen their panes.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use crate::backend::obj::Block;
+use crate::backend::obj::{Block, MetaMapType};
 
 /// Block meta key mirroring the owner, for the frontend.
 pub(crate) const OWNER_META_KEY: &str = "browser:owner_agent";
@@ -38,12 +41,38 @@ pub(crate) fn record(block_id: &str, agent_id: &str) {
         .insert(block_id.to_string(), agent_id.to_string());
 }
 
+/// Drop `block_id`'s owner: the pane was deleted or taken over.
+pub(crate) fn forget(block_id: &str) {
+    owners()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(block_id);
+}
+
 pub(crate) fn owner_of(block_id: &str) -> Option<String> {
     owners()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .get(block_id)
         .cloned()
+}
+
+/// Why a caller may not drive a pane. Not an authentication failure: the
+/// caller's identity was already verified.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Denied {
+    /// No such block (closed, or never existed).
+    NotFound(String),
+    /// The block exists, but this caller may not drive it.
+    Forbidden(String),
+}
+
+impl Denied {
+    pub(crate) fn message(&self) -> &str {
+        match self {
+            Denied::NotFound(m) | Denied::Forbidden(m) => m,
+        }
+    }
 }
 
 /// May `agent_id` drive `pane`? `block` is the pane's block as stored (None if
@@ -53,23 +82,55 @@ pub(crate) fn check(
     recorded: Option<&str>,
     agent_id: &str,
     pane: &str,
-) -> Result<(), String> {
-    let block = block.ok_or_else(|| format!("no pane {pane:?} (it may have been closed)"))?;
-    let view = block.meta.get("view").and_then(|v| v.as_str()).unwrap_or("");
+) -> Result<(), Denied> {
+    let block = block
+        .ok_or_else(|| Denied::NotFound(format!("no pane {pane:?} (it may have been closed)")))?;
+    let view = block
+        .meta
+        .get("view")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if view != "browser" {
-        return Err(format!("pane {pane:?} is not a browser pane"));
+        return Err(Denied::Forbidden(format!(
+            "pane {pane:?} is not a browser pane"
+        )));
     }
     if !recorded.is_some_and(|r| r.eq_ignore_ascii_case(agent_id)) {
+        return Err(Denied::Forbidden(format!(
+            "pane {pane:?} is not a browser pane you own: an agent can drive only browser \
+             panes it opened itself with OpenBrowser, and loses one the user takes over"
+        )));
+    }
+    let mirrored = block
+        .meta
+        .get(OWNER_META_KEY)
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if !mirrored.eq_ignore_ascii_case(agent_id) {
+        return Err(Denied::Forbidden(format!(
+            "the user took over pane {pane:?}; open a new one with OpenBrowser if you still need a browser"
+        )));
+    }
+    Ok(())
+}
+
+/// Guard for meta updates that come from a client (the `setmeta` WebSocket
+/// command and the `UpdateObjectMeta` service call), not from srv itself.
+/// `browser:owner_agent` is srv's to write: a client may only clear it, which
+/// is the human's Take over and ends that pane's ownership for good. Setting
+/// or changing it is refused, so a taken-over agent can't write itself back.
+pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<(), String> {
+    let Some(value) = meta.get(OWNER_META_KEY) else {
+        return Ok(());
+    };
+    if !value.is_null() {
         return Err(format!(
-            "pane {pane:?} is not a browser pane you opened with OpenBrowser; \
-             an agent can drive only browser panes it opened itself"
+            "{OWNER_META_KEY} is written by AgentMux itself when an agent opens a browser pane; \
+             a client can only clear it (Take over)"
         ));
     }
-    let mirrored = block.meta.get(OWNER_META_KEY).and_then(|v| v.as_str()).unwrap_or("");
-    if !mirrored.eq_ignore_ascii_case(agent_id) {
-        return Err(format!(
-            "the user took over pane {pane:?}; open a new one with OpenBrowser if you still need a browser"
-        ));
+    if let Some(block_id) = oref.strip_prefix("block:") {
+        forget(block_id);
     }
     Ok(())
 }
@@ -100,7 +161,10 @@ mod tests {
     fn another_agent_may_not() {
         let b = block("browser", Some("lark"));
         let e = check(Some(&b), Some("lark"), "korp", "p1").unwrap_err();
-        assert!(e.contains("not a browser pane you opened"), "{e}");
+        assert!(
+            matches!(&e, Denied::Forbidden(m) if m.contains("not a browser pane you own")),
+            "{e:?}"
+        );
     }
 
     #[test]
@@ -114,20 +178,81 @@ mod tests {
     fn take_over_clears_the_meta_key_and_ends_ownership() {
         let b = block("browser", None);
         let e = check(Some(&b), Some("lark"), "lark", "p1").unwrap_err();
-        assert!(e.contains("took over"), "{e}");
+        assert!(
+            matches!(&e, Denied::Forbidden(m) if m.contains("took over")),
+            "{e:?}"
+        );
     }
 
     #[test]
     fn only_browser_panes_and_only_existing_ones() {
         let b = block("term", Some("lark"));
-        assert!(check(Some(&b), Some("lark"), "lark", "p1").unwrap_err().contains("not a browser pane"));
-        assert!(check(None, Some("lark"), "lark", "p1").unwrap_err().contains("no pane"));
+        assert!(matches!(
+            check(Some(&b), Some("lark"), "lark", "p1"),
+            Err(Denied::Forbidden(_))
+        ));
+        assert!(matches!(
+            check(None, Some("lark"), "lark", "p1"),
+            Err(Denied::NotFound(_))
+        ));
     }
 
     #[test]
-    fn record_and_owner_of_round_trip() {
+    fn record_owner_of_and_forget() {
         record("test-block-browser-owner-rt", "lark");
-        assert_eq!(owner_of("test-block-browser-owner-rt").as_deref(), Some("lark"));
+        assert_eq!(
+            owner_of("test-block-browser-owner-rt").as_deref(),
+            Some("lark")
+        );
         assert_eq!(owner_of("test-block-browser-owner-unknown"), None);
+        forget("test-block-browser-owner-rt");
+        assert_eq!(owner_of("test-block-browser-owner-rt"), None);
+    }
+
+    fn meta(key: &str, v: serde_json::Value) -> MetaMapType {
+        let mut m = MetaMapType::new();
+        m.insert(key.to_string(), v);
+        m
+    }
+
+    #[test]
+    fn a_client_cannot_set_the_owner_key() {
+        // The taken-over agent writing itself back, or any client faking an owner.
+        let e =
+            guard_client_meta_write("block:test-guard-set", &meta(OWNER_META_KEY, json!("lark")))
+                .unwrap_err();
+        assert!(e.contains("only clear it"), "{e}");
+    }
+
+    #[test]
+    fn a_client_clearing_the_owner_key_ends_ownership_for_good() {
+        record("test-guard-clear", "lark");
+        guard_client_meta_write(
+            "block:test-guard-clear",
+            &meta(OWNER_META_KEY, serde_json::Value::Null),
+        )
+        .unwrap();
+        assert_eq!(owner_of("test-guard-clear"), None);
+        // Even if the key were somehow written back, the map no longer agrees.
+        let b = block("browser", Some("lark"));
+        assert!(check(
+            Some(&b),
+            owner_of("test-guard-clear").as_deref(),
+            "lark",
+            "test-guard-clear"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn other_meta_writes_pass_untouched() {
+        record("test-guard-other", "lark");
+        guard_client_meta_write(
+            "block:test-guard-other",
+            &meta("url", json!("https://example.com")),
+        )
+        .unwrap();
+        assert_eq!(owner_of("test-guard-other").as_deref(), Some("lark"));
+        forget("test-guard-other");
     }
 }
