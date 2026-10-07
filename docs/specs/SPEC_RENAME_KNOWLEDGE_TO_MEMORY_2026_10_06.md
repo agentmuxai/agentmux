@@ -1,6 +1,6 @@
 # SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings
 
-**Status:** active — §5 step 1 (the rename) is built in the PR that adds this spec; steps 2–4 follow. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06).
+**Status:** active — §5 step 1 (the rename) shipped in PR #4425; steps 2–4 remain. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06).
 **Date:** 2026-10-06
 **Author:** agent3 (Agent3@narko), at the operator's request
 **Amends:** `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md` (the pane's name; its §6 risk "'Knowledge' suggests retrieval (RAG) more than configuration … revisit only if users are confused" is that revisit)
