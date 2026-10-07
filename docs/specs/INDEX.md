@@ -247,6 +247,7 @@ partial list.
 | [`SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22`](SPEC_AGENT_STASH_PANE_MIGRATION_2026_09_22.md) | Spec: Promote Agent Stash from a modal to a top-anchored drawer |
 | [`SPEC_AGENT_TOOL_CALL_TONES_2026_06_05`](SPEC_AGENT_TOOL_CALL_TONES_2026_06_05.md) | SPEC — Agent tool-call tones (subliminal "talking" voice) |
 | [`SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18`](SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md) | SPEC: Agent turn-phase timeline — unified, replayable phase-history logging + `muxlog phases` |
+| [`SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07`](SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md) | Agent pane: one turn token counter, Claude Code's convention |
 | [`SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24`](SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24.md) | Spec: agent-view.scss Decomposition |
 | [`SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01`](SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md) | Working row: stand down on promotion, and sit above the composer |
 | [`SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02`](SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md) | Agent pane "Working…" row: composer typeface, pane-border color, ambient summary, per-turn tokens that are the turn's own |
@@ -873,7 +874,6 @@ partial list.
 | [`SPEC_AGENT_STATUS_LABELS_2026_06_27`](SPEC_AGENT_STATUS_LABELS_2026_06_27.md) | Agent Status Labels — Richer Working State UX |
 | [`SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04`](SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md) | Agent API: System Management Surface (reload, process/render diagnostics, saga health) |
 | [`SPEC_AGENT_TOOL_STORE_2026_04_15`](SPEC_AGENT_TOOL_STORE_2026_04_15.md) | Spec: Agent Tool Store — managed CLI tool availability for agent panes |
-| [`SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07`](SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md) | Agent pane: one turn token counter, Claude Code's convention |
 | [`SPEC_AGENT_UX_STREAMING_SCROLL_OVERLAY_2026_04_15`](SPEC_AGENT_UX_STREAMING_SCROLL_OVERLAY_2026_04_15.md) | SPEC: Agent Pane — Status Line, Auto-Scroll, and Tool Overlay |
 | [`SPEC_AGENT_VERIFICATION_ROUND_2026_04_16`](SPEC_AGENT_VERIFICATION_ROUND_2026_04_16.md) | SPEC: Agent Startup Verification Round |
 | [`SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08`](SPEC_AGENT_WORKING_INDICATOR_SHIMMER_AND_MIC_RELOCATION_2026_07_08.md) | SPEC: Working-Indicator Shimmer + Mic Button Relocation |
