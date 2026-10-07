@@ -149,14 +149,15 @@ async fn bashwrap_binary_idle_kill_cleans_up_full_process_tree() {
     );
 }
 
+/// `pgrep -f` lists one PID per line on Linux and macOS (BSD `pgrep` has no
+/// count flag); no match is an empty list.
 #[cfg(unix)]
 fn count_processes_with_marker(marker: &str) -> usize {
     std::process::Command::new("pgrep")
-        .args(["-fc", &format!("^sleep {marker}")])
+        .args(["-f", &format!("^sleep {marker}")])
         .output()
-        .ok()
-        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse::<usize>().ok())
-        .unwrap_or(usize::MAX)
+        .map(|out| String::from_utf8_lossy(&out.stdout).lines().filter(|l| !l.trim().is_empty()).count())
+        .unwrap_or(usize::MAX) // pgrep missing reads as "assume survivors" — never a false pass
 }
 
 /// Unix: the idle-kill takes the command's whole process group, so a child

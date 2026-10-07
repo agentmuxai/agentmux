@@ -364,7 +364,7 @@ async fn run_one(state: &AppState, block_id: &str, policy: Policy, deadline: std
             if policy.stop_container {
                 report.stopped_container = stop_container(state, block_id, &before, deadline).await;
             }
-            report.containers_left = compose_containers_left(state, block_id, &before).await;
+            report.containers_left = compose_containers_left(state, block_id, &before, deadline).await;
         }
     }
     report
@@ -407,14 +407,31 @@ async fn stop_container(
 /// the agent's process tree, so no tracker ends them. Reported, not stopped:
 /// a person may be using them too. Skipped when the agent works in `/` or
 /// the home directory, where every project would match.
-async fn compose_containers_left(state: &AppState, block_id: &str, before: &AgentResources) -> Vec<String> {
+async fn compose_containers_left(
+    state: &AppState,
+    block_id: &str,
+    before: &AgentResources,
+    deadline: std::time::Instant,
+) -> Vec<String> {
     let dir = std::path::PathBuf::from(&before.cwd);
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from);
     if before.cwd.is_empty() || dir.parent().is_none() || home.as_deref() == Some(dir.as_path()) {
         return Vec::new();
     }
     let Some(cm) = state.container_manager.get().await else { return Vec::new() };
-    let names = cm.running_compose_containers_under(&dir).await.unwrap_or_default();
+    // A daemon that accepts but never answers must not hold up the close.
+    let wait = deadline.saturating_duration_since(std::time::Instant::now()).max(std::time::Duration::from_secs(1));
+    let names = match tokio::time::timeout(wait, cm.running_compose_containers_under(&dir)).await {
+        Ok(Ok(names)) => names,
+        Ok(Err(e)) => {
+            tracing::warn!(block_id = %block_id, error = %e, "agent_teardown: listing Compose containers failed");
+            return Vec::new();
+        }
+        Err(_) => {
+            tracing::warn!(block_id = %block_id, "agent_teardown: Docker didn't list Compose containers in time");
+            return Vec::new();
+        }
+    };
     for name in &names {
         publish_shutdown(
             state,
