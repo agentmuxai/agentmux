@@ -503,7 +503,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "PI_CODING_AGENT_DIR",
         authDirName: "pi",
         supportedVendors: ["pi"],
-        startupInstructionsFilename: ".pi/APPEND_SYSTEM.md",
+        // AGENTS.md: pi skips the trust-protected .pi/APPEND_SYSTEM.md in
+        // RPC mode (pi-acp). See `static PI` in providers.rs.
+        startupInstructionsFilename: "AGENTS.md",
         launchArgs: [],
         resumeFlag: null,
         sessionIdField: "sessionId",

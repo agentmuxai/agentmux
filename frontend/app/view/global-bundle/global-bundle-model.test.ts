@@ -152,9 +152,8 @@ describe("GlobalBundleViewModel system/ordinary split", () => {
         const byFilename = Object.fromEntries(groups.map((g) => [g.filename, g.providerNames]));
         expect(byFilename["CLAUDE.md"].sort()).toEqual(["Claude Code", "Mux Code"].sort());
         expect(byFilename["GEMINI.md"].sort()).toEqual(["Antigravity (AGY)", "Gemini CLI"].sort());
-        expect(byFilename["AGENTS.md"].sort()).toEqual(["Codex CLI", "GitHub Copilot CLI", "OpenClaw"].sort());
+        expect(byFilename["AGENTS.md"].sort()).toEqual(["Codex CLI", "GitHub Copilot CLI", "OpenClaw", "Pi"].sort());
         expect(byFilename["QWEN.md"]).toEqual(["Qwen Code"]);
-        expect(byFilename[".pi/APPEND_SYSTEM.md"]).toEqual(["Pi"]);
         // Kimi has no confirmed native file — it must not appear in any group.
         expect(groups.some((g) => g.providerNames.includes("Kimi Code CLI"))).toBe(false);
     });

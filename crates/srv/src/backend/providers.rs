@@ -610,19 +610,17 @@ static PI: ProviderConfig = ProviderConfig {
     pinned_version: "0.0.34",
     base_url_env_var: None,
     supported_vendors: &["pi"],
-    // Confirmed: npmjs.com/package/@mariozechner/pi-coding-agent docs —
-    // .pi/SYSTEM.md REPLACES pi's default system prompt; .pi/APPEND_SYSTEM.md
-    // APPENDS to it. AgentMux's Soul+AgentMD+Bundle content is additive
-    // background, not a full system-prompt replacement (pi's own default
-    // prompt carries pi's own tool-usage instructions) — APPEND_SYSTEM.md
-    // is the correct target, not SYSTEM.md. See
-    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
-    startup_instructions_filename: Some(".pi/APPEND_SYSTEM.md"),
-    // Two sources, per the citation above: pi reads .pi/SYSTEM.md (which
-    // REPLACES its default system prompt) as well as the APPEND_SYSTEM.md
-    // AgentMux writes. A repo-provided SYSTEM.md is exactly the kind of
-    // instruction file Phase 3 exists to surface.
-    native_instruction_sources: &[".pi/APPEND_SYSTEM.md", ".pi/SYSTEM.md"],
+    // AGENTS.md, a context file pi always loads. pi 1.0.4 treats
+    // .pi/APPEND_SYSTEM.md (the earlier target) and .pi/SYSTEM.md as
+    // trust-protected, and RPC mode (pi-acp) skips them for a project with no
+    // saved trust decision, so the instructions written there were never read.
+    // SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
+    startup_instructions_filename: Some("AGENTS.md"),
+    // pi reads AGENTS.md or CLAUDE.md as context, and .pi/SYSTEM.md (which
+    // replaces its default prompt) and .pi/APPEND_SYSTEM.md in a trusted
+    // project. A repo-provided SYSTEM.md is exactly the kind of instruction
+    // file Phase 3 exists to surface.
+    native_instruction_sources: &["AGENTS.md", "CLAUDE.md", ".pi/APPEND_SYSTEM.md", ".pi/SYSTEM.md"],
     native_instruction_dirs: &[],
 };
 
@@ -1481,7 +1479,7 @@ mod tests {
             ("qwen", Some("QWEN.md")),
             ("copilot", Some("AGENTS.md")),
             ("openclaw", Some("AGENTS.md")),
-            ("pi", Some(".pi/APPEND_SYSTEM.md")),
+            ("pi", Some("AGENTS.md")),
             ("antigravity", Some("GEMINI.md")),
             ("muxcode", Some("CLAUDE.md")),
             ("kimi", None),
