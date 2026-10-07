@@ -900,6 +900,7 @@ export function useAgentControllerStatus(
                 }
                 case "inapp-success":
                 case "terminal-success":
+                case "terminal-cli-signed-in":
                     // openedAccountId/openedAccountDir are only set by
                     // onAccountRegistered, which run-provider-login.ts fires
                     // ONLY once the account row is actually persisted — a
@@ -914,7 +915,8 @@ export function useAgentControllerStatus(
                     // fail even though the credential is genuinely on disk
                     // (see its doc comment) — so it's handled identically
                     // here, not given its own branch.
-                    if (openedAccountId && openedAccountDir) {
+                    // A cli-managed CLI (Pi) keeps its own login: no account.
+                    if (outcome === "terminal-cli-signed-in" || (openedAccountId && openedAccountDir)) {
                         // The "Signed in from your global login" wording was
                         // the tier-2 seed-from-personal-~/.claude case, removed
                         // 2026-08-31 — every success is now a real login.
@@ -1159,7 +1161,8 @@ export function useAgentControllerStatus(
                 case "opened":
                     break;
                 case "terminal-success":
-                    if (registeredAccountId && registeredAccountDir) {
+                case "terminal-cli-signed-in":
+                    if (outcome === "terminal-cli-signed-in" || (registeredAccountId && registeredAccountDir)) {
                         opts.log("auth", "Login successful — retrying…");
                         setAuthNotice(null);
                         setAuthStatus("authenticated");

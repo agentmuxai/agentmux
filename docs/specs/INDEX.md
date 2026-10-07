@@ -402,6 +402,7 @@ partial list.
 | [`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30`](SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md) | SPEC — Require real explanation text before declaring a persistent-mode turn done |
 | [`SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16`](SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md) | SPEC: Pillar 1 Step 6 — collapse launcher saga durability to an in-memory registry |
 | [`SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11`](SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md) | Pillar 2 — Sanitize-Then-Decide: Retiring the Last Two Independent Quit Authorities |
+| [`SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06`](SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md) | Spec: Make the Pi harness launch, through the `pi-acp` adapter |
 | [`SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19`](SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md) | Phase 7 — Pre-warmed Window Pool for macOS and Linux |
 | [`SPEC_PORTABLE_SOURCE_MAPS_2026_06_01`](SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md) | Source Maps in Portable Builds |
 | [`SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) | Spec: Pre-launch OAuth flow — identity-first agent setup |

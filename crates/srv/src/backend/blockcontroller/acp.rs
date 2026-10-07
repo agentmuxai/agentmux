@@ -663,7 +663,10 @@ impl Controller for AcpController {
         // object) or as a JSON string — before M4b-2 only the string form was
         // read, so an `agent.open` launch lost both (spec §6.5.8).
         let args = meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
-        let env_vars = self.spawn_env(&block_meta);
+        let mut env_vars = self.spawn_env(&block_meta);
+        if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
+            env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
+        }
 
         self.spawn_process(cmd, args, cwd, env_vars)
     }

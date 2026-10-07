@@ -472,30 +472,47 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
     pi: {
         id: "pi",
         displayName: "Pi",
-        cliCommand: "pi",
+        // pi speaks no ACP itself; the pi-acp adapter does, driving the pi
+        // CLI installed beside it (`companionNpmPackages`). Mirrors
+        // crates/srv/src/backend/providers.rs `static PI`;
+        // SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
+        cliCommand: "pi-acp",
         defaultArgs: [],
-        styledArgs: ["--json"],
+        styledArgs: [],
         outputFormat: "acp",
         styledOutputFormat: "acp",
-        authType: "api-key",
-        authCheckCommand: ["config", "get", "provider"],
-        authLoginCommand: ["config"],
-        npmPackage: "@mariozechner/pi-coding-agent",
-        pinnedVersion: "0.73.1",
+        // pi keeps its logins and API keys in PI_CODING_AGENT_DIR (AgentMux's
+        // shared Pi dir, `authConfigDirEnvVar`), one for all Pi agents, so
+        // there's no account to bind. pi-acp has no status command; srv runs
+        // the `pi` beside it as `pi --list-models`, which says "No models
+        // available" until a provider is set up. Login is pi-acp's own
+        // terminal method, which starts `pi` interactively.
+        authType: "cli-managed",
+        authCheckCommand: ["--list-models"],
+        authLoginCommand: ["--terminal-login"],
+        // A terminal-only login (pi-acp's documented terminal auth method):
+        // URL capture would only burn its timeout before the terminal opens.
+        headlessLoginUrlUnsupported: true,
+        npmPackage: "pi-acp",
+        pinnedVersion: "0.0.34",
+        companionNpmPackages: [{ name: "@earendil-works/pi-coding-agent", version: "1.0.4" }],
         docsUrl: "https://github.com/badlogic/pi-mono",
-        windowsInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
-        unixInstallCommand: "npm install -g @mariozechner/pi-coding-agent",
+        windowsInstallCommand: "npm install -g pi-acp @earendil-works/pi-coding-agent",
+        unixInstallCommand: "npm install -g pi-acp @earendil-works/pi-coding-agent",
         icon: "terminal",
-        authConfigDirEnvVar: "PI_HOME",
+        authConfigDirEnvVar: "PI_CODING_AGENT_DIR",
         authDirName: "pi",
         supportedVendors: ["pi"],
-        startupInstructionsFilename: ".pi/APPEND_SYSTEM.md",
-        launchArgs: ["--json"],
+        // AGENTS.md: pi skips the trust-protected .pi/APPEND_SYSTEM.md in
+        // RPC mode (pi-acp). See `static PI` in providers.rs.
+        startupInstructionsFilename: "AGENTS.md",
+        launchArgs: [],
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
-        // Node 20.6+: `engines` of @mariozechner/pi-coding-agent.
-        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "20.6.0" }, NPM_PREREQ],
+        // Node 22.19+: `engines` of @earendil-works/pi-coding-agent (pi-acp
+        // needs 20+).
+        systemPrereqs: [{ ...NODE_PREREQ, minVersion: "22.19.0" }, NPM_PREREQ],
     },
     // Antigravity (AGY) — Google's agentic coding CLI harness. Checked against
     // agy 1.1.11 (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md): its

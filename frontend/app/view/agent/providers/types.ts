@@ -68,6 +68,10 @@ export interface ProviderDefinition {
     authCheckCommand: string[];  // e.g. ["auth", "status", "--json"]
     authLoginCommand: string[];  // e.g. ["auth", "login"]
     npmPackage: string;          // npm package name for local install
+    // Packages installed with `npmPackage`, in the same npm run and dir (Pi's
+    // pi-acp adapter runs the `pi` package). Display only: srv adds them from
+    // its own registry (`ProviderConfig::companion_npm_packages`).
+    companionNpmPackages?: { name: string; version: string }[];
     pinnedVersion: string;       // version to install ("latest" or specific)
     docsUrl: string;
     windowsInstallCommand: string;  // official installer for Windows (powershell)

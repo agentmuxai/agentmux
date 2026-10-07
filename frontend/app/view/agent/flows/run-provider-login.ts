@@ -83,12 +83,14 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
+import { companionCliEnv } from "../providers/companion-env";
 
 export interface RunProviderLoginParams extends ForceLoginParams {
     provider: ForceLoginParams["provider"] & {
         id: string;
         authConfigDirEnvVar: string;
         authCheckCommand: string[];
+        authType?: string;
     };
     /** Polled during the tier-3 wait; return true to abort early (e.g. the user hit Cancel). */
     isCancelled?: () => boolean;
@@ -171,6 +173,7 @@ export type ProviderLoginOutcome =
     | "inapp-success" // tier 1 + awaitTier1Completion: in-app login completed (child done, credential landed) and the account was persisted/linked here
     | "inapp-timeout" // tier 1 + awaitTier1Completion: URL captured, but no completion within the window (or cancelled) — no automatic tier 3 fallback; the user already has the URL in hand
     | "terminal-success" // tier 3: terminal login completed and was detected
+    | "terminal-cli-signed-in" // tier 3, cli-managed provider: the CLI's own check passed; there is no account to save
     | "terminal-timeout" // tier 3: terminal opened, but no login within 5 min (or cancelled)
     | "terminal-unavailable"; // tier 3 itself couldn't open (e.g. unsupported platform)
 
@@ -553,7 +556,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
 
     p.log("auth", "opening a terminal window for a fresh login…");
 
-    const terminalEnv: Record<string, string> = { ...p.authEnv };
+    const terminalEnv: Record<string, string> = { ...companionCliEnv(p.provider.id, p.cliPath), ...p.authEnv };
     if (minted) {
         // UNIFIED 2026-08-31 — every oauth-class provider, Claude included,
         // logs in DIRECTLY into its isolated dir by keeping the config-dir env
@@ -591,6 +594,11 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
         // above): ask the CLI whether it's authenticated IN THE ISOLATED DIR.
         const ready = await pollForCliAuthReady(p.cliPath, p.provider.authCheckCommand, terminalEnv, isCancelled);
         if (!ready) return "terminal-timeout";
+    } else if (p.provider.authType === "cli-managed" && p.provider.authCheckCommand.length > 0) {
+        // The CLI keeps its own login (Pi): ask it, in the env the terminal
+        // got, and there is no account to save.
+        const ready = await pollForCliAuthReady(p.cliPath, p.provider.authCheckCommand, terminalEnv, isCancelled);
+        return ready ? "terminal-cli-signed-in" : "terminal-timeout";
     } else {
         // Not oauth-class (or the dir mint itself failed) — nothing to poll
         // for and nothing to persist; the terminal opened, but there's no

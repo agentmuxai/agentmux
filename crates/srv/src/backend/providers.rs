@@ -241,6 +241,30 @@ impl ProviderConfig {
         }
     }
 
+    /// Packages installed next to `npm_package`, in the same `npm install` and
+    /// the same pinned dir: `(name, version)`. Pi's adapter (`pi-acp`) runs
+    /// the `pi` CLI, which is its own package (`@earendil-works/...`; the old
+    /// `@mariozechner/...` name stops at 0.73.1).
+    pub fn companion_npm_packages(&self) -> &'static [(&'static str, &'static str)] {
+        match self.id {
+            "pi" => &[("@earendil-works/pi-coding-agent", "1.0.4")],
+            _ => &[],
+        }
+    }
+
+    /// Every `name@version` an install of this provider passes to npm: the
+    /// pinned package (at `pin`, the effective pin) and its companions.
+    pub fn npm_install_specs(&self, pin: &str) -> Vec<String> {
+        let main = if pin.is_empty() {
+            self.npm_package.to_string()
+        } else {
+            format!("{}@{}", self.npm_package, pin)
+        };
+        std::iter::once(main)
+            .chain(self.companion_npm_packages().iter().map(|(n, v)| format!("{n}@{v}")))
+            .collect()
+    }
+
     /// The flag that passes the prompt as an argument, for a CLI that doesn't
     /// read it from stdin: `agy` ignores stdin and needs `-p <prompt>`
     /// (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md). `None`, the prompt
@@ -559,40 +583,44 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     native_instruction_dirs: &[],
 };
 
+// Pi runs through `pi-acp`, an ACP adapter that drives `pi --mode rpc`: pi
+// itself speaks no ACP (`pi --json` was never an option, so no Pi launch ever
+// started). Both packages install together (`companion_npm_packages`), and
+// `pi-acp` is told which `pi` to run (`PI_ACP_PI_COMMAND`, acp.rs).
+// SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
 static PI: ProviderConfig = ProviderConfig {
     id: "pi",
-    cli_command: "pi",
+    cli_command: "pi-acp",
     controller_type: ControllerType::Acp,
     app_server: None,
-    launch_args: &["--json"],
+    launch_args: &[],
     persistent_launch_args: None,
     resume_flag: None,
     session_id_field: "sessionId",
     styled_output_format: "acp",
-    auth_config_dir_env_var: "PI_HOME",
+    // pi's own config/auth dir variable; `PI_HOME` was never read.
+    auth_config_dir_env_var: "PI_CODING_AGENT_DIR",
     auth_dir_name: "pi",
     // Not OAuth-class -- never reaches ensure_history_link. Also
     // ACP-native (see the "openclaw" entry above) if that changes.
     history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
-    npm_package: "@mariozechner/pi-coding-agent",
-    pinned_version: "0.73.1",
+    npm_package: "pi-acp",
+    pinned_version: "0.0.34",
     base_url_env_var: None,
     supported_vendors: &["pi"],
-    // Confirmed: npmjs.com/package/@mariozechner/pi-coding-agent docs —
-    // .pi/SYSTEM.md REPLACES pi's default system prompt; .pi/APPEND_SYSTEM.md
-    // APPENDS to it. AgentMux's Soul+AgentMD+Bundle content is additive
-    // background, not a full system-prompt replacement (pi's own default
-    // prompt carries pi's own tool-usage instructions) — APPEND_SYSTEM.md
-    // is the correct target, not SYSTEM.md. See
-    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
-    startup_instructions_filename: Some(".pi/APPEND_SYSTEM.md"),
-    // Two sources, per the citation above: pi reads .pi/SYSTEM.md (which
-    // REPLACES its default system prompt) as well as the APPEND_SYSTEM.md
-    // AgentMux writes. A repo-provided SYSTEM.md is exactly the kind of
-    // instruction file Phase 3 exists to surface.
-    native_instruction_sources: &[".pi/APPEND_SYSTEM.md", ".pi/SYSTEM.md"],
+    // AGENTS.md, a context file pi always loads. pi 1.0.4 treats
+    // .pi/APPEND_SYSTEM.md (the earlier target) and .pi/SYSTEM.md as
+    // trust-protected, and RPC mode (pi-acp) skips them for a project with no
+    // saved trust decision, so the instructions written there were never read.
+    // SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
+    startup_instructions_filename: Some("AGENTS.md"),
+    // pi reads AGENTS.md or CLAUDE.md as context, and .pi/SYSTEM.md (which
+    // replaces its default prompt) and .pi/APPEND_SYSTEM.md in a trusted
+    // project. A repo-provided SYSTEM.md is exactly the kind of instruction
+    // file Phase 3 exists to surface.
+    native_instruction_sources: &["AGENTS.md", "CLAUDE.md", ".pi/APPEND_SYSTEM.md", ".pi/SYSTEM.md"],
     native_instruction_dirs: &[],
 };
 
@@ -836,6 +864,31 @@ fn antigravity_install_paths(
             .into_iter()
             .collect()
     }
+}
+
+/// The `pi` installed next to `cmd` when `cmd` is pi-acp, for
+/// `PI_ACP_PI_COMMAND` (blockcontroller/acp.rs) and the auth check (`run_auth_check`). Without it pi-acp runs whatever `pi` is on PATH, often
+/// none (the managed install's `.bin` isn't on PATH) or an older one.
+/// SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
+pub fn pi_beside_pi_acp(cmd: &str) -> Option<String> {
+    if !is_pi_acp(cmd) {
+        return None;
+    }
+    let path = std::path::Path::new(cmd);
+    let dir = path.parent()?;
+    let names: &[&str] = if cfg!(windows) { &["pi.cmd", "pi.exe", "pi"] } else { &["pi"] };
+    names
+        .iter()
+        .map(|n| dir.join(n))
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+/// Whether `cmd` (a path or bare name) is the pi-acp adapter.
+pub fn is_pi_acp(cmd: &str) -> bool {
+    std::path::Path::new(cmd)
+        .file_stem()
+        .is_some_and(|s| s.to_string_lossy().eq_ignore_ascii_case("pi-acp"))
 }
 
 /// Look up a provider by canonical ID or alias.
@@ -1219,6 +1272,20 @@ mod tests {
     }
 
     #[test]
+    fn pi_acp_is_pointed_at_the_pi_installed_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let pi = dir.path().join(if cfg!(windows) { "pi.cmd" } else { "pi" });
+        let acp = dir.path().join(if cfg!(windows) { "pi-acp.cmd" } else { "pi-acp" });
+        std::fs::write(&acp, "").unwrap();
+        assert_eq!(pi_beside_pi_acp(&acp.to_string_lossy()), None, "no pi yet");
+        std::fs::write(&pi, "").unwrap();
+        assert_eq!(pi_beside_pi_acp(&acp.to_string_lossy()), Some(pi.to_string_lossy().into_owned()));
+        // Other ACP CLIs get nothing.
+        let copilot = dir.path().join("copilot.cmd");
+        assert_eq!(pi_beside_pi_acp(&copilot.to_string_lossy()), None);
+    }
+
+    #[test]
     fn every_provider_declares_at_least_one_supported_vendor() {
         for id in ["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "muxcode", "copilot", "antigravity"] {
             let p = get_provider(id).unwrap_or_else(|| panic!("provider '{id}' not registered"));
@@ -1365,8 +1432,19 @@ mod tests {
         assert_eq!(p.controller_type, ControllerType::Acp);
         assert_eq!(p.controller_type_str(), "acp");
         assert_eq!(p.styled_output_format, "acp");
-        assert_eq!(p.cli_command, "pi");
-        assert_eq!(p.npm_package, "@mariozechner/pi-coding-agent");
+        // pi speaks no ACP itself (`pi --json` was never an option); the
+        // pi-acp adapter does, and runs the pi package installed beside it.
+        assert_eq!(p.cli_command, "pi-acp");
+        assert!(p.launch_args.is_empty());
+        assert_eq!(p.npm_package, "pi-acp");
+        assert_eq!(
+            p.npm_install_specs(p.pinned_version),
+            vec!["pi-acp@0.0.34".to_string(), "@earendil-works/pi-coding-agent@1.0.4".to_string()]
+        );
+        // Everyone else installs just the one package.
+        let claude = get_provider("claude").unwrap();
+        assert_eq!(claude.npm_install_specs("2.1.288"), vec!["@anthropic-ai/claude-code@2.1.288".to_string()]);
+        assert!(claude.companion_npm_packages().is_empty());
     }
 
     // Harness vs. model vendor decoupling: only claude has a verified,
@@ -1401,7 +1479,7 @@ mod tests {
             ("qwen", Some("QWEN.md")),
             ("copilot", Some("AGENTS.md")),
             ("openclaw", Some("AGENTS.md")),
-            ("pi", Some(".pi/APPEND_SYSTEM.md")),
+            ("pi", Some("AGENTS.md")),
             ("antigravity", Some("GEMINI.md")),
             ("muxcode", Some("CLAUDE.md")),
             ("kimi", None),

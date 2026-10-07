@@ -360,6 +360,52 @@ describe("runProviderLogin", () => {
         );
     });
 
+    // A cli-managed CLI keeps its own login (Pi through pi-acp): no account
+    // dir is minted, the terminal points pi-acp at its pi, and the CLI's own
+    // check decides, with nothing to persist
+    // (SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md).
+    it("polls a cli-managed CLI's own check after its terminal login, saving no account", async () => {
+        hub.ensureAccountDir.mockResolvedValue({ accountId: "", dir: "" });
+        const pi = {
+            id: "pi",
+            authType: "cli-managed",
+            authLoginCommand: ["--terminal-login"],
+            authConfigDirEnvVar: "PI_CODING_AGENT_DIR",
+            authCheckCommand: ["--list-models"],
+        } as any;
+
+        const outcome = await runProviderLogin({
+            provider: pi,
+            cliPath: "C:/cli/pi/0.0.34/node_modules/.bin/pi-acp.cmd",
+            authEnv: { PI_CODING_AGENT_DIR: "C:/shared/providers/pi" },
+            setAuthUrl: vi.fn(),
+            log: vi.fn(),
+            skipTier1: true,
+        });
+
+        expect(outcome).toBe("terminal-cli-signed-in");
+        const terminalEnv = {
+            PI_ACP_PI_COMMAND: "C:/cli/pi/0.0.34/node_modules/.bin/pi.cmd",
+            PI_CODING_AGENT_DIR: "C:/shared/providers/pi",
+        };
+        expect(hub.openLoginTerminal).toHaveBeenCalledWith(
+            "C:/cli/pi/0.0.34/node_modules/.bin/pi-acp.cmd",
+            ["--terminal-login"],
+            terminalEnv,
+        );
+        expect(hub.checkCliAuthCommand).toHaveBeenCalledWith(
+            {},
+            {
+                cli_path: "C:/cli/pi/0.0.34/node_modules/.bin/pi-acp.cmd",
+                auth_check_args: ["--list-models"],
+                auth_env: terminalEnv,
+            },
+            { timeout: 10000 },
+        );
+        expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
+        expect(hub.runCliLogin).not.toHaveBeenCalled();
+    });
+
     it("returns 'terminal-timeout' without a full 5-minute wait when cancelled", async () => {
         hub.runCliLogin.mockResolvedValue(null);
 

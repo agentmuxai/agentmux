@@ -257,16 +257,16 @@ export const loginCommand: SlashCommand = {
                     };
                 }
                 case "terminal-success":
+                case "terminal-cli-signed-in":
                     // openedAccountId/openedAccountDir are only set once
                     // onAccountRegistered fires — run-provider-login.ts only
                     // calls it once the account row is actually persisted, so
                     // this also catches the case where a credential seeded/
                     // typed in successfully but the DB write itself failed.
                     // See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md.
-                    if (openedAccountId && openedAccountDir) {
-                        if (outcome === "terminal-success") {
-                            ctx.log("auth", "login complete — run /cost to verify");
-                        }
+                    // A cli-managed CLI (Pi) keeps its own login: no account.
+                    if (outcome === "terminal-cli-signed-in" || (openedAccountId && openedAccountDir)) {
+                        ctx.log("auth", "login complete — run /cost to verify");
                         // See finalizeLoginSuccess's doc comment for the
                         // active-turn / refresh-failure gating.
                         return await finalizeLoginSuccess(ctx);
