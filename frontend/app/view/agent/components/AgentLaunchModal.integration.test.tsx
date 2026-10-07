@@ -340,6 +340,22 @@ describe("AgentLaunchModal — memory change must not reset auth state (§6.10)"
         });
         expect(onSubmit.mock.calls[0][0].bundleId).toBe("mem-personal");
     });
+
+    // An unedited list is never saved (#4434), so one that
+    // loaded late or failed to load can't wipe the agent's saved bundles.
+    it("leaves the saved list alone when it wasn't edited, even if it failed to load", async () => {
+        vi.mocked(RpcApi.GetAgentBundlesCommand).mockRejectedValueOnce(new Error("down"));
+        const user = userEvent.setup();
+        const onSubmit = vi.fn();
+        render(() => <AgentLaunchModalPanel agent={claudeAgent} onSubmit={onSubmit} onCancel={vi.fn()} />);
+        await screen.findByLabelText("Account");
+        await user.type(screen.getByLabelText("Agent name"), "alpha");
+        const launch = screen.getByRole("button", { name: /^launch/i });
+        await waitFor(() => expect(launch).not.toBeDisabled());
+        await user.click(launch);
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(RpcApi.SetAgentBundlesCommand).not.toHaveBeenCalled();
+    });
 });
 
 describe("AgentLaunchModal — provider resolution through the bound bundle", () => {

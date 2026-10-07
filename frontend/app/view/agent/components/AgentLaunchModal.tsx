@@ -286,17 +286,26 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     const hasUserBundles = createMemo(() => realBundles(flow.state).length > 0);
 
     // The agent's Bundles list: what it was handed back from the `+ New
-    // bundle` round-trip, else the saved one. Saved again on Launch.
+    // bundle` round-trip, else the saved one. Launch saves it only when it
+    // was edited, so a list that hasn't loaded (or failed to) never
+    // overwrites the saved one; the editor waits for the load.
     const [picks, setPicks] = createSignal<string[]>(props.initialFormState?.bundleIds ?? []);
+    const [picksEdited, setPicksEdited] = createSignal(props.initialFormState?.bundleIds !== undefined);
+    const [picksReady, setPicksReady] = createSignal(picksEdited());
     const [ownBundleId, setOwnBundleId] = createSignal(props.agent.memory_id ?? "");
     void RpcApi.GetAgentBundlesCommand(TabRpcClient, { agent_id: props.agent.id })
         .then((r) => {
-            if (props.initialFormState?.bundleIds === undefined) setPicks(r.bundle_ids);
+            if (!picksEdited()) setPicks(r.bundle_ids);
             setOwnBundleId(r.own_bundle_id);
         })
         .catch(() => {
-            /* the list starts empty; Launch saves what the user picks */
-        });
+            /* left as it is: Launch saves only what the user then picks */
+        })
+        .finally(() => setPicksReady(true));
+    const editPicks = (ids: string[]) => {
+        setPicks(ids);
+        setPicksEdited(true);
+    };
     const pickableBundles = createMemo(() => realBundles(flow.state).filter((b) => b.id !== ownBundleId()));
     const ownBundleName = () => bundles().find((b) => b.id === ownBundleId())?.name;
 
@@ -456,17 +465,17 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         flow.dispatch({ type: "SubmitClicked" });
         try {
             const row = continuedRow();
-            const saved = await RpcApi.SetAgentBundlesCommand(TabRpcClient, {
-                agent_id: props.agent.id,
-                bundle_ids: picks(),
-            });
+            const bundleIds = picksEdited()
+                ? (await RpcApi.SetAgentBundlesCommand(TabRpcClient, { agent_id: props.agent.id, bundle_ids: picks() }))
+                      .bundle_ids
+                : picks();
             await props.onSubmit({
                 instanceName: name().trim(),
                 agentType: runtime(),
                 environment: runtime() === "container" ? "docker" : "local",
                 containerImage: runtime() === "container" ? resolvedImage() : undefined,
                 accountId: accountId(),
-                bundleId: saved.bundle_ids[0] ?? bundleId(),
+                bundleId: bundleIds[0] ?? bundleId(),
                 // v8 — when continuing a past agent, thread the id +
                 // working directory through. Launch flow uses
                 // workDirOverride to skip allocate_agent_workdir.
@@ -732,9 +741,9 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     <BundleListEditor
                                         bundles={pickableBundles()}
                                         value={picks()}
-                                        onChange={setPicks}
+                                        onChange={editPicks}
                                         own={ownBundleName()}
-                                        disabled={submitting()}
+                                        disabled={submitting() || !picksReady()}
                                         testId="agent-launch-bundles"
                                     />
                                 </div>
