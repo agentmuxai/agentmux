@@ -26,7 +26,7 @@ import { Follower } from "./follower";
 export const RECHECK_MS = 300;
 
 /**
- * After the user commits (sends, types, a queued message starts its turn), the
+ * After the user commits (a send, or a queued message starting its turn), the
  * layout keeps changing for a moment: the composer shrinks back to one line,
  * the queued-message panel comes and goes. Those are the user's own changes
  * (spec §1), so for this long they land at the true bottom instead of being
