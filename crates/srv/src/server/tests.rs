@@ -7209,10 +7209,21 @@ async fn fleet_events_start_with_retry_and_the_snapshot() {
     let mut body = resp.into_body().into_data_stream();
     assert_eq!(next_body_chunk(&mut body).await.unwrap(), "retry: 3000\n\n");
     let snapshot = feed.snapshot();
-    assert_eq!(
-        next_body_chunk(&mut body).await.unwrap(),
-        format!("event: fleet\nid: {}\ndata: {}\n\n", feed.event_id(&snapshot), feed.body_json(&snapshot))
-    );
+    let event = next_body_chunk(&mut body).await.unwrap();
+    let head = format!("event: fleet\nid: {}\ndata: ", feed.event_id(&snapshot));
+    let data = event
+        .strip_prefix(&head)
+        .and_then(|rest| rest.strip_suffix("\n\n"))
+        .unwrap_or_else(|| panic!("not the snapshot event: {event}"));
+    // `now_ms` is the clock when each body is built, so the stream's copy and
+    // this test's can differ by a millisecond; everything else must match.
+    let without_now = |text: &str| {
+        let mut json: serde_json::Value = serde_json::from_str(text).unwrap();
+        let now = json.as_object_mut().unwrap().remove("now_ms");
+        assert!(now.and_then(|n| n.as_u64()).is_some_and(|n| n > 0), "now_ms: {text}");
+        json
+    };
+    assert_eq!(without_now(data), without_now(&feed.body_json(&snapshot)));
     assert_eq!(feed.open_streams(), 1);
     drop(body);
     assert_eq!(feed.open_streams(), 0, "a dropped response body frees the slot");
