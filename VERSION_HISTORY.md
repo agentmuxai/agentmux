@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.59.14 — 2026-10-07
+
+- feat(agents): Linux tracks every process an agent starts in its own cgroup, and closing the agent ends them all
+- feat(agents): macOS (and Linux without systemd) find and end the processes an agent starts, and closing an agent reports any that escaped tracking
+- fix(agents): Windows puts an agent's processes in its job before they run, keeps tracking after a kill, and no longer caps the list at 256
+- CI accepts the renamed review and agent bots (muxreview, muxagent) alongside their old names.
+- fix(agents): an idle Bash command's whole process group is killed on Linux and macOS, and closing an agent names Docker Compose containers left running in its folder
+- Claude agents no longer add a Co-Authored-By trailer or a "Generated with" line to commits and PR descriptions (an agent's own attribution setting still wins), and the repo's trailer check now also rejects "Generated with" lines
+- fix(agent-pane): a message sent mid-turn no longer leaves a gap above the composer
+
 ## 0.59.13 — 2026-10-07
 
 - Agent pane: Qwen Code panes show the agent's replies and tool calls; Qwen writes Claude Code's stream format, which was being read as Gemini's
