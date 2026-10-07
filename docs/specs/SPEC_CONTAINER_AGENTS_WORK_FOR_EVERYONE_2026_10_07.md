@@ -79,7 +79,7 @@ The message begins "Couldn't start the container ..." and `muxspect_handlers::cl
 
 A new RPC, `containerimagecheck { image }`, answers whether an image can be had: `local` (the daemon has it), `public` (an anonymous registry check succeeds), `denied`, `not_found`, or `unknown` (no answer: offline, a proxy, a registry that does not speak the token flow). Only `denied` and `not_found` count against the container. `unknown` never does, because a false "no" would take away a working default.
 
-The registry check is a small anonymous request (`backend/image_probe.rs`): the manifest URL, the bearer-token challenge if one is returned, a second request with the anonymous token. It runs in srv, so the renderer needs no network access and the answer matches what the daemon-side pull will do.
+The registry check is a small anonymous request (`backend/container_image.rs`): the manifest URL, the bearer-token challenge if one is returned, a second request with the anonymous token. It runs in srv, so the renderer needs no network access and the answer matches what the daemon-side pull will do.
 
 `AgentCreateFromTemplateModal` runs the check once Docker is known to be available, and `containerPreselect()` (new, in `frontend/app/view/agent/defaults/container-default.ts`) decides the default: container only if the template is a container template, the CLI supports containers, Docker answers, and the image is not `denied`/`not_found`. When it declines because of the image, the Runtime row says why and the host option is already selected: a one-click fallback is the existing dropdown. The container option stays selectable, since the user may know better.
 
@@ -101,7 +101,7 @@ For a stored legacy image the check also tries the base image, mirroring the run
 ## 4. Phases
 
 1. **Pull errors and message mapping.** `ImagePull`, classification, `user_message()`, the shared turn-prepare helper, the muxspect prefix. Useful on its own.
-2. **Image check and create flow.** `image_probe.rs`, the RPC and its generated types, `container-default.ts`, the modal.
+2. **Image check and create flow.** `container_image.rs`, the RPC and its generated types, `container-default.ts`, the modal.
 3. **Base image and install.** Dockerfile, CLI provisioning (script builders, install, frames, cache), the `PATH` append, the legacy fallback, defaults in the seed and catalog, workflow and script, pin tests, `docs/spec-claude-code-versioning.md`.
 
 ## 5. Test plan
@@ -109,7 +109,7 @@ For a stored legacy image the check also tries the base image, mirroring the run
 | Layer | What | Where |
 |---|---|---|
 | Rust unit | Pull-error classification across the real message shapes; message text per kind; no raw `Docker API error` in a pull message | `container.rs` tests |
-| Rust unit | Image reference parsing, token-challenge parsing, legacy-image detection, default resolution | `image_probe.rs`, `container.rs` tests |
+| Rust unit | Image reference parsing, token-challenge parsing, legacy-image detection, default resolution | `container_image.rs`, `container.rs` tests |
 | Rust unit | Install and check script builders: arguments are positional, never interpolated; marker name; the turn wrapper's `PATH` append | `container.rs`, `container_spawn.rs` tests |
 | Rust unit | `classify_last_error_source` recognises the new prefix | `muxspect_handlers.rs` tests |
 | Frontend unit | `containerPreselect()` truth table; the Runtime row text per image state | `container-default.test.ts`, modal test |
