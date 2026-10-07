@@ -225,6 +225,9 @@ interface UseAgentStreamOpts {
      * backend picked up), not just from this pane's own composer send.
      */
     onTurnStartFromQueue?: () => void;
+    /** Every queued message the backend accepts, mid-turn included — see
+     *  usePendingMessageAcceptance's `onPendingLeft`. */
+    onPendingLeft?: () => void;
     /**
      * Where this pane's history load ended (Phase 5a-4,
      * `transcript-cursor.ts`). Live events are held until it settles, then
@@ -254,6 +257,7 @@ export function useAgentStream({
     provider,
     agentName,
     onTurnStartFromQueue,
+    onPendingLeft,
     transcriptSettle,
 }: UseAgentStreamOpts): Accessor<BackgroundTaskView[]> {
     // Mutable state that doesn't trigger re-renders. Kept here (not
@@ -460,6 +464,7 @@ export function useAgentStream({
             hasNodeId,
             addNodeId,
             onTurnStartFromQueue,
+            onPendingLeft,
             onAccepted: (text) => echoLedger.accepted(text),
         });
 

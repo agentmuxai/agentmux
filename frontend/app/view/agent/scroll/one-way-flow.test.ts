@@ -402,6 +402,30 @@ describe("OneWayFlow", () => {
         }
     });
 
+    it("a message accepted mid-turn, long after the send, is a commit too", () => {
+        let now = 1000;
+        const spy = vi.spyOn(performance, "now").mockImplementation(() => now);
+        try {
+            const { m, flow, fire } = setup();
+            flow.jumpToBottom(true); // the send
+            now += 5000; // queued for a while; the settle window is long gone
+            m.rows[6].h -= 50;
+            m.clamp();
+            fire();
+            expect(m.spacerPx()).toBe(50);
+            // The backend accepts it: the pending panel leaves (viewport +45).
+            flow.commit();
+            expect(m.spacerPx()).toBe(0);
+            m.clientHeight += 45;
+            m.clamp();
+            fire();
+            expect(m.spacerPx()).toBe(0);
+            expect(m.top).toBe(m.max());
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
     it("typing jumps to the bottom but is not a commit: the room stays and the rule stays on", () => {
         const { m, flow, fire } = setup();
         m.rows[6].h -= 80;

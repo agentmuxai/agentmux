@@ -152,11 +152,7 @@ export class OneWayFlow {
         const el = this.scroller;
         if (!el) return;
         this.follower.stop();
-        if (commit) this.settleUntil = performance.now() + COMMIT_SETTLE_MS;
-        if (commit && this.spacerPx > 0) {
-            this.host.note?.(`spacer:release-${this.spacerPx}`);
-            this.setSpacer(0);
-        }
+        if (commit) this.commit();
         const ch = el.clientHeight; // perf:allow-layout-read — user-initiated jump
         const sh = el.scrollHeight; // perf:allow-layout-read — user-initiated jump
         const target = Math.max(0, sh - ch);
@@ -165,6 +161,19 @@ export class OneWayFlow {
             this.host.wrote({ scrollTop: el.scrollTop, scrollHeight: sh, clientHeight: ch }); // perf:allow-layout-read — after a scrollTop write, which does not invalidate layout
         }
         this.baseline = this.readVisible(el, ch);
+    }
+
+    /**
+     * A commit point without a jump (a queued message accepted mid-turn): give
+     * up spacer room and let layout changes for COMMIT_SETTLE_MS settle at the
+     * bottom. Callers only use it while the pane follows.
+     */
+    commit(): void {
+        this.settleUntil = performance.now() + COMMIT_SETTLE_MS;
+        if (this.spacerPx > 0) {
+            this.host.note?.(`spacer:release-${this.spacerPx}`);
+            this.setSpacer(0);
+        }
     }
 
     /** `/clear` or a fresh session in the pane: no room is owed to anything. */
