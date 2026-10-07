@@ -38,12 +38,19 @@ interface HamburgerMenuProps {
 
 export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
     const menuItems = createMemo((): MenuItem[] => {
-        const settings = settingsAtom() ?? ({} as any);
+        // Theme and Opacity stay open while the user tries values (keepOpen),
+        // so a choice must not rebuild the items: that would remount the open
+        // submenu under the cursor. The memo doesn't read settings; only each
+        // item's `checked` getter does, and FlyoutMenu reads it in JSX.
+        const settings = (): Record<string, unknown> => settingsAtom() ?? {};
 
-        const currentTheme = (settings["window:theme"] as string) || "default";
+        const currentTheme = (): string => (settings()["window:theme"] as string) || "default";
         const themeSubItems: MenuItem[] = THEME_OPTIONS.map((opt) => ({
             label: opt.label,
-            checked: currentTheme === opt.id,
+            get checked() {
+                return currentTheme() === opt.id;
+            },
+            keepOpen: true,
             onClick: () => {
                 fireAndForget(() =>
                     RpcApi.SetConfigCommand(TabRpcClient, { "window:theme": opt.id } as any),
@@ -51,16 +58,20 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
             },
         }));
 
-        const rawOpacity = (settings["window:opacity"] as number) ?? 0.8;
-        const isTransparent = (settings["window:transparent"] as boolean) ?? false;
-        const effectiveOpacity = isTransparent ? rawOpacity : 1.0;
-        const opacityStep = Math.round(effectiveOpacity * 20) / 20;
+        const opacityStep = (): number => {
+            const rawOpacity = (settings()["window:opacity"] as number) ?? 0.8;
+            const isTransparent = (settings()["window:transparent"] as boolean) ?? false;
+            return Math.round((isTransparent ? rawOpacity : 1.0) * 20) / 20;
+        };
         const opacitySubItems: MenuItem[] = [];
         for (let pct = 100; pct >= 35; pct -= 5) {
             const value = pct / 100;
             opacitySubItems.push({
                 label: `${pct}%`,
-                checked: Math.abs(value - opacityStep) < 0.001,
+                get checked() {
+                    return Math.abs(value - opacityStep()) < 0.001;
+                },
+                keepOpen: true,
                 onClick: () => {
                     fireAndForget(() =>
                         value < 1.0

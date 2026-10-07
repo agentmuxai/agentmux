@@ -49,7 +49,7 @@ function renderEdit(node: ToolNode): JSX.Element {
 }
 
 function renderBash(node: ToolNode): JSX.Element {
-    return <BashOutputViewer params={node.params as any} result={node.result as any} />;
+    return <BashOutputViewer result={node.result as any} />;
 }
 
 const isMarkdownPath = (path: string): boolean => path.endsWith(".md") || path.endsWith(".mdx");

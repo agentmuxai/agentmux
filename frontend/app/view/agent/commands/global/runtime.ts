@@ -155,13 +155,17 @@ function permissionChoices(ctx: SlashCommandContext): SlashChoice[] {
         description: string,
         mode: PermissionMode,
         aliases?: string[],
-    ): SlashChoice => ({
-        value,
-        label,
-        description: permissionModeText(mode, autoAnswers, provider?.id ?? "").note ?? description,
-        current: current === mode,
-        aliases,
-    });
+    ): SlashChoice => {
+        // The palette has room for the full explanation; the runtime panel shows the short note.
+        const text = permissionModeText(mode, autoAnswers, provider?.id ?? "");
+        return {
+            value,
+            label,
+            description: text.detail ?? text.note ?? description,
+            current: current === mode,
+            aliases,
+        };
+    };
     return [
         make("default", "Default", "Standard permission prompts", "default"),
         make("auto", "Auto", "Auto-approve safe operations", "auto"),

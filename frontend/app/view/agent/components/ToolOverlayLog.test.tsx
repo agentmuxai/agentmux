@@ -712,19 +712,22 @@ describe("ToolOverlayLog — follows the latest output", () => {
     });
 });
 
-describe("ToolOverlayLog Bash command header", () => {
-    it("shows the command above the output while streaming", () => {
+// The panel shows output only: the command is in the tool row and its hover
+// (REPORT_THEME_MENU_RUNTIME_PANEL_TOOL_PREVIEW_TWEAKS_2026_10_07.md §3).
+describe("ToolOverlayLog shows no Bash command", () => {
+    it("streams the output alone", () => {
         const { container } = render(() => <ToolOverlayLog node={streamingNode} />);
-        expect(container.querySelector(".agent-bash-cmd-code")!.textContent).toBe("sleep 1 && echo done");
+        expect(container.querySelector(".agent-bash-cmd")).toBeNull();
+        expect(container.textContent).not.toContain("sleep 1 && echo done");
         expect(container.querySelector(".agent-tool-log-line")!.textContent).toBe("line 1");
     });
 
-    it("shows the command while a running call has no visible output yet", () => {
+    it("shows only the spinner while a running call has no visible output yet", () => {
         const marker: ToolLogChunk = { kind: "system", content: "[bashwrap] starting: 20 chars", timestamp: 1 };
         for (const chunks of [[], [marker]]) {
             const node: ToolNode = { ...streamingNode, log: { open: true, chunks } };
             const { container, unmount } = render(() => <ToolOverlayLog node={node} />);
-            expect(container.querySelector(".agent-bash-cmd-code")!.textContent).toBe("sleep 1 && echo done");
+            expect(container.querySelector(".agent-bash-cmd")).toBeNull();
             expect(container.querySelector(".agent-tool-loading")).not.toBeNull();
             unmount();
         }
