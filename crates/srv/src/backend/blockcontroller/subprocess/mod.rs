@@ -441,7 +441,7 @@ pub(crate) fn persists_user_record(output_format: &str) -> bool {
     matches!(
         output_format,
         // agy-stream-json: `agy` doesn't echo the prompt either.
-        "claude-stream-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json"
+        "claude-stream-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "qwen-stream-json"
     )
 }
 

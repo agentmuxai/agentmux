@@ -21,6 +21,10 @@ export function createTranslator(outputFormat: string, opts: { replay?: boolean 
     switch (outputFormat) {
         case "claude-stream-json":
             return new ClaudeTranslator({ replay: opts.replay });
+        // Qwen Code's stream-json is Claude Code's frame shape (catalog.ts).
+        case "qwen-stream-json":
+            // Its input_tokens already include the cached tokens.
+            return new ClaudeTranslator({ replay: opts.replay, inputIncludesCache: true });
         case "gemini-json":
             return new GeminiTranslator({ replay: opts.replay });
         case "codex-json":

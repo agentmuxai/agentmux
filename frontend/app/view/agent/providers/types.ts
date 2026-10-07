@@ -57,8 +57,8 @@ export interface ProviderDefinition {
     cliCommand: string;
     defaultArgs: string[];
     styledArgs: string[];        // CLI flags for JSON streaming mode (documentation; use launchArgs for actual invocation)
-    outputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp" | "raw";
-    styledOutputFormat: "claude-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp";
+    outputFormat: "claude-stream-json" | "qwen-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp" | "raw";
+    styledOutputFormat: "claude-stream-json" | "qwen-stream-json" | "gemini-json" | "codex-json" | "kimi-stream-json" | "agy-stream-json" | "acp";
     // "oauth": a per-account login AgentMux isolates and binds to the agent
     // (launch is blocked until an account is chosen). "api-key": a key from
     // the identity bundle. "cli-managed": the CLI keeps its own sign-in for

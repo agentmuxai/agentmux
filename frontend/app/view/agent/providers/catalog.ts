@@ -294,8 +294,10 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         systemPrereqs: [{ ...NODE_PREREQ, minVersion: "20.0.0" }, NPM_PREREQ],
     },
     // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
-    // Same stream-json headless surface → reuses the gemini translator
-    // (styledOutputFormat "gemini-json"). Backend is OpenAI-compatible: set
+    // Its stream-json is NOT Gemini's: it emits Claude Code's frame shape
+    // (system/assistant/user/result; verified on 0.24.0), read by the Claude
+    // translator as "qwen-stream-json". Its usage counts cached tokens inside
+    // input_tokens, so the context meter doesn't read it. Backend is OpenAI-compatible: set
     // OPENAI_BASE_URL=https://openrouter.ai/api/v1 + OPENAI_API_KEY (+ OPENAI_MODEL)
     // to run any OpenRouter model. The Qwen OAuth free tier was retired
     // (2026-04-15), so this is treated as api-key.
@@ -311,9 +313,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         displayName: "Qwen Code",
         cliCommand: "qwen",
         defaultArgs: [],
-        styledArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        styledArgs: ["--output-format", "stream-json", "--include-partial-messages", "--yolo", "-p", ""],
         outputFormat: "raw",
-        styledOutputFormat: "gemini-json",
+        styledOutputFormat: "qwen-stream-json",
         authType: "api-key",
         authCheckCommand: ["auth", "status"],
         authLoginCommand: ["auth"],
@@ -327,7 +329,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authDirName: "qwen",
         supportedVendors: ["openrouter"],
         startupInstructionsFilename: "QWEN.md",
-        launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        launchArgs: ["--output-format", "stream-json", "--include-partial-messages", "--yolo", "-p", ""],
         resumeFlag: null,
         sessionIdField: "session_id",
         controllerType: "subprocess",

@@ -55,7 +55,7 @@ export const LIVE_FEED_MAX_ROWS = 20_000;
  * which keeps the `codex-json` format but sends the message straight to its
  * session): those panes keep today's behaviour (§6.9; Codex review).
  */
-const ROLL_OFF_FORMATS = new Set(["claude-stream-json", "codex-json", "kimi-stream-json", "agy-stream-json", "gemini-json"]);
+const ROLL_OFF_FORMATS = new Set(["claude-stream-json", "qwen-stream-json", "codex-json", "kimi-stream-json", "agy-stream-json", "gemini-json"]);
 
 export function liveFeedSupported(outputFormat: string | undefined, controller?: string): boolean {
     if (controller === "app-server") return false;
