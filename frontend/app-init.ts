@@ -11,6 +11,7 @@ import {
     registerUserKeybindings,
 } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
+import { registerLinkInPaneListener } from "@/app/element/link-open";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
@@ -992,6 +993,7 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     registerDefaultCommands();
     registerControlShiftTracking();
     registerHostShortcuts();
+    registerLinkInPaneListener();
     tlog("registerKeys", t);
 
     t = performance.now();

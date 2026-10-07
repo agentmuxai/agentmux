@@ -726,7 +726,8 @@ wrap_load_handler! {
 // ---------------------------------------------------------------------------
 //
 // Overrides here: `on_before_browse` (external-protocol / OS-handoff guard for
-// browser panes), `on_render_process_terminated` (white-screen recovery),
+// browser panes; keeps an app window on its frontend), `on_open_urlfrom_tab`
+// (a middle-clicked link never replaces an app window), `on_render_process_terminated` (white-screen recovery),
 // `on_render_process_unresponsive` / `_responsive` (hung-renderer recovery),
 // and `auth_credentials` (HTTP Basic/Digest → BrowserAuthModal). Everything else
 // inherits the default (no-op) implementations from the cef-rs trait.
@@ -752,6 +753,21 @@ wrap_request_handler! {
         ) -> ::std::os::raw::c_int {
             let mut inner = self.inner.lock();
             inner.on_before_browse(browser, frame, request, user_gesture, is_redirect)
+        }
+
+        // A link to open in a new tab (middle-click). See
+        // AgentMuxHandler::on_open_url_from_tab: an app window never loads it
+        // in its own frame.
+        fn on_open_urlfrom_tab(
+            &self,
+            browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            target_url: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            let mut inner = self.inner.lock();
+            inner.on_open_url_from_tab(browser, target_url)
         }
 
         fn on_render_process_terminated(

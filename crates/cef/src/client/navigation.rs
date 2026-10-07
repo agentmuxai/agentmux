@@ -702,15 +702,10 @@ impl AgentMuxHandler {
         // frontend's invokeCommand reject the creds and time out on
         // get_backend_endpoints (#52).
         let ipc_port = self.resolved_ipc_port();
-        // Non-pane windows (main + secondary app windows) always load our
-        // frontend → inject unconditionally (unchanged behavior; `||`
-        // short-circuits so the common path skips the origin resolve). Only
-        // `is_browser_pane` windows need the origin gate to separate our
-        // floating-pane/pool windows from real remote browser panes.
-        let should_inject = !self.is_browser_pane
-            || crate::commands::window::resolve_frontend_base_url(ipc_port)
-                .map(|base| super::recovery_pages::url_on_origin(&frame_url, &base))
-                .unwrap_or(false);
+        // Only the frontend's own pages get the creds, in every window: an
+        // app window that somehow loaded another site, or a browser pane on a
+        // remote one, gets nothing (app_navigation.rs).
+        let should_inject = super::app_navigation::injects_ipc_credentials(&frame_url, &self.frontend_origins());
         if should_inject {
             let ipc_token = &self.state.ipc_token;
             let js = format!(

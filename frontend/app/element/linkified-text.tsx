@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, For, type JSX } from "solid-js";
-import { openLink } from "@/app/store/global";
+import { onLinkAuxClick, onLinkClick } from "./link-open";
 import { linkify, normalizeHref, isLikelyFilename, isSafeHref } from "./linkify-config";
 
 type Segment = { text: string; href?: string };
@@ -54,10 +54,8 @@ export const LinkifiedText = (props: { text: string }): JSX.Element => {
                         <a
                             href={seg.href}
                             class="linkified-url"
-                            onClick={(e) => {
-                                e.preventDefault();
-                                openLink(seg.href!);
-                            }}
+                            onClick={(e) => onLinkClick(e, seg.href!)}
+                            onAuxClick={(e) => onLinkAuxClick(e, seg.href!)}
                         >
                             {seg.text}
                         </a>
