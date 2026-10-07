@@ -43,6 +43,7 @@ import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import { createSessionStartDetector } from "./session-start";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
@@ -304,6 +305,8 @@ export function useAgentStream({
     let lastUsageMessageId: string | undefined;
     // A real compaction card still waiting for the context's size after it.
     let awaitingCompactionSize: ContextCompactedNode | null = null;
+    // Fed every line in stream order: true for a new CLI session's `init`.
+    const isNewSession = createSessionStartDetector();
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
@@ -604,12 +607,10 @@ export function useAgentStream({
                 // live registry having watched the task (activity/task-outcomes.ts).
                 if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
 
-                // A new CLI session (srv reads `init` as a turn boundary too,
-                // background_task_feed.rs): a turn still holding live tokens
-                // ended without a `result`, so its tokens go.
-                if (rawEvent.type === "system" && rawEvent.subtype === "init" && !rawEvent.parent_tool_use_id) {
-                    model.dispatchPane({ type: "StreamSessionStarted" });
-                }
+                // A new CLI session, not a compaction's own `init`
+                // (session-start.ts): a turn still holding live tokens ended
+                // without a `result`, so its tokens go.
+                if (isNewSession(rawEvent)) model.dispatchPane({ type: "StreamSessionStarted" });
 
                 // Real compaction-boundary completion data (Tier 1/2 —
                 // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
