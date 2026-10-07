@@ -9,6 +9,26 @@ use std::sync::Mutex;
 
 use super::adapter::*;
 
+/// Format version of the saved metadata cache (`SessionIndex::with_cache_file`).
+/// Bump when `SessionMeta` or what `extract_meta` derives changes meaning, so
+/// a stale file is rebuilt rather than trusted.
+pub(crate) const META_CACHE_VERSION: u32 = 1;
+
+/// The saved metadata cache is rewritten at most this often (when changed).
+pub(crate) const META_CACHE_WRITE_INTERVAL_MS: i64 = 10 * 60 * 1000;
+
+#[derive(serde::Deserialize)]
+struct MetaCacheFile {
+    version: u32,
+    entries: HashMap<String, (i64, Option<SessionMeta>)>,
+}
+
+#[derive(serde::Serialize)]
+struct MetaCacheFileRef<'a> {
+    version: u32,
+    entries: &'a HashMap<String, (i64, Option<SessionMeta>)>,
+}
+
 /// Max characters of matched text returned per hit.
 ///
 /// A single history message can be hundreds of KB, and this tool must never be
@@ -542,6 +562,16 @@ pub struct SessionIndex {
     /// (42k files / 3.8 GB on one real host), so later refreshes reuse this
     /// for files whose mtime hasn't moved. Only touched under `refresh_lock`.
     meta_cache: Mutex<HashMap<String, (i64, Option<SessionMeta>)>>,
+    /// Where `meta_cache` is kept between launches (`with_cache_file`), so the
+    /// first refresh after a start parses only transcripts that changed since,
+    /// instead of every transcript on the machine (63k sessions took 92–154 s
+    /// per launch; SPEC_AGENT_OPEN_LATENCY_2026_09_27.md §4.3). `None`: kept in
+    /// memory only.
+    cache_file: Option<PathBuf>,
+    /// The cache file has been read (once, at the first refresh).
+    cache_loaded: std::sync::atomic::AtomicBool,
+    /// Unix ms when the cache file was last written; 0 = never.
+    cache_written_at_ms: std::sync::atomic::AtomicI64,
     /// Serializes refreshes. Held for a whole refresh, never while taking any
     /// lock above, so it adds no ordering constraint.
     pub(super) refresh_lock: Mutex<()>,
@@ -578,6 +608,9 @@ impl SessionIndex {
             by_working_dir: Mutex::new(HashMap::new()),
             by_identity: Mutex::new(HashMap::new()),
             meta_cache: Mutex::new(HashMap::new()),
+            cache_file: None,
+            cache_loaded: std::sync::atomic::AtomicBool::new(false),
+            cache_written_at_ms: std::sync::atomic::AtomicI64::new(0),
             refresh_lock: Mutex::new(()),
             refreshed_at_ms: std::sync::atomic::AtomicI64::new(0),
             refreshes_started: std::sync::atomic::AtomicU64::new(0),
@@ -586,6 +619,15 @@ impl SessionIndex {
             adapters,
             isolated_roots,
         }
+    }
+
+    /// Keep the parsed-metadata cache in `path` between launches. Read at the
+    /// first refresh (not here: the file can be tens of MB, and construction
+    /// runs at srv startup), written after the first build and then at most
+    /// every [`META_CACHE_WRITE_INTERVAL_MS`], only when something changed.
+    pub fn with_cache_file(mut self, path: PathBuf) -> Self {
+        self.cache_file = Some(path);
+        self
     }
 
     /// Unix ms when the last refresh finished; 0 if none has.
@@ -619,6 +661,64 @@ impl SessionIndex {
         }
         let (discovered, _, _) = self.refresh_holding(guard);
         FirstBuild::Built { discovered }
+    }
+
+    /// Fill `meta_cache` from the cache file, once per index, if it is still
+    /// empty. A missing, unreadable or other-version file is ignored: the
+    /// refresh then parses everything, as it always did.
+    fn load_cache_file_once(&self) {
+        use std::sync::atomic::Ordering;
+        let Some(path) = &self.cache_file else { return };
+        if self.cache_loaded.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let Ok(bytes) = std::fs::read(path) else { return };
+        match serde_json::from_slice::<MetaCacheFile>(&bytes) {
+            Ok(file) if file.version == META_CACHE_VERSION => {
+                let mut cache = self.meta_cache.lock().unwrap();
+                if cache.is_empty() {
+                    tracing::info!(entries = file.entries.len(), "history: loaded the saved metadata cache");
+                    *cache = file.entries;
+                }
+            }
+            Ok(file) => tracing::info!(version = file.version, "history: saved metadata cache is another version; rebuilding"),
+            Err(e) => tracing::warn!(error = %e, "history: saved metadata cache unreadable; rebuilding"),
+        }
+    }
+
+    /// Save `cache` to the cache file when it changed: always after the first
+    /// build, then at most every `META_CACHE_WRITE_INTERVAL_MS` (searches also
+    /// refresh, and the file is tens of MB). Written to a temporary file and
+    /// renamed over the old one, so a reader (another srv instance) never sees
+    /// half a file. Failures are logged, never fatal: the cache only saves time.
+    fn write_cache_file(&self, cache: &HashMap<String, (i64, Option<SessionMeta>)>, changed: bool) {
+        use std::sync::atomic::Ordering;
+        let Some(path) = &self.cache_file else { return };
+        let now = chrono::Utc::now().timestamp_millis();
+        let last = self.cache_written_at_ms.load(Ordering::Acquire);
+        if !changed && last > 0 {
+            return;
+        }
+        if last > 0 && now - last < META_CACHE_WRITE_INTERVAL_MS {
+            return;
+        }
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let body = serde_json::to_vec(&MetaCacheFileRef { version: META_CACHE_VERSION, entries: cache })
+                .map_err(std::io::Error::other)?;
+            let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+            std::fs::write(&tmp, body)?;
+            std::fs::rename(&tmp, path)
+        };
+        match write() {
+            Ok(()) => {
+                self.cache_written_at_ms.store(now.max(1), Ordering::Release);
+                tracing::debug!(entries = cache.len(), "history: saved the metadata cache");
+            }
+            Err(e) => tracing::warn!(error = %e, path = %path.display(), "history: couldn't save the metadata cache"),
+        }
     }
 
     /// True if `path` lives under an AgentMux-isolated provider home and is
@@ -664,7 +764,10 @@ impl SessionIndex {
         let mut discovered: u32 = 0;
         let mut updated: u32 = 0;
         let mut new_count: u32 = 0;
+        self.load_cache_file_once();
         let old_cache = std::mem::take(&mut *self.meta_cache.lock().unwrap());
+        let mut parsed: u32 = 0;
+        let mut reused: usize = 0;
         let mut new_cache: HashMap<String, (i64, Option<SessionMeta>)> = HashMap::with_capacity(old_cache.len());
 
         let mut new_sessions: HashMap<String, SessionMeta> = HashMap::new();
@@ -692,8 +795,14 @@ impl SessionIndex {
 
             for file in &files {
                 let extracted = match old_cache.get(&file.file_path) {
-                    Some((mtime, cached)) if *mtime == file.mtime_ms => Ok(cached.clone()),
-                    _ => adapter.extract_meta(&file.file_path),
+                    Some((mtime, cached)) if *mtime == file.mtime_ms => {
+                        reused += 1;
+                        Ok(cached.clone())
+                    }
+                    _ => {
+                        parsed += 1;
+                        adapter.extract_meta(&file.file_path)
+                    }
                 };
                 if let Ok(ref meta) = extracted {
                     new_cache.insert(file.file_path.clone(), (file.mtime_ms, meta.clone()));
@@ -743,6 +852,10 @@ impl SessionIndex {
         *self.by_identity.lock().unwrap() = new_by_identity;
         *self.by_working_dir.lock().unwrap() = new_by_working_dir;
         drop(sessions);
+        // Something to save: a transcript parsed afresh, or one gone since.
+        let changed = parsed > 0 || reused < old_cache.len();
+        self.write_cache_file(&new_cache, changed);
+        tracing::debug!(parsed, reused, "history: refresh reused cached metadata");
         *self.meta_cache.lock().unwrap() = new_cache;
         if !problems.is_empty() {
             tracing::warn!(count = problems.len(), first = %problems[0], "history: discovery couldn't read everything");
@@ -1852,6 +1965,51 @@ mod refresh_tests {
 
     fn index_over(adapter: &Arc<ChangingAdapter>) -> SessionIndex {
         SessionIndex::with_isolated_roots(vec![Box::new(adapter.clone())], vec![])
+    }
+
+    /// Across a restart: a new index over the same saved cache file parses
+    /// only what changed since the last launch saved it.
+    #[test]
+    fn a_new_index_with_the_saved_cache_reparses_only_what_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("history").join("session-meta-cache.json");
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1), ("/h/b.jsonl", 1)]);
+        let first = index_over(&a).with_cache_file(cache.clone());
+        first.refresh();
+        assert_eq!(a.take_extracted(), vec!["/h/a.jsonl", "/h/b.jsonl"]);
+        assert!(cache.exists(), "the first build saves the cache");
+
+        // "Restart": a fresh index, b changed while AgentMux was closed.
+        a.set(&[("/h/a.jsonl", 1), ("/h/b.jsonl", 2), ("/h/c.jsonl", 1)]);
+        let second = index_over(&a).with_cache_file(cache.clone());
+        second.refresh();
+        assert_eq!(a.take_extracted(), vec!["/h/b.jsonl", "/h/c.jsonl"], "a came from the saved cache");
+        assert!(second.get_meta("a").is_some() && second.get_meta("c").is_some());
+    }
+
+    #[test]
+    fn a_saved_cache_of_another_version_is_rebuilt_not_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("session-meta-cache.json");
+        std::fs::write(&cache, br#"{"version":999,"entries":{"/h/a.jsonl":[1,null]}}"#).unwrap();
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1)]);
+        let idx = index_over(&a).with_cache_file(cache);
+        idx.refresh();
+        assert_eq!(a.take_extracted(), vec!["/h/a.jsonl"]);
+        assert!(idx.get_meta("a").is_some(), "the stale entry (no meta) wasn't used");
+    }
+
+    #[test]
+    fn an_unreadable_saved_cache_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("session-meta-cache.json");
+        std::fs::write(&cache, b"not json").unwrap();
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1)]);
+        let idx = index_over(&a).with_cache_file(cache.clone());
+        idx.refresh();
+        assert_eq!(a.take_extracted(), vec!["/h/a.jsonl"]);
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&cache).unwrap()).unwrap();
+        assert_eq!(saved["version"], serde_json::json!(META_CACHE_VERSION), "rewritten after the build");
     }
 
     #[test]
