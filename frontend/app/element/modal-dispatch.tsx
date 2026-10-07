@@ -221,8 +221,10 @@ export function renderRequest(
                                         template_id: req.template.id,
                                         name,
                                         identity_id: accountId,
-                                        // The launch's own record of a
-                                        // bundle keeps the first pick.
+                                        // Only echoed back, for the
+                                        // launch's record of a bundle
+                                        // (first pick); the agent still
+                                        // gets a fresh bundle of its own.
                                         memory_id: bundleIds[0] ?? "",
                                         bundle_ids: bundleIds,
                                         // Persist the chosen runtime on the
