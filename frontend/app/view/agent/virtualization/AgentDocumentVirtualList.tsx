@@ -43,6 +43,7 @@ import {
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
 import { attachOneWayRecorder, noteOneWay } from "../scroll/one-way-recorder";
+import { OneWayFlow } from "../scroll/one-way-flow";
 import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
 import { estimateNode, estimateNodeForState, previewCapPx } from "./renderers";
 import { currentExpansion } from "./expansion-source";
@@ -82,6 +83,9 @@ interface ScrollGeometry {
  * coalesced), short enough that an unrelated later scroll never inherits it.
  */
 export const USER_INPUT_WINDOW_MS = 250;
+
+/** One-way path: how close to the true bottom a reader must scroll to follow again (spec 09-24 §5.5). */
+export const ONE_WAY_REATTACH_PX = 24;
 
 export interface AgentDocumentVirtualListProps {
     viewState: AgentViewState;
@@ -149,6 +153,15 @@ export interface AgentDocumentVirtualListProps {
      * once at mount.
      */
     tailPolicy?: "turn" | "count";
+    /**
+     * One-way flow while following (`agent:onewayflow`): visible rows never move
+     * down, nothing overshoots. One observer compensates any downward move of a
+     * visible row, a bottom spacer makes the room that needs, and a follower
+     * eases toward content appended below. The glide, the shrink hold and the
+     * old pin paths are off on this path. Read once at mount.
+     * SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
+     */
+    oneWayFlow?: boolean;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -158,6 +171,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // below (never used for anything else, so it's fine that it's only set
     // once the buffer first mounts).
     let streamingBufferRef: HTMLDivElement | undefined;
+    // One-way path (props.oneWayFlow): the trailing spacer it sizes.
+    let bottomSpacerRef: HTMLDivElement | undefined;
+    const oneWay = untrack(() => props.oneWayFlow === true);
+    // A pointer held anywhere on the transcript (a selection drag, a scrollbar
+    // drag): the one-way path neither compensates nor follows under it.
+    let pointerHeld = false;
     // Guard against concurrent older-history fetches triggered by scroll.
     let loadingOlderInFlight = false;
     // RAF-coalesced scroll handling (task #39): native `scroll` events can
@@ -1021,7 +1040,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             const h = scrollRef.clientHeight; // perf:allow-layout-read — clientHeight ResizeObserver callback (layout clean)
             // Unconditional — see syncOverflowState's own doc comment.
             syncOverflowState();
-            if (h > 0 && props.viewState.stickToBottom()) {
+            if (h > 0 && props.viewState.stickToBottom() && !oneWay) {
                 noteOneWay(paneTag(), "pin:viewport");
                 scrollToTrueBottom();
                 // Every pin source runs the held-open-tool collapse itself: the
@@ -1077,6 +1096,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!scrollRef) return;
             // Unconditional — see syncOverflowState's own doc comment.
             syncOverflowState();
+            // The one-way path pins from its own observer (OneWayFlow).
+            if (oneWay) return;
             if (!props.viewState.stickToBottom()) {
                 rowAppended = false;
                 return;
@@ -1114,7 +1135,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         if (!scrollRef) return;
         transitionFollow(`jump-to-bottom:${reason ?? "unspecified"}`, undefined, () => props.viewState.engageStickToBottom());
         noteOneWay(paneTag(), `pin:jump:${reason ?? "unspecified"}`);
-        scrollToTrueBottom();
+        if (oneWayFlow) oneWayFlow.jumpToBottom();
+        else scrollToTrueBottom();
     };
     if (props.scrollToBottomRef) props.scrollToBottomRef(jumpToBottom);
 
@@ -1237,6 +1259,17 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             if (!trustPin) dispatchScrollMargin();
         }
 
+        // One-way path: a user scroll re-baselines the rows it keeps in place and
+        // lets go of spacer room now below the viewport; moving the transcript
+        // up while following releases follow at once, however small the move.
+        if (oneWayFlow && hadUserInput && !trustPin && oneWayFlow.userScrolled(geo) && props.viewState.stickToBottom()) {
+            transitionFollow(
+                scrollbarPointerHeld ? "user-scroll:scrollbar" : "user-scroll-up",
+                `gap=${Math.round(scrollHeight - clientHeight - scrollTop)}px`,
+                () => props.viewState.disengageStickToBottom(),
+            );
+        }
+
         // Collapse held-open tools that have scrolled off the top (latched).
         // Gated on stick-to-bottom: collapsing a row above the fold shrinks
         // layout height above scrollTop, which is invisible while pinned to the
@@ -1260,8 +1293,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
         // Engage stick when user scrolls back near bottom; disengage
         // otherwise. Engaging clears any captured headAnchor (atomic).
-        const nearBottom = isNearBottom(scrollTop, scrollHeight, clientHeight);
-        if (isFirstOverflow && props.viewState.stickToBottom() && !nearBottom) {
+        // The one-way path re-attaches only at the true bottom (24 px, spec 09-24
+        // §5.5): a reader 100 px up is reading, not following.
+        const nearBottom = oneWay
+            ? scrollHeight - clientHeight - scrollTop <= ONE_WAY_REATTACH_PX
+            : isNearBottom(scrollTop, scrollHeight, clientHeight);
+        if (!oneWay && isFirstOverflow && props.viewState.stickToBottom() && !nearBottom) {
             // A pane that was still following when it hit its first overflow
             // has no legitimate reason for THIS event's geometry to read as
             // "far from bottom" — nowhere existed to scroll away to before
@@ -1319,7 +1356,9 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 // could prove were our own pin, so a browser-made scroll
                 // disengaged as if the user had scrolled away (spec §2.2 B2).
                 if (!hadUserInput) {
-                    console.info(
+                    // The one-way follower is behind the bottom on purpose while
+                    // it eases: its own scrolls are not worth a line each frame.
+                    if (!(oneWay && wasProgrammatic)) console.info(
                         "[wave-scroll]",
                         `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
                         `suppressed disengage — no user scroll input (${wasProgrammatic ? "own pin" : "browser scroll"}), gap=${gapPx}px`,
@@ -1475,11 +1514,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         };
         const onPointerDown = (e: PointerEvent): void => {
             cancelGlides();
+            pointerHeld = true;
             if (e.target !== el) return;
             scrollbarPointerHeld = true;
             mark();
         };
         const onPointerUp = (): void => {
+            pointerHeld = false;
             if (!scrollbarPointerHeld) return;
             scrollbarPointerHeld = false;
             mark(); // the drag's trailing scroll events are still the user's
@@ -1587,12 +1628,47 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : undefined;
     onCleanup(() => measureRO?.disconnect());
+    // The one-way path's single observer (SPEC_AGENT_PANE_ONE_WAY_FLOW R4).
+    // Created after measureRO and tailRO on purpose: in a round where rows
+    // resized, its callback runs after theirs have updated the slice, so the
+    // geometry it reads already includes them.
+    const oneWayFlow = oneWay
+        ? new OneWayFlow({
+            following: () => untrack(props.viewState.stickToBottom),
+            userActive: () => pointerHeld || hasRecentUserScrollInput(),
+            reducedMotion,
+            wrote: (geo) => {
+                pendingProgrammaticScroll = true;
+                pinnedGeometry = geo;
+            },
+            observed: (geo) => {
+                syncOverflowState(geo);
+                collapseScrolledOffTools();
+            },
+            note: (label) => noteOneWay(paneTag(), label),
+        })
+        : null;
+    onCleanup(() => oneWayFlow?.dispose());
+    onMount(() => {
+        if (oneWayFlow && scrollRef && bottomSpacerRef) {
+            oneWayFlow.attach(scrollRef, bottomSpacerRef, [virtualContainerRef, streamingBufferRef]);
+        }
+    });
+    if (oneWayFlow) {
+        // `/clear` or a fresh session: no room is owed to anything.
+        createEffect(() => {
+            if (props.viewState.nodes().length === 0) oneWayFlow.reset();
+        });
+    }
+
     const observeRow = (el: HTMLElement, nodeId: string): void => {
         elNodeId.set(el, nodeId);
         measureRO?.observe(el);
+        oneWayFlow?.observeRow(el);
     };
     const unobserveRow = (el: HTMLElement): void => {
         measureRO?.unobserve(el);
+        oneWayFlow?.unobserveRow(el);
         elNodeId.delete(el);
     };
 
@@ -1606,6 +1682,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             ref={scrollRef}
             onScroll={handleScroll}
             data-follow-state={followLabel(props.viewState.stickToBottom())}
+            data-one-way={oneWay || undefined}
         >
             {/* Virtualized head — only present when document > buffer size.
                 Uses <Key by={r => r.nodeId}> (identity-keyed) so each DOM
@@ -1718,7 +1795,12 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                 // outlive the row: a migrating node's buffer
                                 // row is disposed before the slice effect hands
                                 // its height to the head.
-                                onCleanup(() => { if (rowEl) tailRO?.unobserve(rowEl); });
+                                onCleanup(() => {
+                                    if (rowEl) {
+                                        tailRO?.unobserve(rowEl);
+                                        oneWayFlow?.unobserveRow(rowEl);
+                                    }
+                                });
                                 return (
                                     <DocumentRow
                                         node={nodeAccessor}
@@ -1730,13 +1812,24 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         onAgentErrorLogin={props.onAgentErrorLogin}
                                         onOpenHistory={props.onOpenHistory}
                                         dispatchMatches={props.dispatchMatches}
-                                        ref={(el) => { rowEl = el; tailRowNode.set(el, nodeAccessor); tailRO?.observe(el); }}
+                                        ref={(el) => {
+                                            rowEl = el;
+                                            tailRowNode.set(el, nodeAccessor);
+                                            tailRO?.observe(el);
+                                            oneWayFlow?.observeRow(el);
+                                        }}
                                     />
                                 );
                             }}
                         </Key>
                     </div>
                 )}
+            </Show>
+            {/* One-way path: room left by content that got shorter (or a taller
+                viewport) while following, sized by OneWayFlow, filled by the
+                next content. Not a row: never measured into the layout slice. */}
+            <Show when={oneWay}>
+                <div class="agent-document-bottom-spacer" aria-hidden="true" ref={(el) => { bottomSpacerRef = el; }} />
             </Show>
         </div>
     );

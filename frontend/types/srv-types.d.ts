@@ -1217,6 +1217,7 @@ declare global {
         "attachments:retentiondays"?: number;
         "agent:askquestiontimeoutms"?: number;
         "agent:turnscopedtail"?: boolean;
+        "agent:onewayflow"?: boolean;
         "agent:livefeed"?: boolean;
         "agent:livefeedturns"?: number;
     };

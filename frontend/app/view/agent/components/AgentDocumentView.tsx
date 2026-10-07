@@ -203,6 +203,9 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             blockId={props.blockId}
             layoutView={props.layoutView}
             tailPolicy={props.tailPolicy ?? resolveTailPolicy(untrack(() => getSettingsKeyAtom("agent:turnscopedtail")()))}
+            // One-way flow while following, on unless explicitly false; read once
+            // at mount like the tail policy. SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md.
+            oneWayFlow={untrack(() => getSettingsKeyAtom("agent:onewayflow")()) !== false}
             onOpenHistory={props.onOpenHistory}
             dispatchMatches={dispatchMatches}
         />

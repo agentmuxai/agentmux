@@ -501,6 +501,11 @@
           "default": true,
           "description": "Agent panes keep only the turn in flight (plus anything still running) always mounted; older messages are virtualized. Set false to restore the previous behaviour (the last 50 messages always mounted). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_BOUNDED_LIVE_WINDOW_MIGRATION_2026_09_23.md §6.2."
         },
+        "agent:onewayflow": {
+          "type": "boolean",
+          "default": true,
+          "description": "While an agent pane follows the conversation, text only moves up: nothing overshoots and scrolls back, and a tool preview that gets shorter leaves room at the bottom for the next content instead of pulling the conversation down. Set false to restore the previous behaviour (the glide and the shrink hold). Takes effect when a pane is next opened. See docs/specs/SPEC_AGENT_PANE_ONE_WAY_FLOW_2026_10_07.md."
+        },
         "agent:livefeed": {
           "type": "boolean",
           "default": true,
