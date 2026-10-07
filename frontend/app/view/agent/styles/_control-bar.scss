@@ -103,17 +103,15 @@
             // (codex P2 on PR #2946).
             font-family: var(--font-mono);
             font-weight: 700;
-            // The pane border's own color: the agent's color (the same one
-            // the focused border and header use) when the block has one,
-            // otherwise the theme accent. `.has-agent-color` sits on the block
-            // frame, above `.agent-view`, and `--block-agent-color` is
-            // "transparent" without one, so it can't be a var() fallback.
+            // The same color as the pane's tab (its underline): the pane's
+            // identity color, set on the block frame as --block-identity-color
+            // and unset when the pane has none, so the theme accent is the
+            // fallback. `.has-agent-color` / --block-agent-color looked right
+            // but only ever applies to terminal panes (the hueBorder
+            // capability), so agent panes always got the accent.
             // One solid color: no shimmer sweep any more. See
             // SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md.
-            color: var(--accent-color);
-            .has-agent-color & {
-                color: var(--block-agent-color);
-            }
+            color: var(--block-identity-color, var(--accent-color));
             // Opaque, still — kept deliberately after the row moved out of
             // the scroll region. It no longer overlaps the message list, so
             // the original bleed-through this fixed (commit 6e4497b: history
