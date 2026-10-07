@@ -5,7 +5,10 @@
 //! machine) saying it is up, on which platform, and which agents it runs, so
 //! the account's relay can list it to a signed-in phone that is not on the
 //! same LAN. Wire contract: agentmux-mobile's
-//! SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §6.1.
+//! SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §6.1; version 2 adds each
+//! agent's `state` (agentmux-mobile's
+//! SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §13.1). The desktop
+//! publishes v2; v1 is still built and checked, for the relay's sake.
 //!
 //! Signed with the install's WAN instance key (the W3-S identity in
 //! [`crate::jekt_sign`]), so the record names the key that signed it and
@@ -19,14 +22,20 @@ use serde::{Deserialize, Serialize};
 
 use crate::jekt_sign::{decode_public_key_b64, ed25519_sign_b64, ed25519_verify_b64, wan_instance_id, FIELD_SEP};
 
-/// Domain separator for the presence signature.
+/// Domain separator for the presence signature, the same in v1 and v2 (`v`
+/// is signed right after it).
 const PRESENCE_DOMAIN: &str = "amx-install-presence-v1";
-/// Between an agent's name and its kind in the signed list.
+/// Between an agent's name, kind and (v2) state in the signed list.
 const AGENT_FIELD_SEP: char = '\u{2}';
 /// Between agents in the signed list.
 const AGENT_SEP: char = '\u{3}';
 
-pub const PRESENCE_VERSION: u32 = 1;
+/// The version the desktop publishes.
+pub const PRESENCE_VERSION: u32 = 2;
+/// The first version: no agent `state`.
+pub const PRESENCE_VERSION_V1: u32 = 1;
+/// The values an agent's `state` may take (the LAN feed's `agent_status`).
+pub const PRESENCE_STATES: [&str; 5] = ["working", "waiting", "idle", "stopped", "error"];
 /// Agents in one record; the rest are left out.
 pub const MAX_PRESENCE_AGENTS: usize = 200;
 /// Longest `hostname`, `channel` and agent `name`, in characters.
@@ -36,11 +45,14 @@ pub const MAX_CHANNELS_RUNNING: u32 = 99;
 const MAX_OS_LEN: usize = 16;
 
 /// One agent of the install. `kind` is `host` or `container` (the agent's
-/// block `agentMode`).
+/// block `agentMode`); `state` (v2 only) is one of [`PRESENCE_STATES`], or
+/// absent when unknown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PresenceAgent {
     pub name: String,
     pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
 }
 
 /// The record, in the contract's field order. Public keys and the signature
@@ -76,13 +88,15 @@ fn os_in_bounds(os: &str) -> bool {
 }
 
 fn agent_in_bounds(agent: &PresenceAgent) -> bool {
-    text_in_bounds(&agent.name, MAX_PRESENCE_NAME_CHARS) && (agent.kind == "host" || agent.kind == "container")
+    text_in_bounds(&agent.name, MAX_PRESENCE_NAME_CHARS)
+        && (agent.kind == "host" || agent.kind == "container")
+        && agent.state.as_deref().is_none_or(|s| PRESENCE_STATES.contains(&s))
 }
 
 /// The agents as a record carries them: sorted by lower-cased name, ties by
-/// name; an agent whose name or kind is out of bounds (a control character,
-/// too long, an unknown kind) left out; each name once; at most
-/// [`MAX_PRESENCE_AGENTS`].
+/// name; an agent whose name, kind or state is out of bounds (a control
+/// character, too long, an unknown kind or state) left out; each name once;
+/// at most [`MAX_PRESENCE_AGENTS`].
 pub fn canonical_agents(agents: impl IntoIterator<Item = PresenceAgent>) -> Vec<PresenceAgent> {
     let mut keyed: Vec<(String, PresenceAgent)> = agents
         .into_iter()
@@ -96,10 +110,11 @@ pub fn canonical_agents(agents: impl IntoIterator<Item = PresenceAgent>) -> Vec<
 }
 
 impl InstallPresence {
-    /// Build and sign the record with the instance key. `agents` may come in
-    /// any order and is passed through [`canonical_agents`];
-    /// `channels_running` is clamped to 1..=[`MAX_CHANNELS_RUNNING`]. `None`
-    /// for a malformed key or a top-level field out of bounds.
+    /// Build and sign a [`PRESENCE_VERSION`] record with the instance key.
+    /// `agents` may come in any order and is passed through
+    /// [`canonical_agents`]; `channels_running` is clamped to
+    /// 1..=[`MAX_CHANNELS_RUNNING`]. `None` for a malformed key or a
+    /// top-level field out of bounds.
     #[allow(clippy::too_many_arguments)]
     pub fn sign(
         instance_private_key: &[u8],
@@ -111,10 +126,43 @@ impl InstallPresence {
         agents: impl IntoIterator<Item = PresenceAgent>,
         published_at_ms: u64,
     ) -> Option<Self> {
+        Self::sign_version(
+            PRESENCE_VERSION,
+            instance_private_key,
+            hostname,
+            channel,
+            os,
+            version,
+            channels_running,
+            agents,
+            published_at_ms,
+        )
+    }
+
+    /// [`Self::sign`] for record version `v` (1 or 2). A v1 record carries
+    /// no states: any given are dropped.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sign_version(
+        v: u32,
+        instance_private_key: &[u8],
+        hostname: &str,
+        channel: &str,
+        os: &str,
+        version: &str,
+        channels_running: u32,
+        agents: impl IntoIterator<Item = PresenceAgent>,
+        published_at_ms: u64,
+    ) -> Option<Self> {
         let seed: [u8; 32] = instance_private_key.try_into().ok()?;
         let public_key = ed25519_dalek::SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let agents = agents.into_iter().map(|mut a| {
+            if v == PRESENCE_VERSION_V1 {
+                a.state = None;
+            }
+            a
+        });
         let mut record = Self {
-            v: PRESENCE_VERSION,
+            v,
             instance_id: wan_instance_id(&public_key),
             instance_public_key: BASE64.encode(public_key),
             hostname: hostname.to_string(),
@@ -134,13 +182,21 @@ impl InstallPresence {
     }
 
     /// The UTF-8 string the signature covers: the fields joined by U+0001,
-    /// numbers in decimal, the agents as `name` U+0002 `kind` joined by
-    /// U+0003 (empty when there are none), in the record's order.
+    /// numbers in decimal, the agents joined by U+0003 (empty when there are
+    /// none), in the record's order. In v1 an agent is `name` U+0002 `kind`;
+    /// in v2 `name` U+0002 `kind` U+0002 `state`, `state` empty when absent.
     pub fn signed_material(&self) -> String {
         let agents = self
             .agents
             .iter()
-            .map(|a| format!("{}{AGENT_FIELD_SEP}{}", a.name, a.kind))
+            .map(|a| {
+                if self.v == PRESENCE_VERSION_V1 {
+                    format!("{}{AGENT_FIELD_SEP}{}", a.name, a.kind)
+                } else {
+                    let state = a.state.as_deref().unwrap_or("");
+                    format!("{}{AGENT_FIELD_SEP}{}{AGENT_FIELD_SEP}{state}", a.name, a.kind)
+                }
+            })
             .collect::<Vec<_>>()
             .join(&AGENT_SEP.to_string());
         format!(
@@ -158,9 +214,15 @@ impl InstallPresence {
     }
 
     /// The contract's bounds, on every field the signature covers. The
-    /// agents must already be in canonical order: the order is signed.
+    /// agents must already be in canonical order: the order is signed. A v1
+    /// record may not carry a state, which its signature would not cover.
     pub fn in_bounds(&self) -> bool {
-        self.v == PRESENCE_VERSION
+        let version_ok = match self.v {
+            PRESENCE_VERSION_V1 => self.agents.iter().all(|a| a.state.is_none()),
+            PRESENCE_VERSION => true,
+            _ => false,
+        };
+        version_ok
             && text_in_bounds(&self.hostname, MAX_PRESENCE_NAME_CHARS)
             && text_in_bounds(&self.channel, MAX_PRESENCE_NAME_CHARS)
             && text_in_bounds(&self.version, MAX_PRESENCE_VERSION_CHARS)
@@ -185,7 +247,11 @@ mod tests {
     use super::*;
 
     fn agent(name: &str, kind: &str) -> PresenceAgent {
-        PresenceAgent { name: name.to_string(), kind: kind.to_string() }
+        PresenceAgent { name: name.to_string(), kind: kind.to_string(), state: None }
+    }
+
+    fn agent_in(name: &str, kind: &str, state: &str) -> PresenceAgent {
+        PresenceAgent { state: Some(state.to_string()), ..agent(name, kind) }
     }
 
     fn hex(bytes: &[u8]) -> String {
@@ -210,7 +276,8 @@ mod tests {
     }
 
     fn vector_record() -> InstallPresence {
-        InstallPresence::sign(
+        InstallPresence::sign_version(
+            PRESENCE_VERSION_V1,
             &seed(),
             "narko",
             "stable",
@@ -253,6 +320,107 @@ mod tests {
         // The JSON parses back to the same record, which still verifies.
         let back: InstallPresence = serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
         assert!(back.verify());
+    }
+
+    // The v2 vector: the same install, two agents with a state and one
+    // without. Shared with the relay's suite like the v1 vector.
+    const MATERIAL_V2_HEX: &str = "\
+        616d782d696e7374616c6c2d70726573656e63652d76310132016d7733616d3436773577656578346134667172633361766e\
+        7561016e61726b6f01737461626c650177696e646f777301302e35392e31310133016167656e747802636f6e7461696e6572\
+        02776f726b696e67034167656e745902686f7374020343616d70657202686f73740269646c65013137393133353234393333\
+        3838";
+    const SIG_V2: &str = "ELDWTLT+BEoxMn/o/AsYYVbGLgIAbJjDPuQ6/AbAZ8fk+jqphiEtEn/c/5ZKjHJZdQF+hxIKzmnq6gLZzmWDDw==";
+
+    fn vector_v2_record() -> InstallPresence {
+        InstallPresence::sign(
+            &seed(),
+            "narko",
+            "stable",
+            "windows",
+            "0.59.11",
+            3,
+            [agent_in("Camper", "host", "idle"), agent_in("agentx", "container", "working"), agent("AgentY", "host")],
+            1_791_352_493_388,
+        )
+        .expect("the vector is in bounds")
+    }
+
+    #[test]
+    fn the_v2_shared_vector_signs_byte_for_byte() {
+        let record = vector_v2_record();
+        assert_eq!(record.v, 2);
+        assert_eq!(hex(record.signed_material().as_bytes()), MATERIAL_V2_HEX);
+        assert_eq!(record.sig, SIG_V2);
+        assert_eq!(
+            serde_json::to_value(&record).unwrap(),
+            serde_json::json!({
+                "v": 2,
+                "instance_id": "mw3am46w5weex4a4fqrc3avnua",
+                "instance_public_key": "ebVWLo/mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ=",
+                "hostname": "narko",
+                "channel": "stable",
+                "os": "windows",
+                "version": "0.59.11",
+                "channels_running": 3,
+                "agents": [
+                    {"name": "agentx", "kind": "container", "state": "working"},
+                    {"name": "AgentY", "kind": "host"},
+                    {"name": "Camper", "kind": "host", "state": "idle"},
+                ],
+                "published_at_ms": 1_791_352_493_388u64,
+                "sig": SIG_V2,
+            })
+        );
+        assert!(record.verify());
+        let back: InstallPresence = serde_json::from_str(&serde_json::to_string(&record).unwrap()).unwrap();
+        assert_eq!(back, record);
+        assert!(back.verify());
+    }
+
+    #[test]
+    fn a_changed_added_or_removed_state_fails_verification() {
+        let good = vector_v2_record();
+        let tampered: Vec<(&str, Box<dyn Fn(&mut InstallPresence)>)> = vec![
+            ("state changed", Box::new(|r| r.agents[0].state = Some("idle".into()))),
+            ("state added", Box::new(|r| r.agents[1].state = Some("working".into()))),
+            ("state removed", Box::new(|r| r.agents[2].state = None)),
+            ("version lowered", Box::new(|r| r.v = 1)),
+            ("unknown version", Box::new(|r| r.v = 3)),
+        ];
+        for (what, change) in tampered {
+            let mut r = good.clone();
+            change(&mut r);
+            assert!(!r.verify(), "{what} but the record still verifies");
+        }
+    }
+
+    #[test]
+    fn a_v1_record_carries_no_state() {
+        let r = InstallPresence::sign_version(
+            PRESENCE_VERSION_V1,
+            &seed(),
+            "narko",
+            "stable",
+            "windows",
+            "1",
+            1,
+            [agent_in("AgentY", "host", "working")],
+            1,
+        )
+        .unwrap();
+        assert_eq!(r.agents, vec![agent("AgentY", "host")], "the state is dropped, not signed");
+        assert!(r.verify());
+        let mut smuggled = r.clone();
+        smuggled.agents[0].state = Some("working".into());
+        assert!(!smuggled.verify(), "a v1 signature does not cover a state");
+    }
+
+    #[test]
+    fn an_unknown_state_leaves_the_agent_out() {
+        assert_eq!(
+            canonical_agents([agent_in("a", "host", "busy"), agent_in("b", "host", "idle")]),
+            vec![agent_in("b", "host", "idle")]
+        );
     }
 
     #[test]

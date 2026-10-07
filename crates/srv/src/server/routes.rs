@@ -98,7 +98,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
     let lan_forward_routes = Router::new()
         .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
         .route("/agentmux/reactive/agent", get(reactive::handle_reactive_agent))
-        // Names only — see `handle_reactive_agent_names`' doc comment for why
+        // Names, kinds and status only — see `handle_reactive_agent_names`' doc comment for why
         // this is deliberately not `/agentmux/reactive/agents` (which stays
         // behind full auth because it serializes internal routing fields).
         .route(

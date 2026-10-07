@@ -1812,6 +1812,51 @@ async fn agent_names_carries_kinds_from_the_block() {
     assert!(kinds.get(&blockless).is_none(), "no block, no kind: {kinds}");
 }
 
+/// The names fallback carries each agent's state and since when, plus this
+/// machine's clock; an agent with no known state (a terminal pane, no
+/// controller) gets no entry.
+#[tokio::test]
+async fn agent_names_carries_status_and_now_ms() {
+    use crate::backend::agent_state::test_support::register_stub;
+    use crate::backend::blockcontroller::{self, BLOCK_CONTROLLER_PERSISTENT, BLOCK_CONTROLLER_SHELL, STATUS_RUNNING};
+    let state = test_state();
+    let unique = uuid::Uuid::new_v4();
+    let busy = format!("status-busy-{unique}");
+    let terminal = format!("status-terminal-{unique}");
+    let idle_no_controller = format!("status-none-{unique}");
+    let mut blocks = Vec::new();
+    for agent in [&busy, &terminal, &idle_no_controller] {
+        let mut block = crate::backend::obj::Block { oid: uuid::Uuid::new_v4().to_string(), ..Default::default() };
+        state.mstore.insert(&mut block).expect("insert agent block");
+        state.reactive_handler.register_agent(agent, &block.oid, None).unwrap();
+        blocks.push(block.oid);
+    }
+    register_stub(&blocks[0], BLOCK_CONTROLLER_PERSISTENT, STATUS_RUNNING, true);
+    register_stub(&blocks[1], BLOCK_CONTROLLER_SHELL, STATUS_RUNNING, false);
+
+    let before = agentmux_common::time::now_ms_u64();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state).oneshot(req).await.unwrap();
+    blockcontroller::delete_controller(&blocks[0]);
+    blockcontroller::delete_controller(&blocks[1]);
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let now_ms = json["now_ms"].as_u64().expect("now_ms");
+    assert!(now_ms >= before);
+    let status = &json["agent_status"];
+    assert_eq!(status[&busy]["state"], "working");
+    let since = status[&busy]["since_ms"].as_u64().expect("since_ms");
+    assert!(since >= before && since <= now_ms, "{since} in [{before}, {now_ms}]");
+    assert!(status.get(&terminal).is_none(), "a terminal pane has no state: {status}");
+    assert!(status.get(&idle_no_controller).is_none(), "no controller, no state: {status}");
+}
+
 #[tokio::test]
 async fn lan_key_is_rejected_on_other_reactive_routes() {
     let app = test_router();
@@ -7088,7 +7133,9 @@ async fn fleet_snapshot_is_names_only_sorted_and_deduplicated() {
     assert_eq!(resp.headers()[header::CACHE_CONTROL], "no-cache");
     assert_eq!(resp.headers()[header::CONTENT_TYPE], "application/json");
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let mut json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let now_ms = json.as_object_mut().unwrap().remove("now_ms").expect("now_ms");
+    assert!(now_ms.as_u64().unwrap() > 0, "this machine's clock: {now_ms}");
     assert_eq!(
         json,
         serde_json::json!({
@@ -7101,6 +7148,7 @@ async fn fleet_snapshot_is_names_only_sorted_and_deduplicated() {
             "os": crate::backend::host_os::local_os(),
             "channels_running": 1,
             "agent_kinds": {},
+            "agent_status": {},
         })
     );
 }
