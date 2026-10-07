@@ -37,7 +37,7 @@ const COMMANDS: CommandEntry[] = [
     cmd("dev:open_settings", "Open Settings File", "Dev"),
     cmd("view:zoom:reset", "Actual Size", "View"),
     cmd("app:connectors", "Connectors", "App", "accounts sign in login mcp servers armory"),
-    cmd("app:knowledge", "Knowledge", "App", "memory global personal skills bundles abf armory"),
+    cmd("app:memory", "Memory", "App", "global personal memory skills bundles abf armory knowledge"),
     cmd("view:zoom:in", "Zoom In", "View"),
     cmd("view:zoom:out", "Zoom Out", "View"),
 ];
@@ -74,7 +74,7 @@ describe("searchCommands", () => {
     });
 
     it("finds a command by its keywords", () => {
-        expect(labels("armory")).toEqual(["Connectors", "Knowledge"]);
+        expect(labels("armory")).toEqual(["Connectors", "Memory"]);
         expect(labels("login")).toEqual(["Connectors"]);
     });
 

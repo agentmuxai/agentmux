@@ -1,8 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// GlobalBundleManager — the Global section of the Armory "Memory" tab (moves to
-// the Bundles tab in Phase 4 of SPEC_ARMORY_NAMING_CONSOLIDATION_2026_09_09.md).
+// GlobalBundleManager — the Memory pane's Global section (Global Memory).
 // Presents the workspace-wide global bundles (is_global rows) as an ordered
 // set of memories that compose into every agent's startup instructions file
 // (CLAUDE.md, GEMINI.md, or similar, depending on provider) at launch.

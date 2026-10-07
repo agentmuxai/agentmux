@@ -979,9 +979,12 @@ declare global {
         // Selected section of a sectioned pane, meta-backed so it survives a
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
         "connectors:section"?: "accounts" | "mcp";
+        "memory:section"?: "global" | "personal" | "skills" | "bundles";
+        // Memory's section key from when it was named Knowledge: read as a
+        // fallback (section-pane.tsx `legacySectionKeys`), cleared on the next pick.
         "knowledge:section"?: "global" | "personal" | "skills" | "bundles";
         // The retired Armory's section keys: read once, to move a saved Armory
-        // block to Connectors or Knowledge (section-pane/panes.ts), then cleared.
+        // block to Connectors or Memory (section-pane/panes.ts), then cleared.
         "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
         "armory:memory:subsection"?: "global" | "personal";
         "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";

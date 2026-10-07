@@ -914,7 +914,7 @@ const AgentRefEditor = (p: {
 
     return (
         <>
-            <NodeField label="Memory">
+            <NodeField label="Bundle">
                 <select
                     class="drone-input nodrag"
                     value={ref().memoryId}

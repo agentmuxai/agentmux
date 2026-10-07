@@ -44,12 +44,27 @@ export function widgetColorView(view: string | null | undefined): string | undef
     return colorManifest(view)?.view ?? (view || undefined);
 }
 
+/** Every `pane:colors` key a view's color may be stored under: its canonical
+ *  view first, then its former ids (its manifest's aliases). */
+export function widgetColorKeys(view: string | null | undefined): string[] {
+    const key = widgetColorView(view);
+    return key ? [key, ...(colorManifest(view)?.aliases ?? [])] : [];
+}
+
+/** The user's color for a view's widget type: a hue, `null` for none, or
+ *  undefined when unset. A color saved under a former id still counts. */
+export function storedWidgetHue(view: string | null | undefined): number | null | undefined {
+    const colors = getSettingsKeyAtom("pane:colors")();
+    return widgetColorKeys(view)
+        .map((name) => colors?.[name])
+        .find((v) => v !== undefined);
+}
+
 /** The color of a widget type: the user's `pane:colors` entry, else the
  *  manifest's `defaultHue`. Undefined when it has none, or the user set `null`. */
 export function widgetHueFor(view: string | null | undefined): number | undefined {
-    const key = widgetColorView(view);
-    if (!key) return undefined;
-    const chosen = getSettingsKeyAtom("pane:colors")()?.[key];
+    if (!widgetColorView(view)) return undefined;
+    const chosen = storedWidgetHue(view);
     if (chosen === null) return undefined;
     if (typeof chosen === "number") return chosen;
     return colorManifest(view)?.defaultHue;

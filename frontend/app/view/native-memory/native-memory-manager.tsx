@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * NativeMemoryManager — Armory's "Memory → Personal" tab: a grid of agent
+ * NativeMemoryManager — the Memory pane's Personal section (Personal Memory): a grid of agent
  * cards that drills into a file's full view (NativeMemoryFileView), built
  * from the same MemoryHistory/MemoryContent pieces a Stash pane's own Memory
  * tab uses. Both read the identical agent:memory:{list,history,diff,

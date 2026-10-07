@@ -956,12 +956,12 @@ pub(crate) const GLOBAL_MEMORY_READ_TOOL: &str = r#"{
 
 pub(crate) const GLOBAL_MEMORY_WRITE_TOOL: &str = r#"{
   "name": "GlobalMemoryWrite",
-  "description": "Create a new Global Memory entry, or update an existing one by id. Global Memory is inherited by EVERY agent in this workspace at launch — this is workspace-wide shared state, not your own private memory (use MemoryWrite for that). Every write is retained as a version (see GlobalMemoryHistory) — nothing is ever silently lost. Scope: the Global Memory of the AgentMux you are running in — shared by every channel that shares its identity store, but an isolated channel (a dev or test build) keeps its own, so a write there does not reach the main one or other channels, and vice versa (the Knowledge pane can bring entries into an isolated channel). It is not synced to other machines. Cannot create or touch AgentMux's own system-tier (highest-priority, override-wording) entries — those are managed exclusively in the Knowledge pane.",
+  "description": "Create a new Global Memory entry, or update an existing one by id. Global Memory is inherited by EVERY agent in this workspace at launch — this is workspace-wide shared state, not your own private memory (use MemoryWrite for that). Every write is retained as a version (see GlobalMemoryHistory) — nothing is ever silently lost. Scope: the Global Memory of the AgentMux you are running in — shared by every channel that shares its identity store, but an isolated channel (a dev or test build) keeps its own, so a write there does not reach the main one or other channels, and vice versa (the Memory pane can bring entries into an isolated channel). It is not synced to other machines. Cannot create or touch AgentMux's own system-tier (highest-priority, override-wording) entries — those are managed exclusively in the Memory pane.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "id": { "type": "string", "description": "Omit to create a new entry. Provide an existing entry's id (from GlobalMemoryList) to update it instead." },
-      "name": { "type": "string", "description": "The entry's display name (shown in the Knowledge pane's Global list, and injected as a heading)" },
+      "name": { "type": "string", "description": "The entry's display name (shown in the Memory pane's Global list, and injected as a heading)" },
       "content": { "type": "string", "description": "Markdown instructions injected into every agent's startup instructions file" },
       "provenance": {
         "type": "object",
@@ -979,7 +979,7 @@ pub(crate) const GLOBAL_MEMORY_WRITE_TOOL: &str = r#"{
 
 pub(crate) const GLOBAL_MEMORY_REMOVE_TOOL: &str = r#"{
   "name": "GlobalMemoryRemove",
-  "description": "Remove a Global Memory entry (id from GlobalMemoryList) from the workspace-wide list every agent inherits at launch — the entry itself isn't deleted, only its Global Memory membership (matches the Knowledge pane's own \"Remove\" button). Cannot remove AgentMux's own system-tier entries.",
+  "description": "Remove a Global Memory entry (id from GlobalMemoryList) from the workspace-wide list every agent inherits at launch — the entry itself isn't deleted, only its Global Memory membership (matches the Memory pane's own \"Remove\" button). Cannot remove AgentMux's own system-tier entries.",
   "inputSchema": {
     "type": "object",
     "properties": {
