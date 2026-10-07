@@ -34,7 +34,7 @@
 //! | `== -1` | **every process the caller may signal — a system-wide broadcast** |
 //! | `< -1` | every process in process group `-pid` |
 //!
-//! Three successive muxreview P1s on PR #3033 each caught this module
+//! Three successive ReAgent P1s on PR #3033 each caught this module
 //! hitting one of the non-literal rows through an innocent-looking `u32`:
 //!
 //! 1. `u32::MAX - 1` cast with `as` wraps to `-2` → row four, group 2.

@@ -265,7 +265,7 @@ mod tests {
         assert_eq!(mode & 0o777, 0o600);
     }
 
-    /// muxreview on #4141: a user's 0600 `CLAUDE.md` must not come back 0644.
+    /// ReAgent on #4141: a user's 0600 `CLAUDE.md` must not come back 0644.
     #[cfg(unix)]
     #[test]
     fn a_replaced_file_keeps_its_mode() {

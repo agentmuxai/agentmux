@@ -1100,7 +1100,7 @@ mod broadcast_action_tests {
     #[test]
     fn structured_channels_take_the_broadcast_without_a_new_turn() {
         // ACP, App Server and a running persistent agent all land here: the
-        // regression muxreview found on #4176 was that ACP had no branch at all.
+        // regression ReAgent found on #4176 was that ACP had no branch at all.
         assert_eq!(broadcast_action(Ok(AgentRoute::Sent(SenderDelivery::Delivered))), BroadcastAction::Done);
         assert_eq!(broadcast_action(Ok(AgentRoute::Sent(SenderDelivery::Deferred))), BroadcastAction::Done);
     }

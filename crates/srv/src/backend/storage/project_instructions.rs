@@ -123,7 +123,7 @@ impl Store {
     /// *reads*, which is not a relationship SQLite can express — so without
     /// that call the rows outlive the agent and a future agent reusing the id
     /// inherits somebody else's baseline, every file reporting `unchanged`
-    /// against observations never made about it (muxreview, PR #3162).
+    /// against observations never made about it (ReAgent, PR #3162).
     ///
     /// Nothing else should call it: dropping observations resets every file to
     /// `FirstSeen`, which silently discards the drift this table exists to
@@ -220,7 +220,7 @@ mod tests {
     fn deleting_an_agent_forgets_its_observations() {
         // Without this the rows outlive the agent, and an agent reusing the id
         // inherits a baseline that was never about it — every file reporting
-        // `unchanged` against somebody else's observations (muxreview, #3162).
+        // `unchanged` against somebody else's observations (ReAgent, #3162).
         let s = Store::open_in_memory().unwrap();
         let mut def: crate::backend::storage::AgentDefinition =
             serde_json::from_value(serde_json::json!({

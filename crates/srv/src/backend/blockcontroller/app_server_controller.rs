@@ -656,7 +656,7 @@ mod tests {
         assert!(error.contains("not initialized"));
     }
 
-    // ── Regression coverage for muxreview's PR #3215 review ────────────────────
+    // ── Regression coverage for ReAgent's PR #3215 review ────────────────────
     // Four bugs: (1) `spawn_turn`'s error path couldn't tell "a second turn
     // was rejected because one is already running" from "the process is
     // actually dead", (2) `spawn_event_loop`'s EOF branch never reaped the

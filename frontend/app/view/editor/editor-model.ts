@@ -300,7 +300,7 @@ export class EditorViewModel {
         //
         // An earlier version used a SEPARATE live MPS event (fired directly
         // alongside the meta write) for the already-mounted case, racing
-        // this same meta update. muxreview (PR #2404) found the race: the MPS
+        // this same meta update. Reagent (PR #2404) found the race: the MPS
         // event is a direct WS push and arrives essentially synchronously,
         // while the meta write reaches `meta()` only after an async
         // MuxObj DB-refetch — so the live event's handler could run and try

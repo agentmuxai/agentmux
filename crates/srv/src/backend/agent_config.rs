@@ -1295,7 +1295,7 @@ pub fn write_mcp_json_respecting_user_servers(
     // Refused (a symlink, or outside the workdir) before anything is read
     // or locked: this file carries the agent's signing keys. A refusal
     // leaves the link alone and the launch goes on, as for `CLAUDE.md`
-    // (muxreview on #4141). So does a refused ownership manifest (a `.claude`
+    // (ReAgent on #4141). So does a refused ownership manifest (a `.claude`
     // linking out): without it the next merge would take the user's own
     // servers for AgentMux's and drop them (Codex on #4141).
     let path = match wd.resolve(MANAGED_MCP_SERVERS_MANIFEST).and_then(|_| wd.resolve(".mcp.json")) {
@@ -1919,7 +1919,7 @@ mod tests {
     }
 
     /// An alias of Claude (`claude-code`) is Claude: no index for skills with
-    /// files (muxreview on #4131).
+    /// files (ReAgent on #4131).
     #[test]
     fn a_claude_alias_gets_no_index_for_file_backed_skills() {
         let skills = vec![make_skill("Deploy", "deploy", "Deploy the app", "Run: deploy all")];
@@ -3002,7 +3002,7 @@ mod mcp_json_tests {
         assert_eq!(servers.keys().collect::<Vec<_>>(), vec!["agentmux", "github"]);
     }
 
-    /// muxreview on #4141: a symlinked `.mcp.json`, even one pointing inside
+    /// ReAgent on #4141: a symlinked `.mcp.json`, even one pointing inside
     /// the workdir, is left alone and the launch goes on.
     #[test]
     fn mcp_json_a_symlinked_file_is_left_alone_without_failing_the_launch() {

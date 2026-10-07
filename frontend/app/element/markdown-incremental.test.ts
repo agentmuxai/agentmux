@@ -39,7 +39,7 @@ describe("findSafeSplitPoint — refuses unsafe cuts", () => {
     });
 
     /**
-     * Regression, muxreview on PR #3521. A line that merely STARTS with fence
+     * Regression, ReAgent on PR #3521. A line that merely STARTS with fence
      * characters but carries an info string — an inner "```python" inside an
      * outer "```markdown" block, which agents emit constantly when explaining
      * syntax — is fence CONTENT under CommonMark, not a close. Treating it as
@@ -196,7 +196,7 @@ describe("split equivalence — prefix+tail renders identically to the whole", (
         htmlComment: `${PAD}<!-- a\n\nb -->\n\nAfter comment.\n`,
         nestedList: `${PAD}1. first\n   - nested\n\n2. second\n`,
         blockquote: `${PAD}> quoted line\n>\n> still quoted\n\nAfter quote.\n`,
-        // muxreview's PR #3521 repro: nested fence-like lines, an outer fence
+        // ReAgent's PR #3521 repro: nested fence-like lines, an outer fence
         // that legitimately closes, and a second fence left open at EOF.
         nestedFence: `${PAD}\`\`\`markdown\nExample:\n\n\`\`\`python\nprint('x')\n\`\`\`\n\nMore inner text\n\n\`\`\`\n\nAfter real close.\n\nDANGER paragraph here.\n`,
         unclosedNestedFence: `${PAD}\`\`\`markdown\nExample:\n\n\`\`\`python\nprint('x')\nstill inside\n\nDANGER paragraph here.\n`,

@@ -1289,7 +1289,7 @@ fn memory_dir_follows_the_linked_oauth_account_when_env_has_none() {
     assert_eq!(memory_dir_for_agent_by_id(&store, &def).unwrap(), got, "the account wins");
 
     // An agent with no link of its own inherits its template's, as the
-    // spawn does (muxreview on #3630).
+    // spawn does (ReAgent on #3630).
     let mut tpl = crate::backend::storage::agents::test_agent_def("tpl-3603", "T", "claude", "agent", 1, "");
     tpl.is_seeded = 1;
     store.agent_def_insert(&mut tpl).unwrap();

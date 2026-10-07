@@ -201,7 +201,7 @@ export function opProgressText(op: OpView): string {
 export function opFinishedText(op: OpView): { text: string; tone: "info" | "error" } {
     const verb = op.kind === "move" ? "Moved" : "Copied";
     // srv gives a reason when it stopped the op itself (a conflict nobody
-    // answered for an hour): say that, not just "canceled" (muxreview on #4221).
+    // answered for an hour): say that, not just "canceled" (ReAgent on #4221).
     if (op.state === "canceled" && op.error) return { text: op.error, tone: "error" };
     if (op.state === "canceled") return { text: `${op.kind === "move" ? "Move" : "Copy"} canceled after ${op.done_items} of ${op.total_items}`, tone: "info" };
     if (op.state === "failed") return { text: `Couldn't ${op.kind}: ${op.error ?? "it failed"}`, tone: "error" };

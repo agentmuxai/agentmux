@@ -4,7 +4,7 @@
 /**
  * The grid view's thumbnail maker: never more than four at once, abandoned
  * when every tile that asked has gone, and a failure not retried.
- * muxreview on #4225.
+ * ReAgent on #4225.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

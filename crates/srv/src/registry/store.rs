@@ -43,7 +43,7 @@ pub enum RegistryError {
 /// `definition_id` of every legacy launch record for the real agents
 /// launched from it, so a wide match would delete/retire/rename THEIR
 /// records along with the template. Hence this type rather than a `bool`
-/// or a per-call-site `if` — muxreview found the same omission at four
+/// or a per-call-site `if` — ReAgent found the same omission at four
 /// separate call sites on PR #3262 (rounds 3 and 4), which is a sign the
 /// decision belongs in the signature, not in each caller's memory.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -260,7 +260,7 @@ function setCache(accounts: Account[]): void {
 /**
  * Translate the backend's `SecretRef` (discriminated union, `plaintext_dev`
  * field name) to the frontend's loose-shape `SecretRef` (`value` field for
- * the dev plaintext case). muxreview caught a real bug here in PR #480
+ * the dev plaintext case). Reagent caught a real bug here in PR #480
  * review: a naked `as unknown as SecretRef` cast hid the field-name
  * mismatch, so editing a plaintext_dev account loaded from DB rendered
  * with an empty secret (read `value`, got `undefined`) and a save would

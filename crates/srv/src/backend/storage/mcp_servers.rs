@@ -57,7 +57,7 @@ impl McpServer {
         // The entry's own `type` is the transport when it has one — an inline
         // entry can legitimately be http/sse, and hardcoding stdio would
         // produce a catalog row whose transport column contradicts its own
-        // config JSON (muxreview, PR #3152). `stdio` is the column default and
+        // config JSON (ReAgent, PR #3152). `stdio` is the column default and
         // the right fallback for an entry that says nothing.
         let transport = entry
             .get("type")
@@ -115,7 +115,7 @@ impl Store {
     /// an upsert errored. An entry is "already carried across" only when a
     /// bound server holds an identical config object; matching on name alone
     /// would silently drop a genuinely different entry that happens to share a
-    /// name with something bound through the Armory (muxreview, PR #3152), which
+    /// name with something bound through the Armory (ReAgent, PR #3152), which
     /// is the exact silent loss this whole change exists to end. Matching on
     /// name would also mis-handle its own output: an entry disambiguated to
     /// `foo-2` on the first run stores that name while still deriving `foo`.

@@ -104,7 +104,7 @@ type Creation = {
     /** Committed tabs this creation may activate from: the tab it started on,
      *  plus a tab an in-flight switch was already heading to — that switch
      *  can't be retracted, and this newer creation must still win after it
-     *  lands (muxreview on #4140). */
+     *  lands (ReAgent on #4140). */
     from: ReadonlySet<string>;
     existing: ReadonlySet<string>;
     cancelled: boolean;
@@ -129,7 +129,7 @@ function resolveCreation(creation: Creation): void {
  * the start, so an earlier creation that fails stops counting. Their pills
  * already in the snapshot don't count either: a tab that appeared since the
  * oldest of them started and isn't claimed by a resolved creation is one of
- * theirs (muxreview on #4140).
+ * theirs (ReAgent on #4140).
  */
 function creationsAhead(creation: Creation): number {
     const earlier: Creation[] = [];

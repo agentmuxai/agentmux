@@ -97,7 +97,7 @@ export function findSafeSplitPoint(text: string): number {
     //
     // Rather than reimplement slug generation (and risk diverging from
     // rehype-slug's ids, which are user-visible anchors), refuse to split any
-    // document whose headings could collide. Caught by muxreview on PR #3521.
+    // document whose headings could collide. Caught by ReAgent on PR #3521.
     const headingKeys = new Set<string>();
     let headingsCollide = false;
 
@@ -133,7 +133,7 @@ export function findSafeSplitPoint(text: string): number {
             // snippets. Treating it as a close desyncs this scan from the real
             // parser, and the scan then hands back a "safe" point that is
             // actually inside an open code block, corrupting what renders.
-            // Caught by muxreview on PR #3521; regression test
+            // Caught by ReAgent on PR #3521; regression test
             // "never splits when an inner fence-like line appears inside a
             // fence" in markdown-incremental.test.ts.
             const closes =

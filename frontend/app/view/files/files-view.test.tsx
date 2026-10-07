@@ -864,7 +864,7 @@ describe("the Files pane: dragging files (§8.2)", () => {
             expect(h.rpc.FsOpStartCommand.mock.lastCall?.[1]).toEqual({ kind: "move", sources: [`${HOME}\\b.txt`], dest_dir: `${HOME}\\src`, block_id: "b1" })
         );
         // Over a folder, then over blank space: the folder is no longer the
-        // target, and a drop there goes nowhere (muxreview on #4224).
+        // target, and a drop there goes nowhere (ReAgent on #4224).
         h.rpc.FsOpStartCommand.mockClear();
         beginPathDrag(dt as unknown as DataTransfer, [`${HOME}\\b.txt`], "b1");
         fireEvent.dragOver(v.row("src"));

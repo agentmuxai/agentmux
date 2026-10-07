@@ -54,7 +54,7 @@ export function cachedThumbnail(path: string, mtime?: number): string | undefine
 
 /** Run `work` once fewer than MAX_ACTIVE are running. A finishing job hands
  *  its slot straight to the next waiter, so no new caller can slip in
- *  between (muxreview on #4225). */
+ *  between (ReAgent on #4225). */
 async function slot<T>(work: () => Promise<T>): Promise<T> {
     if (active >= MAX_ACTIVE) await new Promise<void>((r) => waiting.push(r));
     else active++;
@@ -95,7 +95,7 @@ async function shrink(blob: Blob): Promise<Blob> {
 /**
  * The thumbnail for an image file, made if needed; null when it can't be.
  * `signal` is the asking tile going away: when every tile that asked has
- * gone, the fetch is abandoned, queued or not (muxreview on #4225).
+ * gone, the fetch is abandoned, queued or not (ReAgent on #4225).
  */
 export function thumbnail(path: string, mtime?: number, signal?: AbortSignal): Promise<string | null> {
     const key = keyOf(path, mtime);

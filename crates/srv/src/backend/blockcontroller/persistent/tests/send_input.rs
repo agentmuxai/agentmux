@@ -3374,7 +3374,7 @@ async fn the_watchdog_writes_the_whole_backlog_in_order_and_marks_the_turn_activ
     }
 }
 
-/// muxreview (#3562) asked what a failed write does when an older entry is
+/// Reagent (#3562) asked what a failed write does when an older entry is
 /// already stuck at the head. The older entry was accepted and must stay,
 /// first in line. The new one was never accepted: it is removed and reported
 /// as an error, so its caller retries. Neither is lost, and FIFO holds.

@@ -59,7 +59,7 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
     };
     // The repository's own filters, blanked for this run (see module docs).
     // Fails closed: if the config can't be read, git status doesn't run
-    // (muxreview on #4223): unblanked filters would run.
+    // (ReAgent on #4223): unblanked filters would run.
     let Ok(filters) = repo_filters(&dir_arg).await else {
         return FsGitStatus {
             in_repo: true,
@@ -68,7 +68,7 @@ pub async fn git_status(raw: &str) -> FsGitStatus {
         };
     };
     // `-c` splits at the first `=`, so a filter named `x=y` can't be
-    // blanked that way (muxreview on #4223). Such a name is never needed:
+    // blanked that way (ReAgent on #4223). Such a name is never needed:
     // don't run git there at all.
     if filters.iter().any(|n| n.contains('=')) {
         return FsGitStatus {
@@ -462,7 +462,7 @@ mod tests {
 
     /// The other route git status has to a repository's code: a clean filter
     /// named in `.git/config` and applied by `.gitattributes`, run when a
-    /// file's stat data differs from the index. muxreview on #4223.
+    /// file's stat data differs from the index. ReAgent on #4223.
     #[tokio::test]
     async fn runs_git_without_the_repositorys_clean_filter() {
         let dir = tempfile::tempdir().unwrap();

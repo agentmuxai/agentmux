@@ -1298,7 +1298,7 @@ impl Store {
     /// `definition_id` of every legacy, never-re-keyed launch record
     /// belonging to a REAL agent launched from it — so a wide match on a
     /// template deletes / retires / renames those agents' records along
-    /// with the template, making them vanish from the picker. muxreview found
+    /// with the template, making them vanish from the picker. ReAgent found
     /// exactly that omission at four separate call sites on PR #3262
     /// (`agent_def_delete`, `instance_delete`, `instance_set_hidden`,
     /// `instance_rename`), which is why the rule lives here rather than as
@@ -1362,7 +1362,7 @@ impl Store {
         // else's baseline — every file reporting `unchanged` against
         // observations that were never made about it. Cleaned up here,
         // beside the row it belongs to, rather than left to each caller
-        // (muxreview, PR #3162).
+        // (ReAgent, PR #3162).
         if let Err(e) = self.project_instructions_forget(id) {
             tracing::warn!(
                 agent_def_id = %id, caller, error = %e,
@@ -2714,7 +2714,7 @@ fn tombstone_key_names(conn: &rusqlite::Connection, id: &str) -> Result<(), Stor
     // The same names, and the same "another agent may sign under it" rule,
     // as the key purge (M4d-1): a tombstone records a name whose keys were
     // the dead agent's, so it must never be planted against a live agent's
-    // (muxreview on #3633). Folded as the key tables fold (`to_lowercase`);
+    // (ReAgent on #3633). Folded as the key tables fold (`to_lowercase`);
     // compared in Rust, never with SQLite's ASCII-only `lower()`. Deleting
     // the second "AgentY" must not tombstone the first one's `agenty`
     // (adversarial review of #3571).

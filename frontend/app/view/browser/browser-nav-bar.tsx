@@ -75,7 +75,7 @@ export function BrowserNavBar(props: {
     // this the input stayed frozen at the last user-submitted text while
     // `model.urlAtom()` advanced, so the address bar diverged from the
     // actual pane URL. Skip while the user is actively editing the input
-    // (focused) — otherwise we'd clobber mid-keystroke. muxreview caught this
+    // (focused) — otherwise we'd clobber mid-keystroke. Reagent caught this
     // on PR #484 review.
     createEffect(() => {
         const modelUrl = model.urlAtom();

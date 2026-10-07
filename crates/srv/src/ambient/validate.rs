@@ -179,7 +179,7 @@ const ABSENCE_EXACT: &[&str] = &[
 
 /// Deliberately few and specific. A prefix rejects every title that begins with it,
 /// so "no title" and "title not" are NOT here: "No title bar on Windows" and "Title
-/// not updating in swarm row" are real titles (muxreview on #4185). Anything that is
+/// not updating in swarm row" are real titles (ReAgent on #4185). Anything that is
 /// only absence when it is the WHOLE reply belongs in `ABSENCE_EXACT`.
 const ABSENCE_PREFIXES: &[&str] = &[
     "none yet",
@@ -218,7 +218,7 @@ fn absence_form(text: &str) -> String {
 ///
 /// Only ONE balanced pair that wraps the WHOLE text counts. `(WIP) Fix login redirect
 /// (again)` and `[Windows] Fix installer crash [x64]` start and end with brackets but
-/// are real titles: the first pair closes before the end (muxreview on #4185).
+/// are real titles: the first pair closes before the end (ReAgent on #4185).
 fn is_wrapped_note(text: &str) -> bool {
     let t = text.trim();
     let (open, close) = match (t.chars().next(), t.chars().last()) {
@@ -413,7 +413,7 @@ mod tests {
         assert!(is_usable_title("Develop hardening spec for swarm ambient summary quality"));
     }
 
-    // muxreview on #4185: both of these were false rejects in the first version.
+    // ReAgent on #4185: both of these were false rejects in the first version.
     #[test]
     fn titles_that_merely_start_with_a_risky_prefix_or_end_in_brackets_are_accepted() {
         for s in [

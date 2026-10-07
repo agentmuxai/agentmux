@@ -3,7 +3,7 @@
 
 // Tests for the field-name translation between frontend `Account` (loose
 // shape with `value` for plaintext_dev) and backend `IdentityAccount`
-// (discriminated union with `plaintext_dev`). muxreview caught a bug in
+// (discriminated union with `plaintext_dev`). Reagent caught a bug in
 // PR #480 where a naked cast hid the mismatch — these tests guard
 // against regressing the translator.
 

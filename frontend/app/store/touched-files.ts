@@ -42,7 +42,7 @@ const FILE_TOOLS: Record<string, string> = {
  *  paths, whose filesystems ignore it. */
 export function touchKey(path: string): string {
     // Decided on the path as given: normalising first would turn `C:\` into
-    // `C:` and a UNC `\\srv\share` into `/srv/share` (muxreview on #4224).
+    // `C:` and a UNC `\\srv\share` into `/srv/share` (ReAgent on #4224).
     const windows = isWindowsStyle(path);
     const unc = /^[\\/]{2}[^\\/]/.test(path);
     let p = path.replace(/[\\/]+/g, "/").replace(/(.)\/$/, "$1");
