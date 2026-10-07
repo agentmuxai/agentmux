@@ -734,6 +734,7 @@ partial list.
 | [`SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06`](SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md) | Pillar 1 Step 2 — Persist the Two Host-Only Topology Facts to srv |
 | [`SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md) | Pillar 1 Step 3 — Persist Window Kind + Parent Linkage to srv |
 | [`SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07`](SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md) | Pillar 1 Step 4 — Crash Reproject: Automatic Multi-Window Reconstruction |
+| [`SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06`](SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md) | Spec: Make the Pi harness launch, through the `pi-acp` adapter |
 | [`SPEC_POOL_WINDOW_HWND_NULL_2026_05_06`](SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md) | Pool window HWND-null at promote time |
 | [`SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06`](SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md) | Provider CLI version upgrade (2026-09-06 drift report) |
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |

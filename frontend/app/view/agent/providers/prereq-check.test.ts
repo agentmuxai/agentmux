@@ -50,7 +50,7 @@ describe("prereq-check", () => {
         expect(node("claude")?.minVersion).toBe("22.0.0");
         expect(node("qwen")?.minVersion).toBe("22.0.0");
         expect(node("gemini")?.minVersion).toBe("20.0.0");
-        expect(node("pi")?.minVersion).toBe("20.6.0");
+        expect(node("pi")?.minVersion).toBe("22.19.0");
         // Codex declares Node 16+, older than any Node npm still supports.
         expect(node("codex")?.minVersion).toBeUndefined();
     });

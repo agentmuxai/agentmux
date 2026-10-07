@@ -274,6 +274,29 @@ describe("runLaunchFlow — Phase 3 (already authenticated)", () => {
         expect(results).toEqual([true]);
     });
 
+    // A provider with no check command (Pi via pi-acp) reports its sign-in
+    // when the session starts; running anything here would claim a sign-in
+    // nobody checked.
+    it("skips the auth check, and claims nothing, for a provider with no check command", async () => {
+        hub.checkCliAuth.mockClear();
+        const log = vi.fn();
+        const results: boolean[] = [];
+        const result = await runLaunchFlow({
+            blockId: "block-1",
+            provider: { ...claude, authType: "cli-managed", authCheckCommand: [] },
+            log,
+            setAuthUrl: vi.fn(),
+            isCancelled: () => false,
+            setLoginWaiting: vi.fn(),
+            onAuthCheckResult: (confirmed) => results.push(confirmed),
+        });
+
+        expect(result).toBe("success");
+        expect(hub.checkCliAuth).not.toHaveBeenCalled();
+        expect(results).toEqual([]);
+        expect(log).toHaveBeenCalledWith("auth", expect.stringContaining("checks its sign-in when the session starts"));
+    });
+
     it("reagent/codex P2 on PR #2318: reports onAuthCheckResult(false) — not true — when the auth check itself throws, even though the flow still proceeds to 'success'", async () => {
         // Phase 2 deliberately doesn't fail launch on a transient auth-check
         // RPC error ("authentication status unknown — will attempt anyway"),

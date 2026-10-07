@@ -348,7 +348,12 @@ pub fn install_pinned_cli_with(
         clear_unless_valid(d, &req.cli_command)
             .map_err(|e| InstallError::Clear(d.to_path_buf(), e))?;
     }
-    let package = format!("{}@{}", req.npm_package, req.pinned_version);
+    // The pinned package plus any companions (pi-acp's `pi`), in one npm run
+    // under the same lock and completion marker. Specs never hold whitespace.
+    let package = match crate::backend::providers::get_provider(&req.provider_id) {
+        Some(p) if p.npm_package == req.npm_package => p.npm_install_specs(&req.pinned_version).join(" "),
+        _ => format!("{}@{}", req.npm_package, req.pinned_version),
+    };
     tracing::info!(package = %package, prefix = %dir.display(), background = req.background, "running npm install");
     let run = run_npm(&dir, &package, req.background).map_err(InstallError::Spawn)?;
     tracing::info!(
@@ -378,7 +383,8 @@ pub fn install_pinned_cli_with(
     Ok(InstallOutcome::Installed(bin))
 }
 
-/// Run `npm install --prefix <dir> <package>` to completion.
+/// Run `npm install --prefix <dir> <package>` to completion. `package` is one
+/// or more space-separated `name@version` specs.
 ///
 /// Output is collected after exit (`.output()`): pipe-based streaming
 /// (async IOCP and sync blocking alike) receives nothing from `cmd.exe /C`
@@ -428,7 +434,7 @@ fn run_npm_install(dir: &Path, package: &str, background: bool) -> std::io::Resu
                 "--prefix",
             ])
             .arg(dir)
-            .arg(package)
+            .args(package.split_whitespace())
             .env("CI", "true")
             .env("FORCE_COLOR", "0");
             if background {

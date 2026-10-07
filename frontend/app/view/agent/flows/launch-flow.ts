@@ -282,9 +282,15 @@ export async function runLaunchFlow(opts: LaunchFlowOptions): Promise<LaunchFlow
 
     // Phase 2: Auth Check → if not authenticated, notify and stop (the user starts login)
     setPhase({ kind: "checking-auth" });
-    log("auth", `checking ${provider.cliCommand} authentication...`);
     let needsLogin = false;
-    try {
+    // No check command: the CLI has no non-interactive way to report its
+    // sign-in (Pi through pi-acp), and reports it when the session starts
+    // instead. Running something that always succeeds would claim a sign-in
+    // nobody checked.
+    if (provider.authCheckCommand.length === 0) {
+        log("auth", `${provider.cliCommand} checks its sign-in when the session starts`);
+    } else try {
+        log("auth", `checking ${provider.cliCommand} authentication...`);
         const authResult = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
             cli_path: cliResult.cli_path,
             auth_check_args: provider.authCheckCommand,

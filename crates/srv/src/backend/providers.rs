@@ -241,6 +241,30 @@ impl ProviderConfig {
         }
     }
 
+    /// Packages installed next to `npm_package`, in the same `npm install` and
+    /// the same pinned dir: `(name, version)`. Pi's adapter (`pi-acp`) runs
+    /// the `pi` CLI, which is its own package (`@earendil-works/...`; the old
+    /// `@mariozechner/...` name stops at 0.73.1).
+    pub fn companion_npm_packages(&self) -> &'static [(&'static str, &'static str)] {
+        match self.id {
+            "pi" => &[("@earendil-works/pi-coding-agent", "1.0.4")],
+            _ => &[],
+        }
+    }
+
+    /// Every `name@version` an install of this provider passes to npm: the
+    /// pinned package (at `pin`, the effective pin) and its companions.
+    pub fn npm_install_specs(&self, pin: &str) -> Vec<String> {
+        let main = if pin.is_empty() {
+            self.npm_package.to_string()
+        } else {
+            format!("{}@{}", self.npm_package, pin)
+        };
+        std::iter::once(main)
+            .chain(self.companion_npm_packages().iter().map(|(n, v)| format!("{n}@{v}")))
+            .collect()
+    }
+
     /// The flag that passes the prompt as an argument, for a CLI that doesn't
     /// read it from stdin: `agy` ignores stdin and needs `-p <prompt>`
     /// (SPEC_ANTIGRAVITY_HARNESS_REAL_CLI_2026_10_06.md). `None`, the prompt
@@ -559,12 +583,17 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     native_instruction_dirs: &[],
 };
 
+// Pi runs through `pi-acp`, an ACP adapter that drives `pi --mode rpc`: pi
+// itself speaks no ACP (`pi --json` was never an option, so no Pi launch ever
+// started). Both packages install together (`companion_npm_packages`), and
+// `pi-acp` is told which `pi` to run (`PI_ACP_PI_COMMAND`, acp.rs).
+// SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
 static PI: ProviderConfig = ProviderConfig {
     id: "pi",
-    cli_command: "pi",
+    cli_command: "pi-acp",
     controller_type: ControllerType::Acp,
     app_server: None,
-    launch_args: &["--json"],
+    launch_args: &[],
     persistent_launch_args: None,
     resume_flag: None,
     session_id_field: "sessionId",
@@ -576,8 +605,8 @@ static PI: ProviderConfig = ProviderConfig {
     history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
-    npm_package: "@mariozechner/pi-coding-agent",
-    pinned_version: "0.73.1",
+    npm_package: "pi-acp",
+    pinned_version: "0.0.34",
     base_url_env_var: None,
     supported_vendors: &["pi"],
     // Confirmed: npmjs.com/package/@mariozechner/pi-coding-agent docs —
@@ -1363,8 +1392,19 @@ mod tests {
         assert_eq!(p.controller_type, ControllerType::Acp);
         assert_eq!(p.controller_type_str(), "acp");
         assert_eq!(p.styled_output_format, "acp");
-        assert_eq!(p.cli_command, "pi");
-        assert_eq!(p.npm_package, "@mariozechner/pi-coding-agent");
+        // pi speaks no ACP itself (`pi --json` was never an option); the
+        // pi-acp adapter does, and runs the pi package installed beside it.
+        assert_eq!(p.cli_command, "pi-acp");
+        assert!(p.launch_args.is_empty());
+        assert_eq!(p.npm_package, "pi-acp");
+        assert_eq!(
+            p.npm_install_specs(p.pinned_version),
+            vec!["pi-acp@0.0.34".to_string(), "@earendil-works/pi-coding-agent@1.0.4".to_string()]
+        );
+        // Everyone else installs just the one package.
+        let claude = get_provider("claude").unwrap();
+        assert_eq!(claude.npm_install_specs("2.1.288"), vec!["@anthropic-ai/claude-code@2.1.288".to_string()]);
+        assert!(claude.companion_npm_packages().is_empty());
     }
 
     // Harness vs. model vendor decoupling: only claude has a verified,

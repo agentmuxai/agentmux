@@ -724,10 +724,12 @@ fn spawn_install_task(
         }
         let provider_dir_str = provider_dir.to_string_lossy().to_string();
 
-        let pkg_arg = if pinned_version.is_empty() {
-            npm_package.clone()
-        } else {
-            format!("{}@{}", npm_package, pinned_version)
+        // The pinned package plus any companions (pi-acp's `pi`): one npm run,
+        // one dir, one completion marker.
+        let pkg_args: Vec<String> = match crate::backend::providers::get_provider(&provider_id) {
+            Some(p) if p.npm_package == npm_package => p.npm_install_specs(&pinned_version),
+            _ if pinned_version.is_empty() => vec![npm_package.clone()],
+            _ => vec![format!("{}@{}", npm_package, pinned_version)],
         };
 
         // `--progress=false` is unconditional: npm only renders the
@@ -737,16 +739,17 @@ fn spawn_install_task(
         // also unconditional: the user's only signal of progress
         // during long installs is the per-package fetch/extract
         // chatter, so we always pay for the noise to gain the signal.
-        let npm_args: Vec<String> = vec![
-            "install".to_string(),
-            pkg_arg.clone(),
-            "--prefix".to_string(),
-            provider_dir_str.clone(),
-            "--no-audit".to_string(),
-            "--no-fund".to_string(),
-            "--progress=false".to_string(),
-            "--loglevel=verbose".to_string(),
-        ];
+        let npm_args: Vec<String> = std::iter::once("install".to_string())
+            .chain(pkg_args)
+            .chain([
+                "--prefix".to_string(),
+                provider_dir_str.clone(),
+                "--no-audit".to_string(),
+                "--no-fund".to_string(),
+                "--progress=false".to_string(),
+                "--loglevel=verbose".to_string(),
+            ])
+            .collect();
 
         emit_line(
             &broker,

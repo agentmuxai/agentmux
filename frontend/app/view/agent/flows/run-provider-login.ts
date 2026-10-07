@@ -83,6 +83,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
+import { companionCliEnv } from "../providers/companion-env";
 
 export interface RunProviderLoginParams extends ForceLoginParams {
     provider: ForceLoginParams["provider"] & {
@@ -553,7 +554,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
 
     p.log("auth", "opening a terminal window for a fresh login…");
 
-    const terminalEnv: Record<string, string> = { ...p.authEnv };
+    const terminalEnv: Record<string, string> = { ...companionCliEnv(p.provider.id, p.cliPath), ...p.authEnv };
     if (minted) {
         // UNIFIED 2026-08-31 — every oauth-class provider, Claude included,
         // logs in DIRECTLY into its isolated dir by keeping the config-dir env
