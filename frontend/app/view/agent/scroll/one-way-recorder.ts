@@ -476,13 +476,13 @@ export function attachOneWayRecorder(pane: string, el: HTMLElement): () => void 
     };
 }
 
-/** Record that the code itself did something that can move the content (a pin, a hold, a glide). */
 /** The one-way observer finished a run in this frame (see Sampling). */
 export function sampleOneWayFrame(pane: string): void {
     if (!enabled) return;
     recorders.get(pane)?.sampleFromFlow();
 }
 
+/** Record that the code itself did something that can move the content (a pin, a hold, a glide). */
 export function noteOneWay(pane: string, label: string): void {
     if (!enabled) return;
     recorders.get(pane)?.note(label);

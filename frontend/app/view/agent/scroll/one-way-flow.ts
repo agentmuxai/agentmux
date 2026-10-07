@@ -176,7 +176,7 @@ export class OneWayFlow {
             el.scrollTop = target;
             this.host.wrote({ scrollTop: el.scrollTop, scrollHeight: sh, clientHeight: ch }); // perf:allow-layout-read — after a scrollTop write, which does not invalidate layout
         }
-        this.baseline = this.readVisible(el, ch);
+        this.baseline = this.readAllTops(el);
     }
 
     /**
@@ -214,7 +214,7 @@ export class OneWayFlow {
         if (this.spacerPx > 0) {
             this.setSpacer(spacerFor({ spacer: this.spacerPx, wanted: geo.scrollTop, clientHeight: geo.clientHeight, scrollHeight: geo.scrollHeight }));
         }
-        this.baseline = this.readVisible(el, geo.clientHeight);
+        this.baseline = this.readAllTops(el);
         return movedUp && this.host.following();
     }
 
@@ -306,7 +306,7 @@ export class OneWayFlow {
             }
         }
         this.lastGeo = { scrollHeight: sh, clientHeight: ch };
-        this.baseline = this.readVisible(el, ch);
+        this.baseline = this.readAllTops(el);
         this.host.observed?.({ scrollTop: live, scrollHeight: sh, clientHeight: ch });
     }
 
@@ -374,7 +374,7 @@ export class OneWayFlow {
     }
 
     /** The record for the next comparison: every mounted row's top. */
-    private readVisible(el: HTMLElement, _clientHeight: number): Map<string, number> {
+    private readAllTops(el: HTMLElement): Map<string, number> {
         const out = new Map<string, number>();
         for (const [id, r] of this.readRows(el)) out.set(id, r.top);
         return out;
