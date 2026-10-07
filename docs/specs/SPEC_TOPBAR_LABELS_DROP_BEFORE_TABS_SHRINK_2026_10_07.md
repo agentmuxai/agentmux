@@ -1,7 +1,7 @@
 # Top bar: widget labels drop before tabs shrink
 
-**Status:** active — the tier decision (`frontend/app/window/top-bar-tier.ts`) and the measuring hook are built and
-were checked live on macOS by the owner; the 1/3/8-tab CDP sweep and the Windows/Linux check (§4) remain.
+**Status:** active — the tier decision (`frontend/app/window/top-bar-tier.ts`) and the measuring hook shipped in #4442
+and were checked live on macOS by the owner; the 1/3/8-tab CDP sweep and the Windows/Linux check (§4) remain.
 **Date:** 2026-10-07.
 **Requested by:** repo owner (asafebgi): "when widgets automatically switch from text label to icon-only because of
 size, the trigger should be when the widgets intersect an unreduced-sized tab. Currently the switch to icon only only
