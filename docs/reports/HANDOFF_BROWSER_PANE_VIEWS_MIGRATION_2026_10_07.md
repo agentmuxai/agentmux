@@ -3,7 +3,7 @@
 **Date:** 2026-10-07
 **Author:** Agent4
 **Status:** resize performance work shipped; the browser-pane Views migration is **shelved at the spike stage**, proven feasible on Windows, with next steps below.
-**Tracking:** the GitHub tracking issue linked from the PR or issue that cites this file.
+**Tracking:** agentmuxai/agentmux#4430.
 
 The detailed analysis is in two documents:
 - `docs/analysis/ANALYSIS_WINDOW_RESIZE_REPAINT_LAG_2026_10_06.md` (§1–12), about the page side.
