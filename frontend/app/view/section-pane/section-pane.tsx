@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A pane with a rail of sections, each one manager component: the shape of
+ * A pane with a row of sections, each one manager component: the shape of
  * the Connectors and Memory panes (connectors.tsx, memory.tsx), which
  * replaced the Armory. The selected section lives in block meta under the
  * pane's own key, so it names the pane, survives a remount, and lets an entry
@@ -35,7 +35,7 @@ export interface SectionPaneSpec<Id extends string> {
     legacySectionKeys?: readonly string[];
     /** Section shown when the meta holds none, or an unknown id. */
     defaultSection: Id;
-    /** The rail's accessible name. */
+    /** The section tabs' accessible name. */
     ariaLabel: string;
     sections: readonly PaneSection<Id>[];
 }
@@ -105,8 +105,8 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
         // answer the `armory` container queries; an element can't answer its own.
         <div class="armory-container">
             <div class="armory-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
-                {/* One tablist: a rail, an icon-only rail, or tabs along the top,
-                    by width (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
+                {/* One tablist along the top: icons only when narrow, labels when
+                    there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
                 <TabbedPane
                     items={sections.map((item) => ({
                         id: item.id,

@@ -179,44 +179,37 @@
 
 // ── TabbedPane ──────────────────────────────────────────────────────────────
 
+// Tabs along the top at every width: a side rail costs a pane its width.
 .ui-tabbed-pane {
     display: flex;
+    flex-direction: column;
     width: 100%;
     height: 100%;
     min-height: 0;
-}
-
-.ui-tabbed-pane--rail {
-    flex-direction: row;
-
-    > .ui-tabs {
-        flex: 0 0 auto;
-        width: 168px;
-        border-right: 1px solid var(--border-color);
-        overflow-y: auto;
-    }
-}
-
-.ui-tabbed-pane--rail-icons > .ui-tabs {
-    width: var(--space-12);
-}
-
-.ui-tabbed-pane--top {
-    flex-direction: column;
 
     > .ui-tabs {
         flex: 0 0 auto;
         padding: 0 var(--space-2);
     }
 
-    // Icon-only tabs share the width, like the old narrow tab bars.
+    // The tabs share the width up to 10rem each. Past that they stop
+    // growing and sit at the left, so a maximised pane has no wide tabs.
     > .ui-tabs > .ui-tooltip-anchor {
+        display: flex;
         flex: 1 1 0;
         min-width: 0;
+        max-width: 10rem;
 
         > .ui-tab {
             flex: 1 1 auto;
+            justify-content: center;
+            min-width: 0;
         }
+    }
+
+    .ui-tab-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 }
 

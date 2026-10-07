@@ -57,8 +57,8 @@ export function WardenView(props: { model: WardenViewModel }): JSX.Element {
         // container element cannot respond to its own container query.
         <div class="warden-container">
             <div class="warden-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
-                {/* One tablist: a rail, an icon-only rail, or tabs along the top,
-                    by width (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
+                {/* One tablist along the top: icons only when narrow, labels when
+                    there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
                 <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Warden section" panelClass="bundle-manager-section">
                     {/*
                      * All five sections stay mounted — toggling is instant
