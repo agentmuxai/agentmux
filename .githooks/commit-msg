@@ -17,13 +17,15 @@ TMP_FILE="${MSG_FILE}.tmp.$$"
 #
 # Also strips a "Generated with ..." attribution line (e.g. Claude Code's
 # "🤖 Generated with [Claude Code](...)"): the line starts with the phrase,
-# after anything that isn't a letter or digit. A sentence that merely
-# mentions the phrase doesn't start with it and is kept.
+# after only spaces, ASCII punctuation and that emoji. A sentence that
+# merely mentions the phrase doesn't start with it and is kept, including
+# one that starts with non-ASCII letters (a negated class such as
+# [^a-z0-9] would count those as punctuation; Codex P2 on #4454).
 awk '
   {
     l = tolower($0)
     if (substr(l, 1, 15) == "co-authored-by:") next
-    if (l ~ /^[^a-z0-9]*generated with /) next
+    if (l ~ /^[[:space:][:punct:]]*(🤖[[:space:]]*)?generated with /) next
     lines[++n] = $0
   }
   END {
