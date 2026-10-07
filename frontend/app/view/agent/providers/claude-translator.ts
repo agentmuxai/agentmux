@@ -192,7 +192,11 @@ export class ClaudeTranslator implements OutputTranslator {
      * batch stamp for that line and show every restored user message as sent
      * "just now" (ReAgent P1, #3620). Replay leaves it unset.
      */
-    constructor(private readonly opts: { replay?: boolean } = {}) {}
+    /**
+     * `inputIncludesCache`: the CLI's `usage.input_tokens` is already the whole
+     * prompt, cached tokens included (Qwen Code), not Claude's uncached share.
+     */
+    constructor(private readonly opts: { replay?: boolean; inputIncludesCache?: boolean } = {}) {}
 
     private currentToolCallId: string | null = null;
     private currentToolName: string | null = null;
@@ -284,10 +288,16 @@ export class ClaudeTranslator implements OutputTranslator {
             // just the sum) — see SessionStats' fresh_input_tokens doc comment.
             const usage = rawEvent.usage;
             if (usage && typeof usage === "object") {
-                const freshInput = usage.input_tokens ?? 0;
                 const cacheCreation = usage.cache_creation_input_tokens ?? 0;
                 const cacheRead = usage.cache_read_input_tokens ?? 0;
-                const input = freshInput + cacheCreation + cacheRead;
+                // Claude: input_tokens is the uncached share. A CLI whose
+                // input_tokens already counts the cache would be summed twice.
+                const input = this.opts.inputIncludesCache
+                    ? (usage.input_tokens ?? 0)
+                    : (usage.input_tokens ?? 0) + cacheCreation + cacheRead;
+                const freshInput = this.opts.inputIncludesCache
+                    ? Math.max(0, input - cacheCreation - cacheRead)
+                    : (usage.input_tokens ?? 0);
                 const output = usage.output_tokens ?? 0;
                 if (input > 0) {
                     stats.input_tokens = input;

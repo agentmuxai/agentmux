@@ -82,6 +82,15 @@ describe("Qwen Code's stream", () => {
         expect(events.length).toBeGreaterThan(0);
     });
 
+    it("counts a turn's input once: its input_tokens already include the cached ones", () => {
+        const result = { ...realErrorResult, is_error: false, subtype: "success", result: "ok", usage: { input_tokens: 12_000, output_tokens: 8, cache_read_input_tokens: 11_000 } };
+        const end = createTranslator("qwen-stream-json").translate(result).find((e) => e.type === "session_end");
+        expect(end).toMatchObject({ stats: { input_tokens: 12_000, fresh_input_tokens: 1_000, cache_read_input_tokens: 11_000 } });
+        // Claude's own stream still sums (its input_tokens is the uncached share).
+        const claudeEnd = createTranslator("claude-stream-json").translate(result).find((e) => e.type === "session_end");
+        expect(claudeEnd).toMatchObject({ stats: { input_tokens: 23_000, fresh_input_tokens: 12_000 } });
+    });
+
     it("is not read by the context meter: its input_tokens already include the cached ones", () => {
         expect(readsMainAgentUsage("qwen-stream-json")).toBe(false);
     });
