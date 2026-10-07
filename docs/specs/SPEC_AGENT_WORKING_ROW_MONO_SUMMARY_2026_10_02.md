@@ -73,6 +73,9 @@ Consequences of dropping the tool text:
 
 ### 3.4 Per-turn tokens: what the turn added, not the context it re-sent
 
+> [!NOTE]
+> Replaced on 2026-10-07 by `SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md`: the row now shows one figure, the turn's output, the way Claude Code does, and no input figure. The reasoning below about input re-sent on every call still holds; it is why input isn't shown.
+
 **The problem.** Every API call in a turn re-sends the whole conversation. So the `↑` figure was never "this turn": the live value was the input of the *last call* (`TokensIn` overwrites), which is the size of the context; and the "Worked" value was the result event's whole-turn `input_tokens`, which sums that context over *every* call (the reducer's own test fixture has a 70,000 result total for a turn whose last call was 2). A one-line question late in a long session read as `↑180k`. The composer's `123k / 200k` is the same kind of number on purpose: it is the context-window meter.
 
 **The definition.** The turn's input contribution is the growth of the context across the turn:

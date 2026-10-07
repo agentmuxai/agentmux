@@ -36,6 +36,8 @@ interface StreamLineShape {
 interface MessageShape {
     id?: string;
     model?: string;
+    /** A `user` frame's blocks (tool results), for mainAgentRequestStarted. */
+    content?: unknown;
     usage?: {
         input_tokens?: number;
         cache_creation_input_tokens?: number;
@@ -103,4 +105,31 @@ export function mainAgentUsage(rawEvent: StreamLineShape): MainAgentUsage | null
         return output != null ? { kind: "out", output } : null;
     }
     return null;
+}
+
+/**
+ * Characters of model output a main-agent `content_block_delta` streams: text,
+ * thinking, and tool-call input, which Claude Code's own spinner counts (at
+ * four a token) for its turn token counter. A `signature_delta` is not output
+ * and isn't counted. 0 for anything else, and for a subagent's lines.
+ * SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md §2.
+ */
+export function mainAgentStreamedChars(rawEvent: StreamLineShape): number {
+    if (rawEvent.parent_tool_use_id || rawEvent.type !== "stream_event") return 0;
+    const inner = rawEvent.event as { type?: string; delta?: { type?: string; text?: unknown; thinking?: unknown; partial_json?: unknown } } | undefined;
+    if (inner?.type !== "content_block_delta") return 0;
+    const d = inner.delta;
+    const s = d?.type === "text_delta" ? d.text : d?.type === "thinking_delta" ? d.thinking : d?.type === "input_json_delta" ? d.partial_json : null;
+    return typeof s === "string" ? s.length : 0;
+}
+
+/**
+ * A main-agent `user` frame carrying tool results: the CLI is sending them
+ * back, so a request is in flight until the next call's `message_start`
+ * (Claude Code's `requesting` mode, the ↑ arrow).
+ */
+export function mainAgentRequestStarted(rawEvent: StreamLineShape): boolean {
+    if (rawEvent.parent_tool_use_id || rawEvent.type !== "user") return false;
+    const content = rawEvent.message?.content;
+    return Array.isArray(content) && content.some((b) => (b as { type?: unknown } | null)?.type === "tool_result");
 }
