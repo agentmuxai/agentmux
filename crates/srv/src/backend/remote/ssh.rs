@@ -20,12 +20,15 @@ pub const EXIT_CONNECTION_FAILED: u32 = 255;
 /// The `ssh` to run: the first on `PATH`, then (Windows) the OpenSSH client
 /// Windows installs, which an inherited `PATH` can lack.
 ///
-/// On Windows an MSYS2 or Cygwin build on `PATH` (Git for Windows' own
-/// `usr/bin/ssh.exe`, there when AgentMux is started from Git Bash) comes
-/// last, after Windows' own client: it resolves names with its own POSIX
-/// resolver, which can't find a machine on the local network by name ("Could
-/// not resolve hostname"), and it doesn't use Windows' ssh-agent. It is still
-/// used when it is the only ssh there is.
+/// On Windows a native client that can force askpass (OpenSSH 8.4+) comes
+/// first, before an MSYS2 or Cygwin build on `PATH` (Git for Windows' own
+/// `usr/bin/ssh.exe`, there when AgentMux is started from Git Bash): that
+/// build resolves names with its own POSIX resolver, which can't find a
+/// machine on the local network by name ("Could not resolve hostname"), and
+/// doesn't use Windows' ssh-agent. A native client older than 8.4 is not
+/// preferred: an agent's ssh relies on `SSH_ASKPASS_REQUIRE=force`
+/// (askpass.rs) to keep its prompts out of the agent's terminal. With no such
+/// client, the order is the plain one above.
 pub fn binary() -> Option<PathBuf> {
     #[cfg(windows)]
     let windows_client = {
@@ -34,24 +37,62 @@ pub fn binary() -> Option<PathBuf> {
     };
     #[cfg(not(windows))]
     let windows_client = None;
-    pick(which::which_all("ssh").into_iter().flatten(), windows_client, is_posix_layer_build)
+    pick(which::which_all("ssh").into_iter().flatten(), windows_client, |p| {
+        !cfg!(windows) || (!is_posix_layer_build(p) && forces_askpass(p))
+    })
 }
 
-/// [`binary`]'s order: the first native `ssh` on `PATH`, then Windows' own
-/// client, then the first MSYS2 or Cygwin build.
+/// [`binary`]'s order: the first `preferred` ssh on `PATH`, then Windows'
+/// own client if preferred, else the first on `PATH`, else Windows' client.
 fn pick(
     on_path: impl IntoIterator<Item = PathBuf>,
     windows_client: Option<PathBuf>,
-    is_posix_layer: impl Fn(&Path) -> bool,
+    preferred: impl Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    let mut posix_layer = None;
-    for p in on_path {
-        if !is_posix_layer(&p) {
-            return Some(p);
-        }
-        posix_layer.get_or_insert(p);
+    let on_path: Vec<PathBuf> = on_path.into_iter().collect();
+    if let Some(p) = on_path.iter().find(|p| preferred(p)) {
+        return Some(p.clone());
     }
-    windows_client.or(posix_layer)
+    if let Some(w) = windows_client.as_ref().filter(|w| preferred(w)) {
+        return Some(w.clone());
+    }
+    on_path.into_iter().next().or(windows_client)
+}
+
+/// Whether `ssh` is OpenSSH 8.4 or newer, which honours
+/// `SSH_ASKPASS_REQUIRE=force`; asked once per binary (`ssh -V`).
+fn forces_askpass(ssh: &Path) -> bool {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, bool>>> =
+        std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(&ok) = seen.lock().unwrap_or_else(|e| e.into_inner()).get(ssh) {
+        return ok;
+    }
+    let mut cmd = std::process::Command::new(ssh);
+    cmd.arg("-V").stdin(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use agentmux_common::win32::NoWindow;
+        cmd.no_window();
+    }
+    let ok = cmd
+        .output()
+        .ok()
+        .and_then(|out| openssh_version(&String::from_utf8_lossy(&out.stderr)))
+        .is_some_and(|v| v >= (8, 4));
+    seen.lock().unwrap_or_else(|e| e.into_inner()).insert(ssh.to_path_buf(), ok);
+    ok
+}
+
+/// `(major, minor)` from `ssh -V`'s "OpenSSH_9.5p2, …" or
+/// "OpenSSH_for_Windows_8.1p1, …".
+fn openssh_version(banner: &str) -> Option<(u32, u32)> {
+    let rest = &banner[banner.find("OpenSSH")?..];
+    let start = rest.find(|c: char| c.is_ascii_digit())?;
+    let mut parts = rest[start..].split(|c: char| !c.is_ascii_digit());
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    Some((major, minor))
 }
 
 /// An `ssh.exe` built for MSYS2 or Cygwin: its runtime DLL sits beside it.
@@ -216,16 +257,33 @@ pub fn control_dir(config_home: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
 
-    /// A native ssh on PATH first, then Windows' client, and an MSYS2 or
-    /// Cygwin build only when there is nothing else.
+    /// The preferred ssh on PATH first, then Windows' client if preferred;
+    /// with neither, the first on PATH, as before.
     #[test]
-    fn a_native_ssh_is_preferred_but_git_bashs_is_kept_as_a_last_resort() {
+    fn a_preferred_ssh_comes_first_and_otherwise_the_order_is_the_plain_one() {
         let p = |s: &str| PathBuf::from(s);
-        let posix = |path: &Path| path.starts_with("/git");
-        assert_eq!(pick([p("/git/ssh"), p("/native/ssh")], Some(p("/win/ssh")), posix), Some(p("/native/ssh")));
-        assert_eq!(pick([p("/git/ssh")], Some(p("/win/ssh")), posix), Some(p("/win/ssh")));
-        assert_eq!(pick([p("/git/ssh")], None, posix), Some(p("/git/ssh")), "the only ssh there is");
-        assert_eq!(pick(Vec::<PathBuf>::new(), None, posix), None);
+        let preferred = |path: &Path| path.starts_with("/native");
+        assert_eq!(
+            pick([p("/git/ssh"), p("/native/ssh")], Some(p("/win/ssh")), preferred),
+            Some(p("/native/ssh"))
+        );
+        let win_ok = |path: &Path| path.starts_with("/win");
+        assert_eq!(pick([p("/git/ssh")], Some(p("/win/ssh")), win_ok), Some(p("/win/ssh")));
+        // An old native client (no forced askpass) isn't preferred: the
+        // first on PATH, as before this change.
+        let none = |_: &Path| false;
+        assert_eq!(pick([p("/git/ssh"), p("/old/ssh")], Some(p("/win/ssh")), none), Some(p("/git/ssh")));
+        assert_eq!(pick(Vec::<PathBuf>::new(), Some(p("/win/ssh")), none), Some(p("/win/ssh")));
+        assert_eq!(pick(Vec::<PathBuf>::new(), None, none), None);
+    }
+
+    #[test]
+    fn openssh_versions_are_read_from_the_banner() {
+        assert_eq!(openssh_version("OpenSSH_for_Windows_9.5p2, LibreSSL 3.8.2"), Some((9, 5)));
+        assert_eq!(openssh_version("OpenSSH_for_Windows_8.1p1, LibreSSL 3.0.2"), Some((8, 1)));
+        assert_eq!(openssh_version("OpenSSH_10.2p1, OpenSSL 3.5.4 30 Sep 2025"), Some((10, 2)));
+        assert_eq!(openssh_version("Dropbear v2022.83"), None);
+        assert!((8, 1) < (8, 4) && (10, 2) >= (8, 4));
     }
 
     /// Git for Windows' and Cygwin's ssh are passed over for the native one.
