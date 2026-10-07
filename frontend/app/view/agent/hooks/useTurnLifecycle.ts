@@ -28,6 +28,7 @@ import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { isStopping, SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
+import { turnOutputTokens } from "@/app/store/agent-pane-state/turn-contribution";
 import type { Accessor } from "solid-js";
 import type { DocumentNode, SessionStats } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -88,7 +89,17 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         // undercount multi-call turns; fall back to them only when
         // session_end carries no usage (e.g. providers without a
         // token-bearing result line).
-        const liveTokens = paneSnapshot(opts.blockId)?.turnTokens ?? null;
+        const live = paneSnapshot(opts.blockId)?.turnTokens ?? null;
+        // Output as the turn's total over its calls, not the last call's.
+        const liveTokens = live
+            ? {
+                input: live.input,
+                output: turnOutputTokens(live) ?? 0,
+                freshInput: live.freshInput,
+                cacheCreation: live.cacheCreation,
+                cacheRead: live.cacheRead,
+            }
+            : null;
         const statsTokens =
             stats && (stats.input_tokens != null || stats.output_tokens != null)
                 ? {

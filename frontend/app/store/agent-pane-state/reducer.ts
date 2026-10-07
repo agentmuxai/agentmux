@@ -59,7 +59,7 @@ import {
     windowFor,
     type ContextReading,
 } from "./context-reading";
-import { turnAddedInput } from "./turn-contribution";
+import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
 
 /** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
 function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {
@@ -959,25 +959,22 @@ export function update(
         }
 
         case "TokensIn": {
-            // Context size going into this turn, for turnAddedInput(): set at
-            // the turn's first call and carried unchanged after. It is the
-            // previous turn's last context size; with nothing before it (a
-            // fresh pane, after TurnReset) the first call's own input stands
-            // in, so the turn is not credited with the system prompt. A
-            // reading restored from history is the same quantity (the last
-            // call's prompt), so it serves as well as a live one.
             const prevReading = state.context;
-            const contextBaseline =
-                state.turnTokens?.contextBaseline ??
-                (plausibleReading(prevReading)?.tokens ?? command.input);
-            const next = {
+            // A new call (the stream counts each call once, by message id):
+            // the previous call's output is final, so it moves into
+            // `outputDone`, and the new call starts streaming (↓).
+            const prevTokens = state.turnTokens;
+            const next = withShownOutput({
                 input: command.input,
-                output: state.turnTokens?.output ?? 0,
+                output: 0,
                 freshInput: command.freshInput,
                 cacheCreation: command.cacheCreation,
                 cacheRead: command.cacheRead,
-                contextBaseline,
-            };
+                outputDone: prevTokens ? outputSoFar(prevTokens) : 0,
+                streamedChars: 0,
+                requesting: false,
+                shownOutput: prevTokens?.shownOutput,
+            });
             // The window: reported by Claude Code for this model, a larger one
             // proven by an accepted prompt, else the model-name table
             // (context-reading.ts). Unknown stays unknown.
@@ -1051,16 +1048,15 @@ export function update(
         }
 
         case "TokensOut": {
-            const next = {
+            // The latest call's exact output (message_delta, at the call's
+            // end): it replaces the call's streamed estimate. Everything else
+            // carries over from its TokensIn.
+            const next = withShownOutput({
+                ...state.turnTokens,
                 input: state.turnTokens?.input ?? 0,
                 output: command.output,
-                // Preserve the breakdown from the last TokensIn — TokensOut
-                // never carries its own, only replaces `output`.
-                freshInput: state.turnTokens?.freshInput,
-                cacheCreation: state.turnTokens?.cacheCreation,
-                cacheRead: state.turnTokens?.cacheRead,
-                contextBaseline: state.turnTokens?.contextBaseline,
-            };
+                streamedChars: 0,
+            });
             const nextState = bumpEvent(
                 { ...state, turnTokens: next },
                 nowMs,
@@ -1070,6 +1066,23 @@ export function update(
                 { type: "tokens-updated", input: null, output: command.output },
             ];
             return { state: nextState, events };
+        }
+
+        // The working row's counter (turnOutputTokens): an output estimate for
+        // the call still streaming, and the ↑/↓ phase. Not liveness events:
+        // the same lines already reach the reducer as StreamFlushObserved.
+        // Before the turn's first call there is nothing to count yet.
+        case "OutputStreamed": {
+            const t = state.turnTokens;
+            if (!t || command.chars <= 0) return { state, events: [] };
+            const next = withShownOutput({ ...t, streamedChars: (t.streamedChars ?? 0) + command.chars, requesting: false });
+            return { state: { ...state, turnTokens: next }, events: [] };
+        }
+
+        case "RequestStarted": {
+            const t = state.turnTokens;
+            if (!t || t.requesting) return { state, events: [] };
+            return { state: { ...state, turnTokens: { ...t, requesting: true } }, events: [] };
         }
 
         case "RequestStop": {
@@ -1828,23 +1841,23 @@ function bumpEvent(
 
 /**
  * Merge the turn's token totals into sessionStats. Prefer the result
- * event's whole-turn totals over the live turn-tokens, which hold only
- * the last message_start/message_delta (TokensIn/TokensOut overwrite),
- * fall back to the live turn-tokens only when the result reported no/zero
- * usage (hence `||`, not `??`). Codex emits usage only on the stats
- * branch (no live tokens), so it's unaffected.
+ * event's whole-turn totals; fall back to the live turn-tokens only when
+ * the result reported no/zero usage (hence `||`, not `??`). The live
+ * input is the last call's, the live output the turn's total
+ * (turnOutputTokens). Codex emits usage only on the stats branch (no
+ * live tokens), so it's unaffected.
  */
 function mergeStats(
     stats: AgentPaneState["sessionStats"],
     tokens: AgentPaneState["turnTokens"],
 ): AgentPaneState["sessionStats"] {
-    const added = turnAddedInput(tokens);
+    // The turn's output over all its calls, as the working row counted it.
+    const liveOutput = turnOutputTokens(tokens);
     if (stats) {
         return {
             ...stats,
             input_tokens: stats.input_tokens || tokens?.input,
-            added_input_tokens: added ?? stats.added_input_tokens,
-            output_tokens: stats.output_tokens || tokens?.output,
+            output_tokens: stats.output_tokens || liveOutput,
             // Same fallback logic as input_tokens/output_tokens above,
             // applied to the cache breakdown — prefer the result event's
             // own breakdown, fall back to the live turn-tokens' breakdown.
@@ -1856,8 +1869,7 @@ function mergeStats(
     if (tokens) {
         return {
             input_tokens: tokens.input,
-            added_input_tokens: added,
-            output_tokens: tokens.output,
+            output_tokens: liveOutput,
             fresh_input_tokens: tokens.freshInput,
             cache_creation_input_tokens: tokens.cacheCreation,
             cache_read_input_tokens: tokens.cacheRead,

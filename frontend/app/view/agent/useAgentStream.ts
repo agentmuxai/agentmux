@@ -42,7 +42,7 @@ import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
-import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import { mainAgentRequestStarted, mainAgentStreamedChars, mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
 import { createSessionStartDetector } from "./session-start";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
@@ -314,6 +314,16 @@ export function useAgentStream({
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
+    // Output characters the main agent streamed since the last dispatch, for
+    // the working row's counter: one OutputStreamed per batch of lines, not
+    // per delta. Flushed before any call boundary so a call's characters are
+    // never credited to the next one.
+    let pendingStreamedChars = 0;
+    const flushStreamedChars = () => {
+        if (pendingStreamedChars <= 0) return;
+        model.dispatchPane({ type: "OutputStreamed", chars: pendingStreamedChars });
+        pendingStreamedChars = 0;
+    };
 
     const memoryReinjectionController = createMemoryReinjectionController({
         contextWindow: currentContextWindow,
@@ -824,10 +834,18 @@ export function useAgentStream({
                     // parent_tool_use_id and have their own context and model
                     // (main-agent-usage.ts).
                     const usage = readsUsage ? mainAgentUsage(rawEvent) : null;
+                    if (readsUsage) {
+                        pendingStreamedChars += mainAgentStreamedChars(rawEvent);
+                        if (mainAgentRequestStarted(rawEvent)) {
+                            flushStreamedChars();
+                            model.dispatchPane({ type: "RequestStarted" });
+                        }
+                    }
                     // A call already counted from its message_start (its
                     // assistant frames repeat the same usage).
                     const sameCall = usage?.kind === "in" && usage.messageId != null && usage.messageId === lastUsageMessageId;
                     if (usage?.kind === "in" && !sameCall) {
+                        flushStreamedChars();
                         lastUsageMessageId = usage.messageId;
                         if (awaitingCompactionSize) {
                             // Through the raw queue: the first call after a
@@ -867,6 +885,7 @@ export function useAgentStream({
                         // for providers with no structured event (codex/gemini/copilot).
                         pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
                     } else if (usage?.kind === "out") {
+                        flushStreamedChars();
                         model.dispatchPane({ type: "TokensOut", output: usage.output });
                     }
                     // The windows Claude Code reports for the models this turn
@@ -922,6 +941,7 @@ export function useAgentStream({
                         parser.releaseHeld();
                         pushReleasedJekts();
                         queue.flushNow();
+                        flushStreamedChars();
                         finalizeTurn(event.stats ?? null);
                         // AFTER finalizeTurn — turnPhase is now genuinely
                         // Done for whatever turn just ended (real or
@@ -1003,6 +1023,7 @@ export function useAgentStream({
                 }
             }
             parser.setSourceLine(null);
+            flushStreamedChars();
 
             // Schedule a single flush per animation frame
             if (queue.hasPendingNewOrUpdated()) {
