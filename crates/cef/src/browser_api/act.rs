@@ -177,9 +177,24 @@ const READ_BACK: &str = r#"function () {
 }"#;
 
 /// The focused element's DOM facts, for the secret-field guard on typing.
+/// Descends through shadow roots and same-origin frames to the element that
+/// really has focus. A focused frame it can't look into (cross-origin) comes
+/// back as `uninspectable`: the guard fails closed on it.
 const FOCUSED_FACTS: &str = r#"(() => {
-  let el = document.activeElement;
-  while (el && el.shadowRoot && el.shadowRoot.activeElement) el = el.shadowRoot.activeElement;
+  let doc = document;
+  let el = doc.activeElement;
+  for (let depth = 0; el && depth < 16; depth++) {
+    if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; continue; }
+    if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
+      let inner = null;
+      try { inner = el.contentDocument; } catch (e) { inner = null; }
+      if (!inner) return { uninspectable: true, localName: el.localName, attributes: [] };
+      doc = inner;
+      el = doc.activeElement;
+      continue;
+    }
+    break;
+  }
   if (!el) return null;
   const attrs = [];
   for (const a of el.attributes) { attrs.push(a.name, a.value); }
@@ -293,8 +308,14 @@ pub async fn refuse_typing_into_secret_field(cdp: &mut CdpSession) -> Result<(),
         json!({ "expression": FOCUSED_FACTS, "contextId": ctx, "returnByValue": true }),
     )
     .await?;
-    let facts = v.pointer("/result/value").filter(|x| !x.is_null()).map(DomFacts::from_described);
-    if facts.as_ref().is_some_and(snapshot::is_secret) {
+    let raw = v.pointer("/result/value").filter(|x| !x.is_null());
+    if raw.and_then(|r| r.get("uninspectable")).and_then(|u| u.as_bool()) == Some(true) {
+        return Err("the focused field is inside a frame from another site, which AgentMux can't check: \
+                    it could be a password or card field (payment forms often are), so typing there is refused. \
+                    Ask the user to fill it in the pane."
+            .to_string());
+    }
+    if raw.map(DomFacts::from_described).as_ref().is_some_and(snapshot::is_secret) {
         return Err(SECRET_REFUSAL.to_string());
     }
     Ok(())
@@ -458,6 +479,11 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
             }
             let text = req.text.clone().ok_or("fill needs `text`")?;
             call_on(cdp, &obj, PREPARE_FILL, vec![]).await?;
+            // Focusing ran the page's own handlers, which could have turned
+            // the field into a secret one: check again before writing.
+            if describe(cdp, backend).await.as_ref().is_some_and(snapshot::is_secret) {
+                return Err(SECRET_REFUSAL.to_string());
+            }
             if text.is_empty() {
                 call_on(cdp, &obj, SET_VALUE, vec![json!("")]).await?;
             } else {

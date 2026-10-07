@@ -700,16 +700,18 @@ pub async fn dispatch_key(
         }
     }
 
-    if let Some(text) = &req.text {
-        // Never type into a password, one-time-code or card field
-        // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1). Only for a
-        // dedicated browser pane: AgentMux's own panes have no such fields.
-        if !scope_to_block {
-            if let Err(e) = super::act::refuse_typing_into_secret_field(&mut cdp).await {
-                let _ = cdp.close().await;
-                return ok_body(ApiResponse::err(e));
-            }
+    // Never type into, or erase, a password, one-time-code or card field
+    // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.1): text, and the
+    // named keys that write or delete. Only for a dedicated browser pane:
+    // AgentMux's own panes have no such fields.
+    let writes = req.text.is_some() || matches!(req.key.as_deref(), Some("Space") | Some("Backspace"));
+    if writes && !scope_to_block {
+        if let Err(e) = super::act::refuse_typing_into_secret_field(&mut cdp).await {
+            let _ = cdp.close().await;
+            return ok_body(ApiResponse::err(e));
         }
+    }
+    if let Some(text) = &req.text {
         // Input.insertText is atomic and handles IME / composition
         // correctly. Preferred over key-by-key dispatch for strings.
         if let Err(e) = cdp
