@@ -1174,14 +1174,6 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // AGENTMUX_AGENT_ID exported (never a real agent-launched block, so
     // never seeded with frame:activebordercolor) no longer picks up a color
     // from that alone — only real agents (or an explicit hue pick) do.
-    // The pane's identity color, exactly what its tab's underline shows
-    // (PaneChrome's tabColors), for content that should match the tab: the
-    // agent pane's working-status text. Unset when the pane has none, so
-    // consumers fall back with var(--block-identity-color, <default>).
-    const blockIdentityColor = createMemo(() =>
-        props.preview ? undefined : computeBlockIdentityColor(blockData()?.meta, isLightThemeActive())
-    );
-
     const blockAgentColor = createMemo(() => {
         if (!props.preview && paneTabCapability(blockData()?.meta?.view, "hueBorder")) {
             const isLightTheme = isLightThemeActive();
@@ -1192,6 +1184,14 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         }
         return null;
     });
+
+    // The pane's identity color, exactly what its tab's underline shows
+    // (PaneChrome's tabColors), for content that should match the tab: the
+    // agent pane's working-status text. Unset when the pane has none, so
+    // consumers fall back with var(--block-identity-color, <default>).
+    const blockIdentityColor = createMemo(() =>
+        props.preview ? undefined : computeBlockIdentityColor(blockData()?.meta, isLightThemeActive())
+    );
 
     createEffect(() => {
         if (!manageConnection) {
