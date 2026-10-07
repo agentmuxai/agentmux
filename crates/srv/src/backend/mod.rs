@@ -3,6 +3,7 @@
 
 
 pub mod agent_admission;
+pub mod agent_state;
 pub mod attachments;
 pub mod agent_color;
 pub mod agent_config;

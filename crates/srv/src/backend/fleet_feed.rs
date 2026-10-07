@@ -14,7 +14,10 @@
 //! decision 2026-10-06, agentmux-mobile's
 //! SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5.1) where each agent
 //! runs (`agent_kinds`), how many channels this machine runs, its platform
-//! and this install's id. The cloud presence publisher
+//! and this install's id; and (owner decision D1, 2026-10-07, agentmux-mobile's
+//! SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §3.2, §13.1) each agent's
+//! state and since when (`agent_status`, `backend::agent_state`), with this
+//! machine's clock (`now_ms`). The cloud presence publisher
 //! (`muxbus::wan_presence`) reads the same snapshot.
 
 use std::collections::BTreeMap;
@@ -27,6 +30,8 @@ use axum::body::Bytes;
 use futures_util::Stream;
 use serde::Serialize;
 use tokio::sync::watch;
+
+use crate::backend::agent_state::AgentStatus;
 
 /// How often the name set is compared.
 pub const CHANGE_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -46,8 +51,8 @@ pub type AgentKind = &'static str;
 
 /// One state of the fleet. `rev` starts at 1 and goes up by one on every
 /// change of any field below; `agents` is sorted case-insensitively and
-/// de-duplicated; `agent_kinds` has an entry for each of `agents` whose kind
-/// is known.
+/// de-duplicated; `agent_kinds` and `agent_status` have an entry for each of
+/// `agents` whose kind or state is known.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FleetSnapshot {
     pub rev: u64,
@@ -55,14 +60,17 @@ pub struct FleetSnapshot {
     pub agent_kinds: Arc<BTreeMap<String, AgentKind>>,
     /// This channel plus the other running channels of this machine, 1..=99.
     pub channels_running: u32,
+    pub agent_status: Arc<BTreeMap<String, AgentStatus>>,
 }
 
 /// What one look at the instance found: each reachable agent with its kind,
-/// `None` when its block couldn't be read, and the channel count.
+/// `None` when its block couldn't be read, the channel count, and the state
+/// of each agent that has one, by name.
 #[derive(Debug, Clone, Default)]
 pub struct FleetObservation {
     pub agents: Vec<(String, Option<AgentKind>)>,
     pub channels_running: u32,
+    pub agent_status: BTreeMap<String, AgentStatus>,
 }
 
 /// The `/agentmux/fleet` body, in the contract's field order.
@@ -79,6 +87,8 @@ struct FleetBody<'a> {
     install_id: Option<&'a str>,
     channels_running: u32,
     agent_kinds: &'a BTreeMap<String, AgentKind>,
+    now_ms: u64,
+    agent_status: &'a BTreeMap<String, AgentStatus>,
 }
 
 pub struct FleetFeed {
@@ -131,6 +141,7 @@ impl FleetFeed {
             agents: Arc::new(Vec::new()),
             agent_kinds: Arc::new(BTreeMap::new()),
             channels_running: 1,
+            agent_status: Arc::new(BTreeMap::new()),
         });
         Self {
             epoch,
@@ -186,8 +197,15 @@ impl FleetFeed {
         format!("{}:{}", self.epoch, snapshot.rev)
     }
 
-    /// The `/agentmux/fleet` body, on one line.
+    /// The `/agentmux/fleet` body, on one line, with `now_ms` read as it is
+    /// served, so a peer can tell how long a state has held without trusting
+    /// its own clock against this one. `now_ms` is not part of the snapshot:
+    /// it never bumps `rev` or changes the `ETag`.
     pub fn body_json(&self, snapshot: &FleetSnapshot) -> String {
+        self.body_json_at(snapshot, agentmux_common::time::now_ms_u64())
+    }
+
+    fn body_json_at(&self, snapshot: &FleetSnapshot, now_ms: u64) -> String {
         serde_json::to_string(&FleetBody {
             epoch: &self.epoch,
             rev: snapshot.rev,
@@ -199,20 +217,25 @@ impl FleetFeed {
             install_id: self.install_id.as_deref(),
             channels_running: snapshot.channels_running,
             agent_kinds: &snapshot.agent_kinds,
+            now_ms,
+            agent_status: &snapshot.agent_status,
         })
         .unwrap_or_default()
     }
 
     /// Record the current fleet; bumps `rev` and wakes every stream only if
-    /// it differs from the last one (names, kinds or channel count). Returns
-    /// whether it did.
+    /// it differs from the last one (names, kinds, channel count or any
+    /// agent's state). Returns whether it did.
     pub fn observe_fleet(&self, observation: FleetObservation) -> bool {
         let (names, kinds) = normalize_agents(observation.agents);
         let channels_running = observation.channels_running.clamp(1, 99);
+        let mut status = observation.agent_status;
+        status.retain(|name, _| names.contains(name));
         self.tx.send_if_modified(|current| {
             if *current.agents == names
                 && *current.agent_kinds == kinds
                 && current.channels_running == channels_running
+                && *current.agent_status == status
             {
                 return false;
             }
@@ -220,6 +243,7 @@ impl FleetFeed {
             current.agents = Arc::new(names);
             current.agent_kinds = Arc::new(kinds);
             current.channels_running = channels_running;
+            current.agent_status = Arc::new(status);
             true
         })
     }
@@ -232,6 +256,7 @@ impl FleetFeed {
         self.observe_fleet(FleetObservation {
             agents: names.into_iter().map(|n| (n, None)).collect(),
             channels_running,
+            agent_status: BTreeMap::new(),
         })
     }
 
@@ -353,6 +378,7 @@ impl Drop for StreamSlot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::agent_state::AgentState;
     use futures_util::StreamExt;
 
     fn feed() -> Arc<FleetFeed> {
@@ -430,6 +456,19 @@ mod tests {
         FleetObservation {
             agents: agents.iter().map(|(n, k)| (n.to_string(), *k)).collect(),
             channels_running,
+            ..Default::default()
+        }
+    }
+
+    fn status(state: AgentState, since_ms: u64) -> AgentStatus {
+        AgentStatus { state, since_ms }
+    }
+
+    fn with_status(agents: &[&str], status: &[(&str, AgentStatus)]) -> FleetObservation {
+        FleetObservation {
+            agents: agents.iter().map(|n| (n.to_string(), Some("host"))).collect(),
+            channels_running: 1,
+            agent_status: status.iter().map(|(n, s)| (n.to_string(), *s)).collect(),
         }
     }
 
@@ -451,6 +490,8 @@ mod tests {
             "os",
             "channels_running",
             "agent_kinds",
+            "now_ms",
+            "agent_status",
         ]);
         want.sort();
         assert_eq!(keys_of(&body), want, "no install_id without a WAN identity");
@@ -463,6 +504,47 @@ mod tests {
         assert_eq!(v["os"], crate::backend::host_os::local_os());
         assert_eq!(v["channels_running"], 3);
         assert_eq!(v["agent_kinds"], serde_json::json!({"AgentY": "host", "Clamk": "container"}));
+        assert_eq!(v["agent_status"], serde_json::json!({}));
+        assert!(v["now_ms"].as_u64().unwrap() > 1_700_000_000_000, "this machine's clock, in ms");
+    }
+
+    #[test]
+    fn agent_status_carries_each_known_state_and_leaves_the_rest_out() {
+        let f = feed();
+        f.observe_fleet(with_status(
+            &["AgentY", "Camper", "Clamk"],
+            &[
+                ("AgentY", status(AgentState::Working, 1_000)),
+                ("Camper", status(AgentState::Waiting, 2_000)),
+                ("Gone", status(AgentState::Idle, 3_000)),
+            ],
+        ));
+        let v: serde_json::Value = serde_json::from_str(&f.body_json_at(&f.snapshot(), 5_000)).unwrap();
+        assert_eq!(v["now_ms"], 5_000);
+        assert_eq!(
+            v["agent_status"],
+            serde_json::json!({
+                "AgentY": {"state": "working", "since_ms": 1_000},
+                "Camper": {"state": "waiting", "since_ms": 2_000},
+            }),
+            "Clamk has no state; Gone is not listed"
+        );
+    }
+
+    #[test]
+    fn a_state_change_bumps_rev() {
+        let f = feed();
+        assert!(f.observe_fleet(with_status(&["AgentY"], &[("AgentY", status(AgentState::Idle, 1))])));
+        assert_eq!(f.snapshot().rev, 2);
+        assert!(
+            !f.observe_fleet(with_status(&["AgentY"], &[("AgentY", status(AgentState::Idle, 1))])),
+            "same state, same start"
+        );
+        assert!(f.observe_fleet(with_status(&["AgentY"], &[("AgentY", status(AgentState::Working, 9))])));
+        assert_eq!(f.snapshot().rev, 3);
+        assert!(f.observe_fleet(with_status(&["AgentY"], &[])), "state no longer known");
+        assert_eq!(f.snapshot().rev, 4);
+        assert!(f.snapshot().agent_status.is_empty());
     }
 
     #[test]
@@ -516,15 +598,17 @@ mod tests {
         let mut s = Box::pin(f.open_stream(None).unwrap());
         assert_eq!(next_chunk(&mut s).await, "retry: 3000\n\n");
         let event = next_chunk(&mut s).await;
-        let snap = f.snapshot();
-        assert_eq!(
-            event,
-            format!(
-                "event: fleet\nid: {}:2\ndata: {}\n\n",
-                f.epoch(),
-                f.body_json(&snap)
-            )
-        );
+        let head = format!("event: fleet\nid: {}:2\ndata: ", f.epoch());
+        let data = event
+            .strip_prefix(&head)
+            .and_then(|rest| rest.strip_suffix("\n\n"))
+            .unwrap_or_else(|| panic!("{event}"));
+        let mut got: serde_json::Value = serde_json::from_str(data).unwrap();
+        let now_ms = got["now_ms"].as_u64().expect("now_ms");
+        got["now_ms"] = serde_json::json!(0);
+        let want: serde_json::Value = serde_json::from_str(&f.body_json_at(&f.snapshot(), 0)).unwrap();
+        assert_eq!(got, want);
+        assert!(now_ms > 0);
     }
 
     #[tokio::test]
@@ -599,6 +683,7 @@ mod tests {
             move || FleetObservation {
                 agents: read.lock().iter().map(|n| (n.clone(), None)).collect(),
                 channels_running: 1,
+                ..Default::default()
             },
             token.clone(),
         );

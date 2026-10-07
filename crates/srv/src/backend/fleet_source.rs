@@ -5,7 +5,9 @@
 //! feed, the UDP and mDNS records and the cloud presence record
 //! (agentmux-mobile's SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5–6):
 //! each agent's kind, how many channels this machine is running, and this
-//! install's id.
+//! install's id. Also each agent's state and since when
+//! (`backend::agent_state`, agentmux-mobile's
+//! SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §3).
 //!
 //! The fleet feed's change detection calls [`FleetSource::observe`] once a
 //! second. The LAN replies, which have no fleet feed in hand, read the
@@ -17,6 +19,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::backend::agent_state::{AgentState, SinceTracker};
 use crate::backend::fleet_feed::{AgentKind, FleetObservation};
 use crate::backend::reactive::registry::AgentEntry;
 use crate::backend::storage::store::Store;
@@ -84,6 +87,7 @@ pub fn kinds_by_name<'a>(
 
 type AgentList = Box<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 type KindOfBlock = Box<dyn Fn(&str) -> Option<AgentKind> + Send + Sync>;
+type StateOfBlock = Box<dyn Fn(&str) -> Option<AgentState> + Send + Sync>;
 type RegistryRead = Box<dyn Fn() -> Vec<AgentEntry> + Send + Sync>;
 
 /// The fleet feed's view of this instance.
@@ -91,6 +95,11 @@ pub struct FleetSource {
     /// `(agent name, block id)` of every reachable agent.
     agents: AgentList,
     kind_of_block: KindOfBlock,
+    /// The block's state now (`agent_state::current_state`); read on every
+    /// look, unlike the kind.
+    state_of_block: StateOfBlock,
+    /// When each state began; a block no longer listed is forgotten.
+    since: &'static SinceTracker,
     shared_registry: RegistryRead,
     own_channel: String,
     own_url: String,
@@ -108,6 +117,7 @@ impl FleetSource {
         mstore: Arc<Store>,
         own_url: String,
     ) -> Self {
+        let state_store = Arc::clone(&mstore);
         Self::new(
             Box::new(move || {
                 handler
@@ -117,6 +127,8 @@ impl FleetSource {
                     .collect()
             }),
             Box::new(move |block_id| crate::backend::operator_config_seed::agent_kind_of_block(&mstore, block_id)),
+            Box::new(move |block_id| crate::backend::agent_state::current_state(&state_store, block_id)),
+            crate::backend::agent_state::global_tracker(),
             Box::new(|| {
                 crate::registry::resolve_shared_reactive_dir()
                     .map(|dir| crate::backend::reactive::registry::list_all_shared(&dir))
@@ -130,6 +142,8 @@ impl FleetSource {
     fn new(
         agents: AgentList,
         kind_of_block: KindOfBlock,
+        state_of_block: StateOfBlock,
+        since: &'static SinceTracker,
         shared_registry: RegistryRead,
         own_channel: String,
         own_url: String,
@@ -137,6 +151,8 @@ impl FleetSource {
         Self {
             agents,
             kind_of_block,
+            state_of_block,
+            since,
             shared_registry,
             own_channel,
             own_url,
@@ -148,6 +164,15 @@ impl FleetSource {
     /// One look. Blocking: reads the store and the registry directory.
     pub fn observe(&self) -> FleetObservation {
         let listed = (self.agents)();
+        self.since.retain(|block_id| listed.iter().any(|(_, b)| b == block_id));
+        let now_ms = agentmux_common::time::now_ms_u64();
+        let agent_status = listed
+            .iter()
+            .filter_map(|(name, block_id)| {
+                let status = self.since.record(block_id, (self.state_of_block)(block_id), now_ms)?;
+                Some((name.clone(), status))
+            })
+            .collect();
         let agents = {
             let mut cache = self.kinds.lock();
             cache.retain(|block_id, _| listed.iter().any(|(_, b)| b == block_id));
@@ -171,6 +196,7 @@ impl FleetSource {
         FleetObservation {
             agents,
             channels_running: self.channels_running(),
+            agent_status,
         }
     }
 
@@ -262,6 +288,8 @@ mod tests {
                     _ => None,
                 }
             }),
+            Box::new(|_| None),
+            tracker(),
             Box::new(Vec::new),
             "stable".into(),
             String::new(),
@@ -279,5 +307,56 @@ mod tests {
         assert_eq!(source.observe().agents[1], ("Late".to_string(), Some("host")));
         source.observe();
         assert_eq!(reads.load(Ordering::SeqCst), 4, "both cached now");
+    }
+
+    /// A tracker of the test's own, not the live one the names route shares.
+    fn tracker() -> &'static SinceTracker {
+        Box::leak(Box::new(SinceTracker::default()))
+    }
+
+    #[test]
+    fn states_are_read_every_look_and_keep_their_start_while_unchanged() {
+        let states = Arc::new(parking_lot::Mutex::new(HashMap::from([
+            ("b1".to_string(), AgentState::Working),
+            ("b2".to_string(), AgentState::Idle),
+        ])));
+        let read = states.clone();
+        let listed = Arc::new(parking_lot::Mutex::new(vec![
+            ("AgentX".to_string(), "b1".to_string()),
+            ("Camper".to_string(), "b2".to_string()),
+            ("Term".to_string(), "b3".to_string()),
+        ]));
+        let list = listed.clone();
+        let since = tracker();
+        let source = FleetSource::new(
+            Box::new(move || list.lock().clone()),
+            Box::new(|_| Some("host")),
+            Box::new(move |b| read.lock().get(b).copied()),
+            since,
+            Box::new(Vec::new),
+            "stable".into(),
+            String::new(),
+        );
+        let first = source.observe().agent_status;
+        assert_eq!(
+            first.keys().collect::<Vec<_>>(),
+            ["AgentX", "Camper"],
+            "the agent with no state is left out"
+        );
+        assert_eq!(first["AgentX"].state, AgentState::Working);
+
+        std::thread::sleep(Duration::from_millis(5));
+        let second = source.observe().agent_status;
+        assert_eq!(second, first, "nothing changed, the starts held");
+
+        states.lock().insert("b1".into(), AgentState::Idle);
+        let third = source.observe().agent_status;
+        assert_eq!(third["AgentX"].state, AgentState::Idle);
+        assert!(third["AgentX"].since_ms > first["AgentX"].since_ms, "a change starts again");
+        assert_eq!(third["Camper"], first["Camper"]);
+
+        listed.lock().remove(0);
+        source.observe();
+        assert_eq!(since.len(), 1, "an agent no longer listed is forgotten");
     }
 }

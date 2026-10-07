@@ -270,8 +270,8 @@ async fn main() {
     bootstrap::spawn_wal_checkpoint_loop(stdin_token.clone(), wal_mstore, wal_filestore);
 
     // The fleet feed's change detection (`backend::fleet_feed`): compares the
-    // reachable agents, their kinds and this machine's channel count once a
-    // second, stops with the same token.
+    // reachable agents, their kinds and states and this machine's channel
+    // count once a second, stops with the same token.
     Arc::clone(&fleet_feed).spawn_change_detection(move || fleet_source.observe(), stdin_token.clone());
 
     // The cloud presence record, published from the fleet feed's snapshot
