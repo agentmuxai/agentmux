@@ -171,6 +171,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/remote/host.rs", "&self.ssh_path", 1,
      "no-window: calls no_window()/creation_flags in this file"),
+    ("crates/srv/src/backend/remote/ssh.rs", "ssh", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/claude_layout.rs", "\"git\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/cli_prune.rs", "\"ps\"", 1,

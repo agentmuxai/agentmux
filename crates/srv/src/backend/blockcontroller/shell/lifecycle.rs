@@ -637,10 +637,22 @@ impl Controller for ShellController {
             _ => None,
         };
         // An SSH pane runs the system `ssh` (remote::ssh). Its cwd is a path on
-        // the remote host, handed to the remote shell, never set here.
+        // the remote host, handed to the remote shell, never set here. An
+        // agent's (its PtyShell, marked below) needs one that forces askpass.
         let ssh_plan = match crate::backend::remote::ConnTarget::parse(&conn_name) {
             Ok(crate::backend::remote::ConnTarget::Ssh(dest)) => {
-                crate::backend::remote::ssh::binary().map(|path| (path, dest))
+                let agents = !obj::meta_get_string(
+                    &block_meta,
+                    crate::backend::remote::askpass::META_KEY_AGENT_BLOCK,
+                    "",
+                )
+                .is_empty();
+                if agents {
+                    crate::backend::remote::ssh::binary()
+                } else {
+                    crate::backend::remote::ssh::binary_for_user()
+                }
+                .map(|path| (path, dest))
             }
             _ => None,
         };
