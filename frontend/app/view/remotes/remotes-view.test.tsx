@@ -256,7 +256,7 @@ describe("RemotesView", () => {
         );
     });
 
-    it("opens the ssh config file that defines the host", async () => {
+    it("opens the ssh config file that defines the host, at its Host line", async () => {
         const { model } = await renderWith([remote("db1")]);
         rpc.RemoteSshLocateCommand.mockResolvedValueOnce({ path: "/home/u/.ssh/config", line: 12 });
         fireEvent.click(document.querySelector('[data-remote="db1"]')!);
@@ -264,10 +264,10 @@ describe("RemotesView", () => {
         await new Promise((r) => setTimeout(r, 0));
         expect(tabRpcCall).toHaveBeenCalledWith(
             "pane.open",
-            expect.objectContaining({ view: "editor", file: "/home/u/.ssh/config" }),
+            expect.objectContaining({ view: "editor", file: "/home/u/.ssh/config", line: 12 }),
             {}
         );
-        expect(model.notice()).toContain("line 12");
+        expect(model.notice()).toBeFalsy();
     });
 
     it("lists the agents allowed on a host, each with Revoke", async () => {

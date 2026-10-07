@@ -54,6 +54,7 @@ import { openPendingFiles } from "./pending-open-files";
 import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { readZoom } from "@/app/store/zoom-factor";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
+import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -194,6 +195,9 @@ export class EditorViewModel {
     private ctx: PaneTabHostContext;
     zoomAtom!: Accessor<number>;
 
+    /** The line pane.open asked the initial file to open at, until the view
+     *  has moved the cursor there (takeOpenAtLine). */
+    private _openAtLine: { path: string; line: number } | null = null;
     /** Tabs that started loading via openFile — used so concurrent dispatches
      *  for the same path don't double-fetch. */
     private _loadingPaths = new Set<string>();
@@ -466,6 +470,13 @@ export class EditorViewModel {
         // with that one file.
         const restored = hydrateDocTabs(meta?.[DOC_TABS_META], deserializeEditorBuffer);
         const legacyFile = meta?.[META_LEGACY_FILE];
+        // A line to open `file` at, once (pane.open's `line`). Cleared at once,
+        // so a reload of the pane opens where the user left it instead.
+        const openAt = readOpenAtLine(meta, legacyFile);
+        if (openAt != null && typeof legacyFile === "string") {
+            this._openAtLine = { path: canonicalizePath(legacyFile), line: openAt };
+        }
+        if (meta?.[META_OPEN_AT_LINE] != null) void this.persistMeta({ [META_OPEN_AT_LINE]: null });
         if (restored) {
             this._docTabsWritten = JSON.stringify(meta?.[DOC_TABS_META]);
             dispatch(blockId, { type: "RestoreDocTabs", doc: restored, source: "hydrate" });
@@ -497,6 +508,15 @@ export class EditorViewModel {
         // Reuse: pending files are handled by the reactive createEffect
         // above (covers this initial-mount case too — no separate one-shot
         // check needed here, and having both would double-open).
+    }
+
+    /** The line to put the cursor on now that `path`'s content is in the
+     *  editor, once; undefined for any other file or while it is loading. */
+    takeOpenAtLine(path: string | undefined): number | undefined {
+        const pending = this._openAtLine;
+        if (!pending || !path || this.loadingAtom() || canonicalizePath(path) !== pending.path) return undefined;
+        this._openAtLine = null;
+        return pending.line;
     }
 
     // ── Event subscription (used by editor-view.tsx for CodeMirror state
