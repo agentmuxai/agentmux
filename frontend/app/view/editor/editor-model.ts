@@ -55,6 +55,7 @@ import { showBlockWithoutFocus } from "@/app/util/reveal-block";
 import { readZoom } from "@/app/store/zoom-factor";
 import { isSshConnection } from "@/app/view/term/ssh-connection";
 import { META_OPEN_AT_LINE, readOpenAtLine } from "./open-at-line";
+import { openRemoteFile } from "./open-from-remote";
 
 const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
@@ -182,6 +183,9 @@ export class EditorViewModel {
     // the user explicitly turns it off via the right-click menu.
     private _wordWrap = createSignal<boolean>(true);
     wordWrapAtom: Accessor<boolean> = this._wordWrap[0];
+    /** "Open from remote…" is showing its picker (open-from-remote-modal.tsx). */
+    private _openFromRemote = createSignal<boolean>(false);
+    openFromRemoteAtom: Accessor<boolean> = this._openFromRemote[0];
 
     // Per-tab editor mode: "preview" | "source" | "split".
     // Not persisted — tabs return to their language-appropriate default on reopen.
@@ -1362,7 +1366,19 @@ export class EditorViewModel {
                 checked: this.wordWrapAtom(),
                 click: () => void this.toggleWordWrap(),
             },
+            { type: "separator" },
+            { label: "Open from remote…", click: () => this.setOpenFromRemote(true) },
         ];
+    }
+
+    /** Shows or hides the "Open from remote…" picker. */
+    setOpenFromRemote(open: boolean): void {
+        this._openFromRemote[1](open);
+    }
+
+    /** Opens `path` on `host` (open-from-remote.ts), from the picker. */
+    openFromRemote(host: string, path: string): Promise<void> {
+        return openRemoteFile(this, host, path);
     }
 
     setTreeWidth(width: number): void {
