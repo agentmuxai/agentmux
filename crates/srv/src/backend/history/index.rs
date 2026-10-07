@@ -702,22 +702,29 @@ impl SessionIndex {
         if last > 0 && now - last < META_CACHE_WRITE_INTERVAL_MS {
             return;
         }
+        let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
         let write = || -> std::io::Result<()> {
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
             let body = serde_json::to_vec(&MetaCacheFileRef { version: META_CACHE_VERSION, entries: cache })
                 .map_err(std::io::Error::other)?;
-            let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
             std::fs::write(&tmp, body)?;
             std::fs::rename(&tmp, path)
         };
+        // Recorded whether or not the write works: an unwritable cache (a
+        // read-only shared dir, a full disk) then waits out the interval too,
+        // instead of being serialized and retried on every refresh — and
+        // searches refresh.
+        self.cache_written_at_ms.store(now.max(1), Ordering::Release);
         match write() {
-            Ok(()) => {
-                self.cache_written_at_ms.store(now.max(1), Ordering::Release);
-                tracing::debug!(entries = cache.len(), "history: saved the metadata cache");
+            Ok(()) => tracing::debug!(entries = cache.len(), "history: saved the metadata cache"),
+            Err(e) => {
+                // Never leave a partial or orphaned temporary file (tens of MB,
+                // one per srv process) in the shared dir.
+                let _ = std::fs::remove_file(&tmp);
+                tracing::warn!(error = %e, path = %path.display(), "history: couldn't save the metadata cache");
             }
-            Err(e) => tracing::warn!(error = %e, path = %path.display(), "history: couldn't save the metadata cache"),
         }
     }
 
@@ -1985,6 +1992,26 @@ mod refresh_tests {
         second.refresh();
         assert_eq!(a.take_extracted(), vec!["/h/b.jsonl", "/h/c.jsonl"], "a came from the saved cache");
         assert!(second.get_meta("a").is_some() && second.get_meta("c").is_some());
+    }
+
+    /// An unwritable cache location is tried once per interval, not on every
+    /// refresh, and leaves no temporary file behind.
+    #[test]
+    fn an_unwritable_cache_waits_out_the_interval_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("not-a-dir");
+        std::fs::write(&blocker, b"a file where the cache dir would be").unwrap();
+        let cache = blocker.join("session-meta-cache.json");
+        let a = ChangingAdapter::new(&[("/h/a.jsonl", 1)]);
+        let idx = index_over(&a).with_cache_file(cache.clone());
+        idx.refresh();
+        let first_try = idx.cache_written_at_ms.load(std::sync::atomic::Ordering::Acquire);
+        assert!(first_try > 0, "the failed attempt is recorded");
+        a.set(&[("/h/a.jsonl", 2)]);
+        idx.refresh();
+        assert_eq!(idx.cache_written_at_ms.load(std::sync::atomic::Ordering::Acquire), first_try, "not retried within the interval");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path()).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name()).collect();
+        assert_eq!(leftovers.len(), 1, "only the blocker file: {leftovers:?}");
     }
 
     #[test]
