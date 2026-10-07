@@ -4,7 +4,7 @@
 use crate::job_object::{create_job_object, JobHandle};
 use crate::host_spawn::spawn_host_supervised;
 use crate::logging::log;
-use crate::second_instance::{forward_open_new_window, ForwardError};
+use crate::second_instance::{forward_open_new_window, ForwardError, Handoff};
 use crate::show_fatal_dialog;
 use crate::supervisor::{
     HOST_RESTART_BUDGET, HOST_RESTART_WINDOW, SRV_RESTART_BUDGET, SRV_RESTART_WINDOW,
@@ -181,36 +181,40 @@ pub(crate) async fn run_windows(
                 std::process::exit(0);
             }
             if already_running {
-                match forward_open_new_window(&paths.data_dir, &dir_hash) {
+                let first = match forward_open_new_window(&paths.data_dir, &dir_hash) {
                     Ok(()) => {
                         log("forwarded open_new_window to existing instance — exiting 0");
                         std::process::exit(0);
                     }
-                    Err(ForwardError::Transient(reason)) => {
-                        // Transient race: the host is alive (pipe is
-                        // held by the first launcher) but its
-                        // forwarding hint isn't readable yet —
-                        // typically because the host is mid-CEF-init
-                        // and hasn't written `<data-dir>/ipc-port`
-                        // yet. Silent exit so the user isn't punished
-                        // for double-clicking quickly.
+                    Err(e) => e,
+                };
+                // The host didn't take it: still starting (no port file
+                // yet), or quitting (host gone; its launcher holds the pipe
+                // until srv has closed every agent). Wait for either.
+                log(&format!("forward failed: {} — waiting for the instance to start or finish quitting", first.reason()));
+                match crate::second_instance::await_running_instance(
+                    || ipc::server::bind_first_pipe_instance(&pipe_path).ok(),
+                    || forward_open_new_window(&paths.data_dir, &dir_hash),
+                    first,
+                ) {
+                    Handoff::Claimed(pipe) => {
+                        log("the previous instance has quit — starting");
+                        break 'claim pipe;
+                    }
+                    Handoff::Forwarded => {
+                        log("forwarded open_new_window to existing instance — exiting 0");
+                        std::process::exit(0);
+                    }
+                    Handoff::GaveUp(ForwardError::Transient(reason)) => {
+                        // Never published its port: exit silently, as for a
+                        // quick double-click.
                         log(&format!("forward transient: {} — exiting 0 silently", reason));
                         std::process::exit(0);
                     }
-                    Err(ForwardError::Fatal(reason)) => {
-                        // The host published its port but doesn't answer.
-                        // Usually the instance is quitting (its launcher holds
-                        // the pipe until srv has closed every agent): wait and
-                        // start fresh. Still held after that: hung, so show the
-                        // dialog rather than a silent no-op (#598).
-                        log(&format!("forward fatal: {} — waiting for the instance to finish quitting", reason));
-                        if let Some(pipe) = crate::second_instance::wait_to_claim(|| {
-                            ipc::server::bind_first_pipe_instance(&pipe_path).ok()
-                        }) {
-                            log("the previous instance has quit — starting");
-                            break 'claim pipe;
-                        }
-                        log("the instance is still running — surfacing dialog");
+                    Handoff::GaveUp(ForwardError::Fatal(reason)) => {
+                        // Published its port but never answered: hung. Show
+                        // the dialog rather than a silent no-op (#598).
+                        log(&format!("forward fatal: {} — surfacing dialog", reason));
                         show_fatal_dialog(
                             "AgentMux",
                             &format!(

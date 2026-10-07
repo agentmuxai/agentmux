@@ -453,10 +453,12 @@ phase changes one resource kind behind the same entry point.
     Teardowns run as tracked tasks (`agent_teardown::detached`), so a caller
     that stops waiting (the host gives `CloseWindow` 2 s) can't cut one
     short, and `app_exit` waits for every close in flight. The handoff: a
-    relaunch whose `open_new_window` forward fails `Fatal` (the quitting
-    instance's host is gone) waits for the old launcher to let go of the
-    socket/pipe (`second_instance::wait_to_claim`, `SRV_EXIT_WAIT` + 5 s) and
-    then starts fresh; past that it is treated as hung, as before.
+    relaunch whose `open_new_window` forward fails (the host is gone, and a
+    clean exit deletes its port file; or it is still starting) keeps at it
+    for `SRV_EXIT_WAIT` + 5 s (`second_instance::await_running_instance`):
+    it starts fresh as soon as the old launcher lets go of the socket/pipe,
+    or forwards as soon as the host answers. Past that, the old outcome:
+    silent exit, or the "not responding" dialog on Windows.
 - **O4. Verified: `Start-Process` does not escape the agent's job on today's
   Windows build.**
   - **Test:** 2026-10-01, from inside an agent's Bash on AgentMux 0.59. A
