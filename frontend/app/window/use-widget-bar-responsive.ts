@@ -31,6 +31,16 @@ const px = (v: string | null | undefined, fallback: number): number => {
     return Number.isFinite(n) ? n : fallback;
 };
 
+/** An element's layout width plus margins, unrounded, in its own CSS px. */
+function outerWidth(el: HTMLElement): number {
+    const cs = getComputedStyle(el);
+    let w = px(cs.width, el.offsetWidth);
+    if (cs.boxSizing !== "border-box") {
+        w += px(cs.paddingLeft, 0) + px(cs.paddingRight, 0) + px(cs.borderLeftWidth, 0) + px(cs.borderRightWidth, 0);
+    }
+    return w + px(cs.marginLeft, 0) + px(cs.marginRight, 0);
+}
+
 /**
  * The tab bar's width with every tab at its natural width, and with every tab
  * at its floor: tabs plus separators, the drag gutter after the last tab, and
@@ -47,8 +57,11 @@ function measureTabStrip(tabBar: HTMLElement, tabScroll: HTMLElement): { natural
         tabs++;
         natural += Math.min(max, Math.max(floor, px(w.style.getPropertyValue("--tab-natural-width"), TAB_NATURAL_FALLBACK_PX)));
     }
+    // Exact widths, not offsetWidth: separators are fractional at a non-100%
+    // zoom (v-separator's --snap-chrome), and rounding each one would add up
+    // past the tolerance with many tabs.
     let separators = 0;
-    for (const sep of tabScroll.querySelectorAll<HTMLElement>(":scope > .tab-separator")) separators += sep.offsetWidth;
+    for (const sep of tabScroll.querySelectorAll<HTMLElement>(":scope > .tab-separator")) separators += outerWidth(sep);
     const fill = tabScroll.querySelector<HTMLElement>(":scope > .tab-bar-fill");
     const gutter = fill ? px(getComputedStyle(fill).minWidth, DRAG_GUTTER_FALLBACK_PX) : DRAG_GUTTER_FALLBACK_PX;
     // Everything in the tab bar that isn't the scrolling strip (the hamburger).
