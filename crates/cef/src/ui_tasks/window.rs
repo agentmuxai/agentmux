@@ -1930,6 +1930,33 @@ wrap_task! {
                 }
             };
 
+            // Only reclaim inside the window the user is in. Both set_focus and
+            // Win32 SetFocus activate a background window, and that window's
+            // page then reclaims again on its own activation: with several
+            // windows open they took activation from each other forever
+            // (docs/incident/INCIDENT_2026_10_07_MULTI_WINDOW_FOCUS_STORM.md).
+            // Returning early also keeps defocus_all below from taking focus
+            // away from a pane in the active window.
+            #[cfg(target_os = "windows")]
+            {
+                use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GetForegroundWindow, GA_ROOT};
+                let target_root = browser_view_get_for_browser(Some(&mut browser))
+                    .and_then(|bv| bv.window())
+                    .map(|w| w.window_handle().0 as isize)
+                    .filter(|h| *h != 0);
+                let foreground_root = unsafe {
+                    let fg = GetForegroundWindow();
+                    if fg.is_null() { 0 } else { GetAncestor(fg, GA_ROOT) as isize }
+                };
+                if !reclaim_allowed(target_root, foreground_root) {
+                    tracing::debug!(
+                        label = %label,
+                        "[main-focus-reclaim] skipped: the window isn't the foreground window"
+                    );
+                    return;
+                }
+            }
+
             if let Some(host) = browser.host() {
                 host.set_focus(1);
                 tracing::info!("[main-focus-reclaim] host.set_focus(1) on label={}", label);
@@ -2013,6 +2040,43 @@ wrap_task! {
             // Defocus all live panes at the Chromium level too.
             self.state.browser_panes.defocus_all(&self.state);
         }
+    }
+}
+
+/// Whether `MainFocusReclaimTask` may act on a window whose top-level HWND is
+/// `target_root`, given the foreground window's root. Only the foreground
+/// window: reclaiming in any other window would activate it. A target whose
+/// top-level can't be resolved keeps the old behaviour (nothing to activate).
+#[cfg(target_os = "windows")]
+fn reclaim_allowed(target_root: Option<isize>, foreground_root: isize) -> bool {
+    match target_root {
+        None => true,
+        Some(t) => t == foreground_root,
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod reclaim_tests {
+    use super::reclaim_allowed;
+
+    #[test]
+    fn reclaims_in_the_foreground_window() {
+        assert!(reclaim_allowed(Some(0x100), 0x100));
+    }
+
+    #[test]
+    fn never_reclaims_in_a_background_window() {
+        assert!(!reclaim_allowed(Some(0x100), 0x200));
+    }
+
+    #[test]
+    fn never_reclaims_when_no_window_of_ours_is_foreground() {
+        assert!(!reclaim_allowed(Some(0x100), 0));
+    }
+
+    #[test]
+    fn keeps_the_old_behaviour_when_the_target_window_is_unknown() {
+        assert!(reclaim_allowed(None, 0x200));
     }
 }
 
