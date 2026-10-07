@@ -68,8 +68,8 @@ pub struct SessionMeta {
     /// see `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
     /// §4.4. An agent's own id is resolved from this via
     /// `db_agent_identity_links` (`Store::agent_identity_list_for_agent`),
-    /// not stored here directly — the same bundle can in principle be
-    /// shared, and this field reflects the filesystem fact (which bundle),
+    /// not stored here directly — the same account can in principle be
+    /// shared, and this field reflects the filesystem fact (which account),
     /// not a specific agent's claim on it.
     #[serde(default)]
     pub identity_id: String,
