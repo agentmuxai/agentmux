@@ -1,6 +1,6 @@
 # Pasting into a terminal from the right-click menu should leave the terminal ready for Enter
 
-**Status:** implemented — PR #4431: §5 layers 1–3 (see §8). §6 open items remain.
+**Status:** implemented — PR #4431: §5 layers 1–3 (see §8), verified live. One §6 open item remains (Ctrl+Shift+V at the OS level).
 **Date:** 2026-10-07 · **Author:** agent2 · **Base:** `main` @ `22857409f`
 **Related:** `SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md` (the one-click rule for inputs), `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` (`giveBlockFocus`), `SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (the menu every pane shares).
 
@@ -33,7 +33,7 @@ Reproduced in an isolated `task dev` build (main @ `22857409f`), driven over CDP
 
 A focus recorder (capture-phase `focusin`/`focusout`, with `HTMLElement.prototype.focus`/`blur` wrapped to log their callers) showed no programmatic focus or blur call from AgentMux code on the paste paths. The only focus calls were xterm's own (on click and on key-up). The menu-path loss is the browser's default blur on a mousedown on a non-focusable element, not code moving focus.
 
-Not reproduced reliably: in one run the first left-click from `<body>` onto the terminal left focus on `<body>`, and a second click was needed. A dedicated rerun focused the terminal on the first click. The first run read the page state between mousedown and mouseup, which may itself have caused it. Treat it as unconfirmed (§6).
+Not a bug, it turned out: in some runs the first left-click on the terminal left focus on `<body>`, and a second click was needed. That was the probe, not the app (§6).
 
 ## 4. Who else is affected
 
@@ -57,7 +57,7 @@ The `focusin` this produces in the block also fires `handleChildFocus` → `recl
 ## 6. Open items
 
 - **Ctrl+Shift+V at the OS level.** CDP injects keys inside the page, so it can't see Win32 keyboard focus. If the operator still loses Enter after Ctrl+Shift+V once §5 ships, the loss is at the Win32 level: the page still thinks the terminal is focused, but the OS routes keys to another HWND, for example a browser pane's. Clicking restores it because the click fires `reclaimWindowFocus`. Next step: reproduce on the operator's machine with real keys, and log `GetFocus()` before and after the paste. If confirmed, the paste path should call `reclaimWindowFocus` the way `handleChildFocus` does.
-- **The unconfirmed "first click doesn't focus"** from §3. Recheck with a clean probe (no state read mid-press) after §5. If it is real, it belongs with `SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS`.
+- **"First click doesn't focus"** from §3: resolved, a probe artifact. The probe sent Ctrl+Shift+V as one key carrying the Ctrl and Shift flags, and never the Ctrl and Shift key-ups. `registerControlShiftTracking` (`keymodel-dispatch.ts`) therefore stayed in layout mode, where every pane's `.block-mask` shows its number and takes pointer events. The next plain click landed on the mask, a non-focusable `<div>`, so focus fell to `<body>`, and `keyboardMouseDownHandler` left layout mode. After the probe sent the two key-ups, the masks went from 16 to 0, and a click focused each of five terminals on the first try. A real keyboard sends those key-ups, so users don't hit this. Anyone writing a CDP probe should send them too.
 
 ## 7. Method
 
@@ -82,3 +82,12 @@ All three layers of §5:
   - an opener that was removed isn't refocused.
 - `pane-actions.test.ts`: Paste calls `paste`, then `giveFocus`.
 - `shell-drawer-menu.test.ts`: Paste calls `paste`, then the terminal's `focus`.
+
+**Live**, in an isolated dev build of this branch, over CDP with real mouse and key events, on a plain terminal pane:
+
+| Step | Focus afterwards |
+|---|---|
+| Right-click in the terminal (menu open) | `TEXTAREA.xterm-helper-textarea` in the terminal |
+| Click the menu's **Paste** row | `TEXTAREA.xterm-helper-textarea` in the terminal, `document.hasFocus()` true (before the fix: `BODY`) |
+| Enter, with no click in between | the pasted command ran: it wrote a marker file, which a control run without the Enter didn't |
+| Ctrl+Shift+V | `TEXTAREA.xterm-helper-textarea` in the terminal: kept |
