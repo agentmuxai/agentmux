@@ -218,7 +218,8 @@ pub enum TrackingConfidence {
 /// the `SubprocessController` so children from any turn are all tracked
 /// under the same umbrella.
 /// `agent`: the block runs an agent, not a terminal a person types in (see
-/// `AgentProcessRegistry::ensure_tracker_kind`). Only Linux tells them apart.
+/// `AgentProcessRegistry::ensure_tracker_kind`). Every Unix tells them apart;
+/// Windows gives both a Job Object.
 pub fn new_tracker(block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
     #[cfg(windows)]
     {

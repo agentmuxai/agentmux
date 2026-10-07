@@ -66,10 +66,20 @@ fn with_snapshot<T>(after: Option<std::time::Instant>, f: impl FnOnce(&sysinfo::
     f(&snap.sys)
 }
 
-/// The members of one agent's tree in `sys`: `roots` and every process whose
-/// environment holds `tag` (`AGENTMUX_BLOCKID=<block>`), then all their
-/// descendants. Never srv itself.
-fn members_in(sys: &sysinfo::System, roots: &HashSet<u32>, tag: &OsString) -> Vec<TrackedProcess> {
+/// Is `p` the process recorded as started at `started_ms`? A PID the OS has
+/// reused for another process is not (start times are whole seconds).
+fn same_process(started_ms: u64, p: &sysinfo::Process) -> bool {
+    started_ms.abs_diff(p.start_time() * 1000) <= 1000
+}
+
+fn is_root(roots: &HashMap<u32, u64>, pid: u32, p: &sysinfo::Process) -> bool {
+    roots.get(&pid).is_some_and(|started| same_process(*started, p))
+}
+
+/// The members of one agent's tree in `sys`: its live `roots` (PID → start
+/// time) and every process whose environment holds `tag`
+/// (`AGENTMUX_BLOCKID=<block>`), then all their descendants. Never srv itself.
+fn members_in(sys: &sysinfo::System, roots: &HashMap<u32, u64>, tag: &OsString) -> Vec<TrackedProcess> {
     let me = std::process::id();
     let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
     for (pid, p) in sys.processes() {
@@ -81,7 +91,7 @@ fn members_in(sys: &sysinfo::System, roots: &HashSet<u32>, tag: &OsString) -> Ve
         .processes()
         .iter()
         .filter(|(_, p)| p.status() != sysinfo::ProcessStatus::Zombie)
-        .filter(|(pid, p)| roots.contains(&pid.as_u32()) || p.environ().iter().any(|e| e == tag))
+        .filter(|(pid, p)| is_root(roots, pid.as_u32(), p) || p.environ().iter().any(|e| e == tag))
         .map(|(pid, _)| pid.as_u32())
         .collect();
     let mut seen: HashSet<u32> = set.iter().copied().collect();
@@ -128,21 +138,27 @@ pub fn block_tag(block_id: &str) -> OsString {
 /// Every live process tagged with `block_id` (and its descendants), from a
 /// fresh scan. What a teardown reports as having escaped its tracker.
 pub fn tagged(block_id: &str) -> Vec<TrackedProcess> {
-    with_snapshot(Some(std::time::Instant::now()), |sys| members_in(sys, &HashSet::new(), &block_tag(block_id)))
+    with_snapshot(Some(std::time::Instant::now()), |sys| members_in(sys, &HashMap::new(), &block_tag(block_id)))
 }
 
 #[cfg(unix)]
 struct Inner {
     tag: OsString,
-    roots: Mutex<HashSet<u32>>,
+    /// The processes assigned to the agent (its CLI, one per spawn): PID →
+    /// start time (Unix ms). Pruned as they exit, so a reused PID never
+    /// counts.
+    roots: Mutex<HashMap<u32, u64>>,
 }
 
 #[cfg(unix)]
 impl Inner {
     fn members(&self, fresh: bool) -> Vec<TrackedProcess> {
-        let roots = self.roots.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let after = fresh.then(std::time::Instant::now);
-        with_snapshot(after, |sys| members_in(sys, &roots, &self.tag))
+        with_snapshot(after, |sys| {
+            let mut roots = self.roots.lock().unwrap_or_else(|e| e.into_inner());
+            roots.retain(|pid, started| sys.process(sysinfo::Pid::from_u32(*pid)).is_some_and(|p| same_process(*started, p)));
+            members_in(sys, &roots, &self.tag)
+        })
     }
 
     /// SIGKILL every member, leaves first, again until none is left (a
@@ -170,14 +186,22 @@ pub struct ScanTracker {
 #[cfg(unix)]
 impl ScanTracker {
     pub fn new(block_id: &str) -> Self {
-        Self { inner: Arc::new(Inner { tag: block_tag(block_id), roots: Mutex::new(HashSet::new()) }) }
+        Self { inner: Arc::new(Inner { tag: block_tag(block_id), roots: Mutex::new(HashMap::new()) }) }
     }
 }
 
 #[cfg(unix)]
 impl TrackerHandle for ScanTracker {
     fn assign_process(&self, pid: u32) -> Result<(), String> {
-        self.inner.roots.lock().unwrap_or_else(|e| e.into_inner()).insert(pid);
+        // Its start time, from a fresh scan: recorded with the PID so a later
+        // process reusing the PID is not taken for it.
+        let started = with_snapshot(Some(std::time::Instant::now()), |sys| {
+            sys.process(sysinfo::Pid::from_u32(pid)).map(|p| p.start_time() * 1000)
+        });
+        let Some(started) = started else {
+            return Err(format!("pid {pid} is not running"));
+        };
+        self.inner.roots.lock().unwrap_or_else(|e| e.into_inner()).insert(pid, started);
         Ok(())
     }
 
@@ -262,6 +286,22 @@ mod tests {
         assert!(wait_for(|| commands(&tracker).iter().any(|c| c == "sleep 4001")), "{:?}", commands(&tracker));
         tracker.kill_tree();
         assert!(wait_for(|| commands(&tracker).is_empty()), "left: {:?}", commands(&tracker));
+    }
+
+    /// A root that exited is forgotten: a later process reusing its PID is
+    /// not taken for the agent's.
+    #[test]
+    fn an_exited_root_is_pruned_and_its_pid_not_trusted() {
+        let block = format!("scan-test-prune-{}", std::process::id());
+        let tracker = ScanTracker::new(&block);
+        let mut root = spawn("exec sleep 4031", None);
+        tracker.assign_process(root.id()).unwrap();
+        assert!(wait_for(|| tracker.member_count() == 1));
+        let _ = root.kill();
+        let _ = root.wait();
+        assert!(wait_for(|| tracker.member_count() == 0));
+        assert!(tracker.inner.roots.lock().unwrap().is_empty(), "the exited root was pruned");
+        assert!(tracker.assign_process(root.id()).is_err(), "a PID that isn't running can't be assigned");
     }
 
     /// Descendants of an assigned root count even without the tag (a
