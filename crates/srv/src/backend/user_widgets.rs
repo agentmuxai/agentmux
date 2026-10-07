@@ -47,11 +47,22 @@ fn builtin_widgets() -> &'static HashMap<String, WidgetConfigType> {
     BUILTIN.get_or_init(|| wconfig::build_default_config().widgets)
 }
 
+/// Built-in widgets that were renamed: a user entry under the old key still
+/// replaces the widget, now under its new key. Mirrors `RENAMED_PINS` in
+/// frontend/app/window/action-widgets-config.ts, which reads pins the same way.
+const RENAMED_WIDGETS: &[(&str, &str)] = &[("defwidget@knowledge", "defwidget@memory")];
+
 /// The built-ins with the user's entries merged over them.
 pub fn merge_widgets(
     builtin: &HashMap<String, WidgetConfigType>,
-    user: HashMap<String, WidgetConfigType>,
+    mut user: HashMap<String, WidgetConfigType>,
 ) -> HashMap<String, WidgetConfigType> {
+    for (old, new) in RENAMED_WIDGETS {
+        if let Some(entry) = user.remove(*old) {
+            // An entry the user already wrote under the new key wins.
+            user.entry(new.to_string()).or_insert(entry);
+        }
+    }
     let mut merged = builtin.clone();
     merged.extend(user);
     merged
@@ -176,6 +187,22 @@ mod tests {
         assert_eq!(merged["defwidget@a"].label, "A");
         assert_eq!(merged["defwidget@b"].label, "B2");
         assert_eq!(merged["ext@c"].label, "C");
+    }
+
+    #[test]
+    fn an_entry_under_a_renamed_widgets_old_key_replaces_the_new_one() {
+        let builtin = HashMap::from([("defwidget@memory".to_string(), widget("Memory"))]);
+        let merged = merge_widgets(&builtin, HashMap::from([("defwidget@knowledge".to_string(), widget("Mine"))]));
+        assert_eq!(merged.len(), 1, "no stray old-key widget");
+        assert_eq!(merged["defwidget@memory"].label, "Mine");
+        // An entry under the new key wins over one under the old key.
+        let both = HashMap::from([
+            ("defwidget@knowledge".to_string(), widget("Old")),
+            ("defwidget@memory".to_string(), widget("New")),
+        ]);
+        let merged = merge_widgets(&builtin, both);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged["defwidget@memory"].label, "New");
     }
 
     #[test]
