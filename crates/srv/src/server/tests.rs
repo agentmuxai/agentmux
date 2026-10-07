@@ -1766,6 +1766,52 @@ async fn agent_names_exposes_names_only_not_registration_internals() {
     }
 }
 
+/// The names fallback carries each agent's kind, from its block's
+/// `agentMode`; an agent whose block can't be read gets no entry rather than
+/// a guess.
+#[tokio::test]
+async fn agent_names_carries_kinds_from_the_block() {
+    let state = test_state();
+    let unique = uuid::Uuid::new_v4();
+    let sandboxed = format!("kinds-sandbox-{unique}");
+    let on_host = format!("kinds-host-{unique}");
+    let blockless = format!("kinds-noblock-{unique}");
+    for (agent, mode) in [(&sandboxed, Some("container")), (&on_host, None)] {
+        let mut block = crate::backend::obj::Block {
+            oid: uuid::Uuid::new_v4().to_string(),
+            ..Default::default()
+        };
+        if let Some(mode) = mode {
+            block.meta.insert("agentMode".to_string(), serde_json::json!(mode));
+        }
+        state.mstore.insert(&mut block).expect("insert agent block");
+        state.reactive_handler.register_agent(agent, &block.oid, None).unwrap();
+    }
+    state
+        .reactive_handler
+        .register_agent(&blockless, &format!("missing-block-{unique}"), None)
+        .unwrap();
+
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent-names")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = build_router(state).oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let names: Vec<&str> = json["agents"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    for agent in [&sandboxed, &on_host, &blockless] {
+        assert!(names.contains(&agent.as_str()), "agents unchanged: {names:?}");
+    }
+    let kinds = &json["agent_kinds"];
+    assert_eq!(kinds[&sandboxed], "container");
+    assert_eq!(kinds[&on_host], "host", "no agentMode means a host agent");
+    assert!(kinds.get(&blockless).is_none(), "no block, no kind: {kinds}");
+}
+
 #[tokio::test]
 async fn lan_key_is_rejected_on_other_reactive_routes() {
     let app = test_router();
@@ -7052,6 +7098,9 @@ async fn fleet_snapshot_is_names_only_sorted_and_deduplicated() {
             "channel": "test-channel",
             "version": "0.28.20",
             "agents": ["AgentY", "Clamk"],
+            "os": crate::backend::host_os::local_os(),
+            "channels_running": 1,
+            "agent_kinds": {},
         })
     );
 }

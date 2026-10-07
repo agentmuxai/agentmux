@@ -22,6 +22,7 @@ pub mod bundle_validate;
 pub mod background_task_feed;
 pub mod dock_snapshot;
 pub mod fleet_feed;
+pub mod fleet_source;
 pub mod narrated_events;
 pub mod pending_background_pids;
 pub mod mcp_probe;

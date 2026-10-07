@@ -10,8 +10,14 @@
 //! publishes `(rev, names)` through a `watch`, so the snapshot route and every
 //! stream read the same value and no stream can fall behind: a slow reader
 //! skips straight to the latest state. Agent names only, the same line
-//! `handle_reactive_agent_names` holds for a `lan_key` holder.
+//! `handle_reactive_agent_names` holds for a `lan_key` holder, plus (owner
+//! decision 2026-10-06, agentmux-mobile's
+//! SPEC_FLEET_HOST_TAGS_AND_CLOUD_HOSTS_2026_10_06 §5.1) where each agent
+//! runs (`agent_kinds`), how many channels this machine runs, its platform
+//! and this install's id. The cloud presence publisher
+//! (`muxbus::wan_presence`) reads the same snapshot.
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -34,12 +40,29 @@ pub const MAX_STREAMS: usize = 32;
 const RETRY_PREAMBLE: &[u8] = b"retry: 3000\n\n";
 const HEARTBEAT: &[u8] = b": hb\n\n";
 
-/// One state of the name set. `rev` starts at 1 and goes up by one on every
-/// change; `agents` is sorted case-insensitively and de-duplicated.
+/// An agent's kind as the feed reports it: `"host"` or `"container"`
+/// (`operator_config_seed::agent_kind`).
+pub type AgentKind = &'static str;
+
+/// One state of the fleet. `rev` starts at 1 and goes up by one on every
+/// change of any field below; `agents` is sorted case-insensitively and
+/// de-duplicated; `agent_kinds` has an entry for each of `agents` whose kind
+/// is known.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FleetSnapshot {
     pub rev: u64,
     pub agents: Arc<Vec<String>>,
+    pub agent_kinds: Arc<BTreeMap<String, AgentKind>>,
+    /// This channel plus the other running channels of this machine, 1..=99.
+    pub channels_running: u32,
+}
+
+/// What one look at the instance found: each reachable agent with its kind,
+/// `None` when its block couldn't be read, and the channel count.
+#[derive(Debug, Clone, Default)]
+pub struct FleetObservation {
+    pub agents: Vec<(String, Option<AgentKind>)>,
+    pub channels_running: u32,
 }
 
 /// The `/agentmux/fleet` body, in the contract's field order.
@@ -51,6 +74,11 @@ struct FleetBody<'a> {
     channel: &'a str,
     version: &'a str,
     agents: &'a [String],
+    os: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    install_id: Option<&'a str>,
+    channels_running: u32,
+    agent_kinds: &'a BTreeMap<String, AgentKind>,
 }
 
 pub struct FleetFeed {
@@ -61,20 +89,38 @@ pub struct FleetFeed {
     hostname: String,
     channel: String,
     version: String,
+    os: String,
+    /// This install's WAN instance id; `None` without a WAN identity store.
+    install_id: Option<String>,
     tx: watch::Sender<FleetSnapshot>,
     streams: Arc<AtomicUsize>,
     heartbeat: Duration,
 }
 
+/// [`normalize_agents`] for names alone.
+#[cfg(test)]
+pub fn normalize_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    normalize_agents(names.into_iter().map(|n| (n, None))).0
+}
+
 /// Sort case-insensitively and drop names that differ only by case
 /// (registration keys are lower-cased, so those are one agent). Ties break on
-/// the exact string so the result does not depend on input order.
-pub fn normalize_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
-    let mut keyed: Vec<(String, String)> =
-        names.into_iter().map(|n| (n.to_lowercase(), n)).collect();
+/// the exact string so the result does not depend on input order. Each
+/// surviving name keeps its own kind.
+fn normalize_agents(
+    agents: impl IntoIterator<Item = (String, Option<AgentKind>)>,
+) -> (Vec<String>, BTreeMap<String, AgentKind>) {
+    let mut keyed: Vec<(String, String, Option<AgentKind>)> = agents
+        .into_iter()
+        .map(|(n, kind)| (n.to_lowercase(), n, kind))
+        .collect();
     keyed.sort();
     keyed.dedup_by(|later, earlier| later.0 == earlier.0);
-    keyed.into_iter().map(|(_, n)| n).collect()
+    let kinds = keyed
+        .iter()
+        .filter_map(|(_, n, kind)| kind.map(|k| (n.clone(), k)))
+        .collect();
+    (keyed.into_iter().map(|(_, n, _)| n).collect(), kinds)
 }
 
 impl FleetFeed {
@@ -83,16 +129,26 @@ impl FleetFeed {
         let (tx, _) = watch::channel(FleetSnapshot {
             rev: 1,
             agents: Arc::new(Vec::new()),
+            agent_kinds: Arc::new(BTreeMap::new()),
+            channels_running: 1,
         });
         Self {
             epoch,
             hostname,
             channel,
             version,
+            os: crate::backend::host_os::local_os(),
+            install_id: None,
             tx,
             streams: Arc::new(AtomicUsize::new(0)),
             heartbeat: HEARTBEAT_INTERVAL,
         }
+    }
+
+    /// Set the install id the body reports (`fleet_source::install_id`).
+    pub fn with_install_id(mut self, install_id: Option<String>) -> Self {
+        self.install_id = install_id;
+        self
     }
 
     #[cfg(test)]
@@ -100,8 +156,29 @@ impl FleetFeed {
         &self.epoch
     }
 
+    pub fn hostname(&self) -> &str {
+        &self.hostname
+    }
+
+    pub fn channel(&self) -> &str {
+        &self.channel
+    }
+
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    pub fn os(&self) -> &str {
+        &self.os
+    }
+
     pub fn snapshot(&self) -> FleetSnapshot {
         self.tx.borrow().clone()
+    }
+
+    /// A receiver that wakes on every change, for the presence publisher.
+    pub fn subscribe(&self) -> watch::Receiver<FleetSnapshot> {
+        self.tx.subscribe()
     }
 
     /// `<epoch>:<rev>`: the SSE `id`, and (quoted) the snapshot's `ETag`.
@@ -118,42 +195,69 @@ impl FleetFeed {
             channel: &self.channel,
             version: &self.version,
             agents: &snapshot.agents,
+            os: &self.os,
+            install_id: self.install_id.as_deref(),
+            channels_running: snapshot.channels_running,
+            agent_kinds: &snapshot.agent_kinds,
         })
         .unwrap_or_default()
     }
 
-    /// Record the current name set; bumps `rev` and wakes every stream only
-    /// if it differs from the last one. Returns whether it did.
-    pub fn observe(&self, names: impl IntoIterator<Item = String>) -> bool {
-        let names = normalize_names(names);
+    /// Record the current fleet; bumps `rev` and wakes every stream only if
+    /// it differs from the last one (names, kinds or channel count). Returns
+    /// whether it did.
+    pub fn observe_fleet(&self, observation: FleetObservation) -> bool {
+        let (names, kinds) = normalize_agents(observation.agents);
+        let channels_running = observation.channels_running.clamp(1, 99);
         self.tx.send_if_modified(|current| {
-            if *current.agents == names {
+            if *current.agents == names
+                && *current.agent_kinds == kinds
+                && current.channels_running == channels_running
+            {
                 return false;
             }
             current.rev += 1;
             current.agents = Arc::new(names);
+            current.agent_kinds = Arc::new(kinds);
+            current.channels_running = channels_running;
             true
         })
     }
 
-    /// Start the change-detection task: `list` is read now, then every
-    /// [`CHANGE_POLL_INTERVAL`] until `token` is cancelled (srv shutdown),
-    /// the same stop signal the WAL checkpoint loop watches.
+    /// [`Self::observe_fleet`] with names only: no kinds, the channel count
+    /// unchanged.
+    #[cfg(test)]
+    pub fn observe(&self, names: impl IntoIterator<Item = String>) -> bool {
+        let channels_running = self.snapshot().channels_running;
+        self.observe_fleet(FleetObservation {
+            agents: names.into_iter().map(|n| (n, None)).collect(),
+            channels_running,
+        })
+    }
+
+    /// Start the change-detection task: `observe` is read now, then every
+    /// [`CHANGE_POLL_INTERVAL`] on a blocking thread (it reads the store and
+    /// the shared registry) until `token` is cancelled (srv shutdown), the
+    /// same stop signal the WAL checkpoint loop watches.
     pub fn spawn_change_detection<F>(
         self: Arc<Self>,
-        list: F,
+        observe: F,
         token: tokio_util::sync::CancellationToken,
     ) where
-        F: Fn() -> Vec<String> + Send + 'static,
+        F: Fn() -> FleetObservation + Send + Sync + 'static,
     {
-        self.observe(list());
+        let observe = Arc::new(observe);
+        self.observe_fleet(observe());
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(CHANGE_POLL_INTERVAL);
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
                     _ = tick.tick() => {
-                        self.observe(list());
+                        let observe = Arc::clone(&observe);
+                        if let Ok(observation) = tokio::task::spawn_blocking(move || observe()).await {
+                            self.observe_fleet(observation);
+                        }
                     }
                     _ = token.cancelled() => break,
                 }
@@ -315,25 +419,94 @@ mod tests {
         assert_eq!(*f.snapshot().agents, names(&["a"]));
     }
 
+    fn keys_of(body: &str) -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(body).unwrap();
+        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    fn observation(agents: &[(&str, Option<AgentKind>)], channels_running: u32) -> FleetObservation {
+        FleetObservation {
+            agents: agents.iter().map(|(n, k)| (n.to_string(), *k)).collect(),
+            channels_running,
+        }
+    }
+
     #[test]
     fn the_body_has_exactly_the_contract_fields() {
         let f = feed();
-        f.observe(names(&["Clamk", "AgentY"]));
+        f.observe_fleet(observation(&[("Clamk", Some("container")), ("AgentY", Some("host"))], 3));
         let snap = f.snapshot();
         let body = f.body_json(&snap);
         assert!(!body.contains('\n'));
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
-        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        let mut want = names(&["epoch", "rev", "hostname", "channel", "version", "agents"]);
+        let mut want = names(&[
+            "epoch",
+            "rev",
+            "hostname",
+            "channel",
+            "version",
+            "agents",
+            "os",
+            "channels_running",
+            "agent_kinds",
+        ]);
         want.sort();
-        assert_eq!(keys, want);
+        assert_eq!(keys_of(&body), want, "no install_id without a WAN identity");
         assert_eq!(v["epoch"], f.epoch());
         assert_eq!(v["rev"], 2);
         assert_eq!(v["hostname"], "narko");
         assert_eq!(v["channel"], "stable");
         assert_eq!(v["version"], "0.59.7");
         assert_eq!(v["agents"], serde_json::json!(["AgentY", "Clamk"]));
+        assert_eq!(v["os"], crate::backend::host_os::local_os());
+        assert_eq!(v["channels_running"], 3);
+        assert_eq!(v["agent_kinds"], serde_json::json!({"AgentY": "host", "Clamk": "container"}));
+    }
+
+    #[test]
+    fn the_install_id_is_reported_when_known() {
+        let f = FleetFeed::new("narko".into(), "stable".into(), "0.59.7".into())
+            .with_install_id(Some("pqkksqckrolze5wvcs6rqeic4e".into()));
+        let body = f.body_json(&f.snapshot());
+        assert!(keys_of(&body).contains(&"install_id".to_string()));
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["install_id"], "pqkksqckrolze5wvcs6rqeic4e");
+    }
+
+    #[test]
+    fn a_kind_or_channel_count_change_bumps_rev_like_a_name_change() {
+        let f = feed();
+        assert!(f.observe_fleet(observation(&[("AgentX", Some("host"))], 1)));
+        assert_eq!(f.snapshot().rev, 2);
+        assert!(!f.observe_fleet(observation(&[("AgentX", Some("host"))], 1)), "nothing changed");
+        assert!(f.observe_fleet(observation(&[("AgentX", Some("container"))], 1)), "kind changed");
+        assert_eq!(f.snapshot().rev, 3);
+        assert!(f.observe_fleet(observation(&[("AgentX", Some("container"))], 3)), "a channel started");
+        assert_eq!(f.snapshot().rev, 4);
+        assert!(f.observe_fleet(observation(&[("AgentX", None)], 3)), "kind no longer known");
+        assert_eq!(f.snapshot().rev, 5);
+        assert!(f.snapshot().agent_kinds.is_empty());
+    }
+
+    #[test]
+    fn kinds_follow_the_name_that_survives_deduplication_and_counts_are_clamped() {
+        let f = feed();
+        f.observe_fleet(observation(
+            &[("agenty", Some("container")), ("AgentY", Some("host")), ("Clamk", None)],
+            500,
+        ));
+        let snap = f.snapshot();
+        assert_eq!(*snap.agents, names(&["AgentY", "Clamk"]));
+        assert_eq!(
+            *snap.agent_kinds,
+            BTreeMap::from([("AgentY".to_string(), "host")]),
+            "the unknown kind is left out, not guessed"
+        );
+        assert_eq!(snap.channels_running, 99);
+        f.observe_fleet(observation(&[], 0));
+        assert_eq!(f.snapshot().channels_running, 1);
     }
 
     #[tokio::test]
@@ -422,8 +595,13 @@ mod tests {
         let source = Arc::new(parking_lot::Mutex::new(names(&["a"])));
         let token = tokio_util::sync::CancellationToken::new();
         let read = source.clone();
-        f.clone()
-            .spawn_change_detection(move || read.lock().clone(), token.clone());
+        f.clone().spawn_change_detection(
+            move || FleetObservation {
+                agents: read.lock().iter().map(|n| (n.clone(), None)).collect(),
+                channels_running: 1,
+            },
+            token.clone(),
+        );
         assert_eq!(
             *f.snapshot().agents,
             names(&["a"]),
