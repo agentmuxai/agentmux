@@ -513,15 +513,19 @@ async fn close_cli(
     survivors
 }
 
-/// The wait after SIGTERM to what an agent started: what's left of the
-/// teardown's deadline, within these bounds.
-const MEMBERS_GRACE_MIN: std::time::Duration = std::time::Duration::from_millis(500);
+/// The longest wait after SIGTERM to what an agent started; never past the
+/// teardown's deadline.
 const MEMBERS_GRACE_MAX: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Ask everything in the block's tree to exit and wait until it has, or the
 /// grace passes. Returns at once where the tracker has no graceful signal
-/// (Windows) or nothing is left.
+/// (Windows), nothing is left, or the deadline has passed (the release's
+/// kill follows straight away).
 async fn terminate_members(state: &AppState, block_id: &str, deadline: std::time::Instant) {
+    let grace = deadline.saturating_duration_since(std::time::Instant::now()).min(MEMBERS_GRACE_MAX);
+    if grace.is_zero() {
+        return;
+    }
     let registry = state.process_tracker.clone();
     let id = block_id.to_string();
     let count = move || {
@@ -535,7 +539,6 @@ async fn terminate_members(state: &AppState, block_id: &str, deadline: std::time
     if !tokio::task::spawn_blocking(move || r.terminate(&id)).await.unwrap_or(false) {
         return;
     }
-    let grace = deadline.saturating_duration_since(std::time::Instant::now()).clamp(MEMBERS_GRACE_MIN, MEMBERS_GRACE_MAX);
     let until = std::time::Instant::now() + grace;
     while std::time::Instant::now() < until {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
