@@ -1,12 +1,19 @@
-# AgentMux Container Agent Image
+# AgentMux Container Agent Base Image
 # Independent of claw — AgentMux builds and distributes this image.
-# Published to: ghcr.io/agentmuxai/agent-claude
+# Published to: ghcr.io/agentmuxai/agent-base (must be a PUBLIC package: AgentMux
+# pulls it without credentials; container-image.yml checks that after each push)
+#
+# This image carries NO provider CLI. Claude Code is under a proprietary license,
+# so it is not redistributed here: AgentMux installs the pinned version from npm
+# on the user's machine the first time the agent's container starts, into the
+# /home/agent/.agentmux/cli volume (see docs/specs/SPEC_CONTAINER_AGENTS_WORK_FOR_EVERYONE_2026_10_07.md).
 #
 # Design decisions:
-#   - node:24-slim (Debian Bookworm): glibc required — Alpine/musl crashes Claude Code
+#   - node:24-slim (Debian Bookworm): glibc required — Alpine/musl crashes Claude Code;
+#     node and npm are also what the first-start CLI install runs
 #   - tini as PID 1 + sleep infinity: container stays alive; agent turns run via
 #     `docker exec`, not as PID 1. tini handles signal forwarding and zombie reaping.
-#   - DISABLE_AUTOUPDATER=1: version pinned at image build time, not runtime
+#   - DISABLE_AUTOUPDATER=1: the CLI version is AgentMux's to manage, not the CLI's
 #   - ~/.claude is a named Docker volume (not host bind mount) — credential isolation
 #   - /workspace is bind-mounted by the AgentMux runtime at container start
 #
@@ -89,12 +96,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN usermod -l agent -d /home/agent -m node \
     && groupmod -n agent node
 
-# Claude Code — version pinned at build time for reproducible images.
-# Managed by rebuilding with a new CLAUDE_VERSION arg, not npm update.
-ARG CLAUDE_VERSION=2.1.288
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_VERSION}
-
-# Prevent in-container auto-updates — version is managed at the image level.
+# Prevent in-container auto-updates — AgentMux installs and pins the CLI.
 ENV DISABLE_AUTOUPDATER=1
 ENV NO_UPDATE_NOTIFIER=1
 
@@ -107,6 +109,10 @@ ENV LANG=C.UTF-8
 # Docker initialises a fresh named volume as root:root; without this the agent
 # user cannot write its config/session state on first mount.
 RUN mkdir -p /home/agent/.claude && chown agent:agent /home/agent/.claude
+
+# Where AgentMux installs the provider CLI on first start. A named volume mounted
+# here is initialised from this directory, so it is writable by `agent`.
+RUN mkdir -p /home/agent/.agentmux/cli && chown -R agent:agent /home/agent/.agentmux
 
 # agentmux-mcp / agentmux-bashwrap — copied from the mcp-builder stage above.
 # /usr/local/bin is on PATH for every user by default (Docker's baked-in

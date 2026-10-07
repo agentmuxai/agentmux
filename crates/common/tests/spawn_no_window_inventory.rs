@@ -183,6 +183,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/claude_layout.rs", "\"git\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
+    ("crates/srv/src/backend/container_cli.rs", "\"sh\"", 1,
+     "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/cli_prune.rs", "\"ps\"", 1,
      "not-windows: returns None on Windows before it spawns `ps`"),
     ("crates/srv/src/backend/cli_install.rs", "\"cmd\"", 1,

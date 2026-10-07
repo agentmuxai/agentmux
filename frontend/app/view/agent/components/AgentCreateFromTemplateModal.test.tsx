@@ -38,6 +38,8 @@ vi.mock("@/app/store/rpc-api", () => ({
         // Mount-time daemon probe (drives the host/container dropdown).
         // Default → no reachable runtime → host-only.
         ContainerRuntimeAvailableCommand: vi.fn(),
+        // Whether the container's image can be had; decides the default runtime.
+        ContainerImageCheckCommand: vi.fn(),
         // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution
         // (#2594) — resolves to `undefined` by default so the base
         // `template` fixture (no memory_id) never even triggers a fetch;
@@ -96,6 +98,7 @@ beforeEach(async () => {
     // shared toolchain-capabilities store, not called directly by the
     // component anymore — see docs/retro/RETRO_DOCKER_DETECTION_DIVERGENCE_2026_07_04.md.
     vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: false });
+    vi.mocked(RpcApi.ContainerImageCheckCommand).mockResolvedValue({ status: "public" });
 });
 
 afterEach(() => cleanup());
@@ -238,6 +241,65 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             (o) => o.value === "container",
         )!;
         expect(containerOpt.disabled).toBe(false);
+    });
+
+    describe("when the container image can't be had", () => {
+        const containerTemplate = { ...template, agent_type: "container", container_image: "ghcr.io/x/y:latest" } as AgentDefinition;
+
+        const renderContainerTemplate = async () => {
+            vi.mocked(RpcApi.ContainerRuntimeAvailableCommand).mockResolvedValue({ available: true });
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={containerTemplate}
+                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onCancel={vi.fn()}
+                />
+            ));
+            return screen.getByTestId("create-from-template-runtime-select") as HTMLSelectElement;
+        };
+
+        it("asks about the template's own image", async () => {
+            const select = await renderContainerTemplate();
+            await waitFor(() => expect(select.value).toBe("container"));
+            expect(RpcApi.ContainerImageCheckCommand).toHaveBeenCalledWith(
+                expect.anything(),
+                { image: "ghcr.io/x/y:latest" },
+                expect.anything(),
+            );
+        });
+
+        it.each(["denied", "not_found"] as const)("defaults to host and says why when the registry says %s", async (status) => {
+            vi.mocked(RpcApi.ContainerImageCheckCommand).mockResolvedValue({ status });
+            const select = await renderContainerTemplate();
+            const note = await screen.findByTestId("create-from-template-image-note");
+            expect(note.textContent).toMatch(/host/);
+            expect(select.value).toBe("host");
+            // Still selectable: the user may know better.
+            const containerOpt = Array.from(select.options).find((o) => o.value === "container")!;
+            expect(containerOpt.disabled).toBe(false);
+        });
+
+        it("keeps the container default when the check fails or has no answer", async () => {
+            vi.mocked(RpcApi.ContainerImageCheckCommand).mockRejectedValue(new Error("offline"));
+            const select = await renderContainerTemplate();
+            await waitFor(() => expect(select.value).toBe("container"));
+            expect(screen.queryByTestId("create-from-template-image-note")).toBeNull();
+        });
+
+        it("does not override a runtime the user picked while the check was running", async () => {
+            let answer!: (v: { status: "denied" }) => void;
+            vi.mocked(RpcApi.ContainerImageCheckCommand).mockReturnValue(
+                new Promise((resolve) => {
+                    answer = resolve as typeof answer;
+                }),
+            );
+            const select = await renderContainerTemplate();
+            await waitFor(() => expect(RpcApi.ContainerImageCheckCommand).toHaveBeenCalled());
+            fireEvent.change(select, { target: { value: "container" } });
+            answer({ status: "denied" });
+            await screen.findByTestId("create-from-template-image-note");
+            expect(select.value).toBe("container");
+        });
     });
 
     it("surfaces an error from onSubmit", async () => {

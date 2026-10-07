@@ -340,10 +340,9 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     auth_extra_env: &[],
     unset_env: &["CLAUDECODE"],
     npm_package: "@anthropic-ai/claude-code",
-    // Keep in sync with frontend/app/view/agent/providers/index.ts `pinnedVersion`,
-    // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
-    // .github/workflows/container-image.yml `claude_version` default — enforced by
-    // frontend/app/view/agent/providers/pin-consistency.test.ts.
+    // Keep in sync with the frontend catalog's `pinnedVersion`, enforced by
+    // frontend/app/view/agent/providers/pin-consistency.test.ts. Host installs and
+    // the container agents' first-start install both use this version.
     pinned_version: "2.1.288",
     // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.

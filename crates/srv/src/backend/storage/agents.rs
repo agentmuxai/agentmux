@@ -112,7 +112,7 @@ pub struct AgentDefinition {
     #[ts(type = "number")]
     pub user_hidden: i64,
     /// Docker image to use when `agent_type == "container"`.
-    /// e.g. `"ghcr.io/agentmuxai/agent-claude:latest"`.
+    /// e.g. `"ghcr.io/agentmuxai/agent-base:latest"`.
     /// Empty string for host agents. Schema v6.
     #[serde(default)]
     pub container_image: String,

@@ -46,7 +46,7 @@ const CLI_DEFS = [
         description: "Anthropic's coding agent",
         bus: "claude",
         containerSupported: true,
-        containerImage: "ghcr.io/agentmuxai/agent-claude:latest",
+        containerImage: "ghcr.io/agentmuxai/agent-base:latest",
     },
     {
         id: "codex",

@@ -820,6 +820,38 @@ pub struct ContainerRuntimeAvailableResult {
     pub available: bool,
 }
 
+/// Request for `containerimagecheck`. An empty `image` means the default image.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct CommandContainerImageCheckData {
+    #[serde(default)]
+    pub image: String,
+}
+
+/// Whether a container image can be had on this machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub enum ContainerImageAccess {
+    /// The Docker daemon already has it.
+    Local,
+    /// The registry serves it to an anonymous caller.
+    Public,
+    /// The registry refuses an anonymous caller.
+    Denied,
+    /// The registry has no such image or tag.
+    NotFound,
+    /// No definite answer: offline, a proxy, or a registry we do not probe.
+    Unknown,
+}
+
+/// Result of `containerimagecheck`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct ContainerImageCheckResult {
+    pub status: ContainerImageAccess,
+}
+
 /// Result of `reseedagents`. Was an inline
 /// `json!({ "deleted": .., "created": .., "skipped": .. })`.
 ///

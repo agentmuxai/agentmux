@@ -117,9 +117,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // behavior-gate for providers whose CLI genuinely never prints one.
         npmPackage: "@anthropic-ai/claude-code",
         // Keep in sync with crates/srv/src/backend/providers.rs `pinned_version`,
-        // crates/cef/src/commands/providers.rs `CLAUDE_VERSION`, and
-        // .github/workflows/container-image.yml `claude_version` default — enforced by
-        // ./pin-consistency.test.ts.
+        // enforced by ./pin-consistency.test.ts.
         pinnedVersion: "2.1.288",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
