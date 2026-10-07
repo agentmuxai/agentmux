@@ -437,7 +437,7 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
     })?;
     let ctx = isolated_context(cdp).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
-    match req.action.as_str() {
+    let after = match req.action.as_str() {
         "click" => {
             click_element(cdp, &obj).await?;
             Ok(call_on(cdp, &obj, READ_BACK, vec![]).await.unwrap_or(Value::Null))
@@ -487,5 +487,43 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
             Ok(after)
         }
         other => Err(format!("unknown action {other:?}: use click, fill, select or check")),
+    }?;
+    Ok(redact_secret(after, &facts))
+}
+
+/// A secret field's value never reaches the agent, whatever the action
+/// (spec §5.1): the read-back keeps the field's shape but not its value.
+fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
+    if snapshot::is_secret(facts) {
+        if let Some(obj) = after.as_object_mut() {
+            if obj.remove("value").is_some() {
+                obj.insert("value".to_string(), Value::String("[secret: hidden]".to_string()));
+            }
+        }
+    }
+    after
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn facts(tag: &str, attrs: &[(&str, &str)]) -> DomFacts {
+        DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }
+    }
+
+    #[test]
+    fn a_secret_fields_value_is_hidden_from_every_read_back() {
+        let after = json!({ "tag": "input", "type": "password", "value": "hunter2" });
+        let out = redact_secret(after, &facts("input", &[("type", "password")]));
+        assert_eq!(out["value"], "[secret: hidden]");
+        assert_eq!(out["type"], "password");
+    }
+
+    #[test]
+    fn an_ordinary_fields_value_is_kept() {
+        let after = json!({ "tag": "input", "value": "lark@example.com" });
+        let out = redact_secret(after, &facts("input", &[("type", "email")]));
+        assert_eq!(out["value"], "lark@example.com");
     }
 }
