@@ -193,9 +193,10 @@ impl AgentProcessRegistry {
     }
 
     /// [`ensure_tracker`](Self::ensure_tracker) for an agent's block
-    /// (`agent`) or a terminal a person types in. The kind only matters on
-    /// Linux, where an agent gets a cgroup (its whole tree ends with it) and
-    /// a terminal keeps Unix semantics: what the user `nohup`s outlives it.
+    /// (`agent`) or a terminal a person types in. The kind matters on every
+    /// Unix, where an agent gets a cgroup or the best-effort scan tracker (its
+    /// whole tree ends with it) and a terminal keeps Unix semantics: what the
+    /// user `nohup`s outlives it.
     pub fn ensure_tracker_kind(&self, block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
         let mut map = self.inner.lock();
         if let Some(entry) = map.get(block_id) {

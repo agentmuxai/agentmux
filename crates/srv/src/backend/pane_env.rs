@@ -280,6 +280,8 @@ mod spawn_site_coverage {
          "test: disposable children for the job-object tracker (assign, adopt)"),
         ("src/backend/process_tracker/registry.rs", "\"sh\"", 1,
          "test: disposable child for the job-object tracker"),
+        ("src/backend/process_tracker/scan.rs", "\"sh\"", 1,
+         "test: disposable children the scan tracker tests find and kill"),
         ("src/backend/process_tracker/cgroup_linux.rs", "\"sleep\"", 1,
          "test: the argv the PTY-wrap test wraps; never spawned as built"),
         ("src/backend/process_tracker/cgroup_linux.rs", "&argv[0]", 1,

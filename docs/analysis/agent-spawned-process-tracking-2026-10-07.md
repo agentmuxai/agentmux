@@ -1,7 +1,7 @@
 # Agent-Spawned Processes: Tracking and Cleanup — Analysis
 
 **Date:** 2026-10-07
-**Status:** analysis — findings plus a proposed design. Built so far: the Linux cgroup tracker (§6.2), as a per-agent cgroup without sub-scopes
+**Status:** analysis — findings plus a proposed design. Built so far: the Linux cgroup tracker (§6.2, a per-agent cgroup without sub-scopes), the best-effort scan tracker for macOS and Linux without delegation (§6.3), and the escape report (§6.4)
 **Scope:** every process an agent causes to exist (its CLI, the CLI's MCP
 servers, Bash tool commands, `run_in_background` tasks, whatever those
 daemonize, `Shell()` / `!cmd` / PtyShell sessions), on Linux, macOS and

@@ -10,15 +10,15 @@
 //! place what's still running on their machine, and kill it reliably
 //! when they're done.
 //!
-//! The API is a platform-agnostic trait. Windows and Linux have real impls;
-//! macOS gets the no-op `StubTracker` (as does Linux without a delegated
-//! cgroup, see `cgroup_linux::init`):
+//! The API is a platform-agnostic trait, one impl per platform. Terminals a
+//! person types in get the no-op `StubTracker` everywhere but Windows (see
+//! `AgentProcessRegistry::ensure_tracker_kind`).
 //!
 //! | Platform | Impl            | Mechanism                                  | Confidence |
 //! |----------|-----------------|--------------------------------------------|------------|
 //! | Windows  | `JobObjectTracker` | `CreateJobObject` + `AssignProcessToJobObject` + `TerminateJobObject` | high       |
 //! | Linux    | `CgroupTracker` | cgroup v2 per agent in srv's delegated user scope; `cgroup.procs` / `cgroup.kill` | high |
-//! | macOS    | `StubTracker` (planned: process group) | `POSIX_SPAWN_SETPGROUP` + `killpg`                 | none (planned: best-effort) |
+//! | Linux, no delegated cgroup; macOS | `ScanTracker` | process table: descendants of the CLI + the inherited `AGENTMUX_BLOCKID` env tag | best effort |
 //! | other    | `StubTracker`   | no-op                                                          | none       |
 //!
 //! The frontend's swarm panel surfaces the confidence level so users know
@@ -36,6 +36,8 @@ pub mod windows;
 
 #[cfg(target_os = "linux")]
 pub mod cgroup_linux;
+
+pub mod scan;
 
 // `stub` is defined inline below; there is no `stub.rs`. A file-form
 // `pub mod stub;` here would collide with it (E0428) and break `task dev`.
@@ -216,7 +218,8 @@ pub enum TrackingConfidence {
 /// the `SubprocessController` so children from any turn are all tracked
 /// under the same umbrella.
 /// `agent`: the block runs an agent, not a terminal a person types in (see
-/// `AgentProcessRegistry::ensure_tracker_kind`). Only Linux tells them apart.
+/// `AgentProcessRegistry::ensure_tracker_kind`). Every Unix tells them apart;
+/// Windows gives both a Job Object.
 pub fn new_tracker(block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
     #[cfg(windows)]
     {
@@ -241,9 +244,19 @@ pub fn new_tracker(block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
                 Err(e) => tracing::warn!(block_id = %block_id, error = %e, "[process-tracker] cgroup tracker init failed"),
             }
         }
+        if agent {
+            return Arc::new(scan::ScanTracker::new(block_id));
+        }
         Arc::new(stub::StubTracker)
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        if agent {
+            return Arc::new(scan::ScanTracker::new(block_id));
+        }
+        Arc::new(stub::StubTracker)
+    }
+    #[cfg(not(any(windows, unix)))]
     {
         let _ = (block_id, agent);
         Arc::new(stub::StubTracker)
