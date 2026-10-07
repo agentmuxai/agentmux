@@ -1,6 +1,6 @@
 # SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop
 
-**Status:** proposed. Nothing here is built.
+**Status:** active — B1 (`OpenBrowser`, server-checked ownership, `pane` on the Browser/UI tools, the "Driven by" badge and Take over) in #4451; B2–B5 not built yet.
 **Date:** 2026-10-07
 **Author:** lark@narko, at the operator's request
 **Trigger (operator, 2026-10-07):** "is agentmux able to open a browser and fill forms? do we have best practice infra to make that process smooth? … this would run through the agentmux browser pane which has app api integrations … lets spec out the needs, write to file, we'll build this first." The first real task is a false-positive report to Microsoft: a web form with a sign-in, text fields, a file upload and a submit.
