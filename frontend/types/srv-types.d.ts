@@ -814,6 +814,10 @@ declare global {
         file?: string;
         url?: string;
         pinnedurl?: string;
+        /** The agent that opened this browser pane with `OpenBrowser` and drives it.
+         *  Written by srv only; the human's Take over clears it
+         *  (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3, §5.5). */
+        "browser:owner_agent"?: string | null;
         // Floating-pane window state (host-written; `pane:floating_*` family).
         "pane:floating_placement"?: "normal" | "maximized";
         "pane:floating_normal_rect"?: { left: number; top: number; right: number; bottom: number };

@@ -124,6 +124,34 @@ pub(crate) fn verified_block_id(
         })
 }
 
+/// The block a UI-automation request acts on: the caller's own pane, or,
+/// when `pane` is given, a browser pane the caller opened with `OpenBrowser`
+/// (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3). The caller's
+/// identity is verified first either way; `pane` is then checked against
+/// `browser_owner`'s map, never trusted on its own.
+pub(crate) fn target_block_id(
+    state: &AppState,
+    caller: Option<&crate::server::caller::Caller>,
+    auth: &UiAutomationAuth,
+    pane: Option<&str>,
+) -> Result<String, String> {
+    let own = verified_block_id(state, caller, auth)?;
+    let Some(pane) = pane.map(str::trim).filter(|p| !p.is_empty()) else {
+        return Ok(own);
+    };
+    let block = state
+        .mstore
+        .get::<crate::backend::obj::Block>(pane)
+        .map_err(|e| format!("load pane {pane:?}: {e}"))?;
+    crate::server::browser_owner::check(
+        block.as_ref(),
+        crate::server::browser_owner::owner_of(pane).as_deref(),
+        &auth.agent_id,
+        pane,
+    )?;
+    Ok(pane.to_string())
+}
+
 async fn get_host_ipc(state: &AppState) -> Result<HostIpc, String> {
     state.host_ipc.lock().await.clone().ok_or_else(|| {
         "this AgentMux instance's CEF host has not registered its UI-automation \
@@ -202,7 +230,7 @@ pub(crate) async fn handle_ui_screenshot(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiScreenshotRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -295,7 +323,7 @@ pub(crate) async fn handle_ui_click(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiClickRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -341,7 +369,7 @@ pub(crate) async fn handle_ui_query(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiQueryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -411,7 +439,7 @@ pub(crate) async fn handle_ui_browser_navigate(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserNavigateRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -442,7 +470,7 @@ pub(crate) async fn handle_ui_browser_back(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserHistoryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -463,7 +491,7 @@ pub(crate) async fn handle_ui_browser_forward(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserHistoryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -484,7 +512,7 @@ pub(crate) async fn handle_ui_browser_reload(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserHistoryRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -514,7 +542,7 @@ pub(crate) async fn handle_ui_browser_eval(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserEvalRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -559,7 +587,7 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserDispatchKeyRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -592,7 +620,7 @@ pub(crate) async fn handle_ui_browser_focus_element(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserFocusElementRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -624,7 +652,7 @@ pub(crate) async fn handle_ui_browser_focus_info(
     caller: Option<axum::Extension<crate::server::caller::Caller>>,
     Json(req): Json<UiBrowserFocusInfoRequest>,
 ) -> impl IntoResponse {
-    let block_id = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
         Ok(b) => b,
         Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
     };
@@ -680,4 +708,78 @@ mod tests {
         assert!(!stale.exists(), "stale screenshot must be pruned");
         assert!(other.exists(), "non-png files must never be pruned");
     }
+}
+
+
+/// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser pane
+/// next to the caller's own pane and records the caller as its owner, so the
+/// `Browser*`/`UI*` tools accept it as `pane`
+/// (docs/specs/SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
+pub(crate) async fn handle_ui_browser_open(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<agentmux_common::api_types::UiBrowserOpenRequest>,
+) -> impl IntoResponse {
+    let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    let url = req.url.trim();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return err_response(
+            StatusCode::BAD_REQUEST,
+            format!("OpenBrowser takes an http:// or https:// URL, not {url:?}"),
+        );
+    }
+    let split = req.split.as_deref().unwrap_or("right");
+    if !matches!(split, "right" | "left" | "up" | "down") {
+        return err_response(
+            StatusCode::BAD_REQUEST,
+            format!("split must be right, left, up or down, not {split:?}"),
+        );
+    }
+    let mut cmd = crate::backend::rpc_types::CommandPaneOpenData {
+        view: "browser".to_string(),
+        file: None,
+        url: Some(url.to_string()),
+        cwd: None,
+        title: req.title.clone(),
+        tab_id: None,
+        split_direction: Some(split.to_string()),
+        split_reference_block_id: Some(own.clone()),
+        focus: Some(false),
+        tree_expanded: None,
+        floating: None,
+        meta: None,
+        skip_placement: None,
+        stack_onto_block_id: None,
+        connection: None,
+        auth: None,
+        reuse_editor_pane: None,
+        select: None,
+        line: None,
+    };
+    let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
+        Ok(m) => m,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
+    meta.insert(
+        crate::server::browser_owner::OWNER_META_KEY.to_string(),
+        json!(req.auth.agent_id),
+    );
+    cmd.meta = Some(meta);
+    let result = match crate::server::app_api::open_pane(&state, cmd).await {
+        Ok(r) => r,
+        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+    };
+    crate::server::browser_owner::record(&result.block_id, &req.auth.agent_id);
+    tracing::info!(
+        agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url,
+        "[ui-automation] browser open (agent-owned)"
+    );
+    (
+        StatusCode::OK,
+        Json(json!({ "ok": true, "data": { "pane": result.block_id } })),
+    )
+        .into_response()
 }

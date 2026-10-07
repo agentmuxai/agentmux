@@ -235,6 +235,24 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 createPane={rectSync.createPane}
             />
 
+            <Show when={model.driverAgentAtom()}>
+                {(agent) => (
+                    <div class="browser-driven-by" role="status">
+                        <i class="fa-solid fa-robot" aria-hidden="true" />
+                        <span>
+                            Driven by <b>{agent()}</b>
+                        </span>
+                        <button
+                            type="button"
+                            class="browser-take-over"
+                            title="End the agent's control of this pane; its next action here will fail."
+                            onClick={() => model.takeOver().catch(() => {})}
+                        >
+                            Take over
+                        </button>
+                    </div>
+                )}
+            </Show>
             <Show when={model.errorAtom()}>
                 <div class="browser-error">{model.errorAtom()}</div>
             </Show>
