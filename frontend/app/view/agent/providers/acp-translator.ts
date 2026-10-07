@@ -54,6 +54,19 @@ export class AcpTranslator implements OutputTranslator {
             return [{ type: "session_end", stats: {} }];
         }
 
+        // A JSON-RPC error: a failed prompt, or a session the agent refused to
+        // open (pi's "Authentication required"). Shown, and it ends the turn.
+        const error = rawEvent.error;
+        if (error && typeof error === "object" && rawEvent.id != null) {
+            this.ended.clear();
+            this.calls.clear();
+            const message = typeof error.message === "string" && error.message ? error.message : "the agent returned an error";
+            return [
+                { type: "text", content: `**Error:** ${message}` },
+                { type: "session_end", stats: {} },
+            ];
+        }
+
         // The raw event may be the full JSON-RPC envelope or just the params.
         const params = rawEvent.params ?? rawEvent;
         const update = params?.update;

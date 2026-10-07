@@ -1224,9 +1224,15 @@ pub async fn run_agent_turn(
             };
             subprocess_ctrl.spawn_turn(config)?;
         }
+    } else if let Some(acp_ctrl) =
+        ctrl.as_any().downcast_ref::<blockcontroller::acp::AcpController>()
+    {
+        // ACP agents (Copilot, OpenClaw, Pi): the message becomes a
+        // `session/prompt` on the agent's running session.
+        acp_ctrl.send_message(message, message_id.as_deref())?;
     } else {
         return Err(
-            "controller is not a SubprocessController or PersistentSubprocessController"
+            "controller is not a SubprocessController, PersistentSubprocessController or AcpController"
                 .to_string(),
         );
     }

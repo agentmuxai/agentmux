@@ -156,6 +156,18 @@ struct AcpInner {
     kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
     /// First user prompt, deferred until session/create completes.
     pending_prompt: Option<String>,
+    /// ACP v1 handshake: the `initialize` request, whose result decides
+    /// between `session/new` and `session/load`.
+    init_request_id: Option<u64>,
+    /// The `session/new` or `session/load` request in flight.
+    session_request_id: Option<u64>,
+    /// The session being loaded: its result carries no id of its own.
+    loading_session: Option<String>,
+    /// The pane's previous session (`agent:sessionid`), offered to
+    /// `session/load` when the agent supports it.
+    resume_session_id: Option<String>,
+    /// The session's working directory.
+    session_cwd: String,
 }
 
 /// AcpController manages an ACP-speaking agent process.
@@ -206,6 +218,11 @@ impl AcpController {
                 stdin_tx: None,
                 kill_tx: None,
                 pending_prompt: None,
+                init_request_id: None,
+                session_request_id: None,
+                loading_session: None,
+                resume_session_id: None,
+                session_cwd: String::new(),
             })),
             broker,
             event_bus,
@@ -415,10 +432,63 @@ impl AcpController {
                 }
                 // Parse as JSON to check for session/update notifications
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                    // Extract session ID from initialize result or session/create result
-                    if let Some(result) = json.get("result") {
-                        if let Some(sid) = result.get("sessionId").and_then(|v| v.as_str()) {
-                            let sid_owned = sid.to_string();
+                    // A request from the agent (permission, fs, terminal):
+                    // answer it, or the agent waits forever.
+                    if let Some(reply) = reply_to_agent_request(&json) {
+                        let inner = inner_clone.lock().unwrap();
+                        if let Some(ref tx) = inner.stdin_tx {
+                            if tx.try_send(reply.to_string()).is_err() {
+                                tracing::warn!(block_id = %block_id_stdout, "[acp] reply to an agent request dropped — channel full or closed");
+                            }
+                        }
+                    }
+                    // Handshake: `initialize` answered → open or load the
+                    // session; a failed `session/load` → open a new one. A
+                    // loaded session's result carries no id: it is the one
+                    // we asked for.
+                    let msg_id = json.get("id").and_then(|v| v.as_u64());
+                    let mut loaded: Option<String> = None;
+                    {
+                        let mut inner = inner_clone.lock().unwrap();
+                        let is = |id: Option<u64>| msg_id.is_some() && msg_id == id;
+                        let next = if is(inner.init_request_id) && json.get("result").is_some() {
+                            inner.init_request_id = None;
+                            let can_load = json
+                                .pointer("/result/agentCapabilities/loadSession")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let resume = inner.resume_session_id.clone();
+                            let loading = if can_load { resume.clone() } else { None };
+                            Some((session_request(resume.as_deref(), can_load, &inner.session_cwd), loading))
+                        } else if is(inner.session_request_id) && json.get("error").is_some() && inner.loading_session.is_some() {
+                            inner.loading_session = None;
+                            Some((session_request(None, false, &inner.session_cwd), None))
+                        } else {
+                            None
+                        };
+                        if is(inner.session_request_id) && json.get("result").is_some() {
+                            loaded = inner.loading_session.take();
+                        }
+                        if let Some(((method, params), loading)) = next {
+                            let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
+                            inner.session_request_id = Some(id);
+                            inner.loading_session = loading;
+                            let req = serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string();
+                            if let Some(ref tx) = inner.stdin_tx {
+                                if tx.try_send(req).is_err() {
+                                    tracing::error!(block_id = %block_id_stdout, method, "[acp] session request dropped — channel full or closed; agent will not start");
+                                }
+                            }
+                        }
+                    }
+                    let session = json
+                        .pointer("/result/sessionId")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                        .or(loaded);
+                    if let Some(sid_owned) = session {
+                        {
+                            let sid = sid_owned.as_str();
                             {
                                 let mut inner = inner_clone.lock().unwrap();
                                 inner.session_id = Some(sid_owned.clone());
@@ -453,10 +523,7 @@ impl AcpController {
                                         "jsonrpc": "2.0",
                                         "id": id,
                                         "method": "session/prompt",
-                                        "params": {
-                                            "sessionId": sid,
-                                            "prompt": { "type": "text", "text": prompt },
-                                        }
+                                        "params": prompt_params(sid, &prompt),
                                     }).to_string();
                                     if let Some(ref tx) = inner.stdin_tx {
                                         if tx.try_send(req).is_err() {
@@ -650,30 +717,22 @@ impl AcpController {
             }
         });
 
-        // Send ACP initialize handshake
-        let init_req = self.make_request("initialize", serde_json::json!({
-            "clientInfo": {
-                "name": "AgentMux",
-                "version": env!("CARGO_PKG_VERSION"),
-            },
-            "capabilities": {
-                "tools": true,
-                "fileAccess": true,
-            },
-            "workspaceRoots": [working_dir],
-        }));
-        let init_notification = self.make_notification("initialized", serde_json::json!({}));
-        let session_req = self.make_request("session/create", serde_json::json!({
-            "cwd": working_dir,
-        }));
-
-        // Queue the handshake messages
-        let inner = self.inner.lock().unwrap();
+        // ACP v1 handshake: `initialize` only. Its result decides between
+        // `session/new` and `session/load`; the stdout reader sends that.
+        let init_id = self.next_id();
+        let init_req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": init_id,
+            "method": "initialize",
+            "params": initialize_params(),
+        })
+        .to_string();
+        let mut inner = self.inner.lock().unwrap();
+        inner.init_request_id = Some(init_id);
+        inner.session_cwd = working_dir.clone();
         if let Some(ref tx) = inner.stdin_tx {
-            for (label, msg) in [("initialize", init_req), ("initialized", init_notification), ("session/create", session_req)] {
-                if tx.try_send(msg).is_err() {
-                    tracing::error!(block_id = %self.block_id, method = label, "[acp] handshake message dropped — channel full or closed; agent will not start");
-                }
+            if tx.try_send(init_req).is_err() {
+                tracing::error!(block_id = %self.block_id, "[acp] initialize dropped — channel full or closed; agent will not start");
             }
         }
 
@@ -695,6 +754,17 @@ fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<Str
 
 
 impl AcpController {
+    /// A user message from `agentinput` / `agent.send` (`run_agent_turn`):
+    /// sent as `session/prompt`, then acknowledged the way the other
+    /// controllers acknowledge theirs, so the pane stops showing it as pending.
+    pub fn send_message(&self, message: String, message_id: Option<&str>) -> Result<(), String> {
+        Controller::send_input(self, BlockInputUnion::data(message.into_bytes()), None)?;
+        if let (Some(id), Some(broker)) = (message_id, self.broker.as_ref()) {
+            super::publish_message_accepted(broker, &self.block_id, id);
+        }
+        Ok(())
+    }
+
     /// The env this block's ACP process is spawned with: `cmd:env` (either
     /// shape), with the block's row UID + token carried onto it — identity
     /// M4b-2. Buys no attribution today (ACP agents are not given
@@ -734,6 +804,8 @@ impl Controller for AcpController {
         // object) or as a JSON string — before M4b-2 only the string form was
         // read, so an `agent.open` launch lost both (spec §6.5.8).
         let args = meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
+        let resume = super::super::obj::meta_get_string(&block_meta, super::core::META_SESSION_ID, "");
+        self.inner.lock().unwrap().resume_session_id = Some(resume).filter(|s| !s.is_empty());
         let mut env_vars = self.spawn_env(&block_meta);
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
@@ -811,13 +883,7 @@ impl Controller for AcpController {
                 "jsonrpc": "2.0",
                 "id": prompt_id,
                 "method": "session/prompt",
-                "params": {
-                    "sessionId": session_id,
-                    "prompt": {
-                        "type": "text",
-                        "text": message,
-                    }
-                }
+                "params": prompt_params(&session_id, &message),
             }).to_string();
             // `mark_turn_active_returning_was_active` (not the plain
             // `set_active_turn(true)` this used to call) is atomic across

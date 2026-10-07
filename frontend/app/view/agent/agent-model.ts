@@ -343,7 +343,10 @@ export class AgentViewModel {
             await this.ctx.setMeta({
                 agentId: agentId,
                 agentOutputFormat: provider.styledOutputFormat,
-                controller: isPersistent ? "persistent" : "subprocess",
+                // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
+                // without it they ran as plain subprocesses and never spoke ACP
+                // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
+                controller: provider.controllerType === "acp" ? "acp" : isPersistent ? "persistent" : "subprocess",
                 cmd: cliBin,
                 "cmd:args": cliArgs,
                 "cmd:env": envVars,
@@ -833,7 +836,10 @@ export class AgentViewModel {
                 // here — it is a one-shot launch intent, not a durable arg.
                 [PROVIDER_FLAGS_META_KEY]: paneFlags,
                 ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
-                controller: isPersistent ? "persistent" : "subprocess",
+                // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
+                // without it they ran as plain subprocesses and never spoke ACP
+                // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
+                controller: provider.controllerType === "acp" ? "acp" : isPersistent ? "persistent" : "subprocess",
                 cmd: cliBin,
                 "cmd:args": cliArgs,
                 "cmd:cwd": finalWorkDir,

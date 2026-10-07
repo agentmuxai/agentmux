@@ -162,3 +162,28 @@ describe("AcpTranslator — the earlier flat shape still works", () => {
         expect(res).toMatchObject({ type: "tool_result", id: "t1", status: "success" });
     });
 });
+
+// SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md §6: a JSON-RPC error (a refused
+// session/new, a failed prompt) is shown, not dropped, and ends the turn.
+describe("AcpTranslator — JSON-RPC errors", () => {
+    it("shows the agent's error and ends the turn", () => {
+        const t = new AcpTranslator();
+        const events = t.translate({
+            jsonrpc: "2.0",
+            id: 2,
+            error: { code: -32000, message: "Authentication required: Configure an API key or log in with an OAuth provider." },
+        });
+        expect(events).toEqual([
+            { type: "text", content: "**Error:** Authentication required: Configure an API key or log in with an OAuth provider." },
+            { type: "session_end", stats: {} },
+        ]);
+    });
+
+    it("still says something for an error with no message", () => {
+        const t = new AcpTranslator();
+        expect(t.translate({ jsonrpc: "2.0", id: 3, error: { code: -32603 } })[0]).toEqual({
+            type: "text",
+            content: "**Error:** the agent returned an error",
+        });
+    });
+});
