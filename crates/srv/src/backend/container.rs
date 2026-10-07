@@ -33,7 +33,7 @@ use bollard::models::{ContainerInspectResponse, HostConfig, Mount, MountTypeEnum
 use crate::backend::container_cli::{
     check_says_present, install_failure_detail, reap_argv, reap_says_gone, CliInstall, InstallLimits,
 };
-use crate::backend::container_image::{CONTAINER_CLI_DIR, 
+use crate::backend::container_image::{CONTAINER_CLI_DIR,
     classify_pull_error, cli_install_failure_message, docker_error_message, docker_unreachable_message, is_legacy_agent_image,
     looks_like_daemon_unreachable, pull_failure_message, PullFailure, DEFAULT_AGENT_IMAGE,
 };

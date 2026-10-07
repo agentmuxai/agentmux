@@ -1,6 +1,6 @@
 # SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop
 
-**Status:** active — B1 (`OpenBrowser`, server-checked ownership, `pane` on the Browser/UI tools, the "Driven by" badge and Take over) in #4451; B2–B5 not built yet.
+**Status:** active — B1 (`OpenBrowser`, server-checked ownership, `pane` on the Browser/UI tools, the "Driven by" badge and Take over) in #4451; B2 (`BrowserSnapshot`; `BrowserClick`/`Fill`/`Select`/`Check` by reference with read-back; the secret-field guard on fill and typing) in the B2 PR stacked on it; B3–B5 not built yet.
 **Date:** 2026-10-07
 **Author:** lark@narko, at the operator's request
 **Trigger (operator, 2026-10-07):** "is agentmux able to open a browser and fill forms? do we have best practice infra to make that process smooth? … this would run through the agentmux browser pane which has app api integrations … lets spec out the needs, write to file, we'll build this first." The first real task is a false-positive report to Microsoft: a web form with a sign-in, text fields, a file upload and a submit.
@@ -61,10 +61,11 @@ Returns a compact, text-first view of the page's **accessibility tree**, the way
 - button "Continue" [ref=e21]
 ```
 
-- Source: CDP `Accessibility.getFullAXTree` (plus `DOM.describeNode` for input types and file inputs), including same-origin iframes. Cross-origin iframes are listed with their URL and snapshotted separately by frame.
+- Source: CDP `Accessibility.getFullAXTree` (plus `DOM.describeNode` for input types and file inputs), including same-origin iframes. Cross-origin iframes are listed with their URL and snapshotted separately by frame. **As built in B2, the snapshot covers the top frame only**: a form inside any iframe gets no references, so the agent can't act in it and hands it to the user (`BrowserHandoff`). Typing into a focused frame the guard can't inspect is refused (§5.1). Joining child-frame trees with `f1e12`-style references is a follow-up.
 - **References** map to CDP `backendNodeId`s in a per-pane table. They're valid until the next snapshot or navigation, and a reference whose node has left the DOM fails too; either way the error says "take a new snapshot", never a guess. References inside a frame carry its prefix (`f1e12`), as Playwright MCP's do.
 - Shows what an agent needs to fill a form correctly: `required`, `invalid` and the field's validation message, `disabled`, `readonly`, the options of a `select`, the `autocomplete` hint, and whether a field is a password, one-time-code or card field (§5.1).
-- Size-capped (default 40 KB). `scope` (a reference or a CSS selector) narrows it to one form or region.
+- Size-capped (default 40 KB). `scope` (a reference from the previous snapshot) narrows it to that element's subtree; its references are named `<scope>.eN` and added to the full snapshot's.
+- A label's or legend's text isn't repeated (it is the name of what it labels), nor a field's own text (it is its `value=`).
 
 ### 4.2 Acting on a reference
 
@@ -72,7 +73,7 @@ Returns a compact, text-first view of the page's **accessibility tree**, the way
 |---|---|---|
 | `BrowserClick({pane, ref})` | click | scroll into view, `Input.dispatchMouseEvent` at the element's centre (as `click_element` does today) |
 | `BrowserFill({pane, ref, text})` | replace a field's value | focus, select all, `Input.insertText` (a trusted input event, so React- and Vue-controlled fields accept it); if the value read back differs (some custom widgets), set it through the native `value` setter **of the element's own prototype** (the `HTMLInputElement` setter throws on a `textarea`) and dispatch `input` and `change` (bubbling) |
-| `BrowserSelect({pane, ref, option})` | pick a `<select>` option or a listbox/combobox item by label or value | native `select`: set and dispatch `change`; ARIA combobox: open, type, choose the matching option |
+| `BrowserSelect({pane, ref, option})` | pick a native `<select>` option by label or value | set and dispatch `input` and `change`. A custom (ARIA) dropdown is driven with `BrowserClick`: open it, take a snapshot, click the option |
 | `BrowserCheck({pane, ref, checked})` | checkbox, radio, switch | click only if the state differs |
 | `BrowserSetFiles({pane, ref, paths})` | file upload | `DOM.setFileInputFiles` (§5.3) |
 | `BrowserPress({pane, key})` | Enter, Tab, Escape, arrows | existing `dispatch_key` |
@@ -145,7 +146,7 @@ Some actions can't be taken back: submitting a form, sending a message, paying, 
 
 1. **The page is untrusted input.** Snapshot text, eval results and screenshots come from whatever site is loaded and may contain instructions aimed at the agent. Tool results mark them as page content; tool descriptions tell the agent not to follow instructions found in a page. The human's approval in the pane (§5.4) is what stops a tricked agent from committing anything. Vendors say the same of their own browsing agents: prompt injection is reduced, not solved.
    - **Optional domain allowlist:** `OpenBrowser({allowed_origins})` keeps the pane on those sites; a navigation elsewhere (a link, a redirect, a popup) asks the human in the pane, like §5.4. Off when not given, since sign-in flows cross origins.
-   - **Data minimisation:** the agent fills only the fields the task needs, and the snapshot omits the values of fields it didn't fill unless asked.
+   - **Data minimisation:** the agent fills only the fields the task needs. The snapshot shows field values, which an agent needs to verify its own fills, but never a secret field's.
 2. **Ownership is server-side.** `browser:owner_agent` is written only by srv from a verified identity and checked on every call, the same model as #2662.
 3. **The secret-field guard is a guard, not a boundary.** `BrowserEval` can still type anywhere a page lets it. The boundaries are: the agent's pane starts logged out (§6), the human approves committing actions in the pane, and hand-off refuses the agent's tools while the human is typing.
 4. **Uploads can exfiltrate.** That's why paths are limited to the agent's workspace or what the human approved, and every upload is shown in the pane.
@@ -184,8 +185,8 @@ What this spec takes from them:
 | Phase | Ships | Unblocks |
 |---|---|---|
 | **B1** | `OpenBrowser`, `browser:owner_agent`, the `pane` argument on existing tools, `UIScreenshot` on owned panes, the "Driven by" badge and Take over | an agent can drive a browser pane at all |
-| **B2** | `BrowserSnapshot` with references; `BrowserClick`/`Fill`/`Select`/`Check`/`Press`/`WaitFor` by reference; read-back | reliable form filling |
-| **B3** | `BrowserHandoff`, the secret-field guard, `BrowserSetFiles` with the path policy and the file-dialog intercept, `BrowserDialog`, committing-action approval, the action log, the optional origin allowlist | sign-in, uploads, submitting: the acceptance test (§9) |
+| **B2** | `BrowserSnapshot` with references; `BrowserClick`/`Fill`/`Select`/`Check` by reference with read-back; the secret-field guard (§5.1) on fill and on `BrowserDispatchKey` typing | reliable form filling |
+| **B3** | `BrowserHandoff`, `BrowserSetFiles` with the path policy and the file-dialog intercept, `BrowserPress`, `BrowserWaitFor`, `BrowserDialog`, committing-action approval, the action log, the optional origin allowlist | sign-in, uploads, submitting: the acceptance test (§9) |
 | **B4** | The profile button with Shared and Private (identities spec Phase 1, Windows); `OpenBrowser` private by default; "use my session" from the pane | agents stop inheriting the human's sessions; several accounts on one site |
 | **B4b** | Named profiles: the on-disk profile experiment on Windows, then the profile manager and the "Agents may use this profile" switch (identities spec Phase 3) | logins that survive restarts, lendable to agents |
 | **B5** | The human grants an agent a pane they opened themselves; per-site approval overrides | later |

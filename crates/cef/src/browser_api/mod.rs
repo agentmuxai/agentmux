@@ -28,9 +28,11 @@ use axum::Router;
 
 use crate::state::AppState;
 
+pub mod act;
 pub mod cdp;
 pub mod resolver;
 pub mod routes;
+pub mod snapshot;
 pub mod types;
 
 /// Register `/agentmux/browser/*` routes on the given axum Router.
@@ -41,6 +43,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/query", post(routes::query))
         .route("/agentmux/browser/focus_info", post(routes::focus_info))
         .route("/agentmux/browser/eval", post(routes::eval))
+        .route("/agentmux/browser/snapshot", post(act::snapshot_route))
+        .route("/agentmux/browser/act", post(act::act_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))
@@ -56,12 +60,15 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
 /// lazily populated on first resolve per block.
 pub struct BrowserApiState {
     pub target_cache: resolver::TargetCache,
+    /// Each pane's latest snapshot references (`act::RefTable`).
+    pub ref_tables: act::RefTables,
 }
 
 impl BrowserApiState {
     pub fn new() -> Self {
         Self {
             target_cache: resolver::TargetCache::new(),
+            ref_tables: act::RefTables::default(),
         }
     }
 }

@@ -691,6 +691,44 @@ pub struct UiBrowserFocusInfoRequest {
     pub pane: Option<String>,
 }
 
+/// `POST /api/v1/ui/browser/snapshot` — backs `BrowserSnapshot`
+/// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §4.1).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserSnapshotRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened with `OpenBrowser`; absent =
+    /// the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// A reference from the previous snapshot: narrow to that element.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
+/// `POST /api/v1/ui/browser/act` — backs `BrowserClick`, `BrowserFill`,
+/// `BrowserSelect` and `BrowserCheck` (spec §4.2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserActRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened with `OpenBrowser`; absent =
+    /// the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// A reference from the latest snapshot, e.g. `e12`.
+    #[serde(rename = "ref")]
+    pub ref_: String,
+    /// `click`, `fill`, `select` or `check`.
+    pub action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+}
+
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser
 /// pane next to the caller's own pane and records the caller as its owner
 /// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
