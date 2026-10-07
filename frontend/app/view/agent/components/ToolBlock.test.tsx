@@ -324,6 +324,24 @@ describe("ToolBlock — panel mode", () => {
             }
         });
 
+        // REPORT_THEME_MENU_RUNTIME_PANEL_TOOL_PREVIEW_TWEAKS_2026_10_07.md §4:
+        // a file path is ellipsized from the left. jsdom can't measure the cut,
+        // so this pins the markup the CSS relies on.
+        it("lays out a Read path to be cut from the left, keeping the full path text", () => {
+            const path = "/c/Users/me/projects/agentmux/frontend/app/view/agent/a.ts";
+            const read: ToolNode = { ...baseTool, id: "tc-r", tool: "Read", toolName: "Read", params: { file_path: path }, summary: `Read ${path}` };
+            const { container } = render(() => <ToolBlock node={read} pinned={false} onTogglePin={() => {}} />);
+            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--path")).toBe(true);
+            const detail = container.querySelector(".agent-tool-detail--path")!;
+            expect(detail.querySelector("bdi")!.textContent).toBe(path);
+            cleanup();
+
+            const grep: ToolNode = { ...baseTool, id: "tc-g2", tool: "Grep", toolName: "Grep", params: { pattern: "x" }, summary: "Grep x" };
+            const other = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
+            expect(other.container.querySelector(".agent-tool-name--path")).toBeNull();
+            expect(other.container.querySelector(".agent-tool-detail--path")).toBeNull();
+        });
+
         // SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.7: a Bash command is
         // shell-coloured in the row and the popover, with its text unchanged.
         it("colours a Bash command in the row and the popover; other tools stay plain", () => {

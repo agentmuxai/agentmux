@@ -437,6 +437,31 @@ $transcript-preview-max-height: calc(50vh / 3);
                 font-weight: 400;
             }
 
+            // A file path (Read, Write, Edit): the icon, label and line range keep
+            // their width and only the path shrinks, cut from the left, so a
+            // narrow row reads "Read …/view/agent/a.ts", not "Read /c/Users/…".
+            // A flex row drops the spaces between its items, so `column-gap`
+            // stands in for them.
+            .agent-tool-name--path {
+                display: flex;
+                align-items: baseline;
+                column-gap: 0.3em;
+
+                > * {
+                    flex: none;
+                }
+
+                > .agent-tool-detail--path {
+                    flex: 0 1 auto;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                    direction: rtl;
+                    text-align: left;
+                }
+            }
+
             // A Bash command in the row: the label keeps the tool's colour,
             // the command reads in the text colour with only its program and
             // punctuation picked out, so a list of rows stays calm. Colour

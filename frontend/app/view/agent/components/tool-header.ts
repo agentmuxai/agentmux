@@ -13,7 +13,7 @@
  */
 
 import { fileRangeOf, formatFileRangeShort } from "../tool-meta/file-range";
-import { toolDetailOf, toolIcon, toolLabel, toolNameOf } from "../tool-meta/tool-descriptors";
+import { toolDetailIsPath, toolDetailOf, toolIcon, toolLabel, toolNameOf } from "../tool-meta/tool-descriptors";
 import type { ToolNode } from "../types";
 
 export interface ToolHeaderParts {
@@ -22,6 +22,8 @@ export interface ToolHeaderParts {
     label: string | null;
     /** The tool's main argument (path, command, query, …); "" when none. */
     detail: string;
+    /** `detail` is a file path, ellipsized from the left so the file name shows. */
+    detailIsPath: boolean;
     /** Which part of the file a Read, Edit or Write covers ("120:179 of 456"); null for any other tool. */
     range: string | null;
 }
@@ -34,6 +36,7 @@ export function toolHeaderParts(node: ToolNode): ToolHeaderParts {
         icon: toolIcon(node),
         label: toolLabel(toolNameOf(node), detail),
         detail,
+        detailIsPath: detail !== "" && toolDetailIsPath(node),
         range: range ? formatFileRangeShort(range) : null,
     };
 }

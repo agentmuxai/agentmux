@@ -1,4 +1,4 @@
-# Report: three UI tweaks — Theme menu stays open, runtime panel text fits, tool previews show output only
+# Report: four UI tweaks — Theme menu stays open, runtime panel text fits, tool previews show output only, paths keep their end
 
 **Date:** 2026-10-07
 **Author:** agent3 (Agent3@narko), at the operator's request
@@ -11,6 +11,7 @@ The operator, 2026-10-07:
 1. Choosing an item in **≡ → Theme** should leave the menu open, so themes can be tried one after another; the menu closes by clicking elsewhere.
 2. In the agent pane's model / effort panel, the descriptive text overflows the panel. Shorten it and make it fit.
 3. A tool call's expanded preview should show only the output. The command is already in the hover, so don't print it again.
+4. In Read, Edit, Write and similar rows, a long path should show its end, with the ellipsis on the left: "Read …<end of path>", not "Read <beginning of path>…". It stays responsive as before. (Added later the same day.)
 
 ## 1. Theme menu stays open after a choice
 
@@ -113,9 +114,32 @@ There's no way for an item to opt out. `MenuItem` (`frontend/types/custom.d.ts:6
 - `ToolBlock.test.tsx` and `ToolOverlayLog.test.tsx` reference the command in the panel; switch those to assert its absence, and that the hover still has it.
 - Add a test for the "No output" line.
 
-## 4. Delivery
+## 4. Paths keep their end in the tool row
 
-- **One agentmux PR**, frontend only, with a changeset and the tests above. The three tweaks are small and independent; commit each separately so a review note on one doesn't hold the others.
+**Where it's cut.** The tool row's name run (`ToolBlock.tsx`, `.agent-tool-name`) is a single text run: icon, label, line range (for a Read), then the detail. It has `text-overflow: ellipsis` (`frontend/app/view/agent/styles/_document-nodes.scss`), so a long path is cut on the right and the file name is the part that disappears: "📖 Read /c/Users/me/projects/agentmux/front…".
+
+**Which tools.** The descriptors whose detail is a file path (`pathOf` in `frontend/app/view/agent/tool-meta/tool-descriptors.ts`):
+- Read (`read`, `read_file`)
+- Write (`write`, `write_file`)
+- Edit (`edit`, `str_replace_editor`, `multiedit`)
+
+Bash commands, Grep and Glob patterns, and web queries are not paths and keep the right-side cut.
+
+**Fix.**
+- **Descriptor:** a new fact, `detailIsPath`, is true for those three descriptors and false in the catch-all. `toolHeaderParts` passes it on, and only when there is a detail.
+- **Row layout:** for such a row, `ToolBlock` adds `agent-tool-name--path` and wraps the path in `<span class="agent-tool-detail agent-tool-detail--path"><bdi>…</bdi></span>`. The name run becomes a flex row: icon, label and range keep their width, and only the path shrinks.
+- **The ellipsis:** the path span is `direction: rtl` with `text-overflow: ellipsis`, which puts the ellipsis on the left. The `<bdi>` isolates the path, so it still reads left to right. A flex row drops the spaces between its items, so `column-gap` stands in for them, and the row's text is unchanged.
+- **Width:** it adapts to the row's width, as before: a path that fits shows in full, left-aligned.
+
+**Tests.**
+- `tool-header.test.ts`: which tools mark a path; no path means no path layout.
+- `ToolBlock.test.tsx`: a Read row has the path layout with the full path in its `<bdi>`, and a Grep row doesn't.
+- `tool-descriptors.parity.test.ts` accepts the new field.
+- jsdom can't measure an ellipsis, so the left-side cut itself is checked in an isolated `task dev`.
+
+## 5. Delivery
+
+- **One agentmux PR**, frontend only, with a changeset and the tests above. The four tweaks are small and independent; commit each separately so a review note on one doesn't hold the others.
 - **Visual check** in an isolated `task dev`, which this report needs for the §1 submenu question and the §2 layout. Include before/after notes in the PR description.
 - **Docs:** `agentmux-docs` `main-menu.md`, whose Theme row (`:19`, `:30`) should say the menu stays open while you pick, in a follow-up docs PR after the app PR merges. No docs page describes the tool panel showing the command.
 - **Decisions:** taken, see §1.
