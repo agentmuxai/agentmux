@@ -68,6 +68,70 @@ impl NoWindow for tokio::process::Command {
     }
 }
 
+/// Resume the (single) main thread of a CREATE_SUSPENDED process.
+///
+/// Walks a Toolhelp32 thread snapshot to find the one thread belonging
+/// to `pid` (a freshly-spawned suspended process has only its main
+/// thread), opens it with THREAD_SUSPEND_RESUME, and ResumeThread's it.
+///
+/// Errors come from snapshot creation, OpenThread, or ResumeThread
+/// returning `(DWORD)-1`. A `ResumeThread` return of 0 means the thread
+/// was already running (impossible if the process was just created
+/// suspended) — treated as success.
+#[cfg(windows)]
+pub fn resume_main_thread(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
+        THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{
+        OpenThread, ResumeThread, THREAD_SUSPEND_RESUME,
+    };
+
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return Err("CreateToolhelp32Snapshot failed".into());
+        }
+
+        let mut entry: THREADENTRY32 = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+
+        let mut found = false;
+        if Thread32First(snap, &mut entry) != 0 {
+            loop {
+                if entry.th32OwnerProcessID == pid {
+                    let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                    if !thread.is_null() {
+                        let prev = ResumeThread(thread);
+                        CloseHandle(thread);
+                        if prev == u32::MAX {
+                            CloseHandle(snap);
+                            return Err(format!(
+                                "ResumeThread failed for tid={}",
+                                entry.th32ThreadID
+                            ));
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+                entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+                if Thread32Next(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(snap);
+        if !found {
+            return Err(format!("no thread found for pid={}", pid));
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

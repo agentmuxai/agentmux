@@ -179,8 +179,9 @@ impl SubprocessController {
         cmd.stderr(std::process::Stdio::piped());
 
         // Spawn
-        crate::backend::process_tracker::registry::place_spawn(&self.block_id, &mut cmd, true);
-        let spawned = cmd.spawn();
+        // In the block's tracker before it runs (`spawn_tracked`), so every
+        // descendant it spawns (bg bash, dev servers, watchers) is caught.
+        let spawned = crate::backend::process_tracker::registry::spawn_tracked(&self.block_id, &mut cmd, crate::backend::process_tracker::registry::Join::Agent);
         if spawned.is_err() {
             // The turn was marked active (and published) above; a spawn that
             // never started must not leave it "active" forever — roll back and
@@ -218,17 +219,6 @@ impl SubprocessController {
             args = ?args_for_log(&args, prompt_in_argv),
             "subprocess spawned"
         );
-
-        // Assign the child to this block's process tracker so every
-        // descendant it spawns (bg bash, dev servers, watchers, etc.)
-        // is caught by the per-platform tracking mechanism and surfaces
-        // in the swarm activity panel. No-op if the tracker global
-        // hasn't been initialized (tests) or on platforms without a
-        // real tracker impl yet (stub handle accepts silently).
-        // See `backend::process_tracker`.
-        if pid != 0 {
-            crate::backend::process_tracker::registry::track_spawned_agent(&self.block_id, pid);
-        }
 
         // Store PID
         let (kill_tx, kill_rx) = tokio::sync::oneshot::channel::<bool>();

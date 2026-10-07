@@ -515,9 +515,18 @@ phase changes one resource kind behind the same entry point.
   processes still carrying the agent's tag are added to the survivors
   ("still running, outside the agent's tracking") and reported, not killed:
   one may be an app the agent opened for the user.
+- **Windows** (2026-10-07):
+  - Agent-side spawns start `CREATE_SUSPENDED`, are assigned to the job,
+    then resumed (`registry::spawn_tracked`, §6.4), so nothing escapes
+    between spawn and assignment. Every tokio spawn site uses it.
+  - `kill_tree` keeps the job open, so a respawned CLI is still tracked;
+    the PID list is no longer capped at 256.
+  - A Job Object that can't be created is logged as an error and the agent
+    falls back to the best-effort tracker, not the stub.
 - **Not yet:**
   - Stopping foreground descendants on Stop (§5). They need telling apart
     from background tasks in the tracker.
   - The close dialog reading `AgentResources`.
   - The `AgentResources` MCP tool.
-  - Phase 3 on Windows; Windows `CREATE_SUSPENDED`.
+  - Phase 3 on Windows: agents run without a console, so there's no
+    CTRL_BREAK to send; the job's kill is still immediate.

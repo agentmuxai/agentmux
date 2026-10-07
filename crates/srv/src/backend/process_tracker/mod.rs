@@ -223,16 +223,19 @@ pub enum TrackingConfidence {
 pub fn new_tracker(block_id: &str, agent: bool) -> Arc<dyn TrackerHandle> {
     #[cfg(windows)]
     {
-        let _ = agent;
         match windows::JobObjectTracker::new(block_id) {
             Ok(t) => Arc::new(t),
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     block_id = %block_id,
                     error = %e,
-                    "[process-tracker] JobObjectTracker init failed — falling back to stub"
+                    "[process-tracker] JobObjectTracker init failed — falling back to best-effort tracking"
                 );
-                Arc::new(stub::StubTracker)
+                if agent {
+                    Arc::new(scan::ScanTracker::new(block_id))
+                } else {
+                    Arc::new(stub::StubTracker)
+                }
             }
         }
     }

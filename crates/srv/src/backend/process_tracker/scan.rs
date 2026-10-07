@@ -6,8 +6,9 @@
 //!
 //! - [`tagged`], on every OS: after a teardown, what still carries the tag got
 //!   out of the agent's tracker, and is reported (`agent_teardown`).
-//! - [`ScanTracker`] (Unix): the best-effort tracker where the OS can't hold
-//!   the tree, macOS (no cgroups) and Linux without a delegated cgroup.
+//! - [`ScanTracker`]: the best-effort tracker where the OS can't hold the
+//!   tree: macOS (no cgroups), Linux without a delegated cgroup, and Windows
+//!   when a Job Object can't be created.
 //!
 //! An agent's processes are:
 //!
@@ -22,13 +23,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-#[cfg(unix)]
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-#[cfg(unix)]
-use super::{TrackerHandle, TrackingConfidence};
-use super::TrackedProcess;
+use super::{TrackedProcess, TrackerHandle, TrackingConfidence};
 
 /// A process-table snapshot shared by every scan tracker, refreshed at most
 /// this often: the 2 s poll of N agents costs one OS scan, not N.
@@ -122,11 +119,38 @@ fn members_in(sys: &sysinfo::System, roots: &HashMap<u32, u64>, tag: &OsString) 
         .collect()
 }
 
+/// Ask `pid` to exit. `false` where there is no such signal (Windows: the
+/// agent side runs without a console, so no CTRL_BREAK).
 #[cfg(unix)]
-fn signal(pid: u32, sig: libc::c_int) {
+fn ask_to_exit(pid: u32) -> bool {
+    // SAFETY: kill(2) with a pid from the process table and a constant signal.
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) == 0 }
+}
+
+#[cfg(windows)]
+fn ask_to_exit(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn kill_now(pid: u32) {
     // SAFETY: kill(2) with a pid from the process table and a constant signal.
     unsafe {
-        libc::kill(pid as libc::pid_t, sig);
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    }
+}
+
+#[cfg(windows)]
+fn kill_now(pid: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    // SAFETY: a handle opened, used and closed here.
+    unsafe {
+        let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if !h.is_null() {
+            TerminateProcess(h, 1);
+            CloseHandle(h);
+        }
     }
 }
 
@@ -141,7 +165,6 @@ pub fn tagged(block_id: &str) -> Vec<TrackedProcess> {
     with_snapshot(Some(std::time::Instant::now()), |sys| members_in(sys, &HashMap::new(), &block_tag(block_id)))
 }
 
-#[cfg(unix)]
 struct Inner {
     tag: OsString,
     /// The processes assigned to the agent (its CLI, one per spawn): PID →
@@ -150,7 +173,6 @@ struct Inner {
     roots: Mutex<HashMap<u32, u64>>,
 }
 
-#[cfg(unix)]
 impl Inner {
     fn members(&self, fresh: bool) -> Vec<TrackedProcess> {
         let after = fresh.then(std::time::Instant::now);
@@ -170,27 +192,24 @@ impl Inner {
                 return;
             }
             for p in members.iter().rev() {
-                signal(p.pid, libc::SIGKILL);
+                kill_now(p.pid);
             }
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     }
 }
 
-#[cfg(unix)]
 /// One agent's best-effort tracker.
 pub struct ScanTracker {
     inner: Arc<Inner>,
 }
 
-#[cfg(unix)]
 impl ScanTracker {
     pub fn new(block_id: &str) -> Self {
         Self { inner: Arc::new(Inner { tag: block_tag(block_id), roots: Mutex::new(HashMap::new()) }) }
     }
 }
 
-#[cfg(unix)]
 impl TrackerHandle for ScanTracker {
     fn assign_process(&self, pid: u32) -> Result<(), String> {
         // Its start time, from a fresh scan: recorded with the PID so a later
@@ -217,7 +236,7 @@ impl TrackerHandle for ScanTracker {
         if !self.inner.members(true).iter().any(|p| p.pid == pid) {
             return false;
         }
-        signal(pid, libc::SIGKILL);
+        kill_now(pid);
         true
     }
 
@@ -226,10 +245,11 @@ impl TrackerHandle for ScanTracker {
     }
 
     fn terminate(&self) -> bool {
+        let mut asked = false;
         for p in self.inner.members(true) {
-            signal(p.pid, libc::SIGTERM);
+            asked |= ask_to_exit(p.pid);
         }
-        true
+        asked
     }
 
     fn member_count(&self) -> usize {
@@ -237,7 +257,6 @@ impl TrackerHandle for ScanTracker {
     }
 }
 
-#[cfg(unix)]
 impl Drop for ScanTracker {
     /// The agent is gone: end what it left. Off the caller's thread, since a
     /// scan takes tens of milliseconds and the caller may be async.
