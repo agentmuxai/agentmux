@@ -4,7 +4,7 @@
 use crate::job_object::{create_job_object, JobHandle};
 use crate::host_spawn::spawn_host_supervised;
 use crate::logging::log;
-use crate::second_instance::{forward_open_new_window, ForwardError};
+use crate::second_instance::{forward_open_new_window, ForwardError, Handoff};
 use crate::show_fatal_dialog;
 use crate::supervisor::{
     HOST_RESTART_BUDGET, HOST_RESTART_WINDOW, SRV_RESTART_BUDGET, SRV_RESTART_WINDOW,
@@ -154,7 +154,7 @@ pub(crate) async fn run_windows(
         dir_hash,
         pipe_path
     ));
-    let first_pipe = match ipc::server::bind_first_pipe_instance(&pipe_path) {
+    let first_pipe = 'claim: { match ipc::server::bind_first_pipe_instance(&pipe_path) {
         Ok(p) => p,
         Err(e) => {
             // ERROR_ACCESS_DENIED (5) means another launcher already
@@ -181,33 +181,39 @@ pub(crate) async fn run_windows(
                 std::process::exit(0);
             }
             if already_running {
-                match forward_open_new_window(&paths.data_dir, &dir_hash) {
+                let first = match forward_open_new_window(&paths.data_dir, &dir_hash) {
                     Ok(()) => {
                         log("forwarded open_new_window to existing instance — exiting 0");
                         std::process::exit(0);
                     }
-                    Err(ForwardError::Transient(reason)) => {
-                        // Transient race: the host is alive (pipe is
-                        // held by the first launcher) but its
-                        // forwarding hint isn't readable yet —
-                        // typically because the host is mid-CEF-init
-                        // and hasn't written `<data-dir>/ipc-port`
-                        // yet. Silent exit so the user isn't punished
-                        // for double-clicking quickly.
+                    Err(e) => e,
+                };
+                // The host didn't take it: still starting (no port file
+                // yet), or quitting (host gone; its launcher holds the pipe
+                // until srv has closed every agent). Wait for either.
+                log(&format!("forward failed: {} — waiting for the instance to start or finish quitting", first.reason()));
+                match crate::second_instance::await_running_instance(
+                    || ipc::server::bind_first_pipe_instance(&pipe_path).ok(),
+                    || forward_open_new_window(&paths.data_dir, &dir_hash),
+                    first,
+                ) {
+                    Handoff::Claimed(pipe) => {
+                        log("the previous instance has quit — starting");
+                        break 'claim pipe;
+                    }
+                    Handoff::Forwarded => {
+                        log("forwarded open_new_window to existing instance — exiting 0");
+                        std::process::exit(0);
+                    }
+                    Handoff::GaveUp(ForwardError::Transient(reason)) => {
+                        // Never published its port: exit silently, as for a
+                        // quick double-click.
                         log(&format!("forward transient: {} — exiting 0 silently", reason));
                         std::process::exit(0);
                     }
-                    Err(ForwardError::Fatal(reason)) => {
-                        // Fatal forward failure: the port file IS
-                        // readable, so the host got far enough to
-                        // publish it, but the HTTP path is dead
-                        // (connect refused, write failed). Could be
-                        // a hung host, a port collision, or
-                        // ERROR_ACCESS_DENIED that wasn't really
-                        // "another instance" (namespace conflict).
-                        // Surface the dialog so the user sees that
-                        // something is genuinely broken rather than
-                        // a silent no-op. (codex P2 PR #598.)
+                    Handoff::GaveUp(ForwardError::Fatal(reason)) => {
+                        // Published its port but never answered: hung. Show
+                        // the dialog rather than a silent no-op (#598).
                         log(&format!("forward fatal: {} — surfacing dialog", reason));
                         show_fatal_dialog(
                             "AgentMux",
@@ -232,7 +238,7 @@ pub(crate) async fn run_windows(
             );
             std::process::exit(2);
         }
-    };
+    } };
 
     // Task #35 (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md P1) — read-only
     // detection of other, OLDER AgentMux instances still running (the
@@ -1228,12 +1234,25 @@ pub(crate) async fn run_windows(
     // as the Unix path above (prevent spurious LSD-3 compensation).
     saga_coord.cancel_all_in_flight("launcher shutting down").await;
 
-    // 8. Cleanup. Happy path: drop(job) → KILL_ON_JOB_CLOSE reaps
-    // the surviving child + CEF renderers. Degraded path (job is
-    // None): explicit start_kill on both — neither will be reaped
-    // by the OS, so we have to terminate them ourselves to avoid
+    // 8. Cleanup. srv first, through the one stop path (`quiesce_srv`):
+    // closing its stdin tells it to close every agent gracefully
+    // (`agent_teardown::app_exit`) and exit; it is force-killed only if it
+    // hasn't within `SRV_EXIT_WAIT`. Then the happy path: drop(job) →
+    // KILL_ON_JOB_CLOSE reaps whatever survives + CEF renderers. Degraded
+    // path (job is None): explicit start_kill on both — neither will be
+    // reaped by the OS, so we have to terminate them ourselves to avoid
     // orphans. (gemini PR #570 round-1 MEDIUM L105 / round-2 P1
     // backstop pattern.)
+    match crate::upgrade::quiesce_srv(
+        &mut srv_child,
+        srv_stdin_keepalive.take(),
+        agentmux_common::process::SRV_EXIT_WAIT,
+    )
+    .await
+    {
+        Ok((_, outcome)) => log(&format!("srv stopped ({outcome:?})")),
+        Err(e) => log(&format!("WARN: stopping srv failed: {e}")),
+    }
     if job.is_none() {
         log("WARN: J0 absent — explicitly killing surviving children");
         let _ = host_child.start_kill();

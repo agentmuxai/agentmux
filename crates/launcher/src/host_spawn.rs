@@ -305,7 +305,13 @@ pub(crate) fn terminate_child_gracefully(child: &tokio::process::Child) {
 /// SIGTERM's own graceful shutdown already reaped it).
 #[cfg(not(target_os = "windows"))]
 fn kill_process_group(child: &tokio::process::Child, signal: libc::c_int, signal_name: &str) {
-    let Some(pid) = child.id() else { return };
+    if let Some(pid) = child.id() {
+        kill_group(pid, signal, signal_name);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_group(pid: u32, signal: libc::c_int, signal_name: &str) {
     // SAFETY: kill(2) with a process-scoped pid + a constant signal — no
     // memory is touched. A stale pid just returns ESRCH (ignored below).
     let rc = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
@@ -320,22 +326,10 @@ fn kill_process_group(child: &tokio::process::Child, signal: libc::c_int, signal
     }
 }
 
-/// SIGTERM an entire process group — gives a process that installs a signal
-/// handler (srv does: SIGINT/SIGTERM → `shell_sessions.stop_all()`,
-/// `crates/srv/src/main.rs`) a chance to run its own graceful shutdown
-/// before the harder `kill_process_group_forcefully` follows. Matters
-/// specifically for srv: its tracked agent shells (`shell_node.rs`) are each
-/// spawned into THEIR OWN process group (`.process_group(0)`, same mechanism
-/// this backstop itself uses, applied for a different scoping purpose), so
-/// they are NOT members of srv's own group and a bare group-SIGKILL of srv
-/// would orphan them. `stop_all()` reaches them anyway — `kill_tree()`
-/// signals each tracked shell BY ITS OWN pid/pgid directly
-/// (`kill(-shell_pgid, SIGTERM)` then `SIGKILL`), independent of ambient
-/// process-group membership. host is not presumed capable of a meaningful
-/// graceful response here (the whole premise of a teardown-backstop
-/// scenario is that its UI thread is wedged) but SIGTERM-ing it too is
-/// harmless — a wedged process with no custom SIGTERM handler just
-/// terminates on it the same as SIGKILL would.
+/// SIGTERM an entire process group, before the harder
+/// `kill_process_group_forcefully` follows. The teardown backstop uses it
+/// on the host's group; srv is never group-signalled first, since its own
+/// SIGTERM/stdin-EOF shutdown closes its agents (`upgrade::quiesce_srv`).
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn kill_process_group_gracefully(child: &tokio::process::Child) {
     kill_process_group(child, libc::SIGTERM, "SIGTERM");
@@ -357,6 +351,13 @@ pub(crate) fn kill_process_group_gracefully(child: &tokio::process::Child) {
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn kill_process_group_forcefully(child: &tokio::process::Child) {
     kill_process_group(child, libc::SIGKILL, "SIGKILL");
+}
+
+/// [`kill_process_group_forcefully`] by pgid, for a child already reaped
+/// (whose `id()` is gone): srv's group after srv was force-killed.
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn kill_group_forcefully(pgid: u32) {
+    kill_group(pgid, libc::SIGKILL, "SIGKILL");
 }
 
 #[cfg(all(test, not(target_os = "windows")))]

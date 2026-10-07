@@ -171,10 +171,17 @@ fn taskkill_tree(pid: i32) -> std::process::Command {
 }
 
 /// The cap on srv's app-exit teardown (`agent_teardown::app_exit`: every
-/// agent closed, then leftover shells swept). Shared so the launcher can pin
-/// its upgrade quiesce (`upgrade::GRACEFUL_QUIESCE_TIMEOUT`) above it: a
-/// shorter wait would kill srv mid-teardown.
+/// agent closed, then leftover shells swept). Shared so the launcher's wait
+/// for srv ([`SRV_EXIT_WAIT`]) stays above it.
 pub const SRV_APP_EXIT_CAP: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// How long the launcher waits for srv to exit on its own after telling it
+/// to (stdin closed; on Unix also SIGTERM) before force-killing it: on every
+/// quit and on an upgrade (`upgrade::quiesce_srv`). Above
+/// [`SRV_APP_EXIT_CAP`] with room for srv's own exit, so a force-kill never
+/// lands mid-teardown. srv usually exits well before it.
+pub const SRV_EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+const _: () = assert!(SRV_EXIT_WAIT.as_millis() > SRV_APP_EXIT_CAP.as_millis() + 1000);
 
 #[cfg(test)]
 mod tests {
