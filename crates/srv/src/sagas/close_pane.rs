@@ -876,6 +876,33 @@ mod tests {
         }
     }
 
+    /// A teardown finishes even when its caller is dropped mid-way: the
+    /// host gives `CloseWindow` 2 s and then hangs up, which drops the
+    /// handler, and a graceful close takes longer than that.
+    #[tokio::test]
+    async fn a_teardown_outlives_a_dropped_caller() {
+        let state = test_state();
+        let (_ws, tab_id) = seed_tab(&state).await;
+        let a = seed_block(&state, &tab_id).await;
+        register_slow(&a, 500);
+        let caller = {
+            let (st, a) = (state.clone(), a.clone());
+            tokio::spawn(async move {
+                crate::sagas::agent_teardown::run_many(&st, std::slice::from_ref(&a), crate::sagas::agent_teardown::Policy::close())
+                    .await;
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        caller.abort();
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !(blockcontroller::is_closing(&a) && !blockcontroller::closing_blocks_still_running().contains(&a)) {
+            assert!(std::time::Instant::now() < until, "the teardown was cut short with its caller");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(blockcontroller::get_controller(&a).is_none());
+        finish_close(&state, &a).await;
+    }
+
     /// Agent teardown spec §6.6: a pane close takes its PtyShell drawers
     /// (sub-blocks) server-side, whether or not the pane is mounted to send
     /// `deletesubblock`.

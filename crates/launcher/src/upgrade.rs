@@ -25,6 +25,8 @@
 //! today's loops now would be guessing at an integration shape that phase 2
 //! gets to actually decide. This module is deliberately the callable,
 //! tested half; the calling half is follow-up work once §4.2 lands.
+//! ([`quiesce_srv`] itself is live: both supervisors stop srv with it on
+//! quit, after their loops have ended, so no respawn handling is involved.)
 //!
 //! Constraint 2 from the spec — "migrations only run with no live srv
 //! holding that data dir" (`341faa981`'s data-loss incident) — is what
@@ -52,15 +54,10 @@ use crate::data_dir::DataPaths;
 use crate::srv_spawner::{run_migrate, SrvSpawnError};
 use crate::startup_events::StartupEventSink;
 
-/// How long [`quiesce_srv`] waits for srv to exit on its own (Unix: after
-/// SIGTERM) before escalating to a hard kill. Generous on purpose — this
-/// runs during a deliberate, user-initiated upgrade action, not a crash
-/// recovery path, so there's no reason to race a slow-but-clean WAL
-/// checkpoint.
-pub const GRACEFUL_QUIESCE_TIMEOUT: Duration = Duration::from_secs(10);
-// srv closes its agents on the way out (agent_teardown::app_exit), capped at
-// SRV_APP_EXIT_CAP; a quiesce no longer than that would kill it mid-teardown.
-const _: () = assert!(GRACEFUL_QUIESCE_TIMEOUT.as_secs() > agentmux_common::process::SRV_APP_EXIT_CAP.as_secs());
+/// How long [`quiesce_srv`] waits for srv to exit on its own before
+/// escalating to a hard kill: long enough for srv to close every agent
+/// (`agent_teardown::app_exit`, capped at `SRV_APP_EXIT_CAP`).
+pub const GRACEFUL_QUIESCE_TIMEOUT: Duration = agentmux_common::process::SRV_EXIT_WAIT;
 
 /// How [`quiesce_srv`] actually stopped the process — logged, and useful in
 /// tests, but callers don't need to branch on it: either variant means the
@@ -70,60 +67,39 @@ pub enum QuiesceOutcome {
     /// The child had already exited before this call (e.g. a crash that
     /// raced the upgrade request).
     AlreadyExited,
-    /// Exited on its own within [`GRACEFUL_QUIESCE_TIMEOUT`] (Unix: after
-    /// SIGTERM; Windows: see the "no graceful signal" note on
-    /// `quiesce_srv`'s Windows branch).
+    /// Exited on its own within the graceful window, after being told to.
     ExitedGracefully,
-    /// Didn't exit in time (Unix only — Windows always takes this path, see
-    /// below) and was force-killed.
+    /// Didn't exit in time and was force-killed.
     ExitedAfterForceKill,
 }
 
-/// Stop `child` and return only once it has genuinely exited — never a
-/// fixed sleep. This is the fix for the exact gap the `sleep(300ms)`
-/// heuristic in `crates/cef/src/commands/backend.rs`'s `run_migrations`
-/// left open: that comment already says "so the OS releases file locks
-/// before we open the DB," which a sleep can only approximate and a real
-/// `.wait()` guarantees outright.
+/// Stop srv and return only once it has genuinely exited — never a fixed
+/// sleep. The launcher's one way of stopping srv: on every quit (both
+/// supervisors) and before a migration ([`run_migration_upgrade`]).
 ///
-/// # Windows
-/// There is no graceful shutdown signal available here today — every
-/// existing srv-teardown call site in this launcher already uses
-/// `start_kill()` (the `srv_child.start_kill()` calls in
-/// `supervisor/windows.rs`'s `run_windows`), relying on srv's
-/// SQLite WAL durability rather than a clean in-process shutdown. Building
-/// a graceful path for Windows is out of scope for this change; this
-/// function stays consistent with that existing convention rather than
-/// introducing a new, untested shutdown mechanism for one caller.
-// `graceful_timeout` is unused on the Windows branch (there's no graceful
-// wait to bound) — allowed there specifically rather than renaming the
-// param, since it IS used on every other platform.
-#[cfg_attr(target_os = "windows", allow(unused_variables))]
+/// Telling srv to stop is dropping `stdin`, its keepalive pipe: srv reads
+/// EOF as "shut down" on every platform (`bootstrap::install_shutdown_handlers`)
+/// and closes every agent gracefully on the way out
+/// (`agent_teardown::app_exit`). Unix also gets SIGTERM, which does the same.
+/// Only if srv hasn't exited after `graceful_timeout` is it force-killed —
+/// on Windows, whatever it still runs then goes with J0.
 pub async fn quiesce_srv(
     child: &mut Child,
+    stdin: Option<tokio::process::ChildStdin>,
     graceful_timeout: Duration,
 ) -> std::io::Result<(std::process::ExitStatus, QuiesceOutcome)> {
     if let Ok(Some(status)) = child.try_wait() {
         return Ok((status, QuiesceOutcome::AlreadyExited));
     }
-
-    #[cfg(target_os = "windows")]
-    {
-        child.start_kill()?;
-        let status = child.wait().await?;
-        Ok((status, QuiesceOutcome::ExitedAfterForceKill))
-    }
-
+    drop(stdin);
     #[cfg(not(target_os = "windows"))]
-    {
-        crate::host_spawn::terminate_child_gracefully(child);
-        match tokio::time::timeout(graceful_timeout, child.wait()).await {
-            Ok(status) => Ok((status?, QuiesceOutcome::ExitedGracefully)),
-            Err(_elapsed) => {
-                child.start_kill()?;
-                let status = child.wait().await?;
-                Ok((status, QuiesceOutcome::ExitedAfterForceKill))
-            }
+    crate::host_spawn::terminate_child_gracefully(child);
+    match tokio::time::timeout(graceful_timeout, child.wait()).await {
+        Ok(status) => Ok((status?, QuiesceOutcome::ExitedGracefully)),
+        Err(_elapsed) => {
+            child.start_kill()?;
+            let status = child.wait().await?;
+            Ok((status, QuiesceOutcome::ExitedAfterForceKill))
         }
     }
 }
@@ -162,14 +138,16 @@ impl std::fmt::Display for UpgradeError {
 /// BEFORE this runs, so its migrations are the ones that end up applied).
 ///
 /// `srv_child` must be the handle for the ALREADY-RUNNING srv this upgrade
-/// is replacing — this function does not spawn or discover it.
+/// is replacing — this function does not spawn or discover it — and
+/// `srv_stdin` its stdin keepalive (see [`quiesce_srv`]).
 pub async fn run_migration_upgrade(
     launcher_exe_dir: &Path,
     paths: &DataPaths,
     srv_child: &mut Child,
+    srv_stdin: Option<tokio::process::ChildStdin>,
     sink: &StartupEventSink,
 ) -> Result<(), UpgradeError> {
-    let (status, outcome) = quiesce_srv(srv_child, GRACEFUL_QUIESCE_TIMEOUT)
+    let (status, outcome) = quiesce_srv(srv_child, srv_stdin, GRACEFUL_QUIESCE_TIMEOUT)
         .await
         .map_err(UpgradeError::Quiesce)?;
     crate::log(&format!(
@@ -213,9 +191,8 @@ mod tests {
     }
 
     /// A child that ignores SIGTERM, forcing `quiesce_srv`'s escalation
-    /// path. Unix only — Windows has no graceful signal to ignore in the
-    /// first place (see `quiesce_srv`'s own doc comment), so its escalation
-    /// path is unconditional and already covered by every Windows test here.
+    /// path (it has no stdin to close). Unix only: Windows sends no signal
+    /// to ignore, so its escalation path is covered by the live-child test.
     ///
     /// Blocks until the child confirms its trap is actually installed
     /// before returning — sending SIGTERM immediately after `spawn()` races
@@ -260,7 +237,7 @@ mod tests {
             .await
             .expect("child did not exit");
 
-        let (status, outcome) = quiesce_srv(&mut child, Duration::from_secs(1))
+        let (status, outcome) = quiesce_srv(&mut child, None, Duration::from_secs(1))
             .await
             .expect("quiesce_srv must not error on an already-exited child");
 
@@ -277,9 +254,11 @@ mod tests {
         let mut child = spawn_long_lived();
         let pid = child.id().expect("live child has a pid");
 
+        // A short graceful window: on Windows nothing here tells the dummy
+        // to stop, so it is force-killed when the window ends.
         let (_status, _outcome) = tokio::time::timeout(
             Duration::from_secs(15),
-            quiesce_srv(&mut child, GRACEFUL_QUIESCE_TIMEOUT),
+            quiesce_srv(&mut child, None, Duration::from_secs(1)),
         )
         .await
         .expect("quiesce_srv hung instead of returning once the child exited")
@@ -306,7 +285,7 @@ mod tests {
             Duration::from_secs(10),
             // Short graceful window so the test doesn't wait the full
             // production 10s to prove the escalation path.
-            quiesce_srv(&mut child, Duration::from_millis(300)),
+            quiesce_srv(&mut child, None, Duration::from_millis(300)),
         )
         .await
         .expect("quiesce_srv hung past its own escalation timeout")
@@ -314,6 +293,36 @@ mod tests {
 
         assert_eq!(outcome, QuiesceOutcome::ExitedAfterForceKill);
         assert_eq!(status.signal(), Some(libc::SIGKILL));
+    }
+
+    /// Closing stdin is the stop signal on every platform (it is the only
+    /// one on Windows): a child that ignores SIGTERM but exits on stdin EOF,
+    /// as srv does, exits gracefully.
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn closing_stdin_stops_a_child_that_ignores_sigterm() {
+        let mut child = tokio::process::Command::new("sh")
+            .args(["-c", "trap '' TERM; echo ready; cat >/dev/null"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("spawn stdin-reading shell");
+        let stdin = child.stdin.take();
+        let stdout = child.stdout.take().expect("piped stdout");
+        let line = BufReader::new(stdout).lines().next_line().await.expect("read").expect("line");
+        assert_eq!(line.trim(), "ready");
+
+        let (status, outcome) = tokio::time::timeout(
+            Duration::from_secs(10),
+            quiesce_srv(&mut child, stdin, Duration::from_secs(5)),
+        )
+        .await
+        .expect("quiesce_srv hung")
+        .expect("quiesce_srv errored");
+
+        assert_eq!(outcome, QuiesceOutcome::ExitedGracefully);
+        assert!(status.success());
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -327,7 +336,7 @@ mod tests {
 
         let (_status, outcome) = tokio::time::timeout(
             Duration::from_secs(5),
-            quiesce_srv(&mut child, GRACEFUL_QUIESCE_TIMEOUT),
+            quiesce_srv(&mut child, None, GRACEFUL_QUIESCE_TIMEOUT),
         )
         .await
         .expect("quiesce_srv hung")

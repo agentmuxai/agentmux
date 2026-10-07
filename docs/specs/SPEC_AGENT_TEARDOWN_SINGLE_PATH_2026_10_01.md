@@ -446,6 +446,17 @@ phase changes one resource kind behind the same entry point.
     wait holds the single-instance pipe while agents close, so a quick
     relaunch would forward to a dying instance and open nothing. It needs a
     single-instance handoff first (§12).
+  - **Amended 2026-10-07 (normal-quit wait):** both launchers now stop srv
+    through `upgrade::quiesce_srv` on every quit: close its stdin (Unix:
+    also SIGTERM), wait up to `SRV_EXIT_WAIT` (10 s, pinned above the cap),
+    and only then force-kill (Unix: srv's process group too; Windows: J0).
+    Teardowns run as tracked tasks (`agent_teardown::detached`), so a caller
+    that stops waiting (the host gives `CloseWindow` 2 s) can't cut one
+    short, and `app_exit` waits for every close in flight. The handoff: a
+    relaunch whose `open_new_window` forward fails `Fatal` (the quitting
+    instance's host is gone) waits for the old launcher to let go of the
+    socket/pipe (`second_instance::wait_to_claim`, `SRV_EXIT_WAIT` + 5 s) and
+    then starts fresh; past that it is treated as hung, as before.
 - **O4. Verified: `Start-Process` does not escape the agent's job on today's
   Windows build.**
   - **Test:** 2026-10-01, from inside an agent's Bash on AgentMux 0.59. A
@@ -486,5 +497,4 @@ phase changes one resource kind behind the same entry point.
     from background tasks in the tracker.
   - The close dialog reading `AgentResources`.
   - The `AgentResources` MCP tool.
-  - A normal-quit wait in the launchers (§11 O3 amendment).
   - Phases 3 and 4.

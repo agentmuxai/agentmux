@@ -148,12 +148,10 @@ async fn run_inner(
     // Step 2: per-tab DeleteTab dispatch. `force: true` bypasses the
     // reducer's last-tab guard — the saga is intentionally draining
     // the workspace, the guard exists to protect user-facing CloseTab
-    // flows from emptying a workspace by accident. The persist
-    // subscriber's `apply_tab_deleted` runs `wcore::delete_tab` which
-    // kills each block's PTY controller via `delete_tab_inner` →
-    // `delete_controller(block_id)`. That's the same controller-cleanup
-    // path the user-facing DeleteTab saga (Step 5 PR 1) relies on,
-    // so we don't replicate the controller-kill here.
+    // flows from emptying a workspace by accident. Every agent was
+    // already closed gracefully above (`agent_teardown::run_many`); the
+    // persist subscriber's `wcore::delete_tab` → `delete_tab_inner` →
+    // `agent_teardown::discard` is only the backstop and finds nothing.
     //
     // **No compensation.** If a tab's DeleteTab dispatch fails mid-
     // cascade, the already-deleted prefix is gone — we can't

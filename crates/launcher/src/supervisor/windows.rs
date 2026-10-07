@@ -154,7 +154,7 @@ pub(crate) async fn run_windows(
         dir_hash,
         pipe_path
     ));
-    let first_pipe = match ipc::server::bind_first_pipe_instance(&pipe_path) {
+    let first_pipe = 'claim: { match ipc::server::bind_first_pipe_instance(&pipe_path) {
         Ok(p) => p,
         Err(e) => {
             // ERROR_ACCESS_DENIED (5) means another launcher already
@@ -201,14 +201,24 @@ pub(crate) async fn run_windows(
                         // Fatal forward failure: the port file IS
                         // readable, so the host got far enough to
                         // publish it, but the HTTP path is dead
-                        // (connect refused, write failed). Could be
-                        // a hung host, a port collision, or
-                        // ERROR_ACCESS_DENIED that wasn't really
-                        // "another instance" (namespace conflict).
-                        // Surface the dialog so the user sees that
-                        // something is genuinely broken rather than
-                        // a silent no-op. (codex P2 PR #598.)
-                        log(&format!("forward fatal: {} — surfacing dialog", reason));
+                        // (connect refused, write failed). Most often
+                        // the instance is quitting: its host is gone
+                        // and its launcher holds the pipe until srv has
+                        // closed every agent. Wait for it to let go and
+                        // start fresh. Otherwise a hung host, a port
+                        // collision, or ERROR_ACCESS_DENIED that wasn't
+                        // really "another instance" (namespace
+                        // conflict): surface the dialog so the user
+                        // sees that something is genuinely broken
+                        // rather than a silent no-op. (codex P2 PR #598.)
+                        log(&format!("forward fatal: {} — waiting for the instance to finish quitting", reason));
+                        if let Some(pipe) = crate::second_instance::wait_to_claim(|| {
+                            ipc::server::bind_first_pipe_instance(&pipe_path).ok()
+                        }) {
+                            log("the previous instance has quit — starting");
+                            break 'claim pipe;
+                        }
+                        log("the instance is still running — surfacing dialog");
                         show_fatal_dialog(
                             "AgentMux",
                             &format!(
@@ -232,7 +242,7 @@ pub(crate) async fn run_windows(
             );
             std::process::exit(2);
         }
-    };
+    } };
 
     // Task #35 (SPEC_WIN10_PAGEFILE_OOM_CRASH_2026_06_29.md P1) — read-only
     // detection of other, OLDER AgentMux instances still running (the
@@ -1228,12 +1238,25 @@ pub(crate) async fn run_windows(
     // as the Unix path above (prevent spurious LSD-3 compensation).
     saga_coord.cancel_all_in_flight("launcher shutting down").await;
 
-    // 8. Cleanup. Happy path: drop(job) → KILL_ON_JOB_CLOSE reaps
-    // the surviving child + CEF renderers. Degraded path (job is
-    // None): explicit start_kill on both — neither will be reaped
-    // by the OS, so we have to terminate them ourselves to avoid
+    // 8. Cleanup. srv first, through the one stop path (`quiesce_srv`):
+    // closing its stdin tells it to close every agent gracefully
+    // (`agent_teardown::app_exit`) and exit; it is force-killed only if it
+    // hasn't within `SRV_EXIT_WAIT`. Then the happy path: drop(job) →
+    // KILL_ON_JOB_CLOSE reaps whatever survives + CEF renderers. Degraded
+    // path (job is None): explicit start_kill on both — neither will be
+    // reaped by the OS, so we have to terminate them ourselves to avoid
     // orphans. (gemini PR #570 round-1 MEDIUM L105 / round-2 P1
     // backstop pattern.)
+    match crate::upgrade::quiesce_srv(
+        &mut srv_child,
+        srv_stdin_keepalive.take(),
+        agentmux_common::process::SRV_EXIT_WAIT,
+    )
+    .await
+    {
+        Ok((_, outcome)) => log(&format!("srv stopped ({outcome:?})")),
+        Err(e) => log(&format!("WARN: stopping srv failed: {e}")),
+    }
     if job.is_none() {
         log("WARN: J0 absent — explicitly killing surviving children");
         let _ = host_child.start_kill();

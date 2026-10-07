@@ -30,6 +30,32 @@ pub(crate) enum ForwardError {
     Fatal(String),
 }
 
+/// How long a relaunch waits for a running instance whose host doesn't
+/// answer to let go of the single-instance socket/pipe. That is what an
+/// instance looks like while it quits: its host is gone, and its launcher
+/// holds on until srv has closed every agent (`upgrade::quiesce_srv`, up to
+/// `SRV_EXIT_WAIT`). Past this it is treated as hung, as before.
+pub(crate) const QUITTING_INSTANCE_WAIT: std::time::Duration =
+    std::time::Duration::from_secs(agentmux_common::process::SRV_EXIT_WAIT.as_secs() + 5);
+
+/// Poll `try_claim` until it returns the single-instance socket/pipe or
+/// [`QUITTING_INSTANCE_WAIT`] passes. Both supervisors call it when their
+/// `open_new_window` forward fails `Fatal`, so a relaunch during a quit
+/// starts a fresh instance once the old one is gone, rather than doing
+/// nothing.
+pub(crate) fn wait_to_claim<T>(mut try_claim: impl FnMut() -> Option<T>) -> Option<T> {
+    let until = std::time::Instant::now() + QUITTING_INSTANCE_WAIT;
+    loop {
+        if let Some(claimed) = try_claim() {
+            return Some(claimed);
+        }
+        if std::time::Instant::now() >= until {
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
 /// Forward an arbitrary host IPC command over the same authenticated
 /// localhost channel `forward_open_new_window` uses.
 ///
@@ -198,30 +224,46 @@ fn print_dev_instance_collision(channel: &str, data_dir: &std::path::Path, socke
 /// answered our connect probe), so a transient/fatal forward failure shouldn't
 /// block — at worst the relaunch is a silent no-op instead of a new window.
 /// SPEC_MACOS_LAUNCH_COHERENCE_2026_06_18.md.
+/// Returns `true` when the host didn't answer (`Fatal`): the instance may be
+/// quitting.
 #[cfg(not(target_os = "windows"))]
-pub(crate) fn forward_open_new_window_or_log(data_dir: &std::path::Path, dir_hash: &str) {
+pub(crate) fn forward_open_new_window_or_log(data_dir: &std::path::Path, dir_hash: &str) -> bool {
     match forward_open_new_window(data_dir, dir_hash) {
         Ok(()) => log("forwarded open_new_window to existing instance"),
         Err(ForwardError::Transient(reason)) => {
             log(&format!("open_new_window forward transient (host mid-startup?): {}", reason))
         }
         Err(ForwardError::Fatal(reason)) => {
-            log(&format!("open_new_window forward failed: {}", reason))
+            log(&format!("open_new_window forward failed: {}", reason));
+            return true;
         }
     }
+    false
 }
 
 /// What a launcher that lost the single-instance race does: open a window in
 /// the running instance, unless it was started by a login entry, which only
 /// asks that AgentMux be running (SPEC_START_WITH_OS_2026_09_25.md §3.6).
 /// Not used by the macOS reopen handler, which is a user asking for a window.
+/// Returns `true` when the running instance's host didn't answer.
 #[cfg(not(target_os = "windows"))]
-fn forward_for_second_instance(data_dir: &std::path::Path, dir_hash: &str) {
+fn forward_for_second_instance(data_dir: &std::path::Path, dir_hash: &str) -> bool {
     if !crate::autostart::second_instance_opens_window(&std::env::args().collect::<Vec<_>>()) {
         log("login start: AgentMux is already running — exiting without opening a window");
-        return;
+        return false;
     }
-    forward_open_new_window_or_log(data_dir, dir_hash);
+    forward_open_new_window_or_log(data_dir, dir_hash)
+}
+
+/// The socket, once the launcher that held it has exited: unlink its file
+/// and bind. `None` while it still answers. Called under the recovery lock.
+#[cfg(not(target_os = "windows"))]
+fn claim_after_quit(socket_path: &str) -> Option<tokio::net::UnixListener> {
+    if std::os::unix::net::UnixStream::connect(socket_path).is_ok() {
+        return None;
+    }
+    let _ = std::fs::remove_file(socket_path);
+    crate::ipc::server::bind_first_unix_socket(socket_path).ok()
 }
 
 /// Bind the launcher's IPC socket with single-instance enforcement +
@@ -336,7 +378,13 @@ pub(crate) fn bind_socket_with_recovery(
                     socket_path
                 );
             }
-            forward_for_second_instance(data_dir, dir_hash);
+            if forward_for_second_instance(data_dir, dir_hash) {
+                log("[ipc] the running instance's host doesn't answer — waiting for it to finish quitting");
+                if let Some(listener) = wait_to_claim(|| claim_after_quit(socket_path)) {
+                    log("[ipc] the previous instance has quit — starting");
+                    return listener;
+                }
+            }
             log(&format!(
                 "[ipc] second-instance detected — existing launcher owns {}",
                 socket_path
@@ -373,7 +421,7 @@ pub(crate) fn bind_socket_with_recovery(
                             socket_path
                         );
                     }
-                    forward_for_second_instance(data_dir, dir_hash);
+                    let _ = forward_for_second_instance(data_dir, dir_hash);
                     log(&format!(
                         "[ipc] post-recovery bind lost the race to a fresh launcher on {} — exiting as second instance",
                         socket_path
@@ -403,4 +451,24 @@ pub(crate) fn bind_socket_with_recovery(
         }
     }
     // `lock_file` drops here; flock auto-released on close.
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wait_to_claim;
+
+    /// A relaunch during a quit takes the socket/pipe as soon as the old
+    /// instance lets go of it, not after the whole wait.
+    #[test]
+    fn wait_to_claim_returns_once_the_claim_succeeds() {
+        let mut tries = 0;
+        let started = std::time::Instant::now();
+        let claimed = wait_to_claim(|| {
+            tries += 1;
+            (tries == 3).then_some("socket")
+        });
+        assert_eq!(claimed, Some("socket"));
+        assert_eq!(tries, 3);
+        assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
 }
