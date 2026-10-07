@@ -83,7 +83,7 @@ export class Follower {
         const gap = this.target - pos;
         if (gap >= REST_PX && (this.host.reducedMotion() || gap > clientHeight * SNAP_FRACTION)) {
             // A snap (reduced motion, or more than most of a viewport): land now, before paint.
-            // Anything smaller is left to the frames: no step here (ReAgent P2 on #4438).
+            // Anything smaller is left to the frames: no step here.
             this.write(this.target);
         }
         if (this.target - this.pos < REST_PX) return this.stop();

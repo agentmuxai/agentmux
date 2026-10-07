@@ -218,7 +218,7 @@ export class OneWayFlow {
                 live = el.scrollTop; // perf:allow-layout-read — after the spacer write: one layout, inside the RO callback
                 this.host.wrote({ scrollTop: live, scrollHeight: sh, clientHeight: ch });
             }
-            // The geometry any write from here reports (ReAgent P2 on #4438).
+            // The geometry any write from here reports.
             this.lastGeo = { scrollHeight: sh, clientHeight: ch };
             this.follower.update(live, sh - ch, ch);
             live = this.follower.position;
@@ -226,8 +226,7 @@ export class OneWayFlow {
             this.follower.stop();
             // Following, but the user is touching the pane: nothing moves now.
             // Look again once they let go, or content that arrived meanwhile
-            // would sit below the bottom until some unrelated resize
-            // (ReAgent P2 on #4438).
+            // would sit below the bottom until some unrelated resize.
             if (this.host.following()) this.recheckSoon();
             // Detached: keep only the room the reader's position needs.
             if (this.spacerPx > 0) {
