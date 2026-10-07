@@ -1264,7 +1264,7 @@ mod tests {
     /// A message sent before the handshake has opened the session (the
     /// startup message, sent right after launch) is queued for the stdout
     /// reader to send once the session exists, never sent with an empty
-    /// session id (ReAgent on #4447).
+    /// session id (#4447).
     #[tokio::test]
     async fn a_message_before_the_session_exists_is_queued_not_sent() {
         let c = controller();
