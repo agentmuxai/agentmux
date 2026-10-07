@@ -281,14 +281,14 @@ export interface AgentPaneState {
     currentToolArg: string | null;
     /**
      * The current turn's live usage, from the stream. Its lifetime follows the
-     * stream's own order: set by `TokensIn`, cleared by that turn's `TurnEnd`.
-     * `ReconcileTurnActive(false)` and the liveness recovery leave it alone:
-     * they don't come from the stream, and srv sends the turn-ended push
-     * before it forwards the `result` line, so the turn's `session_end` (and
-     * sometimes earlier calls) still follow. A new turn established without
-     * a `TurnEnd` (`TurnStart` from idle, a backend turn-active promotion)
-     * clears it, so a lost `session_end` can't credit one turn's tokens to
-     * the next. Hard ends (disconnect, failure, timeouts, reset) clear it.
+     * stream's own order: set by `TokensIn`, cleared by that turn's `TurnEnd`,
+     * or by `StreamSessionStarted` when the process died before a `result`.
+     * Nothing outside the stream clears it on a normal turn end:
+     * `ReconcileTurnActive`, the liveness recovery and `TurnStart` all leave
+     * it alone, because srv sends the turn-ended push before it forwards the
+     * `result` line, so the turn's `session_end` (and sometimes earlier calls)
+     * still follow, and a queued message or the next turn can start in that
+     * gap. Hard ends (disconnect, failure, timeouts, reset) clear it.
      */
     turnTokens: TurnTokens | null;
     /**
@@ -762,6 +762,10 @@ export type AgentPaneCommand =
     // this is the same split, just on the dispatched command.
     | { type: "TokensIn"; input: number; model?: string; freshInput?: number; cacheCreation?: number; cacheRead?: number }
     | { type: "TokensOut"; output: number }
+    /** The stream shows a new CLI session starting (`system/init`): any turn
+     *  still holding tokens ended without a `result` (the process died), so
+     *  they belong to no turn that is coming. */
+    | { type: "StreamSessionStarted" }
     /** The main agent's model sent `stop_reason: end_turn`; see `modelEndedTurn` on the Streaming phase. */
     | { type: "ModelEndedTurn" }
     /** The main agent's model began a new message; it is working again. */

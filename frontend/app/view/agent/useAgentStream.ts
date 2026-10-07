@@ -604,6 +604,13 @@ export function useAgentStream({
                 // live registry having watched the task (activity/task-outcomes.ts).
                 if (rawEvent.type === "system") noteTaskFrame(blockId, rawEvent, Date.now());
 
+                // A new CLI session (srv reads `init` as a turn boundary too,
+                // background_task_feed.rs): a turn still holding live tokens
+                // ended without a `result`, so its tokens go.
+                if (rawEvent.type === "system" && rawEvent.subtype === "init" && !rawEvent.parent_tool_use_id) {
+                    model.dispatchPane({ type: "StreamSessionStarted" });
+                }
+
                 // Real compaction-boundary completion data (Tier 1/2 —
                 // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md).
                 // Claude Code's `system`/`compact_boundary` frame arrives on this

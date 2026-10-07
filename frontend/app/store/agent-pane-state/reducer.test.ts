@@ -622,26 +622,41 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.sessionStats?.added_input_tokens).toBe(5_000);
             });
 
-            // A turn whose session_end never arrives must not lend its tokens to
-            // the next turn.
-            it("a new user turn from idle drops tokens left by a turn whose session_end never came", () => {
+            // The Idle phase the push leaves releases queued messages at once,
+            // so the next turn can start before this turn's session_end.
+            it("a queued message starting the next turn before session_end keeps this turn's tokens for it", () => {
                 const started = update(reconciled(), { type: "TurnStart", at: 300 }).state;
-                expect(started.turnTokens).toBeNull();
+                expect(started.turnPhase.kind).toBe("Submitting");
+                const r = update(started, { type: "TurnEnd", stats: resultStats });
+                expect(r.state.sessionStats?.added_input_tokens).toBe(3_000);
             });
 
-            it("so does the backend's turn-active push starting the next turn", () => {
+            it("so does the backend's turn-active push for the next turn", () => {
                 const promoted = update(reconciled(), { type: "ReconcileTurnActive", at: 300, active: true }).state;
                 expect(promoted.turnPhase.kind).toBe("Streaming");
-                expect(promoted.turnTokens).toBeNull();
-                // With no live tokens of its own, its TurnEnd reports the result's figures.
                 const r = update(promoted, { type: "TurnEnd", stats: resultStats });
-                expect(r.state.sessionStats?.added_input_tokens).toBeUndefined();
+                expect(r.state.sessionStats?.added_input_tokens).toBe(3_000);
             });
 
             it("a message accepted mid-turn keeps the running turn's tokens", () => {
                 const s = midTurn();
                 const steered = update(s, { type: "TurnStart", at: 150 }).state;
                 expect(steered.turnTokens).toBe(s.turnTokens);
+            });
+
+            // A turn whose process died before its `result` must not lend its
+            // tokens to the next turn: the new session's `init` comes first in
+            // the stream.
+            it("a new CLI session in the stream drops tokens left by a turn that never got its result", () => {
+                const s = update(reconciled(), { type: "StreamSessionStarted" }).state;
+                expect(s.turnTokens).toBeNull();
+                const next = update(s, { type: "TokensIn", input: 44_000 }).state;
+                expect(next.turnTokens?.contextBaseline).toBe(43_000);
+            });
+
+            it("a new CLI session with nothing held changes nothing", () => {
+                const s0 = streaming(110);
+                expect(update(s0, { type: "StreamSessionStarted" }).state).toBe(s0);
             });
         });
     });

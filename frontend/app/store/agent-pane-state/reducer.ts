@@ -540,10 +540,9 @@ export function update(
                 return {
                     state: {
                         ...state,
-                        // The backend says a new turn is running: tokens still
-                        // held belong to an earlier turn whose session_end never
-                        // came, and must not be credited to this one.
-                        turnTokens: null,
+                        // turnTokens stay, as on TurnStart: the next turn can be
+                        // marked active before the last one's session_end has
+                        // come through the stream.
                         turnPhase: {
                             kind: "Streaming",
                             bufferSize: 0,
@@ -603,9 +602,8 @@ export function update(
                     // the stream is usually still delivering this turn: its
                     // session_end, and sometimes calls before it. Clearing them
                     // here left TurnEnd with no live tokens, and the footer
-                    // showed every call's input summed. The stream's own
-                    // TurnEnd clears them; a new turn established without one
-                    // clears them too (TurnStart, the promotion above).
+                    // showed every call's input summed. Only the stream ends
+                    // them: TurnEnd, or a new CLI session (StreamSessionStarted).
                     turnPhase: { kind: "Idle" },
                     // Same reasoning as the other authoritative terminal
                     // transitions above: the backend has just confirmed
@@ -754,10 +752,9 @@ export function update(
                 state: {
                     ...state,
                     sessionStats: null, // clear stale stats from prior turn
-                    // A new turn from idle: tokens still held belong to a turn
-                    // whose session_end never came, and must not be credited
-                    // to this one. A send accepted mid-turn keeps them.
-                    turnTokens: workingFromPhase(state.turnPhase) ? state.turnTokens : null,
+                    // turnTokens stay: a queued message drains as soon as the
+                    // turn-ended push makes the pane Idle, often before that
+                    // turn's session_end has come through the stream.
                     lastEventMs: command.at,
                     failure: null,
                     // Submitting until the first stream event /
@@ -884,6 +881,13 @@ export function update(
                 ],
             };
         }
+
+        // In stream order, a session's `init` comes after the last turn's
+        // `result` and before the next turn's calls, so clearing here never
+        // drops tokens a coming TurnEnd needs.
+        case "StreamSessionStarted":
+            if (state.turnTokens == null) return { state, events: [] };
+            return { state: { ...state, turnTokens: null }, events: [] };
 
         case "TurnReset":
             return {
