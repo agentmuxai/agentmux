@@ -28,7 +28,13 @@ const INTERACTIVE_ROLES: &[&str] = &[
 /// their place.
 const TRANSPARENT_ROLES: &[&str] = &[
     "generic", "none", "presentation", "InlineTextBox", "LineBreak", "RootWebArea", "WebArea",
-    "Section", "GenericContainer", "Ignored", "IgnoredRole",
+    "Section", "GenericContainer", "Ignored", "IgnoredRole", "LabelText", "Legend", "MenuListPopup",
+];
+
+/// Text inside these is already shown: a label's or legend's text is the
+/// accessible name of what it labels, and a field's text is its `value=`.
+const TEXT_SHOWN_ELSEWHERE: &[&str] = &[
+    "LabelText", "Legend", "textbox", "searchbox", "combobox", "spinbutton", "slider", "textarea",
 ];
 
 /// What `DOM.describeNode` says about an element, for the few things the
@@ -161,7 +167,7 @@ pub fn render(nodes: &[Value], facts: &HashMap<i64, DomFacts>, scope_backend_id:
     };
     let mut out = Snapshot { text: String::new(), refs: Vec::new(), truncated: false };
     if let Some(root) = root {
-        walk(root, &by_id, facts, 0, "", &mut out);
+        walk(root, &by_id, facts, 0, "", false, &mut out);
     }
     if out.truncated {
         out.text.push_str("- … snapshot truncated at 40 KB: pass `scope` (a reference) to read one part of the page\n");
@@ -175,6 +181,7 @@ fn walk(
     facts: &HashMap<i64, DomFacts>,
     depth: usize,
     parent_name: &str,
+    hide_text: bool,
     out: &mut Snapshot,
 ) {
     if out.truncated {
@@ -187,7 +194,7 @@ fn walk(
     let is_text = role == "StaticText";
     let transparent = ignored
         || TRANSPARENT_ROLES.contains(&role)
-        || (is_text && (name.is_empty() || name == parent_name))
+        || (is_text && (hide_text || name.is_empty() || name == parent_name))
         || role.is_empty();
 
     let mut child_depth = depth;
@@ -208,7 +215,7 @@ fn walk(
     if let Some(children) = node.get("childIds").and_then(|v| v.as_array()) {
         for c in children {
             if let Some(child) = c.as_str().and_then(|id| by_id.get(id)) {
-                walk(child, by_id, facts, child_depth, name_for_children, out);
+                walk(child, by_id, facts, child_depth, name_for_children, hide_text || TEXT_SHOWN_ELSEWHERE.contains(&role), out);
             }
         }
     }
@@ -340,6 +347,23 @@ mod tests {
         );
         assert_eq!(s.refs, vec![("e1".into(), 40), ("e2".into(), 50), ("e3".into(), 60)]);
         assert!(!s.truncated);
+    }
+
+    #[test]
+    fn label_text_and_field_text_are_not_repeated() {
+        let mut name = n("4", Some("3"), "textbox", "Your name", Some(40), &["5"]);
+        name["value"] = json!({ "type": "string", "value": "Lark" });
+        let nodes = vec![
+            n("1", None, "RootWebArea", "", Some(1), &["2"]),
+            n("2", Some("1"), "LabelText", "", Some(2), &["6", "3"]),
+            n("3", Some("2"), "generic", "", Some(3), &["4"]),
+            name,
+            n("5", Some("4"), "StaticText", "Lark", None, &[]),
+            n("6", Some("2"), "StaticText", "Your name", None, &[]),
+        ];
+        let s = render(&nodes, &HashMap::new(), None);
+        assert_eq!(s.text, "- textbox \"Your name\" [ref=e1] value=\"Lark\"
+");
     }
 
     #[test]
