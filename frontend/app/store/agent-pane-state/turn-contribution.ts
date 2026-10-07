@@ -3,30 +3,36 @@
 
 import type { TurnTokens } from "@/app/view/agent/types";
 
+/** Characters per token for a call's streamed-output estimate, as Claude Code
+ *  uses for its own spinner (`Math.round(responseLength / 4)`). */
+const CHARS_PER_TOKEN = 4;
+
+/** The turn's output by its parts: earlier calls' exact counts, plus the latest
+ *  call's exact count or, while it is still streaming, its estimate. A new
+ *  call's `outputDone` is this figure of the turn so far. */
+export function outputSoFar(t: Pick<TurnTokens, "output" | "outputDone" | "streamedChars">): number {
+    const current = Math.max(t.output, Math.round((t.streamedChars ?? 0) / CHARS_PER_TOKEN));
+    return (t.outputDone ?? 0) + current;
+}
+
 /**
- * What a turn actually ADDED to the conversation on the input side, as opposed
- * to the input it sent.
+ * The working row's one live counter: the turn's output so far, the way Claude
+ * Code counts it. It only grows within a turn: every API call re-sends the
+ * conversation, so input is the context size, not something the turn produced,
+ * and it isn't counted (the composer's context meter shows it).
  *
- * Every API call in a turn re-sends the whole conversation, so the raw
- * `input` of a call (and the whole-turn input the result event reports, which
- * sums every call's) is essentially the size of the context, repeated: a
- * one-line question late in a long session reads as "↑180k". The turn's own
- * contribution is the growth of the context across the turn: the user's
- * message, the tool results, and the assistant's earlier output that became
- * input to the next call.
- *
- *     added = context size at the turn's last call - context size before it began
- *
- * `contextBaseline` is the context size going in, captured by the reducer at
- * the turn's first TokensIn. Returns undefined when there is no baseline (a
- * provider that reports no live usage), so callers can fall back to the raw
- * figure rather than inventing one. Never negative: a compaction mid-turn
- * shrinks the context, which is not a negative contribution.
- *
- * Output is already a per-turn quantity and is shown as reported. See
- * docs/specs/SPEC_AGENT_WORKING_ROW_MONO_SUMMARY_2026_10_02.md section 3.4.
+ * See docs/specs/SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md.
  */
-export function turnAddedInput(tokens: Pick<TurnTokens, "input" | "contextBaseline"> | null | undefined): number | undefined {
-    if (!tokens || tokens.contextBaseline == null) return undefined;
-    return Math.max(0, tokens.input - tokens.contextBaseline);
+export function turnOutputTokens(
+    t: Pick<TurnTokens, "output" | "outputDone" | "streamedChars" | "shownOutput"> | null | undefined,
+): number | undefined {
+    if (!t) return undefined;
+    return Math.max(t.shownOutput ?? 0, outputSoFar(t));
+}
+
+/** `next` with its `shownOutput` raised to its current total. Never lowered, so
+ *  a call whose exact count comes in under its estimate doesn't move the
+ *  counter back. */
+export function withShownOutput(next: TurnTokens): TurnTokens {
+    return { ...next, shownOutput: turnOutputTokens(next) };
 }

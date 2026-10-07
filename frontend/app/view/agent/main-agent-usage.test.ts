@@ -4,7 +4,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import { mainAgentRequestStarted, mainAgentStreamedChars, mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
 
 const start = (over: Record<string, unknown> = {}, model = "claude-sonnet-5-5") => ({
     type: "stream_event",
@@ -168,5 +168,42 @@ describe("the context meter is fed only per-call usage (source pins)", () => {
         expect(src).toMatch(/useContextReading\(model\.blockId, paneModel, block\)/);
         expect(src).toMatch(/contextTokens=\{contextReading\(\)\?\.tokens \?\? null\}/);
         expect(read("frontend/app/view/agent/hooks/useContextReading.ts")).toMatch(/plausibleReading\(context\(\)\)/);
+    });
+});
+
+// SPEC_AGENT_TURN_TOKEN_COUNTER_CLAUDE_CONVENTION_2026_10_07.md §4: what the
+// working row's counter reads off the stream.
+describe("mainAgentStreamedChars", () => {
+    const delta = (delta: Record<string, unknown>, parent?: string) => ({
+        type: "stream_event",
+        parent_tool_use_id: parent ?? null,
+        event: { type: "content_block_delta", index: 0, delta },
+    });
+
+    it("counts text, thinking and tool-call input", () => {
+        expect(mainAgentStreamedChars(delta({ type: "text_delta", text: "hello" }))).toBe(5);
+        expect(mainAgentStreamedChars(delta({ type: "thinking_delta", thinking: "hmm…" }))).toBe(4);
+        expect(mainAgentStreamedChars(delta({ type: "input_json_delta", partial_json: '{"a":1' }))).toBe(6);
+    });
+
+    it("doesn't count a signature, a subagent's output, or anything that isn't a delta", () => {
+        expect(mainAgentStreamedChars(delta({ type: "signature_delta", signature: "x".repeat(300) }))).toBe(0);
+        expect(mainAgentStreamedChars(delta({ type: "text_delta", text: "hello" }, "toolu_1"))).toBe(0);
+        expect(mainAgentStreamedChars({ type: "stream_event", event: { type: "message_stop" } })).toBe(0);
+        expect(mainAgentStreamedChars({ type: "assistant", message: { content: [{ type: "text", text: "hello" }] } })).toBe(0);
+    });
+});
+
+describe("mainAgentRequestStarted", () => {
+    const toolResults = { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "ok" }] } };
+
+    it("is true for the main agent's tool results going back", () => {
+        expect(mainAgentRequestStarted(toolResults)).toBe(true);
+    });
+
+    it("is false for a subagent's tool results, a typed message, or other frames", () => {
+        expect(mainAgentRequestStarted({ ...toolResults, parent_tool_use_id: "toolu_9" })).toBe(false);
+        expect(mainAgentRequestStarted({ type: "user", message: { content: "hi" } })).toBe(false);
+        expect(mainAgentRequestStarted({ type: "assistant", message: { content: [{ type: "tool_use" }] } })).toBe(false);
     });
 });
