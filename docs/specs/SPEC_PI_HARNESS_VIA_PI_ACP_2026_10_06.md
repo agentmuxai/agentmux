@@ -1,6 +1,6 @@
 # Spec: Make the Pi harness launch, through the `pi-acp` adapter
 
-**Status:** proposed
+**Status:** implemented (#4424)
 **Date:** 2026-10-06
 **Author:** Camper
 

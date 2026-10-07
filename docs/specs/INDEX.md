@@ -401,6 +401,7 @@ partial list.
 | [`SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30`](SPEC_PERSISTENT_TURN_END_TEXT_GATE_2026_07_30.md) | SPEC — Require real explanation text before declaring a persistent-mode turn done |
 | [`SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16`](SPEC_PILLAR1_STEP6_SAGA_COLLAPSE_2026_07_16.md) | SPEC: Pillar 1 Step 6 — collapse launcher saga durability to an in-memory registry |
 | [`SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11`](SPEC_PILLAR2_SANITIZE_THEN_DECIDE_2026_07_11.md) | Pillar 2 — Sanitize-Then-Decide: Retiring the Last Two Independent Quit Authorities |
+| [`SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06`](SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md) | Spec: Make the Pi harness launch, through the `pi-acp` adapter |
 | [`SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19`](SPEC_POOL_PHASE7_MACOS_LINUX_2026_06_19.md) | Phase 7 — Pre-warmed Window Pool for macOS and Linux |
 | [`SPEC_PORTABLE_SOURCE_MAPS_2026_06_01`](SPEC_PORTABLE_SOURCE_MAPS_2026_06_01.md) | Source Maps in Portable Builds |
 | [`SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14`](SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md) | Spec: Pre-launch OAuth flow — identity-first agent setup |
@@ -734,7 +735,6 @@ partial list.
 | [`SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06`](SPEC_PILLAR1_STEP2_WINDOW_TOPOLOGY_PERSISTENCE_2026_07_06.md) | Pillar 1 Step 2 — Persist the Two Host-Only Topology Facts to srv |
 | [`SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07`](SPEC_PILLAR1_STEP3_WINDOW_TOPOLOGY_2026_07_07.md) | Pillar 1 Step 3 — Persist Window Kind + Parent Linkage to srv |
 | [`SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07`](SPEC_PILLAR1_STEP4_CRASH_REPROJECT_2026_07_07.md) | Pillar 1 Step 4 — Crash Reproject: Automatic Multi-Window Reconstruction |
-| [`SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06`](SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md) | Spec: Make the Pi harness launch, through the `pi-acp` adapter |
 | [`SPEC_POOL_WINDOW_HWND_NULL_2026_05_06`](SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md) | Pool window HWND-null at promote time |
 | [`SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06`](SPEC_PROVIDER_CLI_VERSION_UPGRADE_2026_09_06.md) | Provider CLI version upgrade (2026-09-06 drift report) |
 | [`SPEC_PROVIDER_ISOLATION_2026_06_20`](SPEC_PROVIDER_ISOLATION_2026_06_20.md) | SPEC: Provider environment isolation — never touch the user's `~/.claude` or global CLI |
