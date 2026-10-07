@@ -210,6 +210,7 @@ impl TrackerHandle for JobObjectTracker {
                 rss_bytes: query_rss(pid),
                 started_at_ms: 0, // deferred; uses NtQueryInformationProcess — skip for v1
                 parent_pid: parents.get(&pid).copied(),
+                exe: String::new(),
             })
             .collect()
     }

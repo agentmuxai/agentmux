@@ -85,24 +85,37 @@ pub fn track_adopted(block_id: &str, pid: u32) {
 /// with no pre-exec placement.
 pub fn place_spawn(block_id: &str, cmd: &mut tokio::process::Command, create: bool) {
     #[cfg(target_os = "linux")]
-    {
-        if block_id.is_empty() {
-            return;
-        }
-        let Some(registry) = global() else { return };
-        let tracker = if create {
-            Some(registry.ensure_tracker_kind(block_id, true))
-        } else {
-            registry.inner.lock().get(block_id).map(|e| e.tracker.clone())
-        };
-        if let Some(target) = tracker.and_then(|t| t.spawn_target()) {
-            super::cgroup_linux::join_before_exec(cmd, target);
-        }
+    if let Some(target) = spawn_target(block_id, create) {
+        super::cgroup_linux::join_before_exec(cmd, target);
     }
     #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (block_id, cmd, create);
+    let _ = (block_id, cmd, create);
+}
+
+/// [`place_spawn`] for an agent's PTY spawn, which has no pre-exec hook: the
+/// command is wrapped to join first (`cgroup_linux::join_before_exec_pty`).
+pub fn place_pty_spawn(block_id: &str, cmd: &mut portable_pty::CommandBuilder) {
+    #[cfg(target_os = "linux")]
+    if let Some(target) = spawn_target(block_id, true) {
+        super::cgroup_linux::join_before_exec_pty(cmd, target);
     }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (block_id, cmd);
+}
+
+/// Where a spawn for `block_id` joins its agent's tree, if anywhere.
+#[cfg(target_os = "linux")]
+fn spawn_target(block_id: &str, create: bool) -> Option<std::path::PathBuf> {
+    if block_id.is_empty() {
+        return None;
+    }
+    let registry = global()?;
+    let tracker = if create {
+        Some(registry.ensure_tracker_kind(block_id, true))
+    } else {
+        registry.inner.lock().get(block_id).map(|e| e.tracker.clone())
+    };
+    tracker?.spawn_target()
 }
 
 /// Settings key: run agents' process trees at below-normal CPU priority so

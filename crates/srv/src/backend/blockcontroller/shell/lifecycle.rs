@@ -953,6 +953,9 @@ impl Controller for ShellController {
             })
             .unwrap_or_default();
 
+        if is_agent {
+            crate::backend::process_tracker::registry::place_pty_spawn(&self.block_id, &mut cmd);
+        }
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
             tracing::error!(block_id = %self.block_id, error = %e, cmd = %cmd_str, "spawn failed");
             let mut inner = self.inner.lock().unwrap();

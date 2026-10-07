@@ -55,6 +55,17 @@ pub struct TrackedProcess {
     /// Parent PID, if the platform exposes it. Drives
     /// [`agent_started`]'s ancestry walk.
     pub parent_pid: Option<u32>,
+    /// The executable alone (path or name), which [`agent_started`]
+    /// classifies by: `command` may be a whole argv (`/bin/bash -c npm
+    /// test`). Empty means `command` is the executable.
+    #[serde(skip)]
+    pub exe: String,
+}
+
+impl TrackedProcess {
+    fn image(&self) -> String {
+        image_name(if self.exe.is_empty() { &self.command } else { &self.exe })
+    }
 }
 
 /// Lowercased executable name without directory or `.exe` suffix —
@@ -70,7 +81,7 @@ fn image_name(command: &str) -> String {
 /// use `powershell`/`cmd`).
 fn is_shell(p: &TrackedProcess) -> bool {
     matches!(
-        image_name(&p.command).as_str(),
+        p.image().as_str(),
         "bash" | "sh" | "dash" | "zsh" | "fish" | "cmd" | "powershell" | "pwsh" | "nu"
     )
 }
@@ -96,7 +107,7 @@ pub fn agent_started(members: Vec<TrackedProcess>, roots: &HashSet<u32>) -> Vec<
     let by_pid: HashMap<u32, &TrackedProcess> = members.iter().map(|p| (p.pid, p)).collect();
     let keep: HashSet<u32> = members
         .iter()
-        .filter(|p| !roots.contains(&p.pid) && image_name(&p.command) != "conhost")
+        .filter(|p| !roots.contains(&p.pid) && p.image() != "conhost")
         .filter(|p| {
             let mut cur = *p;
             // Bounded walk: a PID-reuse cycle can't spin forever.
@@ -278,6 +289,7 @@ mod tests {
             rss_bytes: 0,
             started_at_ms: 0,
             parent_pid: parent,
+            exe: String::new(),
         }
     }
 
@@ -351,6 +363,19 @@ mod tests {
         let mut members = idle_claude();
         members.push(proc(60, Some(1), r"C:\Users\u\.local\bin\claude.exe"));
         assert!(agent_started(members, &HashSet::from([10, 60])).is_empty());
+    }
+
+    /// Linux and macOS report the whole argv as `command`; the shell is
+    /// recognised from `exe`.
+    #[test]
+    fn a_shell_reported_with_its_argv_is_still_a_shell() {
+        let argv = |pid, parent, exe: &str, command: &str| TrackedProcess { exe: exe.to_string(), ..proc(pid, parent, command) };
+        let members = vec![
+            argv(10, Some(1), "/usr/bin/node", "node /usr/lib/claude/cli.js --input-format stream-json"),
+            argv(20, Some(10), "/bin/bash", "/bin/bash -c npm test"),
+            argv(21, Some(20), "/usr/bin/node", "node /repo/node_modules/.bin/vitest"),
+        ];
+        assert_eq!(pids(&agent_started(members, &HashSet::from([10]))), vec![20, 21]);
     }
 
     #[test]

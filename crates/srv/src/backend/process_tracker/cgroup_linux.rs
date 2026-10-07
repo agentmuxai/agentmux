@@ -190,6 +190,7 @@ impl TrackerHandle for CgroupTracker {
                     rss_bytes: p.memory(),
                     started_at_ms: p.start_time() * 1000,
                     parent_pid: p.parent().map(|pp| pp.as_u32()),
+                    exe: cmd.first().cloned().unwrap_or_else(|| p.name().to_string_lossy().into_owned()),
                 }
             })
             .collect()
@@ -264,6 +265,24 @@ pub fn join_before_exec(cmd: &mut tokio::process::Command, procs: PathBuf) {
             Ok(())
         });
     }
+}
+
+/// [`join_before_exec`] for a PTY spawn (portable-pty has no pre-exec hook):
+/// run the command through `sh`, which joins and then `exec`s it, so the
+/// program starts already in the cgroup, as the same process.
+pub fn join_before_exec_pty(cmd: &mut portable_pty::CommandBuilder, procs: PathBuf) {
+    let argv = cmd.get_argv_mut();
+    if argv.is_empty() {
+        return; // the user's default shell: never an agent
+    }
+    let mut wrapped: Vec<std::ffi::OsString> = vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        r#"echo 0 > "$0" 2>/dev/null; exec "$@""#.into(),
+        procs.into_os_string(),
+    ];
+    wrapped.append(argv);
+    *argv = wrapped;
 }
 
 #[cfg(test)]
@@ -344,6 +363,25 @@ mod tests {
         assert!(wait_for(|| pids_in(&dir).len() >= 2).await);
         drop(tracker);
         assert!(wait_for(|| !dir.exists()).await, "cgroup still there: {:?}", pids_in(&dir));
+    }
+
+    /// A PTY-style spawn wrapped by `join_before_exec_pty` starts in the
+    /// cgroup as the same process, with its own argv.
+    #[tokio::test]
+    async fn a_wrapped_pty_command_joins_before_it_runs() {
+        let Some(root) = test_root().await else { return };
+        let tracker = CgroupTracker::new(root, "test-pty-wrap").unwrap();
+        let mut b = portable_pty::CommandBuilder::new("sleep");
+        b.arg("3041");
+        join_before_exec_pty(&mut b, tracker.spawn_target().unwrap());
+        let argv: Vec<String> = b.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        let mut child = tokio::process::Command::new(&argv[0]).args(&argv[1..]).kill_on_drop(true).spawn().unwrap();
+        let pid = child.id().unwrap();
+        assert!(wait_for(|| tracker.pids() == vec![pid]).await, "members: {:?}", tracker.pids());
+        let listed = tracker.list_members();
+        assert_eq!(listed.first().map(|p| p.command.as_str()), Some("sleep 3041"), "exec'd in place");
+        tracker.kill_tree();
+        let _ = child.wait().await;
     }
 
     /// `assign_process` after spawn tracks a child spawned without the
