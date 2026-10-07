@@ -379,6 +379,10 @@ async fn run_loop(
             )
             .await;
     }
+    // The presence publisher reads the sign-in through this registration. A
+    // first login on a fresh channel signals it before the registration above
+    // has run, so signal again now that it has (#4463).
+    crate::muxbus::wan_presence::sign_in_changed();
 
     // The stale sign-in reason last logged, so a parked loop logs it once.
     let mut stale_logged: Option<String> = None;
