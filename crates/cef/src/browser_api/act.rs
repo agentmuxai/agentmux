@@ -374,7 +374,10 @@ pub async fn snapshot_route(
     let _ = cdp.call("Accessibility.enable", json!({})).await;
     let tree = match call(&mut cdp, "Accessibility.getFullAXTree", json!({})).await {
         Ok(t) => t,
-        Err(e) => return fail(e),
+        Err(e) => {
+            let _ = cdp.close().await;
+            return fail(e);
+        }
     };
     let nodes: Vec<Value> = tree.get("nodes").and_then(|n| n.as_array()).cloned().unwrap_or_default();
     let mut facts = HashMap::new();
@@ -506,7 +509,8 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
             let want = req.checked.ok_or("check needs `checked`")?;
             let before = call_on(cdp, &obj, READ_BACK, vec![]).await?;
             if before.get("checked").and_then(|v| v.as_bool()) == Some(want) {
-                return Ok(before);
+                // Nothing was clicked: redact on the facts from before.
+                return Ok(redact_secret(before, &facts));
             }
             click_element(cdp, &obj).await?;
             let after = call_on(cdp, &obj, READ_BACK, vec![]).await?;
