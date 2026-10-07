@@ -1227,7 +1227,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // auto-scroll, not just the disengage branch specifically.
         const wasProgrammatic = pendingProgrammaticScroll;
         pendingProgrammaticScroll = false;
-        const hadUserInput = hasRecentUserScrollInput();
+        // On the one-way path a pointer held on the content counts too: a
+        // text-selection drag past the pane's edge autoscrolls it, and that
+        // scroll is the user's (it must be able to release follow).
+        const hadUserInput = hasRecentUserScrollInput() || (oneWay && pointerHeld);
 
         // A batch that is purely our own pin reuses the geometry the pin read
         // after layout (see pinnedGeometry) — no layout read here. Anything the
@@ -1344,7 +1347,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 );
             }
         } else {
-            if (props.viewState.stickToBottom()) {
+            // On the one-way path only an upward user scroll releases follow
+            // (OneWayFlow.userScrolled, above). A user scrolling DOWN while the
+            // follower is still catching up is helping it, not leaving.
+            if (props.viewState.stickToBottom() && !oneWay) {
                 const gapPx = scrollHeight - clientHeight - scrollTop;
                 // Only the user can stop the follow. With no user scroll input
                 // in the window, "not near bottom" can only be something other
