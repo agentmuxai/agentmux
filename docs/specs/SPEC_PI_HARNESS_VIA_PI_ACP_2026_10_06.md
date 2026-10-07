@@ -56,16 +56,18 @@ is not worth it unless the adapter proves unreliable.
    `PI_ACP_PI_COMMAND` to the `pi` beside `pi-acp` (`pi_beside_pi_acp`,
    blockcontroller/acp.rs), and the login terminal gets the same variable
    (`companionCliEnv`).
-3. **Sign-in.** pi keeps its own logins and API keys (`~/.pi/agent`). It
-   reads `PI_CODING_AGENT_DIR`, not `PI_HOME`, so the `PI_HOME` AgentMux sets
-   is inert, and logins stay machine-wide, as for Antigravity. Neither pi nor
-   pi-acp has a non-interactive status command (`pi --list-models` exits 0
-   with "No models available"), so `authType` is `cli-managed` with an empty
-   `authCheckCommand`. The launch flow now skips the check for an empty
-   command instead of claiming a sign-in nobody checked. An unauthenticated
-   session fails `session/new` with "Authentication required: Configure an
-   API key or log in with an OAuth provider", which the pane shows. Login is
-   pi-acp's own terminal method, `pi-acp --terminal-login`.
+3. **Sign-in.** pi keeps its logins and API keys in `PI_CODING_AGENT_DIR`
+   (default `~/.pi/agent`). AgentMux had set `PI_HOME`, which pi never reads;
+   `authConfigDirEnvVar` is now `PI_CODING_AGENT_DIR`, so the agent, the
+   sign-in check and the login terminal all use AgentMux's shared Pi dir, one
+   for every Pi agent, as `cli-managed` (no account to bind). pi-acp has no
+   status command; for a `pi-acp` path srv runs the `pi` beside it with
+   `--list-models` (`run_auth_check`), which exits 0 either way and says "No
+   models available" until a provider is set up. An empty check command is
+   now refused by srv, so no caller can read a bare CLI's exit 0 as a
+   sign-in. An unauthenticated session also fails `session/new` with
+   "Authentication required". Login is pi-acp's own terminal method,
+   `pi-acp --terminal-login`.
 4. **Pins and prereqs:** Node 22.19.0 (pi's `engines`). The old-name pin is
    gone.
 5. **Card:** the description was already corrected (#4403).
@@ -75,11 +77,11 @@ is not worth it unless the adapter proves unreliable.
 - `providers.rs`: Pi runs `pi-acp` with no launch args, and installs
   `pi-acp@0.0.34` plus `@earendil-works/pi-coding-agent@1.0.4`; every other
   provider installs one package.
-- `acp.rs`: `PI_ACP_PI_COMMAND` points at the `pi` beside `pi-acp`, and only
-  for pi-acp.
-- Frontend: `companionCliEnv` for the login terminal; the launch flow skips the
-  check, and claims nothing, for an empty check command; Pi is `cli-managed`
-  with Node 22.19.0.
+- `pi_beside_pi_acp` finds the `pi` beside `pi-acp`, and only for pi-acp;
+  `pi_lists_models` reads "No models available" as signed out; an empty check
+  command is refused.
+- Frontend: `companionCliEnv` for the login terminal; Pi is `cli-managed`,
+  checked with `--list-models`, with `PI_CODING_AGENT_DIR` and Node 22.19.0.
 - Manually, before the change: `pi-acp` over ACP answers `initialize`, and
   `session/new` without credentials fails with "Authentication required"
   and offers the terminal login.
@@ -89,7 +91,7 @@ is not worth it unless the adapter proves unreliable.
 
 ## Open questions
 
-1. ~~Does the session map follow `PI_HOME`?~~ pi reads `PI_CODING_AGENT_DIR`;
-   `PI_HOME` is inert, and logins are machine-wide (see 3).
+1. ~~Does the session map follow `PI_HOME`?~~ pi reads `PI_CODING_AGENT_DIR`,
+   which AgentMux now sets (see 3).
 2. Which accounts and model providers does Pi need configured to answer a
    first prompt (Pi brings its own model providers)?

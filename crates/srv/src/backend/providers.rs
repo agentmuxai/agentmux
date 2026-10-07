@@ -598,7 +598,8 @@ static PI: ProviderConfig = ProviderConfig {
     resume_flag: None,
     session_id_field: "sessionId",
     styled_output_format: "acp",
-    auth_config_dir_env_var: "PI_HOME",
+    // pi's own config/auth dir variable; `PI_HOME` was never read.
+    auth_config_dir_env_var: "PI_CODING_AGENT_DIR",
     auth_dir_name: "pi",
     // Not OAuth-class -- never reaches ensure_history_link. Also
     // ACP-native (see the "openclaw" entry above) if that changes.
@@ -863,6 +864,25 @@ fn antigravity_install_paths(
             .into_iter()
             .collect()
     }
+}
+
+/// The `pi` installed next to `cmd` when `cmd` is pi-acp, for
+/// `PI_ACP_PI_COMMAND` (blockcontroller/acp.rs) and the auth check (`run_auth_check`). Without it pi-acp runs whatever `pi` is on PATH, often
+/// none (the managed install's `.bin` isn't on PATH) or an older one.
+/// SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
+pub fn pi_beside_pi_acp(cmd: &str) -> Option<String> {
+    let path = std::path::Path::new(cmd);
+    let stem = path.file_stem()?.to_string_lossy().to_ascii_lowercase();
+    if stem != "pi-acp" {
+        return None;
+    }
+    let dir = path.parent()?;
+    let names: &[&str] = if cfg!(windows) { &["pi.cmd", "pi.exe", "pi"] } else { &["pi"] };
+    names
+        .iter()
+        .map(|n| dir.join(n))
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Look up a provider by canonical ID or alias.
@@ -1243,6 +1263,20 @@ mod tests {
         // Every other provider either installs through npm or relies on PATH.
         assert!(known_install_paths("kimi").is_empty());
         assert!(known_install_paths("claude").is_empty());
+    }
+
+    #[test]
+    fn pi_acp_is_pointed_at_the_pi_installed_beside_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let pi = dir.path().join(if cfg!(windows) { "pi.cmd" } else { "pi" });
+        let acp = dir.path().join(if cfg!(windows) { "pi-acp.cmd" } else { "pi-acp" });
+        std::fs::write(&acp, "").unwrap();
+        assert_eq!(pi_beside_pi_acp(&acp.to_string_lossy()), None, "no pi yet");
+        std::fs::write(&pi, "").unwrap();
+        assert_eq!(pi_beside_pi_acp(&acp.to_string_lossy()), Some(pi.to_string_lossy().into_owned()));
+        // Other ACP CLIs get nothing.
+        let copilot = dir.path().join("copilot.cmd");
+        assert_eq!(pi_beside_pi_acp(&copilot.to_string_lossy()), None);
     }
 
     #[test]

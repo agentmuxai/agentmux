@@ -623,25 +623,6 @@ fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<Str
 }
 
 
-/// The `pi` installed next to `cmd` when `cmd` is pi-acp, for
-/// `PI_ACP_PI_COMMAND`. Without it pi-acp runs whatever `pi` is on PATH, often
-/// none (the managed install's `.bin` isn't on PATH) or an older one.
-/// SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md.
-fn pi_beside_pi_acp(cmd: &str) -> Option<String> {
-    let path = std::path::Path::new(cmd);
-    let stem = path.file_stem()?.to_string_lossy().to_ascii_lowercase();
-    if stem != "pi-acp" {
-        return None;
-    }
-    let dir = path.parent()?;
-    let names: &[&str] = if cfg!(windows) { &["pi.cmd", "pi.exe", "pi"] } else { &["pi"] };
-    names
-        .iter()
-        .map(|n| dir.join(n))
-        .find(|p| p.is_file())
-        .map(|p| p.to_string_lossy().into_owned())
-}
-
 impl AcpController {
     /// The env this block's ACP process is spawned with: `cmd:env` (either
     /// shape), with the block's row UID + token carried onto it — identity
@@ -683,7 +664,7 @@ impl Controller for AcpController {
         // read, so an `agent.open` launch lost both (spec §6.5.8).
         let args = meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
         let mut env_vars = self.spawn_env(&block_meta);
-        if let Some(pi) = pi_beside_pi_acp(&cmd) {
+        if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
         }
 
@@ -869,20 +850,6 @@ impl Controller for AcpController {
 
 #[cfg(test)]
 mod tests {
-
-    #[test]
-    fn pi_acp_is_pointed_at_the_pi_installed_beside_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let pi = dir.path().join(if cfg!(windows) { "pi.cmd" } else { "pi" });
-        let acp = dir.path().join(if cfg!(windows) { "pi-acp.cmd" } else { "pi-acp" });
-        std::fs::write(&acp, "").unwrap();
-        assert_eq!(super::pi_beside_pi_acp(&acp.to_string_lossy()), None, "no pi yet");
-        std::fs::write(&pi, "").unwrap();
-        assert_eq!(super::pi_beside_pi_acp(&acp.to_string_lossy()), Some(pi.to_string_lossy().into_owned()));
-        // Other ACP CLIs get nothing.
-        let copilot = dir.path().join("copilot.cmd");
-        assert_eq!(super::pi_beside_pi_acp(&copilot.to_string_lossy()), None);
-    }
 
     /// Identity M4b-2 (spec §6.5.8): `agent.open` stores `cmd:args` as an
     /// array and `cmd:env` as an object; ACP read only JSON strings, so

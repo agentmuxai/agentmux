@@ -478,13 +478,14 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         styledArgs: [],
         outputFormat: "acp",
         styledOutputFormat: "acp",
-        // pi keeps its own logins and API keys (~/.pi/agent), and has no
-        // non-interactive status command: an unauthenticated session fails
-        // `session/new` with "Authentication required", so there is no
-        // pre-launch check. Login is pi-acp's own terminal method, which
-        // starts `pi` interactively.
+        // pi keeps its logins and API keys in PI_CODING_AGENT_DIR (AgentMux's
+        // shared Pi dir, `authConfigDirEnvVar`), one for all Pi agents, so
+        // there's no account to bind. pi-acp has no status command; srv runs
+        // the `pi` beside it as `pi --list-models`, which says "No models
+        // available" until a provider is set up. Login is pi-acp's own
+        // terminal method, which starts `pi` interactively.
         authType: "cli-managed",
-        authCheckCommand: [],
+        authCheckCommand: ["--list-models"],
         authLoginCommand: ["--terminal-login"],
         npmPackage: "pi-acp",
         pinnedVersion: "0.0.34",
@@ -493,7 +494,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         windowsInstallCommand: "npm install -g pi-acp @earendil-works/pi-coding-agent",
         unixInstallCommand: "npm install -g pi-acp @earendil-works/pi-coding-agent",
         icon: "terminal",
-        authConfigDirEnvVar: "PI_HOME",
+        authConfigDirEnvVar: "PI_CODING_AGENT_DIR",
         authDirName: "pi",
         supportedVendors: ["pi"],
         startupInstructionsFilename: ".pi/APPEND_SYSTEM.md",

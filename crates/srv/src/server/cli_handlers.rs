@@ -749,13 +749,29 @@ pub(crate) fn make_cli_cmd(cli_path: &str) -> tokio::process::Command {
 /// Run the provider auth-check CLI against `auth_env` and parse the verdict.
 /// Returns `(authenticated, email, auth_method, raw_output)`. Extracted so the
 /// stale-credential self-heal can re-run the exact same check after refreshing.
+/// `pi --list-models` exits 0 either way; it is signed in when it lists
+/// models rather than "No models available".
+fn pi_lists_models(success: bool, stdout: &str, stderr: &str) -> bool {
+    success && !stdout.contains("No models available") && !stderr.contains("No models available")
+}
+
 async fn run_auth_check(
     cli_path: &str,
     auth_check_args: &[String],
     auth_env: &std::collections::HashMap<String, String>,
 ) -> Result<(bool, Option<String>, Option<String>, String), String> {
+    // No check command must never read as signed in: a bare CLI with null
+    // stdin often just exits 0 (pi-acp does).
+    if auth_check_args.is_empty() {
+        return Err("this CLI has no sign-in check".to_string());
+    }
+    // pi-acp has no status command of its own; the pi beside it does:
+    // `pi --list-models` prints "No models available" until a provider is
+    // set up (SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md).
+    let pi = crate::backend::providers::pi_beside_pi_acp(cli_path);
+    let program = pi.as_deref().unwrap_or(cli_path);
     let output = tokio::time::timeout(std::time::Duration::from_secs(10), {
-        let mut check_cmd = make_cli_cmd(cli_path);
+        let mut check_cmd = make_cli_cmd(program);
         // An auth check is the provider CLI acting as a plain third-party
         // binary, not as one of our agents — no endpoint, no credential.
         // (ReAgent P0, round 5, on #3326.)
@@ -790,6 +806,8 @@ async fn run_auth_check(
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
         json.get("loggedIn").and_then(|v| v.as_bool()).unwrap_or(false)
+    } else if pi.is_some() {
+        pi_lists_models(output.status.success(), &stdout, &stderr)
     } else {
         output.status.success()
     };
@@ -1067,6 +1085,22 @@ mod tests {
             .find(|p| !super::is_script_wrapper(p));
         assert_eq!(first_real.as_deref(), Some(r"D:\tools\agy.exe"));
         assert_eq!(super::spawnable_candidates("/usr/bin/agy\n", false), vec!["/usr/bin/agy".to_string()]);
+    }
+
+    #[test]
+    fn pi_is_signed_in_only_when_it_lists_models() {
+        let none = "No models available. Use /login to log into a provider via OAuth or API key.";
+        assert!(!super::pi_lists_models(true, none, ""));
+        assert!(!super::pi_lists_models(true, "", none));
+        assert!(!super::pi_lists_models(false, "", ""));
+        assert!(super::pi_lists_models(true, "anthropic/claude-sonnet-4-6
+", ""));
+    }
+
+    #[tokio::test]
+    async fn an_empty_check_command_is_refused_not_read_as_signed_in() {
+        let err = super::run_auth_check("pi-acp", &[], &Default::default()).await.unwrap_err();
+        assert!(err.contains("no sign-in check"), "{err}");
     }
 
     /// A prompt passed through one of these is re-parsed by `cmd.exe`.

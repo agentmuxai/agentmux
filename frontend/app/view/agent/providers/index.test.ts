@@ -9,8 +9,8 @@ import type { ProviderDefinition } from "./index";
 //   - OAuth CLIs (raw stream): claude, codex, gemini — authType "oauth",
 //     outputFormat "raw", no defaultArgs.
 //   - ACP providers:           openclaw (OAuth via subcommand —
-//     SPEC_OPENCLAW_AGENT_2026_05_17.md §4), pi (cli-managed: pi-acp
-//     reports sign-in when the session starts). Both `outputFormat: "acp"`.
+//     SPEC_OPENCLAW_AGENT_2026_05_17.md §4), pi (cli-managed: its own
+//     logins, checked through `pi --list-models`). Both `outputFormat: "acp"`.
 const OAUTH_CLI_IDS = ["claude", "codex", "gemini"] as const;
 const API_KEY_CLI_IDS = ["kimi", "qwen"] as const;
 const ACP_IDS = ["openclaw", "pi"] as const;
@@ -111,13 +111,14 @@ describe("PROVIDERS", () => {
         }
     });
 
-    // pi keeps its own logins and has no non-interactive status command, so
-    // there is no pre-launch check (SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md).
-    test("ACP cli-managed providers have no pre-launch auth check (pi)", () => {
+    // pi keeps its own logins (no account to bind); srv checks them with
+    // the pi beside pi-acp (SPEC_PI_HARNESS_VIA_PI_ACP_2026_10_06.md).
+    test("ACP cli-managed providers check sign-in through their own CLI (pi)", () => {
         for (const id of ACP_CLI_MANAGED_IDS) {
             expect(PROVIDERS[id].authType).toBe("cli-managed");
-            expect(PROVIDERS[id].authCheckCommand).toEqual([]);
+            expect(PROVIDERS[id].authCheckCommand).toEqual(["--list-models"]);
             expect(PROVIDERS[id].authLoginCommand).toEqual(["--terminal-login"]);
+            expect(PROVIDERS[id].authConfigDirEnvVar).toBe("PI_CODING_AGENT_DIR");
         }
     });
 });
