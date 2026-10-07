@@ -6,7 +6,7 @@
 // The CDP driving itself needs a running instance and isn't tested here.
 
 import { describe, expect, it } from "vitest";
-import { assess, overBudget, parseTrace, phasesOf } from "./agent-open.mjs";
+import { assess, exitCode, overBudget, parseTrace, phasesOf } from "./agent-open.mjs";
 
 // A real line from a v0.59.11 open (cef-debug.log), as the console reports it.
 const LINE =
@@ -52,5 +52,20 @@ describe("agent-open benchmark", () => {
         ]);
         expect(assess(parseTrace(LINE.replace("outcome=quiet", "outcome=timeout")), args)).toEqual(["outcome=timeout"]);
         expect(assess(parseTrace(LINE.replace("outcome=quiet", "outcome=unsettled")), args)).toEqual([]);
+    });
+
+    it("fails a stalled open, and treats an agent missing from My Agents as a setup error", () => {
+        const ok = { name: "A", status: "traced", misses: [] };
+        const alreadyOpen = { name: "B", status: "skipped (already open)" };
+        const stalled = { name: "C", status: "stalled", misses: ["no trace within 30000 ms"] };
+        const missing = { name: "Typo", status: "not in My Agents" };
+        expect(exitCode([ok, alreadyOpen])).toBe(0);
+        // One healthy open beside a stalled one still fails the run.
+        expect(exitCode([ok, stalled])).toBe(1);
+        expect(exitCode([stalled])).toBe(1);
+        expect(exitCode([{ ...ok, misses: ["outcome=failed"] }])).toBe(1);
+        // A run that covered fewer agents than asked doesn't pass.
+        expect(exitCode([ok, missing])).toBe(2);
+        expect(exitCode([alreadyOpen])).toBe(2);
     });
 });

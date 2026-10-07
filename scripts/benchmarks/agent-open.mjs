@@ -27,11 +27,14 @@
 //   read     history_read − history_start (the transcript read)
 //   painted  first rows painted
 //   revealed the loading cover lifted (bounded at 1.5 s, PANE_REVEAL_BOUND_MS)
-// An agent that's already open in the instance is focused, not opened, so it
-// produces no trace: it's reported as skipped, not as a failure.
+// An agent that's already open in the instance isn't opened again: the picker
+// shows its "already open" prompt instead, which the run dismisses and reports
+// as skipped. A click that shows no prompt and logs no trace within --timeout
+// is a stalled open, and fails the run.
 //
-// Exit code: 0 when every measured open is within budget, 1 when any isn't,
-// 2 on a setup error (no CDP target, no picker, no agent measured).
+// Exit code: 0 when every open is within budget, 1 when any isn't, failed or
+// stalled, 2 on a setup error (no CDP target, no picker, an agent not in My
+// Agents, or no agent measured).
 
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -40,6 +43,8 @@ const DEFAULTS = { port: Number(process.env.AGENTMUX_CDP_PORT) || 9222, revealBu
 // The Agent widget's icon opens a new agent picker pane.
 const PICKER_SELECTOR = ".fa-sparkles";
 const ENTRY_SELECTOR = '[data-testid="agent-my-agents-entry"]';
+// Shown instead of an open when the agent is already open (MyAgentsList).
+const OPEN_PROMPT_SELECTOR = '[data-testid="agent-fork-prompt"]';
 
 function parseArgs(argv) {
     const a = { ...DEFAULTS, agents: [], json: false };
@@ -102,6 +107,17 @@ export function assess(trace, args) {
     if (!p) return [...misses, "no history read in the trace"];
     if (p.revealed === undefined) misses.push("never revealed");
     return [...misses, ...overBudget(p, args)];
+}
+
+/**
+ * The run's exit code. An agent missing from My Agents is a setup error (the
+ * run covered fewer agents than asked), as is a run that measured nothing; a
+ * stalled open or a traced open with misses fails it.
+ */
+export function exitCode(results) {
+    if (results.some((r) => r.status === "not in My Agents")) return 2;
+    if (results.some((r) => r.misses?.length)) return 1;
+    return results.some((r) => r.status === "traced") ? 0 : 2;
 }
 
 function percentile(xs, q) {
@@ -169,9 +185,17 @@ async function openAgent(cdp, name, timeout) {
             const trace = parseTrace(line);
             return { name, status: "traced", outcome: trace.outcome, trace, phases: phasesOf(trace) };
         }
+        // Already open: dismiss the prompt (its ✕) and leave the picker as it was.
+        const alreadyOpen = await cdp.evaluate(`(() => {
+            const p = [...document.querySelectorAll(${JSON.stringify(OPEN_PROMPT_SELECTOR)})].find((e) => e.offsetParent && (e.innerText || "").includes(${JSON.stringify(name)}));
+            if (!p) return false;
+            p.querySelector('[aria-label="Cancel"]')?.click();
+            return true;
+        })()`);
+        if (alreadyOpen) return { name, status: "skipped (already open)" };
         await new Promise((r) => setTimeout(r, 100));
     }
-    return { name, status: "skipped (no trace: already open, or still opening)" };
+    return { name, status: "stalled", misses: [`no trace within ${timeout} ms`] };
 }
 
 async function main() {
@@ -184,8 +208,8 @@ async function main() {
     }
     cdp.ws.close();
 
-    // Every open that produced a trace counts; only those that produced none
-    // (already open, not in My Agents) are left out.
+    // Every open that produced a trace is assessed; a stalled one already
+    // carries its miss.
     const measured = results.filter((r) => r.status === "traced");
     for (const r of measured) r.misses = assess(r.trace, args);
     if (args.json) {
@@ -194,7 +218,8 @@ async function main() {
         console.log(["agent".padEnd(16), "read", "lines", "painted", "revealed", "result"].join("\t"));
         for (const r of results) {
             if (r.status !== "traced") {
-                console.log(`${r.name.padEnd(16)}\t\t\t\t\t${r.status}`);
+                const verdict = r.misses?.length ? `FAIL: ${r.status}, ${r.misses.join("; ")}` : r.status;
+                console.log(`${r.name.padEnd(16)}\t-\t-\t-\t-\t${verdict}`);
                 continue;
             }
             const p = r.phases ?? {};
@@ -208,8 +233,7 @@ async function main() {
             if (xs.length) console.log(`${k}: p50 ${percentile(xs, 0.5)} ms, p95 ${percentile(xs, 0.95)} ms, max ${Math.max(...xs)} ms`);
         }
     }
-    if (measured.length === 0) process.exit(2);
-    process.exit(measured.some((r) => r.misses.length) ? 1 : 0);
+    process.exit(exitCode(results));
 }
 
 // Run only when executed directly, not when the tests import the helpers.

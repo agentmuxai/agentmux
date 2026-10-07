@@ -249,7 +249,7 @@ node scripts/benchmarks/agent-open.mjs --agents Maka,Lzop,Parko --port 9222
 | `--read-budget MS` | 1000 | Transcript read (`history_read − history_start`) |
 | `--reveal-budget MS` | 1500 | Loading cover lifted (`revealed`) |
 | `--paint-budget MS` | none | First rows painted (`painted`); the spec's target is 300 |
-| `--timeout MS` | 30000 | Wait per open before reporting it skipped |
+| `--timeout MS` | 30000 | Wait per open for its trace before failing it as stalled |
 | `--json` | off | Machine-readable results |
 
-Prints one row per agent and p50/p95/max per phase. Exit code 0 when every open completed within budget; 1 when any missed a budget or didn't complete normally (outcome `failed`, `timeout`, `closed` or `superseded`, no transcript read, or never revealed); 2 on a setup error. An agent that's already open is focused rather than opened and is reported as skipped. Each open starts the agent in that instance, taking it over from any other instance, so run it against a dev build or a throwaway instance.
+Prints one row per agent and p50/p95/max per phase. Exit code 0 when every open completed within budget; 1 when any missed a budget, stalled (no trace within `--timeout`) or didn't complete normally (outcome `failed`, `timeout`, `closed` or `superseded`, no transcript read, or never revealed); 2 on a setup error, including an agent that isn't in My Agents. An agent that's already open isn't opened again: the picker's "already open" prompt is dismissed and the agent is reported as skipped. Each open starts the agent in that instance, taking it over from any other instance, so run it against a dev build or a throwaway instance.
