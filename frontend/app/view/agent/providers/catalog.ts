@@ -487,6 +487,9 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authType: "cli-managed",
         authCheckCommand: ["--list-models"],
         authLoginCommand: ["--terminal-login"],
+        // A terminal-only login (pi-acp's documented terminal auth method):
+        // URL capture would only burn its timeout before the terminal opens.
+        headlessLoginUrlUnsupported: true,
         npmPackage: "pi-acp",
         pinnedVersion: "0.0.34",
         companionNpmPackages: [{ name: "@earendil-works/pi-coding-agent", version: "1.0.4" }],
