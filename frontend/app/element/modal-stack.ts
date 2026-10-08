@@ -34,6 +34,16 @@ export const remove = (id: string): void => {
 };
 
 /**
+ * True when an open modal's lock region contains `el`: a window or tab modal,
+ * or a pane modal in that pane. Covers every `<Modal>`, including the
+ * declarative ones `modalsModel` doesn't track. A pane modal in another pane
+ * doesn't count.
+ */
+export function modalCovers(el: Element): boolean {
+    return stack.some((e) => e.lockEl === el || e.lockEl.contains(el));
+}
+
+/**
  * True when `inner`'s lock region is covered by `outer`'s — i.e. `outer`
  * is a higher modal whose backdrop blocks interaction with `inner`. A
  * region is covered if `outer.lockEl` contains `inner.lockEl`, or the two

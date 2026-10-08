@@ -508,7 +508,10 @@ function Block(props: BlockProps): JSX.Element {
                 if (!active) return;
                 activeVm = vm;
                 vm.onActivate?.();
-                if (props.nodeModel.isFocused?.()) vm.giveFocus?.();
+                // Through the shared routine (caret guard, the data-pane-focus and
+                // dummy fallbacks, the retry for a view still mounting), not a
+                // bare giveFocus(). SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
+                if (props.nodeModel.isFocused?.()) giveBlockFocus(props.nodeModel.blockId);
             });
         });
         onCleanup(() => untrack(deactivate));

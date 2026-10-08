@@ -55,6 +55,8 @@ export const AgentPickerFilterBar = (props: AgentPickerFilterBarProps): JSX.Elem
             <input
                 type="text"
                 class="agent-picker-filter-input"
+                // The pane's typing target when nothing else claims it (focusManager).
+                data-pane-focus
                 placeholder="Filter agents..."
                 value={props.value()}
                 data-testid="agent-picker-filter-input"

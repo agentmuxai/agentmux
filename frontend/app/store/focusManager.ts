@@ -3,10 +3,22 @@
 //
 // SolidJS migration: Jotai derived atom → plain function (reactive when called inside SolidJS tracking context)
 
-import { getBlockComponentModel } from "@/app/store/global";
+import { createEffect, createRoot, on } from "solid-js";
+import { atoms, getBlockComponentModel } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
-import { focusedBlockId, userCaretInBlock } from "@/util/focusutil";
+import { modalCovers } from "@/app/element/modal-stack";
+import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
+import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { getLayoutModelForStaticTab } from "@/layout/index";
+
+/**
+ * How many animation frames `giveBlockFocus` keeps trying a pane whose input
+ * isn't there yet (a view mounting fresh, a window tab still being revealed):
+ * about a second. SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
+ */
+export const FOCUS_RETRY_FRAMES = 60;
+/** A pointer press this recently means the user moved focus on purpose. */
+const DELIBERATE_PRESS_MS = 300;
 
 class FocusManager {
     /** Reactive accessor — returns the currently focused blockId (or null). */
@@ -54,6 +66,31 @@ class FocusManager {
     }
 
     /**
+     * The caret follows the selection: put it in the active tab's selected
+     * pane (its active pane tab), unless the user has it somewhere on purpose.
+     * Called whenever the selection changes for a reason other than the user
+     * placing the caret: a pane or pane tab closing, a view swapping inside a
+     * pane, a window tab becoming active, a modal closing over a pane that is
+     * gone, and by the safety net when focus falls onto `<body>`.
+     * `model`: the layout model whose selection changed; a background tab's
+     * model is ignored. SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
+     */
+    ensureSelectionFocused(_reason: string, model?: unknown): void {
+        // In the background, never: a browser pane's giveFocus() moves native
+        // focus and can raise the window. The window's own focus event runs
+        // this again when the user comes back.
+        if (!windowHasFocus()) return;
+        const active = getLayoutModelForStaticTab();
+        if (model != null && model !== active) return;
+        // A caret the user put in the tab-rename field, a search box outside
+        // the panes, … stays there.
+        if (caretInEditableOutsidePanes()) return;
+        const blockId = active?.focusedNode?.()?.data?.blockId;
+        if (blockId == null || modalInTheWay(blockId)) return;
+        giveBlockFocus(blockId);
+    }
+
+    /**
      * Called from a pane's own onMount, once its focusable element (textarea,
      * CodeMirror view, xterm instance, …) is actually ready. Covers the case
      * `refocusNode()` cannot: a pane whose `giveFocus()` was attempted before
@@ -90,11 +127,155 @@ class FocusManager {
  * (SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md).
  */
 export function giveBlockFocus(blockId: string): void {
+    cancelFocusRetry();
     if (userCaretInBlock(blockId)) return;
-    const ok = getBlockComponentModel(blockId)?.viewModel?.giveFocus?.();
-    if (!ok) {
-        document.getElementById(`${blockId}-dummy-focus`)?.focus({ preventScroll: true });
+    if (focusBlockTarget(blockId)) return;
+    // Nothing to type into yet: the block's dummy input keeps the keys in the
+    // pane (its shortcuts work) instead of on <body>, and the target is tried
+    // again on the next frames in case the view is still mounting.
+    document.getElementById(`${blockId}-dummy-focus`)?.focus({ preventScroll: true });
+    scheduleFocusRetry(blockId);
+}
+
+/**
+ * The block's focus target, in order: the view's `giveFocus()`; else the first
+ * visible element in the block marked `data-pane-focus` (a pane's main text
+ * input, for views without a `giveFocus` of their own). True when one took it.
+ */
+function focusBlockTarget(blockId: string): boolean {
+    if (getBlockComponentModel(blockId)?.viewModel?.giveFocus?.()) return true;
+    const el = paneFocusElement(blockId);
+    if (el == null) return false;
+    el.focus({ preventScroll: true });
+    return document.activeElement === el;
+}
+
+function paneFocusElement(blockId: string): HTMLElement | null {
+    if (typeof document.querySelectorAll !== "function") return null;
+    for (const el of document.querySelectorAll<HTMLElement>(`[data-blockid="${CSS.escape(blockId)}"] [data-pane-focus]`)) {
+        const visible = typeof el.checkVisibility === "function" ? el.checkVisibility() : el.offsetParent != null;
+        if (visible && !(el as HTMLInputElement).disabled) return el;
     }
+    return null;
+}
+
+function windowHasFocus(): boolean {
+    return typeof document.hasFocus !== "function" || document.hasFocus();
+}
+
+/**
+ * A modal over the pane: one opened through `modalsModel`, or any `<Modal>`
+ * whose lock region covers it (the pane-close confirmation is declarative and
+ * only on the modal stack). A browser pane focused under it would take native
+ * keyboard focus from the modal.
+ */
+function modalInTheWay(blockId: string): boolean {
+    if (modalsModel.hasOpenModals()) return true;
+    if (typeof document.querySelector !== "function") return false;
+    const blockEl = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
+    return blockEl != null && modalCovers(blockEl);
+}
+
+let focusRetry: number | null = null;
+
+function cancelFocusRetry(): void {
+    if (focusRetry != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(focusRetry);
+    focusRetry = null;
+}
+
+/** Keep trying `blockId`'s target while it is still the selection and the caret is still parked. */
+function scheduleFocusRetry(blockId: string): void {
+    if (typeof requestAnimationFrame !== "function") return;
+    let frames = FOCUS_RETRY_FRAMES;
+    const tick = (): void => {
+        focusRetry = null;
+        if (--frames < 0) return;
+        if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId !== blockId) return;
+        const active = document.activeElement;
+        const parked = active == null || active === document.body || active.id === `${blockId}-dummy-focus`;
+        if (!parked || !windowHasFocus() || modalInTheWay(blockId)) return;
+        if (focusBlockTarget(blockId)) return;
+        focusRetry = requestAnimationFrame(tick);
+    };
+    focusRetry = requestAnimationFrame(tick);
+}
+
+let followInstalled = false;
+
+/**
+ * Install once at startup. Two things no single close path can own:
+ * - a window tab becoming active, however it happened (a click, a close that
+ *   promoted a neighbour): its selected pane gets the caret, retried until the
+ *   tab is revealed;
+ * - the window regaining focus with the caret on <body> (the selection changed
+ *   while AgentMux was in the background);
+ * - a reveal gate lifting (a window tab or a pane held hidden while it
+ *   mounts): a view inside a hidden container reports that it took focus,
+ *   but Chromium can't focus it, so the caret stayed on <body>;
+ * - the safety net: when focus leaves an element inside a pane and lands on
+ *   <body> (the focused element was removed or hidden: a pane, a pane tab or a
+ *   drawer closing), and the user didn't just press the pointer anywhere (a
+ *   press on pane text blurs the composer too, and the caret must not jump
+ *   back mid-selection), the caret goes back to the selection. Logged, so a
+ *   path that relies on the net can be found and wired properly.
+ * SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1, R2.
+ */
+export function installFocusFollowsSelection(): void {
+    if (followInstalled || typeof document === "undefined") return;
+    followInstalled = true;
+    let lastPressAt = Number.NEGATIVE_INFINITY;
+    document.addEventListener(
+        "pointerdown",
+        () => {
+            lastPressAt = performance.now();
+        },
+        true
+    );
+    window.addEventListener("focus", () => {
+        const active = document.activeElement;
+        if (active == null || active === document.body) focusManager.ensureSelectionFocused("window-focus");
+    });
+    document.addEventListener(
+        "focusout",
+        (e) => {
+            const from = e.target as Element | null;
+            if (e.relatedTarget != null || !from?.closest?.("[data-blockid]")) return;
+            requestAnimationFrame(() => {
+                const active = document.activeElement;
+                if (active != null && active !== document.body) return;
+                if (!windowHasFocus()) return; // the window lost focus: not an orphan
+                if (performance.now() - lastPressAt < DELIBERATE_PRESS_MS) return;
+                console.info("[focus] orphan: caret fell to <body>; returning it to the selection");
+                focusManager.ensureSelectionFocused("orphan");
+            });
+        },
+        true
+    );
+    const afterReveal = (): void => {
+        requestAnimationFrame(() => {
+            const active = document.activeElement;
+            if (active == null || active === document.body) focusManager.ensureSelectionFocused("revealed");
+        });
+    };
+    createRoot(() => {
+        createEffect(
+            on(
+                () => atoms.activeTabId(),
+                () => requestAnimationFrame(() => focusManager.ensureSelectionFocused("tab-activated")),
+                { defer: true }
+            )
+        );
+        createEffect(
+            on(tabSwitching, (switching, was) => {
+                if (was && !switching) afterReveal();
+            })
+        );
+        createEffect(
+            on(gatingNodeIds, (now, before) => {
+                if (before != null && now.size < before.size) afterReveal();
+            })
+        );
+    });
 }
 
 export const focusManager = new FocusManager();

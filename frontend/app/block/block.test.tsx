@@ -191,6 +191,8 @@ vi.mock("@/app/platform/ipc", () => ({
 
 vi.mock("@/util/focusutil", () => ({
     focusedBlockId: () => null,
+    userCaretInBlock: () => false,
+    caretInEditableOutsidePanes: () => false,
 }));
 
 async function loadBlock() {

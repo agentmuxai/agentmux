@@ -1,6 +1,7 @@
 # When a pane closes, the pane that takes over gets the caret
 
-**Status:** proposed.
+**Status:** superseded — never built; replaced by a spec that also covers pane-tab close, panes without an input target and the agent shell drawer.
+**Superseded-by:** `docs/specs/SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md`
 **Date:** 2026-10-03.
 **Severity:** Medium. No data is lost, but every close costs a mouse trip before the user can type again, and the most common closes (`exit` in a terminal, `/quit` in an agent pane) are keyboard actions where the user's hands are already on the keys.
 **Requested by:** repo owner (asafebgi).

@@ -81,6 +81,7 @@ vi.mock("@/app/store/focusManager", () => ({
         requestNodeFocus: () => {},
         refocusNode: () => {},
         claimFocusOnMount: () => {},
+        ensureSelectionFocused: () => {},
     },
 }));
 
