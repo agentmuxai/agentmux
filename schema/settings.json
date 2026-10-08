@@ -364,6 +364,11 @@
           "default": true,
           "description": "Notify when an agent receives a message that needs your review before it acts (ESCALATE=required). The notification never contains the message."
         },
+        "notify:os:cloudsignedout": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify once when this AgentMux is signed out of MuxBus and agents stop getting messages from other computers and GitHub."
+        },
         "notify:pause:until": {
           "type": "integer",
           "default": 0,

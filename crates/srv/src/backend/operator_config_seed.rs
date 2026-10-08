@@ -1016,4 +1016,23 @@ mod swarm_broadcast_entry_tests {
     fn the_manifest_version_moved_with_the_new_entry() {
         assert!(shipped().version >= 8);
     }
+
+    #[test]
+    fn the_system_notes_it_describes_are_the_ones_srv_writes() {
+        use crate::muxbus::delivery_status::notes;
+        let manifest = shipped();
+        let entry = manifest.entries.iter().find(|e| e.id == "operator-config-swarm-broadcast").unwrap();
+        let text = &entry.instructions;
+        assert!(text.contains(&format!("`{} ", notes::NOTE_MARKER)), "names the marker");
+        assert!(text.contains("a jekt cannot carry one"));
+        // The example notes keep the producer's wording (times aside).
+        let pause = notes::pause_note(0, "MuxBus needs a sign-in");
+        let after_time = &pause[pause.find(" (").unwrap()..];
+        assert!(text.contains(after_time), "pause note drifted: {after_time}");
+        assert!(text.contains("Cloud messages are paused since "));
+        assert!(text.contains("Cloud messages resumed at "));
+        assert!(notes::delayed_prefix(Some(0), notes::DELAYED_AFTER_MS + 1).starts_with("(sent "));
+        assert!(text.contains("(sent 14:30, delivered 14:41)"));
+        assert!(manifest.version >= 12);
+    }
 }

@@ -47,6 +47,7 @@ import {
     uiContext,
 } from "./window-identity";
 import { allConnStatus } from "./conn-status";
+import { acceptMuxbusDelivery, MUXBUS_STATUS_EVENT } from "./muxbus-delivery";
 import { flashErrors, notifications, notificationPopoverMode, pushNotification } from "./flash-notifications";
 
 // ---------------------------------------------------------------------------
@@ -300,6 +301,11 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 // A successful broadcast clears any prior error state.
                 setLanDiscoveryErrorAtom(null);
             },
+        },
+        {
+            // Cloud delivery's state changed (srv `muxbus::delivery_status`).
+            eventType: MUXBUS_STATUS_EVENT,
+            handler: (event) => acceptMuxbusDelivery(event.data),
         },
         {
             eventType: "laninstances:error",

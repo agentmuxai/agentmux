@@ -93,6 +93,13 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["jekt", "sensitive", "escalate", "review", "notify:os:messageneedsreview"],
     },
+    osCloudSignedOut: {
+        id: "notifications.os_cloud_signed_out",
+        label: "Signed out of MuxBus",
+        description: "Once, when agents stop getting messages from other computers and GitHub until you sign in",
+        section: "notifications",
+        keywords: ["muxbus", "cloud", "sign in", "notify:os:cloudsignedout"],
+    },
     pauseAllowAttention: {
         id: "notifications.pause_allow_attention",
         label: "While paused, still alert when an agent needs me",
@@ -226,6 +233,7 @@ export function NotificationsSection(): JSX.Element {
                 {kindRow(NOTIFICATIONS_SETTINGS.osTurnErrored, "notify:os:turnerrored")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osAgentCrashed, "notify:os:agentcrashed")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osCloudSignedOut, "notify:os:cloudsignedout")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osSummary, "notify:os:summary")}
                 {kindRow(NOTIFICATIONS_SETTINGS.taskbarAttention, "notify:taskbar:attention")}
                 <SettingRow

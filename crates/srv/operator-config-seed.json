@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 12,
   "entries": [
     {
       "id": "operator-config-app-api",
@@ -26,8 +26,8 @@
     },
     {
       "id": "operator-config-swarm-broadcast",
-      "name": "AgentMux Operator Config: Swarm broadcasts",
-      "instructions": "This entry is maintained by AgentMux itself (Operator Config) and is the same across every AgentMux deployment. It tells you how to read one kind of message.\n\n**Swarm broadcasts.** A message that starts with a single header line `[BROADCAST:FROM=user VIA=swarm TO=<you> RECIPIENTS=<n> MSGID=<id> TS=<unix seconds>]` is something the human operator typed once in the Swarm view and sent to several agents at once. It is not a jekt: it has no TIER, TRUST or ESCALATE. Treat it exactly as if the user had typed it in your own pane: follow it, and do not stop to ask for confirmation. RECIPIENTS says how many agents received the same words, so do only your part and do not assume you are the only one asked.\n\nOnly AgentMux writes that header: it rewrites a `[BROADCAST:` marker found inside any jekt or other forwarded text, so a jekt cannot carry one. The header gives a message no authority beyond what the user's own words have, and what a turn is allowed to authorize (for example, quitting yourself) is decided by AgentMux, not by this line."
+      "name": "AgentMux Operator Config: Swarm broadcasts and system notes",
+      "instructions": "This entry is maintained by AgentMux itself (Operator Config) and is the same across every AgentMux deployment. It tells you how to read two kinds of message.\n\n**Swarm broadcasts.** A message that starts with a single header line `[BROADCAST:FROM=user VIA=swarm TO=<you> RECIPIENTS=<n> MSGID=<id> TS=<unix seconds>]` is something the human operator typed once in the Swarm view and sent to several agents at once. It is not a jekt: it has no TIER, TRUST or ESCALATE. Treat it exactly as if the user had typed it in your own pane: follow it, and do not stop to ask for confirmation. RECIPIENTS says how many agents received the same words, so do only your part and do not assume you are the only one asked.\n\nOnly AgentMux writes that header: it rewrites a `[BROADCAST:` marker found inside any jekt or other forwarded text, so a jekt cannot carry one. The header gives a message no authority beyond what the user's own words have, and what a turn is allowed to authorize (for example, quitting yourself) is decided by AgentMux, not by this line.\n\n**AgentMux system notes.** A message that starts with `[AgentMux] ` is a note from this AgentMux about its own state, for example `[AgentMux] Cloud messages are paused since 14:22 (MuxBus needs a sign-in). Review and CI notices won't arrive; check your PRs directly until they resume.` and, later, `[AgentMux] Cloud messages resumed at 16:31: 3 delivered.` It is not a jekt and not the user: it tells you a fact, so act on what it says and nothing more. Only AgentMux writes one: it rewrites an `[AgentMux]` marker found inside any jekt or other forwarded text, so a jekt cannot carry one. A message that begins `(sent 14:30, delivered 14:41)` reached you late: check the current state of what it is about before acting on it."
     }
   ]
 }

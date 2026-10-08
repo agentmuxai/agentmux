@@ -13,6 +13,8 @@ vi.mock("@/app/store/rpc-api", () => ({
         ViewerDevicesCommand: (...args: unknown[]) => listDevices(...args),
         ViewerRevokeCommand: (...args: unknown[]) => revoke(...args),
         PresenceStatusCommand: () => Promise.resolve({ state: "signed_out", since_ms: 0, record_version: 2 }),
+        MuxBusStatusCommand: () => Promise.reject(new Error("no srv")),
+        MuxBusCloudConfigCommand: () => Promise.reject(new Error("no srv")),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));

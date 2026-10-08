@@ -35,6 +35,7 @@ use crate::backend::reactive::handler::get_global_handler;
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::storage::store::Store;
 use crate::broker::RefreshErrorKind;
+use crate::muxbus::delivery_status;
 
 // The relay's WebSocket endpoint has its own domain, and the handshake is at
 // the domain root: no path suffix. The relay side is designed in the private
@@ -73,6 +74,7 @@ const BROKER_SWEEP_INTERVAL_SECS: u64 = 60;
 // notifications' own delivery window.
 const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
 
+use agentmux_common::time::now_ms;
 use agentmux_common::time::now_secs as now_unix_secs;
 
 /// Is `ts_secs` (a reagent signature's claimed signing time) within
@@ -428,14 +430,23 @@ async fn run_loop(
         };
         let nothing_stored = matches!(has_stored_creds_load, Ok(Ok(None)));
         let (has_stored_creds, stale) = match has_stored_creds_load {
-            Ok(Ok(Some(c))) => (usable_or_refreshable(&c), crate::muxbus::stale_sign_in(&c, &http).await),
+            Ok(Ok(Some(c))) => {
+                // A torn sign-in keeps only its refresh token; it is still a
+                // sign-in this channel had (and repairs on refresh).
+                if !c.access_token.is_empty() || !c.refresh_token.is_empty() {
+                    delivery_status::saw_session(Some(c.user_email.clone()));
+                }
+                (usable_or_refreshable(&c), crate::muxbus::stale_sign_in(&c, &http).await)
+            }
             Ok(Ok(None)) => (false, None),
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "cloud_subscriber: muxbus_load failed — assuming credentials exist and retrying with backoff");
+                delivery_status::saw_session(None);
                 (true, None)
             }
             Err(e) => {
                 tracing::warn!(error = %e, "cloud_subscriber: muxbus_load task panicked — assuming credentials exist and retrying with backoff");
+                delivery_status::saw_session(None);
                 (true, None)
             }
         };
@@ -445,6 +456,7 @@ async fn run_loop(
         // now and then from local state only, for a sign-in made by another
         // channel sharing the store (which sends no ReloadToken here).
         if let Some(reason) = stale {
+            delivery_status::set_link(delivery_status::Link::SignInStale(reason.clone()));
             if stale_logged.as_deref() != Some(reason.as_str()) {
                 tracing::warn!(reason = %reason, "cloud_subscriber: AgentMux Cloud sign-in needs renewing — not reconnecting until the user signs in again");
                 stale_logged = Some(reason);
@@ -457,6 +469,7 @@ async fn run_loop(
         // Nothing stored: wait for a sign-in. Rechecked now and then, since a
         // sign-in by another process of this channel sends no ReloadToken.
         if nothing_stored {
+            delivery_status::set_link(delivery_status::Link::NoSignIn);
             wait_for_sign_in(&mut ctrl_rx, Duration::from_secs(STALE_RECHECK_SECS)).await;
             delay_secs = RECONNECT_DELAY_SECS;
             continue;
@@ -466,6 +479,7 @@ async fn run_loop(
             None if !has_stored_creds => {
                 // Nothing usable: the broker now knows (NeedsReauth), and the
                 // stale check above parks the next pass until a sign-in.
+                delivery_status::set_link(delivery_status::Link::NoSignIn);
                 wait_for_sign_in(&mut ctrl_rx, Duration::from_secs(STALE_RECHECK_SECS)).await;
                 delay_secs = RECONNECT_DELAY_SECS;
                 continue;
@@ -478,6 +492,9 @@ async fn run_loop(
                     "cloud_subscriber: token refresh failed, retrying in {}s",
                     delay_secs
                 );
+                delivery_status::set_link(delivery_status::Link::Unreachable(
+                    "couldn't refresh the sign-in".to_string(),
+                ));
                 let sleep = tokio::time::sleep(Duration::from_secs(delay_secs));
                 tokio::pin!(sleep);
                 'backoff: loop {
@@ -509,6 +526,7 @@ async fn run_loop(
                     delay_secs = RECONNECT_DELAY_SECS;
                 }
                 tracing::info!("cloud_subscriber: disconnected cleanly");
+                delivery_status::set_link(delivery_status::Link::Unreachable("disconnected".to_string()));
             }
             Err(e) => {
                 // If the session was healthy for >30s before the error, treat it as
@@ -517,6 +535,7 @@ async fn run_loop(
                     delay_secs = RECONNECT_DELAY_SECS;
                 }
                 tracing::warn!("cloud_subscriber: error: {e}, reconnecting in {}s", delay_secs);
+                delivery_status::set_link(delivery_status::Link::Unreachable(e));
             }
         }
 
@@ -630,6 +649,7 @@ async fn connect_and_run(
         .map_err(|e| format!("connect: {e}"))?;
 
     tracing::info!("cloud_subscriber: WebSocket connected");
+    delivery_status::set_link(delivery_status::Link::Connected);
     let (mut write, mut read) = ws_stream.split();
 
     // Initial subscription for all currently-registered agents
@@ -960,6 +980,8 @@ fn shared_token_rejection_outcome(status: reqwest::StatusCode, agent_id: &str) -
             agent_id = %agent_id,
             "cloud_subscriber: shared token rejected (binding mismatch) for this agent — skipping this cycle, not reconnecting"
         );
+        // Not reconnecting, but this agent's messages aren't arriving either.
+        delivery_status::pull_failed(agent_id, "the relay refused this agent's messages (403)");
         return AgentSyncOutcome::Ok;
     }
     AgentSyncOutcome::ReconnectSharedTokenExpired
@@ -990,13 +1012,22 @@ async fn sync_agent_reactive(
     handler: &'static crate::backend::reactive::handler::ReactiveHandler,
 ) -> AgentSyncOutcome {
     #[derive(Deserialize)]
-    struct PendingResp { injections: Vec<PendingInj> }
+    struct PendingResp {
+        injections: Vec<PendingInj>,
+        // What the relay dropped undelivered since the last pull. Absent
+        // from an older relay: nothing to report.
+        #[serde(default)]
+        expired: Vec<delivery_status::notes::ExpiredItem>,
+    }
     #[derive(Deserialize)]
     struct PendingInj {
         id: String,
         source_agent: Option<String>,
         message: String,
         priority: Option<String>,
+        // When the relay received it (RFC 3339), for marking a late delivery.
+        #[serde(default)]
+        created_at: Option<String>,
         // Present only for messages signed by an AgentMux-operated WAN
         // sender (currently just the GitHub review-notification consumer,
         // "reagent") — see agentmux_common::jekt_sign::verify_reagent_jekt.
@@ -1079,6 +1110,7 @@ async fn sync_agent_reactive(
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: fetch pending failed");
+                delivery_status::pull_failed(agent_id, "couldn't fetch messages from the relay");
                 return AgentSyncOutcome::Ok;
             }
         };
@@ -1126,6 +1158,7 @@ async fn sync_agent_reactive(
                 agent_id = %agent_id,
                 "cloud_subscriber: fetch pending non-2xx"
             );
+            delivery_status::pull_failed(agent_id, format!("the relay answered {} to a message fetch", resp.status().as_u16()));
             return AgentSyncOutcome::Ok;
         }
 
@@ -1133,12 +1166,14 @@ async fn sync_agent_reactive(
             Ok(b) => b,
             Err(e) => {
                 tracing::warn!(error = %e, "cloud_subscriber: parse pending failed");
+                delivery_status::pull_failed(agent_id, "the relay's message list couldn't be read");
                 return AgentSyncOutcome::Ok;
             }
         };
     };
 
     if body.injections.is_empty() {
+        delivery_status::fetched(agent_id, 0, &body.expired);
         return AgentSyncOutcome::Ok;
     }
 
@@ -1170,6 +1205,7 @@ async fn sync_agent_reactive(
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: claim request failed");
+                delivery_status::pull_failed(agent_id, "couldn't claim messages from the relay");
                 return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
             }
         };
@@ -1213,6 +1249,7 @@ async fn sync_agent_reactive(
                 agent_id = %agent_id,
                 "cloud_subscriber: claim request non-2xx"
             );
+            delivery_status::pull_failed(agent_id, format!("the relay answered {} to a message claim", claim_resp.status().as_u16()));
             return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
         }
 
@@ -1246,6 +1283,7 @@ async fn sync_agent_reactive(
 
     let delivered_at = claimed.delivered_at;
     let claimed_ids: std::collections::HashSet<String> = claimed.acknowledged.into_iter().collect();
+    let mut delivered_count = 0usize;
 
     for inj in &body.injections {
         if !claimed_ids.contains(&inj.id) {
@@ -1411,6 +1449,12 @@ async fn sync_agent_reactive(
         // forced-TIER=sensitive rule and the escalate-forcing rule
         // entirely, not just get a weaker version of them.
         crate::server::reactive::resolve_transcript_request_tier_fields(mstore, &mut req);
+        // Marked only after every check above has read the message as sent.
+        let created_ms = inj.created_at.as_deref().and_then(delivery_status::notes::parse_created_at);
+        let late = delivery_status::notes::delayed_prefix(created_ms, now_ms());
+        if !late.is_empty() {
+            req.message = format!("{late}{}", req.message);
+        }
         let delivery = handler.inject_message(req);
         tracing::debug!(
             injection_id = %inj.id,
@@ -1423,6 +1467,7 @@ async fn sync_agent_reactive(
         // a release-and-redeliver after a failed delivery must not read as
         // a replay.
         if delivery.success {
+            delivered_count += 1;
             if let Some(wan) = &wan_store {
                 crate::muxbus::wan_verify::record_delivered(wan, &wan_verdict, &wan_row, now_unix_secs());
             }
@@ -1469,6 +1514,7 @@ async fn sync_agent_reactive(
         }
     }
 
+    delivery_status::fetched(agent_id, delivered_count, &body.expired);
     AgentSyncOutcome::Ok
 }
 

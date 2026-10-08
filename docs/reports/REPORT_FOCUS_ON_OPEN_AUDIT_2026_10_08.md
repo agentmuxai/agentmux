@@ -184,4 +184,3 @@ no longer rely on the modal's first-focusable rule alone.
 
 Checked live on a dev build: Cmd+F in a terminal, Cmd+Shift+G, and Cmd+, from a terminal each put the caret in the field
 that opened. The lint rule from §6 item 3 and the rest of §3 and §5 are not done.
-
