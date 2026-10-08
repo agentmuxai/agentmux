@@ -5,7 +5,7 @@
 **Trigger:** Repo owner, 2026-10-08: "if a user selects 'Broadcast' in the swarm, the input box should select right after
 the button click … scan the codebase for other places where a user expects to be able to type as soon as it opens, like
 settings … find them all, write report to file."
-**Status:** partly implemented — the shared helper and the Swarm Broadcast fix are in #4481; every other row is open.
+**Status:** active — the shared helper and the Swarm Broadcast fix are in #4481; every other row is open.
 **Related:** `SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md` (#4479: the caret follows the selected pane after a close; adds
 `data-pane-focus` and the retry this report refers to), `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` (`claimFocusOnMount`).
 
