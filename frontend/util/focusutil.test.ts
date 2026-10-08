@@ -4,8 +4,8 @@
 // SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md §4.1 — the one guard every
 // pane-selection focus path consults before moving the caret.
 
-import { afterEach, describe, expect, it } from "vitest";
-import { eventBelongsToBlock, eventBelongsToPaneOf, isEditableTarget, userCaretInBlock } from "./focusutil";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { eventBelongsToBlock, eventBelongsToPaneOf, focusOnOpen, isEditableTarget, userCaretInBlock } from "./focusutil";
 
 function mountBlock(blockId: string, inner: string): HTMLElement {
     const block = document.createElement("div");
@@ -168,5 +168,35 @@ describe("isEditableTarget", () => {
         expect(isEditableTarget(document.createElement("button"))).toBe(false);
         expect(isEditableTarget(document.createElement("div"))).toBe(false);
         expect(isEditableTarget(null)).toBe(false);
+    });
+});
+
+describe("focusOnOpen", () => {
+    it("focuses the element once it is in the document, without scrolling", async () => {
+        const input = document.createElement("input");
+        const focus = vi.spyOn(input, "focus");
+        focusOnOpen(input); // a Solid ref runs before the element is inserted
+        document.body.appendChild(input);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(input);
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+        input.remove();
+    });
+
+    it("selects the existing text when asked (rename fields)", async () => {
+        const input = document.createElement("input");
+        input.value = "old name";
+        document.body.appendChild(input);
+        focusOnOpen(input, { select: true });
+        await Promise.resolve();
+        expect([input.selectionStart, input.selectionEnd]).toEqual([0, 8]);
+        input.remove();
+    });
+
+    it("does nothing for an element that never made it into the document", async () => {
+        const input = document.createElement("input");
+        focusOnOpen(input);
+        await Promise.resolve();
+        expect(document.activeElement).not.toBe(input);
     });
 });

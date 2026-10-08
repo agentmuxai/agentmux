@@ -119,6 +119,28 @@ export function isEditableTarget(target: EventTarget | null): boolean {
     return el.isContentEditable === true;
 }
 
+/**
+ * For an input the user's own click or key just opened (a composer that
+ * replaces the button, an inline form, a find bar): give it the caret as soon
+ * as it is in the document. Use as `ref={(el) => focusOnOpen(el)}`.
+ *
+ * The `autofocus` attribute does not do this: Solid only sets the property, and
+ * Chromium honours it on an inserted element only until something on the page
+ * has been focused, so in practice never after startup. A microtask runs after
+ * the render that inserts the element and before the layout's next-frame focus
+ * work, which then sees the caret in this pane and leaves it.
+ * `select`: select the existing text (rename fields).
+ * Not for UI an agent or the backend opens: that must not take the caret.
+ * REPORT_FOCUS_ON_OPEN_AUDIT_2026_10_08.md.
+ */
+export function focusOnOpen(el: HTMLElement, opts: { select?: boolean } = {}): void {
+    queueMicrotask(() => {
+        if (!el.isConnected) return;
+        el.focus({ preventScroll: true });
+        if (opts.select && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) el.select();
+    });
+}
+
 export function focusedBlockId(): string {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement) {
