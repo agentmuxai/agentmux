@@ -123,11 +123,17 @@ pub(crate) fn check(
 /// a client that could write it could keep a real request's id and change
 /// what the banner tells the human they're approving.
 pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<(), String> {
-    if meta.contains_key(crate::server::browser_attention::ATTENTION_META_KEY) {
-        return Err(format!(
-            "{} is written only by AgentMux itself",
-            crate::server::browser_attention::ATTENTION_META_KEY
-        ));
+    // The popup keys name the pane that opened this one and its site, shown
+    // to the person as "Popup from …": a client that could write them could
+    // make any pane claim to come from a site it doesn't.
+    for key in [
+        crate::server::browser_attention::ATTENTION_META_KEY,
+        crate::server::browser_popup::POPUP_OF_META_KEY,
+        crate::server::browser_popup::POPUP_FROM_META_KEY,
+    ] {
+        if meta.contains_key(key) {
+            return Err(format!("{key} is written only by AgentMux itself"));
+        }
     }
     let Some(value) = meta.get(OWNER_META_KEY) else {
         return Ok(());
@@ -264,6 +270,15 @@ mod tests {
         let forged = json!({ "id": "real-id", "kind": "approval", "what": "Click \"Cancel\"" });
         assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, forged)).is_err());
         assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, serde_json::Value::Null)).is_err());
+    }
+
+    #[test]
+    fn a_client_cannot_write_the_popup_keys() {
+        use crate::server::browser_popup::{POPUP_FROM_META_KEY, POPUP_OF_META_KEY};
+        for key in [POPUP_OF_META_KEY, POPUP_FROM_META_KEY] {
+            assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, json!("x"))).is_err());
+            assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, serde_json::Value::Null)).is_err());
+        }
     }
 
     #[test]

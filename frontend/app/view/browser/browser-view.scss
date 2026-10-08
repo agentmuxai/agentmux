@@ -167,6 +167,20 @@
     }
 }
 
+/* A popup another pane's page opened (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5):
+   which site opened it, so the person can tell a real sign-in step from a page
+   pretending to be one. */
+.browser-popup-from {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-4);
+    color: var(--secondary-text-color);
+    font-size: 12px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
 .browser-error-hint {
     font-size: 11px;
     color: var(--secondary-text-color);

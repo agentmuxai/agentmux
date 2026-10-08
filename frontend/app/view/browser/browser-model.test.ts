@@ -420,6 +420,15 @@ describe("BrowserViewModel agent driver", () => {
         expect(vm.driverAgentAtom()).toBe("lark");
     });
 
+    it("reports the site a popup came from, and nothing for an ordinary pane", () => {
+        const popup = new BrowserViewModel({
+            ...fakeCtx(),
+            meta: () => ({ "browser:popup_from": "https://console.example.com" }),
+        });
+        expect(popup.popupFromAtom()).toBe("https://console.example.com");
+        expect(new BrowserViewModel(fakeCtx()).popupFromAtom()).toBeUndefined();
+    });
+
     it("reports no driver for an ordinary pane or an empty key", () => {
         expect(new BrowserViewModel(fakeCtx()).driverAgentAtom()).toBeUndefined();
         const blank = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:owner_agent": "  " }) });

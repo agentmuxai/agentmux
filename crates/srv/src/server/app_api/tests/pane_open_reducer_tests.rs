@@ -1371,3 +1371,112 @@ async fn a_handoff_waits_for_the_users_answer_through_the_host_only() {
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["answer"], "cancelled");
 }
+
+/// A browser pane's popup becomes a pane beside it, owned by whoever owns the
+/// opener (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md).
+#[tokio::test]
+async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+
+    // The agent's pane, and one the person opened.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://console.example.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let agents = body["data"]["pane"].as_str().unwrap().to_string();
+    let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+    cmd.view = "browser".into();
+    cmd.file = None;
+    cmd.url = Some("https://shop.example.net/".into());
+    let persons = open_pane(&state, cmd).await.unwrap().block_id;
+
+    let popup = |opener: &str, opener_url: &str, url: &str, gesture: bool| {
+        serde_json::json!({ "opener": opener, "opener_url": opener_url, "url": url, "user_gesture": gesture })
+    };
+    let console = |url: &str| popup(&agents, "https://console.example.com/home", url, true);
+
+    // Only the host can report a popup.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &[("X-Host-Token", "guess")]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // A clicked popup from the agent's pane, even to another site, opens as a
+    // pane the agent owns, saying where it came from.
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://idp.other.org/login"), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let p1 = body["data"]["pane"].as_str().unwrap().to_string();
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&p1).unwrap();
+    let meta = |k: &str| block.meta.get(k).and_then(|v| v.as_str()).map(str::to_string);
+    assert_eq!(meta("view").as_deref(), Some("browser"));
+    assert_eq!(meta("url").as_deref(), Some("https://idp.other.org/login"));
+    assert_eq!(meta("browser:popup_of").as_deref(), Some(agents.as_str()));
+    assert_eq!(meta("browser:popup_from").as_deref(), Some("https://console.example.com"));
+    assert_eq!(meta("browser:owner_agent").as_deref(), Some(agent.as_str()));
+    // The agent gets past the ownership check on it, and stops at the host,
+    // which this test registered on a port nothing listens on.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p1 }))).await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY);
+    // And the opener's snapshot lists it.
+    let listed = crate::server::ui_handlers::popup_listing(&state, &agents, &agent);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["pane"], p1.as_str());
+    assert_eq!(listed[0]["yours"], true);
+
+    // A script with no click opens nothing new.
+    let no_click = popup(&agents, "https://console.example.com/", "https://signin.example.com/", false);
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", no_click, &host).await;
+    assert_eq!(body["data"]["admitted"], false, "{body}");
+
+    // The person's pane: its own site opens as a pane nobody owns; another
+    // site goes to the system browser.
+    let elsewhere = popup(&persons, "https://shop.example.net/", "https://pay.other.org/", true);
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", elsewhere, &host).await;
+    assert_eq!(body["data"]["admitted"], false, "{body}");
+    let same_site = popup(&persons, "https://shop.example.net/", "https://checkout.example.net/", true);
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", same_site, &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let p2 = body["data"]["pane"].as_str().unwrap().to_string();
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&p2).unwrap();
+    assert!(block.meta.get("browser:owner_agent").is_none_or(|v| v.is_null()));
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p2 }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // A popup reported for a pane that isn't a browser pane is refused.
+    let not_browser = popup(&own, "https://x.example.com/", "https://x.example.com/a", true);
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", not_browser, &host).await;
+    assert_eq!(body["data"]["admitted"], false, "{body}");
+
+    // At most MAX_POPUPS_PER_PANE open at once per pane.
+    for _ in 1..crate::server::browser_popup::MAX_POPUPS_PER_PANE {
+        let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
+        assert_eq!(body["data"]["admitted"], true, "{body}");
+    }
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
+    assert_eq!(body["data"]["admitted"], false, "{body}");
+    // Closing one makes room again.
+    crate::backend::wcore::delete_block(&state.mstore, &tab_id, &p1).unwrap();
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+}

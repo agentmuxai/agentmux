@@ -66,6 +66,16 @@ pub(crate) fn is_last_window_close(browser_list_empty: bool, is_browser_pane: bo
     browser_list_empty && !is_browser_pane && draining
 }
 
+/// Where a browser pane's popup went before it could open as a pane, and
+/// still goes when it can't. `open_url_in_default_browser` only spawns a
+/// child process, so it's safe from any thread.
+fn open_popup_in_system_browser(url: &str) {
+    match crate::commands::platform::open_url_in_default_browser(url) {
+        Ok(()) => tracing::info!(url = %url, "browser-pane popup opened in the system browser"),
+        Err(e) => tracing::warn!(url = %url, error = %e, "failed to open a browser-pane popup in the system browser"),
+    }
+}
+
 impl AgentMuxHandler {
     pub(crate) fn on_after_created(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
@@ -726,6 +736,7 @@ impl AgentMuxHandler {
         _frame: Option<&mut Frame>,
         target_url: Option<&CefString>,
         target_disposition: WindowOpenDisposition,
+        user_gesture: bool,
     ) -> bool {
         let url = target_url.map(|s| s.to_string()).unwrap_or_default();
         if url.is_empty() {
@@ -801,13 +812,24 @@ impl AgentMuxHandler {
                 return false; // allow CEF to create the popup browser
             }
 
-            // Any OTHER pane popup (non-auth window.open): don't create a rogue
-            // in-app window and don't hijack the pane's own frame. Open it in
-            // the system browser if external; otherwise cancel.
+            // Any OTHER pane popup (non-auth window.open): never a rogue
+            // in-app window, never the pane's own frame. srv decides whether
+            // it opens as a browser pane beside this one (it was clicked, and
+            // it's on this page's site or an agent owns this pane:
+            // SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md); if not, or srv
+            // can't be asked, it opens in the system browser as before.
+            // Internal URLs are cancelled.
             if is_external {
-                match crate::commands::platform::open_url_in_default_browser(&url) {
-                    Ok(()) => tracing::info!(url = %url, "non-auth browser-pane popup opened in system browser"),
-                    Err(e) => tracing::warn!(url = %url, error = %e, "failed to open pane popup in system browser"),
+                let opener = browser
+                    .as_deref()
+                    .and_then(|b| crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b));
+                let opener_url = browser
+                    .as_deref()
+                    .map(crate::browser_pane::callbacks::main_frame_url)
+                    .unwrap_or_default();
+                match opener {
+                    Some(opener) => self.offer_popup_as_pane(opener, opener_url, url, user_gesture),
+                    None => open_popup_in_system_browser(&url),
                 }
             }
             return true; // cancel the in-app popup
@@ -849,6 +871,53 @@ impl AgentMuxHandler {
             "popup intercepted — deferred navigation of current frame",
         );
         true // cancel the top-level popup creation
+    }
+
+    /// Ask srv to open a popup from the browser pane `opener` as a pane beside
+    /// it; open it in the system browser if srv says no or can't be reached.
+    /// srv makes the call because only it knows whether an agent owns the
+    /// opener. The request runs on its own thread: `on_before_popup` holds
+    /// this handler's lock on the UI thread and must return at once.
+    fn offer_popup_as_pane(&self, opener: String, opener_url: String, url: String, user_gesture: bool) {
+        let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
+        let auth_key = self.state.auth_key.lock().clone();
+        let ipc_token = self.state.ipc_token.clone();
+        let body = serde_json::json!({
+            "opener": opener,
+            "opener_url": opener_url,
+            "url": url,
+            "user_gesture": user_gesture,
+        });
+        let fallback_url = url.clone();
+        let spawned = std::thread::Builder::new().name("browser-popup".into()).spawn(move || {
+            match crate::client::backend_browser_popup(&web_endpoint, &auth_key, &ipc_token, &body) {
+                Ok(data) if data.get("admitted").and_then(|v| v.as_bool()) == Some(true) => {
+                    tracing::info!(
+                        opener = %opener,
+                        pane = %data.get("pane").and_then(|v| v.as_str()).unwrap_or(""),
+                        url = %url,
+                        "browser-pane popup opened as a pane",
+                    );
+                }
+                Ok(data) => {
+                    tracing::info!(
+                        opener = %opener,
+                        url = %url,
+                        reason = %data.get("reason").and_then(|v| v.as_str()).unwrap_or(""),
+                        "browser-pane popup not opened as a pane",
+                    );
+                    open_popup_in_system_browser(&url);
+                }
+                Err(e) => {
+                    tracing::warn!(opener = %opener, url = %url, error = %e, "couldn't ask srv about a browser-pane popup");
+                    open_popup_in_system_browser(&url);
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "couldn't start the browser-popup thread");
+            open_popup_in_system_browser(&fallback_url);
+        }
     }
 
     /// An app window's main frame shows only the frontend
