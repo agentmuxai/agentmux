@@ -328,9 +328,20 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(3);
         });
 
+        // The hamburger menu opened Settings: the caret is on its button.
+        it("keeps retrying while the caret is on a window-chrome button", () => {
+            giveFocus.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
+            document.body.innerHTML = `<button id="menu">≡</button><div data-blockid="block-1"></div>`;
+            (document.getElementById("menu") as HTMLButtonElement).focus();
+            focusManager.ensureSelectionFocused("selection");
+            runFrames(2);
+            expect(giveFocus).toHaveBeenCalledTimes(3);
+        });
+
         it("stops retrying once the user puts the caret somewhere", () => {
             giveFocus.mockReturnValue(false);
             focusManager.ensureSelectionFocused("selection");
+            caretOutsidePanes = true; // a text field outside the panes
             document.body.innerHTML = `<input id="elsewhere" />`;
             document.body.querySelector<HTMLInputElement>("#elsewhere")!.focus();
             runFrames(3);

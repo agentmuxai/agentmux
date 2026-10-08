@@ -198,14 +198,16 @@ function scheduleFocusRetry(blockId: string): void {
         if (--frames < 0) return;
         if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId !== blockId) return;
         const active = document.activeElement;
-        // Parked: on <body>, on this block's dummy, or still in the pane the
+        // Parked: on <body>, on this block's dummy, still in the pane the
         // selection just left (Cmd+, from a terminal opens Settings while the
-        // caret is in the terminal). Not a caret the user put outside the panes.
+        // caret is in the terminal), or on a window-chrome control that opened
+        // it (the hamburger menu's button). Not a text field outside the panes.
         const parked =
             active == null ||
             active === document.body ||
             active.id === `${blockId}-dummy-focus` ||
-            caretInOtherPane(active, blockId);
+            caretInOtherPane(active, blockId) ||
+            (active.closest("[data-blockid]") == null && !caretInEditableOutsidePanes());
         if (!parked || !windowHasFocus() || modalInTheWay(blockId)) return;
         if (focusBlockTarget(blockId)) return;
         focusRetry = requestAnimationFrame(tick);
