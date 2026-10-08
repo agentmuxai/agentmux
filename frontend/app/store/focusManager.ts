@@ -7,6 +7,7 @@ import { createEffect, createRoot, on } from "solid-js";
 import { atoms, getBlockComponentModel } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
 import { modalCovers } from "@/app/element/modal-stack";
+import { gatingNodeIds, tabSwitching } from "@/app/store/tab-reveal";
 import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
@@ -208,6 +209,9 @@ let followInstalled = false;
  *   tab is revealed;
  * - the window regaining focus with the caret on <body> (the selection changed
  *   while AgentMux was in the background);
+ * - a reveal gate lifting (a window tab or a pane held hidden while it
+ *   mounts): a view inside a hidden container reports that it took focus,
+ *   but Chromium can't focus it, so the caret stayed on <body>;
  * - the safety net: when focus leaves an element inside a pane and lands on
  *   <body> (the focused element was removed or hidden: a pane, a pane tab or a
  *   drawer closing), and the user didn't just press the pointer anywhere (a
@@ -247,6 +251,12 @@ export function installFocusFollowsSelection(): void {
         },
         true
     );
+    const afterReveal = (): void => {
+        requestAnimationFrame(() => {
+            const active = document.activeElement;
+            if (active == null || active === document.body) focusManager.ensureSelectionFocused("revealed");
+        });
+    };
     createRoot(() => {
         createEffect(
             on(
@@ -254,6 +264,16 @@ export function installFocusFollowsSelection(): void {
                 () => requestAnimationFrame(() => focusManager.ensureSelectionFocused("tab-activated")),
                 { defer: true }
             )
+        );
+        createEffect(
+            on(tabSwitching, (switching, was) => {
+                if (was && !switching) afterReveal();
+            })
+        );
+        createEffect(
+            on(gatingNodeIds, (now, before) => {
+                if (before != null && now.size < before.size) afterReveal();
+            })
         );
     });
 }

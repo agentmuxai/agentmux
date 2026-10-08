@@ -241,6 +241,17 @@ describe("AgentCard type to filter", () => {
         expect(onInput).toHaveBeenCalledTimes(1);
     });
 
+    // An IME composition's first key is not printable (#4479).
+    it("moves the caret to the filter when an IME composition starts, without inserting anything", () => {
+        const { card, filter } = renderInPane();
+        card.focus();
+
+        fireEvent.keyDown(card, { key: "Process", keyCode: 229 });
+
+        expect(document.activeElement).toBe(filter);
+        expect(filter.value).toBe("");
+    });
+
     it("keeps Enter, Space and shortcuts on the card", () => {
         const { card, filter, onLaunch } = renderInPane();
         card.focus();

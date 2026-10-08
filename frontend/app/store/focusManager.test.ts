@@ -30,6 +30,12 @@ vi.mock("@/layout/index", () => ({
 const giveFocus = vi.fn(() => true);
 let bcmForBlockId: Record<string, { viewModel: { giveFocus?: () => boolean } }> = {};
 const [activeTabId, setActiveTabId] = createSignal("tab-1");
+const [tabSwitching, setTabSwitching] = createSignal(false);
+const [gatingNodeIds, setGatingNodeIds] = createSignal<ReadonlySet<string>>(new Set());
+vi.mock("@/app/store/tab-reveal", () => ({
+    tabSwitching: () => tabSwitching(),
+    gatingNodeIds: () => gatingNodeIds(),
+}));
 vi.mock("@/app/store/global", () => ({
     atoms: { activeTabId: () => activeTabId() },
     getBlockComponentModel: (blockId: string) => bcmForBlockId[blockId],
@@ -389,6 +395,35 @@ describe("focusManager", () => {
             const r = document.body.querySelector<HTMLInputElement>("#rename")!;
             r.focus();
             r.blur();
+            runFrames(1);
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        // A view under a hidden reveal gate says it took focus but can't
+        // (#4479); when the gate lifts, try again.
+        it("focuses the selection when a window tab's reveal gate lifts with the caret on <body>", () => {
+            setTabSwitching(true);
+            runFrames(1);
+            expect(giveFocus).not.toHaveBeenCalled();
+            setTabSwitching(false);
+            runFrames(1);
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        it("focuses the selection when a pane's reveal gate lifts", () => {
+            setGatingNodeIds(new Set(["node-1"]));
+            runFrames(1);
+            expect(giveFocus).not.toHaveBeenCalled();
+            setGatingNodeIds(new Set<string>());
+            runFrames(1);
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        it("leaves a caret the user placed alone when a gate lifts", () => {
+            document.body.innerHTML = `<input id="x" />`;
+            document.body.querySelector<HTMLInputElement>("#x")!.focus();
+            setTabSwitching(true);
+            setTabSwitching(false);
             runFrames(1);
             expect(giveFocus).not.toHaveBeenCalled();
         });
