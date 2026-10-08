@@ -739,7 +739,7 @@ mod turn_ending_tests {
             "[assistant] Want me to merge it?**",
             "[assistant] Is it the stable build you want?\n\n",
             "[assistant] Okay？",
-            // A question followed by a line of courtesy still waits (Codex P2, #4476).
+            // A question followed by a line of courtesy still waits (#4476).
             "[assistant] Which approach do you prefer? Let me know and I'll proceed.",
             "[assistant] Both work.\n\nShould I use A (\"simpler\")?\nOtherwise I'll go with B.",
         ] {

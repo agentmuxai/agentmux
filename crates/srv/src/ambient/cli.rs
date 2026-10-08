@@ -289,7 +289,7 @@ mod live_cli_smoke {
 
     /// A message that waits for the user without a question mark passes the
     /// turn-ending gate, so the prompt's SKIP case is what keeps a guess out of
-    /// the composer (Codex P2 on #4476). Live, like the test above.
+    /// the composer (#4476). Live, like the test above.
     #[tokio::test]
     #[ignore = "calls the real claude CLI; run with --ignored"]
     async fn live_cli_skips_a_wait_the_gate_cannot_see() {
