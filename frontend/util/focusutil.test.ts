@@ -5,7 +5,7 @@
 // pane-selection focus path consults before moving the caret.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { eventBelongsToBlock, eventBelongsToPaneOf, focusOnOpen, isEditableTarget, userCaretInBlock } from "./focusutil";
+import { eventBelongsToBlock, eventBelongsToPaneOf, focusOnOpen, focusWhenRendered, isEditableTarget, userCaretInBlock } from "./focusutil";
 
 function mountBlock(blockId: string, inner: string): HTMLElement {
     const block = document.createElement("div");
@@ -198,5 +198,55 @@ describe("focusOnOpen", () => {
         focusOnOpen(input);
         await Promise.resolve();
         expect(document.activeElement).not.toBe(input);
+    });
+});
+
+describe("focusOnOpen guard", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+    });
+
+    // A form that remounts in a background pane must not take the caret from
+    // the pane the user is typing in.
+    it("leaves a caret the user has in another pane's text field", async () => {
+        document.body.innerHTML = `<div data-blockid="a"><textarea id="typing"></textarea></div><div data-blockid="b"><input id="form" /></div>`;
+        const typing = document.getElementById("typing") as HTMLTextAreaElement;
+        typing.focus();
+        focusOnOpen(document.getElementById("form")!);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(typing);
+    });
+
+    it("takes it from a field in the same pane", async () => {
+        document.body.innerHTML = `<div data-blockid="a"><textarea id="t"></textarea><input id="form" /></div>`;
+        (document.getElementById("t") as HTMLTextAreaElement).focus();
+        const form = document.getElementById("form")!;
+        focusOnOpen(form);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(form);
+    });
+
+    // Terminal Find is portaled to <body>, outside every pane, and opens over
+    // the terminal whose caret it takes.
+    it("an input outside the panes takes the caret from a pane", async () => {
+        document.body.innerHTML = `<div data-blockid="a"><textarea id="t"></textarea></div><input id="find" />`;
+        (document.getElementById("t") as HTMLTextAreaElement).focus();
+        const find = document.getElementById("find")!;
+        focusOnOpen(find);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(find);
+    });
+});
+
+describe("focusWhenRendered", () => {
+    it("finds the element after the render that adds it", async () => {
+        document.body.innerHTML = `<div id="list"></div>`;
+        const list = document.getElementById("list")!;
+        focusWhenRendered(() => list.querySelector<HTMLInputElement>("input:last-of-type"));
+        list.innerHTML = `<input id="old" /><input id="new" />`; // the "+ Add" render
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(document.activeElement?.id).toBe("new");
+        document.body.innerHTML = "";
     });
 });

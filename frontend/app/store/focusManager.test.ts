@@ -317,6 +317,17 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
+        // Cmd+, from a terminal: Settings is selected but not mounted yet, and
+        // the caret is still in the terminal the selection left.
+        it("keeps retrying while the caret is still in the pane the selection left", () => {
+            giveFocus.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
+            document.body.innerHTML = `<div data-blockid="term"><textarea id="xterm"></textarea></div><div data-blockid="block-1"></div>`;
+            (document.getElementById("xterm") as HTMLTextAreaElement).focus();
+            focusManager.ensureSelectionFocused("selection");
+            runFrames(2);
+            expect(giveFocus).toHaveBeenCalledTimes(3);
+        });
+
         it("stops retrying once the user puts the caret somewhere", () => {
             giveFocus.mockReturnValue(false);
             focusManager.ensureSelectionFocused("selection");

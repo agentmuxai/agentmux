@@ -188,6 +188,7 @@ export function NativeMemoryFileView(props: NativeMemoryFileViewProps): JSX.Elem
             loading={history.contentLoadingAtom()}
             error={history.contentErrorAtom()}
             editing={draft.editingAtom()}
+            autoFocus
             draft={draft.draftAtom() ?? ""}
             onDraftInput={(v) => draft.setDraft(v)}
             textareaLabel={`Edit ${filename}`}

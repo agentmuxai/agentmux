@@ -153,8 +153,26 @@ export function isEditableTarget(target: EventTarget | null): boolean {
 export function focusOnOpen(el: HTMLElement, opts: { select?: boolean } = {}): void {
     queueMicrotask(() => {
         if (!el.isConnected) return;
+        // The user is typing in another pane (this one remounted behind them):
+        // leave the caret there. A find bar portaled outside the panes is
+        // exempt; it opens over the pane whose caret it takes.
+        const pane = findBlockId(el);
+        const active = document.activeElement;
+        if (pane != null && active instanceof HTMLElement && active !== el && isTextEntry(active) && findBlockId(active) !== pane) return;
         el.focus({ preventScroll: true });
         if (opts.select && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) el.select();
+    });
+}
+
+/**
+ * `focusOnOpen` for an element the user's action is about to render but that
+ * has no mount of its own to hook (a row appended by "+ Add", a field that
+ * stays mounted when "New" resets it): find it once the render has run.
+ */
+export function focusWhenRendered(find: () => HTMLElement | null | undefined, opts: { select?: boolean } = {}): void {
+    queueMicrotask(() => {
+        const el = find();
+        if (el != null) focusOnOpen(el, opts);
     });
 }
 

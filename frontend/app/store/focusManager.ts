@@ -176,6 +176,12 @@ function modalInTheWay(blockId: string): boolean {
     return blockEl != null && modalCovers(blockEl);
 }
 
+function caretInOtherPane(active: Element, blockId: string): boolean {
+    if (active.closest("[data-blockid]") == null) return false;
+    const pane = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
+    return pane != null && !pane.contains(active);
+}
+
 let focusRetry: number | null = null;
 
 function cancelFocusRetry(): void {
@@ -192,7 +198,14 @@ function scheduleFocusRetry(blockId: string): void {
         if (--frames < 0) return;
         if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId !== blockId) return;
         const active = document.activeElement;
-        const parked = active == null || active === document.body || active.id === `${blockId}-dummy-focus`;
+        // Parked: on <body>, on this block's dummy, or still in the pane the
+        // selection just left (Cmd+, from a terminal opens Settings while the
+        // caret is in the terminal). Not a caret the user put outside the panes.
+        const parked =
+            active == null ||
+            active === document.body ||
+            active.id === `${blockId}-dummy-focus` ||
+            caretInOtherPane(active, blockId);
         if (!parked || !windowHasFocus() || modalInTheWay(blockId)) return;
         if (focusBlockTarget(blockId)) return;
         focusRetry = requestAnimationFrame(tick);

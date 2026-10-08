@@ -36,6 +36,7 @@ import {
     type ProviderInstruction,
 } from "./bundle-model";
 import { Button } from "@/app/element/ui";
+import { focusWhenRendered } from "@/util/focusutil";
 
 interface BundleProviderInstructionsSectionProps {
     /** The draft's raw `instructions_by_provider` JSON string. */
@@ -181,7 +182,17 @@ export const BundleProviderInstructionsSection = (
                     <For each={knownProviders()}>{(p) => <option value={p} />}</For>
                 </datalist>
 
-                <Button icon="plus" class="bundle-view-provider-instruction-add" onClick={addRow}>
+                <Button
+                    icon="plus"
+                    class="bundle-view-provider-instruction-add"
+                    onClick={(e) => {
+                        const section = e.currentTarget.parentElement;
+                        addRow();
+                        focusWhenRendered(() =>
+                            section?.querySelector<HTMLInputElement>(".bundle-view-provider-instruction-row:last-of-type input")
+                        );
+                    }}
+                >
                     Add provider override
                 </Button>
             </Show>

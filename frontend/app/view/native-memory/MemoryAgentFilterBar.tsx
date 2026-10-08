@@ -53,8 +53,10 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                 rule (see the .scss) applies to the trio atomically. */}
             <span class="memory-agent-filter-search">
                 <i class="fa-solid fa-magnifying-glass memory-agent-filter-icon" aria-hidden="true" />
+                {/* The pane's typing target when nothing else claims it (focusManager). */}
                 <input
                     type="text"
+                    data-pane-focus
                     class="memory-agent-filter-input"
                     placeholder="Filter agents..."
                     value={props.value()}

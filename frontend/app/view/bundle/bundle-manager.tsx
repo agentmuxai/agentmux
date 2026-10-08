@@ -26,6 +26,7 @@ import { BundleSkillsSection } from "./BundleSkillsSection";
 import "./bundle-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
 import { Button } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 interface BundleManagerBodyProps {
     model: BundleViewModel;
@@ -280,6 +281,7 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                     onContextMenu={showTextInputContextMenu}
                                     placeholder="e.g. Claude-coder"
                                     required
+                                    ref={(el) => focusOnOpen(el, { select: true })}
                                 />
                             </label>
 

@@ -333,3 +333,22 @@ describe("NumberInput", () => {
         expect(onChange).toHaveBeenCalledTimes(1);
     });
 });
+
+// REPORT_FOCUS_ON_OPEN_AUDIT_2026_10_08.md: the attribute alone only works at
+// page load.
+describe("TextInput autofocus", () => {
+    it("takes the caret when it is rendered, and still hands its ref out", async () => {
+        let got: HTMLInputElement | undefined;
+        render(() => <TextInput aria-label="Name" autofocus ref={(el) => (got = el)} />);
+        await Promise.resolve();
+        const input = screen.getByLabelText("Name");
+        expect(document.activeElement).toBe(input);
+        expect(got).toBe(input);
+    });
+
+    it("leaves the caret alone without it", async () => {
+        render(() => <TextInput aria-label="Name" />);
+        await Promise.resolve();
+        expect(document.activeElement).not.toBe(screen.getByLabelText("Name"));
+    });
+});

@@ -5,7 +5,7 @@
 **Trigger:** Repo owner, 2026-10-08: "if a user selects 'Broadcast' in the swarm, the input box should select right after
 the button click … scan the codebase for other places where a user expects to be able to type as soon as it opens, like
 settings … find them all, write report to file."
-**Status:** active — the shared helper and the Swarm Broadcast fix are in #4481; every other row is open.
+**Status:** active — every row of §2 and the Settings gap in §3 are fixed in #4481 (§7); the rest of §3 and §5 is open.
 **Related:** `SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md` (#4479: the caret follows the selected pane after a close; adds
 `data-pane-focus` and the retry this report refers to), `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` (`claimFocusOnMount`).
 
@@ -26,9 +26,9 @@ The rest of the gaps share one shape: a button is replaced by the input it opens
 form), the button had the caret, it is removed, and the caret falls to `<body>`.
 
 There is no shared helper for "focus this input when it appears"; the surfaces that work each do it their own way
-(§5). #4481 adds one, `focusOnOpen` in `frontend/util/focusutil.ts`, and uses it for the Swarm Broadcast composer.
+(§5). #4481 adds one, `focusOnOpen` in `frontend/util/focusutil.ts`, and fixes every row of §2 with it (§7).
 
-## 2. Does not take the caret today (fix needed, most-hit first)
+## 2. Did not take the caret (most-hit first; all fixed in #4481, §7)
 
 | # | Surface | Opened by | Input | Why not | Select text? | Fix |
 |---|---|---|---|---|---|---|
@@ -147,3 +147,40 @@ the pane is the active tab's selection, no modal, the user's caret isn't in a te
    opens: one change for Bundle, Skill and MCP.
 5. **Move the ad-hoc focus code in §5 onto the helper** as those files are touched, which also fixes the missing
    `preventScroll`s.
+
+## 7. Fixed in #4481
+
+One helper pair in `frontend/util/focusutil.ts`, used everywhere below:
+
+- `focusOnOpen(el, { select })`: on the next microtask, if the element is in the document, `focus({ preventScroll: true
+  })` and optionally select its text. Skipped when the user's caret is in a text field in *another* pane, so a form that
+  remounts in a background pane doesn't take it; an input outside every pane (Terminal Find is portaled to `<body>`) is
+  exempt, since it opens over the pane whose caret it takes.
+- `focusWhenRendered(find, opts)`: the same for an element the user's action renders but that has no mount of its own to
+  hook (a row appended by "+ Add", a field that stays mounted when "New" resets it).
+
+| # | Surface | Fix |
+|---|---|---|
+| 1 | Terminal Find | `Input` honours `autoFocus` through `focusOnOpen` (with `autoSelect`, the previous query is selected); Find passes `autoSelect` |
+| 2 | Deny + feedback | `focusOnOpen` on the textarea |
+| 3 | Swarm Broadcast | `focusOnOpen` on the field |
+| 4, 9 | Connection switcher, Open from remote | through `Input` (`TypeAheadModal` passes `autoFocus`) |
+| 5 | Agent Memory "+ New file" | `focusOnOpen` |
+| 6 | Memory Edit (3 places) | `MemoryContent`'s new `autoFocus` prop, passed by the three edit views |
+| 7 | Global Memory "New memory" | `focusOnOpen` on Name when new (the content editor doesn't take it there) |
+| 8 | Bundle / Skill / MCP New and Edit | `focusOnOpen(…, { select: true })` on Name, which mounts with the form |
+| 10 | Accounts Add / Edit | `focusOnOpen(…, { select: true })` on Name |
+| 11 | Remotes Add remote | `focusOnOpen` on the first field |
+| 12 | Agent shell drawer | `useShellLogBridge`'s `withShellFocus` wraps the user's toggle; the shell takes the caret when its terminal is ready. The `!cmd` auto-open doesn't go through it |
+| 13 | Personal Memory agent filter | `data-pane-focus` |
+| 14 | Drone New, Variables "+ Add" | `focusWhenRendered` (name selected on New; the new row's name on Add) |
+| 15 | Bundle "Add provider override" | `focusWhenRendered` on the new row |
+| 16 | Pane title editor | `focusOnOpen(…, { select: true })` |
+| §3 | Settings opened from a terminal or composer | `focusManager`'s retry treats a caret still in the pane the selection just left as parked, so it keeps trying until the Settings search mounts |
+
+`TextInput` (`element/ui/inputs.tsx`) also honours `autofocus` through `focusOnOpen` now, so its call sites inside modals
+no longer rely on the modal's first-focusable rule alone.
+
+Checked live on a dev build: Cmd+F in a terminal, Cmd+Shift+G, and Cmd+, from a terminal each put the caret in the field
+that opened. The lint rule from §6 item 3 and the rest of §3 and §5 are not done.
+

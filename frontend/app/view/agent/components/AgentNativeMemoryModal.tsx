@@ -35,6 +35,7 @@ import "./AgentNativeMemoryModal.scss";
 import type { NativeMemoryFileMeta } from "@/app/store/rpc-api";
 import { keyLabel } from "@/app/keybindings";
 import { Button } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 interface AgentNativeMemoryModalProps {
     agentId: string;
@@ -196,7 +197,7 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                         type="text"
                         placeholder="filename.md"
                         value={newFileName()}
-                        autofocus
+                        ref={(el) => focusOnOpen(el)}
                         onInput={(e) => { setNewFileName(e.currentTarget.value); setNewFileError(null); }}
                         onKeyDown={onNewFileKeyDown}
                     />
@@ -318,6 +319,7 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
                         content={model.contentAtom()}
                         loading={model.contentAtom() === null}
                         editing={model.editingAtom()}
+                        autoFocus
                         draft={model.draftContentAtom()}
                         onDraftInput={(v) => model.setDraftContent(v)}
                         view="plain"

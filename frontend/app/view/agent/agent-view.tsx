@@ -333,7 +333,8 @@ export const AgentPresentationView = ({
         onTermReady: handleShellTermReady,
         onTermDispose: handleShellTermDispose,
         clearTermWrite,
-    } = useShellLogBridge();
+        withShellFocus,
+    } = useShellLogBridge(model.blockId);
 
     /**
      * The drawer's shell process exited cleanly — the human typed `exit`.
@@ -1405,7 +1406,7 @@ export const AgentPresentationView = ({
                 sessionTotals={paneModel.state.sessionTotals}
                 loading={paneBusy()}
                 logOpen={paneModel.state.detailsOpen}
-                onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
+                onToggleLog={withShellFocus(() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user"))}
                 contextTokens={contextReading()?.tokens ?? null}
                 contextWindow={contextReading()?.window ?? undefined}
                 contextNote={contextNote()}
