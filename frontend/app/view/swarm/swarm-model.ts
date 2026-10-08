@@ -1070,8 +1070,7 @@ export class SwarmViewModel {
     // write), but persisted to localStorage as of
     // SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3, so a
     // dismissal survives reload/restart instead of resurfacing every time
-    // (previously ephemeral, same as memory-pressure-banner.tsx's
-    // dismissedAt — that comparison no longer applies). Maps rowKey -> the
+    // (it was ephemeral before). Maps rowKey -> the
     // row's own lastEventAt AT THE MOMENT it was retired, not just a bare
     // membership set: this is what lets a row un-retire itself automatically
     // the moment genuinely new activity arrives for that same key

@@ -45,7 +45,6 @@ import { PerfHud } from "@/perf/hud";
 import { DiagPanel } from "./devtools/diag-panel";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
-import { MemoryPressureBanner } from "./notification/memory-pressure-banner";
 import { BrowserPaneOutsideClickBridge } from "./window/browser-pane-outside-click-bridge";
 import { CredentialApprovalWindow } from "./view/credential-approval/CredentialApprovalWindow";
 import { MemoryAdoptionApprovalWindow } from "./view/memory-adoption-approval/MemoryAdoptionApprovalWindow";
@@ -460,18 +459,6 @@ const AppInner = () => {
                 <AppFocusHandler />
                 <AppSettingsUpdater />
                 <BrowserPaneOutsideClickBridge />
-                <Show when={!IS_FLOATING_PANE}>
-                    {/* Low-memory warning banners — app-wide, non-modal,
-                        dismissible. Driven by the host's mem_pressure level.
-                        RAM and Page File are independently-tracked signals
-                        (SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16 §5.F,
-                        SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07) — both
-                        can show at once if both are true. */}
-                    <MemoryPressureBanner kind="ram" />
-                    <MemoryPressureBanner kind="pagefile" />
-                    {/* srv health-probe latency, same banner system — analysis §8.2. */}
-                    <MemoryPressureBanner kind="backend" />
-                </Show>
                 <Show
                     when={IS_FLOATING_PANE}
                     fallback={<Workspace />}

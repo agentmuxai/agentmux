@@ -22,6 +22,7 @@ mod commands;
 mod dev_authfile;
 mod drag_stash;
 mod events;
+mod health_signals;
 mod ipc;
 mod launcher_event_bridge;
 mod launcher_ipc;
