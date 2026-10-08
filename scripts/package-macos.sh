@@ -479,7 +479,13 @@ done
 # 4. Backend + host get the app entitlements (CLI feature access + CEF JIT).
 #    The host is now NESTED code (the launcher is CFBundleExecutable), so it must
 #    be signed here, before the bundle seal.
-"${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
+#    srv gets a fixed --identifier: without one, codesign takes it from the
+#    versioned file name, and srv is the process that reads the Keychain. An
+#    item trusts an app by its designated requirement, identifier included, so
+#    "Always Allow" never carried over and every new version asked for the
+#    login keychain on first launch (retro-keychain-prompt-recurs-per-build-
+#    identity-2026-08-21.md). Same identifier on every channel and version.
+"${SIGN[@]}" --identifier ai.agentmux.srv --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/$(basename "$SRV")"
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP/Contents/MacOS/agentmux-cef"
 # agentmux-mcp and agentmux-bashwrap are nested Mach-Os under MacOS/tools/bin/
 # (Claude's PATH). They must be signed inside-out before the seal or `codesign
