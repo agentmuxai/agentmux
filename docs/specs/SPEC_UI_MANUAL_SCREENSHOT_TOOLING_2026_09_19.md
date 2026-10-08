@@ -245,3 +245,79 @@ neither a defect in `capture.mjs`/`shots.mjs` as committed here.
   `containsWorkspaceData: boolean` (or similar) field, checked by a human
   before a shot is trusted for a public manual, rather than relying on the
   shot author's judgment call at selection time going unrecorded.
+
+## 8. Sizes, suites and the widget collection (2026-10-08)
+
+Screenshots for the docs and the landing site need every widget at several
+sizes, from an instance that shows nothing of the machine it runs on. This
+section covers what was added for that; §7's "variants" and
+"containsWorkspaceData" follow-ups are both implemented here.
+
+### 8.1 Sizes
+
+`sizes.mjs` names the sizes: `small` 800×600, `medium` 1280×800 and `large`
+1920×1080 (CSS pixels of the whole window, each with a `scale`, the device
+pixel ratio of the PNG). A shot with `sizes: true` is captured once per size:
+the runner sets the page's viewport with `Emulation.setDeviceMetricsOverride`,
+so the layout reflows to that size without resizing the real window (the
+result doesn't depend on the screen), then measures the selector again and
+crops. Files are `<id>-<size>.png`; `--sizes small,large` limits a run.
+
+### 8.2 Suites
+
+`--suite` picks the manifest: `manual` (`shots.mjs`, the default) or `widgets`
+(`widget-shots.mjs`). The widget suite is built from the app's own widget
+config (`crates/srv/src/config/widgets.json`), so a new widget is captured
+without editing the suite; `EXCLUDE` lists the ones left out, with a reason.
+A new suite is a new manifest file plus one line in `capture.mjs`'s `SUITES`.
+
+Each widget shot opens a new window tab, opens the widget (its pinned icon,
+found by the `icon` class from widgets.json; else the top bar's More list,
+the hamburger menu, or the command palette), finds its pane (the block that
+is new since the tab opened, or a marker class for a widget already in a new
+tab's layout), maximizes it, captures it at each size and closes the tab. It
+fails rather than capture the wrong thing when no visible pane appeared or
+the pane didn't fill the tab.
+
+Things learned while building it, which any new shot should respect:
+
+- Every window tab's panes stay laid out in the page, hidden ones under the
+  visible tab. A pane in the DOM with a size isn't necessarily on screen; check
+  with a hit test at its centre.
+- The top bar renders measuring copies of its icons. Click only an element a
+  hit test at its centre reaches.
+- The pane `+` and right-click menus are native menus, outside the page.
+- Closing a tab with panes asks "Close tab?"; the dialog blocks every click
+  after it until answered.
+- A Browser pane's web page is a separate page target, and its content is a
+  native view the page screenshot doesn't include (Browser is excluded for
+  now). The runner picks the app's own page (`127.0.0.1`/`localhost`).
+- The pointer is moved off the page before every capture (`parkMouse`), so no
+  hover state or tooltip is in a shot.
+
+`cleanup(session)` runs after every shot, failed or not. `SHOTS_DEBUG=1` logs
+each crop; `SHOTS_DEBUG=keep` skips cleanup so the state can be inspected.
+
+### 8.3 Isolation and the demo environment
+
+The capture instance is a separate build started with
+`AGENTMUX_HOME_OVERRIDE=<empty folder>` and `AGENTMUX_CDP_PORT`, which moves
+everything AgentMux keeps under `~/.agentmux` (agents, memory, accounts). It
+doesn't cover what widgets read from the rest of the file system: Hangar opened
+on the home folder and the terminal prompt showed it. `demo-env.mjs --home <dir>
+[--demo <dir>]` writes a small made-up project and a user `widgets.json` that
+starts Hangar, Terminal and Editor in it. Put the demo project at a path
+without a user name in it.
+
+Some widgets always show the machine's own data (Toolchain lists its installs
+and their paths); their shots set `containsWorkspaceData: true`. Every other
+shot is `"review"`: a person checks each image before it is published.
+
+### 8.4 Running it
+
+1. Build a portable (`task package`) and start it with
+   `AGENTMUX_HOME_OVERRIDE=<empty folder>` and `AGENTMUX_CDP_PORT=<port>`.
+2. `node scripts/ui-screenshots/demo-env.mjs --home <that folder> --demo <path>`.
+3. `node scripts/ui-screenshots/capture.mjs --port <port> --suite widgets --out <dir>`.
+4. Review every image (and `manifest.json`'s `containsWorkspaceData`) before
+   copying any into a public repository.
