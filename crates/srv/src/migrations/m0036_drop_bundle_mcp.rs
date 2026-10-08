@@ -18,9 +18,11 @@
 //! alone. `db_bundle_mcp_ref` stays defined, because an older build on the
 //! same channel expects it; dropping it is a later cleanup.
 //!
-//! Idempotent: a second run finds no refs and nothing inline. Never fails a
-//! boot over the identity store: when it can't be opened, the private servers
-//! are left (unreachable, since their refs go) and that is logged.
+//! Idempotent: a second run finds no refs and nothing inline. Fails (to be
+//! retried on the next boot) when the shared store can't be opened or the
+//! inline column can't be cleared, since those hold server configs. Never
+//! fails over the identity store: when it can't be opened, the private
+//! servers are left (unreachable, since their refs go) and that is logged.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -30,7 +32,6 @@ use rusqlite::params;
 use crate::backend::storage::store::Store;
 use crate::registry;
 
-use super::m0021_backfill_agent_bundles::resolve_bundle_store;
 use super::{Migration, MigrationContext, MigrationError, MigrationScope};
 
 pub struct M0036DropBundleMcp;
@@ -50,7 +51,12 @@ impl Migration for M0036DropBundleMcp {
             Store::open(&ctx.channel_store_path)
                 .map_err(|e| MigrationError(format!("drop_bundle_mcp: open mstore: {e}")))?,
         );
-        let bundle_store = resolve_bundle_store(ctx, &mstore);
+        // The shared store itself, not m0021's best-effort fallback to the
+        // channel store: clearing that (usually empty) local copy would record
+        // this as done with the shared configs still stored. Unavailable means
+        // fail, and retry on the next boot.
+        let bundle_store = Store::open_shared(&ctx.shared_store_path)
+            .map_err(|e| MigrationError(format!("drop_bundle_mcp: open shared store: {e}")))?;
         let identity_store = match open_identity_store() {
             Ok(store) => Some(store),
             Err(e) => {
@@ -305,6 +311,24 @@ mod tests {
         exec(&shared, "DROP TABLE db_bundles", &[]);
         let err = drop_bundle_mcp(&mstore, None, &shared).unwrap_err();
         assert!(err.contains("clear inline mcp_servers"), "{err}");
+    }
+
+    /// No fallback to the channel store's local copy: an unopenable shared
+    /// store fails the run, to be retried.
+    #[test]
+    fn an_unopenable_shared_store_fails_the_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let channel = dir.path().join("objects.db");
+        Store::open(&channel).unwrap();
+        let ctx = MigrationContext {
+            home: std::env::temp_dir(),
+            data_dir: std::env::temp_dir(),
+            // A directory, which SQLite can't open as a database.
+            shared_store_path: dir.path().to_path_buf(),
+            channel_store_path: channel,
+        };
+        let err = M0036DropBundleMcp.up(&ctx).unwrap_err();
+        assert!(err.0.contains("open shared store"), "{err}");
     }
 
     #[test]

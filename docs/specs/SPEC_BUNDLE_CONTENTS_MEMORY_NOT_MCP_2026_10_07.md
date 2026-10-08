@@ -44,7 +44,7 @@ Operator, 2026-10-07: **a bundle contains instructions, context, skills, Global 
   - clear `db_bundles.mcp_servers` to `[]`;
   - log each agent that loses servers, by name and server name, so the loss is visible in the srv log.
 
-  The table stays defined (an older build on the same channel expects it) and is no longer written. Dropping the table is a later cleanup. When the identity store can't be opened, the private servers are left in place (unreachable once their refs go) and that is logged, rather than failing the boot.
+  The table stays defined (an older build on the same channel expects it) and is no longer written. Dropping the table is a later cleanup. When the identity store can't be opened, the private servers are left in place (unreachable once their refs go) and that is logged, rather than failing the boot. It does fail, to be retried on the next boot, when the shared store can't be opened (no fallback to the channel store's local copy) or the inline column can't be cleared: both would otherwise record the migration as done with server configs still stored.
 - **`m0030`** keeps only its skills half. Its MCP half carried the inline column into bundle refs, which `m0036` deletes straight after, and it called store code this removes.
 - **Validation** is store-free again: with no MCP servers to check, `bundle.validate` reads only the draft.
 - **Export also drops `accounts/requirements.json`.** It was inferred from the servers' `env` keys, so it goes with them, along with the redaction of secrets out of server configs. Import still reads `accounts/requirements.json` from any archive, to match accounts.
