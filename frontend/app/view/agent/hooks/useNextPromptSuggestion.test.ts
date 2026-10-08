@@ -19,6 +19,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { DocumentNode } from "../types";
 
 const hub = vi.hoisted(() => ({
     nextPromptSuggestion: vi.fn(),
@@ -49,7 +50,7 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-function setup(isComposerEmpty: () => boolean = () => true) {
+function setup(isComposerEmpty: () => boolean = () => true, document?: () => DocumentNode[]) {
     let setPhase!: (p: TurnPhase) => void;
     let bumpTurnEnded!: () => void;
     let dispose: () => void = () => {};
@@ -64,6 +65,7 @@ function setup(isComposerEmpty: () => boolean = () => true) {
             turnPhase: phase,
             turnJustEndedAtom: turnEnded,
             isComposerEmpty,
+            document,
         });
     });
     return { setPhase, bumpTurnEnded, dispose };
@@ -181,6 +183,20 @@ describe("useNextPromptSuggestion — no call when there's nothing to suggest", 
         const { setPhase, bumpTurnEnded, dispose } = setup();
         await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome: "completed", finishedAt: 2 });
         expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
+    it("sends the pane's recent activity with the request", async () => {
+        const nodes = [
+            { type: "user_message", id: "u", message: "fix it" },
+            { type: "markdown", id: "m", content: "Fixed." },
+        ] as unknown as DocumentNode[];
+        const { setPhase, bumpTurnEnded, dispose } = setup(undefined, () => nodes);
+        await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome: "completed", finishedAt: 2 });
+        expect(hub.nextPromptSuggestion.mock.calls[0][1]).toMatchObject({
+            block_id: BLOCK_ID,
+            activity: ["[user] fix it", "[assistant] Fixed."],
+        });
         dispose();
     });
 

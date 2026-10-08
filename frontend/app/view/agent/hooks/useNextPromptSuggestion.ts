@@ -99,6 +99,8 @@ import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";
 import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
+import { recentActivityEntries } from "../ambient-activity";
+import type { DocumentNode } from "../types";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
 
 export interface UseNextPromptSuggestionOptions {
@@ -109,6 +111,10 @@ export interface UseNextPromptSuggestionOptions {
     turnJustEndedAtom: Accessor<number>;
     /** Checked at write time — see the module doc comment, guard 3. */
     isComposerEmpty: () => boolean;
+    /** The pane's document. Its recent conversation is sent with the request
+     *  (`ambient-activity.ts`), so the server need not read it back from the
+     *  output file, which it can parse only for Claude. */
+    document?: Accessor<DocumentNode[]>;
 }
 
 // Shared across every pane's hook instance — module-level, not per-mount.
@@ -196,7 +202,7 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
 
         RpcApi.NextPromptSuggestionCommand(
             TabRpcClient,
-            { block_id: blockId, generation: Date.now() },
+            { block_id: blockId, generation: Date.now(), activity: opts.document && recentActivityEntries(opts.document()) },
             { timeout: AMBIENT_PULL_TIMEOUT_MS },
         ).then((result) => {
             if (activeTurnId !== myTurnId) return; // superseded by a newer turn

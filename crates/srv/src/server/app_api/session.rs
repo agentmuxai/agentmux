@@ -440,7 +440,14 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                let Some(activity) = ambient::digest::read_recent_activity(&filestore, &cmd.block_id) else {
+                // The pane's own translated conversation when it sent one (any
+                // provider); otherwise the output file, which only Claude-shaped
+                // streams can be read from.
+                let activity = match cmd.activity.filter(|entries| !entries.is_empty()) {
+                    Some(entries) => ambient::digest::activity_from_entries(&cmd.block_id, entries),
+                    None => ambient::digest::read_recent_activity(&filestore, &cmd.block_id),
+                };
+                let Some(activity) = activity else {
                     slot.abandon(ambient::outcome::Outcome::EmptyDigest);
                     return Ok(empty_suggestion_result());
                 };

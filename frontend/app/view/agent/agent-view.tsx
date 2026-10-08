@@ -783,6 +783,7 @@ export const AgentPresentationView = ({
         turnPhase: (() => paneModel.state.turnPhase),
         turnJustEndedAtom,
         isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
+        document: paneModel.document,
     });
 
     // Subscribe to subprocess output and parse into DocumentNodes.
