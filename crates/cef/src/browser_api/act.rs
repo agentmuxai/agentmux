@@ -232,28 +232,29 @@ const COMMIT_INFO: &str = r#"function () {
       if (fields.length >= 40) break;
     }
   }
-  // Everything the click would send, hidden controls included (an amount or
-  // a recipient id can live in one), for the check after approval. srv keeps
-  // it out of the banner. Every control counts, however many there are (a
-  // page could pad the form to push a changed one past a cutoff). Secret
-  // values go back separately (`secrets`); the host folds all of it into one
-  // keyed digest before anything leaves it. The element's own markup counts
-  // too: a click handler can read its target from a data attribute.
+  // Everything the click would send, for the check after approval: the
+  // browser's own entry list for this form and submitter (FormData), so its
+  // rules (disabled controls and options, checkbox defaults, the submitter's
+  // name and value, every control however many) are the ones checked. This
+  // script runs in an isolated world, where the page can't replace FormData.
+  // srv keeps it out of the banner. Values of secret controls go back
+  // separately (`secrets`); the host folds all of it into one keyed digest
+  // before anything leaves it. The element's own markup counts too: a click
+  // handler can read its target from a data attribute.
   const sent = [];
   const secrets = [];
   if (form) {
+    const secretNames = new Set();
     for (const el of Array.from(formGet("elements"))) {
-      const ty = (el.type || "").toLowerCase();
-      let v;
-      if (secret(el)) { secrets.push(String(el.value)); v = "[secret]"; }
-      else if (ty === "checkbox" || ty === "radio") v = el.checked ? (el.value || "on") : null;
-      // Lists stay lists: one option valued "a,b" isn't two valued a and b.
-      else if (ty === "file") v = Array.from(el.files || []).map(f => [f.name, f.size]);
-      else if (el.tagName === "SELECT") v = Array.from(el.selectedOptions).map(o => o.value);
-      else v = el.value;
-      // name and id apart: only a named control is submitted, so adding a
-      // name to an id-only one changes what is sent.
-      sent.push([el.tagName, ty, el.getAttribute("name"), el.id || null, el.disabled ? 1 : 0, v == null ? null : Array.isArray(v) ? v : String(v)]);
+      if (secret(el) && el.getAttribute("name")) secretNames.add(el.getAttribute("name"));
+    }
+    let entries;
+    try { entries = Array.from(new FormData(form, submits ? this : undefined)); }
+    catch (e) { entries = Array.from(new FormData(form)); }
+    for (const [k, v] of entries) {
+      if (typeof v !== "string") sent.push([k, "file", v.name, v.size, v.type]);
+      else if (secretNames.has(k)) { secrets.push(v); sent.push([k, "[secret]"]); }
+      else sent.push([k, v]);
     }
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
