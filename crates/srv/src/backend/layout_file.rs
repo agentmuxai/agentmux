@@ -439,6 +439,11 @@ fn view_from_block(store: &Store, meta: &MetaMapType, ctx: &ExportContext, warni
             config.insert("section".into(), Value::String(section.to_string()));
         }
     }
+    // Remotes was a pane of its own until it became a section of Connectors.
+    if view_type == "remotes" {
+        view_type = "connectors".to_string();
+        config.insert("section".into(), Value::String("remotes".to_string()));
+    }
     match view_type.as_str() {
         "agent" => {
             // The definition's portable identity, never its local row id.
@@ -951,15 +956,17 @@ impl PlanBuilder<'_> {
                 }
                 self.summary.push("System info".to_string());
             }
-            // Files saved before the Armory was split say "armory", and ones
-            // saved before Memory was renamed say "knowledge".
-            "connectors" | "memory" | "knowledge" | "armory" => {
+            // Files saved before the Armory was split say "armory", ones saved
+            // before Memory was renamed say "knowledge", and ones saved before
+            // Remotes became a section of Connectors say "remotes".
+            "connectors" | "memory" | "knowledge" | "armory" | "remotes" => {
                 let (pane, section) = match kind {
                     "armory" => {
                         let (pane, section) = armory_target(cfg_str(view, "section"), None);
                         (pane, Some(section))
                     }
                     "knowledge" => ("memory", cfg_str(view, "section")),
+                    "remotes" => ("connectors", Some("remotes")),
                     pane => (pane, cfg_str(view, "section")),
                 };
                 meta.insert("view".into(), pane.into());

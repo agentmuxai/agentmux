@@ -997,7 +997,7 @@ declare global {
         "subagent:session"?: string;
         // Selected section of a sectioned pane, meta-backed so it survives a
         // block remount and names the pane (section-pane.tsx, warden-model.ts).
-        "connectors:section"?: "accounts" | "mcp";
+        "connectors:section"?: "accounts" | "mcp" | "remotes";
         "memory:section"?: "global" | "personal" | "skills" | "bundles";
         // Memory's section key from when it was named Knowledge: read as a
         // fallback (section-pane.tsx `legacySectionKeys`), cleared on the next pick.

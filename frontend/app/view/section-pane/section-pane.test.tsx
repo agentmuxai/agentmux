@@ -3,8 +3,9 @@
 
 /**
  * The Connectors and Memory panes (section-pane.tsx and the two manifests),
- * and the Armory manifest that moves saved Armory blocks onto them.
- * docs/specs/SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md.
+ * and the Armory and Remotes manifests that move saved blocks onto them.
+ * docs/specs/SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md,
+ * docs/specs/SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md.
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
@@ -29,6 +30,28 @@ vi.mock("@/app/view/mcp/mcp-manager", () => ({
 vi.mock("@/app/view/skill/skill-manager", () => ({
     SkillManager: () => <div data-testid="skill-manager" />,
 }));
+// The Remotes list, standing in: it shows what the section gave its model.
+const remotesModels = vi.hoisted(() => [] as { blockId: string; expandRequest: () => string; disposed: boolean }[]);
+vi.mock("@/app/view/remotes/remotes-model", () => ({
+    RemotesViewModel: class {
+        blockId: string;
+        expandRequest: () => string;
+        disposed = false;
+        constructor(ctx: { blockId: string; meta?: () => Record<string, unknown> | undefined }) {
+            this.blockId = ctx.blockId;
+            this.expandRequest = () => (ctx.meta?.()?.["remotes:expand"] as string | undefined) ?? "";
+            remotesModels.push(this);
+        }
+        dispose() {
+            this.disposed = true;
+        }
+    },
+}));
+vi.mock("@/app/view/remotes/remotes-view", () => ({
+    RemotesView: (props: { model: { blockId: string; expandRequest: () => string } }) => (
+        <div data-testid="remotes-view" data-block={props.model.blockId} data-expand={props.model.expandRequest()} />
+    ),
+}));
 vi.mock("@/app/store/block-component-registry", () => ({
     openOrFocusPaneByView: vi.fn(() => Promise.resolve()),
 }));
@@ -37,6 +60,7 @@ import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-r
 import { armoryPaneTab } from "@/app/view/armory/armory";
 import { connectorsPaneTab } from "@/app/view/connectors/connectors";
 import { memoryPaneTab } from "@/app/view/memory/memory";
+import { remotesPaneTab } from "@/app/view/remotes/remotes";
 
 // A real signal behind the host context, so a setMeta write flows back into
 // the pane the way the backend's meta push does.
@@ -77,12 +101,13 @@ afterEach(() => {
     cleanup();
     setMetaMock.mockClear();
     setBlockMeta({});
+    remotesModels.length = 0;
 });
 
 describe("Connectors pane", () => {
-    it("has the sections Accounts and MCP servers, on Accounts by default", () => {
+    it("has the sections Accounts, MCP servers and Remotes, on Accounts by default", () => {
         const { container, title } = mount(connectorsPaneTab);
-        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers"]);
+        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers", "Remotes"]);
         expect(visiblePane(container)).toBe("accounts-manager");
         expect(title()).toBe("Connectors · Accounts");
     });
@@ -104,6 +129,51 @@ describe("Connectors pane", () => {
         expect(setMetaMock).toHaveBeenCalledWith({ "connectors:section": "mcp" });
         expect(visiblePane(container)).toBe("mcp-manager");
         expect(title()).toBe("Connectors · MCP servers");
+    });
+});
+
+describe("Connectors → Remotes", () => {
+    it("shows the Remotes list on this pane's block", () => {
+        const { container, title } = mount(connectorsPaneTab, { "connectors:section": "remotes" });
+        expect(visiblePane(container)).toBe("remotes-view");
+        expect(title()).toBe("Connectors · Remotes");
+        expect(container.querySelector('[data-testid="remotes-view"]')!.getAttribute("data-block")).toBe("test-block");
+    });
+
+    it("passes the pane's meta on, so another pane's link reaches the list", () => {
+        const { container } = mount(connectorsPaneTab, { "connectors:section": "remotes" });
+        setBlockMeta((m) => ({ ...m, "remotes:expand": "db1" }));
+        expect(container.querySelector('[data-testid="remotes-view"]')!.getAttribute("data-expand")).toBe("db1");
+    });
+
+    it("disposes the list's model with the pane", () => {
+        const { unmount } = mount(connectorsPaneTab);
+        expect(remotesModels).toHaveLength(1);
+        unmount();
+        expect(remotesModels[0].disposed).toBe(true);
+    });
+});
+
+describe("a saved Remotes block", () => {
+    it("rewrites its meta to Connectors → Remotes after it's created, keeping the rest", async () => {
+        setBlockMeta({ view: "remotes", "remotes:expand": "db1", "term:zoom": 1.3 });
+        createRoot(() => remotesPaneTab.create(makeCtx()));
+        expect(setMetaMock).not.toHaveBeenCalled();
+        await Promise.resolve();
+        expect(setMetaMock).toHaveBeenCalledWith({ view: "connectors", "connectors:section": "remotes" });
+    });
+
+    it("shows Connectors on Remotes before the write lands, and lets the user pick another section", () => {
+        const { container, title } = mount(remotesPaneTab, { view: "remotes", "remotes:expand": "db1" });
+        expect(visiblePane(container)).toBe("remotes-view");
+        expect(title()).toBe("Connectors · Remotes");
+        expect(container.querySelector('[data-testid="remotes-view"]')!.getAttribute("data-expand")).toBe("db1");
+        fireEvent.click(screen.getByRole("tab", { name: "Accounts" }));
+        expect(visiblePane(container)).toBe("accounts-manager");
+    });
+
+    it("stands in for Connectors", () => {
+        expect(remotesPaneTab.legacyOf).toBe("connectors");
     });
 });
 
@@ -211,7 +281,7 @@ describe("a saved Armory block", () => {
 
     it("shows its new pane until the block remounts as it", () => {
         const { container, title } = mount(armoryPaneTab, { view: "trust", "armory:section": "mcp" });
-        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers"]);
+        expect(tabLabels(container)).toEqual(["Accounts", "MCP servers", "Remotes"]);
         expect(title()).toBe("Connectors · Accounts");
         // The meta write lands: now the section follows.
         setBlockMeta((m) => ({ ...m, view: "connectors", "connectors:section": "mcp" }));

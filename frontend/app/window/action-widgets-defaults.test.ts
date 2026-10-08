@@ -51,7 +51,6 @@ describe("the default widget bar", () => {
             "warden",
             "media",
             "toolchain",
-            "remotes",
             "settings",
         ]);
     });

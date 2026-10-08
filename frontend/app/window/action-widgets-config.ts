@@ -59,11 +59,12 @@ export function widgetIconStyle(widget: WidgetConfigType): JSX.CSSProperties {
 
 /** Pinned short-names saved under an older name, read as the widget that
  *  replaced them: the Armory became Connectors and Memory, Knowledge became
- *  Memory. A user widget override under an old key is moved to its new key by
+ *  Memory, Remotes became a section of Connectors. A user widget override under an old key is moved to its new key by
  *  srv (`RENAMED_WIDGETS`, crates/srv/src/backend/user_widgets.rs). */
 const RENAMED_PINS: Record<string, string[]> = {
     armory: ["connectors", "memory"],
     knowledge: ["memory"],
+    remotes: ["connectors"],
 };
 
 function currentPinNames(pinned: readonly string[]): string[] {

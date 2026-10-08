@@ -50,16 +50,17 @@ const builtins = [
     helpPaneTab, // native (create(ctx)) — the Phase 2b pilot
     launcherPaneTab, // native — Phase 2c (no header)
     swarmPaneTab, // native — Phase 2c
-    remotesPaneTab, // native (SPEC_REMOTES_PANE_2026_10_05.md)
     mediaPaneTab, // native — Phase 2c
     identityPaneTab, // native — Phase 2c
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c
     toolchainPaneTab, // native — Phase 2c
-    connectorsPaneTab, // native (the Armory's Accounts and MCP servers)
+    connectorsPaneTab, // native (the Armory's Accounts and MCP servers, and Remotes)
     memoryPaneTab, // native (the rest of the Armory; was Knowledge)
     // Moves a saved Armory block (or "trust") onto one of the two above.
     armoryPaneTab,
+    // Moves a saved Remotes block onto Connectors → Remotes.
+    remotesPaneTab,
     settingsPaneTab, // native — Phase 2c
 ];
 const unregisterBuiltins = builtins.map(registerPaneTab);
