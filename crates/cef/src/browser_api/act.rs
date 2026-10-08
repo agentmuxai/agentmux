@@ -176,9 +176,16 @@ const SELECT_OPTION: &str = r#"function (want) {
 /// form's non-secret values (spec §5.4).
 const COMMIT_INFO: &str = r#"function () {
   const t = (this.tagName || "").toLowerCase();
-  const type = (this.getAttribute("type") || "").toLowerCase();
+  // The type the browser applies, not the attribute: <button type="bogus">
+  // is a submit button. Read through the prototype, which the page can't
+  // shadow on the element.
+  const typeOf = (el) => {
+    const proto = el.tagName === "BUTTON" ? HTMLButtonElement.prototype : el.tagName === "INPUT" ? HTMLInputElement.prototype : null;
+    return proto ? String(Object.getOwnPropertyDescriptor(proto, "type").get.call(el)).toLowerCase() : "";
+  };
+  const type = typeOf(this);
   const form = this.form || (this.closest && this.closest("form"));
-  const submits = !!form && ((t === "button" && (type === "" || type === "submit")) || (t === "input" && (type === "submit" || type === "image")));
+  const submits = !!form && ((t === "button" && type === "submit") || (t === "input" && (type === "submit" || type === "image")));
   const name = (this.getAttribute("aria-label") || this.innerText || this.value || "").trim().replace(/\s+/g, " ").slice(0, 120);
   const verb = /\b(submit|send|pay|buy|purchase|order|checkout|check out|delete|remove|publish|post|confirm|sign up|sign|agree|accept|transfer|unsubscribe)\b/i.test(name);
   const fields = [];
@@ -240,12 +247,13 @@ const COMMIT_INFO: &str = r#"function () {
       let v;
       if (secret(el)) { secrets.push(String(el.value)); v = "[secret]"; }
       else if (ty === "checkbox" || ty === "radio") v = el.checked ? (el.value || "on") : null;
-      else if (ty === "file") v = Array.from(el.files || []).map(f => f.name + ":" + f.size).join(",");
-      else if (el.tagName === "SELECT") v = Array.from(el.selectedOptions).map(o => o.value).join(",");
+      // Lists stay lists: one option valued "a,b" isn't two valued a and b.
+      else if (ty === "file") v = Array.from(el.files || []).map(f => [f.name, f.size]);
+      else if (el.tagName === "SELECT") v = Array.from(el.selectedOptions).map(o => o.value);
       else v = el.value;
       // name and id apart: only a named control is submitted, so adding a
       // name to an id-only one changes what is sent.
-      sent.push([el.tagName, ty, el.getAttribute("name"), el.id || null, el.disabled ? 1 : 0, v == null ? null : String(v)]);
+      sent.push([el.tagName, ty, el.getAttribute("name"), el.id || null, el.disabled ? 1 : 0, v == null ? null : Array.isArray(v) ? v : String(v)]);
     }
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
