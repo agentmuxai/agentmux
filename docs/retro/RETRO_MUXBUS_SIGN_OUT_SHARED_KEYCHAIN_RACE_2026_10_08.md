@@ -38,6 +38,10 @@ Oct 8. Times are UTC.
   another process reports the sign-in fresh. On Oct 8 the run started at 14:22:16.305, 70
   ms after two processes (v0.59.15 and v0.59.13) both reported it fresh.
 
+- Reproduced on purpose afterwards: four processes saving and reading one sign-in in the real
+  Windows keychain tore 35 to 59 of 160 reads without a cross-process lock, and none with it. A
+  save took up to about 0.7 s, so collisions between processes were easy to hit.
+
 ## Root cause
 
 Three things had to be true, and all were:

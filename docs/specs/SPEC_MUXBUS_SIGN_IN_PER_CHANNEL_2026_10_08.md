@@ -135,5 +135,9 @@ as.
   retried.
 - Cached credentials: the host-wide clear removes only unprefixed rows; a channel clears only its own;
   deleting an agent removes its rows in every channel.
+- Live, against the real Windows keychain (ignored in CI,
+  `concurrent_processes_never_tear_a_live_sign_in`): four processes each save and read one namespace 40
+  times. Without the lock 35 to 59 of the 160 reads were torn, mixed or failed across three runs; with
+  it, none. A save took up to about 0.7 s under that contention.
 - Manual, with two `task dev` clones: sign both in, refresh both at once, sign one out; the other stays
   signed in, and a jekt to an agent on each arrives in its own pane.

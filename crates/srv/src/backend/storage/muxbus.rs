@@ -1560,4 +1560,102 @@ mod tests {
         assert!(matches!(absent, SplitRead::Absent));
         assert_eq!(calls, 1, "an absent login is not retried");
     }
+
+    const HAMMER_NS: &str = "AGENTMUX_TEST_MUXBUS_HAMMER_NS";
+    const HAMMER_LOCK: &str = "AGENTMUX_TEST_MUXBUS_HAMMER_LOCK";
+
+    /// One child of `concurrent_processes_never_tear_a_live_sign_in`: save and
+    /// read the same namespace in a loop, printing how many reads were torn
+    /// or paired tokens from two saves.
+    fn hammer(ns: &str, lock_path: Option<&std::path::Path>) -> usize {
+        let me = std::process::id();
+        let wait = std::time::Duration::from_secs(120);
+        let mut torn = 0;
+        let mut longest_save = std::time::Duration::ZERO;
+        for i in 0..40 {
+            let tag = format!("{me}-{i}");
+            let tokens = MuxBusTokens {
+                access_token: format!("access-{tag}-{}", "x".repeat(1500)),
+                refresh_token: format!("refresh-{tag}"),
+                id_token: format!("id-{tag}"),
+            };
+            {
+                let _guard = lock_path.map(|p| lock_file(p, wait).expect("lock"));
+                let started = std::time::Instant::now();
+                // Unlocked, a write can fail when another removes an entry under it.
+                let _ = write_split_tokens(ns, &tokens);
+                longest_save = longest_save.max(started.elapsed());
+            }
+            let _guard = lock_path.map(|p| lock_file(p, wait).expect("lock"));
+            // An `Err` is a read that found a field mid-write (its `:gen` is
+            // deleted first): bad too, though callers retry it as transient.
+            match read_split_state(ns) {
+                Ok(SplitRead::Complete(t, _)) => {
+                    let saved = t.refresh_token.trim_start_matches("refresh-");
+                    if !t.access_token.starts_with(&format!("access-{saved}-")) || t.id_token != format!("id-{saved}") {
+                        torn += 1;
+                    }
+                }
+                Ok(SplitRead::Torn) | Err(_) => torn += 1,
+                Ok(SplitRead::Absent) => panic!("the sign-in vanished"),
+            }
+        }
+        println!("HAMMER longest_save_ms={}", longest_save.as_millis());
+        torn
+    }
+
+    /// The bug behind the retro, against the REAL OS keychain: several
+    /// processes saving and reading one sign-in at once. Without the lock it
+    /// usually tears (printed, not asserted: it's a race); with it, never.
+    /// `cargo test -p agentmux-srv --bin agentmux-srv concurrent_processes_never_tear -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn concurrent_processes_never_tear_a_live_sign_in() {
+        if let Ok(ns) = std::env::var(HAMMER_NS) {
+            let lock = std::env::var(HAMMER_LOCK).ok().filter(|p| !p.is_empty());
+            println!("HAMMER torn={}", hammer(&ns, lock.as_deref().map(std::path::Path::new)));
+            return;
+        }
+        if !cfg!(target_os = "windows") {
+            return; // only Windows splits a sign-in across entries
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("hammer.lock");
+        let longest_save_ms = std::cell::Cell::new(0u128);
+        let run = |locked: bool| -> usize {
+            let ns = format!("muxbus:channel:test-hammer-{}", new_generation());
+            let children: Vec<_> = (0..4)
+                .map(|_| {
+                    std::process::Command::new(std::env::current_exe().unwrap())
+                        .args(["--exact", "backend::storage::muxbus::tests::concurrent_processes_never_tear_a_live_sign_in"])
+                        .args(["--ignored", "--nocapture"])
+                        .env(HAMMER_NS, &ns)
+                        .env(HAMMER_LOCK, if locked { lock_path.to_str().unwrap() } else { "" })
+                        .stdout(std::process::Stdio::piped())
+                        .spawn()
+                        .expect("spawn")
+                })
+                .collect();
+            let torn = children
+                .into_iter()
+                .map(|c| {
+                    let out = String::from_utf8_lossy(&c.wait_with_output().unwrap().stdout).into_owned();
+                    if let Some(ms) = out.lines().find_map(|l| l.strip_prefix("HAMMER longest_save_ms=")) {
+                        longest_save_ms.set(longest_save_ms.get().max(ms.trim().parse().unwrap_or(0)));
+                    }
+                    let line = out.lines().find(|l| l.starts_with("HAMMER torn=")).unwrap_or_else(|| panic!("child output: {out}"));
+                    line["HAMMER torn=".len()..].trim().parse::<usize>().unwrap()
+                })
+                .sum();
+            delete_split_tokens(&ns);
+            torn
+        };
+        let unlocked = run(false);
+        let locked = run(true);
+        println!(
+            "torn reads out of 160: without the lock {unlocked}, with it {locked}; longest save {} ms",
+            longest_save_ms.get()
+        );
+        assert_eq!(locked, 0, "the lock must make save and read one critical section");
+    }
 }
