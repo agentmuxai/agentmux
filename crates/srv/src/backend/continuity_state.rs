@@ -18,7 +18,6 @@
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use super::memory_record::sha256_hex;
@@ -46,11 +45,6 @@ const STATE_MAX_CHARS: usize = 12_000;
 /// A state version is well under this; reading the file's last window finds
 /// the newest without reading every version.
 const LATEST_WINDOW_BYTES: i64 = 64 * 1024;
-/// Ambient Model Call gateway purpose tag (`crate::ambient`), also the
-/// usage-dashboard category for this call site.
-const AMBIENT_PURPOSE: &str = "continuity_state";
-/// Off the launch path, so it can take longer than a pane-header summary.
-const SUMMARIZER_TIMEOUT: Duration = Duration::from_secs(90);
 /// The heading the summarizer must produce. Output without it is rejected
 /// rather than stored.
 const REQUIRED_HEADING: &str = "## Last user request";
@@ -310,7 +304,7 @@ pub(crate) fn after_successful_turn(mstore: Option<Arc<Store>>, block_id: String
                 version = v.version,
                 based_on = v.based_on,
                 chars = v.text.len(),
-                purpose = AMBIENT_PURPOSE,
+                purpose = crate::ambient::purpose::CONTINUITY_STATE.tag,
                 input_tokens = v.tokens.as_ref().map_or(0, |t| t.input),
                 output_tokens = v.tokens.as_ref().map_or(0, |t| t.output),
                 "continuity: state block updated"
@@ -341,26 +335,30 @@ async fn update(mstore: &Store, block_id: &str) -> Result<Option<StateVersion>, 
         return Ok(None);
     }
 
-    // Through the Ambient Model Call gateway like every other ambient call.
-    // The transcript size is this agent's generation: it only grows. The
-    // `InFlight` claim above already keeps a second update from starting, so
-    // the gateway never has an older call of ours to cancel.
-    let key = crate::ambient::AmbientCallKey::new(zone.clone(), AMBIENT_PURPOSE);
-    let guard = match crate::ambient::gateway().admit(key, size as u64) {
-        crate::ambient::Admission::Proceed(guard) => guard,
-        crate::ambient::Admission::StaleOnArrival => return Ok(None),
+    // Through the same call path as every other ambient call, so its outcome
+    // and timing are recorded. The transcript size is this agent's generation:
+    // it only grows. The `InFlight` claim above already keeps a second update
+    // from starting, so the gateway never has an older call of ours to cancel.
+    let Some(slot) =
+        crate::ambient::call::admit(&crate::ambient::purpose::CONTINUITY_STATE, zone.clone(), size as u64, None).await
+    else {
+        return Ok(None);
     };
     let prompt = summarizer_prompt(latest.as_ref().map(|v| v.text.as_str()), &turns);
-    let (raw, tokens) = crate::ambient::cli::invoke_haiku_with_timeout(
-        &cli_path,
-        &prompt,
-        &block.meta,
-        guard.cancellation(),
-        SUMMARIZER_TIMEOUT,
-    )
-    .await?;
-    drop(guard);
-    let text = accept_state(&raw).ok_or("summarizer reply is not a state block")?;
+    let target = crate::ambient::call::CliTarget { cli_path, meta: block.meta.clone() };
+    let reply = slot
+        .run(&target, &prompt, |raw| match accept_state(raw) {
+            Some(text) => crate::ambient::reply::Verdict::Use(text),
+            None => crate::ambient::reply::Verdict::Reject(crate::ambient::outcome::RejectReason::Format),
+        })
+        .await;
+    if let Some(error) = reply.error {
+        return Err(error);
+    }
+    if reply.text.is_empty() {
+        return Err("summarizer reply is not a state block".to_string());
+    }
+    let (text, tokens) = (reply.text, reply.tokens);
     let version = StateVersion {
         version: latest.as_ref().map_or(1, |v| v.version + 1),
         created_at_ms: now,

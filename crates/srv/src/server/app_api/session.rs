@@ -326,7 +326,8 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // a permit never spawns the CLI at all. See
                 // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
                 let Some(slot) = ambient::call::admit(
-                    ambient::AmbientCallKey::new(cmd.block_id.clone(), ambient::purpose::ACTIVITY_SUMMARY),
+                    &ambient::purpose::ACTIVITY_SUMMARY,
+                    cmd.block_id.clone(),
                     cmd.generation,
                     Some(ambient::limits::pull_call_semaphore()),
                 )
@@ -344,18 +345,21 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
 
                 // The user's newest message, verbatim — the frontend passes this
                 // directly from the just-submitted TurnStart content, so the
-                // common case needs no FileStore read at all. Falls back to the
-                // old tail-digest extraction only when the caller didn't supply
-                // one (e.g. an older frontend build), so the endpoint degrades
-                // gracefully instead of going silent. See
+                // common case needs no FileStore read at all. Without one, the
+                // session's recent activity is read instead, and shown to the
+                // model as activity: it used to be passed off as "The user just
+                // said". See
                 // docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
                 let user_message = cmd
                     .user_message
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| ambient::digest::read_recent_activity_digest(&filestore, &cmd.block_id));
+                    .map(str::to_string);
+                let activity = match user_message {
+                    Some(_) => None,
+                    None => ambient::digest::read_recent_activity_digest(&filestore, &cmd.block_id),
+                };
 
                 // A stored value that is not a real title (a placeholder an older build
                 // accepted, such as `(none yet)`) counts as NO title: it is never fed
@@ -370,7 +374,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
 
                 // Nothing to anchor a title on AND nothing new to evaluate —
                 // matches the old digest-empty early return.
-                if user_message.is_none() && current_title.is_empty() {
+                if user_message.is_none() && activity.is_none() && current_title.is_empty() {
                     slot.abandon(ambient::outcome::Outcome::EmptyDigest);
                     return Ok(empty_summary_result());
                 }
@@ -380,9 +384,18 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     return Ok(empty_summary_result());
                 };
 
-                let prompt = ambient::prompt::build_session_title_prompt(&current_title, user_message.as_deref(), word_target);
+                let prompt = ambient::prompt::build_session_title_prompt(
+                    &current_title,
+                    user_message.as_deref(),
+                    activity.as_deref(),
+                    word_target,
+                );
                 let limits = ambient::validate::title_limits(word_target);
-                let reply = slot.run(&target, &prompt, |t| ambient::validate::accept_line(t, &limits)).await;
+                let reply = slot
+                    .run(&target, &prompt, |raw| {
+                        ambient::reply::judge_line(raw, |t| ambient::validate::accept_line(t, &limits))
+                    })
+                    .await;
 
                 // The frontend writes `term:ambient_summary` after receiving this
                 // response so it can discard results from turns that were
@@ -414,7 +427,8 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 // (a stale suggestion can put words in the user's mouth), so
                 // admitting before any work matters just as much here.
                 let Some(slot) = ambient::call::admit(
-                    ambient::AmbientCallKey::new(cmd.block_id.clone(), ambient::purpose::NEXT_PROMPT_SUGGESTION),
+                    &ambient::purpose::NEXT_PROMPT_SUGGESTION,
+                    cmd.block_id.clone(),
                     cmd.generation,
                     Some(ambient::limits::pull_call_semaphore()),
                 )
@@ -447,7 +461,9 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 };
 
                 let prompt = ambient::prompt::build_next_prompt_prompt(&activity.text);
-                let reply = slot.run_formatted(&target, &prompt, ambient::validate::accept_next_prompt).await;
+                let reply = slot
+                    .run(&target, &prompt, |raw| ambient::reply::judge_line(raw, ambient::validate::accept_next_prompt))
+                    .await;
 
                 // The tokens were spent either way, so they are still reported;
                 // only the text is withheld when it is not a usable next prompt.

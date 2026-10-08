@@ -24,6 +24,34 @@ or the single word SKIP when the text should not be written. Nothing before or a
 const ANSWER_PREFIX: &str = "ANSWER:";
 const SKIP: &str = "SKIP";
 
+/// What a call's judge decided about a reply. Every ambient call ends in one,
+/// and its outcome is recorded from it (`call::Slot::run`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Verdict {
+    /// The text to use.
+    Use(String),
+    /// The model decided there is nothing to write (`SKIP`): a healthy answer.
+    Skip,
+    /// Not usable, and why.
+    Reject(super::outcome::RejectReason),
+}
+
+/// Judge a one-line reply in this format: `ANSWER:` text that `check` takes is
+/// used, `SKIP` is a skip, and anything else is refused, by `check` (`Other`) or
+/// for not being in the format (`Format`, or `Empty` for no reply at all).
+pub fn judge_line(raw: &str, check: impl Fn(&str) -> Option<String>) -> Verdict {
+    use super::outcome::RejectReason;
+    match parse(raw) {
+        Parsed::Answer(answer) => match check(&answer) {
+            Some(text) => Verdict::Use(text),
+            None => Verdict::Reject(RejectReason::Other),
+        },
+        Parsed::Skip => Verdict::Skip,
+        Parsed::Malformed if raw.trim().is_empty() => Verdict::Reject(RejectReason::Empty),
+        Parsed::Malformed => Verdict::Reject(RejectReason::Format),
+    }
+}
+
 /// What a reply in this format says.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Parsed {
@@ -118,6 +146,34 @@ mod tests {
         assert_eq!(parse("ANSWER:"), Parsed::Malformed);
         assert_eq!(parse("ANSWER:   "), Parsed::Malformed);
         assert_eq!(parse("ANSWER: Run the tests\nthen push"), Parsed::Malformed);
+    }
+
+    #[test]
+    fn one_wrapping_pair_of_quotes_is_dropped_and_inner_quotes_are_kept() {
+        assert_eq!(parse("ANSWER: \"Run the tests\""), Parsed::Answer("Run the tests".into()));
+        assert_eq!(parse("ANSWER: `Fix the build`"), Parsed::Answer("Fix the build".into()));
+        assert_eq!(parse("ANSWER: Rename it to \"foo\""), Parsed::Answer("Rename it to \"foo\"".into()));
+        assert_eq!(
+            parse("ANSWER: \"foo\" and \"bar\" both break"),
+            Parsed::Answer("\"foo\" and \"bar\" both break".into())
+        );
+    }
+
+    #[test]
+    fn a_reply_is_judged_by_its_form_then_by_the_check() {
+        use crate::ambient::outcome::RejectReason;
+        let check = |t: &str| (!t.contains("rm -rf")).then(|| t.to_string());
+        assert_eq!(judge_line("ANSWER: Run the tests", check), Verdict::Use("Run the tests".into()));
+        assert_eq!(judge_line("SKIP", check), Verdict::Skip);
+        assert_eq!(judge_line("ANSWER: rm -rf build", check), Verdict::Reject(RejectReason::Other));
+        assert_eq!(
+            judge_line(
+                "Output nothing at all - the assistant's message ends by asking for a decision and waiting for user input.",
+                check
+            ),
+            Verdict::Reject(RejectReason::Format)
+        );
+        assert_eq!(judge_line("  ", check), Verdict::Reject(RejectReason::Empty));
     }
 
     #[test]

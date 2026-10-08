@@ -1,17 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Output validation for ambient model calls. `sanitize::sanitize_ambient_text`
-//! strips formatting; this decides whether what's left is usable at all. A model
-//! that was handed too little context tends to answer *as an assistant* ("I
-//! don't have access to...", "If you'd like me to...") instead of with the
-//! requested text, and that must never reach a pane title, a name, a narration
-//! line or a ghost-text composer.
+//! What a well-formed answer must still satisfy. The reply format (`reply`) has
+//! already turned away anything that isn't an `ANSWER:` or `SKIP`; these checks
+//! judge the answer text itself: its size, and whether it is a real title (a
+//! stored one too, from an older build), or a safe suggestion.
 //!
-//! Every ambient call's reply goes through [`accept_line`] (via `call::Slot::run`),
-//! so a refusal, a paragraph or a placeholder is dropped the same way everywhere.
-//! A next-prompt suggestion additionally goes through [`accept_next_prompt`],
-//! because it is something the user may send.
+//! The absence and refusal lists below are frozen. They judge titles that older
+//! builds stored, before the reply format existed, and the frontend's port of
+//! [`is_usable_title`] shares them through `title_corpus.json`. New wordings are
+//! the reply format's job, not a new list entry.
 
 /// Size bounds for a one-line reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,24 +56,6 @@ const REFUSAL_PHRASES: &[&str] = &[
     "not enough context",
     "not enough information",
     "as an ai",
-];
-
-/// More ways a next-prompt reply can be about the task instead of the next
-/// step. Too broad for titles ("Fix insufficient permissions error"), so only
-/// the next-prompt check uses them.
-const NEXT_PROMPT_META_PHRASES: &[&str] = &[
-    "without more",
-    "no recent activity",
-    "insufficient",
-    "the user is",
-    "the user has",
-    "next instruction",
-    "next step would",
-    "recent activity",
-    "cost summary",
-    "nothing plausible",
-    "no plausible",
-    "empty string",
 ];
 
 /// Things a ghost suggestion must not propose on its own initiative: one Tab and
@@ -246,9 +226,12 @@ fn is_wrapped_note(text: &str) -> bool {
 /// fits": the model said "no change" and explained itself. Case-sensitive on purpose:
 /// "Keep alive pings" and "Keep the swarm summary fresh" are real titles, while an
 /// upper-case KEEP is the token the prompt asked for.
+/// The word the title prompts used for "no change" before the reply format.
+const LEGACY_KEEP_TOKEN: &str = "KEEP";
+
 fn leads_with_abstain_token(text: &str) -> bool {
     let first = text.trim().split_whitespace().next().unwrap_or("");
-    first.trim_matches(|c: char| !c.is_alphanumeric()) == crate::ambient::prompt::KEEP_TOKEN
+    first.trim_matches(|c: char| !c.is_alphanumeric()) == LEGACY_KEEP_TOKEN
 }
 
 fn is_absence(text: &str) -> bool {
@@ -288,31 +271,6 @@ pub fn accept_line(raw: &str, limits: &Limits) -> Option<String> {
     Some(text.to_string())
 }
 
-/// Which rule refuses `raw`, for the outcome log (`ambient::outcome`). Uses the
-/// stored-title bounds for "too long", since the caller's own word target is not
-/// known here; a reply refused only by a tighter purpose limit reads `Other`.
-pub fn rejection_reason(raw: &str) -> super::outcome::RejectReason {
-    use super::outcome::RejectReason;
-    let text = raw.trim();
-    if text.is_empty() {
-        return RejectReason::Empty;
-    }
-    if text.contains('\n')
-        || !text.chars().any(|c| c.is_alphabetic())
-        || text.chars().count() > STORED_TITLE.max_chars
-        || text.split_whitespace().count() > STORED_TITLE.max_words
-    {
-        return RejectReason::Shape;
-    }
-    if is_absence(text) {
-        return RejectReason::AbsencePattern;
-    }
-    if has_any(&normalized(text), REFUSAL_PHRASES) {
-        return RejectReason::Refusal;
-    }
-    RejectReason::Other
-}
-
 /// Bounds for judging a title that is ALREADY stored. Generous: a title written
 /// under an older word target or by an older build may be longer than today's.
 pub const STORED_TITLE: Limits = Limits { max_words: 28, max_chars: 200 };
@@ -326,20 +284,15 @@ pub fn is_usable_title(stored: &str) -> bool {
     accept_line(stored, &STORED_TITLE).is_some()
 }
 
-/// Returns the suggestion to show, or `None` if the text is not a usable next
-/// prompt: anything [`accept_line`] rejects, a question, talk about the task, or
-/// a risky command.
+/// Returns the suggestion to show, or `None` if the answer is not a usable next
+/// prompt: anything [`accept_line`] rejects, a question, or a risky command.
 pub fn accept_next_prompt(raw: &str) -> Option<String> {
     let text = accept_line(raw, &NEXT_PROMPT)?;
     // A question is the model asking, not the user telling.
     if text.ends_with('?') {
         return None;
     }
-    let lower = normalized(&text);
-    if has_any(&lower, NEXT_PROMPT_META_PHRASES) {
-        return None;
-    }
-    if has_any(&lower, RISKY_PHRASES) {
+    if has_any(&normalized(&text), RISKY_PHRASES) {
         return None;
     }
     Some(text)
@@ -376,9 +329,6 @@ mod tests {
             "I don\u{2019}t have enough information",
             "If you'd like me to continue, say so",
             "Not enough context to decide",
-            "No plausible next instruction",
-            "The user is likely to ask for tests",
-            "Based on the recent activity, run the tests",
         ] {
             assert_eq!(accept_next_prompt(s), None, "{s}");
         }
@@ -535,12 +485,11 @@ mod tests {
     }
 
     #[test]
-    fn titles_and_names_may_use_words_only_the_next_prompt_check_blocks() {
+    fn titles_and_names_may_name_problems_and_secrets_in_ordinary_words() {
         assert_eq!(
             accept_line("Fix insufficient permissions error", &title_limits(7)),
             Some("Fix insufficient permissions error".into())
         );
-        assert_eq!(accept_next_prompt("Fix insufficient permissions error"), None);
         assert_eq!(
             accept_line("Rotate the API token flow", &NAME),
             Some("Rotate the API token flow".into())
