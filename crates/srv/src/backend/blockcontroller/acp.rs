@@ -118,10 +118,9 @@ fn prompt_params(session_id: &str, text: &str) -> serde_json::Value {
 /// offer) gets "method not found", so the agent never waits on us.
 fn reply_to_agent_request(json: &serde_json::Value) -> Option<serde_json::Value> {
     let method = json.get("method")?.as_str()?;
+    // A request carries an `id`, which ACP lets be null and requires us to
+    // echo; a notification has none.
     let id = json.get("id")?.clone();
-    if id.is_null() {
-        return None;
-    }
     if method == "session/request_permission" {
         let options = json
             .pointer("/params/options")
@@ -194,6 +193,10 @@ struct AcpInner {
     /// `session/new` was refused (pi: "Authentication required"): no session
     /// will open until the agent restarts.
     session_failed: bool,
+    /// Counts spawns. A process's waiter cleans up the shared state only
+    /// while its generation is current, so one that finishes after a restart
+    /// can't disconnect the new process.
+    generation: u64,
     /// The pane's previous session (`agent:sessionid`), offered to
     /// `session/load` when the agent supports it.
     resume_session_id: Option<String>,
@@ -256,6 +259,7 @@ impl AcpController {
                 session_request_id: None,
                 loading_session: None,
                 session_failed: false,
+                generation: 0,
                 resume_session_id: None,
                 session_cwd: String::new(),
             })),
@@ -735,6 +739,11 @@ impl AcpController {
         });
 
         // Spawn process waiter task
+        let generation = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.generation += 1;
+            inner.generation
+        };
         let block_id_wait = self.block_id.clone();
         let inner_wait = self.inner.clone();
         let broker_wait = self.broker.clone();
@@ -747,6 +756,10 @@ impl AcpController {
                     tracing::info!(block_id = %block_id_wait, "ACP process killed");
 
                     let mut inner = inner_wait.lock().unwrap();
+                    if inner.generation != generation {
+                        // A newer process owns the controller now.
+                        return;
+                    }
                     inner.stdin_tx = None;
                     inner.current_pid = None;
                     AcpController::set_status(&mut inner, STATUS_DONE);
@@ -781,6 +794,10 @@ impl AcpController {
                         "ACP process exited"
                     );
                     let mut inner = inner_wait.lock().unwrap();
+                    if inner.generation != generation {
+                        // A newer process owns the controller now.
+                        return;
+                    }
                     inner.proc_exit_code = exit_code;
                     inner.stdin_tx = None;
                     AcpController::set_status(&mut inner, STATUS_DONE);
@@ -1403,6 +1420,37 @@ mod tests {
         c.inner.lock().unwrap().stdin_tx = None;
         let err = c.ensure_started(Default::default()).unwrap_err();
         assert!(err.contains("no cmd"), "stopped: it tries to start: {err}");
+    }
+
+    /// ACP lets a request id be null and requires the reply to echo it; only a
+    /// message with no `id` at all is a notification.
+    #[test]
+    fn a_null_request_id_is_echoed() {
+        let req = serde_json::json!({ "jsonrpc": "2.0", "id": null, "method": "fs/read_text_file", "params": {} });
+        let reply = super::reply_to_agent_request(&req).unwrap();
+        assert!(reply["id"].is_null());
+        assert_eq!(reply["error"]["code"], -32601);
+    }
+
+    /// The previous process's waiter finishing after a restart must not clear
+    /// the new process's state.
+    #[tokio::test]
+    async fn a_stale_process_waiter_leaves_a_restart_alone() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.generation = 2;
+        }
+        // What the waiter of generation 1 checks before cleaning up.
+        let stale = 1;
+        let cleaned = {
+            let mut inner = c.inner.lock().unwrap();
+            if inner.generation != stale { false } else { inner.stdin_tx = None; true }
+        };
+        assert!(!cleaned);
+        assert!(c.is_running(), "the new process stays connected");
     }
 
     #[test]

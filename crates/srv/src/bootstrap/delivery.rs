@@ -96,10 +96,16 @@ pub(crate) fn route_agent_message_from(
             // false for a live process whose delivery failed for another reason;
             // both keep returning the original error rather than start a second
             // turn.
+            // An ACP agent whose process exited likewise: the turn path
+            // starts it again (`AcpController::ensure_started`).
             let recoverable = ctrl
                 .as_any()
                 .downcast_ref::<backend::blockcontroller::persistent::PersistentSubprocessController>()
-                .is_some_and(|p| p.needs_spawn());
+                .is_some_and(|p| p.needs_spawn())
+                || ctrl
+                    .as_any()
+                    .downcast_ref::<backend::blockcontroller::acp::AcpController>()
+                    .is_some_and(|a| !a.is_running());
             if !recoverable {
                 return Err(e);
             }
@@ -330,6 +336,30 @@ mod route_agent_message_tests {
             panic!("an App Server controller with no process cannot take a message");
         };
         assert!(e.contains("not initialized"), "{e}");
+        delete_controller(block_id);
+    }
+
+    /// A message for an ACP agent whose process has exited is a turn to
+    /// start (which starts the agent again), not a refusal that leaves the
+    /// message stashed with nothing to run it.
+    #[test]
+    fn a_stopped_acp_agent_is_routed_to_a_turn_that_restarts_it() {
+        let block_id = "route-test-acp-stopped";
+        register_controller(
+            block_id,
+            Arc::new(backend::blockcontroller::acp::AcpController::new(
+                "tab-route".to_string(),
+                block_id.to_string(),
+                None,
+                None,
+                None,
+                None,
+            )),
+        );
+        assert!(matches!(
+            route_agent_message(block_id, "hi"),
+            Ok(AgentRoute::StartTurn { subprocess: false })
+        ));
         delete_controller(block_id);
     }
 }
