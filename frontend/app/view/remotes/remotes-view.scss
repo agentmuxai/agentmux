@@ -21,16 +21,6 @@
     border-bottom: 1px solid var(--border-color);
 }
 
-.remotes-filter {
-    flex: 1 1 auto;
-    min-width: 0;
-    padding: 4px 8px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md, 4px);
-    background: var(--main-bg-color);
-    color: var(--main-text-color);
-}
-
 // Row actions are element/ui IconButtons.
 
 .remotes-error,

@@ -51,6 +51,7 @@ import { NativeMemoryFileView } from "./NativeMemoryFileView";
 import { MemoryAdoptionPanel } from "./MemoryAdoptionPanel";
 import { MemoryClaimsPanel } from "./MemoryClaimsPanel";
 import "./native-memory-manager.scss";
+import { matchesEveryWord } from "@/app/util/fuzzysearch";
 
 const MEMORY_SORT_STORAGE_KEY = "nativeMemory:sortBy";
 
@@ -269,11 +270,11 @@ export function NativeMemoryManager(): JSX.Element {
     // (`agents()`/`counts()`) — unlike MyAgentsList, this list isn't
     // RPC-paginated, so there's nothing to debounce or refetch here.
     const visibleAgents = createMemo(() => {
-        const query = nameFilter().trim().toLowerCase();
+        const query = nameFilter();
         const onlyMemories = onlyWithMemories();
         const currentCounts = counts();
         const filtered = agents().filter((agent) => {
-            if (query && !agentLabel(agent).toLowerCase().includes(query)) return false;
+            if (!matchesEveryWord(query, agentLabel(agent))) return false;
             // Never hides a `loading`/`error` card — only a resolved `count: 0`
             // counts as "no memories" for this toggle (see the spec's own
             // rationale: a slow or failing fetch shouldn't make a card vanish
