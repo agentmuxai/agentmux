@@ -208,8 +208,6 @@ describe("focusManager", () => {
             expect(giveFocus).not.toHaveBeenCalled();
         });
 
-        // A declarative <Modal> (the pane-close confirmation) is only on the
-        // modal stack, not in modalsModel.
         // The window is in the background (`exit`, then the user switched
         // apps): a browser pane's giveFocus() would take native focus.
         it("never runs while the window doesn't have focus", () => {
@@ -226,6 +224,8 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
+        // A declarative <Modal> (the pane-close confirmation) is only on the
+        // modal stack, not in modalsModel.
         it("never runs under a modal-stack modal covering the pane", () => {
             document.body.innerHTML = `<div data-blockid="block-1"></div>`;
             pushModal({ id: "confirm", scope: "window", lockEl: document.body, close: () => {} });
