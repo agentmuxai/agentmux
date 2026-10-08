@@ -3,7 +3,8 @@
 //
 // Paired devices: every device paired with this computer's viewer (the host
 // popover's "Pair a device"), when it paired and was last seen, and Revoke,
-// which stops its token working and closes what it is watching.
+// which stops its token working and closes what it is watching. Below it,
+// Cloud presence (cloud-presence.tsx).
 // agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §4.1.
 
 import { Button } from "@/app/element/ui";
@@ -14,6 +15,7 @@ import { RpcApi, type ViewerDeviceInfo } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader } from "../settings-controls";
+import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -26,6 +28,7 @@ export const DEVICES_SETTINGS = {
         section: "devices",
         keywords: ["mobile", "device", "tablet", "pair", "revoke", "viewer", "live feed", "qr code"],
     },
+    cloudPresence: CLOUD_PRESENCE_SETTING,
 } satisfies Record<string, SettingsIndexEntry>;
 
 /** "just now", "5 min ago", "3 h ago", or a date. */
@@ -126,6 +129,8 @@ export function DevicesSection(): JSX.Element {
                     )}
                 </Show>
             </div>
+            <SectionHeader label={DEVICES_SETTINGS.cloudPresence.label} />
+            <CloudPresence />
         </div>
     );
 }

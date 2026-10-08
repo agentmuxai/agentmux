@@ -362,3 +362,21 @@
 .setting-devices-name {
     overflow-wrap: anywhere;
 }
+
+// Cloud presence (sections/cloud-presence.tsx): the status line, "Publish
+// now" at the end, and a note under them.
+.setting-presence {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.setting-presence-line {
+    overflow-wrap: anywhere;
+}
+
+.setting-presence-note {
+    color: var(--secondary-text-color);
+    margin-top: var(--space-1);
+}

@@ -12,6 +12,7 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ViewerDevicesCommand: (...args: unknown[]) => listDevices(...args),
         ViewerRevokeCommand: (...args: unknown[]) => revoke(...args),
+        PresenceStatusCommand: () => Promise.resolve({ state: "signed_out", since_ms: 0, record_version: 2 }),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -83,5 +84,12 @@ describe("DevicesSection", () => {
         listDevices.mockResolvedValue({ devices: [] });
         render(() => <DevicesSection />);
         expect(await screen.findByText(/No devices paired/)).toBeInTheDocument();
+    });
+
+    it("shows Cloud presence below the paired devices", async () => {
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        expect(await screen.findByText("Sign in to publish")).toBeInTheDocument();
+        expect(screen.getByText("Cloud presence")).toBeInTheDocument();
     });
 });
