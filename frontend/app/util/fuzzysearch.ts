@@ -109,3 +109,20 @@ function containsRank(haystack: string | null | undefined, needle: string): numb
     if (at < 0) return -1;
     return h === needle ? 0 : at === 0 ? 1 : /[\s\-_.]/.test(h[at - 1]) ? 2 : 3;
 }
+
+/**
+ * The plain "type to narrow" match the panes' filter boxes share (FilterInput):
+ * every word of `query` appears, case-insensitively, in one of `texts`. No
+ * ranking and no fuzziness, so what shows stays in its order and predictable;
+ * use `literalFirstSearch` where results should be ranked. A blank query
+ * matches everything.
+ */
+export function matchesEveryWord(query: string, ...texts: (string | null | undefined)[]): boolean {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return true;
+    const haystack = texts
+        .filter((t): t is string => !!t)
+        .map((t) => t.toLowerCase())
+        .join("\n");
+    return words.every((w) => haystack.includes(w));
+}

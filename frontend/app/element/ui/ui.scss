@@ -316,6 +316,62 @@
     }
 }
 
+// FilterInput (FilterInput.tsx): the bordered box a pane's filter sits in.
+.ui-filter {
+    box-sizing: border-box;
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    min-height: var(--ui-height);
+    padding: 0 var(--space-2);
+    font-size: var(--ui-font-size);
+    color: var(--main-text-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    transition: border-color 80ms ease, box-shadow 80ms ease;
+
+    &:focus-within {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 1px var(--accent-color);
+    }
+
+    .ui-filter-icon {
+        color: var(--secondary-text-color);
+        font-size: 0.9em;
+    }
+
+    .ui-filter-input {
+        flex: 1 1 auto;
+        min-width: 0;
+        padding: 0;
+        font: inherit;
+        color: inherit;
+        background: transparent;
+        border: 0;
+        outline: none;
+
+        &::placeholder {
+            color: var(--secondary-text-color);
+            opacity: 0.7;
+        }
+    }
+
+    .ui-filter-clear {
+        padding: 0 2px;
+        font: inherit;
+        color: var(--secondary-text-color);
+        background: transparent;
+        border: 0;
+        cursor: var(--cursor-interactive);
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
+}
+
 select.ui-input {
     cursor: var(--cursor-interactive);
 

@@ -148,6 +148,8 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                 .post(&req_url)
                 .header("X-AuthKey", auth_key)
                 .json(&agentmux_common::api_types::UiBrowserSetFilesRequest { auth, pane: pane_arg(arguments), ref_: r.clone(), paths })
+                // srv reads up to 25 MB and gives the host up to 60 s: wait for it.
+                .timeout(std::time::Duration::from_secs(90))
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;

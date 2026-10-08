@@ -19,7 +19,8 @@
  * as `nameFilter`/`sortBy`. See docs/specs/SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md.
  */
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { type Accessor, type JSX } from "solid-js";
+import { FilterInput } from "@/app/element/ui";
 
 /** "Recently launched" (most recent `started_at` first) is the default —
  *  it matches the backend's own existing sort intent (see
@@ -39,41 +40,21 @@ export interface AgentPickerFilterBarProps {
 }
 
 export const AgentPickerFilterBar = (props: AgentPickerFilterBarProps): JSX.Element => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-        // Clears the field, same as the AgentSearchBar convention — but
-        // doesn't hide the bar, since (unlike that Ctrl+F overlay) this
-        // bar has no hidden state to return to.
-        if (e.key === "Escape" && props.value()) {
-            e.preventDefault();
-            props.onClear();
-        }
-    };
-
     return (
         <div class="agent-picker-filter-bar" data-testid="agent-picker-filter-bar">
-            <i class="fa-solid fa-magnifying-glass agent-picker-filter-icon" aria-hidden="true" />
-            <input
-                type="text"
-                class="agent-picker-filter-input"
-                // The pane's typing target when nothing else claims it (focusManager).
-                data-pane-focus
-                placeholder="Filter agents..."
+            {/* Escape clears the field but doesn't hide the bar, which (unlike
+                the Ctrl+F AgentSearchBar overlay) has no hidden state. */}
+            <FilterInput
+                bare
                 value={props.value()}
-                data-testid="agent-picker-filter-input"
-                onInput={(e) => props.onInput(e.currentTarget.value)}
-                onKeyDown={handleKeyDown}
+                onInput={props.onInput}
+                onClear={props.onClear}
+                placeholder="Filter agents..."
+                iconClass="agent-picker-filter-icon"
+                inputClass="agent-picker-filter-input"
+                clearClass="agent-picker-filter-clear"
+                testId="agent-picker-filter"
             />
-            <Show when={props.value()}>
-                <button
-                    type="button"
-                    class="agent-picker-filter-clear"
-                    onClick={() => props.onClear()}
-                    aria-label="Clear filter"
-                    data-testid="agent-picker-filter-clear"
-                >
-                    &times;
-                </button>
-            </Show>
             <label class="agent-picker-sort" data-testid="agent-picker-sort">
                 <span class="agent-picker-sort-label">Sort</span>
                 <select

@@ -8,6 +8,7 @@
 // the React app bootstraps.
 
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import type { HealthPayload } from "@/app/store/health-signals";
 import { registerPaneOverlay, type PaneOverlayHandle } from "@/app/platform/pane-overlay";
 import {
     assertMenuInPaintableArea,
@@ -537,6 +538,9 @@ export function buildCefApi(): AppApi {
         },
         restartBackend: async () => {
             await invokeCommand("restart_backend");
+        },
+        getHealthSignals: async () => {
+            return await invokeCommand<HealthPayload[]>("get_health_signals");
         },
 
         // --- Context menu (JS overlay for CEF — no native menu API) ---

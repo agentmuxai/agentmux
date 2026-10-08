@@ -208,14 +208,11 @@ pub fn start(state: std::sync::Arc<crate::state::AppState>) {
                         "RAM pressure changed"
                     );
                 }
-                // Push to the banner on a transition (to show or clear it), AND
-                // re-assert a steady non-Normal level each tick so a window
-                // opened or reloaded mid-episode catches up within one heartbeat
-                // rather than staying silent until the next transition (reagent
-                // #1501 P2 — the CustomEvent channel has no replay-on-subscribe).
-                // Idempotent on existing windows (the frontend dedups an
-                // unchanged level and a re-assert never un-dismisses); a steady
-                // Normal stays silent, so there's no traffic in the common case.
+                // Push on a transition (to show or clear the signal), and
+                // re-send a steady non-Normal level each tick so its numbers
+                // (free memory, disk context) stay current. A window opened
+                // mid-episode catches up from `health_signals::snapshot`; a
+                // steady Normal stays silent.
                 if transition.is_some() || level_now != crate::memory_pressure::PressureLevel::Normal {
                     // Pass the Option straight through -- a `None` (read
                     // failure) must reach the frontend as "no disk context",

@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { fuzzySearch } from "./fuzzysearch";
+import { fuzzySearch, matchesEveryWord } from "./fuzzysearch";
 
 interface Entry {
     id: string;
@@ -80,5 +80,25 @@ describe("fuzzySearch", () => {
             keys: [{ name: "searchName", getFn: (r) => r.instance_name || r.definition_name }],
         });
         expect(results[0]?.definition_name).toBe("Opaz");
+    });
+});
+
+describe("matchesEveryWord", () => {
+    it("matches everything for a blank query", () => {
+        expect(matchesEveryWord("", "anything")).toBe(true);
+        expect(matchesEveryWord("   ", "anything")).toBe(true);
+    });
+
+    it("needs every word, in any order, case-insensitively, across the texts", () => {
+        expect(matchesEveryWord("PANE split", "Split pane right", "Panes")).toBe(true);
+        expect(matchesEveryWord("split tab", "Split pane right", "Panes")).toBe(false);
+    });
+
+    it("ignores missing texts", () => {
+        expect(matchesEveryWord("host", undefined, null, "my-host")).toBe(true);
+    });
+
+    it("doesn't match a word across two texts", () => {
+        expect(matchesEveryWord("ab", "a", "b")).toBe(false);
     });
 });
