@@ -212,6 +212,7 @@
     },
     {
       "id": "seed-agentmux-dev",
+      "replaces_instructions_sha256": ["04af0430edeaa5c0acbdae583e239a880061221c9406be5a4eeff318c8a2f34e"],
       "name": "AgentMux Development",
       "description": "Stack, build commands, version management, and workflow for the AgentMux codebase",
       "is_global": false,
