@@ -205,8 +205,10 @@ export const SkillApi = {
         return client.rpcCall("skill.catalog.list_for_bundle", data, opts);
     },
 
-    // Creates a NEW, PRIVATE skill scoped directly to a bundle — see
-    // McpApi.McpCatalogUpsertForBundleCommand's identical comment.
+    // Creates a NEW, PRIVATE skill scoped directly to a bundle (never
+    // global) — the actual "give this bundle its own skill" path.
+    // SkillCatalogBindToBundleCommand alone can only reference already-global
+    // rows, which already reach every agent.
     SkillCatalogUpsertForBundleCommand(
         client: RpcClient,
         data: SkillCatalogUpsertForBundleInput,

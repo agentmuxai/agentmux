@@ -278,14 +278,10 @@ declare global {
     /** `skill.catalog.list`'s response shape — see McpServerCatalogItem. */
     type SkillCatalogItem = Skill & { bound_count: number };
 
-    /** `mcp.catalog.list_for_bundle`'s response shape — an McpServer plus
-     *  whether the given bundle specifically holds the `db_bundle_mcp_ref`
+    /** `skill.catalog.list_for_bundle`'s response shape — a Skill plus
+     *  whether the given bundle specifically holds the `db_bundle_skills_ref`
      *  bind (as opposed to just being visible because it's global).
      *  Composable model v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. */
-    type McpServerBundleListItem = McpServer & { bound_to_bundle: boolean };
-
-    /** `skill.catalog.list_for_bundle`'s response shape — see
-     *  McpServerBundleListItem. */
     type SkillBundleListItem = Skill & { bound_to_bundle: boolean };
 
     type AgentInstanceStatus = "running" | "paused" | "stopped" | "crashed" | "detached";

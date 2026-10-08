@@ -161,14 +161,10 @@ fn register_bundle_get(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // to satisfy the generator, which is the wrong trade. The RESPONSE is typed
 // (`ValidationReport`, ts-rs-generated) and that is where the drift risk
 // actually was; the request stays a `Value` on purpose.
-fn register_bundle_validate(engine: &Arc<WshRpcEngine>, state: &AppState) {
-    let mstore = state.mstore.clone();
-    let identity_store = state.identity_store.clone();
+fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     let handler: crate::backend::rpc::engine::CommandHandler = Box::new(move |data, _ctx| {
-        let mstore = mstore.clone();
-        let identity_store = identity_store.clone();
         Box::pin(async move {
-            let report = bundle_validate_impl(&mstore, &identity_store, data)?;
+            let report = bundle_validate_impl(data)?;
             Ok(Some(serde_json::to_value(&report).map_err(|e| e.to_string())?))
         })
     });
@@ -534,52 +530,15 @@ pub(crate) async fn bundle_get_impl(
 /// brand-new bundle with no id yet) rather than only whatever was last
 /// persisted.
 ///
-/// Reads the bundle's bound MCP servers when the draft names a persisted
-/// bundle. Before Phase 0b this was fully store-free and validated the inline
-/// `mcp_servers` column; the ref tables are authoritative now, so validating
-/// that column would report on data nothing else consumes
-/// (`SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md` §3.4). An unsaved
-/// draft has no bindings, so it is still checked without touching the store.
+/// Store-free: what it checks is all in the draft. (It read the bundle's
+/// bound MCP servers while bundles carried them;
+/// `SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1.)
 pub(crate) fn bundle_validate_impl(
-    mstore: &crate::backend::storage::store::Store,
-    identity_store: &crate::backend::storage::store::Store,
     data: serde_json::Value,
 ) -> Result<crate::backend::bundle_validate::ValidationReport, String> {
     let memory: Bundle = serde_json::from_value(bundle::normalize_bundle_upsert_input(data))
         .map_err(|e| format!("bundle.validate: {e}"))?;
-    let (mcp_entries, resolve_warnings) = if memory.id.is_empty() {
-        (Vec::new(), Vec::new())
-    } else {
-        // A store failure must NOT read as "this bundle has no components":
-        // that would return a clean, apparently-successful report for a check
-        // that never ran (Codex, PR #3153). The UI is built to show a failed
-        // validate; give it one.
-        let resolved = bundle::resolve_bundle_components(mstore, identity_store, &memory.id)
-            .map_err(|e| format!("bundle.validate: {e}"))?;
-        (resolved.mcp_entries, resolved.warnings)
-    };
-    let mut report = crate::backend::bundle_validate::validate_bundle(&memory, &mcp_entries);
-
-    // The resolver drops a bound server whose config will not parse, and says
-    // so in a warning. Discarding that left the validator reporting `is_valid`
-    // for exactly the malformed component it exists to catch (Codex, PR
-    // #3153) — the entry is absent from `mcp_entries`, so nothing downstream
-    // could see it. Surface each as an error: unlike a duplicate name, an
-    // unusable config is not a stylistic warning, it is a component that will
-    // not load.
-    for w in resolve_warnings {
-        report.issues.push(crate::backend::bundle_validate::ValidationIssue {
-            severity: crate::backend::bundle_validate::IssueSeverity::Error,
-            field: "mcp_servers".to_string(),
-            message: w,
-        });
-    }
-    report.is_valid = !report
-        .issues
-        .iter()
-        .any(|i| i.severity == crate::backend::bundle_validate::IssueSeverity::Error);
-
-    Ok(report)
+    Ok(crate::backend::bundle_validate::validate_bundle(&memory))
 }
 
 pub(crate) async fn bundle_self_get_impl<'o>(

@@ -5,8 +5,7 @@
 //! `docs/specs/REPORT_ARMORY_BUNDLE_STANDARD_RESEARCH_2026_07_16.md` /
 //! <https://docs.agentmux.ai/abf/>. Serializes a `db_bundles` row (the
 //! `Bundle` struct — table/UI say "Bundles", the type name predates the
-//! rename) plus its referenced skills and inline MCP server configs into
-//! the ABF v0.1 on-disk layout:
+//! rename) plus its referenced skills into the ABF on-disk layout:
 //!
 //! ```text
 //! <bundle-slug>/
@@ -14,44 +13,20 @@
 //! ├── instructions/
 //! │   ├── AGENTS.md
 //! │   └── context/…
-//! ├── skills/
-//! │   └── <skill-slug>/
-//! │       └── SKILL.md
-//! ├── mcp/
-//! │   └── <server-slug>.server.json
-//! └── accounts/
-//!     └── requirements.json   (only written when inferred requirements exist)
+//! └── skills/
+//!     └── <skill-slug>/
+//!         └── SKILL.md
 //! ```
 //!
 //! Pure functions only — no I/O, no Store access. Callers (the `bundle.export`
 //! RPC handler) own fetching the `Bundle` row and resolving its `skills`
 //! id-array into `Skill` rows before calling [`export_bundle`].
 //!
-//! **`accounts/requirements.json` design note:** the plan this implements
-//! says these entries come from "`db_agent_identity_links`-implied needs",
-//! but no such link exists at the bundle level — `db_agent_identity_links`
-//! is keyed on `(agent_id, provider)`, and bundles are reusable across many
-//! agents with no FK to any one of them. Rather than requiring an arbitrary
-//! agent context (and risking exporting a real `db_accounts` pointer),
-//! requirements are inferred abstractly from the bundle's own inline
-//! `mcp_servers` configs: each `env` key on a server config becomes one
-//! requirement declaration (name/provider guess, no values, ever) — this
-//! matches ABF's own "declare, don't bundle secrets" design and MCP's own
-//! `isSecret`/env-placeholder convention (see the research report §3b/§3d).
-//!
-//! **`mcp/<slug>.server.json` content note:** this writes AgentMux's own
-//! runtime MCP config shape (`{type, command, args, env}` — the same object
-//! `.mcp.json` uses), NOT the official MCP registry `server.json` schema
-//! (`packages[].registry_type`/`identifier`/`environment_variables`, etc.).
-//! Real conversion would require fabricating fields this data doesn't
-//! contain (registry type/package identifier aren't derivable from a bare
-//! stdio command) — worse than an honest runtime-shape export. Deferred to
-//! Phase 2 (schema validation), tracked alongside the importer rather than
-//! guessed at here (Codex P1, PR #2325 — flagged as a real gap, not
-//! disputed; this comment documents the deliberate scope decision).
-//! `env` values ARE redacted before being written (see [`redact_mcp_entry`])
-//! regardless of this open question — the credential-leak fix does not wait
-//! on the schema question.
+//! **No `mcp/` or `accounts/`.** A bundle carries no MCP servers; they belong
+//! to Connectors (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1).
+//! `accounts/requirements.json` was inferred from those servers' `env` keys,
+//! so it went with them, as did the redaction of secrets out of their configs.
+//! An importer still reads both from older archives.
 
 use std::collections::{HashMap, HashSet};
 
@@ -86,7 +61,7 @@ pub struct BundleExport {
     /// `SKILL_TYPE_AGENT_SKILL`).
     pub skipped_skills: Vec<String>,
     /// Non-fatal problems encountered while exporting: malformed source
-    /// JSON (`context_files`/`mcp_servers`) that had to be treated as
+    /// JSON (`context_files`, `instructions_by_provider`) that had to be treated as
     /// empty, or a context-file path that collided with an earlier one
     /// after normalization and was skipped rather than silently
     /// overwriting it. Never blocks the export — surfaced to the
@@ -105,225 +80,6 @@ pub(crate) struct ContextFileEntry {
     pub(crate) path: String,
     #[serde(default)]
     pub(crate) content: String,
-}
-
-/// Flag names (case/dash/underscore-insensitive, `-`/`--` prefix optional)
-/// whose value is credential-shaped in common CLI/MCP server invocations —
-/// a curated allowlist rather than a broad substring match (e.g. `--keymap`
-/// must NOT trigger this). Used for BOTH `args` flag names AND `url` query
-/// param names — a single shared list so the two can never drift apart
-/// again (reagent P1, PR #2333: the two lists started separate and the
-/// query-param one was missing several names the args one already had).
-const SECRET_NAMES: &[&str] = &[
-    "key", "api-key", "apikey", "api_key",
-    "token", "access-token", "access_token", "auth-token", "auth_token",
-    "bearer-token", "bearer_token",
-    "secret", "secret-key", "secret_key", "client-secret", "client_secret",
-    "password", "passwd",
-];
-
-fn secret_placeholder(name: &str) -> String {
-    let normalized = name.trim_start_matches('-').to_uppercase().replace('-', "_");
-    format!("${{{normalized}}}")
-}
-
-fn is_secret_name(name: &str) -> bool {
-    let normalized = name.trim_start_matches('-').to_lowercase();
-    SECRET_NAMES.contains(&normalized.as_str())
-}
-
-/// HTTP header names whose value is credential-shaped when embedded in a
-/// `"HeaderName: value"` string passed as a CLI flag's argument (see
-/// [`redact_header_value`]) — a separate curated list from `SECRET_NAMES`
-/// because header names (`authorization`, `cookie`) and CLI flag names
-/// (`api-key`, `token`) are different vocabularies that happen to overlap
-/// only partially.
-const SECRET_HEADER_NAMES: &[&str] = &[
-    "authorization", "x-api-key", "x-auth-token", "proxy-authorization", "cookie",
-];
-
-fn is_secret_header_name(name: &str) -> bool {
-    SECRET_HEADER_NAMES.contains(&name.trim().to_lowercase().as_str())
-}
-
-fn is_header_flag(flag: &str) -> bool {
-    matches!(
-        flag.trim_start_matches('-').to_lowercase().as_str(),
-        "header" | "headers" | "h"
-    )
-}
-
-/// Redact a `"HeaderName: value"` string -- the shape a `--header`/`-H`
-/// flag's argument takes in common CLI/MCP server invocations -- when the
-/// header name is secret-shaped, e.g. turning
-/// `"Authorization: Bearer <token>"` into `"Authorization: ${AUTHORIZATION}"`.
-/// The flag name itself (`--header`) is never secret-shaped, so the
-/// `is_secret_name` flag check above can never catch this: the secret is
-/// smuggled inside the *value*, not signaled by the flag (Codex + reagent
-/// P0, PR #2333, flagged across multiple review rounds). Returns the
-/// rebuilt string plus the header name to record in `requirements.json`,
-/// or `None` if `value` isn't `name: value`-shaped or the name isn't a
-/// recognized secret-bearing header.
-fn redact_header_value(value: &str) -> Option<(String, String)> {
-    let (header_name, _header_value) = value.split_once(':')?;
-    let header_name = header_name.trim();
-    if header_name.is_empty() || !is_secret_header_name(header_name) {
-        return None;
-    }
-    Some((
-        format!("{header_name}: {}", secret_placeholder(header_name)),
-        header_name.to_string(),
-    ))
-}
-
-/// Redact userinfo (`scheme://user:pass@host`) and known secret-bearing
-/// query params from a URL string. Hand-rolled string scanning rather than
-/// a `url`-crate parse (no such dependency in this workspace, matching
-/// this module's existing style — see `sanitize_context_relative_path`) —
-/// deliberately conservative: only touches the exact shapes below, leaving
-/// anything it doesn't recognize unchanged rather than risking a malformed
-/// rewrite of a URL this scan doesn't fully understand. Returns the
-/// redacted URL plus the "landing" names for each thing redacted, so the
-/// caller can generate a matching `requirements.json` entry per name
-/// (reagent P2, PR #2333: redaction and the declared requirement must
-/// never disagree, the same invariant already enforced for headers).
-fn redact_url_credentials(url: &str) -> (String, Vec<String>) {
-    let mut result = url.to_string();
-    let mut redacted_names = Vec::new();
-
-    if let Some(scheme_end) = result.find("://") {
-        let after_scheme = scheme_end + 3;
-        // The authority section (the only place userinfo can legally
-        // appear) ends at the first '/', '?', or '#' -- the complete set
-        // of authority-terminating delimiters per RFC 3986 §3.2. An `@`
-        // at or after that boundary is inside the path/query/fragment,
-        // not userinfo. Finding the boundary once up front (rather than
-        // excluding one delimiter at a time as edge cases surface) is the
-        // robust fix: this handles '/', '?', AND '#' — and any future
-        // reader can see the fix's completeness at a glance instead of
-        // wondering "what about the next delimiter" (reagent P0 + P2, PR
-        // #2333: a bare '@' after either '?' or '#' was each independently
-        // misread as userinfo, and the '?' case additionally blinded the
-        // query-param redaction pass by consuming the delimiter itself).
-        let authority_end = result[after_scheme..]
-            .find(['/', '?', '#'])
-            .map(|p| after_scheme + p)
-            .unwrap_or(result.len());
-        if let Some(at_offset) = result[after_scheme..authority_end].find('@') {
-            let userinfo_end = after_scheme + at_offset;
-            result.replace_range(after_scheme..userinfo_end, "${URL_CREDENTIALS}");
-            redacted_names.push("url_credentials".to_string());
-        }
-    }
-
-    if let Some(query_start) = result.find('?') {
-        let (base, query_with_qmark) = result.split_at(query_start);
-        let query = &query_with_qmark[1..];
-        let mut changed = false;
-        let new_pairs: Vec<String> = query
-            .split('&')
-            .map(|pair| match pair.split_once('=') {
-                Some((key, _)) if is_secret_name(key) => {
-                    changed = true;
-                    redacted_names.push(key.to_string());
-                    format!("{key}={}", secret_placeholder(key))
-                }
-                _ => pair.to_string(),
-            })
-            .collect();
-        if changed {
-            result = format!("{base}?{}", new_pairs.join("&"));
-        }
-    }
-
-    (result, redacted_names)
-}
-
-/// Redact secret-shaped values out of an MCP server config entry before it
-/// is written into a shareable bundle export. `env` and `headers` are the
-/// two structured fields AgentMux's own MCP config editors accept literal
-/// secret values into (e.g. `env.GITHUB_TOKEN`, `headers.Authorization` on
-/// an HTTP/SSE-transport server) — every value under either key is
-/// replaced with a `${VAR_NAME}`-style placeholder so the exported
-/// `.server.json` never contains a real credential, matching ABF's
-/// "declare, don't bundle secrets" principle that `accounts/requirements.json`
-/// already follows (security finding, Codex P1 x2, PR #2325). `args` (CLI
-/// flag/value pairs) and `url` (userinfo/query-param credentials) are
-/// ALSO scanned for the same reason — a credential passed as
-/// `--api-key <secret>` or `https://user:pass@host` is just as real a leak
-/// as one in `env`/`headers` (Codex + reagent P1, PR #2333). Any other
-/// field passes through unchanged.
-///
-/// Returns the redacted entry PLUS every "landing" name that was actually
-/// redacted (env/header keys, arg flag names, url credential markers), so
-/// the caller derives `requirements.json` directly from what was redacted
-/// here instead of re-scanning separately — the two can never disagree by
-/// construction (reagent P2, PR #2333).
-fn redact_mcp_entry(entry: &Value) -> (Value, Vec<String>) {
-    let mut redacted = entry.clone();
-    let mut redacted_names: Vec<String> = Vec::new();
-    if let Some(obj) = redacted.as_object_mut() {
-        for field in ["env", "headers"] {
-            if let Some(Value::Object(map)) = obj.get_mut(field) {
-                for (key, value) in map.iter_mut() {
-                    *value = json!(format!("${{{key}}}"));
-                    redacted_names.push(key.clone());
-                }
-            }
-        }
-        if let Some(Value::Array(args)) = obj.get_mut("args") {
-            let mut i = 0;
-            while i < args.len() {
-                let Some(s) = args[i].as_str().map(|s| s.to_string()) else {
-                    i += 1;
-                    continue;
-                };
-                if let Some((flag, value)) = s.split_once('=') {
-                    // "--flag=value" form: redact just the value portion.
-                    if is_secret_name(flag) {
-                        args[i] = json!(format!("{flag}={}", secret_placeholder(flag)));
-                        redacted_names.push(flag.trim_start_matches('-').to_string());
-                    } else if is_header_flag(flag) {
-                        if let Some((redacted_value, header_name)) = redact_header_value(value) {
-                            args[i] = json!(format!("{flag}={redacted_value}"));
-                            redacted_names.push(header_name);
-                        }
-                    }
-                    i += 1;
-                } else if is_secret_name(&s) && i + 1 < args.len() {
-                    // "--flag value" form: redact the NEXT element, leave
-                    // the flag itself (it's not a secret) untouched.
-                    args[i + 1] = json!(secret_placeholder(&s));
-                    redacted_names.push(s.trim_start_matches('-').to_string());
-                    i += 2;
-                } else if is_header_flag(&s) && i + 1 < args.len() {
-                    // "--header value" form, where the secret is embedded
-                    // in the value as "HeaderName: <secret>", not signaled
-                    // by the flag name -- e.g.
-                    // args: ["--header", "Authorization: Bearer <tok>"].
-                    if let Some(value_str) = args[i + 1].as_str() {
-                        if let Some((redacted_value, header_name)) =
-                            redact_header_value(value_str)
-                        {
-                            args[i + 1] = json!(redacted_value);
-                            redacted_names.push(header_name);
-                        }
-                    }
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-        }
-        if let Some(url_str) = obj.get("url").and_then(|v| v.as_str()).map(|s| s.to_string()) {
-            let (redacted_url, url_names) = redact_url_credentials(&url_str);
-            if redacted_url != url_str {
-                obj.insert("url".to_string(), json!(redacted_url));
-                redacted_names.extend(url_names);
-            }
-        }
-    }
-    (redacted, redacted_names)
 }
 
 /// Validate a relative path is safe to place under a bundle export/import
@@ -363,23 +119,12 @@ pub(crate) fn sanitize_context_relative_path(path: &str) -> Option<String> {
 /// Export a bundle + its already-resolved components into the ABF layout.
 ///
 /// **This function does no store lookups and reads no component column off
-/// `bundle`.** Both `skills` and `mcp_servers` must be resolved by the caller
-/// from `db_bundle_skills_ref` / `db_bundle_mcp_ref`, which are authoritative
-/// for what a bundle contains (Phase 0b of
-/// SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md). It used to read
-/// `bundle.mcp_servers` inline here while skills came in resolved — that split
-/// is exactly how export and launch drifted apart, so the renderer now takes
-/// both the same way and has no opinion about where they came from.
-///
-/// `mcp_servers` entries are the exporter's own entry shape: the server's
-/// config object with its `name` alongside, which is what `redact_mcp_entry`
-/// reads. Callers skip ids that failed to resolve before calling; this does
-/// not distinguish "missing" from "not passed".
-pub fn export_bundle(
-    bundle: &Bundle,
-    skills: &[Skill],
-    mcp_servers: &[Value],
-) -> BundleExport {
+/// `bundle`.** `skills` must be resolved by the caller from
+/// `db_bundle_skills_ref`, which is authoritative for what a bundle contains
+/// (Phase 0b of SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md).
+/// Callers skip ids that failed to resolve before calling; this does not
+/// distinguish "missing" from "not passed".
+pub fn export_bundle(bundle: &Bundle, skills: &[Skill]) -> BundleExport {
     let root_slug = derive_slug(&bundle.name);
     let mut files = Vec::new();
     let mut skipped_skills = Vec::new();
@@ -387,7 +132,6 @@ pub fn export_bundle(
 
     let mut manifest_instructions: Vec<String> = Vec::new();
     let mut manifest_skills: Vec<String> = Vec::new();
-    let mut manifest_mcp: Vec<String> = Vec::new();
 
     // ------------------------------------------------------------------
     // instructions/AGENTS.md (default) + instructions/<provider>/AGENTS.md
@@ -531,63 +275,6 @@ pub fn export_bundle(
         manifest_skills.push(format!("skills/{slug}"));
     }
 
-    // ------------------------------------------------------------------
-    // mcp/<slug>.server.json + inferred accounts/requirements.json
-    // ------------------------------------------------------------------
-    let mcp_entries: Vec<Value> = mcp_servers.to_vec();
-    let mut used_mcp_slugs: HashSet<String> = HashSet::new();
-    let mut requirements: Vec<Value> = Vec::new();
-    for (index, entry) in mcp_entries.iter().enumerate() {
-        let display_name = entry
-            .get("name")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("mcp-server-{}", index + 1));
-        let slug = unique_skill_slug(&display_name, &mut used_mcp_slugs);
-        let path = format!("mcp/{slug}.server.json");
-        let (redacted_entry, redacted_names) = redact_mcp_entry(entry);
-        let pretty = serde_json::to_string_pretty(&redacted_entry).unwrap_or_else(|_| "{}".to_string());
-        files.push(BundleExportFile {
-            path: path.clone(),
-            content: pretty,
-        });
-        manifest_mcp.push(path);
-
-        // Requirements are derived DIRECTLY from what redact_mcp_entry
-        // actually redacted (env/header keys, arg flag names, url
-        // credential markers) -- not re-scanned separately here -- so the
-        // exported placeholder and the declared requirement can never
-        // disagree by construction. This invariant was broken twice
-        // already by re-scanning only a subset of fields (reagent P2, PR
-        // #2325 for headers, PR #2333 for args/url); deriving from the
-        // single redaction pass closes it for good.
-        let mut seen_names: HashSet<&str> = HashSet::new();
-        for name in &redacted_names {
-            if !seen_names.insert(name.as_str()) {
-                continue; // e.g. the same flag name appearing twice in args
-            }
-            requirements.push(json!({
-                "id": format!("{slug}-{name}"),
-                // ABF v0.2 (SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_
-                // NATIVE_MEMORY_2026_08_10.md §2.1): renamed from "provider"
-                // to disambiguate from the harness/model-vendor "provider"
-                // concept components.instructions now uses (§2.2) — this one
-                // means "which credential/account service", matching
-                // db_accounts.provider, not a coding harness.
-                "credentialProvider": slug,
-                "kind": "api-key",
-                // "Where it lands" per the requirements.json schema
-                // (research report §5.3) -- an env var name, header name,
-                // arg flag name, or url_credentials for a userinfo/query
-                // redaction; the resolver substitutes into whichever the
-                // exported .server.json's redacted `${NAME}` placeholder
-                // sits under.
-                "env": name,
-                "optional": false,
-            }));
-        }
-    }
-
     let mut components = serde_json::Map::new();
     // ABF v0.2 §2.2: components.instructions is always the keyed-object
     // shape on export ("default" plus zero or more provider variants) —
@@ -607,21 +294,7 @@ pub fn export_bundle(
     if !manifest_skills.is_empty() {
         components.insert("skills".to_string(), json!(manifest_skills));
     }
-    if !manifest_mcp.is_empty() {
-        components.insert("mcpServers".to_string(), json!(manifest_mcp));
-    }
-    if !requirements.is_empty() {
-        components.insert(
-            "accounts".to_string(),
-            json!("accounts/requirements.json"),
-        );
-        let requirements_doc = json!({ "requirements": requirements });
-        files.push(BundleExportFile {
-            path: "accounts/requirements.json".to_string(),
-            content: serde_json::to_string_pretty(&requirements_doc)
-                .unwrap_or_else(|_| "{}".to_string()),
-        });
-    }
+
 
     // Who the bundle was made for: a hint, never enforced (ABF v0.3,
     // SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md §2.1). The row's `model`
@@ -739,19 +412,6 @@ mod tests {
         }
     }
 
-    /// Render a bundle whose MCP servers are given inline, the way these
-    /// renderer tests express a fixture.
-    ///
-    /// `export_bundle` no longer reads `bundle.mcp_servers` — the ref tables
-    /// are authoritative and the caller resolves them (Phase 0b,
-    /// SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md). These tests are
-    /// about rendering, not resolution, so this shim does the parse the
-    /// renderer used to do and hands the entries over explicitly.
-    fn export_with_inline_mcp(bundle: &Bundle, skills: &[Skill]) -> BundleExport {
-        let entries: Vec<Value> = serde_json::from_str(&bundle.mcp_servers).unwrap_or_default();
-        export_bundle(bundle, skills, &entries)
-    }
-
     fn make_agent_skill(name: &str) -> Skill {
         Skill {
             id: format!("skill-{name}"),
@@ -769,7 +429,7 @@ mod tests {
     #[test]
     fn exports_instructions_as_agents_md() {
         let bundle = make_bundle("Follow repo conventions.", "[]", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         let f = export.files.iter().find(|f| f.path == "instructions/AGENTS.md").unwrap();
         assert_eq!(f.content, "Follow repo conventions.");
     }
@@ -778,7 +438,7 @@ mod tests {
     fn exports_context_files_under_instructions_context() {
         let context_files = r#"[{"path":"docs/readme.md","content":"Readme heading"}]"#;
         let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         let f = export
             .files
             .iter()
@@ -791,7 +451,7 @@ mod tests {
     fn rejects_path_traversal_in_context_files() {
         let context_files = r#"[{"path":"../../etc/passwd","content":"evil"}]"#;
         let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         assert!(export.files.iter().all(|f| !f.content.contains("evil")));
         assert!(!export.files.iter().any(|f| f.path.contains("..")));
         // Codex + reagent P2, PR #2333: a rejected entry must not just
@@ -811,7 +471,7 @@ mod tests {
         prompt_skill.skill_type = "prompt".to_string();
         let skills = vec![make_agent_skill("Deploy Checklist"), prompt_skill];
 
-        let export = export_with_inline_mcp(&bundle, &skills);
+        let export = export_bundle(&bundle, &skills);
         assert!(export
             .files
             .iter()
@@ -821,112 +481,13 @@ mod tests {
     }
 
     #[test]
-    fn exports_mcp_servers_and_infers_requirements_from_env_keys() {
-        let mcp_servers = r#"[{"name":"github","type":"stdio","command":"gh-mcp","env":{"GITHUB_TOKEN":""}}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-
-        let server_file = export
-            .files
-            .iter()
-            .find(|f| f.path == "mcp/github.server.json")
-            .expect("expected mcp/github.server.json");
-        assert!(server_file.content.contains("gh-mcp"));
-
-        let req_file = export
-            .files
-            .iter()
-            .find(|f| f.path == "accounts/requirements.json")
-            .expect("expected accounts/requirements.json to be inferred");
-        assert!(req_file.content.contains("GITHUB_TOKEN"));
-        assert!(!req_file.content.to_lowercase().contains("ghp_"), "must never contain a real secret value");
-    }
-
-    #[test]
-    fn requirement_entries_use_credential_provider_not_provider() {
-        // ABF v0.2, §2.1: "provider" was ambiguous with the newer harness/
-        // model-vendor sense components.instructions now uses. Exported
-        // requirements must use the disambiguated key.
-        let mcp_servers = r#"[{"name":"github","type":"stdio","command":"gh-mcp","env":{"GITHUB_TOKEN":""}}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-
-        let req_file = export
-            .files
-            .iter()
-            .find(|f| f.path == "accounts/requirements.json")
-            .unwrap();
-        assert!(req_file.content.contains("\"credentialProvider\""));
-        assert!(
-            !req_file.content.contains("\"provider\""),
-            "must not emit the old, ambiguous key alongside the new one: {}",
-            req_file.content
-        );
-    }
-
-    #[test]
-    fn redacts_real_secret_values_from_the_exported_server_json() {
-        // Security finding, Codex P1 x2, PR #2325: the exported .server.json
-        // must never contain the literal secret value stored in env/headers,
-        // even though requirements.json was already value-free.
-        let mcp_servers = r#"[{
-            "name": "github",
-            "type": "stdio",
-            "command": "gh-mcp",
-            "env": {"GITHUB_TOKEN": "ghp_realSecretValue123"},
-            "headers": {"Authorization": "Bearer realBearerToken456"}
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-
-        let server_file = export
-            .files
-            .iter()
-            .find(|f| f.path == "mcp/github.server.json")
-            .expect("expected mcp/github.server.json");
-        assert!(
-            !server_file.content.contains("ghp_realSecretValue123"),
-            "exported .server.json must never contain the real env secret value: {}",
-            server_file.content
-        );
-        assert!(
-            !server_file.content.contains("realBearerToken456"),
-            "exported .server.json must never contain the real header secret value: {}",
-            server_file.content
-        );
-        // Redacted to a placeholder, not silently dropped -- the key/shape survives.
-        assert!(server_file.content.contains("${GITHUB_TOKEN}"));
-        assert!(server_file.content.contains("${Authorization}"));
-
-        // reagent P2, PR #2325: requirements.json must be inferred from BOTH
-        // env and headers keys -- a header-only-authenticated server's
-        // redacted `${Authorization}` placeholder must have a matching
-        // requirement entry telling an importer a credential is needed there.
-        let req_file = export
-            .files
-            .iter()
-            .find(|f| f.path == "accounts/requirements.json")
-            .unwrap();
-        assert!(req_file.content.contains("GITHUB_TOKEN"));
-        assert!(req_file.content.contains("Authorization"));
-    }
-
-    #[test]
-    fn no_requirements_file_when_no_env_vars_present() {
-        let mcp_servers = r#"[{"name":"local-tool","type":"stdio","command":"local-tool"}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        assert!(!export.files.iter().any(|f| f.path == "accounts/requirements.json"));
-    }
-
-    #[test]
     fn malformed_context_files_json_warns_instead_of_silently_dropping_data() {
         // reagent P1, PR #2333: previously unwrap_or_default() silently
         // treated malformed context_files as empty, with no signal to the
         // caller that data was lost -- defeats the exporter's stated
         // backup/portability guarantee.
         let bundle = make_bundle("", "{not valid json", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         assert!(
             export.warnings.iter().any(|w| w.contains("context_files") && w.contains("malformed")),
             "expected a warning about malformed context_files, got: {:?}",
@@ -935,32 +496,10 @@ mod tests {
     }
 
     #[test]
-    fn malformed_mcp_servers_json_warns_instead_of_silently_dropping_data() {
-        // The renderer no longer parses MCP JSON — it is handed typed entries
-        // (Phase 0b). The guarantee this test protects, that malformed
-        // component data warns instead of vanishing, moved with the parse into
-        // `resolve_bundle_components`, and is asserted there:
-        // `app_api::bundle::export_import_for_agent_tests::
-        //  a_bound_mcp_server_with_unparseable_config_warns_instead_of_vanishing`.
-        //
-        // Kept as a pointer rather than deleted, so the guarantee is still
-        // findable from the module that used to own it. `context_files` is
-        // still parsed here, and its own malformed-input test below is the
-        // live example of the same rule at this layer.
-        let bundle = make_bundle("", "not an array at all", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        assert!(
-            export.warnings.iter().any(|w| w.contains("context_files") && w.contains("malformed")),
-            "expected a warning about malformed context_files, got: {:?}",
-            export.warnings
-        );
-    }
-
-    #[test]
-    fn blank_context_files_and_mcp_servers_produce_no_warning() {
+    fn blank_context_files_produce_no_warning() {
         // A genuinely empty/unset field is not an error -- must not warn.
         let bundle = make_bundle("", "", "", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         assert!(export.warnings.is_empty(), "blank fields must not warn: {:?}", export.warnings);
     }
 
@@ -970,7 +509,7 @@ mod tests {
         // `bundle.skills` column with this exact helper (until #3152 made the
         // ref tables authoritative), which previously had the same
         // unwrap_or_default() silent-loss bug already fixed here for
-        // context_files (and, until #3152, mcp_servers).
+        // context_files.
         let mut warnings = Vec::new();
         let blank: Vec<String> = parse_json_field_or_warn("", "skills", &mut warnings);
         assert!(blank.is_empty());
@@ -997,7 +536,7 @@ mod tests {
             {"path":"docs/./a.md","content":"second, would silently clobber the first"}
         ]"#;
         let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
 
         let matches: Vec<_> = export
             .files
@@ -1025,7 +564,7 @@ mod tests {
             {"path":"docs/a.md","content":"second, would collide on a case-insensitive filesystem"}
         ]"#;
         let bundle = make_bundle("", context_files, "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
 
         let matches: Vec<_> = export
             .files
@@ -1038,258 +577,6 @@ mod tests {
     }
 
     #[test]
-    fn infers_a_requirement_for_a_header_only_authenticated_server() {
-        // reagent P2, PR #2325: a server authenticated ENTIRELY via headers
-        // (no env at all) previously produced no requirements.json -- its
-        // redacted `${Authorization}` placeholder in the exported
-        // .server.json had nothing telling an importer a credential is
-        // needed there.
-        let mcp_servers = r#"[{
-            "name": "notion",
-            "type": "http",
-            "url": "https://mcp.notion.com",
-            "headers": {"Authorization": "Bearer realToken789"}
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-
-        let req_file = export
-            .files
-            .iter()
-            .find(|f| f.path == "accounts/requirements.json")
-            .expect("a header-only-authenticated server must still infer a requirement");
-        assert!(req_file.content.contains("Authorization"));
-        assert!(
-            !req_file.content.to_lowercase().contains("realtoken789"),
-            "must never contain a real secret value"
-        );
-    }
-
-    #[test]
-    fn redacts_credentials_from_args_flag_equals_value_form() {
-        // Codex + reagent P1, PR #2333: a real credential passed as
-        // "--api-key=<secret>" in the runtime args array previously
-        // exported verbatim.
-        let mcp_servers = r#"[{
-            "name": "linear",
-            "type": "stdio",
-            "command": "linear-mcp",
-            "args": ["--api-key=lin_realSecretAbc123", "--verbose"]
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/linear.server.json").unwrap();
-        assert!(!server_file.content.contains("lin_realSecretAbc123"));
-        assert!(server_file.content.contains("${API_KEY}"));
-        assert!(server_file.content.contains("--verbose"), "unrelated flags must survive untouched");
-
-        // reagent P2, PR #2333: an args-derived redaction must infer a
-        // matching requirement too, not just env/headers ones.
-        let req_file = export.files.iter().find(|f| f.path == "accounts/requirements.json").unwrap();
-        assert!(req_file.content.contains("api-key"));
-    }
-
-    #[test]
-    fn redacts_credentials_from_args_flag_space_value_form() {
-        let mcp_servers = r#"[{
-            "name": "custom",
-            "type": "stdio",
-            "command": "custom-mcp",
-            "args": ["--token", "realSecretXyz789", "--port", "8080"]
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/custom.server.json").unwrap();
-        assert!(!server_file.content.contains("realSecretXyz789"));
-        assert!(server_file.content.contains("${TOKEN}"));
-        // "--port 8080" is not a secret flag -- must survive untouched.
-        assert!(server_file.content.contains("8080"));
-
-        let req_file = export.files.iter().find(|f| f.path == "accounts/requirements.json").unwrap();
-        assert!(req_file.content.contains("token"));
-    }
-
-    #[test]
-    fn unrelated_args_flags_are_never_redacted() {
-        // "--keymap" contains neither "key" as a whole segment nor any
-        // other curated secret-flag name -- must not false-positive.
-        let mcp_servers = r#"[{
-            "name": "editor",
-            "type": "stdio",
-            "command": "editor-mcp",
-            "args": ["--keymap=vim", "--theme", "dark"]
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/editor.server.json").unwrap();
-        assert!(server_file.content.contains("--keymap=vim"));
-        assert!(server_file.content.contains("dark"));
-    }
-
-    #[test]
-    fn redacts_userinfo_and_secret_query_params_from_url() {
-        // Codex + reagent P1, PR #2333: a credential embedded in the `url`
-        // field (userinfo or a secret-bearing query param) previously
-        // exported verbatim.
-        let mcp_servers = r#"[{
-            "name": "remote",
-            "type": "http",
-            "url": "https://admin:realPass456@mcp.example.com/api?api_key=realKeyAbc&region=us"
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/remote.server.json").unwrap();
-        assert!(!server_file.content.contains("realPass456"));
-        assert!(!server_file.content.contains("realKeyAbc"));
-        assert!(server_file.content.contains("${URL_CREDENTIALS}@mcp.example.com"));
-        assert!(server_file.content.contains("api_key=${API_KEY}"));
-        // Non-secret query params must survive untouched.
-        assert!(server_file.content.contains("region=us"));
-
-        // reagent P2, PR #2333: requirements.json must be derived from
-        // the SAME redaction pass, not a separate env/headers-only scan.
-        let req_file = export
-            .files
-            .iter()
-            .find(|f| f.path == "accounts/requirements.json")
-            .expect("url-embedded credentials must still infer requirements");
-        assert!(req_file.content.contains("url_credentials"));
-        assert!(req_file.content.contains("api_key"));
-    }
-
-    #[test]
-    fn query_param_redaction_uses_the_same_allowlist_as_args() {
-        // reagent P1, PR #2333: is_secret_query_param's list previously
-        // omitted names already recognized for args (client_secret,
-        // auth_token, bearer_token, secret_key) -- the two lists could
-        // silently drift apart. Now backed by one shared SECRET_NAMES list.
-        let mcp_servers = r#"[{
-            "name": "oauth-server",
-            "type": "http",
-            "url": "https://api.example.com/mcp?client_secret=realClientSecret123&auth_token=realAuthToken456"
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/oauth-server.server.json").unwrap();
-        assert!(!server_file.content.contains("realClientSecret123"));
-        assert!(!server_file.content.contains("realAuthToken456"));
-        assert!(server_file.content.contains("client_secret=${CLIENT_SECRET}"));
-        assert!(server_file.content.contains("auth_token=${AUTH_TOKEN}"));
-    }
-
-    #[test]
-    fn userinfo_detection_does_not_swallow_the_query_string_delimiter() {
-        // reagent P0, PR #2333: a bare "@" appearing INSIDE the query
-        // string (not real userinfo) was previously misdetected as
-        // userinfo, and the replacement consumed the "?" along with it --
-        // blinding the query-param redaction pass to a real secret sitting
-        // right after it. No path, no real userinfo, just an "@" in a
-        // param value.
-        let mcp_servers = r#"[{
-            "name": "svc",
-            "type": "http",
-            "url": "https://svc.example.com?a=b@c&api_key=realSecretShouldBeRedacted"
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/svc.server.json").unwrap();
-        assert!(
-            !server_file.content.contains("realSecretShouldBeRedacted"),
-            "the real secret must still be redacted even with a bare '@' earlier in the query string: {}",
-            server_file.content
-        );
-        assert!(server_file.content.contains("api_key=${API_KEY}"));
-        // No genuine userinfo here -- must not fabricate a ${URL_CREDENTIALS}.
-        assert!(!server_file.content.contains("URL_CREDENTIALS"));
-    }
-
-    #[test]
-    fn userinfo_detection_excludes_the_fragment_delimiter() {
-        // reagent P2, PR #2333: a bare "@" appearing after "#" (inside the
-        // URL fragment, no path/query present) was previously misdetected
-        // as userinfo -- the authority section ends at the FIRST of '/',
-        // '?', OR '#', and the old check only excluded the first two.
-        let mcp_servers = r#"[{
-            "name": "svc",
-            "type": "http",
-            "url": "https://mcp.example.com#note@example.com"
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/svc.server.json").unwrap();
-        assert!(
-            server_file.content.contains("mcp.example.com#note@example.com"),
-            "no genuine userinfo present (the '@' is inside the fragment) -- host must not be mangled: {}",
-            server_file.content
-        );
-        assert!(!server_file.content.contains("URL_CREDENTIALS"));
-    }
-
-    #[test]
-    fn redacts_secret_header_value_embedded_in_args_flag_space_value_form() {
-        // Codex + reagent P0, PR #2333: a credential smuggled inside a
-        // "--header"/"-H" flag's value as "HeaderName: <secret>" -- the
-        // flag name itself is not secret-shaped, so is_secret_name never
-        // catches it; the secret only becomes visible once the value is
-        // itself parsed as a header.
-        let mcp_servers = r#"[{
-            "name": "remote",
-            "type": "stdio",
-            "command": "remote-mcp",
-            "args": ["--header", "Authorization: Bearer realSecretToken789", "--verbose"]
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/remote.server.json").unwrap();
-        assert!(!server_file.content.contains("realSecretToken789"));
-        assert!(server_file.content.contains("Authorization: ${AUTHORIZATION}"));
-        assert!(server_file.content.contains("--verbose"), "unrelated flags must survive untouched");
-
-        let req_file = export.files.iter().find(|f| f.path == "accounts/requirements.json").unwrap();
-        assert!(req_file.content.contains("Authorization"));
-    }
-
-    #[test]
-    fn redacts_secret_header_value_embedded_in_args_flag_equals_value_form() {
-        let mcp_servers = r#"[{
-            "name": "remote2",
-            "type": "stdio",
-            "command": "remote-mcp",
-            "args": ["--header=Authorization: Bearer realSecretToken456"]
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/remote2.server.json").unwrap();
-        assert!(!server_file.content.contains("realSecretToken456"));
-        assert!(server_file.content.contains("--header=Authorization: ${AUTHORIZATION}"));
-    }
-
-    #[test]
-    fn non_secret_header_values_in_args_are_never_redacted() {
-        let mcp_servers = r#"[{
-            "name": "remote3",
-            "type": "stdio",
-            "command": "remote-mcp",
-            "args": ["--header", "X-Request-Id: abc123", "-H", "Content-Type: application/json"]
-        }]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let server_file = export.files.iter().find(|f| f.path == "mcp/remote3.server.json").unwrap();
-        assert!(server_file.content.contains("X-Request-Id: abc123"));
-        assert!(server_file.content.contains("Content-Type: application/json"));
-    }
-
-    #[test]
-    fn dedupes_colliding_mcp_server_names() {
-        let mcp_servers = r#"[{"name":"Server!!!One"},{"name":"Server One"}]"#;
-        let bundle = make_bundle("", "[]", mcp_servers, "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
-        let paths: HashSet<&str> = export.files.iter().map(|f| f.path.as_str()).collect();
-        assert!(paths.contains("mcp/server-one.server.json"));
-        assert!(paths.contains("mcp/server-one-2.server.json"));
-    }
-
-    #[test]
     fn manifest_lists_every_component_and_validates_as_json() {
         let bundle = make_bundle(
             "Instructions",
@@ -1297,7 +584,7 @@ mod tests {
             r#"[{"name":"github","env":{"GITHUB_TOKEN":""}}]"#,
             r#"["skill-a"]"#,
         );
-        let export = export_with_inline_mcp(&bundle, &[make_agent_skill("Deploy")]);
+        let export = export_bundle(&bundle, &[make_agent_skill("Deploy")]);
         let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).expect("bundle.json must be valid JSON");
         assert_eq!(manifest["name"], "backend-dev-bundle");
@@ -1305,8 +592,20 @@ mod tests {
         // ("default" + provider variants), not a flat array.
         assert!(manifest["components"]["instructions"]["default"].as_array().unwrap().len() == 2);
         assert!(manifest["components"]["skills"].as_array().unwrap().len() == 1);
-        assert!(manifest["components"]["mcpServers"].as_array().unwrap().len() == 1);
-        assert_eq!(manifest["components"]["accounts"], "accounts/requirements.json");
+    }
+
+    /// A bundle carries no MCP servers, so a leftover inline column exports
+    /// no `mcp/` files, no `mcpServers` and no inferred `accounts/`
+    /// (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1).
+    #[test]
+    fn exports_no_mcp_servers_and_no_inferred_requirements() {
+        let bundle = make_bundle("", "[]", r#"[{"name":"github","env":{"GITHUB_TOKEN":"ghp_x"}}]"#, "[]");
+        let export = export_bundle(&bundle, &[]);
+        assert!(!export.files.iter().any(|f| f.path.starts_with("mcp/") || f.path.starts_with("accounts/")));
+        let manifest: Value = serde_json::from_str(&export.files.iter().find(|f| f.path == "bundle.json").unwrap().content).unwrap();
+        assert!(manifest["components"].get("mcpServers").is_none());
+        assert!(manifest["components"].get("accounts").is_none());
+        assert!(!export.files.iter().any(|f| f.content.contains("ghp_x")));
     }
 
     #[test]
@@ -1314,7 +613,7 @@ mod tests {
         let mut bundle = make_bundle("Default instructions.", "[]", "[]", "[]");
         bundle.instructions_by_provider =
             r#"{"claude":"Claude-specific override.","codex":"Codex-specific override."}"#.to_string();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
 
         let claude_file = export.files.iter().find(|f| f.path == "instructions/claude/AGENTS.md")
             .expect("expected instructions/claude/AGENTS.md");
@@ -1337,7 +636,7 @@ mod tests {
         // or an empty manifest entry.
         let mut bundle = make_bundle("Default.", "[]", "[]", "[]");
         bundle.instructions_by_provider = r#"{"claude":"   "}"#.to_string();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         assert!(!export.files.iter().any(|f| f.path.starts_with("instructions/claude/")));
         let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
@@ -1353,7 +652,7 @@ mod tests {
         let mut bundle = make_bundle("Default.", "[]", "[]", "[]");
         bundle.instructions_by_provider =
             r#"{"claude":"First.","./claude":"Second."}"#.to_string();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
 
         let claude_files: Vec<_> = export.files.iter().filter(|f| f.path == "instructions/claude/AGENTS.md").collect();
         assert_eq!(claude_files.len(), 1, "must not produce two files at the same path");
@@ -1378,7 +677,7 @@ mod tests {
         // Codex P1, PR #2325: the ABF spec's manifest example references
         // "skills/<slug>" (the directory), not "skills/<slug>/SKILL.md".
         let bundle = make_bundle("", "[]", "[]", r#"["skill-a"]"#);
-        let export = export_with_inline_mcp(&bundle, &[make_agent_skill("Deploy Checklist")]);
+        let export = export_bundle(&bundle, &[make_agent_skill("Deploy Checklist")]);
         let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").unwrap();
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
         let skills = manifest["components"]["skills"].as_array().unwrap();
@@ -1392,7 +691,7 @@ mod tests {
         let mut bundle = make_bundle("Be concise.", "[]", "[]", "[]");
         bundle.provider = "codex".into();
         bundle.model = "openai".into();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         let manifest_file = export.files.iter().find(|f| f.path == "bundle.json").expect("bundle.json");
         assert!(!export.files.iter().any(|f| f.path == "armory.json"));
         let manifest: Value = serde_json::from_str(&manifest_file.content).unwrap();
@@ -1403,7 +702,7 @@ mod tests {
 
     #[test]
     fn omits_the_hint_when_the_bundle_has_none() {
-        let export = export_with_inline_mcp(&make_bundle("x", "[]", "[]", "[]"), &[]);
+        let export = export_bundle(&make_bundle("x", "[]", "[]", "[]"), &[]);
         let manifest: Value = serde_json::from_str(&export.files.iter().find(|f| f.path == "bundle.json").unwrap().content).unwrap();
         assert!(manifest.get("suggestedFor").is_none());
     }
@@ -1413,7 +712,7 @@ mod tests {
         let mut bundle = make_bundle("Be concise.", "[]", "[]", "[]");
         bundle.provider = "gemini".into();
         bundle.model = "google".into();
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         let files: Vec<crate::backend::bundle_import::BundleImportFile> = export
             .files
             .iter()
@@ -1428,7 +727,7 @@ mod tests {
     #[test]
     fn empty_bundle_still_produces_a_valid_manifest() {
         let bundle = make_bundle("", "[]", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         // bundle.json is always written, even for a fully empty bundle.
         assert_eq!(export.files.len(), 1);
         let manifest: Value = serde_json::from_str(&export.files[0].content).unwrap();
@@ -1438,7 +737,7 @@ mod tests {
     #[test]
     fn zip_bundle_export_produces_a_valid_archive_with_all_files() {
         let bundle = make_bundle("Instructions here", "[]", "[]", "[]");
-        let export = export_with_inline_mcp(&bundle, &[]);
+        let export = export_bundle(&bundle, &[]);
         let zip_bytes = zip_bundle_export(&export).expect("zip should succeed");
 
         let cursor = std::io::Cursor::new(zip_bytes);

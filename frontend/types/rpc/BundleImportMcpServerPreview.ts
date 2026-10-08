@@ -2,11 +2,13 @@
 import type { BundleImportMcpServerDisplay } from "./BundleImportMcpServerDisplay";
 
 /**
- * One MCP server offered for selection. Carries only `display`, never the
- * full config — a bundle's server config can hold secrets.
+ * One MCP server the archive carries. Listed so the user knows it isn't
+ * imported: a bundle carries no MCP servers, so they add it in Connectors
+ * (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1). Carries only
+ * `display`, never the full config — a server config can hold secrets.
  */
 export type BundleImportMcpServerPreview = { 
 /**
- * Stable selection key.
+ * Where the archive keeps it.
  */
 source_path: string, display: BundleImportMcpServerDisplay, };

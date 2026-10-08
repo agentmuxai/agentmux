@@ -3,7 +3,6 @@
 //
 // Tests for BundleSkillModel — the bundle-scoped Skills view model
 // (composable model v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md).
-// Mirrors bundle-mcp-model.test.ts.
 
 import { createRoot } from "solid-js";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";

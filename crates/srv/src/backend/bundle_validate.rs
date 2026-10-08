@@ -17,8 +17,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use serde_json::Value;
-
 use super::bundle_export::{parse_json_field_or_warn, sanitize_context_relative_path, ContextFileEntry};
 use super::providers;
 use super::storage::store::Bundle;
@@ -35,8 +33,8 @@ pub enum IssueSeverity {
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct ValidationIssue {
     pub severity: IssueSeverity,
-    /// Which bundle field/component this issue is about — one of
-    /// "instructions_by_provider", "context_files", "mcp_servers", "skills".
+    /// Which bundle field/component this issue is about:
+    /// "instructions_by_provider" or "context_files".
     pub field: String,
     pub message: String,
 }
@@ -50,23 +48,13 @@ pub struct ValidationReport {
     pub issues: Vec<ValidationIssue>,
 }
 
-/// Run every structural check against a bundle.
-///
-/// `mcp_entries` are the bundle's MCP servers **resolved from
-/// `db_bundle_mcp_ref`**, which is authoritative for what a bundle contains
-/// (Phase 0b, `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`). They
-/// are passed in rather than read off `bundle` for the same reason
-/// `export_bundle` takes them: this module does no Store lookups, and reading
-/// the inline `bundle.mcp_servers` column would validate data that nothing
-/// else consumes any more.
-///
-/// Pass an empty slice for an unsaved draft — a bundle with no row yet has no
-/// bindings to check.
-pub fn validate_bundle(bundle: &Bundle, mcp_entries: &[Value]) -> ValidationReport {
+/// Run every structural check against a bundle. A bundle carries no MCP
+/// servers (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1), so
+/// there are none to check.
+pub fn validate_bundle(bundle: &Bundle) -> ValidationReport {
     let mut issues = Vec::new();
     validate_instructions_by_provider(bundle, &mut issues);
     validate_context_files(bundle, &mut issues);
-    validate_mcp_servers(mcp_entries, &mut issues);
     // `skills` had exactly two checks, malformed JSON and a duplicate id, and
     // the ref table makes both unrepresentable: `db_bundle_skills_ref` has a
     // PRIMARY KEY (bundle_id, skill_id), and every id it yields came from a
@@ -79,14 +67,6 @@ pub fn validate_bundle(bundle: &Bundle, mcp_entries: &[Value]) -> ValidationRepo
 fn push_error(issues: &mut Vec<ValidationIssue>, field: &str, message: String) {
     issues.push(ValidationIssue {
         severity: IssueSeverity::Error,
-        field: field.to_string(),
-        message,
-    });
-}
-
-fn push_warning(issues: &mut Vec<ValidationIssue>, field: &str, message: String) {
-    issues.push(ValidationIssue {
-        severity: IssueSeverity::Warning,
         field: field.to_string(),
         message,
     });
@@ -163,51 +143,9 @@ fn validate_context_files(bundle: &Bundle, issues: &mut Vec<ValidationIssue>) {
     }
 }
 
-/// Each entry must be a JSON object (the shape `export_bundle` writes to
-/// `mcp/<slug>.server.json`). Export auto-dedupes colliding display names
-/// into distinct slugs (`unique_skill_slug`), so a duplicate `name` can't
-/// actually collide on disk — flagged as a warning rather than an error
-/// since it's very likely a copy-paste mistake, not a structural break.
-fn validate_mcp_servers(entries: &[Value], issues: &mut Vec<ValidationIssue>) {
-    const FIELD: &str = "mcp_servers";
-    let mut seen_names: HashSet<String> = HashSet::new();
-    for (index, entry) in entries.iter().enumerate() {
-        if !entry.is_object() {
-            push_error(issues, FIELD, format!("entry {} is not a JSON object", index + 1));
-            continue;
-        }
-        if let Some(name) = entry.get("name").and_then(|v| v.as_str()) {
-            let key = name.trim().to_lowercase();
-            if !key.is_empty() && !seen_names.insert(key) {
-                push_warning(
-                    issues,
-                    FIELD,
-                    format!(
-                        "\"{name}\" is used by more than one server entry — each gets a \
-                         distinct slug on export, but this is likely a mistake"
-                    ),
-                );
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Validate a bundle whose MCP servers are written inline, the way these
-    /// fixtures express them.
-    ///
-    /// `validate_bundle` no longer reads that column — the ref tables are
-    /// authoritative and the caller resolves them (Phase 0b,
-    /// `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`). These tests
-    /// are about the checks themselves, not about resolution, so this shim
-    /// does the parse the validator used to do and passes the entries in.
-    fn validate_with_inline_mcp(bundle: &Bundle) -> ValidationReport {
-        let entries: Vec<Value> = serde_json::from_str(&bundle.mcp_servers).unwrap_or_default();
-        validate_bundle(bundle, &entries)
-    }
 
     fn make_bundle(
         instructions_by_provider: &str,
@@ -238,7 +176,7 @@ mod tests {
     #[test]
     fn empty_bundle_is_valid_with_no_issues() {
         let bundle = make_bundle("{}", "[]", "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(report.is_valid);
         assert!(report.issues.is_empty());
     }
@@ -246,14 +184,14 @@ mod tests {
     #[test]
     fn known_provider_keys_pass() {
         let bundle = make_bundle(r#"{"claude":"x","codex":"y"}"#, "[]", "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(report.is_valid, "{:?}", report.issues);
     }
 
     #[test]
     fn unknown_provider_key_is_an_error() {
         let bundle = make_bundle(r#"{"chatgpt-desktop":"x"}"#, "[]", "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(!report.is_valid);
         assert!(report.issues.iter().any(|i| i.severity == IssueSeverity::Error
             && i.field == "instructions_by_provider"
@@ -263,7 +201,7 @@ mod tests {
     #[test]
     fn malformed_instructions_by_provider_json_is_an_error() {
         let bundle = make_bundle("not json", "[]", "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(!report.is_valid);
         assert!(report.issues.iter().any(|i| i.field == "instructions_by_provider"
             && i.message.contains("malformed JSON")));
@@ -275,14 +213,14 @@ mod tests {
         // like the canonical id does, since export/import both treat them
         // as the same provider (providers::get_provider handles aliases).
         let bundle = make_bundle(r#"{"claude-code":"x"}"#, "[]", "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(report.is_valid, "{:?}", report.issues);
     }
 
     #[test]
     fn multiple_unknown_provider_keys_are_each_reported() {
         let bundle = make_bundle(r#"{"foo":"a","bar":"b"}"#, "[]", "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(!report.is_valid);
         let provider_errors: Vec<_> = report
             .issues
@@ -295,7 +233,7 @@ mod tests {
     #[test]
     fn unsafe_context_file_path_is_an_error() {
         let bundle = make_bundle("{}", r#"[{"path":"../../etc/passwd","content":"x"}]"#, "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(!report.is_valid);
         assert!(report.issues.iter().any(|i| i.field == "context_files"
             && i.message.contains("not a safe relative path")));
@@ -309,7 +247,7 @@ mod tests {
             "[]",
             "[]",
         );
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(!report.is_valid);
         assert!(report.issues.iter().any(|i| i.field == "context_files" && i.message.contains("collides")));
     }
@@ -317,31 +255,18 @@ mod tests {
     #[test]
     fn malformed_context_files_json_is_an_error() {
         let bundle = make_bundle("{}", "not json", "[]", "[]");
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(!report.is_valid);
         assert!(report.issues.iter().any(|i| i.field == "context_files" && i.message.contains("malformed")));
     }
 
     #[test]
-    fn duplicate_mcp_server_name_is_a_warning_not_an_error() {
-        let bundle = make_bundle(
-            "{}",
-            "[]",
-            r#"[{"name":"fs","command":"a"},{"name":"FS","command":"b"}]"#,
-            "[]",
-        );
-        let report = validate_with_inline_mcp(&bundle);
-        assert!(report.is_valid, "warnings must not flip is_valid: {:?}", report.issues);
-        assert!(report.issues.iter().any(|i| i.severity == IssueSeverity::Warning
-            && i.field == "mcp_servers"));
-    }
-
-    #[test]
-    fn non_object_mcp_entry_is_an_error() {
+    fn mcp_servers_are_not_validated_because_a_bundle_carries_none() {
+        // A leftover inline column is never read, so it never reports.
         let bundle = make_bundle("{}", "[]", r#"["not-an-object"]"#, "[]");
-        let report = validate_with_inline_mcp(&bundle);
-        assert!(!report.is_valid);
-        assert!(report.issues.iter().any(|i| i.field == "mcp_servers" && i.message.contains("not a JSON object")));
+        let report = validate_bundle(&bundle);
+        assert!(report.is_valid, "{:?}", report.issues);
+        assert!(report.issues.is_empty());
     }
 
     #[test]
@@ -358,7 +283,7 @@ mod tests {
         // Kept as a record of where those guarantees went, rather than a
         // silent deletion of two tests.
         let bundle = make_bundle("{}", "[]", "[]", r#"["skill-1","skill-1"]"#);
-        let report = validate_with_inline_mcp(&bundle);
+        let report = validate_bundle(&bundle);
         assert!(report.is_valid, "{:?}", report.issues);
         assert!(
             !report.issues.iter().any(|i| i.field == "skills"),

@@ -112,7 +112,6 @@ async fn commit_rejects_on_digest_mismatch_and_writes_nothing() {
         include_instructions: false,
         include_context_files: vec![],
         include_skills: vec![],
-        include_mcp_servers: vec![],
     };
     let err = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req)
         .await
@@ -137,7 +136,6 @@ async fn commit_applies_bundle_name_override_not_parsed_name() {
         include_instructions: false,
         include_context_files: vec![],
         include_skills: vec![],
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     let bundle_id = resp.bundle_id;
@@ -163,7 +161,6 @@ async fn commit_bounds_an_oversized_bundle_name_override() {
         include_instructions: false,
         include_context_files: vec![],
         include_skills: vec![],
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     let bundle_id = resp.bundle_id;
@@ -196,7 +193,6 @@ async fn commit_dedupes_repeated_source_dirs_in_include_skills_first_occurrence_
         include_instructions: false,
         include_context_files: vec![],
         include_skills,
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     let imported = resp.imported_skill_ids;
@@ -245,7 +241,6 @@ async fn commit_caps_include_skills_at_max_imported_skills() {
         include_instructions: false,
         include_context_files: vec![],
         include_skills,
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     assert!(
@@ -277,7 +272,6 @@ async fn commit_selects_context_files_by_id_not_display_path() {
         include_instructions: false,
         include_context_files: vec![1],
         include_skills: vec![],
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     let bundle_id = resp.bundle_id;
@@ -322,7 +316,6 @@ async fn commit_skips_colliding_skill_left_with_an_empty_rename() {
         include_instructions: false,
         include_context_files: vec![],
         include_skills: vec![SkillSelection { source_dir: "skills/deploy".to_string(), import_as: None }],
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     assert!(resp.imported_skill_ids.is_empty());
@@ -366,7 +359,6 @@ async fn commit_imports_colliding_skill_under_a_non_empty_rename() {
             source_dir: "skills/deploy".to_string(),
             import_as: Some("deploy-team-x".to_string()),
         }],
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     assert_eq!(resp.imported_skill_ids.len(), 1);
@@ -433,7 +425,6 @@ async fn commit_bounds_an_oversized_import_as_in_the_already_exists_warning() {
             source_dir: "skills/deploy".to_string(),
             import_as: Some(oversized_name),
         }],
-        include_mcp_servers: vec![],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
     assert!(resp.imported_skill_ids.is_empty());
@@ -451,14 +442,18 @@ async fn commit_bounds_an_oversized_import_as_in_the_already_exists_warning() {
     assert!(skipped.chars().count() <= bi::MAX_DISPLAY_FIELD_CHARS + 3);
 }
 
+// A bundle carries no MCP servers: an archive's are named in a warning,
+// never stored (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1).
 #[tokio::test]
-async fn commit_persists_raw_mcp_config_not_the_source_path_wrapper() {
-    // Phase 3 spec §3.0, round 2: every write site touching
-    // parsed.mcp_servers must project to .config before serializing.
+async fn commit_imports_no_mcp_servers_and_names_them_in_a_warning() {
     let state = test_state();
     let files = vec![
-        entry("armory.json", &manifest(serde_json::json!({ "mcpServers": ["mcp/github.server.json"] }))),
-        entry("mcp/github.server.json", r#"{"command":"npx","args":["-y","gh-mcp"]}"#),
+        entry(
+            "armory.json",
+            &manifest(serde_json::json!({ "mcpServers": ["mcp/github.server.json", "mcp/other.server.json"] })),
+        ),
+        entry("mcp/github.server.json", r#"{"name":"github","command":"npx","args":["-y","gh-mcp"]}"#),
+        entry("mcp/other.server.json", r#"{"command":"other"}"#),
     ];
     let bi_files: Vec<bi::BundleImportFile> =
         files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
@@ -472,14 +467,24 @@ async fn commit_persists_raw_mcp_config_not_the_source_path_wrapper() {
         include_instructions: false,
         include_context_files: vec![],
         include_skills: vec![],
-        include_mcp_servers: vec!["mcp/github.server.json".to_string()],
     };
     let resp = bundle_import_commit_impl(&state.id_store, &state.identity_store, &state.mstore, &state.broker, req).await.unwrap();
-    let bundle_id = resp.bundle_id;
-    let saved = state.id_store.bundle_get(&bundle_id).unwrap().unwrap();
-    let mcp_servers: serde_json::Value = serde_json::from_str(&saved.mcp_servers).unwrap();
-    assert_eq!(mcp_servers[0]["command"], "npx");
-    assert!(mcp_servers[0].get("source_path").is_none(), "must not persist the {{source_path, config}} wrapper");
+    let saved = state.id_store.bundle_get(&resp.bundle_id).unwrap().unwrap();
+    assert_eq!(saved.mcp_servers, "[]");
+    let refs: i64 = state
+        .mstore
+        .conn()
+        .lock()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM db_bundle_mcp_ref", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(refs, 0);
+    assert!(
+        resp.warnings.iter().any(|w| w
+            == "mcpServers: not imported (github, mcp/other.server.json). Bundles don't carry MCP servers; add them in Connectors"),
+        "{:?}",
+        resp.warnings
+    );
 }
 
 #[tokio::test]

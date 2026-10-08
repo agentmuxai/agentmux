@@ -1144,24 +1144,11 @@ pub(super) fn write_agent_config_files(
     // legacy blob's user servers are merged in ONLY when the agent has no own
     // ref-bound servers (so a global server never wipes a legacy-only agent's
     // .mcp.json). When the agent has own refs, those are authoritative.
-    // `effective_mcp_servers` (not the raw `mcp_server_list`) also unions in
-    // the agent's bound bundle's own referenced servers — composable model
-    // v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
-    let visible_mcp: Vec<crate::backend::storage::McpServer> = mstore.effective_mcp_servers(identity_store, &agent.id); // own refs + bundle refs + globals
-    // reagentx P1 on PR #2639: has_own_mcp_refs must reflect ONLY the
-    // agent's own direct binds, computed from the raw (pre-bundle-union)
-    // mcp_server_list — NOT from `visible_mcp` above, which already
-    // includes the bundle's referenced servers. Mandatory ABF means every
-    // agent has a bundle, so if a bundle's private server alone could flip
-    // this flag, a legacy-only agent bound to any bundle that happens to
-    // reference one private server would have its legacy .mcp.json blob
-    // silently dropped, even though the agent itself never bound anything.
-    // Same fix as effective_skills's has_own_skill_refs — see its own
-    // comment for the full reasoning.
-    let has_own_mcp_refs = mstore.mcp_server_list(identity_store, &agent.id)
-        .unwrap_or_default()
-        .iter()
-        .any(|item| !item.server.is_global);
+    // A bundle carries no MCP servers
+    // (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1), so these are
+    // the agent's own and the global ones only.
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = mstore.effective_mcp_servers(identity_store, &agent.id);
+    let has_own_mcp_refs = visible_mcp.iter().any(|server| !server.is_global);
     if !visible_mcp.is_empty() {
         let blob_for_merge = if has_own_mcp_refs {
             None
@@ -1568,16 +1555,12 @@ mod write_agent_config_files_tests {
         out
     }
 
-    /// reagentx P1 on PR #2639: a bundle referencing a private MCP server
-    /// must not silently drop the agent's legacy `.mcp.json` blob merge —
-    /// `has_own_mcp_refs` must reflect only the agent's own direct binds.
-    /// Mandatory ABF means every agent has a bundle, so if a bundle's
-    /// private server alone could flip this flag, a legacy-only agent bound
-    /// to any bundle referencing one private server would have its legacy
-    /// server config silently dropped, even though the agent itself never
-    /// bound anything.
+    /// A bundle carries no MCP servers
+    /// (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1): a bundle ref
+    /// an older build left behind neither reaches `.mcp.json` nor counts as
+    /// the agent's own, so the agent's legacy blob is still merged.
     #[test]
-    fn a_bundle_referenced_private_mcp_server_does_not_drop_the_agents_legacy_mcp_blob() {
+    fn a_leftover_bundle_mcp_ref_neither_launches_nor_drops_the_agents_legacy_mcp_blob() {
         let mstore = make_store();
         let id_store = make_store();
         let work_dir = tempfile::tempdir().unwrap();
@@ -1607,23 +1590,7 @@ mod write_agent_config_files_tests {
                 is_system: false,
             })
             .unwrap();
-        mstore
-            .mcp_server_upsert_unique(
-                &mstore,
-                "some-other-context",
-                &crate::backend::storage::McpServer {
-                    id: "bundle-private-server".to_string(),
-                    name: "bundle-server".to_string(),
-                    transport: "stdio".to_string(),
-                    config: r#"{"command":"bundle-tool"}"#.to_string(),
-                    is_global: false,
-                    created_at: 1_700_000_000_000,
-                    updated_at: 1_700_000_000_000,
-                },
-                false,
-            )
-            .unwrap_or(());
-        mstore.bundle_mcp_bind(&mstore, &mstore, "bundle-1", "bundle-private-server").unwrap();
+        leftover_bundle_mcp_ref(&mstore, "bundle-1", "bundle-private-server", "bundle-server", "bundle-tool");
         // agent-1 itself has NO own db_mcp_servers ref — only its bundle does.
 
         mstore
@@ -1642,12 +1609,36 @@ mod write_agent_config_files_tests {
         let parsed: serde_json::Value = serde_json::from_str(&mcp_json).unwrap();
         assert!(
             parsed["mcpServers"].get("legacy-server").is_some(),
-            "a bundle-referenced private server must not silently drop the agent's legacy .mcp.json blob: {mcp_json}"
+            "a leftover bundle ref must not drop the agent's legacy .mcp.json blob: {mcp_json}"
         );
         assert!(
-            parsed["mcpServers"].get("bundle-server").is_some(),
-            "the bundle-referenced server must still be included, just not treated as agent-authoritative: {mcp_json}"
+            parsed["mcpServers"].get("bundle-server").is_none(),
+            "a bundle's server must not launch: {mcp_json}"
         );
+    }
+
+    /// A bundle MCP ref of the kind an older build wrote; nothing writes one now.
+    fn leftover_bundle_mcp_ref(store: &Store, bundle_id: &str, id: &str, name: &str, command: &str) {
+        store
+            .mcp_server_insert_raw(&crate::backend::storage::McpServer {
+                id: id.to_string(),
+                name: name.to_string(),
+                transport: "stdio".to_string(),
+                config: format!(r#"{{"command":"{command}"}}"#),
+                is_global: false,
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_000_000,
+            })
+            .unwrap();
+        store
+            .conn()
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES (?1, ?2)",
+                rusqlite::params![bundle_id, id],
+            )
+            .unwrap();
     }
 
     fn make_bundle(id: &str, name: &str, instructions: &str, is_global: bool) -> crate::backend::storage::bundles::Bundle {
@@ -1674,10 +1665,10 @@ mod write_agent_config_files_tests {
     /// The bundles picked for an agent reach its launch
     /// (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6): their
     /// instructions as `# [Bundle]` sections after Global Memory, in list
-    /// order, and their MCP servers; a listed bundle that no longer exists is
-    /// skipped.
+    /// order; a listed bundle that no longer exists is skipped. Not MCP
+    /// servers: a bundle carries none.
     #[test]
-    fn picked_bundles_reach_the_startup_file_and_mcp_config() {
+    fn picked_bundles_reach_the_startup_file_but_not_the_mcp_config() {
         let mstore = make_store();
         let id_store = make_store();
         let work_dir = tempfile::tempdir().unwrap();
@@ -1688,23 +1679,7 @@ mod write_agent_config_files_tests {
         id_store.bundle_upsert(&make_bundle("global-1", "Rules", "global rule", true)).unwrap();
         id_store.bundle_upsert(&make_bundle("b1", "Reviewer", "review carefully", false)).unwrap();
         id_store.bundle_upsert(&make_bundle("b2", "Writer", "write plainly", false)).unwrap();
-        mstore
-            .mcp_server_upsert_unique(
-                &mstore,
-                "some-other-context",
-                &crate::backend::storage::McpServer {
-                    id: "b2-server".to_string(),
-                    name: "writer-tools".to_string(),
-                    transport: "stdio".to_string(),
-                    config: r#"{"command":"writer-tool"}"#.to_string(),
-                    is_global: false,
-                    created_at: 1_700_000_000_000,
-                    updated_at: 1_700_000_000_000,
-                },
-                false,
-            )
-            .unwrap_or(());
-        mstore.bundle_mcp_bind(&mstore, &id_store, "b2", "b2-server").unwrap();
+        leftover_bundle_mcp_ref(&mstore, "b2", "b2-server", "writer-tools", "writer-tool");
         mstore
             .agent_bundles_set("agent-1", &["b2".to_string(), "gone".to_string(), "b1".to_string()])
             .unwrap();
@@ -1717,9 +1692,8 @@ mod write_agent_config_files_tests {
         let reviewer = claude_md.find("# [Bundle] Reviewer\n\nreview carefully").expect("second pick's section");
         assert!(global < writer && writer < reviewer, "Global Memory, then the picks in order: {claude_md}");
 
-        let mcp_json = std::fs::read_to_string(work_dir.path().join(".mcp.json")).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&mcp_json).unwrap();
-        assert!(parsed["mcpServers"].get("writer-tools").is_some(), "a picked bundle's server: {mcp_json}");
+        let mcp_json = std::fs::read_to_string(work_dir.path().join(".mcp.json")).unwrap_or_default();
+        assert!(!mcp_json.contains("writer-tools"), "a picked bundle's server must not launch: {mcp_json}");
     }
 }
 

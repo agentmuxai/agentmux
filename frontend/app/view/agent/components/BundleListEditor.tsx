@@ -5,7 +5,7 @@
  * BundleListEditor — pick an agent's bundles, in order: the new-agent form,
  * the launch modal and the Stash's Bundles tab
  * (SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md §3.6). Order matters: when
- * two bundles name the same MCP server or skill, the first wins.
+ * two bundles name the same skill, the first wins.
  *
  * Controlled: `value` is the picked ids, `onChange` gets the next list. The
  * agent's own bundle, when given as `own`, is shown first and can't be moved

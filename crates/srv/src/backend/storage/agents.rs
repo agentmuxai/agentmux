@@ -454,7 +454,7 @@ impl Store {
             // configured — the "normal case," not an edge case. Without
             // this fix, agent_def_list() would silently zero memory_id on
             // every read, defeating the bundle lookups that read it
-            // (bundle-scoped MCP servers and skills, the empty-provider
+            // (bundle-scoped skills, the empty-provider
             // fallback in resolve_effective_provider_id) and m0021's own
             // memory_id-empty backfill filter (which would re-process
             // every already-bound agent on every migration run, since it

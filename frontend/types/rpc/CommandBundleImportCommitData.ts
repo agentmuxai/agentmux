@@ -19,8 +19,4 @@ export type CommandBundleImportCommitData = { file_path?: string, zip_base64?: s
 /**
  * Indices into the preview's `context_files`, by `id`.
  */
-include_context_files: number[], include_skills: Array<BundleImportSkillSelection>, 
-/**
- * `source_path` values from the preview's `mcp_servers`.
- */
-include_mcp_servers: Array<string>, };
+include_context_files: number[], include_skills: Array<BundleImportSkillSelection>, };

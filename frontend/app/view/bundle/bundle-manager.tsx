@@ -20,7 +20,6 @@ import { useModalLayer } from "@/app/element/modal-layer";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import { type BundleDraft, BundleViewModel } from "./bundle-model";
-import { BundleMcpSection } from "./BundleMcpSection";
 import { BundleProviderInstructionsSection } from "./BundleProviderInstructionsSection";
 import { BundleSkillsSection } from "./BundleSkillsSection";
 
@@ -241,14 +240,14 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                                             Delete
                                         </Button>
                                     </div>
-                                    {/* MCP servers / skills are managed live via
-                                        their own bind/unbind + upsert-for-bundle
-                                        RPCs, independent of the edit-draft flow
-                                        above — same reason AgentMcpModal/
-                                        AgentSkillsModal sit outside the agent's
-                                        own edit form. Composable model v2,
-                                        docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. */}
-                                    <BundleMcpSection bundleId={memory().id} />
+                                    {/* Skills are managed live via their own
+                                        bind/unbind + upsert-for-bundle RPCs,
+                                        independent of the edit-draft flow above —
+                                        same reason AgentSkillsModal sits outside
+                                        the agent's own edit form. A bundle carries
+                                        no MCP servers; they're bound to agents in
+                                        Connectors
+                                        (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md). */}
                                     <BundleSkillsSection bundleId={memory().id} />
                                 </Show>
                             </div>
@@ -440,9 +439,10 @@ const BundleManagerBody = (props: BundleManagerBodyProps): JSX.Element => {
                             </Show>
 
                             <p class="bundle-view-form-hint">
-                                MCP servers and skills are managed on the bundle's own detail
-                                view (Cancel to get back there), not in this edit form — they
-                                take effect live and don't need a Save. Context files are still
+                                Skills are managed on the bundle's own detail view (Cancel to
+                                get back there), not in this edit form — they take effect live
+                                and don't need a Save. MCP servers aren't part of a bundle: bind
+                                them to agents in Connectors. Context files are still
                                 persisted as JSON and round-trip cleanly through this form; use{" "}
                                 <strong>Validate</strong> above to catch unsafe paths or malformed JSON in
                                 them. To bring in an existing <code>.abf</code> archive's components directly,

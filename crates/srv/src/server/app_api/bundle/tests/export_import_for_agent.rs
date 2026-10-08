@@ -64,9 +64,9 @@ fn make_bundle(state: &AppState, id: &str, instructions: &str) -> crate::backend
     bundle
 }
 
-/// Bind an MCP server to a bundle through the ref table, the way the
-/// Armory does.
-fn bind_mcp(state: &AppState, bundle_id: &str, name: &str, config: &str) {
+/// A bundle MCP ref of the kind an older build wrote. Nothing writes one now
+/// (a bundle carries no MCP servers), so it goes in by hand.
+fn leftover_bundle_mcp_ref(state: &AppState, bundle_id: &str, name: &str, config: &str) {
     let server = crate::backend::storage::McpServer {
         id: format!("srv-{name}"),
         name: name.to_string(),
@@ -76,9 +76,16 @@ fn bind_mcp(state: &AppState, bundle_id: &str, name: &str, config: &str) {
         created_at: 1,
         updated_at: 1,
     };
+    state.identity_store.mcp_server_insert_raw(&server).unwrap();
     state
         .mstore
-        .bundle_mcp_upsert_unique(&state.identity_store, &state.id_store, bundle_id, &server, true)
+        .conn()
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES (?1, ?2)",
+            rusqlite::params![bundle_id, server.id],
+        )
         .unwrap();
 }
 
@@ -147,17 +154,17 @@ async fn project_instructions_resolves_the_authenticated_slug_not_a_uuid() {
 
 #[tokio::test]
 async fn export_carries_ref_bound_components_the_inline_columns_never_had() {
-    // The Phase 0b regression. Before this, binding a skill or server in
-    // the Armory wrote only a ref row while export read only the inline
-    // column, so this bundle exported as empty skills/ and mcp/
-    // directories with no warning — in a format advertised as a backup.
+    // The Phase 0b regression. Before this, binding a skill in the Armory
+    // wrote only a ref row while export read only the inline column, so this
+    // bundle exported an empty skills/ directory with no warning — in a
+    // format advertised as a backup.
     let state = test_state();
     let bundle = make_bundle(&state, "bundle-1", "Be helpful.");
     assert_eq!(bundle.skills, "[]", "fixture must leave the inline columns empty");
-    assert_eq!(bundle.mcp_servers, "[]");
 
     bind_skill(&state, "bundle-1", "Deploy");
-    bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp","env":{"GITHUB_TOKEN":"tok"}}"#);
+    // A bundle carries no MCP servers, so a leftover ref exports nothing.
+    leftover_bundle_mcp_ref(&state, "bundle-1", "github", r#"{"command":"gh-mcp","env":{"GITHUB_TOKEN":"tok"}}"#);
 
     let result = bundle_export_impl(
         &state.id_store,
@@ -178,20 +185,9 @@ async fn export_carries_ref_bound_components_the_inline_columns_never_had() {
         "ref-bound skill must be exported: {paths:?}"
     );
     assert!(
-        paths.iter().any(|p| p == "mcp/github.server.json"),
-        "ref-bound MCP server must be exported: {paths:?}"
+        !paths.iter().any(|p| p.starts_with("mcp/") || p.starts_with("accounts/")),
+        "a bundle exports no MCP servers: {paths:?}"
     );
-
-    // And the secret is still redacted on the way out — resolving from a
-    // different source must not bypass the redaction pass.
-    let server_file = result["files"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|f| f["path"] == "mcp/github.server.json")
-        .unwrap();
-    let content = server_file["content"].as_str().unwrap();
-    assert!(!content.contains("tok"), "secret must not survive export: {content}");
 }
 
 #[tokio::test]
@@ -202,11 +198,10 @@ async fn deleting_a_bundle_takes_its_component_refs_with_it() {
     let state = test_state();
     make_bundle(&state, "bundle-1", "Be helpful.");
     bind_skill(&state, "bundle-1", "Deploy");
-    bind_mcp(&state, "bundle-1", "github", r#"{"command":"gh-mcp"}"#);
+    leftover_bundle_mcp_ref(&state, "bundle-1", "github", r#"{"command":"gh-mcp"}"#);
 
     let before = resolve_bundle_components(&state.mstore, &state.identity_store, "bundle-1").unwrap();
     assert_eq!(before.skills.len(), 1);
-    assert_eq!(before.mcp_entries.len(), 1);
 
     assert!(state.id_store.bundle_delete("bundle-1").unwrap());
     // Through the shared helper both delete RPCs call — `bundle.delete`
@@ -223,40 +218,8 @@ async fn deleting_a_bundle_takes_its_component_refs_with_it() {
     make_bundle(&state, "bundle-1", "Reused id.");
     let after = resolve_bundle_components(&state.mstore, &state.identity_store, "bundle-1").unwrap();
     assert!(
-        after.skills.is_empty() && after.mcp_entries.is_empty(),
+        after.skills.is_empty(),
         "a reused bundle id must not inherit the old bundle's components"
-    );
-}
-
-#[tokio::test]
-async fn validate_reports_a_malformed_bound_component_instead_of_passing() {
-    // Codex on #3153: the resolver drops a bound server whose config will
-    // not parse and says so in a warning. Discarding that left validate
-    // reporting is_valid for exactly the component it exists to catch —
-    // the entry is absent from the resolved list, so nothing downstream
-    // could have seen it.
-    let state = test_state();
-    make_bundle(&state, "bundle-1", "Be helpful.");
-    bind_mcp(&state, "bundle-1", "broken", "not json at all");
-
-    let report = crate::server::app_api::bundle_validate_impl(
-        &state.mstore,
-        &state.identity_store,
-        json!({ "id": "bundle-1", "name": "Bundle bundle-1" }),
-    )
-    .unwrap();
-
-    assert!(
-        !report.is_valid,
-        "a bound component that cannot load must not validate clean: {report:?}"
-    );
-    assert!(
-        report
-            .issues
-            .iter()
-            .any(|i| i.field == "mcp_servers" && i.message.contains("broken")),
-        "the issue must name the server: {:?}",
-        report.issues
     );
 }
 
@@ -547,39 +510,20 @@ async fn a_foreign_instruction_file_changing_between_launches_is_visible() {
 }
 
 #[tokio::test]
-async fn a_bound_mcp_server_with_unparseable_config_warns_instead_of_vanishing() {
-    // The guarantee that moved here from bundle_export.rs when the
-    // renderer stopped parsing MCP JSON: malformed component data warns,
-    // it does not silently disappear.
-    let state = test_state();
-    make_bundle(&state, "bundle-1", "Be helpful.");
-    bind_mcp(&state, "bundle-1", "broken", "not json at all");
-
-    let components = resolve_bundle_components(&state.mstore, &state.identity_store, "bundle-1").unwrap();
-    assert!(components.mcp_entries.is_empty(), "unparseable config must not be exported");
-    assert!(
-        components.warnings.iter().any(|w| w.contains("broken") && w.contains("invalid config")),
-        "expected a warning naming the server, got: {:?}",
-        components.warnings
-    );
-}
-
-#[tokio::test]
 async fn resolving_ignores_catalog_rows_this_bundle_is_not_bound_to() {
     // `managed_list` returns globals alongside bound rows; only the bound
     // ones are this bundle's contents.
     let state = test_state();
     make_bundle(&state, "bundle-1", "Be helpful.");
     make_bundle(&state, "bundle-2", "Other.");
-    bind_mcp(&state, "bundle-2", "elsewhere", r#"{"command":"x"}"#);
+    bind_skill(&state, "bundle-2", "Elsewhere");
 
     let components = resolve_bundle_components(&state.mstore, &state.identity_store, "bundle-1").unwrap();
     assert!(
-        components.mcp_entries.is_empty(),
-        "another bundle's server must not leak in: {:?}",
-        components.mcp_entries
+        components.skills.is_empty(),
+        "another bundle's skill must not leak in: {:?}",
+        components.skills
     );
-    assert!(components.skills.is_empty());
 }
 
 #[tokio::test]
@@ -842,8 +786,8 @@ fn abf_files_with_components() -> Vec<FileEntry> {
 async fn an_imported_bundle_exports_the_components_it_arrived_with() {
     // Codex P1 on #3152: once export reads only the ref tables, an import
     // that writes only the inline columns produces a bundle that exports
-    // empty — and whose MCP servers never reach a spawned agent, since
-    // launch reads the refs too. The round trip is the contract.
+    // empty. The round trip is the contract. The archive's MCP server is not
+    // imported: a bundle carries none, so it's named in a warning instead.
     let state = test_state();
     let config_dir = tempfile::tempdir().unwrap();
     make_agent(&state, "agent-1", "/work/proj", config_dir.path());
@@ -874,11 +818,10 @@ async fn an_imported_bundle_exports_the_components_it_arrived_with() {
         1,
         "imported skill must be bound to the bundle. import result: {result}"
     );
-    assert_eq!(
-        components.mcp_entries.len(),
-        1,
-        "imported MCP server must be bound to the bundle: {:?}",
-        components.warnings
+    let warnings = result["warnings"].as_array().unwrap();
+    assert!(
+        warnings.iter().any(|w| w.as_str().unwrap_or("").starts_with("mcpServers: not imported (github)")),
+        "{warnings:?}"
     );
 
     // And it round-trips out again.
@@ -896,7 +839,7 @@ async fn an_imported_bundle_exports_the_components_it_arrived_with() {
         .map(|f| f["path"].as_str().unwrap_or("").to_string())
         .collect();
     assert!(paths.iter().any(|p| p.starts_with("skills/")), "got {paths:?}");
-    assert!(paths.iter().any(|p| p == "mcp/github.server.json"), "got {paths:?}");
+    assert!(!paths.iter().any(|p| p.starts_with("mcp/")), "got {paths:?}");
 }
 
 #[tokio::test]

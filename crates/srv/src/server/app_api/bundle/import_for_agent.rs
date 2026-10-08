@@ -202,9 +202,8 @@ pub(super) async fn bundle_import_for_agent_impl(
         context_files: serde_json::to_string(
             &parsed.context_files.iter().map(|cf| json!({"path": cf.path, "content": cf.content})).collect::<Vec<_>>(),
         ).unwrap_or_else(|_| "[]".to_string()),
-        mcp_servers: serde_json::to_string(
-            &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
-        ).unwrap_or_else(|_| "[]".to_string()),
+        // A bundle carries no MCP servers (see the warning below).
+        mcp_servers: "[]".to_string(),
         skills: serde_json::to_string(&imported_skill_ids).unwrap_or_else(|_| "[]".to_string()),
         sort_order: 0,
         created_at: now,
@@ -224,17 +223,16 @@ pub(super) async fn bundle_import_for_agent_impl(
         return Err(msg);
     }
 
-    // The bundle row now exists, so its components can be bound. Ref tables
-    // are authoritative — without this the imported bundle would export empty
-    // and its MCP servers would never reach a spawned agent.
+    // The bundle row now exists, so its skills can be bound. Ref tables are
+    // authoritative — without this the imported bundle would export empty.
     warnings.extend(bind_imported_components(
         mstore,
         id_store,
         identity_store,
         &bundle_id,
         &imported_skill_ids,
-        &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
     ));
+    warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
 
     // Bundle files: write through the SAME dual-write path
     // agent:memory:write_file uses (live FS via memory_dir_for_cwd, then

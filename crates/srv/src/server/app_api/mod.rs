@@ -67,7 +67,7 @@ pub(crate) use pane::{move_tab};
 pub use agent_define::{allocate_agent_workdir};
 pub(crate) use agent_define::{agent_define_core};
 pub(crate) use identity::{identity_self_accounts_impl, identity_account_validate_stored_impl};
-pub(crate) use bundle::{bundle_list_impl, bundle_get_impl, bundle_validate_impl, bundle_self_get_impl};
+pub(crate) use bundle::{bundle_list_impl, bundle_get_impl, bundle_self_get_impl};
 pub(crate) use bundle::SelfOwner;
 pub(crate) use global_memory::GlobalMemoryWriteProvenance;
 pub(crate) use memory::MemoryWriteProvenance;

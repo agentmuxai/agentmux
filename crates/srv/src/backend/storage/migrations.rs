@@ -863,7 +863,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- store reasoning as `db_agent_identity_links.account_id`'s
         -- deliberate lack of an account FK (see that table's own doc
         -- comment). Existence is checked at the application layer instead
-        -- — see `Store::bundle_mcp_bind`'s `id_store` parameter.
+        -- — see `Store::bundle_skill_bind`'s `id_store` parameter.
         --
         -- v34: skill_id's FK to db_skills is ALSO gone now (it was
         -- mstore-local before v34; see OBJECT_SCHEMA_VERSION's v34 doc
@@ -878,6 +878,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
 
         -- v34: mcp_id's FK to db_mcp_servers is gone — see the
         -- db_bundle_skills_ref comment above; same reasoning, MCP side.
+        -- No longer written or read: a bundle carries no MCP servers, and
+        -- m0036_drop_bundle_mcp emptied it. Still created, because an older
+        -- build sharing the channel expects it.
         CREATE TABLE IF NOT EXISTS db_bundle_mcp_ref (
             bundle_id TEXT NOT NULL,
             mcp_id    TEXT NOT NULL,

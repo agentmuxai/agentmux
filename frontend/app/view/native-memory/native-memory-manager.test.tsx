@@ -47,10 +47,10 @@ const nativeMemoryListMock = vi.fn();
 
 // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md's own tests drive
 // `agent:memory:changed:{id}` events through this hub, same pattern as
-// bundle-mcp-model.test.ts's own muxEventSubscribe mock — extended here to
+// bundle-skill-model.test.ts's own muxEventSubscribe mock — extended here to
 // accept the VARIADIC multi-subscription call NativeMemoryManager makes
 // (one subscription per grid agent in a single muxEventSubscribe(...) call,
-// not bundle-mcp-model.ts's single-subscription shape).
+// not bundle-skill-model.ts's single-subscription shape).
 const mpsHub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
 }));

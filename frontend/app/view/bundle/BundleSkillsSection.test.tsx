@@ -1,8 +1,9 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 //
-// reagentx P1 on PR #2647 — see BundleMcpSection.test.tsx's identical
-// doc comment, mirrored here for skills.
+// PR #2647: a failed "add private skill" must not silently discard the
+// name/content the user just typed — `addPrivate` never rejects (errors go
+// to errorAtom), so a naive `.then(() => clearForm())` ran regardless.
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";

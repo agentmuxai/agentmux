@@ -94,3 +94,23 @@ describe("BundleImportPreviewModalPanel — rename conflict check", () => {
         expect(screen.queryByText("This name is also taken — pick another.")).not.toBeInTheDocument();
     });
 });
+
+// A bundle carries no MCP servers: the archive's are listed as not imported,
+// with nothing to select (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1).
+describe("BundleImportPreviewModalPanel — MCP servers", () => {
+    it("lists them as not imported, without a checkbox", async () => {
+        vi.mocked(RpcApi.SkillCatalogListCommand).mockResolvedValue([]);
+        const preview = makePreview();
+        preview.skills = [];
+        preview.mcp_servers = [
+            { source_path: "mcp/github.server.json", display: { name: "github", command: "gh-mcp" } },
+        ];
+        const onNext = vi.fn();
+
+        render(() => <BundleImportPreviewModalPanel preview={preview} onNext={onNext} onCancel={() => {}} />);
+
+        expect(screen.getByText("Not imported: MCP servers")).toBeInTheDocument();
+        const row = screen.getByText("github").closest(".bundle-import-checkbox-row")!;
+        expect(row.querySelector("input")).toBeNull();
+    });
+});

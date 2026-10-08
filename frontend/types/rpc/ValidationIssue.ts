@@ -3,7 +3,7 @@ import type { IssueSeverity } from "./IssueSeverity";
 
 export type ValidationIssue = { severity: IssueSeverity, 
 /**
- * Which bundle field/component this issue is about — one of
- * "instructions_by_provider", "context_files", "mcp_servers", "skills".
+ * Which bundle field/component this issue is about:
+ * "instructions_by_provider" or "context_files".
  */
 field: string, message: string, };

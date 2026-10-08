@@ -23,13 +23,10 @@ import { RpcClient } from "../rpc-client";
 export type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
 export type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
 export type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
-export type { McpBundleBindingData } from "@/types/rpc/McpBundleBindingData";
-export type { McpBundleScopeData } from "@/types/rpc/McpBundleScopeData";
 export type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
 export type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
 export type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 export type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
-export type { CommandMcpCatalogUpsertForBundleData } from "@/types/rpc/CommandMcpCatalogUpsertForBundleData";
 export type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
 export type { McpBindResult } from "@/types/rpc/McpBindResult";
 export type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
@@ -37,13 +34,10 @@ export type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
 import type { McpAgentScopeData } from "@/types/rpc/McpAgentScopeData";
 import type { McpAgentItemData } from "@/types/rpc/McpAgentItemData";
 import type { McpAgentBindingData } from "@/types/rpc/McpAgentBindingData";
-import type { McpBundleBindingData } from "@/types/rpc/McpBundleBindingData";
-import type { McpBundleScopeData } from "@/types/rpc/McpBundleScopeData";
 import type { McpCatalogItemData } from "@/types/rpc/McpCatalogItemData";
 import type { McpCatalogListData } from "@/types/rpc/McpCatalogListData";
 import type { CommandMcpUpsertData } from "@/types/rpc/CommandMcpUpsertData";
 import type { CommandMcpCatalogUpsertData } from "@/types/rpc/CommandMcpCatalogUpsertData";
-import type { CommandMcpCatalogUpsertForBundleData } from "@/types/rpc/CommandMcpCatalogUpsertForBundleData";
 import type { McpDeleteResult } from "@/types/rpc/McpDeleteResult";
 import type { McpBindResult } from "@/types/rpc/McpBindResult";
 import type { McpUnbindResult } from "@/types/rpc/McpUnbindResult";
@@ -58,11 +52,6 @@ export type McpUpsertInput = Pick<CommandMcpUpsertData, "agent_id" | "name"> &
     Partial<Omit<CommandMcpUpsertData, "agent_id" | "name">>;
 export type McpCatalogUpsertInput = Pick<CommandMcpCatalogUpsertData, "name"> &
     Partial<Omit<CommandMcpCatalogUpsertData, "name">>;
-export type McpCatalogUpsertForBundleInput = Pick<
-    CommandMcpCatalogUpsertForBundleData,
-    "bundle_id" | "name"
-> &
-    Partial<Omit<CommandMcpCatalogUpsertForBundleData, "bundle_id" | "name">>;
 
 export const McpApi = {
     McpListCommand(
@@ -190,49 +179,5 @@ export const McpApi = {
         opts?: RpcOpts,
     ): Promise<McpUnbindResult> {
         return client.rpcCall("mcp.catalog.unbind", data, opts);
-    },
-
-    // ── Bundle-scoped siblings (composable model v2) ────────────────────
-    // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024
-    // item 3. Same no-agent_id/no-check_s1 shape as the catalog trio above,
-    // keyed by bundle_id instead of agent_id — only global servers (or ones
-    // already bundle-bound) may be bound, same trust boundary as
-    // McpCatalogBindCommand.
-
-    McpCatalogBindToBundleCommand(
-        client: RpcClient,
-        data: McpBundleBindingData,
-        opts?: RpcOpts,
-    ): Promise<McpBindResult> {
-        return client.rpcCall("mcp.catalog.bind_to_bundle", data, opts);
-    },
-
-    McpCatalogUnbindFromBundleCommand(
-        client: RpcClient,
-        data: McpBundleBindingData,
-        opts?: RpcOpts,
-    ): Promise<McpUnbindResult> {
-        return client.rpcCall("mcp.catalog.unbind_from_bundle", data, opts);
-    },
-
-    McpCatalogListForBundleCommand(
-        client: RpcClient,
-        data: McpBundleScopeData,
-        opts?: RpcOpts,
-    ): Promise<McpServerBundleListItem[]> {
-        return client.rpcCall("mcp.catalog.list_for_bundle", data, opts);
-    },
-
-    // Creates a NEW, PRIVATE server scoped directly to a bundle (never
-    // global) — the actual "give this bundle its own tool" path.
-    // McpCatalogBindToBundleCommand alone can only reference already-global
-    // rows, which have no effect once bound (already unconditionally
-    // visible to every agent).
-    McpCatalogUpsertForBundleCommand(
-        client: RpcClient,
-        data: McpCatalogUpsertForBundleInput,
-        opts?: RpcOpts,
-    ): Promise<McpServer> {
-        return client.rpcCall("mcp.catalog.upsert_for_bundle", data, opts);
     },
 };

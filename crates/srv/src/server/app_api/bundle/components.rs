@@ -43,18 +43,15 @@ pub(crate) fn purge_bundle_component_refs(
     }
 }
 
-/// Bind an imported bundle's components into the ref tables.
+/// Bind an imported bundle's skills into the ref table.
 ///
 /// Phase 0b. The ref tables are authoritative for what a bundle contains, so
-/// an import that only wrote the inline columns would produce a bundle that
-/// exports empty and, for MCP servers, never materialises at spawn either —
-/// the `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` "inert at runtime" state
-/// the ref tables exist to end.
+/// an import that only wrote the inline column would produce a bundle that
+/// exports empty.
 ///
-/// **Must run after `bundle_upsert`.** Both bind paths check the bundle exists
-/// in `id_store` first (`managed_bind_bundle` and
-/// `managed_upsert_unique_for_bundle` in `storage/managed.rs`) and refuse
-/// otherwise.
+/// **Must run after `bundle_upsert`.** The bind checks the bundle exists in
+/// `id_store` first (`managed_bind_bundle` in `storage/managed.rs`) and
+/// refuses otherwise.
 ///
 /// Returns warnings rather than failing: by this point the bundle row is
 /// already committed, so aborting would leave a half-imported bundle behind. A
@@ -65,7 +62,6 @@ pub(super) fn bind_imported_components(
     identity_store: &crate::backend::storage::store::Store,
     bundle_id: &str,
     imported_skill_ids: &[String],
-    mcp_configs: &[serde_json::Value],
 ) -> Vec<String> {
     let mut warnings: Vec<String> = Vec::new();
 
@@ -77,40 +73,55 @@ pub(super) fn bind_imported_components(
         }
     }
 
-    // Same shared path the m0030 backfill uses, so a server that arrives by
-    // import and one recovered from an old inline column end up identical,
-    // including duplicate-name handling.
-    let (_created, mcp_warnings) =
-        mstore.bundle_mcp_bind_inline_entries(identity_store, id_store, bundle_id, mcp_configs, now_ms());
-    warnings.extend(mcp_warnings);
-
     warnings
+}
+
+/// The warning an import gives for the MCP servers an archive carries. A
+/// bundle carries no MCP servers, so none is imported; they're named so the
+/// user can add them in Connectors
+/// (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1). `None` when
+/// the archive has none.
+pub(crate) fn mcp_servers_not_imported_warning(
+    servers: &[crate::backend::bundle_import::ParsedMcpServer],
+) -> Option<String> {
+    if servers.is_empty() {
+        return None;
+    }
+    let names: Vec<String> = servers
+        .iter()
+        .map(|m| {
+            crate::backend::bundle_import::mcp_server_display(&m.config)
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| m.source_path.clone())
+        })
+        .collect();
+    Some(format!(
+        "mcpServers: not imported ({}). Bundles don't carry MCP servers; add them in Connectors",
+        names.join(", ")
+    ))
 }
 
 /// A bundle's components, resolved from the tables that are authoritative for
 /// them.
 pub(crate) struct ResolvedComponents {
     pub(crate) skills: Vec<crate::backend::storage::Skill>,
-    /// Exporter entry shape: each server's config object with its `name`
-    /// alongside, which is what `bundle_export::redact_mcp_entry` reads.
-    pub(crate) mcp_entries: Vec<serde_json::Value>,
-    pub(crate) warnings: Vec<String>,
 }
 
-/// Resolve what a bundle actually contains, from `db_bundle_skills_ref` /
-/// `db_bundle_mcp_ref`.
+/// Resolve what a bundle actually contains, from `db_bundle_skills_ref`.
 ///
 /// Phase 0b of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. Before
-/// this, export read the inline `bundle.skills` / `bundle.mcp_servers` columns
+/// this, export read the inline `bundle.skills` column
 /// while agent launch read the ref tables (`write_agent_config_files` in
 /// `app_api/agent_open.rs`), and nothing kept the two in step — so a skill
 /// bound in the Armory ran at launch but exported as an empty `skills/`
 /// directory, with no warning. One
 /// resolver, used by every export path, is what stops that recurring.
 ///
-/// **Scope note:** this is deliberately narrower than `effective_skills` /
-/// `effective_mcp_servers`, which additionally union an *agent's* own binds,
-/// globals and the legacy blob. Those answer "what does this agent run with";
+/// **Scope note:** this is deliberately narrower than `effective_skills`,
+/// which additionally unions an *agent's* own binds, globals and the legacy
+/// blob. Those answer "what does this agent run with";
 /// this answers "what is in this bundle", which is what an ABF describes. The
 /// two are not meant to be equal, only to agree about the bundle's own
 /// contribution.
@@ -118,8 +129,8 @@ pub(crate) struct ResolvedComponents {
 /// `managed_list` returns the whole catalog with a `bound_to_bundle` flag
 /// rather than just the bound rows, hence the filter; and because it joins
 /// through the catalog table, a ref whose catalog row has been deleted
-/// resolves to nothing rather than reporting itself. `skill_delete` /
-/// `mcp_server_delete` both purge refs (`managed_delete` in
+/// resolves to nothing rather than reporting itself. `skill_delete` purges
+/// refs (`managed_delete` in
 /// `storage/managed.rs`), so that state is not reachable through the app
 /// within one channel — but no FK enforces it: the ref tables' catalog FK was
 /// dropped in schema v34, once the catalog moved to `identity_store`.
@@ -135,38 +146,7 @@ pub(crate) fn resolve_bundle_components(
         .filter(|item| item.bound_to_bundle)
         .map(|item| item.skill)
         .collect();
-
-    let mut warnings: Vec<String> = Vec::new();
-    let mut mcp_entries: Vec<serde_json::Value> = Vec::new();
-    for item in mstore
-        .bundle_mcp_list(identity_store, bundle_id)
-        .map_err(|e| format!("failed to resolve bundle MCP servers: {e}"))?
-        .into_iter()
-        .filter(|item| item.bound_to_bundle)
-    {
-        let server = item.server;
-        // `config` is the same JSON object the launch path writes into
-        // `.mcp.json` keyed by `server.name` (`agent_config.rs`
-        // build_mcp_config_from_refs). The exporter wants that object with the
-        // name inline, so the row's name is authoritative over any `name` the
-        // config blob happens to carry.
-        match serde_json::from_str::<serde_json::Value>(&server.config) {
-            Ok(serde_json::Value::Object(mut obj)) => {
-                obj.insert("name".to_string(), json!(server.name));
-                mcp_entries.push(serde_json::Value::Object(obj));
-            }
-            Ok(_) => warnings.push(format!(
-                "mcp server {}: config is not a JSON object — skipped",
-                server.name
-            )),
-            Err(e) => warnings.push(format!(
-                "mcp server {}: invalid config JSON ({e}) — skipped",
-                server.name
-            )),
-        }
-    }
-
-    Ok(ResolvedComponents { skills, mcp_entries, warnings })
+    Ok(ResolvedComponents { skills })
 }
 
 /// Warning the agent-less `bundle.export` pushes when the bundle it is

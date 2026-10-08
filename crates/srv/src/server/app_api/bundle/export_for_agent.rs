@@ -69,7 +69,7 @@ pub(super) async fn build_export_for_agent(
     // what the bundle contains.
     let components = resolve_bundle_components(mstore, identity_store, &bundle.id)
         .map_err(|e| format!("{err_prefix}: {e}"))?;
-    let mut handler_warnings = components.warnings;
+    let mut handler_warnings: Vec<String> = Vec::new();
     // Always empty now — see the note at the agent-less export path.
     let missing_skill_ids: Vec<String> = Vec::new();
 
@@ -83,11 +83,7 @@ pub(super) async fn build_export_for_agent(
         bundle.provider = provider;
     }
 
-    let mut export = crate::backend::bundle_export::export_bundle(
-        &bundle,
-        &components.skills,
-        &components.mcp_entries,
-    );
+    let mut export = crate::backend::bundle_export::export_bundle(&bundle, &components.skills);
 
     // Refresh the mirror from the live FS, then read every mirrored
     // file's content — this agent's memory, freshest as of right now,

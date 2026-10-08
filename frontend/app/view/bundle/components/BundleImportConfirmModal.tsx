@@ -44,9 +44,6 @@ function summaryLine(selection: BundleImportSelectionState): string {
     if (includedSkills.length > 0) {
         parts.push(`${includedSkills.length} skill${includedSkills.length === 1 ? "" : "s"}`);
     }
-    if (selection.includeMcpServerPaths.length > 0) {
-        parts.push(`${selection.includeMcpServerPaths.length} MCP server${selection.includeMcpServerPaths.length === 1 ? "" : "s"}`);
-    }
     return parts.length > 0 ? `Importing: ${parts.join(", ")}.` : "Nothing selected to import.";
 }
 
@@ -75,7 +72,6 @@ export const BundleImportConfirmModalPanel = (
                         source_dir: s.sourceDir,
                         ...(s.renameValue.trim() ? { import_as: s.renameValue.trim() } : {}),
                     })),
-                include_mcp_servers: props.selection.includeMcpServerPaths,
             });
             setSubmitting(false);
             if (res.skipped_skills.length > 0 || res.warnings.length > 0) {

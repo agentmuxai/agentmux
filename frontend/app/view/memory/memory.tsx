@@ -47,7 +47,7 @@ export const MEMORY_SPEC: SectionPaneSpec<MemorySection> = {
             id: "bundles",
             label: "Bundles",
             icon: "layer-group",
-            tooltip: "Bundles: instructions, MCP servers, memory and skills to bind to any agent; imports Agent Bundle Format (ABF) files",
+            tooltip: "Bundles: instructions and skills to give any agent; imports Agent Bundle Format (ABF) files",
             highlight: true,
             component: () => <BundleManager />,
         },

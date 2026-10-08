@@ -1132,7 +1132,7 @@ pub(crate) const GLOBAL_MEMORY_REVERT_TOOL: &str = r#"{
 
 pub(crate) const PRESET_LIST_TOOL: &str = r#"{
   "name": "PresetList",
-  "description": "List the presets available to you (summary fields only). A preset is a provider-agnostic config bundle — instructions, context files, MCP servers, and skills. Use it to discover presets before fetching one in full with PresetGet. Takes no arguments.",
+  "description": "List the presets available to you (summary fields only). A preset is a provider-agnostic config bundle — instructions, context files and skills. Use it to discover presets before fetching one in full with PresetGet. Takes no arguments.",
   "inputSchema": {
     "type": "object",
     "properties": {}

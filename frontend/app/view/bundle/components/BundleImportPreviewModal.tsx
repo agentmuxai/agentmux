@@ -44,9 +44,6 @@ export const BundleImportPreviewModalPanel = (
     const [skills, setSkills] = createSignal<BundleImportSkillSelectionState[]>(
         preview.skills.map((s) => ({ sourceDir: s.source_dir, checked: true, renameValue: "" })),
     );
-    const [mcpChecked, setMcpChecked] = createSignal<Record<string, boolean>>(
-        Object.fromEntries(preview.mcp_servers.map((m) => [m.source_path, true])),
-    );
     const [warningsDismissed, setWarningsDismissed] = createSignal(false);
 
     // §4.1 point 2: the modal fetches the full existing global skill-name
@@ -84,10 +81,6 @@ export const BundleImportPreviewModalPanel = (
         setContextChecked((prev) => ({ ...prev, [id]: !prev[id] }));
     };
 
-    const toggleMcp = (path: string) => {
-        setMcpChecked((prev) => ({ ...prev, [path]: !prev[path] }));
-    };
-
     const suggestedAltName = () => {
         const m = bundleName().match(/^(.*) \((\d+)\)$/);
         if (m) return `${m[1]} (${Number(m[2]) + 1})`;
@@ -102,9 +95,6 @@ export const BundleImportPreviewModalPanel = (
                 .filter((cf) => contextChecked()[cf.id])
                 .map((cf) => cf.id),
             skills: skills(),
-            includeMcpServerPaths: preview.mcp_servers
-                .filter((m) => mcpChecked()[m.source_path])
-                .map((m) => m.source_path),
         });
     };
 
@@ -251,24 +241,25 @@ export const BundleImportPreviewModalPanel = (
                     </section>
                 </Show>
 
+                {/* Listed, not offered: a bundle carries no MCP servers
+                    (SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md §3.1). */}
                 <Show when={preview.mcp_servers.length > 0}>
                     <section class="bundle-import-section">
-                        <h3 class="bundle-import-section-title">MCP servers</h3>
+                        <h3 class="bundle-import-section-title">Not imported: MCP servers</h3>
+                        <div class="bundle-import-hint">
+                            Bundles don't carry MCP servers. Add these in Connectors and bind them to
+                            the agents that need them.
+                        </div>
                         <For each={preview.mcp_servers}>
                             {(m) => (
-                                <label class="bundle-import-checkbox-row">
-                                    <input
-                                        type="checkbox"
-                                        checked={!!mcpChecked()[m.source_path]}
-                                        onChange={() => toggleMcp(m.source_path)}
-                                    />
+                                <div class="bundle-import-checkbox-row">
                                     <span class="bundle-import-item-name">
                                         {m.display.name ?? m.source_path.split("/").pop()}
                                     </span>
                                     <Show when={m.display.command}>
                                         <span class="bundle-import-item-meta">{m.display.command}</span>
                                     </Show>
-                                </label>
+                                </div>
                             )}
                         </For>
                     </section>

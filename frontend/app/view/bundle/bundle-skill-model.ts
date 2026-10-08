@@ -4,9 +4,15 @@
 /**
  * BundleSkillModel — view model for a bundle's Skills section (part of the
  * Bundle editor, bundle-manager.tsx). Same shape as AgentSkillModel
- * (agent-skill-model.ts) and BundleMcpModel (bundle-mcp-model.ts) — see
- * BundleMcpModel's doc comment for why `addPrivate` is the actually-
- * functional path, not bind/unbind of existing globals.
+ * (agent-skill-model.ts), keyed by bundle_id instead of agent_id.
+ *
+ * Binding an existing GLOBAL skill here has no effect on a spawned agent:
+ * globals already reach every agent, bundle-bound or not (composable model
+ * v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md). The
+ * functional path is `addPrivate`, which creates a brand-new private skill
+ * scoped to this bundle, so every agent with the bundle gets it.
+ * Bind/unbind of globals is still offered for parity with the agent-scoped
+ * modal, and because it's harmless.
  */
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
@@ -86,10 +92,14 @@ export class BundleSkillModel {
         }
     }
 
-    /** Creates a NEW, PRIVATE skill scoped directly to this bundle — see
-     *  BundleMcpModel.addPrivate's identical doc comment, including why
-     *  this returns a success boolean instead of Promise<void> (reagentx
-     *  P1 on PR #2647). */
+    /** Creates a NEW, PRIVATE skill scoped directly to this bundle — the
+     *  functional path (see this class's doc comment).
+     *
+     *  Returns whether it succeeded (never throws — same "log to errorAtom,
+     *  don't reject" convention as bind/unbind) so the caller can decide
+     *  whether it's safe to clear its own form state. Since this never
+     *  rejects, a `.then(() => clearForm())` would run unconditionally and
+     *  discard what the user typed on a failed add (PR #2647). */
     async addPrivate(name: string, content: string): Promise<boolean> {
         this.setError(null);
         this.setAdding(true);
