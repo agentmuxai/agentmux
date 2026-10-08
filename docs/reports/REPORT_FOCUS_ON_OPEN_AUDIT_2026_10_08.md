@@ -5,7 +5,7 @@
 **Trigger:** Repo owner, 2026-10-08: "if a user selects 'Broadcast' in the swarm, the input box should select right after
 the button click … scan the codebase for other places where a user expects to be able to type as soon as it opens, like
 settings … find them all, write report to file."
-**Status:** partly implemented — the shared helper and the Swarm Broadcast fix are in #NNNN; every other row is open.
+**Status:** partly implemented — the shared helper and the Swarm Broadcast fix are in #4481; every other row is open.
 **Related:** `SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md` (#4479: the caret follows the selected pane after a close; adds
 `data-pane-focus` and the retry this report refers to), `SPEC_PANE_SELECT_AUTOFOCUS_2026_09_22.md` (`claimFocusOnMount`).
 
@@ -26,7 +26,7 @@ The rest of the gaps share one shape: a button is replaced by the input it opens
 form), the button had the caret, it is removed, and the caret falls to `<body>`.
 
 There is no shared helper for "focus this input when it appears"; the surfaces that work each do it their own way
-(§5). #NNNN adds one, `focusOnOpen` in `frontend/util/focusutil.ts`, and uses it for the Swarm Broadcast composer.
+(§5). #4481 adds one, `focusOnOpen` in `frontend/util/focusutil.ts`, and uses it for the Swarm Broadcast composer.
 
 ## 2. Does not take the caret today (fix needed, most-hit first)
 
@@ -34,7 +34,7 @@ There is no shared helper for "focus this input when it appears"; the surfaces t
 |---|---|---|---|---|---|---|
 | 1 | **Terminal Find** | `pane:find` (Cmd+F / Ctrl+F), `keymodel.ts:214-218` sets `searchAtoms.isOpen` | `element/search.tsx:167-173` (`<Input autoFocus>`, portaled to `<body>`) | `autoFocus` only becomes the attribute (`input.tsx:120`). `termViewModel.giveFocus()` (`:376-380`) returns true while search is open without focusing it. The caret stays in xterm: **typed text goes to the shell.** | yes, if a previous query is kept | `Input` honours `autoFocus` through `focusOnOpen` (§6), with select |
 | 2 | **Agent "Deny + feedback"** | Deny button `AgentDecisionPanel.tsx:419-423` or Shift+Enter `:236-238`; `<Show when={denyMode()}>` `:357` | textarea `:360` | `autofocus` only (`:371`). The clicked button is removed; caret to `<body>`. "Back" does the same. | no | `focusOnOpen` on the textarea. Not on the panel itself: the agent opens that |
-| 3 | **Swarm Broadcast composer** | "Broadcast" `swarm-fleet-toolbar.tsx:150-157`; the input is the `fallback` of `<Show when={!broadcastOpen()}>` `:120-158` | `.swarm-fleet-broadcast-input` `:124-135` | `autofocus` only; the button is removed by the swap | no | **Fixed in #NNNN** (`focusOnOpen`) |
+| 3 | **Swarm Broadcast composer** | "Broadcast" `swarm-fleet-toolbar.tsx:150-157`; the input is the `fallback` of `<Show when={!broadcastOpen()}>` `:120-158` | `.swarm-fleet-broadcast-input` `:124-135` | `autofocus` only; the button is removed by the swap | no | **Fixed in #4481** (`focusOnOpen`) |
 | 4 | **Connection switcher** ("Connect to …") | conn button `blockutil.tsx:77-80`, or Cmd/Ctrl+Shift+G (`keymodel.ts:158-163` → `blockframe.tsx:1202-1204`) | `TypeAheadModal` → `Input` `typeaheadmodal.tsx:218-222`; `autoFocus={isNodeFocused()}` `conntypeahead.tsx:421` | attribute only; `TypeAheadModal`'s `giveFocusRef` prop (`:86, :178-183`) has no caller. Typing goes to the shell | no | `TypeAheadModal` focuses its input on mount when `autoFocus` (also fixes #9) |
 | 5 | **Agent Memory modal "+ New file"** | `AgentNativeMemoryModal.tsx:213-219` → `setShowNewInput(true)`; `<Show>` `:191` | `:193` | `autofocus` only (`:199`); the button is hidden (`visibility:hidden`) | no | `focusOnOpen` |
 | 6 | **Memory "Edit"** (Global Memory `GlobalMemoryFullView.tsx:111`, Personal Memory file `NativeMemoryFileView.tsx:144`, the agent memory modal) | Edit button, swapped out | `MemoryContent.tsx:69` | no focus call | no | opt-in prop on `MemoryContent` that focuses on entering edit mode |
@@ -131,7 +131,7 @@ the pane is the active tab's selection, no modal, the user's caret isn't in a te
 
 ## 6. Recommendation (one helper, not sixteen fixes)
 
-1. **`focusOnOpen(el, { select })`** in `frontend/util/focusutil.ts` (added in #NNNN): a microtask, then
+1. **`focusOnOpen(el, { select })`** in `frontend/util/focusutil.ts` (added in #4481): a microtask, then
    `focus({ preventScroll: true })` and an optional select, if the element is in the document. The microtask runs after
    the render that inserted the element and before #4479's next-frame selection focus, which then sees the caret in the
    pane and leaves it. Use as `ref={(el) => focusOnOpen(el)}`. Add a `"stem"` select mode when the file renames move to
