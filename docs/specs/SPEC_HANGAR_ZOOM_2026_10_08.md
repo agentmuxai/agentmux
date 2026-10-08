@@ -1,6 +1,6 @@
 # Zoom in the Hangar, through the shared pane zoom
 
-**Status:** active — built in #NNNN.
+**Status:** active — built in #4485.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "lets introduce zoom into the hangar .. write a separate spec to file"; "that too
 should be DRY .. from my understanding zoom is already well DRYly defined currently in the codebase".
