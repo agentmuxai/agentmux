@@ -232,14 +232,14 @@ impl SubagentWatcher {
                     &watcher,
                     &dispatch_id,
                     &first_member_agent_id,
-                    crate::ambient::limits::pull_call_semaphore(),
+                    crate::ambient::limits::Class::Interactive,
                 ).await;
             } else {
                 crate::ambient::tasks::generate_subagent_name(
                     &watcher.mstore,
                     &watcher,
                     &first_member_agent_id,
-                    crate::ambient::limits::pull_call_semaphore(),
+                    crate::ambient::limits::Class::Interactive,
                 ).await;
             }
         });
@@ -331,10 +331,9 @@ impl SubagentWatcher {
     /// `process_jsonl_change`'s doc comment and
     /// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md).
     ///
-    /// Deliberately separate from `trigger_eager_naming`'s live path: uses
-    /// its own `backlog_naming_semaphore()` (cap 1), not the shared
-    /// `pull_call_semaphore()` every live user-facing ambient caller
-    /// contends for.
+    /// Deliberately separate from `trigger_eager_naming`'s live path: runs as
+    /// background work (`limits::Class::Background`), so it never queues ahead
+    /// of a name or title the user is waiting on.
     pub(crate) async fn resolve_unnamed_backlog(self: std::sync::Arc<Self>) {
         let items = self.select_unnamed_backlog(BACKLOG_NAMING_BATCH_LIMIT);
         for item in items {
@@ -346,7 +345,7 @@ impl SubagentWatcher {
                             &watcher.mstore,
                             &watcher,
                             &agent_id,
-                            crate::ambient::limits::backlog_naming_semaphore(),
+                            crate::ambient::limits::Class::Background,
                         )
                         .await;
                     }
@@ -356,7 +355,7 @@ impl SubagentWatcher {
                             &watcher,
                             &dispatch_id,
                             &representative_agent_id,
-                            crate::ambient::limits::backlog_naming_semaphore(),
+                            crate::ambient::limits::Class::Background,
                         )
                         .await;
                     }

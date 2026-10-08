@@ -56,6 +56,7 @@ import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";
+import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
 import { isTitleNews, META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
@@ -132,7 +133,7 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
                 generation: Date.now(),
                 user_message: phase.pendingContent,
             },
-            { timeout: 20_000 },
+            { timeout: AMBIENT_PULL_TIMEOUT_MS },
         ).then((result) => {
             if (activeTurnId !== myTurnId) return; // superseded by a newer turn
             if (result.tokens) {

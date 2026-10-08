@@ -14,7 +14,8 @@ use std::sync::Arc;
 
 use super::call::{self, CliTarget, Reply};
 use super::reply::judge_line;
-use super::{digest, limits, prompt, purpose, validate};
+use super::limits::Class;
+use super::{digest, prompt, purpose, validate};
 use crate::agents::TokenCounts;
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::store::Store;
@@ -83,8 +84,7 @@ pub(crate) async fn generate_recovered_title(
 ) -> Option<Generated> {
     let word_target = word_target.max(3).min(20);
 
-    // No concurrency permit here: the sweep in `activity_watcher` bounds itself.
-    let slot = call::admit(&purpose::ACTIVITY_SUMMARY_PUSHED, block_id, generation, None).await?;
+    let slot = call::admit(&purpose::ACTIVITY_SUMMARY_PUSHED, block_id, generation).await?;
 
     let block: Block = mstore.get(block_id).ok().flatten()?;
     let Some(digest) = digest::read_recent_activity_digest(filestore, block_id) else {
@@ -143,9 +143,7 @@ pub(crate) async fn generate_definition_activity_summary(
     block_id: &str,
     provider_id: &str,
 ) -> Option<Generated> {
-    // Background-call semaphore, not `pull_call_semaphore()` — see
-    // `limits::definition_summary_semaphore`'s own doc comment.
-    let slot = call::admit(&purpose::DEFINITION_SUMMARY, definition_id, 1, Some(limits::definition_summary_semaphore())).await?;
+    let slot = call::admit(&purpose::DEFINITION_SUMMARY, definition_id, 1).await?;
 
     let digest = digest::read_recent_activity_digest(filestore, block_id)?;
 
@@ -220,22 +218,20 @@ pub(crate) async fn generate_subagent_name(
     mstore: &Store,
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     agent_id: &str,
-    semaphore: &'static tokio::sync::Semaphore,
+    class: Class,
 ) -> Option<Generated> {
     let info = subagent_watcher.get_info(agent_id)?;
     if let Some(existing) = info.display_name {
         return Some(Generated { text: Some(existing), tokens: None });
     }
 
-    // Concurrency cap — `pull_call_semaphore()` for the live on-click path
-    // (a user rapidly expanding several subagent rows shouldn't spawn
-    // unbounded concurrent Haiku CLIs either), `backlog_naming_semaphore()`
-    // for the bounded backfill pass — see each call site.
+    // Interactive for a live subagent or a row the user opened, background for
+    // the backlog pass over historical ones — see each call site.
     let generated = generate_name_from_task_prompt(
         mstore,
         &info,
         (&purpose::SUBAGENT_NAME, agent_id),
-        semaphore,
+        class,
         prompt::build_subagent_name_prompt,
     )
     .await?;
@@ -271,17 +267,16 @@ pub(crate) async fn generate_dispatch_name(
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     dispatch_id: &str,
     first_member_agent_id: &str,
-    semaphore: &'static tokio::sync::Semaphore,
+    class: Class,
 ) -> Option<Generated> {
     let info = subagent_watcher.get_info(first_member_agent_id)?;
 
-    // Concurrency cap — see `generate_subagent_name`'s matching comment
-    // above; same two possible callers, same two possible semaphores.
+    // Its class: see `generate_subagent_name`'s matching comment above.
     let generated = generate_name_from_task_prompt(
         mstore,
         &info,
         (&purpose::DISPATCH_NAME, dispatch_id),
-        semaphore,
+        class,
         prompt::build_dispatch_name_prompt,
     )
     .await?;
@@ -298,10 +293,10 @@ async fn generate_name_from_task_prompt(
     mstore: &Store,
     info: &crate::backend::subagent_watcher::SubAgent,
     (purpose, entity): (&'static purpose::Purpose, &str),
-    semaphore: &'static tokio::sync::Semaphore,
+    class: Class,
     build_prompt: fn(&str) -> String,
 ) -> Option<Generated> {
-    let slot = call::admit(purpose, entity, 1, Some(semaphore)).await?;
+    let slot = call::admit_as(purpose, entity, 1, class).await?;
 
     let task_prompt = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path)?;
     let block: Block = mstore.get(&info.parent_block_id).ok().flatten()?;
@@ -342,8 +337,7 @@ pub(crate) async fn generate_ambient_narration(
     // several precisely because it expects them. Keying on the block alone let
     // the second silently cancel the first, whose Haiku call then returned
     // "cancelled" and was swallowed. (reagent P1 on #3169.)
-    let slot = call::admit(&purpose::NARRATION, format!("{block_id}:{event_id}"), generation, Some(limits::narration_semaphore()))
-        .await?;
+    let slot = call::admit(&purpose::NARRATION, format!("{block_id}:{event_id}"), generation).await?;
 
     let block: Block = mstore.get(block_id).ok().flatten()?;
     let target = CliTarget::from_meta(&block.meta)?;

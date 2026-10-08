@@ -29,14 +29,14 @@
 //!     activity never shows what the work is (the model abstains) stops costing;
 //!   - no conversation in the digest means no call at all (`digest` returns
 //!     `None` for activity with no user or assistant text);
-//!   - one call in flight per block, and [`MAX_CONCURRENT`] across all blocks;
+//!   - one call in flight per block, waiting in the background class's queue
+//!     (`ambient::limits`) across all blocks;
 //!   - per-block bookkeeping is pruned each tick against the registration list.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::sync::Semaphore;
 use tokio::time::interval;
 
 use crate::ambient::validate::is_usable_title;
@@ -51,9 +51,6 @@ use super::get_global_handler;
 
 /// How often to sweep registered agents.
 const SWEEP_INTERVAL_SECS: u64 = 20;
-
-/// Max simultaneous recovery calls across all agents.
-const MAX_CONCURRENT: usize = 2;
 
 /// Completed attempts per block while its title stays empty. Bounded, as the
 /// `lys` design bounds its retries (spec section 3, research point 2).
@@ -110,7 +107,6 @@ pub(crate) fn store_recovered_title(store: &Store, block_id: &str, title: &str) 
 /// Run the recovery sweep. Never returns.
 pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore>, event_bus: Arc<EventBus>) {
     let mut ticker = interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
-    let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
     let attempts: Arc<Mutex<HashMap<String, Attempts>>> = Arc::new(Mutex::new(HashMap::new()));
     // One call per block at a time: a slow call (up to the CLI timeout) must not
     // be dispatched again by the next tick. Every insert has a matching remove.
@@ -158,16 +154,11 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
             let mstore = mstore.clone();
             let filestore = filestore.clone();
             let event_bus = event_bus.clone();
-            let semaphore = semaphore.clone();
             let attempts = attempts.clone();
             let in_flight = in_flight.clone();
             let output_size = output.size;
 
             tokio::spawn(async move {
-                let Ok(_permit) = semaphore.acquire().await else {
-                    in_flight.lock().unwrap().remove(&block_id);
-                    return;
-                };
                 let result =
                     crate::ambient::tasks::generate_recovered_title(&mstore, &filestore, &block_id, tick, WORD_TARGET)
                         .await;

@@ -329,7 +329,6 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     &ambient::purpose::ACTIVITY_SUMMARY,
                     cmd.block_id.clone(),
                     cmd.generation,
-                    Some(ambient::limits::pull_call_semaphore()),
                 )
                 .await
                 else {
@@ -430,7 +429,6 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     &ambient::purpose::NEXT_PROMPT_SUGGESTION,
                     cmd.block_id.clone(),
                     cmd.generation,
-                    Some(ambient::limits::pull_call_semaphore()),
                 )
                 .await
                 else {
