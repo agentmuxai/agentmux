@@ -3,6 +3,7 @@
 
 import clsx from "clsx";
 import { createEffect, createSignal, For, type JSX, onCleanup, Show, splitProps } from "solid-js";
+import { focusOnOpen } from "@/util/focusutil";
 import { useField } from "./Field";
 import { densityClass, type UiDensity } from "./shared";
 
@@ -33,11 +34,16 @@ export interface TextInputProps extends Omit<JSX.InputHTMLAttributes<HTMLInputEl
 }
 
 export function TextInput(props: TextInputProps): JSX.Element {
-    const [local, rest] = splitProps(props, ["density", "invalid", "detached", "class", "id", "type"]);
+    const [local, rest] = splitProps(props, ["density", "invalid", "detached", "class", "id", "type", "autofocus", "ref"]);
     const field = fieldAttrs(() => local.id, () => local.invalid);
     return (
         <input
             {...rest}
+            // `autofocus` as an attribute only works at page load; focus for real.
+            ref={(el) => {
+                if (typeof local.ref === "function") (local.ref as (el: HTMLInputElement) => void)(el);
+                if (local.autofocus) focusOnOpen(el);
+            }}
             type={local.type ?? "text"}
             id={local.detached ? local.id : field.id()}
             class={clsx("ui-input", densityClass(local.density), local.class)}

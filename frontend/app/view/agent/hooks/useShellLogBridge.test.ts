@@ -106,3 +106,68 @@ describe("useShellLogBridge", () => {
         });
     });
 });
+
+// REPORT_FOCUS_ON_OPEN_AUDIT_2026_10_08.md: a drawer the user opens takes the
+// caret; the agent's `!cmd` auto-open doesn't.
+describe("useShellLogBridge — shell focus", () => {
+    const mountDrawer = () => {
+        document.body.innerHTML = `<div id="agent-composer-details-blk"><textarea class="xterm-helper-textarea"></textarea></div>`;
+        return document.querySelector("textarea")!;
+    };
+
+    it("focuses the shell when the user's toggle opened the drawer", async () => {
+        await createRoot(async (dispose) => {
+            const bridge = useShellLogBridge("blk");
+            bridge.withShellFocus(() => {})();
+            const term = mountDrawer();
+            bridge.onTermReady(() => {});
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(document.activeElement).toBe(term);
+            dispose();
+        });
+    });
+
+    it("leaves the caret alone when the drawer opened on its own", async () => {
+        await createRoot(async (dispose) => {
+            const bridge = useShellLogBridge("blk");
+            const term = mountDrawer();
+            bridge.onTermReady(() => {});
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(document.activeElement).not.toBe(term);
+            dispose();
+        });
+    });
+
+    // The shell starts asynchronously; a caret the user moved meanwhile stays.
+    it("leaves the caret where the user moved it while the shell was starting", async () => {
+        await createRoot(async (dispose) => {
+            const bridge = useShellLogBridge("blk");
+            bridge.withShellFocus(() => {})();
+            const term = mountDrawer();
+            const composer = document.createElement("textarea");
+            document.body.appendChild(composer);
+            composer.focus();
+            bridge.onTermReady(() => {});
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(document.activeElement).toBe(composer);
+            expect(document.activeElement).not.toBe(term);
+            dispose();
+        });
+    });
+
+    it("a toggle that closed the drawer doesn't arm the next auto-open", async () => {
+        await createRoot(async (dispose) => {
+            const bridge = useShellLogBridge("blk");
+            bridge.withShellFocus(() => bridge.onTermDispose())(); // the close
+            const term = mountDrawer();
+            bridge.onTermReady(() => {}); // a later `!cmd` auto-open
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(document.activeElement).not.toBe(term);
+            dispose();
+        });
+    });
+});

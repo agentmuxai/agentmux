@@ -14,6 +14,7 @@ import type { BlockKind, FlowNode } from "./drone-types";
 import "./drone-view.scss";
 import type { Bundle } from "@/app/store/rpc-api";
 import { Button } from "@/app/element/ui";
+import { focusWhenRendered } from "@/util/focusutil";
 
 // The node kind this window is dragging from a top bar, read by the canvas's
 // drop handler. On the drag session, so every drone pane in the window sees it.
@@ -50,9 +51,11 @@ DroneView.displayName = "DroneView";
 const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
     const m = p.model;
     const validation = () => m.validate();
+    let nameEl!: HTMLInputElement;
     return (
         <header class="drone-bar">
             <input
+                ref={nameEl}
                 class="drone-bar-name"
                 value={m.draftAtom().name}
                 onInput={(e) => m.setName(e.currentTarget.value)}
@@ -82,7 +85,13 @@ const NodeTypeBar = (p: { model: DroneViewModel }): JSX.Element => {
                         </For>
                     </select>
                 </Show>
-                <Button class="drone-btn" onClick={() => m.newDrone()}>
+                <Button
+                    class="drone-btn"
+                    onClick={() => {
+                        m.newDrone();
+                        focusWhenRendered(() => nameEl, { select: true });
+                    }}
+                >
                     New
                 </Button>
                 <Button class="drone-btn" onClick={() => void m.save()}>
@@ -850,7 +859,11 @@ const VariablesEditor = (p: {
             <Button
                 density="compact"
                 class="drone-btn drone-btn--small nodrag"
-                onClick={() => p.onChange([...p.entries, { name: "", value: "" }])}
+                onClick={(e) => {
+                    const list = e.currentTarget.parentElement;
+                    p.onChange([...p.entries, { name: "", value: "" }]);
+                    focusWhenRendered(() => list?.querySelector<HTMLInputElement>(".drone-vars-row:last-of-type input"));
+                }}
             >
                 + Add
             </Button>

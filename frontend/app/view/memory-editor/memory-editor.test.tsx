@@ -13,6 +13,7 @@ import { handleMemoryEditorKeyDown } from "./editor-keys";
 import { lineDiff } from "./line-diff";
 import { MemoryDraftModel } from "./memory-draft-model";
 import { loadStoredSplit, PinnedEditorLayout, splitStorageKey } from "./PinnedEditorLayout";
+import { MemoryContent } from "./MemoryContent";
 
 afterEach(() => cleanup());
 beforeEach(() => localStorage.clear());
@@ -261,5 +262,19 @@ describe("MemoryDraftModel", () => {
         expect(model.errorAtom()).toMatch(/disk full/);
         expect(model.editingAtom()).toBe(true);
         dispose();
+    });
+});
+
+describe("MemoryContent autoFocus", () => {
+    test("the editor takes the caret when the user switches to editing", async () => {
+        render(() => <MemoryContent content="saved" editing={true} draft="saved" autoFocus />);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(screen.getByLabelText("Memory content"));
+    });
+
+    test("not without autoFocus (the New view focuses its Name field instead)", async () => {
+        render(() => <MemoryContent content={null} editing={true} draft="" />);
+        await Promise.resolve();
+        expect(document.activeElement).not.toBe(screen.getByLabelText("Memory content"));
     });
 });

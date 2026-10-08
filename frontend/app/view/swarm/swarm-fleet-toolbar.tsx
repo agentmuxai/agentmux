@@ -11,6 +11,7 @@ import { remoteFleetTargets, unavailableReason, type FleetAction } from "./swarm
 import type { SwarmViewModel } from "./swarm-model";
 import { remoteSections } from "./swarm-remote";
 import { Button } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 // Staged rollout only offered once a selection is large enough that
 // blast-radius capping is actually meaningful (spec §5.3) — for a
@@ -131,7 +132,7 @@ export function FleetToolbar({
                                         if (e.key === "Enter") void sendBroadcast();
                                         if (e.key === "Escape") { setBroadcastOpen(false); setBroadcastText(""); }
                                     }}
-                                    autofocus
+                                    ref={(el) => focusOnOpen(el)}
                                 />
                                 <Button
                                     tone="accent"

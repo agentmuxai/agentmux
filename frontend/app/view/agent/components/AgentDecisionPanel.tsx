@@ -22,6 +22,7 @@ import { usePanelKeys, type PanelKeyContext } from "./use-panel-keys";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { PermissionRequestEvent, ToolNode } from "../types";
+import { focusOnOpen } from "@/util/focusutil";
 
 export interface DecisionOutcome {
     request_id: string;
@@ -368,7 +369,7 @@ export const AgentDecisionPanel = (props: AgentDecisionPanelProps): JSX.Element 
                             }}
                             onContextMenu={showTextInputContextMenu}
                             rows={3}
-                            autofocus
+                            ref={(el) => focusOnOpen(el)}
                             aria-invalid={denyError() != null}
                             aria-describedby={denyError() ? denyErrorId : undefined}
                         />

@@ -12,6 +12,7 @@
 import { Show, type JSX } from "solid-js";
 import { Markdown } from "@/app/element/markdown";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
+import { focusOnOpen } from "@/util/focusutil";
 
 interface MemoryContentProps {
     /** Saved content; `null` = not loaded (or failed — see `error`). */
@@ -28,6 +29,8 @@ interface MemoryContentProps {
     placeholder?: string;
     emptyText?: string;
     textareaLabel?: string;
+    /** Give the editor the caret when the user switches to editing. */
+    autoFocus?: boolean;
 }
 
 export function MemoryContent(props: MemoryContentProps): JSX.Element {
@@ -74,6 +77,9 @@ export function MemoryContent(props: MemoryContentProps): JSX.Element {
                     onContextMenu={showTextInputContextMenu}
                     placeholder={props.placeholder}
                     spellcheck={false}
+                    ref={(el) => {
+                        if (props.autoFocus) focusOnOpen(el);
+                    }}
                 />
             </Show>
         </div>

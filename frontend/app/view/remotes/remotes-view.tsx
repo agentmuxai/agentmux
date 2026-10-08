@@ -24,6 +24,7 @@ import {
 } from "./remotes-sections";
 import "./remotes-view.scss";
 import { Button, FilterInput, IconButton } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 interface MenuState {
     items: ContextMenuItem[];
@@ -424,7 +425,7 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
         <form class="remotes-add" onSubmit={(e) => void submit(e)}>
             <div class="remotes-settings">
                 <For each={ADD_FIELDS}>
-                    {(f) => (
+                    {(f, i) => (
                         <label class="remotes-setting">
                             <span>{f.label}</span>
                             <input
@@ -432,6 +433,9 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                                 placeholder={f.placeholder}
                                 value={host()[f.key]}
                                 onInput={(e) => setHost({ ...host(), [f.key]: e.currentTarget.value })}
+                                ref={(el) => {
+                                    if (i() === 0) focusOnOpen(el);
+                                }}
                             />
                         </label>
                     )}

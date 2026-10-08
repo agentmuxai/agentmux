@@ -147,6 +147,10 @@ function focusBlockTarget(blockId: string): boolean {
     const el = paneFocusElement(blockId);
     if (el == null) return false;
     el.focus({ preventScroll: true });
+    // Coming back to a pane selects what its filter or search still holds, so
+    // typing replaces it (a click into the box itself places the caret instead:
+    // giveBlockFocus leaves a caret the user put in the pane alone).
+    if (el instanceof HTMLInputElement) el.select();
     return document.activeElement === el;
 }
 
@@ -176,6 +180,12 @@ function modalInTheWay(blockId: string): boolean {
     return blockEl != null && modalCovers(blockEl);
 }
 
+function caretInOtherPane(active: Element, blockId: string): boolean {
+    if (active.closest("[data-blockid]") == null) return false;
+    const pane = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
+    return pane != null && !pane.contains(active);
+}
+
 let focusRetry: number | null = null;
 
 function cancelFocusRetry(): void {
@@ -192,7 +202,16 @@ function scheduleFocusRetry(blockId: string): void {
         if (--frames < 0) return;
         if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId !== blockId) return;
         const active = document.activeElement;
-        const parked = active == null || active === document.body || active.id === `${blockId}-dummy-focus`;
+        // Parked: on <body>, on this block's dummy, still in the pane the
+        // selection just left (Cmd+, from a terminal opens Settings while the
+        // caret is in the terminal), or on a window-chrome control that opened
+        // it (the hamburger menu's button). Not a text field outside the panes.
+        const parked =
+            active == null ||
+            active === document.body ||
+            active.id === `${blockId}-dummy-focus` ||
+            caretInOtherPane(active, blockId) ||
+            (active.closest("[data-blockid]") == null && !caretInEditableOutsidePanes());
         if (!parked || !windowHasFocus() || modalInTheWay(blockId)) return;
         if (focusBlockTarget(blockId)) return;
         focusRetry = requestAnimationFrame(tick);
