@@ -1,5 +1,26 @@
 # AgentMux Version History
 
+## 0.59.15 — 2026-10-07
+
+- Copilot, OpenClaw and Pi agents can now talk to AgentMux: its ACP client now speaks ACP v1 (the right handshake, prompt format and session resume), launches these agents with the ACP controller, delivers your messages to them, answers their permission requests, and shows their errors.
+- CI accepts the renamed review and agent bots (muxreview, muxagent) alongside their old names.
+- Agents can open a browser pane of their own with OpenBrowser and drive it with the Browser and UI tools; the pane shows which agent is driving it, and Take over ends the agent's control.
+- Agents can read a browser pane as an accessibility snapshot and click, fill, select and check its elements by reference; they're never allowed to type into password, one-time-code or card fields.
+- The pulsing dot in an agent pane's working row is now the pane's color, like the status text next to it.
+- Comments, test names and the review bot's name in the app now say muxreview, its current name.
+- fix(agents): sandbox (container) agents now start for everyone with Docker. The default image is public and carries no Claude Code; AgentMux installs Claude Code in the container on first start and shows the progress in the pane. A failed image download now says what happened and offers running on this computer instead, and the New Agent dialog stops preselecting a sandbox whose image cannot be downloaded.
+- Agent pane: the token count shown when a turn finishes is what that prompt added again, not every call's input summed (it read 2.3m on a 135k context)
+- Cloud presence keeps trying after a cloud update (within minutes, not an hour), backs off on outages, works with a wrong clock or an older cloud, and Settings › Paired devices shows whether it publishes, with a Publish now button.
+- Agents can upload files from their own workspace into a browser pane, wait for a page, and hand the pane to you for sign-in; a click that submits, sends, pays or deletes waits for your approval in the pane.
+- fix(agents): the best-effort process tracker no longer misses an agent process spawned while another scan is running
+- Agent pane: the working row shows one token counter, as Claude Code does: the turn's output, growing as the model streams, with ↑ while a request is in flight and ↓ otherwise. When the turn ends, "✓ Worked · time · tokens" shows that turn's output.
+- The hamburger menu stays open while you try Themes and Opacities; the agent pane's model/effort panel keeps its text inside it; and a Bash call's expanded preview shows its output, not the command again.
+- In Read, Write and Edit rows, a long file path is cut from the left, so the file name stays in view.
+- fix(linux): zooming the window chrome out no longer shifts the tab-bar widgets and window controls left
+- fix(agent-pane): one-way follow catches the remaining one-frame drops (row remounts, rows scrolled into view, held-tool collapse, padding changes)
+- Bash rows cut a long command from the left too, so its end stays in view, like a long path in Read, Write and Edit rows.
+- Jekt messages collapse like tool calls: closed by default, held open when one arrives while you watch until it scrolls off, a click pins it open, and sensitive ones start open. Every preview box in the conversation, jekts included, now holds the wheel for a few notches at its edge even when its content fits.
+
 ## 0.59.14 — 2026-10-07
 
 - feat(agents): Linux tracks every process an agent starts in its own cgroup, and closing the agent ends them all
