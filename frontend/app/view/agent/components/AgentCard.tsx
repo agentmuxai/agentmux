@@ -102,11 +102,28 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (typeToFilter(e)) return;
         if (props.disabled) return;
         if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             props.onLaunch(props.agent, e);
         }
+    };
+
+    // Type to filter: the picker focuses its first card (Enter launches it),
+    // but a printable key goes into the pane's filter box, so landing on the
+    // picker after a close still lets the user type right away.
+    // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md §2d.
+    const typeToFilter = (e: KeyboardEvent): boolean => {
+        if (e.key.length !== 1 || e.key === " " || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return false;
+        const input = cardEl?.closest("[data-blockid]")?.querySelector<HTMLInputElement>("input[data-pane-focus]");
+        if (!input) return false;
+        e.preventDefault();
+        input.focus({ preventScroll: true });
+        const end = input.value.length;
+        input.setRangeText(e.key, end, end, "end");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
     };
 
     const handleNewClick = (e: MouseEvent) => {

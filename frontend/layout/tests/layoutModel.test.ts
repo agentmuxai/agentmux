@@ -15,6 +15,7 @@ import {
     LayoutTreeSetPendingAction,
     LayoutTreeCommitPendingAction,
     LayoutTreeFocusNodeAction,
+    LayoutTreeDeleteNodeAction,
 } from "@/layout/lib/types";
 import type { SignalAtom } from "@/util/util";
 
@@ -91,6 +92,8 @@ vi.mock("@/app/store/global", () => {
 // catch. `requestNodeFocusCaptureModel` is set by the test right before it
 // triggers the action under test.
 let requestNodeFocusCaptureModel: LayoutModel | null = null;
+// SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: the selection observer's calls.
+const ensureSelectionFocusedCalls: { reason: string; model: unknown }[] = [];
 const requestNodeFocusCaptures: { focusedNodeId: string | undefined; focusedNodeDataId: string | undefined }[] = [];
 vi.mock("@/app/store/focusManager", () => ({
     focusManager: {
@@ -101,6 +104,7 @@ vi.mock("@/app/store/focusManager", () => ({
             });
         },
         refocusNode: () => {},
+        ensureSelectionFocused: (reason: string, model: unknown) => ensureSelectionFocusedCalls.push({ reason, model }),
         claimFocusOnMount: () => {},
     },
 }));
@@ -139,6 +143,7 @@ describe("LayoutModel", () => {
         vi.useFakeTimers();
         requestNodeFocusCaptureModel = null;
         requestNodeFocusCaptures.length = 0;
+        ensureSelectionFocusedCalls.length = 0;
     });
 
     afterEach(() => {
@@ -232,6 +237,46 @@ describe("LayoutModel", () => {
         expect(model.localTreeStateAtom().magnifiedNodeId).toBeUndefined();
         expect(persist).toHaveBeenCalled();
         expect(requestNodeFocusCaptures).toHaveLength(0);
+    });
+
+    // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: closing the selected pane
+    // moves the selection to a neighbour without any FocusNode action, so no
+    // requestNodeFocus(); the model's own selection observer hands the caret on.
+    it("asks for the caret on the next frame when closing the selected pane moves the selection", () => {
+        const model = createLayoutModel();
+        const first = newLayoutNode(undefined, undefined, undefined, { blockId: "left" });
+        model.treeReducer({
+            type: LayoutTreeActionType.InsertNode,
+            node: first,
+            magnified: false,
+            focused: true,
+        } as LayoutTreeInsertNodeAction);
+        const second = newLayoutNode(undefined, undefined, undefined, { blockId: "right" });
+        model.treeReducer(
+            {
+                type: LayoutTreeActionType.SplitHorizontal,
+                targetNodeId: model.treeState.rootNode!.id,
+                newNode: second,
+                position: "after",
+                focused: false,
+            } as LayoutTreeSplitHorizontalAction,
+            false
+        );
+        vi.advanceTimersByTime(20);
+        ensureSelectionFocusedCalls.length = 0;
+
+        model.treeReducer({ type: LayoutTreeActionType.DeleteNode, nodeId: first.id } as LayoutTreeDeleteNodeAction);
+        expect(model.focusedNode()?.data?.blockId).toBe("right");
+        expect(ensureSelectionFocusedCalls).toHaveLength(0); // not inline: the DOM hasn't updated yet
+
+        vi.advanceTimersByTime(20);
+        expect(ensureSelectionFocusedCalls).toEqual([{ reason: "selection", model }]);
+
+        // A change that leaves the selection where it is asks for nothing.
+        ensureSelectionFocusedCalls.length = 0;
+        model.treeReducer({ type: LayoutTreeActionType.FocusNode, nodeId: second.id } as LayoutTreeFocusNodeAction);
+        vi.advanceTimersByTime(20);
+        expect(ensureSelectionFocusedCalls).toHaveLength(0);
     });
 
     it("creates a root node and focuses it when inserting the first block", () => {

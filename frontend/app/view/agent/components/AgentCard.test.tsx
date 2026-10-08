@@ -9,7 +9,7 @@
  * on `MyAgentsList` rows only, which this file does not touch.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // vi.mock(...) calls below are hoisted above these — and above the
@@ -209,5 +209,49 @@ describe("AgentCard default focus", () => {
     it("does not claim focus while disabled", () => {
         renderDefault({ disabled: true });
         expect(claimFocusOnMount).not.toHaveBeenCalled();
+    });
+});
+
+// SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md §2d: the picker's focus lands on
+// its first card, but typing must still filter, so a printable key goes to the
+// pane's filter box.
+describe("AgentCard type to filter", () => {
+    const renderInPane = (onLaunch = vi.fn()) => {
+        render(() => (
+            <div data-blockid="blk-1">
+                <input class="filter" data-pane-focus />
+                <AgentCard agent={makeAgent()} launching={false} disabled={false} installed={true} onLaunch={onLaunch} blockId="blk-1" />
+            </div>
+        ));
+        const card = screen.getByRole("button");
+        const filter = document.querySelector<HTMLInputElement>("input.filter")!;
+        return { card, filter, onLaunch };
+    };
+
+    it("moves a printable key into the pane's filter box", () => {
+        const { card, filter } = renderInPane();
+        const onInput = vi.fn();
+        filter.addEventListener("input", onInput);
+        card.focus();
+
+        fireEvent.keyDown(card, { key: "c" });
+
+        expect(document.activeElement).toBe(filter);
+        expect(filter.value).toBe("c");
+        expect(onInput).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps Enter, Space and shortcuts on the card", () => {
+        const { card, filter, onLaunch } = renderInPane();
+        card.focus();
+
+        fireEvent.keyDown(card, { key: "k", metaKey: true });
+        fireEvent.keyDown(card, { key: "ArrowDown" });
+        expect(filter.value).toBe("");
+        expect(document.activeElement).toBe(card);
+
+        fireEvent.keyDown(card, { key: "Enter" });
+        fireEvent.keyDown(card, { key: " " });
+        expect(onLaunch).toHaveBeenCalledTimes(2);
     });
 });

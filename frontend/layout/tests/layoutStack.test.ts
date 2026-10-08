@@ -92,11 +92,13 @@ vi.mock("@/app/store/global", () => {
 // tests exercise pure tree-mutation logic, not app-wide focus plumbing) via
 // `getLayoutModelForStaticTab()`. Mocked out entirely rather than backfilled
 // into the mock above, same reasoning as that mock's own narrow surface.
+const { ensureSelectionFocused } = vi.hoisted(() => ({ ensureSelectionFocused: vi.fn() }));
 vi.mock("@/app/store/focusManager", () => ({
     focusManager: {
         requestNodeFocus: () => {},
         refocusNode: () => {},
         claimFocusOnMount: () => {},
+        ensureSelectionFocused,
     },
 }));
 
@@ -578,6 +580,24 @@ describe("layoutStack", () => {
     });
 
     describe("closeBlockInStack", () => {
+        // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1: the pane's next tab
+        // gets the caret. removeMemberFromStack mutates the same node object,
+        // so the selection observer has to see the commit, not a new node.
+        it("asks for the caret for the pane's next tab when the selected pane closes its active tab", async () => {
+            const model = createLayoutModel();
+            const nodeId = insertRootBlock(model, "b1");
+            pushBlockOntoStack(model, nodeId, "b2");
+            vi.advanceTimersByTime(20);
+            ensureSelectionFocused.mockClear();
+
+            await closeBlockInStack(model, nodeId, "b2");
+            expect(model.focusedNode()?.data?.blockId).toBe("b1");
+            vi.advanceTimersByTime(20);
+
+            expect(ensureSelectionFocused).toHaveBeenCalledTimes(1);
+            expect(ensureSelectionFocused).toHaveBeenCalledWith("selection", model);
+        });
+
         it("delegates to closeNode (removes the whole leaf) when the leaf has no stack at all", async () => {
             const model = createLayoutModel();
             const nodeId = insertRootBlock(model, "b1");

@@ -146,7 +146,10 @@ export async function closeNode(model: LayoutModel, nodeId: string, opts?: { con
     }
 
     if (nodeId === model.magnifiedNodeId) {
-        magnifyNodeToggle(model, nodeId);
+        // Not focused: focusing the pane about to be deleted only to lose the
+        // caret again. The survivor gets it from the selection observer.
+        // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R5.
+        magnifyNodeToggle(model, nodeId, true, false);
     }
     const deleteAction: LayoutTreeDeleteNodeAction = {
         type: LayoutTreeActionType.DeleteNode,

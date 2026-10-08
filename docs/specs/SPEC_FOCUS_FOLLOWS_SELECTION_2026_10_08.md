@@ -1,6 +1,7 @@
 # Focus follows the selection: after any close, you can type right away
 
-**Status:** proposed — nothing built.
+**Status:** active — R1, R2, R4 and R5's `closeNode` fix built in #NNNN (§8). R3 and R5's Windows browser reclaim are
+not built yet.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "if I type exit or close a pane tab, or entire pane, and the next pane that is
 selected/border highlight, i should be able to type right away. this is for anything with an input, include terminal,
@@ -83,9 +84,9 @@ only focus trigger is the tab-visibility effect (`block.tsx:502-513`), which cal
 | Files | file list (`files.tsx:45-48`) | unchanged |
 | Launcher | search input (`launcher.tsx:100-106`), no mount claim | add the mount claim |
 | Settings | none | search box (`settings-search-bar.tsx`) |
-| Swarm | none | toolbar search (`swarm-fleet-toolbar.tsx`) |
-| Remotes, Toolchain, Drone | none | their filter/search input (`remotes-view.tsx`, `toolchain-view.tsx`, `drone-view.tsx`) |
-| Identity | returns false, not wired (`identity-model.ts:729`) | first field of the account form (`identity-account-form.tsx`) |
+| Remotes | none | its filter input (`remotes-view.tsx`) |
+| Swarm, Toolchain, Drone | none | the pane root. Their search fields sit behind a toolbar toggle or only exist in some modes, so there is no input that is always there to type into. |
+| Identity | returns false, not wired (`identity-model.ts:729`) | the pane root: the account form is a secondary screen, not the pane's landing state |
 | Help, Sysinfo, Media, Memory, Connectors, Warden, Armory | none | the pane root (dummy input), so shortcuts and arrow keys work |
 
 ## 3. Design
@@ -197,3 +198,50 @@ overlay. Both go through the live script before merge.
    next unwired path gets found.
 3. **Terminal not in `term` mode** (exit banner shown with close-on-exit off): today `giveFocus` returns false. With R1
    the dummy input gets the caret, so pane shortcuts work. Recommended: keep it that way; there is nothing to type into.
+
+## 8. As built (#NNNN)
+
+The design above called `ensureSelectionFocused` from each place the selection can change. Building it showed one
+observer covers all of them, so that is what was built:
+
+- **R1, one observer per layout model.** `LayoutModel` watches a memo of the selected node's id and block id
+  (`layoutModel.ts`, next to `focusedNode`). When it changes for any reason (a pane deleted by `closeNode` or by srv's
+  backend batch, a pane tab closed or switched, a view swapped inside the pane), it calls
+  `focusManager.ensureSelectionFocused("selection", model)` on the next frame, after the DOM has updated. A background
+  tab's model is ignored. No close path calls it by hand, so a new close path is covered without wiring.
+- **R1, waiting for a view that is still mounting.** Instead of each view registering a mount claim, `giveBlockFocus`
+  retries every frame for up to `FOCUS_RETRY_FRAMES` (60, about a second) while the block is still the selection, the
+  caret is still parked (on `<body>` or the block's dummy input) and no modal is open. This covers the launcher, the
+  picker and any pane that mounts fresh.
+- **R1, window tabs.** `installFocusFollowsSelection()` (called from `app-init.ts`) watches `atoms.activeTabId` and
+  asks on the next frame; the retry covers a tab still held hidden behind the reveal gate.
+- **R1, modal.** `modal.tsx` falls back to `ensureSelectionFocused("modal-closed")` when the opener is gone.
+- **R2** as designed, in `installFocusFollowsSelection()`. It also covers `exit` in an agent's shell drawer: the xterm
+  unmounts, focus falls to `<body>`, and the net hands it to the composer.
+- **R4, a `data-pane-focus` attribute** instead of a `focus` method per pane type. `giveBlockFocus` tries the view's
+  `giveFocus()`, then the first visible, enabled `[data-pane-focus]` inside the block, then the dummy input. Marked:
+  the My Agents picker's filter box, Settings' search box, Remotes' filter. The picker's first card still takes focus
+  (Enter launches it); a printable key typed on a card goes into the filter box (`AgentCard.tsx`).
+- **R5:** `closeNode` un-magnifies without requesting focus.
+- **Guards** (all in `ensureSelectionFocused` / `giveBlockFocus`): an open modal; a caret in an editable element outside
+  every pane (`caretInEditableOutsidePanes`, `focusutil.ts`); a caret the user put in an input inside the selected pane
+  (`userCaretInBlock`, unchanged).
+
+### Consolidated (DRY)
+
+| Before | After |
+|---|---|
+| `block.tsx`'s tab-visibility effect called the view's `giveFocus()` directly, with no caret guard, no fallback and no retry | it calls `giveBlockFocus`, the routine every other "focus this pane" path already used |
+| Each close path would have needed its own focus call (the 10-03 spec listed six) | one selection observer per layout model |
+| A focus method per pane type with an input | one `data-pane-focus` attribute, found by `giveBlockFocus` |
+| Each late-mounting view claims focus on mount | one retry in `giveBlockFocus` |
+| `userCaretInBlock` and the new outside-panes check each had their own "is this a text entry" test | one `isTextEntry` in `focusutil.ts` |
+
+### Not built yet
+
+- **R3** (agent tabs leave the strip at once): a second PR. Until then, closing an agent tab hands the caret over when
+  srv's delete arrives (the observer sees the selection change then), not immediately.
+- **R5, Windows browser reclaim.**
+- **The CDP script** in §5 is not checked in yet. For this PR, a scratch version drove rows 1, 2, 3 and 5 on a dev
+  build, landing on a terminal, an agent composer, the launcher and Settings: on `main` five of the six cases left the
+  caret on `<body>`; with this change all six land in the highlighted pane's input.

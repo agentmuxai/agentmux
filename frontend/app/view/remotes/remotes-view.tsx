@@ -54,6 +54,8 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
             <div class="remotes-toolbar">
                 <input
                     class="remotes-filter"
+                    // The pane's typing target when nothing else claims it (focusManager).
+                    data-pane-focus
                     type="search"
                     placeholder="Filter remotes"
                     aria-label="Filter remotes"
