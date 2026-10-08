@@ -6,7 +6,7 @@
 come and go, should move off the top. The status bar's backend dot turns yellow while there is a problem
 (no chip on the status bar itself); the notices appear as chips at the top of the panel that opens from
 the uptime; and they still come and go as the instance recovers. Reassess the architecture behind them too.
-**Status:** proposed — plan agreed with the operator (§6); no code changed yet. §3 is the design, §5 the work.
+**Status:** implemented (#4487) — plan agreed with the operator (§6). §3 is the design, §5 the work.
 
 ## 1. What exists today
 
