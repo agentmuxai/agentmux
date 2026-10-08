@@ -42,7 +42,7 @@ No search, no anchors, no `giveFocus` and no `data-pane-focus`, so Help never to
   list keeps its order and what shows is predictable. Matching the group name means "terminal" or "tabs" shows a whole
   group.
 - **Keys by name.** macOS key labels are symbols ("⇧⌘W"), so each key label also carries its symbols' names
-  (`keyLabelWords`, `element/quicktips-filter.ts`): "cmd shift w" finds it. Other platforms' labels are words already
+  (`keyLabelWords`, `keybindings/help.ts`, beside the rest of the key labels): "cmd shift w" finds it. Other platforms' labels are words already
   ("Ctrl+Shift+W").
 - **What hides.** Items that don't match; a shortcut group or card with nothing left; the alpha notice while the box
   has text (it is a notice, not help content).

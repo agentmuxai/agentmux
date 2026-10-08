@@ -15,7 +15,7 @@ vi.mock("@/app/keybindings", () => ({
 }));
 
 import { QuickTips } from "./quicktips";
-import { keyLabelWords } from "./quicktips-filter";
+import { keyLabelWords } from "@/app/keybindings/help";
 
 afterEach(() => cleanup());
 

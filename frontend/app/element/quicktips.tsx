@@ -5,7 +5,7 @@ import { shortcutFor, shortcutHelp } from "@/app/keybindings";
 import { cn } from "@/util/util";
 import { createMemo, For, JSX, Show } from "solid-js";
 import { matchesEveryWord } from "@/app/util/fuzzysearch";
-import { keyLabelWords } from "./quicktips-filter";
+import { keyLabelWords } from "@/app/keybindings/help";
 
 const KeyCap = (props: { children?: JSX.Element }): JSX.Element => {
     return (
