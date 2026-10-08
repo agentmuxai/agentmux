@@ -112,14 +112,15 @@ fn drop_bundle_mcp(mstore: &Store, identity_store: Option<&Store>, bundle_store:
     }
 
     // The inline column, which nothing has read since the ref tables became
-    // authoritative, but which still holds server configs.
-    match bundle_store.conn().lock().unwrap().execute(
-        "UPDATE db_bundles SET mcp_servers = '[]' WHERE mcp_servers NOT IN ('', '[]')",
-        [],
-    ) {
-        Ok(n) => dropped.inline_bundles = n,
-        Err(e) => tracing::warn!(error = %e, "drop_bundle_mcp: inline mcp_servers not cleared"),
-    }
+    // authoritative, but which still holds server configs, credentials
+    // included. A failure fails the migration, so it's retried on the next
+    // boot rather than recorded as done with the configs still stored.
+    dropped.inline_bundles = bundle_store
+        .conn()
+        .lock()
+        .unwrap()
+        .execute("UPDATE db_bundles SET mcp_servers = '[]' WHERE mcp_servers NOT IN ('', '[]')", [])
+        .map_err(|e| format!("drop_bundle_mcp: clear inline mcp_servers: {e}"))?;
 
     tracing::info!(
         refs = dropped.refs,
@@ -293,6 +294,17 @@ mod tests {
         exec(&mstore, "INSERT INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES ('b1', 'x')", &[]);
         drop_bundle_mcp(&mstore, None, &shared).unwrap();
         assert_eq!(count(&mstore, "SELECT COUNT(*) FROM db_bundle_mcp_ref"), 0);
+    }
+
+    /// A failed clear of the inline column fails the run, so the migration
+    /// isn't recorded as applied with server configs still stored.
+    #[test]
+    fn a_failed_inline_clear_fails_the_migration() {
+        let mstore = Store::open_in_memory().unwrap();
+        let shared = Store::open_in_memory().unwrap();
+        exec(&shared, "DROP TABLE db_bundles", &[]);
+        let err = drop_bundle_mcp(&mstore, None, &shared).unwrap_err();
+        assert!(err.contains("clear inline mcp_servers"), "{err}");
     }
 
     #[test]
