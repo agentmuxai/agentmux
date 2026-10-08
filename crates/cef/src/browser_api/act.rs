@@ -763,6 +763,10 @@ pub struct SetFilesReq {
     pub files: Vec<UploadFile>,
 }
 
+/// The set_files request body limit: srv's 25 MB of files as base64 (4/3)
+/// plus JSON overhead, with room to spare.
+pub const SET_FILES_BODY_LIMIT: usize = 40 * 1024 * 1024;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UploadFile {
     pub name: String,
