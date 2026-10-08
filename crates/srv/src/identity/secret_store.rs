@@ -131,6 +131,21 @@ impl SharedReads {
         timeout: Duration,
         read: impl FnOnce() -> ReadResult + Send + 'static,
     ) -> Result<ReadResult, RunOutcome> {
+        let spawn = |work: Box<dyn FnOnce() + Send>| {
+            std::thread::Builder::new().name("keychain-read".into()).spawn(work).map(drop)
+        };
+        self.read_with(account_id, timeout, read, spawn)
+    }
+
+    /// [`read`](Self::read) with the thread start passed in, so a test can
+    /// make it fail.
+    fn read_with(
+        &self,
+        account_id: &str,
+        timeout: Duration,
+        read: impl FnOnce() -> ReadResult + Send + 'static,
+        spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
+    ) -> Result<ReadResult, RunOutcome> {
         let pending = {
             let mut in_flight = lock(&self.in_flight);
             match in_flight.get(account_id) {
@@ -139,7 +154,7 @@ impl SharedReads {
                     let pending = Arc::new(PendingRead::default());
                     in_flight.insert(account_id.to_string(), pending.clone());
                     let (worker, map, id) = (pending.clone(), self.in_flight.clone(), account_id.to_string());
-                    std::thread::spawn(move || {
+                    let started = spawn(Box::new(move || {
                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).map_err(|_| ());
                         // Leave the map first, so a read that starts once the
                         // answer is out reads again. Only if this is still the
@@ -151,7 +166,13 @@ impl SharedReads {
                         drop(in_flight);
                         *lock(&worker.result) = Some(result);
                         worker.done.notify_all();
-                    });
+                    }));
+                    if let Err(e) = started {
+                        // Nothing will ever answer this entry: drop it, or every
+                        // later read of the account would wait on it and time out.
+                        in_flight.remove(account_id);
+                        return Ok(Err(format!("keychain read failed: could not start a thread: {e}")));
+                    }
                     pending
                 }
             }
@@ -556,6 +577,16 @@ mod tests {
         std::thread::sleep(SHORT);
         assert_eq!((old.calls(), new.calls()), (1, 1));
         new.open();
+    }
+
+    #[test]
+    fn a_read_whose_thread_cannot_start_fails_and_does_not_block_the_next() {
+        let reads = SharedReads::new();
+        let refuse = |_: Box<dyn FnOnce() + Send>| Err(std::io::Error::other("no threads left"));
+        let failed = reads.read_with("acct", LONG, || Ok(None), refuse).unwrap();
+        assert!(failed.unwrap_err().contains("no threads left"));
+        // Not left waiting on a read that never started.
+        assert_eq!(reads.read("acct", LONG, || secret("v")), Ok(secret("v")));
     }
 
     #[test]
