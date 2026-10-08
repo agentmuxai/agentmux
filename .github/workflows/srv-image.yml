@@ -54,9 +54,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          FILES="$(gh api \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --paginate --jq '.[] | {filename, patch}' 2>/dev/null | jq -s '.')" || FILES=""
+          # gh's status on its own (see ci-pr.yml): a pipeline would report
+          # jq's, so a failed later page could leave a partial list.
+          FILES=""
+          if RAW="$(gh api \
+               "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+               --paginate --jq '.[] | {filename, patch}' 2>/dev/null)"; then
+            FILES="$(printf '%s' "$RAW" | jq -s '.')" || FILES=""
+          fi
           if printf '%s\n' "$FILES" | node scripts/ci-classify-changes.mjs >/tmp/classify.out 2>/tmp/classify.err; then
             grep '^version_only=' /tmp/classify.out >> "$GITHUB_OUTPUT"
             echo "::notice::$(cat /tmp/classify.err)"
