@@ -49,6 +49,13 @@ describe("JektBubble — the live-arrival hold", () => {
         expect(onHoldOpen).toHaveBeenCalledTimes(1);
     });
 
+    it("counts a held jekt from when it was delivered, not when it was sent", () => {
+        const onHoldOpen = vi.fn();
+        const held: JektMessageNode = { ...node, timestamp: Date.now() - 600_000, heldForSecs: 600 };
+        render(() => <JektBubble node={held} collapsed={false} onToggle={() => {}} onHoldOpen={onHoldOpen} />);
+        expect(onHoldOpen).toHaveBeenCalledTimes(1);
+    });
+
     it("does not for a jekt loaded from history", () => {
         const onHoldOpen = vi.fn();
         render(() => <JektBubble node={at(Date.now() - 60_000)} collapsed={true} onToggle={() => {}} onHoldOpen={onHoldOpen} />);

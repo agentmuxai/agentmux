@@ -19,12 +19,12 @@
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
  */
 
+import { LinkifiedText } from "@/app/element/linkified-text";
 import { Show, createEffect, untrack, type JSX } from "solid-js";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
-import { LinkifiedText } from "@/app/element/linkified-text";
-import { CollapsibleMessage } from "./CollapsibleMessage";
 import { arrivedLive } from "../virtualization/live-arrival";
+import { CollapsibleMessage } from "./CollapsibleMessage";
 import { previewBox } from "./scroll-handoff";
 
 interface JektBubbleProps {
@@ -49,6 +49,13 @@ function formatHeldFor(secs: number): string {
     return m ? `${h} h ${m} min` : `${h} h`;
 }
 
+/** When the jekt reached this pane: its send time, plus how long it waited if
+ *  it was held for an absent recipient (`HELD_FOR`). A held jekt delivered
+ *  just now arrived live, however long ago it was sent. */
+export function deliveredAt(node: Pick<JektMessageNode, "timestamp" | "heldForSecs">): number {
+    return node.timestamp + (node.heldForSecs ?? 0) * 1000;
+}
+
 /** Both capped boxes (body, raw payload) skid and hand scroll to the pane at
  *  their edges, like a tool preview (scroll-handoff.ts `previewBox`). */
 const handoff = previewBox();
@@ -62,70 +69,70 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
         const node = props.node;
         if (node.id === checkedId) return;
         checkedId = node.id;
-        if (node.tier !== "sensitive" && arrivedLive(node.timestamp)) untrack(() => props.onHoldOpen?.());
+        if (node.tier !== "sensitive" && arrivedLive(deliveredAt(node))) untrack(() => props.onHoldOpen?.());
     });
 
     return (
-    // Don't destructure props — see CollapsibleMessage for why. The row,
-    // toggle, chevron and peek come from there; the peek adds a relative
-    // time, which the expanded view's toLocaleString() line lacks.
-    <CollapsibleMessage
-        rootClass="agent-jekt-bubble"
-        classPrefix="agent-jekt"
-        classes={{
-            incoming: props.node.direction === "incoming",
-            outgoing: props.node.direction === "outgoing",
-            [`tier-${props.node.tier}`]: true,
-        }}
-        collapsed={props.collapsed}
-        onToggle={props.onToggle}
-        peekText={props.node.message}
-        timestamp={props.node.timestamp}
-        summary={
-            <>
-                <span class="agent-jekt-direction-icon">{props.node.direction === "incoming" ? "📥" : "📤"}</span>
-                <span class="agent-jekt-peer">
-                    {props.node.direction === "incoming" ? `From ${props.node.from}` : `To ${props.node.to}`}
-                </span>
-                <span class="agent-jekt-tier-badge" title={`Tier: ${props.node.tier}`}>
-                    {JEKT_TIER_ICONS[props.node.tier]} {props.node.tier}
-                </span>
-                <span
-                    class="agent-jekt-delivery-badge"
-                    title={`Delivery: ${props.node.deliveryTier} (${props.node.trust})`}
-                >
-                    {JEKT_DELIVERY_ICONS[props.node.deliveryTier]} {props.node.deliveryTier}
-                </span>
-            </>
-        }
-        body={
-            <>
-                <pre class="agent-jekt-body" ref={handoff}>
-                    <LinkifiedText text={props.node.message} />
-                </pre>
-                <div class="agent-jekt-meta">
-                    <span class="agent-jekt-meta-item">From: {props.node.from}</span>
-                    <span class="agent-jekt-meta-item">To: {props.node.to}</span>
-                    <span class="agent-jekt-meta-item">MSGID: {props.node.msgId || "—"}</span>
-                    <span class="agent-jekt-meta-item">Trust: {props.node.trust}</span>
-                    <span class="agent-jekt-meta-item">Priority: {props.node.priority}</span>
-                    <span class="agent-jekt-meta-item">{formatTimestamp(props.node.timestamp)}</span>
-                    <Show when={props.node.heldForSecs !== undefined}>
-                        <span
-                            class="agent-jekt-meta-item"
-                            title="The recipient was not running; this was held and delivered when it started"
-                        >
-                            Held for {formatHeldFor(props.node.heldForSecs ?? 0)}
-                        </span>
-                    </Show>
-                </div>
-                <details class="agent-jekt-raw">
-                    <summary>Raw payload</summary>
-                    <pre ref={handoff}>{props.node.raw}</pre>
-                </details>
-            </>
-        }
-    />
+        // Don't destructure props — see CollapsibleMessage for why. The row,
+        // toggle, chevron and peek come from there; the peek adds a relative
+        // time, which the expanded view's toLocaleString() line lacks.
+        <CollapsibleMessage
+            rootClass="agent-jekt-bubble"
+            classPrefix="agent-jekt"
+            classes={{
+                incoming: props.node.direction === "incoming",
+                outgoing: props.node.direction === "outgoing",
+                [`tier-${props.node.tier}`]: true,
+            }}
+            collapsed={props.collapsed}
+            onToggle={props.onToggle}
+            peekText={props.node.message}
+            timestamp={props.node.timestamp}
+            summary={
+                <>
+                    <span class="agent-jekt-direction-icon">{props.node.direction === "incoming" ? "📥" : "📤"}</span>
+                    <span class="agent-jekt-peer">
+                        {props.node.direction === "incoming" ? `From ${props.node.from}` : `To ${props.node.to}`}
+                    </span>
+                    <span class="agent-jekt-tier-badge" title={`Tier: ${props.node.tier}`}>
+                        {JEKT_TIER_ICONS[props.node.tier]} {props.node.tier}
+                    </span>
+                    <span
+                        class="agent-jekt-delivery-badge"
+                        title={`Delivery: ${props.node.deliveryTier} (${props.node.trust})`}
+                    >
+                        {JEKT_DELIVERY_ICONS[props.node.deliveryTier]} {props.node.deliveryTier}
+                    </span>
+                </>
+            }
+            body={
+                <>
+                    <pre class="agent-jekt-body" ref={handoff}>
+                        <LinkifiedText text={props.node.message} />
+                    </pre>
+                    <div class="agent-jekt-meta">
+                        <span class="agent-jekt-meta-item">From: {props.node.from}</span>
+                        <span class="agent-jekt-meta-item">To: {props.node.to}</span>
+                        <span class="agent-jekt-meta-item">MSGID: {props.node.msgId || "—"}</span>
+                        <span class="agent-jekt-meta-item">Trust: {props.node.trust}</span>
+                        <span class="agent-jekt-meta-item">Priority: {props.node.priority}</span>
+                        <span class="agent-jekt-meta-item">{formatTimestamp(props.node.timestamp)}</span>
+                        <Show when={props.node.heldForSecs !== undefined}>
+                            <span
+                                class="agent-jekt-meta-item"
+                                title="The recipient was not running; this was held and delivered when it started"
+                            >
+                                Held for {formatHeldFor(props.node.heldForSecs ?? 0)}
+                            </span>
+                        </Show>
+                    </div>
+                    <details class="agent-jekt-raw">
+                        <summary>Raw payload</summary>
+                        <pre ref={handoff}>{props.node.raw}</pre>
+                    </details>
+                </>
+            }
+        />
     );
 };
 

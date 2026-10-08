@@ -9,8 +9,9 @@
  * A finished tool whose start and end landed in one stream flush is first drawn
  * already finished, with no transition to see, and a jekt has no transition at
  * all. Both carry the time they arrived (a live tool call is stamped when it
- * comes in; a jekt carries its send time), and a loaded transcript's rows are
- * old, so a recent stamp is the sign of a live arrival.
+ * comes in; a jekt carries its send time, plus `HELD_FOR` when it waited for
+ * an absent recipient, see JektBubble's `deliveredAt`), and a loaded
+ * transcript's rows are old, so a recent stamp is the sign of a live arrival.
  */
 
 /** How recent a row's stamp must be for the row to count as arriving live. */

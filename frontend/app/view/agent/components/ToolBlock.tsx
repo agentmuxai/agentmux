@@ -155,8 +155,6 @@ interface ToolBlockProps {
 // Ctrl+wheel over a preview now simply zooms the pane, which already
 // scales previews correctly, hardcoded pixels included.
 
-/** How recent a finished row's call stamp must be for it to count as a live completion. */
-
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Drives the peek tooltip's live "time ago" text (§2.3 of
     // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md). Unconditional, same
