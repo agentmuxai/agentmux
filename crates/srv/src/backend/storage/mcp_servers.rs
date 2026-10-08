@@ -410,6 +410,27 @@ mod effective_tests {
         store.agent_def_insert(&mut def).unwrap();
     }
 
+    fn bundle_row(id: &str) -> Bundle {
+        Bundle {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 1,
+            updated_at: 1,
+            is_system: false,
+        }
+    }
+
     fn bundle(store: &Store, id: &str) {
         store
             .bundle_upsert(&Bundle {
@@ -466,6 +487,34 @@ mod effective_tests {
             store.effective_mcp_servers(&store, "agent-1").into_iter().map(|s| s.name).collect();
         names.sort();
         assert_eq!(names, vec!["Agent's".to_string(), "Global".to_string()]);
+    }
+
+    /// A bundle write never stores MCP configs, whatever the caller sends, and
+    /// a read never returns any (see `bundles::NO_INLINE_MCP_SERVERS`).
+    #[test]
+    fn a_bundle_write_never_stores_mcp_servers_and_a_read_never_returns_them() {
+        let store = Store::open_in_memory().unwrap();
+        let inline = r#"[{"name":"gh","env":{"GITHUB_TOKEN":"secret"}}]"#;
+        let mut user = Bundle { mcp_servers: inline.to_string(), ..bundle_row("user") };
+        store.bundle_upsert(&user).unwrap();
+        user.id = "system".to_string();
+        user.name = "system".to_string();
+        user.is_system = true;
+        store.bundle_upsert_system(&user).unwrap();
+
+        let stored: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM db_bundles WHERE mcp_servers != '[]'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(stored, 0);
+
+        // Left by an older build: still not read back.
+        store.conn.lock().unwrap().execute("UPDATE db_bundles SET mcp_servers = ?1", params![inline]).unwrap();
+        for id in ["user", "system"] {
+            assert_eq!(store.bundle_get(id).unwrap().unwrap().mcp_servers, "[]");
+        }
     }
 
     #[test]

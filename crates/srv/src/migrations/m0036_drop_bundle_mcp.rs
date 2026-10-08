@@ -264,7 +264,9 @@ mod tests {
         let identity = Store::open_in_memory().unwrap();
         let shared = Store::open_in_memory().unwrap();
 
-        shared.bundle_upsert(&bundle("b1", r#"[{"name":"inline","env":{"T":"x"}}]"#)).unwrap();
+        shared.bundle_upsert(&bundle("b1", "[]")).unwrap();
+        // What an older build left inline; bundle_upsert itself always stores "[]".
+        exec(&shared, r#"UPDATE db_bundles SET mcp_servers = '[{"name":"inline","env":{"T":"x"}}]' WHERE id = 'b1'"#, &[]);
         let mut def = test_agent_def("agent-1", "Agent", "claude", "agent", 1, "");
         def.memory_id = "b1".to_string();
         mstore.agent_def_insert(&mut def).unwrap();
@@ -290,7 +292,7 @@ mod tests {
         for kept in ["global", "shared-with-agent", "agent-own"] {
             assert!(identity.mcp_server_get(kept).unwrap().is_some(), "{kept} stays");
         }
-        assert_eq!(shared.bundle_get("b1").unwrap().unwrap().mcp_servers, "[]");
+        assert_eq!(count(&shared, "SELECT COUNT(*) FROM db_bundles WHERE mcp_servers != '[]'"), 0, "the inline column is cleared");
     }
 
     #[test]
