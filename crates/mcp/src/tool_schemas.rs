@@ -368,7 +368,7 @@ pub(crate) const BROWSER_CHECK_TOOL: &str = r#"{
 
 pub(crate) const BROWSER_SET_FILES_TOOL: &str = r#"{
   "name": "BrowserSetFiles",
-  "description": "Upload files into a file input (named \"file input\" in BrowserSnapshot) by its ref, without opening a file dialog. Only files inside your own workspace are allowed (absolute paths, or relative to your workspace); copy a file there first if it lives elsewhere. Returns the names and sizes the input now holds. Every upload is logged.",
+  "description": "Upload files into a file input (named \"file input\" in BrowserSnapshot) by its ref, without opening a file dialog. Only files inside your own workspace are allowed (absolute paths, or relative to your workspace); copy a file there first if it lives elsewhere. Up to 25 MB in all; for bigger files, hand the pane to the user (BrowserHandoff). Returns the names and sizes the input now holds. Every upload is logged.",
   "inputSchema": {
     "type": "object",
     "properties": {
