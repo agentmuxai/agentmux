@@ -79,7 +79,9 @@ meta; `start` forgets the old session, so the message waits for the new one.
   agent replays the earlier conversation as `session/update`s before it
   answers the load, and the pane already has those turns (their tool-call ids
   would collide). The load's own answer is not part of the replay.
-- After `session/new` is refused, a send returns an error ("couldn't open a
+- `cwd` is always an absolute directory: the pane's working directory
+  (`~` expanded), else the directory the agent process starts in.
+- After `initialize` or `session/new` is refused, a send returns an error ("couldn't open a
   session") instead of queuing for a session that can never open; restarting
   the agent starts a fresh handshake.
 - A `session/load` the agent refuses is not shown in the pane: the client

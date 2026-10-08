@@ -88,6 +88,18 @@ fn is_session_replay(loading: bool, is_session_response: bool) -> bool {
     loading && !is_session_response
 }
 
+/// The absolute directory ACP's `session/new` and `session/load` take as
+/// `cwd`: the pane's working directory (`~` expanded), else the directory the
+/// agent process itself starts in, which is where an unset one runs.
+fn session_cwd(working_dir: &str) -> String {
+    if !working_dir.is_empty() {
+        return super::core::expand_home_dir(working_dir);
+    }
+    std::env::current_dir()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| ".".to_string())
+}
+
 /// `session/prompt` params: the prompt is an array of content blocks.
 fn prompt_params(session_id: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
@@ -498,6 +510,14 @@ impl AcpController {
                         if is(inner.session_request_id) && json.get("result").is_some() {
                             loaded = inner.loading_session.take();
                         }
+                        if next.is_none() && is(inner.init_request_id) && json.get("error").is_some() {
+                            // initialize refused (an unsupported protocol
+                            // version): no session will ever open.
+                            inner.init_request_id = None;
+                            inner.pending_prompt = None;
+                            inner.session_failed = true;
+                            turn_ended_by_error = true;
+                        }
                         if next.is_none() && is(inner.session_request_id) && json.get("error").is_some() {
                             // session/new refused (pi: "Authentication
                             // required"): the queued prompt can't run.
@@ -784,7 +804,7 @@ impl AcpController {
         .to_string();
         let mut inner = self.inner.lock().unwrap();
         inner.init_request_id = Some(init_id);
-        inner.session_cwd = working_dir.clone();
+        inner.session_cwd = session_cwd(&working_dir);
         if let Some(ref tx) = inner.stdin_tx {
             if tx.try_send(init_req).is_err() {
                 tracing::error!(block_id = %self.block_id, "[acp] initialize dropped — channel full or closed; agent will not start");
@@ -1352,6 +1372,14 @@ mod tests {
         let err = c.send_input(BlockInputUnion::data(b"hi".to_vec()), None).unwrap_err();
         assert!(err.contains("couldn't open a session"), "{err}");
         assert!(c.inner.lock().unwrap().pending_prompt.is_none());
+    }
+
+    #[test]
+    fn the_session_directory_is_never_empty() {
+        assert_eq!(super::session_cwd("C:/work/a"), "C:/work/a");
+        let fallback = super::session_cwd("");
+        assert!(!fallback.is_empty());
+        assert!(std::path::Path::new(&fallback).is_absolute(), "{fallback}");
     }
 
     #[test]
