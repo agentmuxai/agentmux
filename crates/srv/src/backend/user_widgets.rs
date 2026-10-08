@@ -62,7 +62,10 @@ pub fn merge_widgets(
     mut user: HashMap<String, WidgetConfigType>,
 ) -> HashMap<String, WidgetConfigType> {
     for (old, new) in RENAMED_WIDGETS {
-        if let Some(entry) = user.remove(*old) {
+        if let Some(mut entry) = user.remove(*old) {
+            if *old == "defwidget@remotes" {
+                retarget_remotes(&mut entry);
+            }
             // An entry the user already wrote under the new key wins.
             user.entry(new.to_string()).or_insert(entry);
         }
@@ -70,6 +73,18 @@ pub fn merge_widgets(
     let mut merged = builtin.clone();
     merged.extend(user);
     merged
+}
+
+/// A Remotes widget entry opens Connectors on its Remotes section. Its old
+/// `view: "remotes"` would still load (through the frontend's legacy manifest),
+/// but a click on it would make a new pane each time instead of focusing the
+/// Connectors one, and the Connectors tab wouldn't take its label and icon.
+fn retarget_remotes(entry: &mut WidgetConfigType) {
+    let meta = &mut entry.block_def.meta;
+    if meta.get("view").and_then(|v| v.as_str()) == Some("remotes") {
+        meta.insert("view".into(), "connectors".into());
+        meta.entry("connectors:section".into()).or_insert_with(|| "remotes".into());
+    }
 }
 
 fn apply(config_watcher: &ConfigState, user: HashMap<String, WidgetConfigType>) {
@@ -212,9 +227,28 @@ mod tests {
     #[test]
     fn an_entry_for_the_remotes_widget_replaces_connectors() {
         let builtin = HashMap::from([("defwidget@connectors".to_string(), widget("Connectors"))]);
-        let merged = merge_widgets(&builtin, HashMap::from([("defwidget@remotes".to_string(), widget("Mine"))]));
+        let mut mine = widget("Mine");
+        mine.block_def.meta.insert("view".into(), "remotes".into());
+        mine.block_def.meta.insert("term:zoom".into(), 1.2.into());
+        let merged = merge_widgets(&builtin, HashMap::from([("defwidget@remotes".to_string(), mine)]));
         assert_eq!(merged.len(), 1, "no stray Remotes widget");
-        assert_eq!(merged["defwidget@connectors"].label, "Mine");
+        let w = &merged["defwidget@connectors"];
+        assert_eq!(w.label, "Mine");
+        // It opens Connectors on Remotes, and keeps the rest of its meta.
+        assert_eq!(w.block_def.meta["view"], "connectors");
+        assert_eq!(w.block_def.meta["connectors:section"], "remotes");
+        assert_eq!(w.block_def.meta["term:zoom"], 1.2);
+    }
+
+    #[test]
+    fn a_remotes_entry_for_another_view_is_moved_but_left_as_it_is() {
+        let builtin = HashMap::from([("defwidget@connectors".to_string(), widget("Connectors"))]);
+        let mut mine = widget("Mine");
+        mine.block_def.meta.insert("view".into(), "term".into());
+        let merged = merge_widgets(&builtin, HashMap::from([("defwidget@remotes".to_string(), mine)]));
+        let w = &merged["defwidget@connectors"];
+        assert_eq!(w.block_def.meta["view"], "term");
+        assert!(!w.block_def.meta.contains_key("connectors:section"));
     }
 
     #[test]
