@@ -68,6 +68,7 @@ describe("demo widget config", () => {
             label: "Editor",
             blockdef: { meta: { view: "editor", "editor:tree_expanded": true, "editor:scratch": true } },
         },
+        "defwidget@sysinfo": { label: "Sysinfo", blockdef: { meta: { view: "sysinfo" } } },
     };
 
     it("starts Hangar, Terminal and Editor in the demo project and keeps the rest of each entry", () => {
@@ -86,6 +87,11 @@ describe("demo widget config", () => {
             view: "editor",
             "editor:tree_expanded": false,
             file: "D:/demo/acme-web/src/App.tsx",
+        });
+        expect(w["defwidget@sysinfo"].blockdef.meta).toEqual({
+            view: "sysinfo",
+            "sysinfo:type": "CPU + Mem + Net",
+            "graph:metrics": ["cpu", "mem:used", "net:bytestotal"],
         });
         // The built-ins aren't modified.
         expect(builtin["defwidget@editor"].blockdef.meta["editor:scratch"]).toBe(true);

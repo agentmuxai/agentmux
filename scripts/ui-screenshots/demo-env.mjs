@@ -15,8 +15,9 @@
 //    a path that contains the user name or the home folder is refused.
 // 2. Writes a user widgets.json into every channel config folder under --home
 //    that starts Hangar (files:path), Terminal (cmd:cwd) and Editor (file) in
-//    the demo project. User entries replace built-in ones, so the rest of each
-//    entry is copied from the built-in config.
+//    the demo project, and shows Sysinfo's CPU, memory and network graphs
+//    rather than CPU alone. User entries replace built-in ones, so the rest of
+//    each entry is copied from the built-in config.
 //
 // The instance creates its channel config folder on first launch, so run this
 // after starting it once; it picks the change up without a restart.
@@ -84,7 +85,16 @@ export function demoWidgets(demo, builtin = JSON.parse(readFileSync(WIDGETS_JSON
     // The file tree would be rooted at the home folder, not the demo project.
     editor.blockdef.meta["editor:tree_expanded"] = false;
     editor.blockdef.meta.file = `${demo}/src/App.tsx`;
-    return { "defwidget@files": files, "defwidget@terminal": terminal, "defwidget@editor": editor };
+    // Sysinfo shows CPU only by default; the docs show it full.
+    const sysinfo = copy("defwidget@sysinfo");
+    sysinfo.blockdef.meta["sysinfo:type"] = "CPU + Mem + Net";
+    sysinfo.blockdef.meta["graph:metrics"] = ["cpu", "mem:used", "net:bytestotal"];
+    return {
+        "defwidget@files": files,
+        "defwidget@terminal": terminal,
+        "defwidget@editor": editor,
+        "defwidget@sysinfo": sysinfo,
+    };
 }
 
 /** Why `demo` (an absolute path with forward slashes) would identify the
