@@ -84,7 +84,7 @@ pub(super) fn current_agent_credential_prefix() -> String {
 const XPROC_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A held OS advisory lock; released when dropped (the handle closes).
-pub(super) struct CrossProcessGuard {
+pub(crate) struct CrossProcessGuard {
     _file: std::fs::File,
 }
 
@@ -128,6 +128,10 @@ fn lock_in(
 fn lock_namespace(ns: &str) -> Result<Option<CrossProcessGuard>, StoreError> {
     lock_in(crate::registry::resolve_global_shared_root(), ns, XPROC_LOCK_WAIT)
 }
+
+/// How long a refresh waits for another process's refresh of the same
+/// sign-in: long enough to cover a slow token request.
+const REFRESH_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Single-entry key holding all three tokens as one JSON blob. Two different
 /// roles depending on platform (see `muxbus_load_tokens` / `muxbus_save`):
@@ -673,7 +677,7 @@ fn read_split_tokens(ns: &str) -> Result<Option<(MuxBusTokens, String)>, StoreEr
     match read_split_settled(ns)? {
         SplitRead::Complete(tokens, generation) => Ok(Some((tokens, generation))),
         SplitRead::Absent => Ok(None),
-        SplitRead::Torn => {
+        SplitRead::Torn { .. } => {
             tracing::warn!(
                 "muxbus: split keychain entries have mismatched generation stamps or are \
                  incomplete (a torn write from an interrupted or concurrent save) — \
@@ -699,8 +703,10 @@ enum SplitRead {
     /// All three, from one save.
     Complete(MuxBusTokens, String),
     /// Present but not from one save: a read that landed mid-write, or a
-    /// write that was interrupted.
-    Torn,
+    /// write that was interrupted. `refresh` is the refresh token if its own
+    /// field is whole: Cognito doesn't rotate it, so refreshing with it can
+    /// make the set whole again.
+    Torn { refresh: Option<String> },
 }
 
 /// Read the split entries, retrying a few times while they look torn: a save
@@ -716,7 +722,7 @@ where
 {
     let mut last = read()?;
     for _ in 1..tries {
-        if !matches!(last, SplitRead::Torn) {
+        if !matches!(last, SplitRead::Torn { .. }) {
             break;
         }
         std::thread::sleep(pause);
@@ -731,9 +737,12 @@ fn read_split_state(ns: &str) -> Result<SplitRead, StoreError> {
         Err(FieldIncomplete::Yes) => Ok(None),
         Ok(v) => Ok(Some(v)),
     };
+    let (access, refresh, id) = (read(FIELD_ACCESS)?, read(FIELD_REFRESH)?, read(FIELD_ID)?);
+    let surviving = refresh.clone().flatten().map(|(token, _)| token).filter(|t| !t.is_empty());
+    let torn = || Ok(SplitRead::Torn { refresh: surviving.clone() });
     // `None` here is a field caught mid-write (a chunk or `:gen` missing).
-    let (Some(access), Some(refresh), Some(id)) = (read(FIELD_ACCESS)?, read(FIELD_REFRESH)?, read(FIELD_ID)?) else {
-        return Ok(SplitRead::Torn);
+    let (Some(access), Some(refresh), Some(id)) = (access, refresh, id) else {
+        return torn();
     };
 
     match (access, refresh, id) {
@@ -758,13 +767,13 @@ fn read_split_state(ns: &str) -> Result<SplitRead, StoreError> {
                     gen_a,
                 ))
             } else {
-                Ok(SplitRead::Torn)
+                torn()
             }
         }
         // Some fields present, some absent: shouldn't happen in normal
         // operation (write_split_tokens writes and rolls back all three
         // together) but follows an interrupted write.
-        _ => Ok(SplitRead::Torn),
+        _ => torn(),
     }
 }
 
@@ -915,11 +924,21 @@ impl Store {
                 // Not yet on the split layout, or torn and still torn after
                 // the retries: check the other sources below.
                 Ok(SplitRead::Absent) => {}
-                Ok(SplitRead::Torn) => {
+                // Torn, but its refresh token is whole: hand back just that,
+                // and the next refresh (which checks the account) saves a
+                // whole set again. No sign-in needed.
+                Ok(SplitRead::Torn { refresh: Some(refresh_token) }) => {
+                    tracing::warn!(
+                        "muxbus: split keychain entries are torn and stayed so on retry — \
+                         keeping the refresh token so the next refresh repairs them"
+                    );
+                    return Ok(MuxBusTokens { refresh_token, ..Default::default() });
+                }
+                Ok(SplitRead::Torn { refresh: None }) => {
                     tracing::warn!(
                         "muxbus: split keychain entries are torn (mismatched generation stamps \
-                         or incomplete) and stayed so on retry — treating as not signed in; \
-                         signing in again repairs it"
+                         or incomplete) and stayed so on retry, with no whole refresh token — \
+                         treating as not signed in; signing in again repairs it"
                     );
                 }
                 Err(e) => {
@@ -1173,6 +1192,14 @@ impl Store {
         }
 
         Ok(MuxBusTokens::default())
+    }
+
+    /// One process at a time refreshes this channel's sign-in; the others
+    /// wait, then find it already fresh. Its own lock, apart from the store's,
+    /// so reads aren't held up by the token request.
+    pub fn muxbus_refresh_lock(&self) -> Result<Option<CrossProcessGuard>, StoreError> {
+        let ns = format!("{}:refresh", keychain_namespace());
+        lock_in(crate::registry::resolve_global_shared_root(), &ns, REFRESH_LOCK_WAIT)
     }
 
     pub fn muxbus_save(&self, creds: &MuxBusCredentials) -> Result<(), StoreError> {
@@ -1586,7 +1613,7 @@ mod tests {
             || {
                 calls += 1;
                 Ok(if calls < 3 {
-                    SplitRead::Torn
+                    SplitRead::Torn { refresh: None }
                 } else {
                     SplitRead::Complete(MuxBusTokens::default(), "1".to_string())
                 })
@@ -1599,8 +1626,8 @@ mod tests {
         assert_eq!(calls, 3);
 
         let mut calls = 0;
-        let stuck = retry_while_torn(|| { calls += 1; Ok(SplitRead::Torn) }, 4, pause).unwrap();
-        assert!(matches!(stuck, SplitRead::Torn));
+        let stuck = retry_while_torn(|| { calls += 1; Ok(SplitRead::Torn { refresh: None }) }, 4, pause).unwrap();
+        assert!(matches!(stuck, SplitRead::Torn { .. }));
         assert_eq!(calls, 4, "gives up after the allowed tries");
 
         let mut calls = 0;
@@ -1624,6 +1651,37 @@ mod tests {
         assert!(same_account(&tokens(String::new(), jwt("user-a")), "user-a"), "no id token: the access token's");
         assert!(!same_account(&tokens("opaque".into(), "opaque".into()), "user-a"), "not a JWT");
         assert!(!same_account(&tokens(jwt(""), jwt("")), ""), "a row with no account matches nothing");
+    }
+
+    /// A torn set keeps its refresh token when that field is whole (so a
+    /// refresh can repair it), and not when the refresh field itself was
+    /// caught mid-write. Real keychain, Windows (the split layout):
+    /// `cargo test -p agentmux-srv --bin agentmux-srv a_torn_set_keeps -- --ignored`.
+    #[test]
+    #[ignore]
+    fn a_torn_set_keeps_a_whole_refresh_token_live() {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+        let ns = format!("muxbus:channel:test-{}-torn", new_generation());
+        let tokens = MuxBusTokens {
+            access_token: "access-a".into(),
+            refresh_token: "refresh-a".into(),
+            id_token: "id-a".into(),
+        };
+        write_split_tokens(&ns, &tokens).expect("write");
+        // Another save's access token with its own stamp: the set is torn.
+        write_chunked_field(&field_key(&ns, FIELD_ACCESS), "access-b", "1").expect("tear");
+        let refresh_after = |ns: &str| match read_split_state(ns).expect("read") {
+            SplitRead::Torn { refresh } => refresh,
+            _ => panic!("expected a torn set"),
+        };
+        assert_eq!(refresh_after(&ns).as_deref(), Some("refresh-a"));
+        // The refresh field mid-write: its stamp goes first.
+        secret_store::delete(&generation_key(&field_key(&ns, FIELD_REFRESH))).expect("delete stamp");
+        assert_eq!(refresh_after(&ns), None);
+        delete_split_tokens(&ns);
+        let _ = secret_store::delete(&generation_key(&field_key(&ns, FIELD_REFRESH)));
     }
 
     const HAMMER_NS: &str = "AGENTMUX_TEST_MUXBUS_HAMMER_NS";
@@ -1661,7 +1719,7 @@ mod tests {
                         torn += 1;
                     }
                 }
-                Ok(SplitRead::Torn) | Err(_) => torn += 1,
+                Ok(SplitRead::Torn { .. }) | Err(_) => torn += 1,
                 Ok(SplitRead::Absent) => panic!("the sign-in vanished"),
             }
         }
