@@ -176,6 +176,7 @@ One helper pair in `frontend/util/focusutil.ts`, used everywhere below:
 | 14 | Drone New, Variables "+ Add" | `focusWhenRendered` (name selected on New; the new row's name on Add) |
 | 15 | Bundle "Add provider override" | `focusWhenRendered` on the new row |
 | 16 | Pane title editor | `focusOnOpen(…, { select: true })` |
+| — | Settings: picking a section with the mouse | the search takes the caret back, its text selected, so the next keystrokes search (owner request, 2026-10-08). Arrow keys in the tab list keep the caret on the tabs |
 | §3 | Settings opened from a terminal or composer | `focusManager`'s retry treats a caret still in the pane the selection just left as parked, so it keeps trying until the Settings search mounts |
 
 `TextInput` (`element/ui/inputs.tsx`) also honours `autofocus` through `focusOnOpen` now, so its call sites inside modals
