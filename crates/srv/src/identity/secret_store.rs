@@ -195,6 +195,17 @@ impl SharedReads {
     fn forget(&self, account_id: &str) {
         lock(&self.in_flight).remove(account_id);
     }
+
+    /// Pass a write's result through, forgetting the account's in-flight
+    /// read only if the write succeeded. A failed write changed nothing, and
+    /// forgetting then would let the next retry start a second read beside
+    /// the one still blocked on a dialog.
+    fn after_write<T>(&self, account_id: &str, written: Result<T, String>) -> Result<T, String> {
+        if written.is_ok() {
+            self.forget(account_id);
+        }
+        written
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -251,8 +262,7 @@ pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
     let written = entry(account_id)?
         .set_password(secret)
         .map_err(|e| format!("keychain write failed: {e}"));
-    shared_reads().forget(account_id);
-    written
+    shared_reads().after_write(account_id, written)
 }
 
 /// Read the secret for `account_id`. Returned wrapped in `Zeroizing` so it
@@ -308,8 +318,7 @@ pub fn delete(account_id: &str) -> Result<(), String> {
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("keychain delete failed: {e}")),
     };
-    shared_reads().forget(account_id);
-    deleted
+    shared_reads().after_write(account_id, deleted)
 }
 
 fn run_outcome_message(op: &str, outcome: RunOutcome) -> String {
@@ -577,6 +586,24 @@ mod tests {
         std::thread::sleep(SHORT);
         assert_eq!((old.calls(), new.calls()), (1, 1));
         new.open();
+    }
+
+    #[test]
+    fn only_a_write_that_succeeded_stops_sharing_the_waiting_read() {
+        let reads = SharedReads::new();
+        let gate = Gate::new();
+        assert_eq!(reads.read("acct", SHORT, gate.read("v")), Err(RunOutcome::TimedOut));
+        // A failed write changed nothing: retries keep joining the waiting read.
+        let _ = reads.after_write("acct", Err::<(), _>("keychain write failed".to_string()));
+        assert_eq!(reads.read("acct", SHORT, gate.read("v")), Err(RunOutcome::TimedOut));
+        std::thread::sleep(SHORT);
+        assert_eq!(gate.calls(), 1, "a failed write let a retry start a second read");
+        // A write that succeeded did: the next read starts its own.
+        let _ = reads.after_write("acct", Ok(()));
+        assert_eq!(reads.read("acct", SHORT, gate.read("v")), Err(RunOutcome::TimedOut));
+        std::thread::sleep(SHORT);
+        assert_eq!(gate.calls(), 2);
+        gate.open();
     }
 
     #[test]
