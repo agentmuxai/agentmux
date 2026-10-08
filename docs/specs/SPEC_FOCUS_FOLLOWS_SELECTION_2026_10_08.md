@@ -216,14 +216,18 @@ observer covers all of them, so that is what was built:
 - **R1, window tabs.** `installFocusFollowsSelection()` (called from `app-init.ts`) watches `atoms.activeTabId` and
   asks on the next frame; the retry covers a tab still held hidden behind the reveal gate.
 - **R1, modal.** `modal.tsx` falls back to `ensureSelectionFocused("modal-closed")` when the opener is gone.
-- **R2** as designed, in `installFocusFollowsSelection()`. It also covers `exit` in an agent's shell drawer: the xterm
+- **R2** in `installFocusFollowsSelection()`, skipped after *any* pointer press in the last 300 ms, not only one outside
+  the panes: a press on agent output blurs the composer to `<body>` too, and refocusing it would collapse the selection
+  being dragged. It also covers `exit` in an agent's shell drawer: the xterm
   unmounts, focus falls to `<body>`, and the net hands it to the composer.
 - **R4, a `data-pane-focus` attribute** instead of a `focus` method per pane type. `giveBlockFocus` tries the view's
   `giveFocus()`, then the first visible, enabled `[data-pane-focus]` inside the block, then the dummy input. Marked:
   the My Agents picker's filter box, Settings' search box, Remotes' filter. The picker's first card still takes focus
   (Enter launches it); a printable key typed on a card goes into the filter box (`AgentCard.tsx`).
 - **R5:** `closeNode` un-magnifies without requesting focus.
-- **Guards** (all in `ensureSelectionFocused` / `giveBlockFocus`): a modal over the pane, whether opened through
+- **Guards** (all in `ensureSelectionFocused` / `giveBlockFocus`): the window not having focus (a browser pane's
+  `giveFocus()` moves native focus and could raise the window; when the window regains focus with the caret on
+  `<body>`, the reconcile runs then, which is acceptance row 13); a modal over the pane, whether opened through
   `modalsModel` or a declarative `<Modal>` on the modal stack (`modalCovers`, `modal-stack.ts`; a pane modal in another
   pane doesn't block); a caret in an editable element outside
   every pane (`caretInEditableOutsidePanes`, `focusutil.ts`); a caret the user put in an input inside the selected pane

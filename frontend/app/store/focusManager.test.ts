@@ -73,6 +73,7 @@ describe("focusManager", () => {
         caretOutsidePanes = false;
         frames = [];
         document.body.innerHTML = "";
+        vi.spyOn(document, "hasFocus").mockReturnValue(true);
         bcmForBlockId = { "block-1": { viewModel: { giveFocus } } };
 
         // jsdom doesn't ship a real dummy-focus target; keep the fallback
@@ -209,6 +210,22 @@ describe("focusManager", () => {
 
         // A declarative <Modal> (the pane-close confirmation) is only on the
         // modal stack, not in modalsModel.
+        // The window is in the background (`exit`, then the user switched
+        // apps): a browser pane's giveFocus() would take native focus.
+        it("never runs while the window doesn't have focus", () => {
+            vi.mocked(document.hasFocus).mockReturnValue(false);
+            focusManager.ensureSelectionFocused("selection");
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        it("stops retrying when the window loses focus", () => {
+            giveFocus.mockReturnValue(false);
+            focusManager.ensureSelectionFocused("selection");
+            vi.mocked(document.hasFocus).mockReturnValue(false);
+            runFrames(3);
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
         it("never runs under a modal-stack modal covering the pane", () => {
             document.body.innerHTML = `<div data-blockid="block-1"></div>`;
             pushModal({ id: "confirm", scope: "window", lockEl: document.body, close: () => {} });
@@ -308,7 +325,6 @@ describe("focusManager", () => {
     describe("installFocusFollowsSelection", () => {
         beforeEach(() => {
             installFocusFollowsSelection();
-            vi.spyOn(document, "hasFocus").mockReturnValue(true);
             vi.spyOn(console, "info").mockImplementation(() => {});
         });
 
@@ -321,6 +337,31 @@ describe("focusManager", () => {
             t.blur();
             runFrames(1);
             expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        // A press on agent output blurs the composer to <body>; refocusing it
+        // would collapse the selection the user is dragging.
+        it("leaves it alone when the user pressed inside the pane", () => {
+            document.body.innerHTML = `<div data-blockid="block-9"><p id="out">text</p><textarea id="t"></textarea></div>`;
+            const t = document.body.querySelector<HTMLTextAreaElement>("#t")!;
+            t.focus();
+            document.getElementById("out")?.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+            t.blur();
+            runFrames(1);
+            expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        it("gives the selection the caret when the window comes back with it on <body>", () => {
+            (document.activeElement as HTMLElement | null)?.blur();
+            window.dispatchEvent(new Event("focus"));
+            expect(giveFocus).toHaveBeenCalledTimes(1);
+        });
+
+        it("leaves a caret the user placed alone when the window comes back", () => {
+            document.body.innerHTML = `<input id="x" />`;
+            document.body.querySelector<HTMLInputElement>("#x")!.focus();
+            window.dispatchEvent(new Event("focus"));
+            expect(giveFocus).not.toHaveBeenCalled();
         });
 
         it("leaves it alone when the press that moved it was outside the panes", () => {
