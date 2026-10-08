@@ -62,7 +62,13 @@ sign-in remains valid. Its keychain namespace is unchanged as well (it was alrea
 The cached per-agent credentials belong to the account a channel is signed in as. They were keyed by
 agent id alone in the shared store, so two channels signed in as different accounts overwrote and cleared
 each other's. They are now behind the channel prefix; sign-out and account switch clear only the
-signing channel's rows; deleting an agent removes its rows in every channel.
+signing channel's rows; deleting an agent removes its rows in every channel. Adoption
+(`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md` §5) no longer copies them from an earlier store: they are
+provisioned again on first use.
+
+A channel whose own tokens are missing still falls back once to the host-wide set, which a channel signed in
+before tokens were scoped used, but only when that set's account (`sub`) is the one its saved row names.
+Otherwise `stable`'s account could pair with this channel's row.
 
 ### 3.3 The cross-process lock
 
@@ -74,8 +80,9 @@ it, logging, so a suspended holder cannot stop sign-in. The lock file is never d
 
 ### 3.4 A torn read
 
-The Windows read path retries a read that looks torn (mismatched generation stamps, or only some fields
-present) up to four times, 120 ms apart. A build without the lock may be mid-save; the same read a moment
+The Windows read path retries a read that looks torn (mismatched generation stamps, some fields present and
+others not, or a field caught mid-write with a chunk or its stamp missing) up to four times, 120 ms apart.
+A keychain that cannot be read at all is still an error, not a tear. A build without the lock may be mid-save; the same read a moment
 later is whole. A tear that persists logs once as such and still means "sign in again".
 
 ## 4. Who receives a message
@@ -133,6 +140,8 @@ as.
   released.
 - A torn read is retried until it settles, gives up after the allowed tries, and an absent sign-in is not
   retried.
+- The host-wide fallback adopts only the same account's tokens.
+- Adoption copies accounts but no cached credentials.
 - Cached credentials: the host-wide clear removes only unprefixed rows; a channel clears only its own;
   deleting an agent removes its rows in every channel.
 - Live, against the real Windows keychain (ignored in CI,

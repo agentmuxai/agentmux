@@ -478,34 +478,34 @@ fn write_chunked_field(
 /// failure too, not defaulted to some sentinel — see `read_split_tokens`,
 /// which needs a REAL generation to compare across fields, not a value
 /// that would spuriously "match" another field's own missing generation.
-fn read_chunked_field(field_key: &str) -> Result<Option<(String, String)>, StoreError> {
+/// Why `read_chunked_field` has no value: the field is mid-write or was
+/// interrupted (`Yes`, a torn read to retry), or the keychain failed (`No`).
+enum FieldIncomplete {
+    Yes,
+    No(StoreError),
+}
+
+fn read_chunked_field(field_key: &str) -> Result<Option<(String, String)>, FieldIncomplete> {
+    let failed = |e| FieldIncomplete::No(StoreError::Other(format!("muxbus: keychain read failed: {e}")));
     let count = match secret_store::get_optional(&count_key(field_key)) {
         Ok(Some(v)) => v.parse::<usize>().map_err(|e| {
-            StoreError::Other(format!("muxbus: corrupted chunk count for {field_key}: {e}"))
+            FieldIncomplete::No(StoreError::Other(format!("muxbus: corrupted chunk count for {field_key}: {e}")))
         })?,
         Ok(None) => return Ok(None),
-        Err(e) => return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
+        Err(e) => return Err(failed(e)),
     };
     let mut value = String::new();
     for i in 0..count {
         match secret_store::get_optional(&chunk_key(field_key, i)) {
             Ok(Some(chunk)) => value.push_str(&chunk),
-            Ok(None) => {
-                return Err(StoreError::Other(format!(
-                    "muxbus: missing chunk {i}/{count} for {field_key} — keychain state is inconsistent"
-                )));
-            }
-            Err(e) => return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
+            Ok(None) => return Err(FieldIncomplete::Yes),
+            Err(e) => return Err(failed(e)),
         }
     }
     let generation = match secret_store::get_optional(&generation_key(field_key)) {
         Ok(Some(g)) => g.to_string(),
-        Ok(None) => {
-            return Err(StoreError::Other(format!(
-                "muxbus: missing generation stamp for {field_key} — keychain state is inconsistent"
-            )));
-        }
-        Err(e) => return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}"))),
+        Ok(None) => return Err(FieldIncomplete::Yes),
+        Err(e) => return Err(failed(e)),
     };
     Ok(Some((value, generation)))
 }
@@ -673,6 +673,14 @@ fn read_split_tokens(ns: &str) -> Result<Option<(MuxBusTokens, String)>, StoreEr
     }
 }
 
+/// Whether `tokens` were issued to the account `user_sub` names. A token that
+/// isn't a JWT, or a row with no `user_sub`, matches nothing.
+fn same_account(tokens: &MuxBusTokens, user_sub: &str) -> bool {
+    let sub = crate::muxbus::pkce::token_sub(&tokens.id_token);
+    let sub = if sub.is_empty() { crate::muxbus::pkce::token_sub(&tokens.access_token) } else { sub };
+    !user_sub.is_empty() && sub == user_sub
+}
+
 /// What the three split entries held when read.
 enum SplitRead {
     /// None of the three fields exist yet.
@@ -707,9 +715,15 @@ where
 }
 
 fn read_split_state(ns: &str) -> Result<SplitRead, StoreError> {
-    let access = read_chunked_field(&field_key(ns, FIELD_ACCESS))?;
-    let refresh = read_chunked_field(&field_key(ns, FIELD_REFRESH))?;
-    let id = read_chunked_field(&field_key(ns, FIELD_ID))?;
+    let read = |field| match read_chunked_field(&field_key(ns, field)) {
+        Err(FieldIncomplete::No(e)) => Err(e),
+        Err(FieldIncomplete::Yes) => Ok(None),
+        Ok(v) => Ok(Some(v)),
+    };
+    // `None` here is a field caught mid-write (a chunk or `:gen` missing).
+    let (Some(access), Some(refresh), Some(id)) = (read(FIELD_ACCESS)?, read(FIELD_REFRESH)?, read(FIELD_ID)?) else {
+        return Ok(SplitRead::Torn);
+    };
 
     match (access, refresh, id) {
         (None, None, None) => Ok(SplitRead::Absent),
@@ -840,7 +854,7 @@ impl Store {
         };
         let (cognito_domain, client_id, legacy_access, legacy_refresh, legacy_id, expires_at, user_email, user_sub) = row;
 
-        let tokens = self.muxbus_load_tokens(allow_migration, &legacy_access, &legacy_refresh, &legacy_id)?;
+        let tokens = self.muxbus_load_tokens(allow_migration, &legacy_access, &legacy_refresh, &legacy_id, &user_sub)?;
 
         Ok(Some(MuxBusCredentials {
             cognito_domain,
@@ -870,6 +884,7 @@ impl Store {
         legacy_access: &str,
         legacy_refresh: &str,
         legacy_id: &str,
+        user_sub: &str,
     ) -> Result<MuxBusTokens, StoreError> {
         let legacy_plaintext = || MuxBusTokens {
             access_token: legacy_access.to_string(),
@@ -1115,9 +1130,10 @@ impl Store {
         // host-wide set. Adopt that set once, read-only — the global entries
         // are never written or deleted from here, so other channels and the
         // `stable` channel keep theirs. From the next save on, this channel's
-        // tokens are its own.
+        // tokens are its own. Only the same account's: `stable` may be signed
+        // in as another, and its tokens must not pair with this row.
         if ns != GLOBAL_KEYCHAIN_NS {
-            if let Some(tokens) = read_any_layout(GLOBAL_KEYCHAIN_NS) {
+            if let Some(tokens) = read_any_layout(GLOBAL_KEYCHAIN_NS).filter(|t| same_account(t, user_sub)) {
                 tracing::info!(
                     namespace = %ns,
                     "muxbus: adopting the host-wide session for this channel (one-time, pre-per-channel sign-in)"
@@ -1559,6 +1575,23 @@ mod tests {
         let absent = retry_while_torn(|| { calls += 1; Ok(SplitRead::Absent) }, 4, pause).unwrap();
         assert!(matches!(absent, SplitRead::Absent));
         assert_eq!(calls, 1, "an absent login is not retried");
+    }
+
+    /// The host-wide set is adopted into a channel only for the account the
+    /// channel's row names.
+    #[test]
+    fn only_the_same_accounts_tokens_are_adopted() {
+        use base64::Engine;
+        let jwt = |sub: &str| {
+            let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(r#"{{"sub":"{sub}"}}"#));
+            format!("e30.{payload}.sig")
+        };
+        let tokens = |id: String, access: String| MuxBusTokens { access_token: access, refresh_token: "r".into(), id_token: id };
+        assert!(same_account(&tokens(jwt("user-a"), jwt("user-a")), "user-a"));
+        assert!(!same_account(&tokens(jwt("user-b"), jwt("user-b")), "user-a"), "another account's");
+        assert!(same_account(&tokens(String::new(), jwt("user-a")), "user-a"), "no id token: the access token's");
+        assert!(!same_account(&tokens("opaque".into(), "opaque".into()), "user-a"), "not a JWT");
+        assert!(!same_account(&tokens(jwt(""), jwt("")), ""), "a row with no account matches nothing");
     }
 
     const HAMMER_NS: &str = "AGENTMUX_TEST_MUXBUS_HAMMER_NS";
