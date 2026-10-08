@@ -124,7 +124,7 @@ pub(super) const FLUSHER_EOF_GRACE: std::time::Duration = std::time::Duration::f
 /// Budget for the fallback flush barrier. Deliberately the REMAINDER of
 /// `FLUSHER_DRAIN_TIMEOUT` after `FLUSHER_EOF_GRACE`, so the two waits split
 /// one budget instead of each claiming a full one — the worst-case exit delay
-/// is unchanged from before the barrier existed, rather than doubled (ReAgent
+/// is unchanged from before the barrier existed, rather than doubled (muxreview
 /// P2 on PR #3261).
 pub(super) const FLUSHER_BARRIER_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(900);

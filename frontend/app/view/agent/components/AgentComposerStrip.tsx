@@ -1336,7 +1336,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         // its own left/right (and, single-row, stats) children — reading
         // it (not a hardcoded constant, which would silently drift if the
         // SCSS value ever changes) matches reagent P2 on PR #2808's same
-        // rationale for the per-slot measurement effect above. (Reagent
+        // rationale for the per-slot measurement effect above. (muxreview
         // P2, PR #2812: this used to read `--space-1-5`, the row's OWN
         // internal `-row-right` gap, not `--space-2`, the actual
         // `column-gap` between the row's left/right/stats children.)

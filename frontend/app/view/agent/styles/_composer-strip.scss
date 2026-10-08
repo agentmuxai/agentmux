@@ -128,7 +128,7 @@
     // zones' own internal flex-wrap had: a row's own content can still be
     // wider than the line it's on (e.g. a long resolved model name before
     // the ≤150px trigger cap applies) — wrap within the row rather than
-    // let the strip's own overflow clip it. Reagent P1 (PR #2393)'s
+    // let the strip's own overflow clip it. muxreview P1 (PR #2393)'s
     // original finding, still the reason this exists.
     flex-wrap: wrap;
     min-width: 0;

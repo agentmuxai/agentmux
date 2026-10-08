@@ -170,7 +170,7 @@ describe("document tabs: the controller", () => {
         expect(ctl.tabs()).toHaveLength(2);
     });
 
-    it("says whether a tab was reopened (ReAgent on #4231)", () => {
+    it("says whether a tab was reopened (muxreview on #4231)", () => {
         const ctl = new DocTabsController(spec, host(), [{ path: "/a" }]);
         expect(ctl.reopen()).toBe(false);
         ctl.open({ path: "/b" });

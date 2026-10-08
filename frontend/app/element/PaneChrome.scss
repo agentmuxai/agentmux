@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// ReAgent P1 on PR #3309: PaneChrome.tsx's `.pane-stack`
+// muxreview P1 on PR #3309: PaneChrome.tsx's `.pane-stack`
 // wrapper had no corresponding SCSS at all — `BlockFrame_Header` (via
 // `PaneHeaderTabStrip`) renders as a direct child here, OUTSIDE the
 // `.block.block-frame-default .block-frame-default-inner` ancestor chain

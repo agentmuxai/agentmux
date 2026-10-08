@@ -540,7 +540,7 @@ export class AuthFlowController {
 
     dispose(): void {
         // Fire-and-forget auth.cancel for any in-flight session so we
-        // don't leave an orphan CLI subprocess on the backend. Reagent
+        // don't leave an orphan CLI subprocess on the backend. muxreview
         // P1 on #853: covers `authenticated` (CLI is done, backend
         // session held alive awaiting the planned `auth.savebundle`) AND `saving`
         // (savebundle RPC in flight, session cleared only by

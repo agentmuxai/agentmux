@@ -220,7 +220,7 @@ export type AuthCommand =
     /**
      * User confirmed the bundle name in the SaveBundle panel. View
      * fires `auth.savebundle` RPC on the emitted event. Transitions
-     * to `saving`. Reagent-pinned: only honored from `authenticated`.
+     * to `saving`. muxreview-pinned: only honored from `authenticated`.
      */
     | { type: "SaveBundleClicked"; name: string }
     /**

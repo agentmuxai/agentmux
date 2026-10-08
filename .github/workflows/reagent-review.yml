@@ -1,6 +1,6 @@
-name: ReAgent review
+name: muxreview review
 
-# ReAgent reviews this repository's PRs here, on free GitHub Actions minutes.
+# muxreview reviews this repository's PRs here, on free GitHub Actions minutes.
 #
 # This job holds no write credential. It asks the actions broker (its URL is
 # the ACTIONS_BROKER_URL secret) for what it needs, proving which workflow it
@@ -31,8 +31,8 @@ jobs:
     # Pre-pull gate: a superset of the reviewer's own filter, so it never skips
     # an event the reviewer would act on, but drops the ones it would certainly
     # drop: edits that change neither the base, title nor body, closed PRs,
-    # ReAgent's own comments, and comments from humans with no @-mention.
-    # ReAgent's tests read THIS expression from main; keep the
+    # muxreview's own comments, and comments from humans with no @-mention.
+    # muxreview's tests read THIS expression from main; keep the
     # `pull_request.state == 'open'` clause (the test uses it as a marker).
     if: >-
       (github.event_name == 'pull_request_target' &&

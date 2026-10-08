@@ -59,7 +59,7 @@ export class FilesOps {
     private readonly setOps: (fn: (o: OpView[]) => OpView[]) => void;
     private readonly labels = new Map<string, string>();
     /** `fs.op.start` calls awaiting their reply. srv starts the op before it
-     *  answers, so its events, even the last, can arrive first (ReAgent on
+     *  answers, so its events, even the last, can arrive first (muxreview on
      *  #4221): they wait here until the reply names the op. */
     private pendingStarts = 0;
     private readonly early = new Map<string, FsOpEvent>();

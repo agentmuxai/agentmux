@@ -179,7 +179,7 @@ describe("pressCanStartPaneDrag", () => {
         expect(pressCanStartPaneDrag(q('[data-role="block-header"]'))).toBe(true);
     });
 
-    it("a press on a tab pill, its close button, or + can't (ReAgent P1 on #3940)", () => {
+    it("a press on a tab pill, its close button, or + can't (muxreview P1 on #3940)", () => {
         const q = header();
         expect(pressCanStartPaneDrag(q(".pane-tab"))).toBe(false);
         expect(pressCanStartPaneDrag(q(".pane-tab .close"))).toBe(false);

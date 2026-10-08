@@ -119,7 +119,7 @@
             // while scrolled up mid-stream) can't recur — but the row now
             // sits directly against the composer, and a translucent status
             // row there would pick up the pane background rather than
-            // reading as its own band. Reagent P1 on a
+            // reading as its own band. muxreview P1 on a
             // later round: --main-bg-color is itself
             // `rgba(34, 34, 34, var(--window-opacity, 0.45))` — alpha-aware
             // by design, for window transparency — so it is NOT actually
@@ -236,7 +236,7 @@
             // row read as its own zone instead of picking up whatever sits
             // behind the pane at low --window-opacity.
             // --block-bg-color is only 50% alpha
-            // (confirmed via computed style) — not opaque enough. Reagent
+            // (confirmed via computed style) — not opaque enough. muxreview
             // P1 on a later round: --main-bg-color isn't opaque either — it's
             // `rgba(34, 34, 34, var(--window-opacity, 0.45))`, alpha-aware
             // by design for window transparency, so it stayed translucent

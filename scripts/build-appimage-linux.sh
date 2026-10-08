@@ -65,7 +65,7 @@ if [ -z "$APPIMAGETOOL" ]; then
     fi
 fi
 
-# --- 0. Wipe the whole AppDir first (ReAgent P1, PR #3236) — the original
+# --- 0. Wipe the whole AppDir first (muxreview P1, PR #3236) — the original
 #        script did `rm -rf "$APPDIR"` before staging anything, which this
 #        refactor initially dropped: stage-linux-runtime.sh only wipes its
 #        own $STAGING_ROOT/usr, never the AppDir's top-level content

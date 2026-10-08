@@ -505,7 +505,7 @@ describe("the Files pane: operations", () => {
     });
 });
 
-describe("the Files pane: rows (ReAgent on #4201)", () => {
+describe("the Files pane: rows (muxreview on #4201)", () => {
     it("keeps each row's element across a scroll and a re-list", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -546,7 +546,7 @@ describe("the Files pane: rows (ReAgent on #4201)", () => {
     });
 });
 
-describe("the Files pane: scrolling to a row (ReAgent on #4201)", () => {
+describe("the Files pane: scrolling to a row (muxreview on #4201)", () => {
     const many = () => Array.from({ length: 200 }, (_, i) => f(`file${String(i).padStart(3, "0")}.txt`));
 
     it("scrolls a new item into view so its rename box mounts", async () => {
@@ -568,7 +568,7 @@ describe("the Files pane: scrolling to a row (ReAgent on #4201)", () => {
     });
 });
 
-describe("the Files pane: deliberate selection (ReAgent on #4201)", () => {
+describe("the Files pane: deliberate selection (muxreview on #4201)", () => {
     it("Delete does nothing once the selection is cleared, even with a row focused", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -765,7 +765,7 @@ describe("the Files pane: copy and move (Phase 2a)", () => {
         expect(h.rpc.FsOpResolveCommand.mock.lastCall?.[1]).toEqual({ op_id: "op1", choice: "keep_both", apply_to_all: true });
     });
 
-    it("an op that finishes before srv replies leaves no progress bar, and keeps its name (ReAgent on #4221)", async () => {
+    it("an op that finishes before srv replies leaves no progress bar, and keeps its name (muxreview on #4221)", async () => {
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
         h.rpc.FsOpStartCommand.mockImplementationOnce(async () => {
@@ -1122,7 +1122,7 @@ describe("the Files pane: pane tabs", () => {
         await waitFor(() => expect(v.container.querySelector(".files-status")?.textContent).toBe("This is the pane's only tab. Use the pane's × to close it."));
     });
 
-    it("says why when a tab can't be closed (ReAgent on #4227)", async () => {
+    it("says why when a tab can't be closed (muxreview on #4227)", async () => {
         tabs.closeError = "layout save failed";
         const v = mount();
         await waitFor(() => expect(v.names()).toHaveLength(4));
@@ -1209,7 +1209,7 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
         await waitFor(() => expect(v.names()).toEqual(["cv.pdf"]));
     });
 
-    it("gates a protected folder however its path is spelled (ReAgent on #4201)", async () => {
+    it("gates a protected folder however its path is spelled (muxreview on #4201)", async () => {
         h.state.dirs.set("/Users/a", [d("Documents")]);
         const v = mount({ "files:path": "/Users/a/Desktop/../Documents" });
         await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
@@ -1228,7 +1228,7 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
         expect(h.rpc.FsListCommand).not.toHaveBeenCalled();
     });
 
-    it("Refresh, F5 and New folder don't list a gated folder (ReAgent on #4201)", async () => {
+    it("Refresh, F5 and New folder don't list a gated folder (muxreview on #4201)", async () => {
         const v = mount({ "files:path": "/Users/a/Documents" });
         await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
         fireEvent.click(v.container.querySelector('[aria-label="Refresh (F5)"]')!);
@@ -1240,7 +1240,7 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
         expect(v.getByText("Open Documents")).toBeTruthy();
     });
 
-    it("Try again works after macOS denies the folder (ReAgent on #4201)", async () => {
+    it("Try again works after macOS denies the folder (muxreview on #4201)", async () => {
         h.state.errors.set("/Users/a/Documents", { kind: "os_blocked", message: "Operation not permitted" });
         const v = mount({ "files:path": "/Users/a/Documents" });
         await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
@@ -1251,7 +1251,7 @@ describe("the Files pane: macOS access prompts (§9.1)", () => {
         await waitFor(() => expect(v.names()).toEqual(["cv.pdf"]));
     });
 
-    it("ignores case, as APFS does (ReAgent on #4201)", async () => {
+    it("ignores case, as APFS does (muxreview on #4201)", async () => {
         const v = mount({ "files:path": "~/documents" });
         await waitFor(() => expect(v.getByText("Open Documents")).toBeTruthy());
         expect(h.rpc.FsListCommand).not.toHaveBeenCalled();

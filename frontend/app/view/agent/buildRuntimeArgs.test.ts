@@ -126,7 +126,7 @@ describe("buildRuntimeArgs", () => {
             expect(buildPaneArgs(CLAUDE_PROVIDER, "host", cfg({ model: "sonnet" }), "--model opus --effort max")).toContain("max");
         });
 
-        it("leaves another provider's own --effort alone (ReAgent P2 on #4161): only Claude rejects it on Haiku", () => {
+        it("leaves another provider's own --effort alone (muxreview P2 on #4161): only Claude rejects it on Haiku", () => {
             for (const id of ["codex", "gemini", "kimi", "qwen"]) {
                 const p = getProvider(id)!;
                 const out = buildPaneArgs(p, "host", cfg({ model: "haiku" }), "--effort high --add-dir /tmp");

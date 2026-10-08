@@ -369,9 +369,9 @@ const NARRATION = [
     ["severity tag next to a PR number", /\bP[0-3]\b.{0,40}#\d{3,}|#\d{3,}.{0,40}\bP[0-3]\b/],
     ["re-review", /\bre-?review/i],
     ["review round count", /\bround \d+\b/i],
-    ["review bot next to a PR number", /\b(?:reagentx?|codex)\b[^.\n]{0,20}#\d{3,}/i],
-    ["review bot with a severity tag", /\b(?:reagentx?|ReAgent|codex|Codex)\b.{0,12}\bP[0-3]\b/],
-    ["review bot verdict", /\b(?:reagentx?|codex)\s+(?:asked|flagged|caught|found|noted|pointed|raised|requested|suggested)\b/i],
+    ["review bot next to a PR number", /\b(?:reagentx?|muxreview|codex)\b[^.\n]{0,20}#\d{3,}/i],
+    ["review bot with a severity tag", /\b(?:reagentx?|ReAgent|muxreview|codex|Codex)\b.{0,12}\bP[0-3]\b/],
+    ["review bot verdict", /\b(?:reagentx?|muxreview|codex)\s+(?:asked|flagged|caught|found|noted|pointed|raised|requested|suggested)\b/i],
 ];
 
 /** Returns the rule name for review-history narration in `text`, or null. */

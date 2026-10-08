@@ -66,7 +66,7 @@ describe("files-path", () => {
         expect(nameProblem(name, windows)).toBe(problem);
     });
 
-    it("normalizes ~, . and .. before comparing (ReAgent on #4201)", () => {
+    it("normalizes ~, . and .. before comparing (muxreview on #4201)", () => {
         expect(normalizePath("~/Documents", "/Users/a")).toBe("/Users/a/Documents");
         expect(normalizePath("/Users/a/Desktop/../Documents/./x", "/Users/a")).toBe("/Users/a/Documents/x");
         expect(normalizePath("C:\\Users\\a\\..\\b", "")).toBe("C:\\Users\\b");

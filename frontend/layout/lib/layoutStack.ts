@@ -19,7 +19,7 @@
  * NONE of these mutators dispose the leaf's cached `NodeModel` on an
  * active-member change anymore, as of `pane-leaf-chrome.tsx`
  * (`SPEC_PANE_TAB_SWITCH_CHROME_STABILITY_2026_09_07.md`). PR #3132 tried
- * shipping that removal ahead of the replacement mechanism and ReAgent/Codex
+ * shipping that removal ahead of the replacement mechanism and muxreview/Codex
  * correctly caught the resulting regression (switching a stack left the old
  * block displayed, with nothing left to update it) — this time the
  * replacement landed in the SAME PR: `DisplayNodesWrapper`

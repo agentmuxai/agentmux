@@ -44,6 +44,11 @@ struct SeedMemory {
     is_global: bool,
     #[serde(default)]
     instructions: String,
+    /// SHA-256 (hex) of instructions this bundle shipped with before. A bundle
+    /// that still holds exactly one of them was never edited, so the seed
+    /// replaces it with `instructions`; a bundle a user changed is left alone.
+    #[serde(default)]
+    replaces_instructions_sha256: Vec<String>,
 }
 
 /// An agent definition in the seed manifest.
@@ -245,14 +250,23 @@ pub fn seed_agents(mstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
 /// exists — this is a one-time seed, not an upsert on every startup.
 fn seed_memories(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, StoreError> {
     let existing = mstore.bundle_list()?;
-    let existing_ids: std::collections::HashSet<String> =
-        existing.iter().map(|m| m.id.clone()).collect();
+    let existing_by_id: std::collections::HashMap<String, Bundle> =
+        existing.into_iter().map(|m| (m.id.clone(), m)).collect();
 
     let now = agentmux_common::time::now_ms();
 
     let mut created = 0usize;
     for (idx, mem_def) in manifest.memories.iter().enumerate() {
-        if existing_ids.contains(&mem_def.id) {
+        if let Some(current) = existing_by_id.get(&mem_def.id) {
+            if is_untouched_earlier_seed(current, mem_def) {
+                let mut refreshed = current.clone();
+                refreshed.instructions = mem_def.instructions.clone();
+                refreshed.updated_at = now;
+                match mstore.bundle_upsert(&refreshed) {
+                    Ok(()) => created += 1,
+                    Err(e) => tracing::warn!(id = %mem_def.id, error = %e, "agent seed: refreshing an untouched bundle failed"),
+                }
+            }
             continue;
         }
         let memory = Bundle {
@@ -292,6 +306,16 @@ fn seed_memories(mstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
     }
 
     Ok(created)
+}
+
+/// Is `current` exactly an earlier text of this seeded bundle, i.e. never edited?
+fn is_untouched_earlier_seed(current: &Bundle, mem_def: &SeedMemory) -> bool {
+    use sha2::{Digest, Sha256};
+    if mem_def.replaces_instructions_sha256.is_empty() || current.instructions == mem_def.instructions {
+        return false;
+    }
+    let digest = hex::encode(Sha256::digest(current.instructions.as_bytes()));
+    mem_def.replaces_instructions_sha256.iter().any(|h| h.eq_ignore_ascii_case(&digest))
 }
 
 /// Run auto-seed on startup. Seeds if empty, or re-seeds if manifest version changed.
@@ -337,11 +361,13 @@ pub fn auto_seed_on_startup(mstore: &Arc<Store>) {
         Err(e) => tracing::error!("agent seed: failed to count agents: {e}"),
     }
 
-    // Seed bundles once — skips any bundle whose ID already exists.
+    // Seed bundles once — an existing ID is skipped, unless it still holds an
+    // earlier seeded text exactly (`replaces_instructions_sha256`): that one
+    // is refreshed.
     if !manifest.memories.is_empty() {
         match seed_memories(mstore, &manifest) {
             Ok(0) => {}
-            Ok(n) => tracing::info!("agent seed: seeded {n} bundles"),
+            Ok(n) => tracing::info!("agent seed: seeded or refreshed {n} bundles"),
             Err(e) => tracing::error!("agent seed: failed to seed memories: {e}"),
         }
     }
@@ -611,5 +637,66 @@ mod tests {
         // And the previously-hidden one stays hidden.
         let claude = after.iter().find(|a| a.id == "tpl-claude").unwrap();
         assert_eq!(claude.user_hidden, 1);
+    }
+
+    // --- refreshing an untouched seeded bundle -----------------------------
+
+    fn sha_hex(text: &str) -> String {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(text.as_bytes()))
+    }
+
+    fn bundle_manifest(new_text: &str, replaces: &[String]) -> SeedManifest {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "agents": [],
+            "memories": [{
+                "id": "seed-test-bundle",
+                "name": "Test Bundle",
+                "instructions": new_text,
+                "replaces_instructions_sha256": replaces,
+            }],
+        }))
+        .unwrap()
+    }
+
+    fn instructions_of(mstore: &Arc<Store>) -> String {
+        mstore.bundle_get("seed-test-bundle").unwrap().unwrap().instructions
+    }
+
+    #[test]
+    fn an_untouched_earlier_seed_text_is_replaced() {
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        seed_memories(&mstore, &bundle_manifest("old text", &[])).unwrap();
+        let n = seed_memories(&mstore, &bundle_manifest("new text", &[sha_hex("old text")])).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(instructions_of(&mstore), "new text");
+    }
+
+    #[test]
+    fn an_edited_bundle_is_left_alone() {
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        seed_memories(&mstore, &bundle_manifest("old text, edited by the user", &[])).unwrap();
+        let n = seed_memories(&mstore, &bundle_manifest("new text", &[sha_hex("old text")])).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(instructions_of(&mstore), "old text, edited by the user");
+    }
+
+    #[test]
+    fn without_earlier_hashes_an_existing_bundle_is_never_touched() {
+        let mstore = Arc::new(Store::open_in_memory().unwrap());
+        seed_memories(&mstore, &bundle_manifest("old text", &[])).unwrap();
+        assert_eq!(seed_memories(&mstore, &bundle_manifest("new text", &[])).unwrap(), 0);
+        assert_eq!(instructions_of(&mstore), "old text");
+    }
+
+    #[test]
+    fn the_shipped_manifest_refreshes_the_old_reagent_text_of_the_dev_bundle() {
+        let manifest: SeedManifest = serde_json::from_str(SEED_MANIFEST).unwrap();
+        let dev = manifest.memories.iter().find(|m| m.id == "seed-agentmux-dev").unwrap();
+        assert!(!dev.replaces_instructions_sha256.is_empty());
+        assert!(dev.instructions.contains("### muxreview Bot"));
+        assert!(!dev.replaces_instructions_sha256.contains(&sha_hex(&dev.instructions)),
+            "the current text must not be listed as an earlier one");
     }
 }

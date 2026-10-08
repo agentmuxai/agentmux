@@ -126,7 +126,7 @@ if (!Number.isFinite(SECS) || SECS <= 0) {
     process.stderr.write(`pane-load: --secs must be a positive number\n`);
     process.exit(2);
 }
-// ReAgent P1 on PR #3286: an unvalidated --max-mb defeats the disk-safety
+// muxreview P1 on PR #3286: an unvalidated --max-mb defeats the disk-safety
 // valve silently rather than loudly. A non-numeric value makes maxBytes NaN,
 // and `bytes >= NaN` is always false in JS — so the cap this flag exists to
 // enforce would simply never fire, for exactly the failure mode (bad/typo'd
@@ -284,7 +284,7 @@ async function main() {
             `pane-load: ${mb.toFixed(1)} MB in ${elapsed.toFixed(1)}s ` +
             `(${(mb / elapsed).toFixed(2)} MB/s), ` +
             `${writes.toLocaleString()} writes (${Math.round(writes / elapsed).toLocaleString()}/s)\n` +
-            // ReAgent P2 on PR #3286: cappedEarly was computed and then never
+            // muxreview P2 on PR #3286: cappedEarly was computed and then never
             // read — losing exactly the diagnostic this tool's own README
             // verification relied on to tell "ran the full window" apart from
             // "hit the disk cap and stopped short".

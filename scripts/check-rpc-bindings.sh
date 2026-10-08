@@ -45,7 +45,7 @@ cd "$(dirname "$0")/.." || exit 1
 # a new type derives TS, its .ts is left out of the commit, and a fresh
 # checkout is missing a binding the frontend imports. `-uall` lists files
 # inside untracked directories too, so a whole new subdirectory is not
-# collapsed to a single entry. (ReAgent + Codex both flagged this on #3078;
+# collapsed to a single entry. (muxreview + Codex both flagged this on #3078;
 # confirmed here: `git diff --quiet` exits 0 with a new untracked file in
 # the path, while `git status --porcelain` reports it as `??`.)
 generated_dirt() {

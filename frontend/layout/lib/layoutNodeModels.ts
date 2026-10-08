@@ -250,7 +250,7 @@ export function getNodeByBlockId(model: LayoutModel, blockId: string): LayoutNod
  *  rendered subtree in the tile renderer (`TileLayout.{win32,linux,darwin}.tsx`).
  *
  *  STILL includes `activeBlockId` for a stacked leaf, same as before this
- *  file started adding chrome-stability groundwork — reviewers (ReAgent,
+ *  file started adding chrome-stability groundwork — reviewers (muxreview,
  *  Codex) on PR #3132 correctly caught that dropping `activeBlockId` from
  *  this key here, alone, breaks the already-shipped in-pane tab-switch
  *  feature: `TabContent`/`Block` render `nodeModel.blockId` as a plain,

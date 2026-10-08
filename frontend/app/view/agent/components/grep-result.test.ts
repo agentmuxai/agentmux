@@ -19,7 +19,7 @@ describe("grepResultCount", () => {
         expect(grepResultCount(text)).toEqual({ n: 3, noun: "match" });
     });
 
-    it("content with -A/-B/-C: context lines (path-N-text) are not matches (Opaz / ReAgent P2 on #3877)", () => {
+    it("content with -A/-B/-C: context lines (path-N-text) are not matches (Opaz / muxreview P2 on #3877)", () => {
         const text = ["C:\\x\\a.ts-11-before", "C:\\x\\a.ts:12:match", "C:\\x\\a.ts-13-after", "--", "C:\\x\\b.ts:40:match"].join("\n");
         expect(grepResultCount(text)).toEqual({ n: 2, noun: "match" });
     });

@@ -174,7 +174,7 @@ describe("patchRuntime — a pick wins over the agent definition's own flags", (
         expect(flagWrites()).toEqual([]);
     });
 
-    it("picking a model that takes no --effort also takes the definition's --effort out (ReAgent P1 on #4161)", async () => {
+    it("picking a model that takes no --effort also takes the definition's --effort out (muxreview P1 on #4161)", async () => {
         // The definition pins Opus + max effort; the user picks Haiku. The
         // definition's --effort would otherwise stay in the flags, be appended
         // after the runtime's, and Haiku answers HTTP 400 on it.

@@ -129,7 +129,7 @@ describe("the Media pane's document tabs", () => {
         await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media", "b.png"]));
     });
 
-    it("a second request for the same file is handled even while the first one's clearing is on its way (ReAgent on #4235)", async () => {
+    it("a second request for the same file is handled even while the first one's clearing is on its way (muxreview on #4235)", async () => {
         const v = mount({ "media:path": "C:/pics/a.png" }, { lagOpenClear: true });
         const first = req("C:/pics/b.png");
         await v.setMeta({ "media:open": [first] });
@@ -142,7 +142,7 @@ describe("the Media pane's document tabs", () => {
         expect(v.pills()).toEqual(["a.png", "b.png"]);
     });
 
-    it("one file, one tab: sent into an empty tab, the tab already showing it comes to the front (ReAgent on #4235)", async () => {
+    it("one file, one tab: sent into an empty tab, the tab already showing it comes to the front (muxreview on #4235)", async () => {
         const v = mount({ "media:path": "C:/pics/a.png" });
         fireEvent.keyDown(v.root(), { key: "t", ctrlKey: true });
         await waitFor(() => expect(v.pills()).toEqual(["a.png", "Media"]));
@@ -169,7 +169,7 @@ describe("the Media pane's document tabs", () => {
         pane.dispose();
     });
 
-    it("dropped bytes open in a new tab, survive a tab switch, and aren't saved (ReAgent on #4235)", async () => {
+    it("dropped bytes open in a new tab, survive a tab switch, and aren't saved (muxreview on #4235)", async () => {
         const v = mount({ "media:path": "C:/pics/a.png" });
         await waitFor(() => expect(v.container.querySelector("img")).not.toBeNull());
         hub.hooks.get("m1")!.drop({ paths: [], files: [new File(["x"], "drop.png", { type: "image/png" })] });

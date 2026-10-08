@@ -267,7 +267,7 @@ a {
 // Pane-header activity flash, referenced by
 // `mixins.block-frame-default-header-layout()`'s `.block-frame-text.term-activity--flash`.
 // Lives HERE, in the one globally-imported stylesheet, rather than in that
-// mixin's body (ReAgent P2 on PR #3151): a @keyframes inside a mixin is
+// mixin's body (muxreview P2 on PR #3151): a @keyframes inside a mixin is
 // emitted once per @include, so it appeared twice once both block.scss and
 // agent-view.scss included the mixin. Moving it to mixins.scss's top level
 // was worse still — every one of that module's 10 consumers then emitted a

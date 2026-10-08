@@ -495,7 +495,7 @@ function follow(file, opt) {
 // hash to compute the filename — glob for any `ipc-port*` file instead,
 // cheaper and forward-compatible if the hash scheme ever changes.
 //
-// Reagent P1 on PR #2752: `port_file_dir` is NOT always the `data` sibling.
+// muxreview P1 on PR #2752: `port_file_dir` is NOT always the `data` sibling.
 // crates/cef/src/lib.rs writes it to `p.cef_cache_dir` for `task dev`
 // instances (`is_dev_build_exe` branch) and to `AGENTMUX_DATA_DIR` (==
 // `DataPaths.data_dir`, the `data` sibling) for portable/installed builds.
@@ -510,7 +510,7 @@ export function siblingCandidateDirs(logDir) {
     return [path.join(parent, "data"), path.join(parent, "cef-cache")];
 }
 
-// Reagent P2 on PR #2742: a raw TCP connect only proves SOMETHING is
+// muxreview P2 on PR #2742: a raw TCP connect only proves SOMETHING is
 // listening, not that it's AgentMux — if the OS reassigns a dead instance's
 // ephemeral port to an unrelated local service before this probe runs, a
 // bare connect would false-positive "live". The host's IPC server
@@ -540,7 +540,7 @@ async function probePort(port, timeoutMs = 300) {
 export async function checkLiveness(logDir) {
     const candidateDirs = siblingCandidateDirs(logDir);
     if (candidateDirs.length === 0) return "?";
-    // Reagent P1 on PR #2742: a dev-mode data dir is keyed by BRANCH, not
+    // muxreview P1 on PR #2742: a dev-mode data dir is keyed by BRANCH, not
     // version, and a crashed (non-graceful-exit) process's port file is
     // never cleaned up (crates/cef/src/lib.rs writes it once at startup;
     // nothing removes it on a crash, only on the graceful-shutdown path).
@@ -549,7 +549,7 @@ export async function checkLiveness(logDir) {
     // readdirSync result (unspecified ordering) could probe the dead one
     // and report "dead" for a genuinely live instance. Probe every
     // candidate concurrently instead; "live" if ANY of them answers.
-    // Reagent P2 on PR #2752: crates/cef/src/lib.rs writes the bare
+    // muxreview P2 on PR #2752: crates/cef/src/lib.rs writes the bare
     // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
     // unset (the task dev:standalone no-launcher path) — startsWith
     // "ipc-port-" alone misses that exact literal.

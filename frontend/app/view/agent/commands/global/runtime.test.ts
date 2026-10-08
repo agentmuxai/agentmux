@@ -78,7 +78,7 @@ describe("/runtime and the choice lists show what the agent really runs", () => 
     });
 });
 
-describe("/permission-mode and /runtime show the mode a definition pins (ReAgent P2 on #4161)", () => {
+describe("/permission-mode and /runtime show the mode a definition pins (muxreview P2 on #4161)", () => {
     const meta = {
         "agent:runtime": { model: "sonnet", permissionMode: "bypass", effort: "high" },
         "agent:provider_flags": "--permission-mode plan",

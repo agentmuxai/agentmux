@@ -182,9 +182,9 @@ task changeset -- patch "fix(scope): short description"
 
 \`muxlog host\` / \`muxlog srv\` / \`muxlog fe\` — pipe to \`grep\` for filtering.
 
-### Reagent Bot
+### muxreview Bot
 
-All PRs are auto-reviewed by reagent (Claude Opus). Address P1 findings before
+All PRs are auto-reviewed by muxreview (Claude Opus). Address P1 findings before
 merging. P2 findings should also be fixed if feasible.
 
 ### Critical Rule
@@ -202,6 +202,9 @@ const SEED_MEMORIES = [
     },
     {
         id: "seed-agentmux-dev",
+        // Earlier texts of this bundle (SHA-256): an install still holding one
+        // exactly gets the new text; an edited bundle is left alone.
+        replaces_instructions_sha256: ["04af0430edeaa5c0acbdae583e239a880061221c9406be5a4eeff318c8a2f34e"],
         name: "AgentMux Development",
         description: "Stack, build commands, version management, and workflow for the AgentMux codebase",
         is_global: false,

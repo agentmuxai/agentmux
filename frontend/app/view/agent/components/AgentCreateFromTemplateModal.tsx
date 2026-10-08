@@ -141,7 +141,7 @@ export const AgentCreateFromTemplateModalPanel = (
     // does (getProvider(id)?.models — setProviderModels folds in
     // authoritative version labels at app-init, e.g. "Sonnet 4.6" →
     // "Sonnet 5"). Reading the raw static catalog directly would show
-    // stale labels and never react to a later-landing overlay (ReAgent
+    // stale labels and never react to a later-landing overlay (muxreview
     // P1 on PR #2618). Gated on providerSupportsModelFlag (ReAgent P2 on
     // the same PR) — a provider with a `models` list but no `--model`
     // wiring in buildRuntimeArgs.ts (e.g. antigravity) would otherwise

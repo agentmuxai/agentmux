@@ -68,7 +68,7 @@ describe("beginShutdownLog / endShutdownLog", () => {
     });
 });
 
-describe("failShutdownLog (ReAgent P1 on #3784)", () => {
+describe("failShutdownLog (muxreview P1 on #3784)", () => {
     it("a close rejected before srv reported anything shows the error, so the pane offers a way out", () => {
         beginShutdownLog("b2");
         failShutdownLog("b2", "ClosePane: tab not found");

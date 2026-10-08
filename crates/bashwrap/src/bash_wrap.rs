@@ -3409,13 +3409,13 @@ mod tests {
     /// (`child.wait()` resolving) appears to reliably win the race against
     /// `pty_reader_loop`'s EOF-then-drop for a trivially fast command like
     /// `echo hello`, so this test does NOT reliably fail on the unfixed
-    /// code and can't be trusted as sole proof the bug is gone. ReAgent's
+    /// code and can't be trusted as sole proof the bug is gone. muxreview's
     /// code-level analysis of the race is still correct — a oneshot
     /// receiver genuinely does resolve identically for "sent" and
     /// "dropped without sending," and the fix (branching on
     /// `idle_signal.is_err()`) is the structurally correct response
     /// regardless of whether this specific test can force the window open.
-    /// The scenario ReAgent named as the realistic trigger — blocking
+    /// The scenario muxreview named as the realistic trigger — blocking
     /// thread-pool contention from concurrent bashwrap invocations —
     /// wasn't reproduced here; doing so reliably would need deliberately
     /// saturating tokio's blocking pool, not attempted given time spent on

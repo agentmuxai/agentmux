@@ -1,6 +1,6 @@
-name: ReAgent review log guard
+name: muxreview review log guard
 
-# Runs after each "ReAgent review" run and scans its logs for anything that
+# Runs after each "muxreview review" run and scans its logs for anything that
 # must never be public: credential shapes, email addresses, AWS account ids
 # and ARNs. On a hit it deletes that run's logs and fails, naming only the
 # pattern, never the text. The review job already prints only fixed lines;
@@ -8,7 +8,9 @@ name: ReAgent review log guard
 
 on:
   workflow_run:
-    workflows: ["ReAgent review"]
+    # A run keeps the name it started under, so the old name stays listed
+    # until no run of "ReAgent review" can still be in progress.
+    workflows: ["muxreview review", "ReAgent review"]
     types: [completed]
 
 permissions: {}
@@ -62,5 +64,5 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/logs"
-          echo "::error::ReAgent review run $RUN_ID printed something that must not be public; its logs are deleted."
+          echo "::error::muxreview review run $RUN_ID printed something that must not be public; its logs are deleted."
           exit 1
