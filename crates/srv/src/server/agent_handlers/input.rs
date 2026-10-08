@@ -733,6 +733,23 @@ pub async fn run_agent_turn(
     origin: crate::backend::blockcontroller::health::TurnOrigin,
     attachments: Vec<AttachmentRef>,
 ) -> Result<(), String> {
+    run_agent_turn_joining(deps, block_id, message, message_id, registration, origin, attachments, None).await
+}
+
+/// [`run_agent_turn`] for a message the pane held while turn `joins_turn`
+/// ran: if that turn is still settling (or only just ended), the message
+/// joins it rather than starting a new one (turn-model spec §4.3, J3).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_agent_turn_joining(
+    deps: &AgentTurnDeps,
+    block_id: String,
+    message: String,
+    message_id: Option<String>,
+    registration: TurnRegistration,
+    origin: crate::backend::blockcontroller::health::TurnOrigin,
+    attachments: Vec<AttachmentRef>,
+    joins_turn: Option<u64>,
+) -> Result<(), String> {
     let AgentTurnDeps {
         mstore,
         id_store,
@@ -1008,7 +1025,7 @@ pub async fn run_agent_turn(
             session_id: persisted_session_id,
             message_id: message_id.clone(),
         };
-        let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone() };
+        let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone(), joins_turn };
         if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input)) {
             // A single-live-instance refusal from inside the controller (the
             // spawn-time claim losing to another instance, or the pre-turn
@@ -1413,7 +1430,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     crate::backend::blockcontroller::health::TurnOrigin::User
                 };
                 let block_id = cmd.blockid.clone();
-                run_agent_turn(
+                run_agent_turn_joining(
                     &deps,
                     cmd.blockid,
                     message,
@@ -1421,6 +1438,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     TurnRegistration::Register,
                     origin,
                     cmd.attachments.unwrap_or_default(),
+                    cmd.joins_turn,
                 )
                 .await?;
                 // Right after the hidden message's own transcript line: replay

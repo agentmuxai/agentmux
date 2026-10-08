@@ -19,6 +19,7 @@ import { trail } from "@/log/render-trail";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
+import { turnOpen } from "@/app/store/agent-pane-state/turn-ledger";
 import { isAuthFailure, workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildPaneArgs, getRuntimeConfig } from "../buildRuntimeArgs";
@@ -297,6 +298,12 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     // SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6.
     const attachmentsByMessage = new Map<string, AttachmentRef[]>();
 
+    /** The id of the turn srv reports open for this pane right now, if any. */
+    const openTurnId = (): number | undefined => {
+        const l = paneSnapshot(opts.blockId)?.turnLedger;
+        return l && turnOpen(l, Date.now()) ? l.turnId : undefined;
+    };
+
     const heldQueue: Array<{
         id: string;
         text: string;
@@ -317,6 +324,13 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          * back, or the pane stays "Working…" forever (#2338).
          */
         initiatedTurnOptimistically: boolean;
+        /**
+         * The turn (srv's `agentturn` id) this message was held during, for a
+         * busy-path hold. Sent with it on the flush, so it joins that turn
+         * instead of starting a new one: the agent never returned to the user
+         * in between (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3, J3).
+         */
+        joinsTurn?: number;
     }> = [];
     // Single-flight: the flush effect fires on every tool/phase change, and
     // two concurrent drains would interleave AgentInputCommands and reorder
@@ -731,7 +745,14 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 opts.model.dispatchPane({ type: "PendingMessageRejected", id: messageId });
                 return;
             }
-            heldQueue.push({ id: messageId, text: message, authWasKnownBadAtQueueTime, authFailureToPreserve: null, initiatedTurnOptimistically: false });
+            heldQueue.push({
+                id: messageId,
+                text: message,
+                authWasKnownBadAtQueueTime,
+                authFailureToPreserve: null,
+                initiatedTurnOptimistically: false,
+                joinsTurn: openTurnId(),
+            });
             // §2.3a (2026-09-17): if the turn is open only for backgrounded
             // work, flush now — a detached dev server may never produce
             // another tool call, and the dark indicator (working-indicator.ts)
@@ -811,6 +832,8 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         /** Caller's pre-TurnStart capture of an "auth" failure (see
          *  sendMessage). Always null for a held-message flush. */
         authFailureToPreserve: PaneFailure | null,
+        /** The turn a held message was held during (see `joinsTurn` on the held item). */
+        joinsTurn?: number,
     ): Promise<void> => {
         // Fast-fail when the pane already knows auth is bad, instead of a
         // doomed "Working…" round-trip: nothing between here and the CLI
@@ -917,6 +940,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 message,
                 message_id: messageId,
                 ...(attachments?.length ? { attachments } : {}),
+                ...(joinsTurn != null ? { joins_turn: joinsTurn } : {}),
             });
             attachmentsByMessage.delete(messageId);
         } catch (err: any) {
@@ -1040,7 +1064,10 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // (SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md
                 // Phase 1, #2970).
                 opts.model.dispatchPane({ type: "PendingMessageFlushStarted", id: item.id });
-                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ item.initiatedTurnOptimistically, /* authFailureToPreserve */ null);
+                // A stop ends the turn: what was held during it starts a new one.
+                const phase = paneSnapshot(opts.blockId)?.turnPhase;
+                const stopped = phase?.kind === "Interrupting" || (phase?.kind === "Done" && phase.outcome !== "completed");
+                await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ item.initiatedTurnOptimistically, /* authFailureToPreserve */ null, stopped ? undefined : item.joinsTurn);
             }
         })().finally(() => {
             inFlightHeldFlush = null;

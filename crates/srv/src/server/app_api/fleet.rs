@@ -191,7 +191,7 @@ async fn deliver_broadcast_turn(
     text: String,
     origin: TurnOrigin,
 ) -> Result<(), String> {
-    let input = crate::backend::blockcontroller::health::TurnInput { origin, text: text.clone() };
+    let input = crate::backend::blockcontroller::health::TurnInput { origin, text: text.clone(), joins_turn: None };
     match broadcast_action(crate::bootstrap::route_agent_message_from(&block_id, &text, Some(input))) {
         BroadcastAction::Done => Ok(()),
         BroadcastAction::Fail(e) => Err(e),

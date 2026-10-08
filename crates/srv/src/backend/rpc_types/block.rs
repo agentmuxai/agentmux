@@ -406,6 +406,13 @@ pub struct CommandAgentInputData {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub attachments: Option<Vec<super::AttachmentRef>>,
+    /// The pane is sending a message it held while turn `joins_turn` (the
+    /// `agentturn` event's `turn_id`) ran: it joins that turn instead of
+    /// starting a new one. Set only for that flush, never for a fresh send.
+    /// SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3 (J3).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub joins_turn: Option<u64>,
 }
 
 /// Data for AskSideQuestionCommand — the `/btw` slash command's one-shot,

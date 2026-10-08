@@ -242,7 +242,7 @@ impl AcpController {
         mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
-        let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
+        let health_monitor = Arc::new(TurnActivityTracker::for_block(block_id.clone(), broker.as_ref()));
         Self {
             tab_id,
             block_id,

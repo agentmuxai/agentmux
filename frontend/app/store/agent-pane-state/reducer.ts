@@ -48,6 +48,7 @@ import {
     workingFromPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
+import type { TurnTokens } from "@/app/view/agent/types";
 import {
     implausibleReason,
     learnedWindowsAfter,
@@ -913,6 +914,12 @@ export function update(
                 events: [{ type: "turn-reset" }],
             };
 
+        case "TurnObserved": {
+            const current = state.turnLedger;
+            if (current != null && command.ledger.turnId < current.turnId) return { state, events: [] };
+            return { state: { ...state, turnLedger: command.ledger }, events: [] };
+        }
+
         case "TurnStartFailed":
             // Deliberately touches ONLY turnPhase (+ compacting, see below)
             // — see this command's doc
@@ -974,6 +981,7 @@ export function update(
                 streamedChars: 0,
                 requesting: false,
                 shownOutput: prevTokens?.shownOutput,
+                ...ledgerStamp(state),
             });
             // The window: reported by Claude Code for this model, a larger one
             // proven by an accepted prompt, else the model-name table
@@ -1777,6 +1785,18 @@ export function update(
             };
         }
     }
+}
+
+/**
+ * The turn and pass a call's tokens belong to, from the pane's ledger, so the
+ * live counter never adds a pass srv has already counted (turn-ledger.ts
+ * `turnLiveOutput`). srv reports a pass before it forwards any of its lines,
+ * so a call always belongs to the ledger's latest pass: the running one, or,
+ * for a line that arrives late, the one that just ended.
+ */
+function ledgerStamp(state: AgentPaneState): Pick<TurnTokens, "ledgerTurnId" | "ledgerPass"> {
+    const l = state.turnLedger;
+    return l ? { ledgerTurnId: l.turnId, ledgerPass: l.passes } : {};
 }
 
 /**

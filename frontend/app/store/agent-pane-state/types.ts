@@ -26,6 +26,7 @@
 
 import type { PendingMessage } from "../../view/agent/state";
 import type { ContextReading, ContextSource, ContextWindowMap, ReportedContextWindows } from "./context-reading";
+import type { TurnLedger } from "./turn-ledger";
 import type {
     SessionStats,
     StreamingState,
@@ -292,6 +293,13 @@ export interface AgentPaneState {
      */
     turnTokens: TurnTokens | null;
     /**
+     * The turn as the user sees it, over however many CLI passes: srv's
+     * `agentturn` event, verbatim (turn-ledger.ts). Null until srv has
+     * published one for this block. The working row runs its clock and counter
+     * from it; `turnPhase` and `turnTokens` stay per pass.
+     */
+    turnLedger: TurnLedger | null;
+    /**
      * True for the duration of a turn started specifically to send a
      * manual "/compact" (the composer's "Compact now" button, or a user
      * typing it) — set on `TurnStart` when `command.content === "/compact"`,
@@ -488,6 +496,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentTool: null,
     currentToolArg: null,
     turnTokens: null,
+    turnLedger: null,
     pendingCompactTurn: false,
     context: null,
     contextSeedable: true,
@@ -737,6 +746,9 @@ export type AgentPaneCommand =
      * pending or streaming.
      */
     | { type: "TurnReset" }
+    /** srv published the block's turn ledger (`agentturn`). An older turn's
+     *  ledger, replayed late, is ignored. */
+    | { type: "TurnObserved"; ledger: TurnLedger }
     /**
      * Revert an OPTIMISTIC `TurnStart` when the turn never actually began —
      * the initiating send's own RPC call failed synchronously (no

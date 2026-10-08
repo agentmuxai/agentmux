@@ -3833,7 +3833,7 @@ async fn a_labelled_delivery_sets_the_turn_provenance_the_controller_reports() {
     use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
     use crate::backend::blockcontroller::Controller;
     let (c, mut rx) = idle_controller();
-    let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into() };
+    let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into(), joins_turn: None };
     assert!(matches!(c.decide_send_action_from("m", None, Some(input)), SendAction::DeliverDirect { was_active: false }));
     let p = c.turn_provenance().expect("a turn is in flight");
     assert_eq!((p.origin, p.tainted), (TurnOrigin::User, false));
@@ -3853,7 +3853,7 @@ async fn a_labelled_structured_delivery_starts_a_user_turn() {
     use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
     use crate::backend::blockcontroller::Controller;
     let (c, mut rx) = idle_controller();
-    let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into() };
+    let input = TurnInput { origin: TurnOrigin::User, text: "finish then quit".into(), joins_turn: None };
     assert_eq!(c.send_user_message_outcome_from("finish then quit".to_string(), Some(input)).unwrap(), SendOutcome::Sent);
     assert!(rx.try_recv().unwrap().contains("finish then quit"));
     let p = c.turn_provenance().expect("a turn is in flight");
@@ -3867,7 +3867,7 @@ async fn a_labelled_structured_delivery_mid_turn_does_not_taint_a_user_turn() {
     use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
     use crate::backend::blockcontroller::Controller;
     let (c, _rx) = idle_controller();
-    let user = |t: &str| TurnInput { origin: TurnOrigin::User, text: t.into() };
+    let user = |t: &str| TurnInput { origin: TurnOrigin::User, text: t.into(), joins_turn: None };
     c.send_user_message_outcome_from("first".to_string(), Some(user("first"))).unwrap();
     c.send_user_message_outcome_from("second".to_string(), Some(user("second"))).unwrap();
     let p = c.turn_provenance().unwrap();
@@ -3883,7 +3883,7 @@ async fn a_labelled_structured_delivery_written_with_a_backlog_is_unlabelled() {
     use crate::backend::blockcontroller::Controller;
     let (c, mut rx) = idle_controller();
     enqueue_deferred(&c, "an older jekt");
-    let input = TurnInput { origin: TurnOrigin::User, text: "then quit".into() };
+    let input = TurnInput { origin: TurnOrigin::User, text: "then quit".into(), joins_turn: None };
     assert_eq!(c.send_user_message_outcome_from("then quit".to_string(), Some(input)).unwrap(), SendOutcome::Sent);
     assert_eq!(drain(&mut rx).len(), 2, "the backlog went out with it");
     assert_eq!(c.turn_provenance(), None, "an unlabelled start is unknown");
@@ -3900,7 +3900,7 @@ async fn a_labelled_delivery_whose_own_write_fails_after_a_backlog_is_unlabelled
     let (tx, mut rx) = mpsc::channel::<String>(1); // room for exactly one write
     c.inner.lock().unwrap().stdin_tx = Some(tx);
     enqueue_deferred(&c, "an older jekt");
-    let input = TurnInput { origin: TurnOrigin::User, text: "then quit".into() };
+    let input = TurnInput { origin: TurnOrigin::User, text: "then quit".into(), joins_turn: None };
     assert!(c.send_user_message_outcome_from("then quit".to_string(), Some(input)).is_err());
     assert!(rx.try_recv().unwrap().contains("an older jekt"), "the backlog was written");
     assert!(c.health_monitor.is_active_turn(), "the older message started a turn");
@@ -3925,7 +3925,7 @@ async fn the_mark_after_a_spawn_does_not_taint_the_user_s_turn() {
     use crate::backend::blockcontroller::health::{TurnInput, TurnOrigin};
     use crate::backend::blockcontroller::Controller;
     let (c, _rx) = idle_controller();
-    c.health_monitor.hint_next_turn(TurnInput { origin: TurnOrigin::User, text: "do X then quit".into() });
+    c.health_monitor.hint_next_turn(TurnInput { origin: TurnOrigin::User, text: "do X then quit".into(), joins_turn: None });
     c.health_monitor.set_active_turn(true); // what spawn_process does
     c.mark_turn_active_and_publish();
     let p = c.turn_provenance().expect("a turn is in flight");
