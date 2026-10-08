@@ -43,6 +43,8 @@ export type { MuxBusLoginReq } from "@/types/rpc/MuxBusLoginReq";
 export type { MuxBusLoginResp } from "@/types/rpc/MuxBusLoginResp";
 export type { MuxBusLoginCancelResp } from "@/types/rpc/MuxBusLoginCancelResp";
 export type { MuxBusStatusResp } from "@/types/rpc/MuxBusStatusResp";
+export type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
+export type { MuxBusDeliveryState } from "@/types/rpc/MuxBusDeliveryState";
 export type { MuxBusDisconnectResp } from "@/types/rpc/MuxBusDisconnectResp";
 export type { MuxBusCloudConfigResp } from "@/types/rpc/MuxBusCloudConfigResp";
 export type { ProvidersModelsParams } from "@/types/rpc/ProvidersModelsParams";

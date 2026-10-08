@@ -3,6 +3,7 @@
 
 pub mod agent_credentials;
 pub mod cloud_subscriber;
+pub mod delivery_status;
 pub mod discovery;
 pub mod wan_lease;
 pub mod pkce;

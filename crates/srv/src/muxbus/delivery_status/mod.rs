@@ -1,0 +1,200 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+//! Whether cloud (MuxBus) messages are reaching this channel's agents, made
+//! visible: a sign-in that stops working, or a relay that can't be reached,
+//! used to leave nothing but a log line while agents silently stopped getting
+//! review, CI and cross-machine messages.
+//!
+//! **State** (`muxbus.status`'s `delivery`, and the `muxbus:status` event on
+//! every change) is derived in [`machine::derive`] from two things only: what
+//! the cloud subscriber's loop last reported ([`set_link`], [`saw_session`])
+//! and the credential broker's state for the sign-in. It never reads the
+//! credential store itself.
+//!
+//! **What follows from it** ([`machine::Effect`]):
+//! - one OS notification when a needs-sign-in episode starts (the notify
+//!   Router's `CloudSignedOut` kind), taken down when it ends;
+//! - after [`machine::PAUSE_NOTICE_MS`] paused, one AgentMux system note to
+//!   every agent subscribed to the cloud, and one more when delivery resumes,
+//!   with what was delivered and what expired meanwhile ([`notes`]). The
+//!   notes are delivered locally by srv, never through the relay; see
+//!   [`notes::NOTE_MARKER`] for why one can't be forged.
+
+mod machine;
+pub mod notes;
+
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+use agentmux_common::time::now_ms;
+pub use machine::Link;
+use machine::{Effect, Machine};
+use notes::{ExpiredItem, Note, NoteBook};
+
+use crate::backend::eventbus::{EventBus, WSEventType};
+use crate::backend::mps::Broker;
+use crate::backend::rpc_types::MuxBusDeliveryStatus;
+use crate::broker::CredentialState;
+
+/// The WebSocket event carrying a changed [`MuxBusDeliveryStatus`].
+pub const EVENT_MUXBUS_STATUS: &str = "muxbus:status";
+
+/// How often the state is re-derived (the broker can move on its own) and
+/// the time-based notes are checked.
+const TICK: Duration = Duration::from_secs(15);
+
+struct Sinks {
+    event_bus: Arc<EventBus>,
+    broker: Arc<Broker>,
+}
+
+struct Runtime {
+    machine: Mutex<Machine>,
+    book: Mutex<NoteBook>,
+    sinks: OnceLock<Sinks>,
+}
+
+static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+
+fn rt() -> &'static Runtime {
+    RUNTIME.get_or_init(|| Runtime {
+        machine: Mutex::new(Machine::new(now_ms())),
+        book: Mutex::new(NoteBook::default()),
+        sinks: OnceLock::new(),
+    })
+}
+
+fn broker_state() -> Option<CredentialState> {
+    crate::broker::get_global().and_then(|s| s.state(crate::muxbus::CREDENTIAL_ID))
+}
+
+fn subscribed_agents() -> Vec<String> {
+    crate::muxbus::cloud_subscriber::get_global_subscriber()
+        .map(|s| s.subscribed_agents())
+        .unwrap_or_default()
+}
+
+/// Where status changes and the notification go. Call once at startup;
+/// starts the tick. Before this, state is still tracked but nothing is sent.
+pub fn install(event_bus: Arc<EventBus>, broker: Arc<Broker>) {
+    if rt().sinks.set(Sinks { event_bus, broker }).is_err() {
+        return;
+    }
+    if tokio::runtime::Handle::try_current().is_err() {
+        return;
+    }
+    tokio::spawn(async {
+        let mut tick = tokio::time::interval(TICK);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            run_tick();
+        }
+    });
+}
+
+fn run_tick() {
+    let broker = broker_state();
+    let now = now_ms();
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).tick(broker.as_ref(), now);
+    apply(effects);
+    let notes = {
+        let mut book = rt().book.lock().unwrap_or_else(|e| e.into_inner());
+        let mut notes = book.pause_late_joiners(&subscribed_agents());
+        notes.extend(book.tick(now));
+        notes
+    };
+    deliver(notes);
+}
+
+/// The current state, for `muxbus.status`.
+pub fn status() -> MuxBusDeliveryStatus {
+    rt().machine.lock().unwrap_or_else(|e| e.into_inner()).status().clone()
+}
+
+/// The subscriber found a stored sign-in, or a sign-in just succeeded.
+pub fn saw_session(email: Option<String>) {
+    let broker = broker_state();
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).saw_session(email, broker.as_ref(), now_ms());
+    apply(effects);
+}
+
+/// The user signed out (`muxbus.disconnect`).
+pub fn signed_out() {
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).signed_out(now_ms());
+    apply(effects);
+}
+
+/// What the subscriber's loop is doing now.
+pub fn set_link(link: Link) {
+    let broker = broker_state();
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).set_link(link, broker.as_ref(), now_ms());
+    apply(effects);
+}
+
+/// One agent's pull answered: `delivered` messages reached it and the relay
+/// reported `expired`. Sends its resume or expiry note, if it has one; call
+/// after the pull's own messages are delivered, so the note comes last.
+pub fn fetched(agent: &str, delivered: usize, expired: &[ExpiredItem]) {
+    rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(now_ms());
+    let note = rt().book.lock().unwrap_or_else(|e| e.into_inner()).fetched(agent, delivered, expired);
+    deliver(note.into_iter().collect());
+}
+
+fn apply(effects: Vec<Effect>) {
+    for effect in effects {
+        match effect {
+            Effect::Changed(status) => {
+                tracing::info!(
+                    state = ?status.state,
+                    error = status.last_error.as_deref().unwrap_or(""),
+                    "muxbus delivery: state changed"
+                );
+                if let Some(sinks) = rt().sinks.get() {
+                    sinks.event_bus.broadcast_event(&WSEventType {
+                        eventtype: EVENT_MUXBUS_STATUS.to_string(),
+                        oref: String::new(),
+                        data: serde_json::to_value(&status).ok(),
+                    });
+                }
+            }
+            Effect::NotifySignInNeeded => {
+                if let Some(router) = router() {
+                    router.cloud_signed_out();
+                }
+            }
+            Effect::RetractSignInNeeded => {
+                if let Some(router) = router() {
+                    router.resolve("", crate::backend::notify::policy::Family::Cloud);
+                }
+            }
+            Effect::PauseNote { since_ms, reason } => {
+                tracing::warn!(reason, "muxbus delivery: paused for two minutes, telling the agents");
+                let notes = rt().book.lock().unwrap_or_else(|e| e.into_inner()).pause(since_ms, reason, &subscribed_agents());
+                deliver(notes);
+            }
+            Effect::Resumed { at_ms } => {
+                rt().book.lock().unwrap_or_else(|e| e.into_inner()).resumed(at_ms);
+            }
+        }
+    }
+}
+
+fn router() -> Option<Arc<crate::backend::notify::router::Router>> {
+    let sinks = rt().sinks.get()?;
+    let router = crate::backend::notify::router::get(&sinks.broker);
+    if router.is_none() {
+        tracing::info!("muxbus delivery: no notification router yet (no window connected)");
+    }
+    router
+}
+
+fn deliver(notes: Vec<Note>) {
+    let handler = crate::backend::reactive::handler::get_global_handler();
+    for note in notes {
+        if let Err(e) = handler.deliver_system_note(&note.agent, &note.text) {
+            tracing::warn!(agent = %note.agent, error = %e, "muxbus delivery: system note not delivered");
+        }
+    }
+}

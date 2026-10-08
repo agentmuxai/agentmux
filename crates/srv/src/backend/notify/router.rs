@@ -195,6 +195,10 @@ fn pick_open_window(p: &PolicyState, window_ids: &[String]) -> Option<String> {
     open.iter().find(|w| Some(w.as_str()) == raise.as_deref()).or(open.first()).map(|w| (*w).clone())
 }
 
+/// The body of the `CloudSignedOut` notification.
+pub const CLOUD_SIGNED_OUT_BODY: &str =
+    "Agents won't get messages from other computers or GitHub until you sign in.";
+
 const AGENT_NAME_MAX: usize = 32;
 const BODY_MAX: usize = 80;
 /// Rich-content spec §1.2: the summary line's cap, before the `…`.
@@ -567,6 +571,7 @@ pub fn settings_from_extra(extra: &std::collections::HashMap<String, serde_json:
         NotifyKind::TurnErrored,
         NotifyKind::AgentCrashed,
         NotifyKind::MessageNeedsReview,
+        NotifyKind::CloudSignedOut,
     ] {
         if let Some(sfx) = kind.setting_suffix() {
             s.kind_enabled.insert(kind, setting_bool(extra, &format!("notify:os:{sfx}"), true));
@@ -734,6 +739,19 @@ impl Router {
             block_id: String::new(),
             agent_name: String::new(),
             body: Some("You'll see alerts like this when an agent needs you.".to_string()),
+            summary: None,
+        }));
+    }
+
+    /// This channel's MuxBus sign-in stopped working
+    /// (`muxbus::delivery_status`). Fixed text; about no agent. Taken down
+    /// with `resolve("", Family::Cloud)`.
+    pub fn cloud_signed_out(&self) {
+        self.step(Input::Emit(Request {
+            kind: NotifyKind::CloudSignedOut,
+            block_id: String::new(),
+            agent_name: String::new(),
+            body: Some(CLOUD_SIGNED_OUT_BODY.to_string()),
             summary: None,
         }));
     }

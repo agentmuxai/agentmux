@@ -4,7 +4,7 @@
 // Paired devices: every device paired with this computer's viewer (the host
 // popover's "Pair a device"), when it paired and was last seen, and Revoke,
 // which stops its token working and closes what it is watching. Below it,
-// Cloud presence (cloud-presence.tsx).
+// MuxBus sign-in (muxbus-sign-in.tsx) and Cloud presence (cloud-presence.tsx).
 // agentmux-mobile's SPEC_AGENT_STATUS_AND_LIVE_PANE_FEED_2026_10_07 §4.1.
 
 import { Button } from "@/app/element/ui";
@@ -16,6 +16,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
 import { SectionHeader } from "../settings-controls";
 import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
+import { MUXBUS_SIGN_IN_SETTING, MuxBusSignIn } from "./muxbus-sign-in";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
 
@@ -28,6 +29,7 @@ export const DEVICES_SETTINGS = {
         section: "devices",
         keywords: ["mobile", "device", "tablet", "pair", "revoke", "viewer", "live feed", "qr code"],
     },
+    muxbus: MUXBUS_SIGN_IN_SETTING,
     cloudPresence: CLOUD_PRESENCE_SETTING,
 } satisfies Record<string, SettingsIndexEntry>;
 
@@ -129,6 +131,8 @@ export function DevicesSection(): JSX.Element {
                     )}
                 </Show>
             </div>
+            <SectionHeader label={DEVICES_SETTINGS.muxbus.label} />
+            <MuxBusSignIn />
             <SectionHeader label={DEVICES_SETTINGS.cloudPresence.label} />
             <CloudPresence />
         </div>

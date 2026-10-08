@@ -70,6 +70,12 @@ pub struct MuxBusStatusResp {
     /// longer publishes (SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.3).
     /// The UI shows "Sign in again" with `email`.
     pub needs_reauth: bool,
+    /// Whether cloud messages are reaching this channel's agents
+    /// (`muxbus::delivery_status`); live changes arrive as the
+    /// `muxbus:status` event. Always present from this srv.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub delivery: Option<crate::backend::rpc_types::MuxBusDeliveryStatus>,
 }
 
 /// Empty request shapes for `muxbus.login.cancel`, `muxbus.status` and
@@ -255,6 +261,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // that has never seen this install's keys; publications
                         // are recorded per directory, so the pass this nudge
                         // starts finds them all pending there.
+                        crate::muxbus::delivery_status::saw_session(Some(email.clone()));
                         clear_wan_peer_cache();
                         crate::muxbus::wan_publish::nudge();
                         // And publish this install's presence now, whatever
@@ -327,6 +334,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         expires_at: 0,
                         valid: false,
                         needs_reauth: false,
+                        delivery: Some(crate::muxbus::delivery_status::status()),
                     };
                     return Ok(resp);
                 }
@@ -347,6 +355,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             expires_at: creds.expires_at,
                             valid,
                             needs_reauth,
+                            delivery: Some(crate::muxbus::delivery_status::status()),
                         };
                         Ok(resp)
                     }
@@ -358,6 +367,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             expires_at: 0,
                             valid: false,
                             needs_reauth: false,
+                            delivery: Some(crate::muxbus::delivery_status::status()),
                         };
                         Ok(resp)
                     }
@@ -383,6 +393,13 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .map_err(|e| format!("muxbus.disconnect: {e}"))?;
                 clear_wan_peer_cache();
                 crate::muxbus::wan_presence::sign_in_changed();
+                // A deliberate sign-out, not a lost sign-in: no notification,
+                // no agent notes. And close the relay connection, which would
+                // otherwise keep delivering on the old token until it ends.
+                crate::muxbus::delivery_status::signed_out();
+                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                    sub.reload_token();
+                }
                 Ok(MuxBusDisconnectResp {})
             }
         },

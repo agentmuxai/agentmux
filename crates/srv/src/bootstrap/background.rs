@@ -215,6 +215,9 @@ pub fn spawn_background_subsystems(
         reactive_handler,
     ));
 
+    // Cloud delivery's state for the UI, the sign-in notification and the
+    // agents' pause/resume notes. Reads nothing from the keychain itself.
+    crate::muxbus::delivery_status::install(event_bus.clone(), broker.clone());
     // Cloud push subscriber — single WS connection per sidecar that the cloud
     // uses to push reactive injections instead of polling. The WS connection
     // itself is a no-op until the user connects via muxbus.login, but

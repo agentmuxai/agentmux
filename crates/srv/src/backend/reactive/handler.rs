@@ -1572,6 +1572,60 @@ impl Handler {
         }
     }
 
+    /// Deliver one of srv's own `[AgentMux]` system notes to `target_agent`
+    /// (`muxbus::delivery_status`). Not a jekt: no marker block, tier or
+    /// trust label, because nothing but srv wrote the text, and no jekt or
+    /// forwarded text can carry the marker (`sanitize::neutralize_markers`).
+    /// Routed like a jekt: the controller's structured channel, else
+    /// keystrokes. Audited as `system_note` from `agentmux`.
+    pub fn deliver_system_note(&mut self, target_agent: &str, text: &str) -> Result<(), String> {
+        let block_id = match self.resolve_target(target_agent) {
+            TargetResolution::Uid(b) | TargetResolution::Name(b) => b,
+            TargetResolution::Ambiguous(candidates) => {
+                return Err(format!("ambiguous agent name: '{target_agent}' is held by {} live agents", candidates.len()));
+            }
+            TargetResolution::NotFound => return Err(format!("agent not found: {target_agent}")),
+        };
+        let result = self.send_to_block(&block_id, text);
+        let request_id = uuid::Uuid::new_v4().to_string();
+        self.log_audit(
+            Some("agentmux"),
+            target_agent,
+            &block_id,
+            text,
+            result.is_ok(),
+            result.as_ref().err().map(String::as_str),
+            &request_id,
+            Some("system_note"),
+            None,
+        );
+        result
+    }
+
+    /// `text` to `block_id` the way a jekt goes: structured when the
+    /// controller takes it, else typed and submitted.
+    fn send_to_block(&self, block_id: &str, text: &str) -> Result<(), String> {
+        if let Some(deliver) = &self.message_sender {
+            match deliver(block_id, text)? {
+                SenderDelivery::Delivered | SenderDelivery::Deferred => return Ok(()),
+                SenderDelivery::Pty => {}
+            }
+        }
+        let sender = self.input_sender.clone().ok_or_else(|| "input sender not configured".to_string())?;
+        let _ = sender(block_id, b"\r");
+        sender(block_id, format!("{text}\r").as_bytes())?;
+        if tokio::runtime::Handle::try_current().is_ok() {
+            let block_id = block_id.to_string();
+            tokio::spawn(async move {
+                for _ in 0..3 {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                    let _ = sender(&block_id, b"\r");
+                }
+            });
+        }
+        Ok(())
+    }
+
     /// Record a Warden Supervisor watcher agent's decision about
     /// `target_agent`. A `Nudge` is delivered through the same path
     /// `inject_message` uses (`inject_message_inner`) and audited with
@@ -2243,6 +2297,11 @@ impl ReactiveHandler {
         let resp = self.inner.lock().unwrap().inject_message(req);
         self.after_delivery(&resp);
         resp
+    }
+
+    /// See [`Handler::deliver_system_note`].
+    pub fn deliver_system_note(&self, target_agent: &str, text: &str) -> Result<(), String> {
+        self.inner.lock().unwrap().deliver_system_note(target_agent, text)
     }
 
     /// See [`Handler::inject_held`].

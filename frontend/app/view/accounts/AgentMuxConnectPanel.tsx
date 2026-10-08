@@ -29,6 +29,7 @@ import { CopyableErrorMessage } from "@/app/errors/CopyableErrorMessage";
 import { createMuxBusCloudConfig } from "./muxbus-cloud-config";
 import { muxbusNeedsSignInAgain } from "./muxbus-session";
 import { Button } from "@/app/element/ui";
+import { acceptMuxbusDelivery, type MuxBusDeliveryStatus } from "@/store/muxbus-delivery";
 
 // Production Cognito config — set after deployment.
 // Override with VITE_MUXBUS_COGNITO_DOMAIN / VITE_MUXBUS_CLIENT_ID at build time.
@@ -53,6 +54,8 @@ interface MuxBusStatus {
     valid: boolean;
     /** Only a new sign-in helps — see `muxbusNeedsSignInAgain`. */
     needsReauth: boolean;
+    /** Whether cloud messages reach the agents (`@/store/muxbus-delivery`). */
+    delivery?: MuxBusDeliveryStatus;
 }
 
 const DISCONNECTED: MuxBusStatus = {
@@ -126,7 +129,10 @@ export function useMuxBusStatus(): MuxBusController {
             // no credentials or server not reachable — treat as disconnected
             next = { ...DISCONNECTED };
         }
-        if (seq === refreshSeq) setStatus(next);
+        if (seq === refreshSeq) {
+            setStatus(next);
+            if (next.delivery) acceptMuxbusDelivery(next.delivery);
+        }
     };
     liveRefreshers.add(refresh);
     if (getOwner()) onCleanup(() => liveRefreshers.delete(refresh));

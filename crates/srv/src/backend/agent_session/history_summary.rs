@@ -266,6 +266,7 @@ fn is_scaffolding(text: &str) -> bool {
         "# Session Context",
         "[JEKT:",
         "[BROADCAST:",
+        "[AgentMux]",
         "<system-reminder>",
         "<command-name>",
         "<command-message>",
