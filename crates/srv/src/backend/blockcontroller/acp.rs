@@ -81,6 +81,13 @@ fn session_request(resume: Option<&str>, load_session: bool, cwd: &str) -> (&'st
     }
 }
 
+/// Whether a line from the agent is part of a `session/load` replay: the
+/// agent streams the earlier conversation as `session/update`s before it
+/// answers the load, and the load's own answer is not one of them.
+fn is_session_replay(loading: bool, is_session_response: bool) -> bool {
+    loading && !is_session_response
+}
+
 /// `session/prompt` params: the prompt is an array of content blocks.
 fn prompt_params(session_id: &str, text: &str) -> serde_json::Value {
     serde_json::json!({
@@ -169,6 +176,9 @@ struct AcpInner {
     session_request_id: Option<u64>,
     /// The session being loaded: its result carries no id of its own.
     loading_session: Option<String>,
+    /// `session/new` was refused (pi: "Authentication required"): no session
+    /// will open until the agent restarts.
+    session_failed: bool,
     /// The pane's previous session (`agent:sessionid`), offered to
     /// `session/load` when the agent supports it.
     resume_session_id: Option<String>,
@@ -227,6 +237,7 @@ impl AcpController {
                 init_request_id: None,
                 session_request_id: None,
                 loading_session: None,
+                session_failed: false,
                 resume_session_id: None,
                 session_cwd: String::new(),
             })),
@@ -440,6 +451,8 @@ impl AcpController {
                 // opens a new session): not shown, or the pane reads it as
                 // an error that ended a turn.
                 let mut recovered_error = false;
+                // A line the agent sends while it replays a loaded session.
+                let mut replaying = false;
                 // An error that ended the turn: a turn end follows it (below),
                 // since the error itself doesn't say whether other prompts are
                 // still running.
@@ -465,6 +478,7 @@ impl AcpController {
                     {
                         let mut inner = inner_clone.lock().unwrap();
                         let is = |id: Option<u64>| msg_id.is_some() && msg_id == id;
+                        replaying = is_session_replay(inner.loading_session.is_some(), is(inner.session_request_id));
                         let next = if is(inner.init_request_id) && json.get("result").is_some() {
                             inner.init_request_id = None;
                             let can_load = json
@@ -488,6 +502,7 @@ impl AcpController {
                             // session/new refused (pi: "Authentication
                             // required"): the queued prompt can't run.
                             inner.pending_prompt = None;
+                            inner.session_failed = true;
                             turn_ended_by_error = true;
                         }
                         if let Some(((method, params), loading)) = next {
@@ -664,6 +679,9 @@ impl AcpController {
                 // Persist + broadcast via the shared helper (same as subprocess/host_spawn.rs)
                 if recovered_error {
                     tracing::info!(block_id = %block_id_stdout, "[acp] session/load refused; opening a new session");
+                } else if replaying {
+                    // Earlier turns the agent replays while loading: the pane
+                    // already has them, and their tool-call ids would collide.
                 } else if let Some(ref broker) = broker_clone {
                     let line_with_newline = format!("{}\n", line);
                     super::shell::handle_append_block_file(
@@ -851,6 +869,7 @@ impl Controller for AcpController {
             inner.init_request_id = None;
             inner.session_request_id = None;
             inner.loading_session = None;
+            inner.session_failed = false;
         }
         let mut env_vars = self.spawn_env(&block_meta);
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
@@ -917,6 +936,9 @@ impl Controller for AcpController {
                 let mut inner = self.inner.lock().unwrap();
                 match inner.session_id.clone() {
                     Some(sid) => sid,
+                    None if inner.session_failed => {
+                        return Err("The agent couldn't open a session (see the error above). Fix that, then restart the agent.".to_string());
+                    }
                     None => {
                         // The handshake hasn't opened the session yet (the
                         // startup message is sent right after launch): queue
@@ -1314,6 +1336,29 @@ mod tests {
         assert!(rx.try_recv().is_err(), "nothing goes to the agent before the session exists");
         assert_eq!(c.inner.lock().unwrap().pending_prompt.as_deref(), Some("startup\n\nsecond"));
         assert!(!c.health_monitor.is_active_turn());
+    }
+
+    /// After `session/new` is refused nothing will ever open a session, so a
+    /// send is an error the user sees, not a message queued for good.
+    #[tokio::test]
+    async fn a_send_after_the_session_was_refused_is_an_error() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_failed = true;
+        }
+        let err = c.send_input(BlockInputUnion::data(b"hi".to_vec()), None).unwrap_err();
+        assert!(err.contains("couldn't open a session"), "{err}");
+        assert!(c.inner.lock().unwrap().pending_prompt.is_none());
+    }
+
+    #[test]
+    fn lines_during_a_session_load_are_replay_except_the_loads_own_answer() {
+        assert!(super::is_session_replay(true, false));
+        assert!(!super::is_session_replay(true, true));
+        assert!(!super::is_session_replay(false, false));
     }
 
     #[tokio::test]

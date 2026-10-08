@@ -75,6 +75,13 @@ meta; `start` forgets the old session, so the message waits for the new one.
 - A prompt sent before the session exists (the startup message is sent right
   after launch) is queued, joined to any earlier queued text, and sent once
   the session opens; it is never sent with an empty session id.
+- While a `session/load` is in flight, lines from the agent are not shown: an
+  agent replays the earlier conversation as `session/update`s before it
+  answers the load, and the pane already has those turns (their tool-call ids
+  would collide). The load's own answer is not part of the replay.
+- After `session/new` is refused, a send returns an error ("couldn't open a
+  session") instead of queuing for a session that can never open; restarting
+  the agent starts a fresh handshake.
 - A `session/load` the agent refuses is not shown in the pane: the client
   recovers by opening a new session, so it is logged, not rendered as an
   error that ended a turn.

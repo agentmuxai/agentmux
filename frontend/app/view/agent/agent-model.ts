@@ -343,7 +343,7 @@ export class AgentViewModel {
             await this.ctx.setMeta({
                 agentId: agentId,
                 agentOutputFormat: provider.styledOutputFormat,
-// ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
+                // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
                 // a container agent keeps the per-turn path into its container
                 // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
                 controller: launchController(provider, undefined),
@@ -836,7 +836,7 @@ export class AgentViewModel {
                 // here — it is a one-shot launch intent, not a durable arg.
                 [PROVIDER_FLAGS_META_KEY]: paneFlags,
                 ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
-// ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
+                // ACP harnesses (Copilot, OpenClaw, Pi) need srv's AcpController;
                 // a container agent keeps the per-turn path into its container
                 // (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md).
                 controller: launchController(provider, agentMode),
