@@ -1081,8 +1081,23 @@ impl Store {
                 }
             }
         } else {
-            match read_split_tokens(&ns) {
-                Ok(Some((tokens, _generation))) => {
+            match read_split_settled(&ns) {
+                // Pre-blob split entries left torn: the same repair as on
+                // Windows; the refresh's save writes a whole blob.
+                Ok(SplitRead::Torn { refresh: Some(refresh_token) }) => {
+                    tracing::warn!(
+                        "muxbus: legacy split keychain entries are torn — keeping the refresh token \
+                         so the next refresh repairs them"
+                    );
+                    return Ok(MuxBusTokens { refresh_token, ..Default::default() });
+                }
+                Ok(SplitRead::Torn { refresh: None }) => {
+                    tracing::warn!(
+                        "muxbus: legacy split keychain entries are torn with no whole refresh token — \
+                         treating as not signed in; signing in again repairs it"
+                    );
+                }
+                Ok(SplitRead::Complete(tokens, _generation)) => {
                     // No coexisting blob was found (the branch above this
                     // one already checked and returned) — self-heal:
                     // collapse the pre-fix chunked entries into one blob so
@@ -1102,7 +1117,7 @@ impl Store {
                     }
                     return Ok(tokens);
                 }
-                Ok(None) => {}
+                Ok(SplitRead::Absent) => {}
                 Err(e) => {
                     if !legacy_access.is_empty() {
                         tracing::warn!(
