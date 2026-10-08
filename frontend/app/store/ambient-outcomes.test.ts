@@ -31,6 +31,14 @@ describe("summarizeAmbientOutcomes", () => {
         expect(s.rows[0].unhealthy).toBe(false);
     });
 
+    it("counts a SKIP as a good answer and a gated call as skipped, not as failures", () => {
+        const s = summarizeAmbientOutcomes({
+            next_prompt_suggestion: { skipped: 20, gated: 15, "rejected:format": 1, timeout: 2 },
+        })!;
+        expect(s.rows[0].unhealthy).toBe(false);
+        expect(s.rows[0].text).toBe("0 accepted · 20 kept · 1 refused · 15 skipped · 2 failed");
+    });
+
     it("still shows a purpose or outcome label this build doesn't know", () => {
         const s = summarizeAmbientOutcomes({ brand_new_purpose: { accepted: 1, some_new_label: 2 } })!;
         expect(s.rows[0].name).toBe("brand_new_purpose");

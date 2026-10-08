@@ -76,8 +76,10 @@ pub struct Slot {
     _guard: AmbientCallGuard<'static>,
     /// Set once this call's outcome is recorded, so `Drop` records `NotRun` only
     /// for a call given up without one: every admitted call ends in exactly one
-    /// outcome (Codex P2 on #4243).
+    /// outcome.
     recorded: bool,
+    /// Time spent waiting for a concurrency permit after admission.
+    queued_ms: u64,
 }
 
 impl Drop for Slot {
@@ -107,6 +109,7 @@ pub async fn admit(
         }
     };
     let cancel = guard.cancellation();
+    let admitted_at = std::time::Instant::now();
     let permit = match limit {
         None => None,
         Some(sem) => {
@@ -122,7 +125,8 @@ pub async fn admit(
             Some(permit?)
         }
     };
-    Some(Slot { purpose, entity_id, cancel, _permit: permit, _guard: guard, recorded: false })
+    let queued_ms = admitted_at.elapsed().as_millis() as u64;
+    Some(Slot { purpose, entity_id, cancel, _permit: permit, _guard: guard, recorded: false, queued_ms })
 }
 
 impl Slot {
@@ -147,29 +151,77 @@ impl Slot {
         prompt: &str,
         accept: impl Fn(&str) -> Option<String>,
     ) -> Reply {
-        let result = super::cli::invoke_haiku(
-            &target.cli_path,
-            prompt,
-            &target.meta,
-            self.cancel.clone(),
-        )
-        .await;
+        let (result, timing) = self.invoke(target, prompt).await;
         match result {
-            Err(error) => {
-                let outcome = super::outcome::classify_error(&error, self.cancel.is_cancelled());
-                tracing::debug!(purpose = self.purpose, entity = %self.entity_id, error = %error, "ambient call failed");
-                super::outcome::record(self.purpose, &self.entity_id, outcome, None);
-                self.recorded = true;
-                Reply { text: String::new(), tokens: None, error: Some(error) }
-            }
+            Err(error) => self.failed(error, timing),
             Ok((raw, tokens)) => {
                 let text = accept(&raw).unwrap_or_default();
                 let outcome = super::outcome::classify_reply(&raw, !text.is_empty());
-                super::outcome::record(self.purpose, &self.entity_id, outcome, Some(&raw));
-                self.recorded = true;
+                self.finish(outcome, Some(&raw), timing);
                 Reply { text, tokens, error: None }
             }
         }
+    }
+
+    /// Run the CLI with a prompt that asks for the reply format (`reply`), and
+    /// keep the answer only if `check` takes it. `SKIP` is a healthy "nothing to
+    /// write"; a reply not in the format is refused whatever it says. Never fails,
+    /// like [`Slot::run`].
+    pub async fn run_formatted(
+        mut self,
+        target: &CliTarget,
+        prompt: &str,
+        check: impl Fn(&str) -> Option<String>,
+    ) -> Reply {
+        let (result, timing) = self.invoke(target, prompt).await;
+        match result {
+            Err(error) => self.failed(error, timing),
+            Ok((raw, tokens)) => {
+                let (text, outcome) = judge_formatted(&raw, check);
+                self.finish(outcome, Some(&raw), timing);
+                Reply { text, tokens, error: None }
+            }
+        }
+    }
+
+    async fn invoke(
+        &self,
+        target: &CliTarget,
+        prompt: &str,
+    ) -> (Result<(String, Option<TokenCounts>), String>, super::outcome::Timing) {
+        let started = std::time::Instant::now();
+        let result = super::cli::invoke_haiku(&target.cli_path, prompt, &target.meta, self.cancel.clone()).await;
+        let timing = super::outcome::Timing { queued_ms: self.queued_ms, run_ms: started.elapsed().as_millis() as u64 };
+        (result, timing)
+    }
+
+    fn failed(&mut self, error: String, timing: super::outcome::Timing) -> Reply {
+        let outcome = super::outcome::classify_error(&error, self.cancel.is_cancelled());
+        tracing::debug!(purpose = self.purpose, entity = %self.entity_id, error = %error, "ambient call failed");
+        self.finish(outcome, None, timing);
+        Reply { text: String::new(), tokens: None, error: Some(error) }
+    }
+
+    fn finish(&mut self, outcome: super::outcome::Outcome, raw: Option<&str>, timing: super::outcome::Timing) {
+        super::outcome::record_timed(self.purpose, &self.entity_id, outcome, raw, Some(timing));
+        self.recorded = true;
+    }
+}
+
+/// The text to use and the outcome for a reply in the format: an `ANSWER:` that
+/// `check` takes is accepted, `SKIP` is skipped, and anything else is refused,
+/// by `check` (`Other`) or for not being in the format (`Format`).
+fn judge_formatted(raw: &str, check: impl Fn(&str) -> Option<String>) -> (String, super::outcome::Outcome) {
+    use super::outcome::{Outcome, RejectReason};
+    use super::reply::{parse, Parsed};
+    match parse(raw) {
+        Parsed::Answer(answer) => match check(&answer) {
+            Some(text) => (text, Outcome::Accepted),
+            None => (String::new(), Outcome::Rejected(RejectReason::Other)),
+        },
+        Parsed::Skip => (String::new(), Outcome::Skipped),
+        Parsed::Malformed if raw.trim().is_empty() => (String::new(), Outcome::Rejected(RejectReason::Empty)),
+        Parsed::Malformed => (String::new(), Outcome::Rejected(RejectReason::Format)),
     }
 }
 
@@ -185,9 +237,9 @@ mod tests {
         Box::leak(Box::new(Semaphore::new(permits)))
     }
 
-    /// Codex P2 on #4243: an admitted call given up before running (no block, no
-    /// CLI path) still ends in one outcome, and an explicit `abandon` records its
-    /// own outcome instead of `not_run`, never both.
+    /// An admitted call given up before running (no block, no CLI path) still ends
+    /// in one outcome, and an explicit `abandon` records its own outcome instead of
+    /// `not_run`, never both.
     #[tokio::test]
     async fn every_admitted_call_ends_in_exactly_one_outcome() {
         const P: &str = "test_purpose_slot_outcomes";
@@ -261,6 +313,26 @@ mod tests {
         drop(slot);
         // The gateway clears the in-flight entry on drop, so the next request admits.
         assert!(admit(key("call-redo", "t_redo"), 3, None).await.is_some());
+    }
+
+    #[test]
+    fn a_formatted_reply_is_judged_by_its_form_then_by_the_check() {
+        use crate::ambient::outcome::{Outcome, RejectReason};
+        let check = |t: &str| (!t.contains("rm -rf")).then(|| t.to_string());
+        assert_eq!(judge_formatted("ANSWER: Run the tests", check), ("Run the tests".into(), Outcome::Accepted));
+        assert_eq!(judge_formatted("SKIP", check), (String::new(), Outcome::Skipped));
+        assert_eq!(
+            judge_formatted("ANSWER: rm -rf build", check),
+            (String::new(), Outcome::Rejected(RejectReason::Other))
+        );
+        assert_eq!(
+            judge_formatted(
+                "Output nothing at all - the assistant's message ends by asking for a decision and waiting for user input.",
+                check
+            ),
+            (String::new(), Outcome::Rejected(RejectReason::Format))
+        );
+        assert_eq!(judge_formatted("  ", check), (String::new(), Outcome::Rejected(RejectReason::Empty)));
     }
 
     #[test]

@@ -67,6 +67,40 @@ pub fn read_recent_activity_digest(
     filestore: &crate::backend::storage::filestore::FileStore,
     block_id: &str,
 ) -> Option<String> {
+    read_recent_activity(filestore, block_id).map(|activity| activity.text)
+}
+
+/// How the newest exchange in a block's recent activity ends. Decided in code,
+/// from the same entries the digest is built from, so a call that could only
+/// decline is never made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnEnding {
+    /// The assistant's last message ends in a question.
+    AssistantAsked,
+    /// After the assistant's last message, it called a tool that asks the user
+    /// (`AskUserQuestion`, `ExitPlanMode`).
+    AskedUser,
+    /// The newest message is the user's: the assistant has not answered it.
+    UserLast,
+    /// The assistant's last message is a statement.
+    Statement,
+}
+
+/// A block's recent activity: the digest text, and how it ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentActivity {
+    pub text: String,
+    pub ending: TurnEnding,
+}
+
+/// Tools that end a turn by asking the user something.
+const ASKS_USER_TOOLS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
+
+/// [`read_recent_activity_digest`]'s digest, with how the newest exchange ends.
+pub fn read_recent_activity(
+    filestore: &crate::backend::storage::filestore::FileStore,
+    block_id: &str,
+) -> Option<RecentActivity> {
     // Authoritative gate — checked before any byte is read. See
     // HIDDEN_REINJECTION_BLOCKS's own doc comment for why this can't be
     // reconstructed from the tail window below.
@@ -97,7 +131,37 @@ pub fn read_recent_activity_digest(
         return None;
     }
 
-    finalize_digest(extract_digest_parts(&window))
+    let parts = extract_digest_parts(&window);
+    let ending = turn_ending(&parts);
+    finalize_digest(parts).map(|text| RecentActivity { text, ending })
+}
+
+/// How `parts` (oldest first) end. See [`TurnEnding`].
+fn turn_ending(parts: &[String]) -> TurnEnding {
+    let Some(newest) = parts.iter().rposition(|p| p.starts_with("[user] ") || p.starts_with("[assistant] ")) else {
+        return TurnEnding::Statement;
+    };
+    let asks_user = parts[newest + 1..]
+        .iter()
+        .any(|p| p.strip_prefix("[tool] ").is_some_and(|tool| ASKS_USER_TOOLS.contains(&tool)));
+    if asks_user {
+        return TurnEnding::AskedUser;
+    }
+    match parts[newest].strip_prefix("[assistant] ") {
+        None => TurnEnding::UserLast,
+        Some(message) if ends_in_question(message) => TurnEnding::AssistantAsked,
+        Some(_) => TurnEnding::Statement,
+    }
+}
+
+/// Whether a message's last line ends in a question mark, past closing
+/// formatting (`**`, `_`, backticks, quotes, brackets).
+fn ends_in_question(message: &str) -> bool {
+    let last_line = message.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let end = last_line.trim_end_matches(|c: char| {
+        c.is_whitespace() || matches!(c, '*' | '_' | '`' | '"' | '\'' | '\u{201D}' | '\u{2019}' | ')' | ']')
+    });
+    end.ends_with('?') || end.ends_with('\u{FF1F}')
 }
 
 /// Entries kept, per-entry and total character caps for a digest. The old digest
@@ -639,6 +703,57 @@ mod finalize_digest_tests {
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         let digest = finalize_digest(extract_digest_parts(&refs)).unwrap();
         assert!(digest.contains("fix the login bug"));
+    }
+}
+
+#[cfg(test)]
+mod turn_ending_tests {
+    use super::*;
+
+    fn parts(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn an_assistant_question_is_asked() {
+        for last in [
+            "[assistant] Fixed it. Shall I start on PR 1?",
+            "[assistant] Two options:\n- A\n- B\n\nWhich do you want?",
+            "[assistant] Want me to merge it?**",
+            "[assistant] Is it the stable build you want?\n\n",
+            "[assistant] Okay？",
+        ] {
+            assert_eq!(turn_ending(&parts(&["[user] go", last])), TurnEnding::AssistantAsked, "{last:?}");
+        }
+    }
+
+    #[test]
+    fn a_statement_is_a_statement_even_with_a_question_earlier() {
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Should it be A? I went with A, and the tests pass."])),
+            TurnEnding::Statement
+        );
+        assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[tool] Bash"])), TurnEnding::Statement);
+    }
+
+    #[test]
+    fn a_tool_that_asks_the_user_after_the_last_message_is_asked() {
+        assert_eq!(
+            turn_ending(&parts(&["[user] plan it", "[assistant] Here is the plan.", "[tool] ExitPlanMode"])),
+            TurnEnding::AskedUser
+        );
+        assert_eq!(turn_ending(&parts(&["[assistant] Let me check.", "[tool] AskUserQuestion"])), TurnEnding::AskedUser);
+        // Asked earlier and answered: the newest message decides.
+        assert_eq!(
+            turn_ending(&parts(&["[tool] AskUserQuestion", "[assistant] Thanks, done."])),
+            TurnEnding::Statement
+        );
+    }
+
+    #[test]
+    fn an_unanswered_user_message_is_user_last() {
+        assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[user] now the docs"])), TurnEnding::UserLast);
+        assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[user] why?"])), TurnEnding::UserLast);
     }
 }
 

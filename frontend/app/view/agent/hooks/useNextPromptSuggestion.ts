@@ -84,6 +84,11 @@
  *      persist into a brand-new session started in the same pane. Don't
  *      duplicate that listener here — one `ControllerStatus` subscription
  *      per pane for this purpose is enough.
+ *
+ * Before any of these, `shouldRequestSuggestion` skips the call itself when
+ * the user is already typing or the turn failed or was stopped, and the
+ * backend skips it when the turn ended waiting for the user. See
+ * docs/reports/REPORT_AMBIENT_FRAMEWORK_REASSESSMENT_2026_10_08.md section 6.2.
  */
 
 import { createEffect, on, type Accessor } from "solid-js";
@@ -126,6 +131,20 @@ function clearSuggestion(blockId: string): void {
     writeSuggestionMeta(blockId, null);
 }
 
+/**
+ * Whether a turn's end is worth a suggestion call. Not while the user is already
+ * typing: the reply would be thrown away by guard 3 anyway, after being paid for.
+ * Not after a turn that failed or was stopped: there is no finished work to
+ * continue. The phase can still read `Idle` or `Streaming` here (the backend's
+ * turn-end edge can arrive before `TurnEnd`), and those don't rule it out.
+ * The backend makes the remaining checks that need the transcript
+ * (`digest::TurnEnding`).
+ */
+export function shouldRequestSuggestion(phase: TurnPhase, composerEmpty: boolean): boolean {
+    if (!composerEmpty) return false;
+    return !(phase.kind === "Done" && phase.outcome !== "completed");
+}
+
 export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): void {
     const { blockId, turnPhase, turnJustEndedAtom, isComposerEmpty } = opts;
 
@@ -164,6 +183,7 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
     // useAgentActivitySummary.ts.
     createEffect(on(turnJustEndedAtom, () => {
         if (lastTurnWasHidden) return; // see lastTurnWasHidden's own doc comment above
+        if (!shouldRequestSuggestion(turnPhase(), isComposerEmpty())) return;
         const myTurnId = activeTurnId;
 
         RpcApi.NextPromptSuggestionCommand(
