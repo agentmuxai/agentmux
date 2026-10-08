@@ -332,6 +332,12 @@ async fn run_loop(
                     let mstore = mstore_refresh.clone();
                     let http = http_refresh.clone();
                     Box::pin(async move {
+                        // Held until this attempt ends, across the token request.
+                        let lock_store = mstore.clone();
+                        let _leader = tokio::task::spawn_blocking(move || lock_store.muxbus_refresh_lock())
+                            .await
+                            .map_err(|e| RefreshErrorKind::Transient(format!("refresh lock task: {e}")))?
+                            .map_err(|e| RefreshErrorKind::Transient(e.to_string()))?;
                         let load_store = mstore.clone();
                         let current = tokio::task::spawn_blocking(move || load_store.muxbus_load())
                             .await
@@ -345,6 +351,10 @@ async fn run_loop(
                                     "no muxbus credentials stored".to_string(),
                                 )
                             })?;
+                        // Another process refreshed while this one waited.
+                        if current.is_valid() && !current.nearly_expired() {
+                            return Ok(());
+                        }
                         if current.refresh_token.is_empty() {
                             // Same reasoning: no refresh_token will ever
                             // appear on its own — only re-login fixes it.
@@ -369,6 +379,11 @@ async fn run_loop(
                         let refreshed = crate::muxbus::pkce::refresh_token(&current, &http)
                             .await
                             .map_err(classify_refresh_token_error)?;
+                        if !refreshed_same_account(&current, &refreshed) {
+                            return Err(RefreshErrorKind::PermanentAuthFailure(
+                                "the refreshed sign-in belongs to another account".to_string(),
+                            ));
+                        }
                         let save_store = mstore.clone();
                         tokio::task::spawn_blocking(move || save_store.muxbus_save(&refreshed))
                             .await
@@ -411,11 +426,9 @@ async fn run_loop(
             let mstore = mstore.clone();
             tokio::task::spawn_blocking(move || mstore.muxbus_load()).await
         };
+        let nothing_stored = matches!(has_stored_creds_load, Ok(Ok(None)));
         let (has_stored_creds, stale) = match has_stored_creds_load {
-            Ok(Ok(Some(c))) => (
-                !c.access_token.is_empty() && (c.is_valid() || !c.refresh_token.is_empty()),
-                crate::muxbus::stale_sign_in(&c, &http).await,
-            ),
+            Ok(Ok(Some(c))) => (usable_or_refreshable(&c), crate::muxbus::stale_sign_in(&c, &http).await),
             Ok(Ok(None)) => (false, None),
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "cloud_subscriber: muxbus_load failed — assuming credentials exist and retrying with backoff");
@@ -441,15 +454,20 @@ async fn run_loop(
             continue;
         }
         stale_logged = None;
+        // Nothing stored: wait for a sign-in. Rechecked now and then, since a
+        // sign-in by another process of this channel sends no ReloadToken.
+        if nothing_stored {
+            wait_for_sign_in(&mut ctrl_rx, Duration::from_secs(STALE_RECHECK_SECS)).await;
+            delay_secs = RECONNECT_DELAY_SECS;
+            continue;
+        }
         let token = match load_valid_token(&mstore, &scheduler).await {
             Some(t) => t,
             None if !has_stored_creds => {
-                // No credentials at all — wait for muxbus.login to signal us
-                while let Some(msg) = ctrl_rx.recv().await {
-                    if matches!(msg, CtrlMsg::ReloadToken) { break; }
-                    // AddAgent / RemoveAgent already updated `agents` mutex
-                }
-                delay_secs = RECONNECT_DELAY_SECS; // reset back-off after fresh login
+                // Nothing usable: the broker now knows (NeedsReauth), and the
+                // stale check above parks the next pass until a sign-in.
+                wait_for_sign_in(&mut ctrl_rx, Duration::from_secs(STALE_RECHECK_SECS)).await;
+                delay_secs = RECONNECT_DELAY_SECS;
                 continue;
             }
             None => {
@@ -522,6 +540,24 @@ async fn run_loop(
         }
         delay_secs = (delay_secs * 2).min(MAX_RECONNECT_DELAY_SECS);
     }
+}
+
+/// A loaded sign-in that can be used now or refreshed: a valid access token,
+/// or a refresh token (all a torn sign-in keeps, see `storage::muxbus`).
+fn usable_or_refreshable(c: &crate::muxbus::MuxBusCredentials) -> bool {
+    c.is_valid() || !c.refresh_token.is_empty()
+}
+
+/// Whether a refresh came back for the account the saved sign-in names. A
+/// torn set could pair a refresh token with another account's row; a row
+/// with no account recorded (an older sign-in) can't be checked.
+fn refreshed_same_account(current: &crate::muxbus::MuxBusCredentials, refreshed: &crate::muxbus::MuxBusCredentials) -> bool {
+    if current.user_sub.is_empty() {
+        return true;
+    }
+    let sub = crate::muxbus::pkce::token_sub(&refreshed.id_token);
+    let sub = if sub.is_empty() { crate::muxbus::pkce::token_sub(&refreshed.access_token) } else { sub };
+    sub == current.user_sub
 }
 
 /// Park until a sign-in (`ReloadToken`) or `recheck` elapses, whichever comes
@@ -1599,6 +1635,56 @@ mod tests {
     use crate::muxbus::pkce::RefreshTokenError;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
+
+    fn jwt(sub: &str) -> String {
+        use base64::Engine;
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(format!(r#"{{"sub":"{sub}"}}"#));
+        format!("e30.{payload}.sig")
+    }
+
+    /// A torn sign-in keeps only its refresh token; that is still worth a
+    /// refresh, where nothing at all is not.
+    #[test]
+    fn a_sign_in_with_only_a_refresh_token_can_still_be_refreshed() {
+        use crate::muxbus::MuxBusCredentials;
+        let in_an_hour = agentmux_common::time::now_secs() + 3600;
+        let usable = |access: &str, refresh: &str, expires_at: i64| {
+            super::usable_or_refreshable(&MuxBusCredentials {
+                access_token: access.into(),
+                refresh_token: refresh.into(),
+                expires_at,
+                ..Default::default()
+            })
+        };
+        assert!(usable("", "rt", 0), "torn: refresh token only");
+        assert!(usable("at", "", in_an_hour), "valid access token");
+        assert!(usable("at", "rt", 0), "expired, refreshable");
+        assert!(!usable("at", "", 0), "expired, nothing to refresh with");
+        assert!(!usable("", "", 0), "nothing");
+    }
+
+    /// A repaired sign-in is kept only for the account the saved row names.
+    #[test]
+    fn a_refresh_for_another_account_is_refused() {
+        use crate::muxbus::MuxBusCredentials;
+        let current = |sub: &str| MuxBusCredentials { user_sub: sub.into(), ..Default::default() };
+        let refreshed = |id: String, access: String| MuxBusCredentials {
+            id_token: id,
+            access_token: access,
+            ..Default::default()
+        };
+        assert!(super::refreshed_same_account(&current("user-a"), &refreshed(jwt("user-a"), jwt("user-a"))));
+        assert!(!super::refreshed_same_account(&current("user-a"), &refreshed(jwt("user-b"), jwt("user-b"))));
+        assert!(
+            super::refreshed_same_account(&current("user-a"), &refreshed(String::new(), jwt("user-a"))),
+            "no id token: the access token's"
+        );
+        assert!(!super::refreshed_same_account(&current("user-a"), &refreshed("x".into(), "y".into())), "unreadable");
+        assert!(
+            super::refreshed_same_account(&current(""), &refreshed(jwt("user-b"), jwt("user-b"))),
+            "an older row with no account recorded can't be checked"
+        );
+    }
 
     // The connection's token is loaded once at connect, and a desktop (PKCE)
     // access token lives 15 min while a connection lasts up to 2 h. Handing

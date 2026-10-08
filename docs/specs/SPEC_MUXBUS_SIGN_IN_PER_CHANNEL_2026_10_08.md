@@ -1,7 +1,7 @@
 # SPEC: each channel signs in to MuxBus on its own
 
 **Date:** 2026-10-08
-**Status:** implemented (#4477) — the sign-in isolation and the cross-process lock are built; §6 lists what is not.
+**Status:** implemented (#4477; repair and refresh leadership in #4490) — §6 lists what is not built.
 **Author:** Camper, at the operator's direction
 **Amends:** `SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md` (reverses it for MuxBus sign-in only),
 restoring the per-channel half of `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` for every channel.
@@ -85,7 +85,26 @@ holder exits, so a crashed holder blocks nothing. The lock file is never deleted
 The Windows read path retries a read that looks torn (mismatched generation stamps, some fields present and
 others not, or a field caught mid-write with a chunk or its stamp missing) up to four times, 120 ms apart.
 A keychain that cannot be read at all is still an error, not a tear. A build without the lock may be mid-save; the same read a moment
-later is whole. A tear that persists logs once as such and still means "sign in again".
+later is whole.
+
+### 3.5 Repairing a tear that persists
+
+A tear that persists is repaired without a sign-in when the refresh token's own field is whole (its chunks
+and stamp complete). The load hands back that refresh token alone, so the next refresh asks Cognito for new
+tokens with it and saves a whole set. Cognito doesn't rotate refresh tokens, so any save's token works.
+Before saving, the refresh checks that the new tokens belong to the account the saved row names (`sub`); a
+torn set that paired another account's refresh token is refused and needs a sign-in. A tear whose refresh
+field is itself broken still means "sign in again".
+
+### 3.6 One refresh at a time, and noticing a sign-in elsewhere
+
+- **Refresh leadership.** A refresh takes a second cross-process lock, separate from the store's so reads
+  aren't held up by the token request, and holds it across the request and the save (waiting up to 30 s).
+  Under it, it loads the sign-in again; if another process has just refreshed it, it uses that and makes no
+  request.
+- **A parked channel looks again.** With nothing stored, or nothing usable, the subscriber used to wait for
+  a sign-in in its own process. It now also re-reads the store every 60 s, so a sign-in by another process
+  of the same channel (two live versions of `stable`, say) brings it back within a minute.
 
 ## 4. Who receives a message
 
@@ -128,9 +147,8 @@ as.
 
 ## 6. Not built
 
-- **Automatic repair of a persistent tear.** Possible, since the refresh token does not rotate; but it
-  must verify that the token and the saved row are the same account before it saves.
-- **Showing a torn or signed-out state to the user as such.** Today it reads as "not connected".
+- **Showing a torn or signed-out state to the user as such.** Today it reads as "not connected"; #4489
+  adds a delivery state for it.
 - **Pruning** a retired channel's sign-in.
 - **One agent name under two accounts** (§4 case 3): untested, tracked outside this repo.
 
@@ -140,6 +158,8 @@ as.
   keeping its existing keys; two channels never share a keychain entry.
 - The lock: a second holder waits, then fails the operation if the lock is still held; it is free once
   released; locks are per namespace.
+- A torn set keeps a whole refresh token and drops a broken one (live, real keychain); a refresh-only
+  sign-in counts as refreshable; a refresh for another account is refused.
 - A torn read is retried until it settles, gives up after the allowed tries, and an absent sign-in is not
   retried.
 - The host-wide fallback adopts only the same account's tokens.
