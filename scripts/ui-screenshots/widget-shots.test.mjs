@@ -7,7 +7,7 @@
 // needs a running instance and isn't tested here.
 
 import { describe, expect, it } from "vitest";
-import { demoWidgets } from "./demo-env.mjs";
+import { demoPathProblem, demoWidgets } from "./demo-env.mjs";
 import { SIZES, parseSizes, shotFilename } from "./sizes.mjs";
 import { EXCLUDE, shots, widgetEntries } from "./widget-shots.mjs";
 
@@ -87,5 +87,20 @@ describe("demo widget config", () => {
         });
         // The built-ins aren't modified.
         expect(builtin["defwidget@editor"].blockdef.meta["editor:scratch"]).toBe(true);
+    });
+});
+
+describe("demo project path", () => {
+    const machine = { user: "alice", home: "C:/Users/alice" };
+
+    it("accepts a path that says nothing about the machine", () => {
+        expect(demoPathProblem("D:/demo/acme-web", machine)).toBeNull();
+        expect(demoPathProblem("/opt/demo/acme-web", { user: "alice", home: "/home/alice" })).toBeNull();
+    });
+
+    it("refuses a path under the home folder or containing the user name", () => {
+        expect(demoPathProblem("C:/Users/alice/demo/acme-web", machine)).toMatch(/home folder/);
+        expect(demoPathProblem("c:/users/ALICE", machine)).toMatch(/home folder/);
+        expect(demoPathProblem("D:/alice-shots/acme-web", machine)).toMatch(/user name/);
     });
 });

@@ -168,13 +168,18 @@ const paneVisible = (paneSelector) => `(() => {
     return !!hit && p.contains(hit);
 })()`;
 
-/** Closes the active window tab, confirming the "Close tab?" dialog if the
- *  app asks, and checks the tab is gone. */
-async function closeActiveTab(session) {
-    const before = await session.evaluate("document.querySelectorAll('.tab').length");
+const TAB_IDS = `[...document.querySelectorAll('.tab[data-tab-id]')].map(t => t.getAttribute('data-tab-id'))`;
+
+/** Closes the window tab `tabId`, confirming the "Close tab?" dialog if the
+ *  app asks, and checks the tab is gone. Only ever a tab this suite created:
+ *  closing "the active tab" could close the instance's own tab if the new one
+ *  never became active (Codex on #4471). */
+async function closeTab(session, tabId) {
+    const tab = `.tab[data-tab-id="${tabId}"]`;
+    if (!(await session.evaluate(`!!document.querySelector(${JSON.stringify(tab)})`))) return;
     // A wide viewport keeps the tab's close button clear of the window buttons.
     await session.setViewport({ width: 1920, height: 800, scale: 1 });
-    await session.clickSelector('.tab.active [title="Close Tab"]');
+    await session.clickSelector(`${tab} [title="Close Tab"]`);
     await session.wait(400);
     const confirm = await session.evaluate(visibleCenter(".modal-backdrop ~ * button, [role=dialog] button"));
     if (confirm) {
@@ -187,8 +192,9 @@ async function closeActiveTab(session) {
         if (pt) await session.clickAt(pt);
         await session.wait(400);
     }
-    const after = await session.evaluate("document.querySelectorAll('.tab').length");
-    if (after >= before) throw new Error(`the shot's tab didn't close (${before} tabs before, ${after} after)`);
+    if (await session.evaluate(`!!document.querySelector(${JSON.stringify(tab)})`)) {
+        throw new Error(`the shot's tab (${tabId}) didn't close`);
+    }
 }
 
 /** The block ids of the panes on screen (centre hit test, as paneVisible). */
@@ -203,11 +209,11 @@ const VISIBLE_BLOCK_IDS = `[...document.querySelectorAll('.pane-stack')].filter(
  *  default panes have stopped changing. The app activates a new tab only once
  *  its layout is built, which can take seconds on a slow instance; acting
  *  before then puts the widget in the old tab, or takes the new tab's late
- *  panes for the widget's (Codex on #4471). */
-async function openNewTab(session) {
-    const activeBefore = await session.evaluate(
-        `document.querySelector('.tab.active')?.getAttribute('data-tab-id') ?? null`
-    );
+ *  panes for the widget's (Codex on #4471). Records the created tab's id in
+ *  `state.tabId` as soon as it appears, even if this then times out, so the
+ *  shot's cleanup closes that tab and no other. */
+async function openNewTab(session, state) {
+    const tabsBefore = new Set(await session.evaluate(TAB_IDS));
     await session.clickSelector(".hamburger-btn");
     await session.wait(300);
     await session.clickText(".menu", "New Tab");
@@ -216,10 +222,12 @@ async function openNewTab(session) {
     let stable = 0;
     while (Date.now() < deadline) {
         await session.wait(250);
+        if (!state.tabId) state.tabId = (await session.evaluate(TAB_IDS)).find((id) => !tabsBefore.has(id)) ?? null;
+        if (!state.tabId) continue;
         const active = await session.evaluate(
             `document.querySelector('.tab.active')?.getAttribute('data-tab-id') ?? null`
         );
-        if (!active || active === activeBefore) continue;
+        if (active !== state.tabId) continue;
         const panes = await session.evaluate(VISIBLE_BLOCK_IDS);
         stable = panes && panes === last ? stable + 1 : 0;
         last = panes;
@@ -231,6 +239,8 @@ async function openNewTab(session) {
 function widgetShot(w) {
     const o = OVERRIDES[w.name] ?? {};
     let paneSelector = null;
+    // The tab this shot created, once it exists; cleanup closes only that tab.
+    const tab = { tabId: null };
     return {
         id: `widget-${w.name}`,
         title: o.title ?? w.label,
@@ -241,7 +251,8 @@ function widgetShot(w) {
         prep: async (session) => {
             await session.setViewport({ width: 1280, height: 800, scale: 1 });
             await session.pressKey("Escape");
-            await openNewTab(session);
+            tab.tabId = null;
+            await openNewTab(session, tab);
             const before = new Set(await session.evaluate(BLOCK_IDS));
             const route = await openWidget(session, w);
             await session.wait(1200);
@@ -276,7 +287,8 @@ function widgetShot(w) {
         selector: () => paneSelector,
         cleanup: async (session) => {
             await session.pressKey("Escape");
-            await closeActiveTab(session);
+            if (tab.tabId) await closeTab(session, tab.tabId);
+            tab.tabId = null;
             await session.clearViewport();
         },
     };

@@ -6,11 +6,13 @@
 // instead of the machine's own files — see
 // docs/specs/SPEC_UI_MANUAL_SCREENSHOT_TOOLING_2026_09_19.md §8.
 //
-//   node scripts/ui-screenshots/demo-env.mjs --home <AGENTMUX_HOME_OVERRIDE dir> [--demo <dir>]
+//   node scripts/ui-screenshots/demo-env.mjs --home <AGENTMUX_HOME_OVERRIDE dir> --demo <dir>
 //
-// 1. Writes a small demo project ("acme-web") to --demo (default: a
-//    `demo/acme-web` folder next to --home). Use a path without a user name
-//    in it: it appears in the Files breadcrumb and the terminal prompt.
+// 1. Writes a small demo project ("acme-web") to --demo. The path appears in
+//    the Files breadcrumb, the terminal prompt and the editor's title, so it
+//    must say nothing about the machine: no user name, nothing under the home
+//    folder (e.g. D:/demo/acme-web or /opt/demo/acme-web). It's required, and
+//    a path that contains the user name or the home folder is refused.
 // 2. Writes a user widgets.json into every channel config folder under --home
 //    that starts Hangar (files:path), Terminal (cmd:cwd) and Editor (file) in
 //    the demo project. User entries replace built-in ones, so the rest of each
@@ -20,6 +22,7 @@
 // after starting it once; it picks the change up without a restart.
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -84,6 +87,18 @@ export function demoWidgets(demo, builtin = JSON.parse(readFileSync(WIDGETS_JSON
     return { "defwidget@files": files, "defwidget@terminal": terminal, "defwidget@editor": editor };
 }
 
+/** Why `demo` (an absolute path with forward slashes) would identify the
+ *  machine in a screenshot, or null if it doesn't: it contains the user name,
+ *  or lies under the home folder. Case-insensitive, for Windows paths. */
+export function demoPathProblem(demo, { user = userInfo().username, home = homedir() } = {}) {
+    const p = demo.toLowerCase();
+    const h = home.replace(/\\/g, "/").toLowerCase();
+    if (h && (p === h || p.startsWith(h + "/"))) return `it is under the home folder (${home})`;
+    if (user && p.split(/[/:]/).some((part) => part.includes(user.toLowerCase())))
+        return `it contains the user name (${user})`;
+    return null;
+}
+
 function main() {
     const args = process.argv.slice(2);
     const get = (flag) => {
@@ -91,11 +106,18 @@ function main() {
         return i >= 0 ? args[i + 1] : undefined;
     };
     const home = get("--home");
-    if (!home) {
-        console.error("usage: demo-env.mjs --home <AGENTMUX_HOME_OVERRIDE dir> [--demo <dir>]");
+    if (!home || !get("--demo")) {
+        console.error("usage: demo-env.mjs --home <AGENTMUX_HOME_OVERRIDE dir> --demo <dir with no user name in it>");
         process.exit(2);
     }
-    const demo = resolve(get("--demo") ?? join(home, "..", "demo", "acme-web")).replace(/\\/g, "/");
+    const demo = resolve(get("--demo")).replace(/\\/g, "/");
+    const problem = demoPathProblem(demo);
+    if (problem) {
+        console.error(
+            `--demo ${demo} would show in screenshots, and ${problem}; pick a neutral path such as D:/demo/acme-web`
+        );
+        process.exit(2);
+    }
     for (const [rel, content] of Object.entries(DEMO_FILES)) {
         const p = join(demo, rel);
         mkdirSync(dirname(p), { recursive: true });
