@@ -25,6 +25,9 @@ export function parseSizes(arg, sizes = SIZES) {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
+    // An empty selection ("--sizes ,", an empty variable) would capture nothing
+    // and still report success.
+    if (names.length === 0) throw new Error(`--sizes "${arg}" names no size (known: ${Object.keys(sizes).join(", ")})`);
     for (const n of names) {
         if (!sizes[n]) throw new Error(`unknown size "${n}" (known: ${Object.keys(sizes).join(", ")})`);
     }

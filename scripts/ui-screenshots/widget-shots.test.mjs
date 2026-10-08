@@ -17,6 +17,8 @@ describe("sizes", () => {
         expect(parseSizes("all")).toEqual(Object.keys(SIZES));
         expect(parseSizes("small, large")).toEqual(["small", "large"]);
         expect(() => parseSizes("huge")).toThrow(/unknown size "huge"/);
+        expect(() => parseSizes(",")).toThrow(/names no size/);
+        expect(() => parseSizes(" , ")).toThrow(/names no size/);
     });
 
     it("names a sized shot by id and size, and an unsized one by its position", () => {
