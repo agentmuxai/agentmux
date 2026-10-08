@@ -6,6 +6,7 @@
 import { createEffect, createRoot, on } from "solid-js";
 import { atoms, getBlockComponentModel } from "@/app/store/global";
 import { modalsModel } from "@/app/store/modalmodel";
+import { modalCovers } from "@/app/element/modal-stack";
 import { caretInEditableOutsidePanes, focusedBlockId, userCaretInBlock } from "@/util/focusutil";
 import { getLayoutModelForStaticTab } from "@/layout/index";
 
@@ -74,14 +75,13 @@ class FocusManager {
      * model is ignored. SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
      */
     ensureSelectionFocused(_reason: string, model?: unknown): void {
-        if (modalsModel.hasOpenModals()) return;
         const active = getLayoutModelForStaticTab();
         if (model != null && model !== active) return;
         // A caret the user put in the tab-rename field, a search box outside
         // the panes, … stays there.
         if (caretInEditableOutsidePanes()) return;
         const blockId = active?.focusedNode?.()?.data?.blockId;
-        if (blockId == null) return;
+        if (blockId == null || modalInTheWay(blockId)) return;
         giveBlockFocus(blockId);
     }
 
@@ -154,6 +154,19 @@ function paneFocusElement(blockId: string): HTMLElement | null {
     return null;
 }
 
+/**
+ * A modal over the pane: one opened through `modalsModel`, or any `<Modal>`
+ * whose lock region covers it (the pane-close confirmation is declarative and
+ * only on the modal stack). A browser pane focused under it would take native
+ * keyboard focus from the modal.
+ */
+function modalInTheWay(blockId: string): boolean {
+    if (modalsModel.hasOpenModals()) return true;
+    if (typeof document.querySelector !== "function") return false;
+    const blockEl = document.querySelector(`[data-blockid="${CSS.escape(blockId)}"]`);
+    return blockEl != null && modalCovers(blockEl);
+}
+
 let focusRetry: number | null = null;
 
 function cancelFocusRetry(): void {
@@ -171,7 +184,7 @@ function scheduleFocusRetry(blockId: string): void {
         if (getLayoutModelForStaticTab()?.focusedNode?.()?.data?.blockId !== blockId) return;
         const active = document.activeElement;
         const parked = active == null || active === document.body || active.id === `${blockId}-dummy-focus`;
-        if (!parked || modalsModel.hasOpenModals()) return;
+        if (!parked || modalInTheWay(blockId)) return;
         if (focusBlockTarget(blockId)) return;
         focusRetry = requestAnimationFrame(tick);
     };

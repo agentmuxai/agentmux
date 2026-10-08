@@ -1,7 +1,7 @@
 # Focus follows the selection: after any close, you can type right away
 
-**Status:** active — R1, R2, R4 and R5's `closeNode` fix built in #4479 (§8). R3 and R5's Windows browser reclaim are
-not built yet.
+**Status:** active — R1, R2, R4 and R5's `closeNode` fix built in #4479 (§8). R3 is dropped: the owner wants agent-tab
+closing unchanged apart from focus (§9). R5's Windows browser reclaim is not built yet.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "if I type exit or close a pane tab, or entire pane, and the next pane that is
 selected/border highlight, i should be able to type right away. this is for anything with an input, include terminal,
@@ -126,7 +126,7 @@ in the log and can be wired properly.
 Chromium fires `focusout` when the focused element is removed from the document, which is exactly the close case. It is
 not relied on alone: R1's explicit calls are the primary mechanism; R2 only covers omissions.
 
-### R3. Agent tabs close in the UI at once
+### R3. Agent tabs close in the UI at once (dropped, §9)
 
 Closing an agent tab activates the neighbour immediately (the closing tab is taken out of the strip and its content
 hidden, with the shutdown overlay shown on the tab pill or in the status line instead), so R1 hands the caret over at
@@ -223,7 +223,9 @@ observer covers all of them, so that is what was built:
   the My Agents picker's filter box, Settings' search box, Remotes' filter. The picker's first card still takes focus
   (Enter launches it); a printable key typed on a card goes into the filter box (`AgentCard.tsx`).
 - **R5:** `closeNode` un-magnifies without requesting focus.
-- **Guards** (all in `ensureSelectionFocused` / `giveBlockFocus`): an open modal; a caret in an editable element outside
+- **Guards** (all in `ensureSelectionFocused` / `giveBlockFocus`): a modal over the pane, whether opened through
+  `modalsModel` or a declarative `<Modal>` on the modal stack (`modalCovers`, `modal-stack.ts`; a pane modal in another
+  pane doesn't block); a caret in an editable element outside
   every pane (`caretInEditableOutsidePanes`, `focusutil.ts`); a caret the user put in an input inside the selected pane
   (`userCaretInBlock`, unchanged).
 
@@ -239,9 +241,37 @@ observer covers all of them, so that is what was built:
 
 ### Not built yet
 
-- **R3** (agent tabs leave the strip at once): a second PR. Until then, closing an agent tab hands the caret over when
-  srv's delete arrives (the observer sees the selection change then), not immediately.
+- **R3**: dropped (§9). Closing an agent tab hands the caret over when srv's delete arrives (the observer sees the
+  selection change then), not immediately.
 - **R5, Windows browser reclaim.**
 - **The CDP script** in §5 is not checked in yet. For this PR, a scratch version drove rows 1, 2, 3 and 5 on a dev
   build, landing on a terminal, an agent composer, the launcher and Settings: on `main` five of the six cases left the
   caret on `<body>`; with this change all six land in the highlighted pane's input.
+
+## 9. Later: possible improvements, not planned
+
+Found while building this; recorded so they can be picked up separately. None changes behaviour in #4479.
+
+1. **Agent tabs hand over the caret late.** Closing an agent pane tab keeps the tab, under its shutdown overlay, until
+   srv finishes the teardown (`SHUTDOWN_GRACE` 5 s, up to about 9 s in the worst case). Only then does the neighbour
+   become active and take the caret. `beforeNodeDelete` returns false for agents (`tabcontent.tsx:147-150`), so
+   `closeBlockInStack` never removes the member itself. R3 would remove the tab at once. The owner chose to keep today's
+   behaviour (2026-10-08). If it is revisited:
+   - srv's later `delete` for a block no longer in the stack is a safe no-op (`layoutPersistence.ts:264-270`), but it
+     logs a `console.error`. Close with `ClosePane([id])` without `frontendWaits`, as terminal tabs do, to avoid it.
+   - The in-pane shutdown overlay (progress, "Couldn't shut down", Try again / Keep open) unmounts with the tab, so
+     progress and failure need another home.
+   - A failed shutdown would leave an agent block in no pane until the orphan reaper runs (2 min); a failure before
+     the teardown starts would leave a *live* agent. Re-adding the tab on failure avoids both.
+2. **The "last agent tab returns to My Agents" fallback is dead code.** #3780 made closing the last agent tab of a pane
+   show the picker. #3784's shutdown log made `beforeNodeDelete` start the shutdown and return false, so
+   `closeAgentTab` returns at `close-agent-tab.ts:63` and srv closes the whole pane. The owner chose that the pane
+   closes (2026-10-08). Remove the picker fallback (`close-agent-tab.ts:67-83`); `close-agent-tab.test.ts` mocks
+   `beforeNodeDelete` as true, so it tests a path that no longer runs for agents.
+3. **A second × on a closing agent tab** probably starts a second probe and a second `ClosePane`: the in-flight guard in
+   `close-agent-tab.ts:46-52` clears as soon as `beforeNodeDelete` returns, while the tab is still visible. Not
+   verified against srv.
+4. **No test of `DeleteNode` for a block id no longer in the tree** (`layoutPersistence.test.ts`).
+5. **`block.test.tsx`'s first test** takes about 1.3 s alone (most of it the cold import of `block.tsx`) and can pass
+   the 5 s timeout when the whole suite runs in parallel on a loaded machine. Warm the import in a `beforeAll`.
+6. **The CDP script** (§5) and **R5's Windows browser reclaim**, from §8.

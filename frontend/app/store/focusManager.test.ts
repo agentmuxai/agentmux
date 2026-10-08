@@ -60,6 +60,7 @@ function runFrames(n = 1): void {
     }
 }
 
+import { push as pushModal, remove as removeModal } from "@/app/element/modal-stack";
 import { FOCUS_RETRY_FRAMES, focusManager, installFocusFollowsSelection } from "./focusManager";
 
 describe("focusManager", () => {
@@ -204,6 +205,43 @@ describe("focusManager", () => {
             hasOpenModals.mockReturnValue(true);
             focusManager.ensureSelectionFocused("selection");
             expect(giveFocus).not.toHaveBeenCalled();
+        });
+
+        // A declarative <Modal> (the pane-close confirmation) is only on the
+        // modal stack, not in modalsModel.
+        it("never runs under a modal-stack modal covering the pane", () => {
+            document.body.innerHTML = `<div data-blockid="block-1"></div>`;
+            pushModal({ id: "confirm", scope: "window", lockEl: document.body, close: () => {} });
+            try {
+                focusManager.ensureSelectionFocused("selection");
+                expect(giveFocus).not.toHaveBeenCalled();
+            } finally {
+                removeModal("confirm");
+            }
+        });
+
+        it("still runs when the only modal is a pane modal in another pane", () => {
+            document.body.innerHTML = `<div data-blockid="block-1"></div><div data-blockid="block-2"><div id="lock"></div></div>`;
+            pushModal({ id: "pane", scope: "pane", lockEl: document.getElementById("lock")!, close: () => {} });
+            try {
+                focusManager.ensureSelectionFocused("selection");
+                expect(giveFocus).toHaveBeenCalledTimes(1);
+            } finally {
+                removeModal("pane");
+            }
+        });
+
+        it("stops retrying once a modal opens over the pane", () => {
+            giveFocus.mockReturnValue(false);
+            document.body.innerHTML = `<div data-blockid="block-1"></div>`;
+            focusManager.ensureSelectionFocused("selection");
+            pushModal({ id: "confirm", scope: "window", lockEl: document.body, close: () => {} });
+            try {
+                runFrames(3);
+                expect(giveFocus).toHaveBeenCalledTimes(1);
+            } finally {
+                removeModal("confirm");
+            }
         });
 
         it("falls back to the pane's data-pane-focus input when its view has no giveFocus", () => {
