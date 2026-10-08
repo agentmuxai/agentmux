@@ -8,7 +8,9 @@ name: muxreview review log guard
 
 on:
   workflow_run:
-    workflows: ["muxreview review"]
+    # A run keeps the name it started under, so the old name stays listed
+    # until no run of "ReAgent review" can still be in progress.
+    workflows: ["muxreview review", "ReAgent review"]
     types: [completed]
 
 permissions: {}
