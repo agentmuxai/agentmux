@@ -76,6 +76,7 @@ pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 // `commands/window_pool.rs::demote_srv_cleanup` replicates
 // `on_before_close`'s backend cleanup (which never fires for parked
 // pool-window browsers).
+pub(crate) use helpers::backend_browser_attention;
 pub(crate) use helpers::backend_close_window;
 // SPEC_PILLAR1_STEP2 Slice A Phase 2 — durable opacity mirror write-through
 // / read-back, used by `commands/window/transparency.rs`.

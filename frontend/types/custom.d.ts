@@ -134,6 +134,10 @@ declare global {
         decideMemoryAdoption(approvalId: string, approve: boolean): Promise<void>;
         /** Answer an SSH approval: consent, or ssh's own prompt (`text` for a secret one). */
         decideSsh(approvalId: string, approve: boolean, text: string, checkbox: boolean): Promise<void>;
+        /** Answer a browser pane's banner: a hand-off (`done`) or an approval
+         *  (`approve`), or `cancel`. Relayed by the host, which srv trusts and
+         *  agents can't impersonate. SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.6. */
+        decideBrowserAttention(blockId: string, id: string, decision: "done" | "approve" | "cancel"): Promise<void>;
         /** Ask to adopt memory folders (payload: window_label, agent_id, list_id, choices, summary). */
         requestMemoryAdoption(args: Record<string, unknown>): Promise<void>;
         /** Ask to release a memory folder (payload: window_label, agent_id, list_id, index, summary). */

@@ -119,7 +119,16 @@ pub(crate) fn check(
 /// `browser:owner_agent` is srv's to write: a client may only clear it, which
 /// is the human's Take over and ends that pane's ownership for good. Setting
 /// or changing it is refused, so a taken-over agent can't write itself back.
+/// `browser:attention` (the hand-off and approval banner) is srv's alone:
+/// a client that could write it could keep a real request's id and change
+/// what the banner tells the human they're approving.
 pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<(), String> {
+    if meta.contains_key(crate::server::browser_attention::ATTENTION_META_KEY) {
+        return Err(format!(
+            "{} is written only by AgentMux itself",
+            crate::server::browser_attention::ATTENTION_META_KEY
+        ));
+    }
     let Some(value) = meta.get(OWNER_META_KEY) else {
         return Ok(());
     };
@@ -131,6 +140,9 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
     }
     if let Some(block_id) = oref.strip_prefix("block:") {
         forget(block_id);
+        // Take over also answers any hand-off or approval still up on the
+        // pane: an Approve clicked after it must not go through.
+        crate::server::browser_attention::cancel_for(block_id);
     }
     Ok(())
 }
@@ -242,6 +254,16 @@ mod tests {
             "test-guard-clear"
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_client_cannot_write_the_banner_at_all() {
+        // Rewriting a real request's banner (same id, harmless-looking text)
+        // would make the human approve something they weren't shown.
+        let key = crate::server::browser_attention::ATTENTION_META_KEY;
+        let forged = json!({ "id": "real-id", "kind": "approval", "what": "Click \"Cancel\"" });
+        assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, forged)).is_err());
+        assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, serde_json::Value::Null)).is_err());
     }
 
     #[test]

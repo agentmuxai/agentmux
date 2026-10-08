@@ -1139,17 +1139,32 @@ async fn open_browser_gives_the_agent_a_pane_only_it_can_drive_until_the_user_ta
     let eval = |auth: &serde_json::Value, pane: &str| merged(auth, serde_json::json!({ "pane": pane, "script": "1" }));
 
     // The owner gets past the ownership check (and stops at the missing host).
-    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", eval(&auth, &pane)).await;
+    assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+
+    // Even the owner can't use the routes that could submit a form without
+    // the approval banner (spec §5.4); typing a letter is still fine.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("approval"), "{body}");
+    let (s, _) = post_json(&app, "/api/v1/ui/click", merged(&auth, serde_json::json!({ "pane": pane, "selector": "button" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let key = |k: &str| merged(&auth, serde_json::json!({ "pane": pane, "key": k }));
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/dispatch_key", key("Enter")).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/dispatch_key", merged(&auth, serde_json::json!({ "pane": pane, "text": "a\n" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/dispatch_key", key("Tab")).await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
 
     // Another agent may not drive it.
     let other_own = stand_in_pane(&state, &tab_id).await;
     let (_, other) = signed_agent_on(&state, &other_own);
-    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", eval(&other, &pane)).await;
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", eval(&other, &pane)).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
 
     // A pane that isn't a browser pane is refused, even a real one.
-    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &other_own)).await;
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", eval(&auth, &other_own)).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
 
     // A client can't make itself the owner by writing the meta key.
@@ -1163,21 +1178,176 @@ async fn open_browser_gives_the_agent_a_pane_only_it_can_drive_until_the_user_ta
     clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
     crate::server::browser_owner::guard_client_meta_write(&oref, &clear).unwrap();
     crate::server::service::update_object_meta(&state.mstore, &oref, &clear).unwrap();
-    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", eval(&auth, &pane)).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
 
     // ...for good: even with the key written straight back (bypassing the
     // client guard), the owner map no longer agrees.
     crate::server::service::update_object_meta(&state.mstore, &oref, &forged).unwrap();
-    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", eval(&auth, &pane)).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
 
     // A closed pane is 404.
     crate::backend::wcore::delete_block(&state.mstore, &tab_id, &pane).unwrap();
-    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", eval(&auth, &pane)).await;
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", eval(&auth, &pane)).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 
     // Without `pane`, the tools still act on the caller's own pane, as before.
     let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "script": "1" }))).await;
     assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+async fn post_json_headers(
+    app: &axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+    extra: &[(&str, &str)],
+) -> (axum::http::StatusCode, serde_json::Value) {
+    use tower::ServiceExt;
+    let mut b = axum::http::Request::builder()
+        .uri(uri)
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json");
+    for (k, v) in extra {
+        b = b.header(*k, *v);
+    }
+    let resp = app.clone().oneshot(b.body(axum::body::Body::from(body.to_string())).unwrap()).await.unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+// SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2: a hand-off shows a
+// banner, pauses the agent's tools on the pane, and only the host (the
+// user's click) can answer it; an agent with the instance auth key can't.
+#[tokio::test]
+async fn a_handoff_waits_for_the_users_answer_through_the_host_only() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (_agent, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://example.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let pane = body["data"]["pane"].as_str().unwrap().to_string();
+
+    // A hand-off on the agent's own (non-browser) pane is refused: nothing
+    // would show the banner, and its tools would stay locked.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/handoff", merged(&auth, serde_json::json!({ "reason": "x" }))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&own), None);
+
+    // The agent hands the pane to the user and waits.
+    let waiting = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": pane, "reason": "Sign in to your Microsoft account" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    let mut banner = serde_json::Value::Null;
+    for _ in 0..100 {
+        let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+        if let Some(b) = block.meta.get("browser:attention").filter(|v| !v.is_null()) {
+            banner = b.clone();
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(banner["kind"], "handoff", "{banner}");
+    assert_eq!(banner["reason"], "Sign in to your Microsoft account");
+    let id = banner["id"].as_str().unwrap().to_string();
+
+    // While the user works, the agent's tools on that pane are paused.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": pane, "script": "1" }))).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+
+    // The agent can't answer its own request with the instance auth key...
+    let answer = serde_json::json!({ "block_id": pane, "id": id, "decision": "done" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer.clone(), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer.clone(), &[("X-Host-Token", "guess")]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // ...only the host can, with its registered token.
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_attention", answer.clone(), &[("X-Host-Token", "host-ipc-token")]).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (s, body) = waiting.await.unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "done");
+
+    // The banner is gone, the pane is the agent's again, and the answer was single use.
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &[("X-Host-Token", "host-ipc-token")]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // An agent that gives up waiting (its request is dropped mid-wait)
+    // doesn't leave the pane locked or the banner up.
+    let abandoned = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": pane, "reason": "Solve the CAPTCHA" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    for _ in 0..100 {
+        if crate::server::browser_attention::waiting_on_user(&pane).is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(crate::server::browser_attention::waiting_on_user(&pane).is_some());
+    abandoned.abort();
+    let _ = abandoned.await;
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
+
+    // A banner left over from before an srv restart (the meta persisted, the
+    // request didn't): the user's answer gets a 404 and srv takes it down.
+    let mut stale = crate::backend::obj::MetaMapType::new();
+    stale.insert("browser:attention".into(), serde_json::json!({ "id": "stale-1", "kind": "approval" }));
+    crate::server::service::update_object_meta(&state.mstore, &format!("block:{pane}"), &stale).unwrap();
+    let answer = serde_json::json!({ "block_id": pane, "id": "stale-1", "decision": "approve" });
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &[("X-Host-Token", "host-ipc-token")]).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&pane).unwrap();
+    assert!(block.meta.get("browser:attention").is_none_or(|v| v.is_null()));
+
+    // Take over while the agent waits answers its request with Cancelled.
+    let waiting = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": pane, "reason": "Pick a seat" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    for _ in 0..100 {
+        if crate::server::browser_attention::waiting_on_user(&pane).is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&format!("block:{pane}"), &clear).unwrap();
+    let (s, body) = waiting.await.unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "cancelled");
+    assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
 }

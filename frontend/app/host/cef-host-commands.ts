@@ -149,6 +149,9 @@ export const cefApprovals: ApprovalHostApi = {
     decideSsh: async (approvalId, approve, text, checkbox) => {
         await invokeCommand("ssh_approval_decide", { approval_id: approvalId, approve, text, checkbox });
     },
+    decideBrowserAttention: async (blockId, id, decision) => {
+        await invokeCommand("browser_attention_resolve", { block_id: blockId, id, decision });
+    },
     requestMemoryAdoption: async (args) => {
         await invokeCommand("memory_adoption_request", args);
     },

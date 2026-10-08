@@ -93,6 +93,14 @@ pub struct ActReq {
     pub option: Option<String>,
     #[serde(default)]
     pub checked: Option<bool>,
+    /// The user approved this committing action in the pane (srv sets it
+    /// only after their click, spec §5.4).
+    #[serde(default)]
+    pub approved: bool,
+    /// The `needs_approval` the user approved. The click is made only if the
+    /// form still looks the same; the page could have changed it meanwhile.
+    #[serde(default)]
+    pub approved_as: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -161,6 +169,77 @@ const SELECT_OPTION: &str = r#"function (want) {
   this.dispatchEvent(new Event("input", { bubbles: true }));
   this.dispatchEvent(new Event("change", { bubbles: true }));
   return { ok: true };
+}"#;
+
+/// Does clicking this element commit something (submit a form, or a button
+/// named like Send/Pay/Delete)? And what would the user be approving: the
+/// form's non-secret values (spec §5.4).
+const COMMIT_INFO: &str = r#"function () {
+  const t = (this.tagName || "").toLowerCase();
+  const type = (this.getAttribute("type") || "").toLowerCase();
+  const form = this.form || (this.closest && this.closest("form"));
+  const submits = !!form && ((t === "button" && (type === "" || type === "submit")) || (t === "input" && (type === "submit" || type === "image")));
+  const name = (this.getAttribute("aria-label") || this.innerText || this.value || "").trim().replace(/\s+/g, " ").slice(0, 120);
+  const verb = /\b(submit|send|pay|buy|purchase|order|checkout|check out|delete|remove|publish|post|confirm|sign up|sign|agree|accept|transfer|unsubscribe)\b/i.test(name);
+  const fields = [];
+  const secret = el => {
+    const ty = (el.type || "").toLowerCase();
+    const ac = (el.getAttribute("autocomplete") || "").toLowerCase();
+    const nm = ((el.name || "") + " " + (el.id || "")).toLowerCase();
+    return ty === "password" || /one-time-code|cc-|password/.test(ac) || /pass(word|code)?|otp|one.?time|cvc|cvv|card.?num|security.?code/.test(nm);
+  };
+  // A form's own properties can be shadowed by controls named after them
+  // (<input name="action">, <input name="elements">): read them through the
+  // prototype's getters, which the page can't shadow that way.
+  const formGet = (prop) => Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, prop).get.call(form);
+  let action = "";
+  if (form) {
+    const own = (t === "button" || t === "input") && this.hasAttribute("formaction");
+    action = String(own ? Object.getOwnPropertyDescriptor(t === "button" ? HTMLButtonElement.prototype : HTMLInputElement.prototype, "formAction").get.call(this) : formGet("action"));
+    for (const el of Array.from(formGet("elements"))) {
+      const ty = (el.type || "").toLowerCase();
+      if (["hidden", "submit", "button", "image", "reset", "fieldset"].includes(ty) || el.tagName === "FIELDSET") continue;
+      let v;
+      if (secret(el)) v = "[secret]";
+      else if (ty === "checkbox" || ty === "radio") { if (!el.checked) continue; v = el.value || "on"; }
+      else if (ty === "file") v = Array.from(el.files || []).map(f => f.name).join(", ");
+      else if (el.tagName === "SELECT") v = Array.from(el.selectedOptions).map(o => o.label.trim() || o.value).join(", ");
+      else v = el.value;
+      // A label's own text, without the text of controls nested in it (a
+      // <select>'s options would otherwise read as part of its label).
+      let labelText = "";
+      if (el.labels && el.labels[0]) {
+        const c = el.labels[0].cloneNode(true);
+        c.querySelectorAll("select, input, textarea, button, option").forEach(n => n.remove());
+        labelText = c.textContent.replace(/\s+/g, " ").trim();
+      }
+      const label = labelText || el.getAttribute("aria-label") || el.name || el.id || ty;
+      fields.push([String(label).replace(/\s+/g, " ").slice(0, 80), String(v).slice(0, 200)]);
+      if (fields.length >= 40) break;
+    }
+  }
+  // Everything the click would send, hidden controls included (an amount or
+  // a recipient id can live in one), for the check after approval. srv keeps
+  // it out of the banner. Secret values go back separately (`secrets`): the
+  // host replaces them with a keyed digest before anything leaves it.
+  const sent = [];
+  const secrets = [];
+  if (form) {
+    for (const el of Array.from(formGet("elements"))) {
+      const ty = (el.type || "").toLowerCase();
+      let v;
+      if (secret(el)) { secrets.push(String(el.value)); v = "[secret]"; }
+      else if (ty === "checkbox" || ty === "radio") v = el.checked ? (el.value || "on") : null;
+      else if (ty === "file") v = Array.from(el.files || []).map(f => f.name + ":" + f.size).join(",");
+      else if (el.tagName === "SELECT") v = Array.from(el.selectedOptions).map(o => o.value).join(",");
+      else v = el.value;
+      sent.push([el.tagName, ty, el.name || el.id || "", el.disabled ? 1 : 0, v == null ? null : String(v)]);
+      if (sent.length >= 500) break;
+    }
+  }
+  const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
+  const fingerprint = JSON.stringify([action, form ? [formGet("method"), formGet("enctype"), formGet("target")] : null, sub, sent]);
+  return { committing: submits || verb, name, action, fields, fingerprint, secrets };
 }"#;
 
 /// The element's state, for read-back after every action.
@@ -473,6 +552,45 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
     let after = match req.action.as_str() {
         "click" => {
+            if facts.is_file_input() {
+                return Err("this is a file input: clicking it opens a file dialog only the user can use; upload with BrowserSetFiles".to_string());
+            }
+            // Fail closed: a click we can't classify (the page broke the
+            // check, say by shadowing form.elements) isn't made.
+            let unclassified = |e: String| {
+                format!("couldn't tell whether this click submits something, so it wasn't made ({e}); ask the user to click it")
+            };
+            let info = call_on(cdp, &obj, COMMIT_INFO, vec![]).await.map_err(unclassified)?;
+            let committing = info
+                .get("committing")
+                .and_then(|v| v.as_bool())
+                .ok_or_else(|| unclassified("no answer from the page".to_string()))?;
+            let name = info.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let ask = json!({
+                "what": if name.is_empty() { "Click a button that submits a form".to_string() } else { format!("Click \"{name}\"") },
+                "page": now,
+                "action": info.get("action").cloned().unwrap_or(Value::Null),
+                "fields": info.get("fields").cloned().unwrap_or(json!([])),
+                // Not shown: srv strips it from the banner and sends it back
+                // with the approved click. Secret values are in it only as a
+                // digest keyed with a secret of this host process.
+                "fingerprint": json!([
+                    info.get("fingerprint").cloned().unwrap_or(Value::Null),
+                    secrets_digest(info.get("secrets")),
+                ]),
+            });
+            if req.approved {
+                // Approved: but the page's own script had the whole wait to
+                // change the destination or the values. Click only if it
+                // still shows what the user approved.
+                if !committing || req.approved_as.as_ref() != Some(&ask) {
+                    return Err("the form changed while the user was reading the approval, so nothing was clicked; \
+                                call BrowserClick again to show them what it sends now"
+                        .to_string());
+                }
+            } else if committing {
+                return Ok(json!({ "needs_approval": ask }));
+            }
             click_element(cdp, &obj).await?;
             Ok(call_on(cdp, &obj, READ_BACK, vec![]).await.unwrap_or(Value::Null))
         }
@@ -540,6 +658,23 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
     })
 }
 
+/// A digest of a form's secret values, so the check after approval notices
+/// a password or card number the page changed during the wait, without the
+/// values leaving this process. SipHash keyed with a random key made once
+/// per host process: the digest can't be reversed or brute-forced by anyone
+/// without that key, and both checks of one approval run in this process.
+fn secrets_digest(secrets: Option<&Value>) -> String {
+    use std::hash::{BuildHasher, Hasher};
+    static KEY: std::sync::OnceLock<std::collections::hash_map::RandomState> = std::sync::OnceLock::new();
+    let mut h = KEY.get_or_init(Default::default).build_hasher();
+    for s in secrets.and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+        let s = s.as_str().unwrap_or("");
+        h.write_usize(s.len());
+        h.write(s.as_bytes());
+    }
+    format!("{:016x}", h.finish())
+}
+
 /// A secret field's value never reaches the agent, whatever the action
 /// (spec §5.1): the read-back keeps the field's shape but not its value.
 fn redact_secret(mut after: Value, facts: &DomFacts) -> Value {
@@ -562,6 +697,18 @@ mod tests {
     }
 
     #[test]
+    fn a_changed_secret_changes_the_digest_without_showing_it() {
+        let d = |v: Value| secrets_digest(Some(&v));
+        let a = d(json!(["hunter2", "4111111111111111"]));
+        assert_eq!(a, d(json!(["hunter2", "4111111111111111"])), "stable within a process");
+        assert_ne!(a, d(json!(["hunter3", "4111111111111111"])));
+        // Boundaries count: ["ab","c"] isn't ["a","bc"].
+        assert_ne!(d(json!(["ab", "c"])), d(json!(["a", "bc"])));
+        assert!(!a.contains("hunter2"));
+        assert_eq!(d(Value::Null), secrets_digest(None));
+    }
+
+    #[test]
     fn a_secret_fields_value_is_hidden_from_every_read_back() {
         let after = json!({ "tag": "input", "type": "password", "value": "hunter2" });
         let out = redact_secret(after, &facts("input", &[("type", "password")]));
@@ -574,5 +721,154 @@ mod tests {
         let after = json!({ "tag": "input", "value": "lark@example.com" });
         let out = redact_secret(after, &facts("input", &[("type", "email")]));
         assert_eq!(out["value"], "lark@example.com");
+    }
+}
+
+// ── Uploads and waiting (spec §4.2, §5.3) ───────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct SetFilesReq {
+    pub block_id: String,
+    #[serde(rename = "ref")]
+    pub ref_: String,
+    /// Absolute paths, already checked by srv against the agent's workspace.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WaitForReq {
+    pub block_id: String,
+    /// Wait until the page's visible text contains this.
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Wait until the page URL contains this.
+    #[serde(default)]
+    pub url_contains: Option<String>,
+    /// Wait until the element behind this reference has left the page.
+    #[serde(default)]
+    pub gone: Option<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WaitForData {
+    pub waited_ms: u64,
+    pub url: String,
+}
+
+/// The files a file input now holds, for read-back after an upload.
+const FILES_READ_BACK: &str = r#"function () {
+  return { tag: "input", type: "file", files: Array.from(this.files || []).map(f => ({ name: f.name, size: f.size })) };
+}"#;
+
+/// `POST /agentmux/browser/set_files`.
+pub async fn set_files_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<SetFilesReq>,
+) -> (StatusCode, Json<ApiResponse<ActData>>) {
+    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    if req.paths.is_empty() {
+        return fail("no files given");
+    }
+    let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
+        return fail("no snapshot of this pane yet: take one with BrowserSnapshot first");
+    };
+    let Some(&backend) = table.refs.get(&req.ref_) else {
+        return fail(format!("unknown reference {:?}; take a new snapshot", req.ref_));
+    };
+    let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "set_files").await {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    let result = set_files(&mut cdp, &table, backend, &req).await;
+    let _ = cdp.close().await;
+    match result {
+        Ok(after) => (StatusCode::OK, Json(ApiResponse::ok(ActData { after }))),
+        Err(e) => fail(e),
+    }
+}
+
+async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &SetFilesReq) -> Result<Value, String> {
+    let now = page_url(cdp).await;
+    if !table.url.is_empty() && now != table.url {
+        return Err(format!("the page changed since the snapshot (now {now}); take a new snapshot"));
+    }
+    let facts = describe(cdp, backend)
+        .await
+        .ok_or_else(|| format!("the element for {} is gone from the page; take a new snapshot", req.ref_))?;
+    if !facts.is_file_input() {
+        return Err(format!("{} is not a file input; the snapshot names file inputs as \"file input\"", req.ref_));
+    }
+    if req.paths.len() > 1 && !facts.attrs.contains_key("multiple") {
+        return Err("this file input takes one file".to_string());
+    }
+    call(cdp, "DOM.setFileInputFiles", json!({ "files": req.paths, "backendNodeId": backend })).await?;
+    let ctx = isolated_context(cdp).await?;
+    let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
+    call_on(cdp, &obj, FILES_READ_BACK, vec![]).await
+}
+
+/// `POST /agentmux/browser/wait_for`.
+pub async fn wait_for_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<WaitForReq>,
+) -> (StatusCode, Json<ApiResponse<WaitForData>>) {
+    if !super::routes::authorized_pub(&headers, &state.ipc_token) {
+        return unauthorized();
+    }
+    let conditions = [req.text.is_some(), req.url_contains.is_some(), req.gone.is_some()];
+    if conditions.iter().filter(|c| **c).count() != 1 {
+        return fail("give exactly one of `text`, `url_contains` or `gone`");
+    }
+    let gone_backend = match &req.gone {
+        Some(r) => match state.browser_api.ref_tables.get(&req.block_id).and_then(|t| t.refs.get(r).copied()) {
+            Some(b) => Some(b),
+            None => return fail(format!("unknown reference {r:?}; take a new snapshot")),
+        },
+        None => None,
+    };
+    let timeout = std::time::Duration::from_millis(req.timeout_ms.unwrap_or(10_000).clamp(250, 60_000));
+    let started = std::time::Instant::now();
+    let mut cdp = match super::routes::open_dedicated_pane(&state, &req.block_id, "wait_for").await {
+        Ok(c) => c,
+        Err(e) => return fail(e),
+    };
+    loop {
+        let url = page_url(&mut cdp).await;
+        let met = if let Some(t) = &req.text {
+            let expr = format!(
+                "!!(document.body && document.body.innerText.includes({}))",
+                serde_json::to_string(t).unwrap_or_else(|_| "\"\"".into())
+            );
+            cdp.call("Runtime.evaluate", json!({ "expression": expr, "returnByValue": true }))
+                .await
+                .ok()
+                .and_then(|v| v.pointer("/result/value").and_then(|b| b.as_bool()))
+                .unwrap_or(false)
+        } else if let Some(u) = &req.url_contains {
+            url.contains(u.as_str())
+        } else if let Some(b) = gone_backend {
+            describe(&mut cdp, b).await.is_none()
+        } else {
+            false
+        };
+        let waited_ms = started.elapsed().as_millis() as u64;
+        if met {
+            let _ = cdp.close().await;
+            return (StatusCode::OK, Json(ApiResponse::ok(WaitForData { waited_ms, url })));
+        }
+        if started.elapsed() >= timeout {
+            let _ = cdp.close().await;
+            return fail(format!(
+                "still waiting after {:.1} s (page now {url}); take a snapshot to see where it is",
+                timeout.as_secs_f64()
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
 }

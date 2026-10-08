@@ -668,6 +668,7 @@ pub(crate) async fn build_persistent_spawn_env(
         carry_agent_uid_env(&mut env_vars, identity.as_ref());
     }
     carry_agent_workdir_env(&mut env_vars, block_meta);
+    crate::server::browser_uploads::record_launch_workspace(block_id, &env_vars);
     // Per-agent git commit identity -- see git_identity_env_vars() doc
     // comment. Still overridable per the same "user-provided values take
     // precedence" rule as every other var here.

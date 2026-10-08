@@ -157,6 +157,8 @@ export class BrowserViewModel {
     /** The agent driving this pane, when an agent opened it with `OpenBrowser`
      *  (`browser:owner_agent`, written by srv; SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     driverAgentAtom: Accessor<string | undefined>;
+    /** The driving agent's pending request to the user (hand-off or approval). */
+    attentionAtom: Accessor<BrowserAttention | undefined>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -363,6 +365,10 @@ export class BrowserViewModel {
                 return v;
             });
             this.showControlsAtom = createMemo(() => (this.meta()?.["browser:show_controls"] as boolean | undefined) ?? true);
+            this.attentionAtom = createMemo(() => {
+                const v = this.meta()?.["browser:attention"];
+                return v && typeof v === "object" && typeof v.id === "string" ? v : undefined;
+            });
             this.driverAgentAtom = createMemo(() => {
                 const v = this.meta()?.["browser:owner_agent"];
                 return typeof v === "string" && v.trim() ? v.trim() : undefined;
@@ -752,6 +758,17 @@ export class BrowserViewModel {
         // Windows-level keyboard focus to the pane's HWND.
         getApi().browserPanes.focus(this.blockId).catch(() => {});
         return true;
+    }
+
+    /** The human answers the pane's banner (a hand-off or an approval). */
+    resolveAttention(decision: "done" | "approve" | "cancel"): Promise<void> {
+        const a = this.attentionAtom();
+        if (!a) return Promise.resolve();
+        // Through the host, never srv directly: srv accepts an answer only
+        // from the host, so no agent can approve its own request (§5.4).
+        // If srv no longer knows the request (it restarted), it takes the
+        // banner down itself; the banner key is srv's alone to write.
+        return getApi().approvals.decideBrowserAttention(this.blockId, a.id, decision);
     }
 
     /** The human takes the pane back from the agent driving it: clearing

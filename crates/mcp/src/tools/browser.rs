@@ -112,6 +112,9 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                     option,
                     checked,
                 })
+                // A committing click waits up to 10 minutes for the user to
+                // approve it in the pane; srv's own steps take up to 20 s each.
+                .timeout(std::time::Duration::from_secs(if action == "click" { 11 * 60 } else { 60 }))
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -123,6 +126,109 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("{name}: bad response: {e}"))?;
             let after = body.pointer("/data/after").cloned().unwrap_or(Value::Null);
             Ok(format!("{name} {r}: done. The element now: {after}"))
+        }
+        "BrowserSetFiles" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let r = arguments
+                .get("ref")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: ref"))?
+                .to_string();
+            let paths: Vec<String> = arguments
+                .get("paths")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|p| p.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            if paths.is_empty() {
+                anyhow::bail!("missing required parameter: paths (one or more files in your workspace)");
+            }
+            let req_url = format!("{}/api/v1/ui/browser/set_files", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&req_url)
+                .header("X-AuthKey", auth_key)
+                .json(&agentmux_common::api_types::UiBrowserSetFilesRequest { auth, pane: pane_arg(arguments), ref_: r.clone(), paths })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("BrowserSetFiles {r} failed: HTTP {status} — {text}");
+            }
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("BrowserSetFiles: bad response: {e}"))?;
+            let after = body.pointer("/data/after").cloned().unwrap_or(Value::Null);
+            Ok(format!("BrowserSetFiles {r}: done. The file input now holds: {after}"))
+        }
+        "BrowserWaitFor" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let text = arguments.get("text").and_then(|v| v.as_str()).map(str::to_string);
+            let url_contains = arguments.get("url_contains").and_then(|v| v.as_str()).map(str::to_string);
+            let gone = arguments.get("gone").and_then(|v| v.as_str()).map(str::to_string);
+            let timeout_ms = arguments
+                .get("timeout_seconds")
+                .and_then(|v| v.as_f64())
+                .map(|s| (s * 1000.0).round() as u64);
+            if [text.is_some(), url_contains.is_some(), gone.is_some()].iter().filter(|b| **b).count() != 1 {
+                anyhow::bail!("give exactly one of text, url_contains or gone");
+            }
+            let req_url = format!("{}/api/v1/ui/browser/wait_for", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&req_url)
+                .header("X-AuthKey", auth_key)
+                .json(&agentmux_common::api_types::UiBrowserWaitForRequest {
+                    auth,
+                    pane: pane_arg(arguments),
+                    text,
+                    url_contains,
+                    gone,
+                    timeout_ms,
+                })
+                .timeout(std::time::Duration::from_secs(90))
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("BrowserWaitFor: HTTP {status} — {text}");
+            }
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("BrowserWaitFor: bad response: {e}"))?;
+            let waited = body.pointer("/data/waited_ms").and_then(|v| v.as_u64()).unwrap_or(0);
+            let url = body.pointer("/data/url").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(format!("Done waiting after {waited} ms; the page is {url}. Take a new snapshot before acting."))
+        }
+        "BrowserHandoff" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
+            let reason = arguments
+                .get("reason")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: reason"))?
+                .to_string();
+            let timeout_minutes = arguments.get("timeout_minutes").and_then(|v| v.as_u64());
+            let wait = std::time::Duration::from_secs(timeout_minutes.unwrap_or(15).clamp(1, 60) * 60 + 60);
+            let req_url = format!("{}/api/v1/ui/browser/handoff", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&req_url)
+                .header("X-AuthKey", auth_key)
+                .json(&agentmux_common::api_types::UiBrowserHandoffRequest { auth, pane: pane_arg(arguments), reason, timeout_minutes })
+                .timeout(wait)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("BrowserHandoff failed: HTTP {status} — {text}");
+            }
+            let body: Value = resp.json().await.map_err(|e| anyhow::anyhow!("BrowserHandoff: bad response: {e}"))?;
+            Ok(match body.pointer("/data/answer").and_then(|v| v.as_str()).unwrap_or("") {
+                "done" => "The user clicked Done. Take a new BrowserSnapshot: don't assume what they changed.".to_string(),
+                "cancelled" => "The user clicked Cancel. Ask them in chat how to proceed; don't retry the hand-off unasked.".to_string(),
+                _ => "The user didn't answer in time. Ask them in chat.".to_string(),
+            })
         }
         "BrowserNavigate" => {
             require_agent_env(local_url, auth_key, block_id)?;

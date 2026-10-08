@@ -45,6 +45,8 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/eval", post(routes::eval))
         .route("/agentmux/browser/snapshot", post(act::snapshot_route))
         .route("/agentmux/browser/act", post(act::act_route))
+        .route("/agentmux/browser/set_files", post(act::set_files_route))
+        .route("/agentmux/browser/wait_for", post(act::wait_for_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))
         .route("/agentmux/browser/focus_element", post(routes::focus_element))

@@ -729,6 +729,62 @@ pub struct UiBrowserActRequest {
     pub checked: Option<bool>,
 }
 
+/// `POST /api/v1/ui/browser/set_files` — backs `BrowserSetFiles`
+/// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.3). srv allows only
+/// files inside the calling agent's own workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserSetFilesRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened with `OpenBrowser`; absent =
+    /// the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// The file input's reference from the latest snapshot.
+    #[serde(rename = "ref")]
+    pub ref_: String,
+    /// Absolute, or relative to the agent's workspace.
+    pub paths: Vec<String>,
+}
+
+/// `POST /api/v1/ui/browser/wait_for` — backs `BrowserWaitFor`.
+/// Exactly one of `text`, `url_contains`, `gone`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserWaitForRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened with `OpenBrowser`; absent =
+    /// the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url_contains: Option<String>,
+    /// A reference whose element should leave the page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+/// `POST /api/v1/ui/browser/handoff` — backs `BrowserHandoff`
+/// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2): show the user a
+/// banner in the pane and wait for Done or Cancel.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiBrowserHandoffRequest {
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
+    /// Target a browser pane this agent opened with `OpenBrowser`; absent =
+    /// the caller's own pane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane: Option<String>,
+    /// What the user is asked to do, e.g. "Sign in to your Microsoft account".
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_minutes: Option<u64>,
+}
+
 /// `POST /api/v1/ui/browser/open` — backs `OpenBrowser`. Opens a browser
 /// pane next to the caller's own pane and records the caller as its owner
 /// (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).

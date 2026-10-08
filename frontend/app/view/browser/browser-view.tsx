@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { isAnyUnderway } from "@/app/drag/drag-session";
 import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
@@ -236,6 +236,49 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                 createPane={rectSync.createPane}
             />
 
+            <Show when={model.attentionAtom()}>
+                {(a) => (
+                    <div class="browser-attention" role="alertdialog" aria-live="assertive">
+                        <div class="browser-attention-head">
+                            <i class="fa-solid fa-hand" aria-hidden="true" />
+                            <span>
+                                <b>{a().agent ?? "An agent"}</b>{" "}
+                                {a().kind === "handoff" ? "needs you: " : "wants to: "}
+                                {a().kind === "handoff" ? a().reason : a().what}
+                            </span>
+                        </div>
+                        <Show when={a().kind === "approval" && (a().fields?.length ?? 0) > 0}>
+                            <table class="browser-attention-fields">
+                                <tbody>
+                                    <For each={a().fields}>
+                                        {(f) => (
+                                            <tr>
+                                                <td>{f[0]}</td>
+                                                <td>{f[1]}</td>
+                                            </tr>
+                                        )}
+                                    </For>
+                                </tbody>
+                            </table>
+                        </Show>
+                        <Show when={a().kind === "approval" && a().action}>
+                            <div class="browser-attention-target">Sends to {a().action}</div>
+                        </Show>
+                        <div class="browser-attention-actions">
+                            <Button
+                                tone="accent"
+                                density="compact"
+                                onClick={() => model.resolveAttention(a().kind === "handoff" ? "done" : "approve").catch(() => {})}
+                            >
+                                {a().kind === "handoff" ? "Done" : "Approve"}
+                            </Button>
+                            <Button density="compact" onClick={() => model.resolveAttention("cancel").catch(() => {})}>
+                                Cancel
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </Show>
             <Show when={model.driverAgentAtom()}>
                 {(agent) => (
                     <div class="browser-driven-by" role="status">

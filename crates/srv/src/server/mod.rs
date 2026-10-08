@@ -44,7 +44,9 @@ mod muxspect_handlers;
 pub(crate) mod native_memory_handlers;
 pub(crate) mod memory_delivery_handlers;
 mod notify_handlers;
+pub(crate) mod browser_attention;
 pub(crate) mod browser_owner;
+pub(crate) mod browser_uploads;
 mod ui_handlers;
 
 #[cfg(test)]

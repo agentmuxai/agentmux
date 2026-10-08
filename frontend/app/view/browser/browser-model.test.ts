@@ -432,3 +432,48 @@ describe("BrowserViewModel agent driver", () => {
         expect(ctxSetMeta).toHaveBeenCalledWith({ "browser:owner_agent": null });
     });
 });
+
+// SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4: the driving
+// agent's hand-off or approval request shows as a banner, and the user's
+// answer goes to the host (never srv directly).
+describe("BrowserViewModel attention banner", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    const request = { id: "req-1", kind: "approval" as const, agent: "lark", what: 'Click "Submit"', fields: [["Email", "a@b.c"]] as [string, string][] };
+
+    it("reads the pending request from browser:attention", () => {
+        const vm = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:attention": request }) });
+        expect(vm.attentionAtom()?.id).toBe("req-1");
+        expect(new BrowserViewModel(fakeCtx()).attentionAtom()).toBeUndefined();
+    });
+
+    it("sends the answer to the host with the request id", async () => {
+        const { invokeCommand } = await import("@/app/platform/ipc");
+        const vm = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:attention": request }) });
+        vi.clearAllMocks();
+        await vm.resolveAttention("approve");
+        expect(invokeCommand).toHaveBeenCalledWith("browser_attention_resolve", {
+            block_id: "test-block-id",
+            id: "req-1",
+            decision: "approve",
+        });
+    });
+
+    it("never writes the banner key itself (srv owns it)", async () => {
+        const { invokeCommand } = await import("@/app/platform/ipc");
+        const vm = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:attention": request }) });
+        vi.clearAllMocks();
+        vi.mocked(invokeCommand).mockRejectedValueOnce("srv refused the answer: no such request");
+        await expect(vm.resolveAttention("approve")).rejects.toBe("srv refused the answer: no such request");
+        expect(ctxSetMeta).not.toHaveBeenCalled();
+    });
+
+    it("does nothing without a pending request", async () => {
+        const { invokeCommand } = await import("@/app/platform/ipc");
+        const vm = makeVM();
+        await vm.resolveAttention("cancel");
+        expect(invokeCommand).not.toHaveBeenCalledWith("browser_attention_resolve", expect.anything());
+    });
+});

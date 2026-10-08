@@ -1,6 +1,6 @@
 # SPEC: Agents drive a browser pane they open: forms, uploads, and the human in the loop
 
-**Status:** active — B1 (`OpenBrowser`, server-checked ownership, `pane` on the Browser/UI tools, the "Driven by" badge and Take over) in #4451; B2 (`BrowserSnapshot`; `BrowserClick`/`Fill`/`Select`/`Check` by reference with read-back; the secret-field guard on fill and typing) in the B2 PR stacked on it; B3–B5 not built yet.
+**Status:** active — B1 (`OpenBrowser`, server-checked ownership, `pane` on the Browser/UI tools, the "Driven by" badge and Take over) in #4451; B2 (`BrowserSnapshot`; `BrowserClick`/`Fill`/`Select`/`Check` by reference with read-back; the secret-field guard) in #4455; B3 (`BrowserSetFiles` limited to the agent's workspace, `BrowserWaitFor`, `BrowserHandoff`, approval of committing clicks, both answered in the pane through the host) in the B3 PR. Not built yet: the action log and Pause (§5.5), the file-chooser intercept and `BrowserDialog`, the origin allowlist, B4–B5.
 **Date:** 2026-10-07
 **Author:** lark@narko, at the operator's request
 **Trigger (operator, 2026-10-07):** "is agentmux able to open a browser and fill forms? do we have best practice infra to make that process smooth? … this would run through the agentmux browser pane which has app api integrations … lets spec out the needs, write to file, we'll build this first." The first real task is a false-positive report to Microsoft: a web form with a sign-in, text fields, a file upload and a submit.
@@ -104,7 +104,8 @@ For sign-in, two-factor codes, CAPTCHAs, payment, or anything the agent shouldn'
 
 ### 5.3 File uploads
 
-- `BrowserSetFiles` accepts only files inside the agent's own workspace (`AGENTMUX_AGENT_WORKDIR`) or paths the human named in this conversation and approved in the pane. srv resolves symlinks and `..` before checking.
+- `BrowserSetFiles` accepts only files inside the agent's own workspace (`AGENTMUX_AGENT_WORKDIR`) or paths the human named in this conversation and approved in the pane. srv resolves symlinks and `..` before checking. The workspace is the directory srv launched the agent in, recorded at spawn, not the block's `cmd:cwd`, which any client can rewrite.
+- **What this does and doesn't stop:** it keeps a tricked agent from uploading an arbitrary file (an SSH key, a browser profile) because a page asked for it. It is not a sandbox against an agent set on getting a file out: a host agent can read the disk with its own shell. The boundary for an untrusted agent is the container runtime, not this check.
 - The pane's action log shows each upload: file name, size, and the field it went into.
 - An `<input type=file>` hidden behind a custom "Browse" button is found through the snapshot (§4.1 lists the input with its button).
 - **The OS file dialog never opens for an agent-owned pane.** The host implements CEF's `CefDialogHandler::OnFileDialog` (or CDP `Page.setInterceptFileChooserDialog`) for these panes: a chooser the page opens is reported to the agent as "the page asked for a file for <ref>" and cancelled, so the agent answers with `BrowserSetFiles`. A native dialog would block the agent with nothing it can click.
@@ -116,6 +117,7 @@ Some actions can't be taken back: submitting a form, sending a message, paying, 
 - **Which actions:** a click on a `submit` button or an element that submits a form, `Enter` in a form field that would submit it, and a click on a button whose name matches a committing verb (Submit, Send, Pay, Buy, Order, Delete, Remove, Publish, Confirm, Sign, Agree). srv classifies it; the agent can also mark any action as committing.
 - **What happens:** the tool doesn't act. It returns `needs_approval` and the pane shows a banner: what will happen ("Submit the form *Submit a file for malware analysis*"), a summary of the form's current values (secrets masked), a screenshot, and **[Approve] [Cancel]**. On Approve, srv performs the action and the agent's call returns the result.
 - **The approval is the human's click in the pane, never text in the agent's chat**, so content in the page can't talk the agent into approving it (§8).
+- **No way around it:** on a pane an agent opened, the general-purpose routes that could commit without the check are refused: `BrowserEval` (arbitrary script), `UIClick` (clicks by CSS selector), and `BrowserDispatchKey` with Enter or Space or a line break. The pane stays locked from the question until the approved click is made, so the agent can't change the form under the human; the page's own script still could, so before the approved click the host recomputes what the click sends and makes it only if that still matches what the banner showed, and everything the click would send, hidden controls included, which srv keeps out of the banner (otherwise the agent must ask again). Take over cancels a pending request, and an Approve that arrives after it isn't acted on. The banner (`browser:attention`) is written only by srv: no client can rewrite a real request's summary, and a banner left over from before an srv restart is taken down when the human answers it. The classification fails closed: if the page breaks the check, the click isn't made. The destination shown comes from the form's own getters (or the button's `formaction`), which named controls can't shadow.
 - **Per-pane override:** the human can tick "don't ask again on this site for this pane". It's off by default and never survives the pane.
 
 ### 5.5 Seeing and stopping it
@@ -123,6 +125,12 @@ Some actions can't be taken back: submitting a form, sending a message, paying, 
 - The pane's header shows "**Driven by Lark**" while an agent owns it, and an action log (navigate, fill field X, upload Y, waiting for you…), with secrets masked.
 - **[Take over]** in the header ends the agent's ownership: its next call on that pane fails with "the user took over this pane". **[Pause]** refuses its calls until resumed.
 - Closing the pane ends ownership.
+
+### 5.6 Who can answer: the host, never srv's ordinary routes
+
+srv's auth key is shared by everything on the instance, agents included, so an answer to a hand-off or approval can't arrive on an ordinary route. The banner's buttons call the CEF host (`browser_attention_resolve` over host IPC, whose token lives only in the front end and the host). The host posts the answer to srv's `/api/v1/host/browser_attention` with `X-Host-Token`, which srv checks against the token the host registered. An agent holding the auth key gets 403 there.
+
+What counts as committing, as built: a click on an element that submits its form (a `<button>` with no type or `type=submit`, an `<input type=submit|image>`), or one whose name matches Submit, Send, Pay, Buy, Order, Checkout, Delete, Remove, Publish, Post, Confirm, Sign, Agree, Accept, Transfer or Unsubscribe. The banner lists the form's values (secrets masked) and where it is sent. `Enter` in a form field submits it too, so on a pane an agent opened, `BrowserDispatchKey` with Enter (or Space, or a line break) is refused; approving Enter-to-submit through the banner is a follow-up.
 
 ## 6. Identity: an agent's pane starts logged out
 
@@ -186,7 +194,7 @@ What this spec takes from them:
 |---|---|---|
 | **B1** | `OpenBrowser`, `browser:owner_agent`, the `pane` argument on existing tools, `UIScreenshot` on owned panes, the "Driven by" badge and Take over | an agent can drive a browser pane at all |
 | **B2** | `BrowserSnapshot` with references; `BrowserClick`/`Fill`/`Select`/`Check` by reference with read-back; the secret-field guard (§5.1) on fill and on `BrowserDispatchKey` typing | reliable form filling |
-| **B3** | `BrowserHandoff`, `BrowserSetFiles` with the path policy and the file-dialog intercept, `BrowserPress`, `BrowserWaitFor`, `BrowserDialog`, committing-action approval, the action log, the optional origin allowlist | sign-in, uploads, submitting: the acceptance test (§9) |
+| **B3** | Built: `BrowserHandoff`; `BrowserSetFiles` with the workspace rule; `BrowserWaitFor`; approval of committing clicks; the banner, answered through the host (§5.6). `BrowserDispatchKey` with `key` covers Press. Left for B3b: the file-chooser intercept, `BrowserDialog`, the action log and Pause, Enter-to-submit approval, the origin allowlist | sign-in, uploads, submitting: the acceptance test (§9) |
 | **B4** | The profile button with Shared and Private (identities spec Phase 1, Windows); `OpenBrowser` private by default; "use my session" from the pane | agents stop inheriting the human's sessions; several accounts on one site |
 | **B4b** | Named profiles: the on-disk profile experiment on Windows, then the profile manager and the "Agents may use this profile" switch (identities spec Phase 3) | logins that survive restarts, lendable to agents |
 | **B5** | The human grants an agent a pane they opened themselves; per-site approval overrides | later |
