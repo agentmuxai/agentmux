@@ -7,7 +7,7 @@
 // and Remotes, once a pane of its own
 // (docs/specs/SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md).
 
-import { onCleanup, type JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, Show, type JSX } from "solid-js";
 
 import type { PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { AccountsManager } from "@/app/view/accounts/accounts-manager";
@@ -19,7 +19,7 @@ import { SectionPaneModel, SectionPaneView, type SectionPaneSpec } from "@/app/v
 
 /** The Remotes list, on this pane's block: New terminal splits beside it, and
  *  another pane's link reaches it through `remotes:expand` (open-remotes.ts). */
-function RemotesSection(props: { pane: SectionPaneModel<ConnectorsSection> }): JSX.Element {
+function RemotesList(props: { pane: SectionPaneModel<ConnectorsSection> }): JSX.Element {
     const pane = props.pane;
     const model = new RemotesViewModel({
         blockId: pane.blockId,
@@ -28,6 +28,20 @@ function RemotesSection(props: { pane: SectionPaneModel<ConnectorsSection> }): J
     });
     onCleanup(() => model.dispose());
     return <RemotesView model={model} />;
+}
+
+/** Built the first time the section is shown, then kept like the others: a
+ *  Connectors pane left on Accounts doesn't load and follow the remotes list. */
+function RemotesSection(props: { pane: SectionPaneModel<ConnectorsSection> }): JSX.Element {
+    const [shown, setShown] = createSignal(false);
+    createEffect(() => {
+        if (props.pane.sectionAtom() === "remotes") setShown(true);
+    });
+    return (
+        <Show when={shown()}>
+            <RemotesList pane={props.pane} />
+        </Show>
+    );
 }
 
 export const CONNECTORS_SPEC: SectionPaneSpec<ConnectorsSection> = {

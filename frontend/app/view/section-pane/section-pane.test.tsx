@@ -146,8 +146,19 @@ describe("Connectors → Remotes", () => {
         expect(container.querySelector('[data-testid="remotes-view"]')!.getAttribute("data-expand")).toBe("db1");
     });
 
+    it("builds the list only once Remotes is shown, then keeps it", () => {
+        const { container } = mount(connectorsPaneTab);
+        expect(remotesModels).toHaveLength(0);
+        fireEvent.click(screen.getByRole("tab", { name: "Remotes" }));
+        expect(remotesModels).toHaveLength(1);
+        fireEvent.click(screen.getByRole("tab", { name: "Accounts" }));
+        fireEvent.click(screen.getByRole("tab", { name: "Remotes" }));
+        expect(remotesModels).toHaveLength(1);
+        expect(visiblePane(container)).toBe("remotes-view");
+    });
+
     it("disposes the list's model with the pane", () => {
-        const { unmount } = mount(connectorsPaneTab);
+        const { unmount } = mount(connectorsPaneTab, { "connectors:section": "remotes" });
         expect(remotesModels).toHaveLength(1);
         unmount();
         expect(remotesModels[0].disposed).toBe(true);
