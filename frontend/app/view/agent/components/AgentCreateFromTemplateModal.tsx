@@ -478,7 +478,7 @@ export const AgentCreateFromTemplateModalPanel = (
                         testId="create-from-template-bundles"
                     />
                     <span class="agent-new-bundle-modal-hint">
-                        In order: when two bundles name the same skill or MCP server, the first wins.
+                        In order: when two bundles name the same skill, the first wins.
                     </span>
                 </div>
                 <Show when={error()}>

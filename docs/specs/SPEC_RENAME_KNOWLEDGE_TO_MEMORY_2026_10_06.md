@@ -1,6 +1,6 @@
 # SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings
 
-**Status:** active — §5 step 1 (the rename) shipped in PR #4425; step 2a (the backend for several bundles) in PR #4433; step 2b (the pickers) in PR #4434; steps 3 and 4 in agentmux-docs#157 and agentmux-landing#190; the retired terms (§3.8) in agentmux-docs#158, agentmux-landing#191 and this repo; step 2c remains. Decisions D1–D7 taken on the recommendations (operator, 2026-10-06), D8–D13 on 2026-10-07.
+**Status:** active — §5 step 1 (the rename) shipped in PR #4425; step 2a (the backend for several bundles) in PR #4433; step 2b (the pickers) in PR #4434; steps 3 and 4 in agentmux-docs#157 and the landing site; the retired terms (§3.8) in agentmux-docs#158, the landing site and this repo; step 2c is cancelled: bundles no longer carry MCP servers (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md`). Decisions D1–D7 taken on the recommendations (operator, 2026-10-06), D8–D13 on 2026-10-07.
 **Date:** 2026-10-06
 **Author:** agent3 (Agent3@narko), at the operator's request
 **Amends:** `SPEC_RETIRE_ARMORY_CONNECTORS_AND_KNOWLEDGE_PANES_2026_10_05.md` (the pane's name; its §6 risk "'Knowledge' suggests retrieval (RAG) more than configuration … revisit only if users are confused" is that revisit)
@@ -168,7 +168,7 @@ Rewrite the memory-related and tab-related entries from §3.1, and fix what's wr
 
 ### 4.4 agentmux-landing
 
-It never adopted Knowledge and still says **Armory**: `FeaturesPage.tsx:60, 109, 182, 240, 365` and `Roadmap.tsx:21`. Update these to Connectors and Memory. `public/llms.txt:43` ("Armory Bundle Format") becomes Agent Bundle Format.
+It never adopted Knowledge and still says **Armory** in its feature and roadmap copy. Update these to Connectors and Memory, and "Armory Bundle Format" to Agent Bundle Format.
 
 ## 5. Delivery
 
@@ -176,7 +176,7 @@ It never adopted Knowledge and still says **Armory**: `FeaturesPage.tsx:60, 109,
 2. **agentmux PRs, several bundles per agent** (§3.6):
    - **2a, backend:** `db_agent_bundles`, the list RPCs (`getagentbundles`, `setagentbundles`), launch composition on both paths (`agent.open`, and `WriteAgentConfig`, which gains an optional agent id), skills and MCP over the list, and bundle and agent deletion. Inert until something writes a list, so it changes nothing on its own. With tests.
    - **2b, the switch:** the new-agent form's **Bundles** multi-select, the launch modal's list, the Stash's **Bundles** tab in place of Startup, the fold of `startup_bundle_id` into the list, and the first-message startup removed. These go together, so no build sends a bundle's instructions twice or loses a Startup pick. New pickers start empty. With tests.
-   - **2c, a pre-existing bug:** the UI launch path delivers the bundles' MCP servers too.
+   - **2c, a pre-existing bug:** the UI launch path delivers the bundles' MCP servers too. **Cancelled:** a bundle carries no MCP servers any more, so there is nothing to deliver (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1).
 3. **agentmux-docs PR:** §4.2 and §4.3, once (1) and (2) have merged, so the docs match the shipped UI.
 4. **agentmux-landing PR:** §4.4.
 

@@ -378,7 +378,6 @@ export interface BundleImportSelectionState {
     includeInstructions: boolean;
     includeContextFileIds: number[];
     skills: BundleImportSkillSelectionState[];
-    includeMcpServerPaths: string[];
 }
 
 /** Step 2 — preview & select. Renders the checklist described in §4 Step

@@ -44,21 +44,6 @@ pub struct McpAgentBindingData {
     pub mcp_id: String,
 }
 
-/// `mcp.catalog.bind_to_bundle`, `mcp.catalog.unbind_from_bundle`.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct McpBundleBindingData {
-    pub bundle_id: String,
-    pub mcp_id: String,
-}
-
-/// `mcp.catalog.list_for_bundle`.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct McpBundleScopeData {
-    pub bundle_id: String,
-}
-
 /// `mcp.catalog.delete`, `mcp.catalog.probe` — window-scoped, so no agent key.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -119,20 +104,6 @@ pub struct CommandMcpCatalogUpsertData {
     pub config: String,
 }
 
-/// `mcp.catalog.upsert_for_bundle` — bundle-scoped. Same field rules.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct CommandMcpCatalogUpsertForBundleData {
-    pub bundle_id: String,
-    #[serde(default)]
-    pub id: String,
-    pub name: String,
-    #[serde(default = "default_transport")]
-    pub transport: String,
-    #[serde(default = "default_config")]
-    pub config: String,
-}
-
 /// Result of `mcp.delete` and `mcp.catalog.delete`. Both were inline
 /// `json!({ "deleted": .. })`. False means no row with that id existed — the
 /// delete is idempotent, so this is "was something removed", not an error.
@@ -142,7 +113,7 @@ pub struct McpDeleteResult {
     pub deleted: bool,
 }
 
-/// Result of the three bind commands. Was an inline `json!({ "bound": true })`
+/// Result of the two bind commands. Was an inline `json!({ "bound": true })`
 /// — a literal, never computed, because binding is idempotent and any real
 /// failure returns `Err`.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
@@ -151,7 +122,7 @@ pub struct McpBindResult {
     pub bound: bool,
 }
 
-/// Result of the three unbind commands. Unlike `bound`, this one IS computed:
+/// Result of the two unbind commands. Unlike `bound`, this one IS computed:
 /// false means there was no binding to remove.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
@@ -159,7 +130,7 @@ pub struct McpUnbindResult {
     pub unbound: bool,
 }
 
-// Request-shape tests for the eighteen `mcp.*` / `mcp.catalog.*` commands.
+// Request-shape tests for the fourteen `mcp.*` / `mcp.catalog.*` commands.
 #[cfg(test)]
 mod req_shape_tests {
     use super::*;
@@ -173,10 +144,6 @@ mod req_shape_tests {
             .expect("mcp.get / delete / probe");
         serde_json::from_value::<McpAgentBindingData>(json!({"agent_id": "a1", "mcp_id": "m1"}))
             .expect("the four agent bind/unbind commands");
-        serde_json::from_value::<McpBundleBindingData>(json!({"bundle_id": "b1", "mcp_id": "m1"}))
-            .expect("the two bundle bind/unbind commands");
-        serde_json::from_value::<McpBundleScopeData>(json!({"bundle_id": "b1"}))
-            .expect("catalog.list_for_bundle");
         serde_json::from_value::<McpCatalogItemData>(json!({"id": "m1"}))
             .expect("catalog.delete / catalog.probe");
     }
@@ -220,20 +187,10 @@ mod req_shape_tests {
     }
 
     #[test]
-    fn the_other_two_upserts_have_the_same_defaulting_rules() {
+    fn the_catalog_upsert_has_the_same_defaulting_rules() {
         let catalog: CommandMcpCatalogUpsertData =
             serde_json::from_value(json!({"name": "n"})).expect("catalog.upsert is window-scoped");
         assert_eq!((catalog.transport.as_str(), catalog.config.as_str()), ("stdio", "{}"));
-
-        let for_bundle: CommandMcpCatalogUpsertForBundleData =
-            serde_json::from_value(json!({"bundle_id": "b1", "name": "n"}))
-                .expect("catalog.upsert_for_bundle");
-        assert_eq!(for_bundle.transport, "stdio");
-        assert!(
-            serde_json::from_value::<CommandMcpCatalogUpsertForBundleData>(json!({"name": "n"}))
-                .is_err(),
-            "bundle_id has no default"
-        );
     }
 
     #[test]

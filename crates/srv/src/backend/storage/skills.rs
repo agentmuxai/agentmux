@@ -674,9 +674,10 @@ impl Store {
 
     /// Bind a skill to a bundle (insert ref row). Idempotent.
     ///
-    /// `id_store` (NOT `self`) is where bundle existence is checked — see
-    /// `Store::bundle_mcp_bind`'s doc comment (mcp_servers.rs) for the full
-    /// reasoning (reagentx P0 review on PR #2639). `catalog` is where
+    /// `id_store` (NOT `self`) is where bundle existence is checked: bundles
+    /// are written through the shared store, and `self`'s own `db_bundles`
+    /// copy is essentially always empty in production, so checking there made
+    /// "bundle not found" fire for every real bundle (PR #2639). `catalog` is where
     /// `db_skills` is authoritative — see `managed_bind_bundle`'s doc
     /// comment for why it now ALSO checks skill existence there (Part A of
     /// SPEC_DURABLE_BINDINGS_2026_09_10.md §5.4 dropped this table's
@@ -687,9 +688,11 @@ impl Store {
 
     /// Atomically create a NEW, PRIVATE (never global) skill scoped and
     /// bound directly to a bundle, enforcing bundle-scoped name uniqueness
-    /// — the bundle-level analog of `skill_upsert_unique`. See
-    /// `Store::bundle_mcp_upsert_unique`'s doc comment (mcp_servers.rs) for
-    /// the full reasoning (reagentx P1 review on PR #2639).
+    /// — the bundle-level analog of `skill_upsert_unique`. Binding can only
+    /// reference global skills (binding another entity's private one would
+    /// hand this bundle read access to it), and a global skill already
+    /// reaches every agent, so this is how a bundle gets a skill of its own
+    /// (PR #2639).
     pub fn bundle_skill_upsert_unique(
         &self,
         catalog: &Store,

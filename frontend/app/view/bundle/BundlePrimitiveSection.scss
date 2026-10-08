@@ -1,9 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Shared styles for BundleMcpSection.tsx / BundleSkillsSection.tsx — the
-// inline MCP Servers / Skills sections inside the Bundle editor's detail
-// view (bundle-manager.tsx). Composable model v2,
+// Styles for BundleSkillsSection.tsx — the inline Skills section inside the
+// Bundle editor's detail view (bundle-manager.tsx). Composable model v2,
 // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. Deliberately its
 // own compact, flat-list layout rather than reusing AgentPrimitiveModal.scss
 // wholesale — this content sits inside bundle-view-detail, not a

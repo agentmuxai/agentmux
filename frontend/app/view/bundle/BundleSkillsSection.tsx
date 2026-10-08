@@ -3,9 +3,14 @@
 
 /**
  * BundleSkillsSection — the "Skills" section of the Bundle editor's detail
- * view. Mirrors BundleMcpSection.tsx — see its doc comment for the
- * bind/unbind-has-no-effect-vs-addPrivate-is-functional reasoning and the
- * flat-list-not-nested-PrimitiveListDetail layout choice.
+ * view. Binding an existing global skill is offered but has no effect on an
+ * agent (a global already reaches every agent); adding a private skill is
+ * the functional path (see BundleSkillModel's doc comment).
+ *
+ * Deliberately a flat inline list, not a nested PrimitiveListDetail — this
+ * section already lives inside the bundle's own detail pane (itself one side
+ * of BundleManagerBody's list/detail split), and a second full-height
+ * single-pane swap nested inside that would fight for the same space.
  */
 
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -29,9 +34,9 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
         e.preventDefault();
         const name = newName().trim();
         if (!name) return;
-        // See BundleMcpSection.tsx's identical comment — addPrivate never
-        // rejects, only clear the form on reported success. reagentx P1 on
-        // PR #2647.
+        // addPrivate never rejects (errors go to errorAtom), so only clear the
+        // form on the reported success; otherwise a failed add would silently
+        // wipe what the user typed (PR #2647).
         void model.addPrivate(name, newContent()).then((ok) => {
             if (!ok) return;
             setNewName("");

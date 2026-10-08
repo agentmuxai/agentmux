@@ -14,8 +14,7 @@ use serde_json::json;
 // straight out of which handlers normalize their payload first:
 //
 //   * bundle_validate_impl runs normalize_bundle_upsert_input, which fills
-//     a missing id with "", then branches on memory.id.is_empty() to skip
-//     component lookups for an unsaved draft.
+//     a missing id with "", so an unsaved draft validates.
 //   * upsertmemory / upsertsystemmemory deserialize Bundle straight from
 //     the payload, and Bundle::id has no serde default.
 //

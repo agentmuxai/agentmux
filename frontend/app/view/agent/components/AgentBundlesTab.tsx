@@ -70,8 +70,9 @@ export const AgentBundlesTab = (props: AgentBundlesTabProps): JSX.Element => {
                 <span class="agent-primitive-modal-field-label">Bundles</span>
                 <p class="agent-primitive-modal-global-note">
                     What this agent starts with, in order. Each bundle's instructions go into its startup file
-                    after Global Memory, and its skills and MCP servers are added. When two bundles name the same
-                    one, the first wins. Changes apply from the next launch.
+                    after Global Memory, and its skills are added. When two bundles name the same skill, the first
+                    wins. MCP servers aren't part of a bundle: bind them in Connectors. Changes apply from the next
+                    launch.
                 </p>
                 <Show when={error()}>
                     <div class="agent-primitive-modal-error">{error()}</div>

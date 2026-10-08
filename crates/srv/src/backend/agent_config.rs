@@ -850,10 +850,7 @@ fn skill_name_slug(name: &str) -> String {
 /// `-2`, `-3`, ... until the slug is unique within `used`, truncating the
 /// base first so the suffixed result never exceeds the spec's 64-character
 /// max (Codex P2, PR #2322 — a 64-char base plus `-2` was previously 66
-/// chars). `bundle_export.rs` also reuses this for MCP server export
-/// filenames, where the underscore-free/64-char constraints are stricter
-/// than strictly required but remain filesystem-safe, so sharing this
-/// implementation is still correct there.
+/// chars).
 pub(crate) fn unique_skill_slug(name: &str, used: &mut HashSet<String>) -> String {
     const MAX_LEN: usize = 64;
     let base = skill_name_slug(name);

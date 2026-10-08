@@ -52,7 +52,9 @@ pub struct Bundle {
     /// JSON-encoded array; the renderer types it as `[{path, content}]`.
     #[serde(default = "default_json_array_string")]
     pub context_files: String,
-    /// JSON-encoded array of MCP server configs.
+    /// Always `"[]"`: a bundle carries no MCP servers
+    /// (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1). Kept on
+    /// the wire for older clients; see [`NO_INLINE_MCP_SERVERS`].
     #[serde(default = "default_json_array_string")]
     pub mcp_servers: String,
     /// JSON-encoded array of skill IDs.
@@ -372,7 +374,7 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
+                NO_INLINE_MCP_SERVERS,
                 memory.skills,
                 memory.sort_order,
                 memory.created_at,
@@ -499,7 +501,7 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
+                NO_INLINE_MCP_SERVERS,
                 memory.skills,
                 memory.sort_order,
                 memory.created_at,
@@ -579,7 +581,7 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
+                NO_INLINE_MCP_SERVERS,
                 memory.skills,
                 memory.sort_order,
                 memory.created_at,
@@ -665,7 +667,7 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
+                NO_INLINE_MCP_SERVERS,
                 memory.skills,
                 memory.sort_order,
                 memory.created_at,
@@ -795,7 +797,7 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
+                NO_INLINE_MCP_SERVERS,
                 memory.skills,
                 memory.sort_order,
                 memory.created_at,
@@ -1050,7 +1052,7 @@ impl Store {
                 memory.model,
                 memory.instructions,
                 memory.context_files,
-                memory.mcp_servers,
+                NO_INLINE_MCP_SERVERS,
                 memory.skills,
                 memory.sort_order,
                 memory.created_at,
@@ -1297,6 +1299,14 @@ impl Store {
     }
 }
 
+/// What every bundle write stores in `db_bundles.mcp_servers`, and what every
+/// read returns, whatever the caller sent or an older build wrote. A bundle
+/// carries no MCP servers (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md`
+/// §3.1), and the column held server configs, credentials included:
+/// `m0036_drop_bundle_mcp` clears it once, and this keeps it clear and
+/// unreadable from this build on, whichever client writes.
+pub(crate) const NO_INLINE_MCP_SERVERS: &str = "[]";
+
 fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Bundle> {
     Ok(Bundle {
         id: row.get(0)?,
@@ -1308,7 +1318,8 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Bundle> {
         model: row.get(6)?,
         instructions: row.get(7)?,
         context_files: row.get(8)?,
-        mcp_servers: row.get(9)?,
+        // Column 9 is never read back; see NO_INLINE_MCP_SERVERS.
+        mcp_servers: NO_INLINE_MCP_SERVERS.to_string(),
         skills: row.get(10)?,
         sort_order: row.get(11)?,
         created_at: row.get(12)?,

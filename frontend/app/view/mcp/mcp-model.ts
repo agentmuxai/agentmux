@@ -36,9 +36,8 @@ function draftFromServer(s: McpServer): McpDraft {
 
 export class McpCatalogModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
-    // a bind/unbind/add/edit made elsewhere (including from the per-bundle
-    // BundleMcpModel, which already subscribes to this same event) refreshes
-    // this standalone Armory "MCP Servers" tab without a manual reopen.
+    // a bind/unbind/add/edit made elsewhere refreshes this standalone Armory
+    // "MCP Servers" tab without a manual reopen.
     private unsubChanged: () => void;
 
     private _servers = createSignal<McpServerCatalogItem[]>([]);

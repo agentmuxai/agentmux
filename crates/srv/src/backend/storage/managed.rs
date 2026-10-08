@@ -8,7 +8,8 @@
 //! Both primitives are the same pattern: one catalog table whose rows are
 //! either global (visible to everyone) or private, an agent-level ref table
 //! binding rows to agents, and a bundle-level ref table binding rows to
-//! bundles. Before this module `skills.rs` and `mcp_servers.rs` each carried
+//! bundles. (Only skills use theirs now: a bundle carries no MCP servers,
+//! `SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1.) Before this module `skills.rs` and `mcp_servers.rs` each carried
 //! their own copy of the eighteen list / get / delete / bind / unbind /
 //! upsert / access-check methods — identical except for table and column
 //! names and the noun in error messages
@@ -449,13 +450,12 @@ impl Store {
     /// always empty in production (reagentx P0 on PR #2639).
     ///
     /// Also checks `id` exists in `catalog` — same Part A FK-removal reason
-    /// as `managed_bind_agent`'s new check (`db_bundle_skills_ref`/
-    /// `db_bundle_mcp_ref` also lost their `skill_id`/`mcp_id` FK, and this
-    /// table never had a `bundle_id` FK at all — see `migrations.rs`'s own
-    /// comment on these tables). Added now for the same reason as the
-    /// agent-level check, even though `bundle_skill_bind`/`bundle_mcp_bind`'s
-    /// current call sites already pre-check existence via `skill_get`/
-    /// `mcp_server_get` before calling — see this crate's report for why
+    /// as `managed_bind_agent`'s new check (`db_bundle_skills_ref` also lost
+    /// its `skill_id` FK, and never had a `bundle_id` FK at all — see
+    /// `migrations.rs`'s own comment on these tables). Added now for the same
+    /// reason as the agent-level check, even though `bundle_skill_bind`'s
+    /// current call sites already pre-check existence via `skill_get` before
+    /// calling — see this crate's report for why
     /// this is still worth doing as a second line of defense at the store
     /// layer rather than trusting every call site forever.
     pub(super) fn managed_bind_bundle<R: ManagedResource>(
@@ -734,7 +734,8 @@ impl Store {
     /// already in `visible` isn't added twice. Composable model v2 — without
     /// this, bundle-level refs would be exactly as inert at launch as the
     /// bundle's old inline JSON columns were (GH issue #2024 item 3). Silent
-    /// on lookup failure, like the two callers it was lifted from.
+    /// on lookup failure. Skills only now: a bundle carries no MCP servers
+    /// (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1).
     pub(super) fn managed_union_bundle_refs<R: ManagedResource>(
         &self,
         catalog: &Store,

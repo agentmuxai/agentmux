@@ -653,8 +653,8 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                         <span class="agent-launch-modal-hint">
                             A Profile groups the agent's <strong>Identity</strong> (credentials
                             for Claude, Codex, GitHub, AWS, …), which is required, with its{" "}
-                            <strong>Bundles</strong> (instructions, MCP servers, skills), in order:
-                            the first wins when two name the same one.
+                            <strong>Bundles</strong> (instructions and skills), in order: the first
+                            wins when two name the same skill.
                         </span>
 
                         <div class="agent-launch-modal-bundle-row">

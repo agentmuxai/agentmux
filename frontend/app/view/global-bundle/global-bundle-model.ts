@@ -138,8 +138,8 @@ export function groupProvidersByStartupFilename(): { filename: string; providerN
 export class GlobalBundleViewModel {
     // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
     // a bundle create/edit/delete/reorder made elsewhere refreshes this view
-    // without a manual reopen, same pattern BundleMcpModel/BundleSkillModel
-    // already use for mcp:changed/skills:changed.
+    // without a manual reopen, same pattern BundleSkillModel already uses for
+    // skills:changed.
     private unsubChanged: () => void;
 
     private _all = createSignal<Bundle[]>([]);

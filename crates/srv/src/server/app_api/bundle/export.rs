@@ -61,7 +61,6 @@ pub(super) fn bundle_export_impl(
     // bundle contains -- see resolve_bundle_components.
     let components = resolve_bundle_components(mstore, identity_store, &bundle.id)
         .map_err(|e| format!("bundle.export: {e}"))?;
-    let mut handler_warnings = components.warnings;
 
     // `missing_skill_ids` predates the ref tables: the inline column stored
     // bare ids, so an id whose skill row had been deleted had to be resolved
@@ -71,14 +70,9 @@ pub(super) fn bundle_export_impl(
     // it is part of the RPC's shape and callers may still read it.
     let missing_skill_ids: Vec<String> = Vec::new();
 
-    let export = crate::backend::bundle_export::export_bundle(
-        &bundle,
-        &components.skills,
-        &components.mcp_entries,
-    );
+    let export = crate::backend::bundle_export::export_bundle(&bundle, &components.skills);
 
     let mut all_warnings = export.warnings.clone();
-    all_warnings.append(&mut handler_warnings);
 
     // Export/import symmetry -- see MEMORY_NOT_EXPORTED_WARNING.
     if bound_agent_has_native_memory(id_store, mstore, &bundle.id) {

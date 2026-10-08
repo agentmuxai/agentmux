@@ -212,17 +212,8 @@ pub(super) fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppStat
                         &parsed.context_files.iter().map(|cf| json!({"path": cf.path, "content": cf.content})).collect::<Vec<_>>(),
                     )
                     .unwrap_or_else(|_| "[]".to_string()),
-                    // Phase 3 spec §3.0, round 2: `parsed.mcp_servers` is now
-                    // `Vec<ParsedMcpServer>{source_path, config}` (a stable
-                    // selection key alongside the raw config) — every write
-                    // site must project to `.config` before serializing, or
-                    // this would persist the wrapper object instead of the
-                    // raw MCP config every consumer of `Bundle.mcp_servers`
-                    // expects.
-                    mcp_servers: serde_json::to_string(
-                        &parsed.mcp_servers.iter().map(|m| &m.config).collect::<Vec<_>>(),
-                    )
-                    .unwrap_or_else(|_| "[]".to_string()),
+                    // A bundle carries no MCP servers (see the warning below).
+                    mcp_servers: "[]".to_string(),
                     skills: serde_json::to_string(&imported_skill_ids)
                         .unwrap_or_else(|_| "[]".to_string()),
                     sort_order: 0,
@@ -247,16 +238,15 @@ pub(super) fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppStat
                 }
 
                 // Ref tables are authoritative — bind after the bundle row
-                // exists, or this import exports empty and its servers never
-                // reach a spawned agent.
+                // exists, or this import exports empty.
                 warnings.extend(bind_imported_components(
                     &mstore,
                     &id_store,
                     &identity_store,
                     &memory.id,
                     &imported_skill_ids,
-                    &parsed.mcp_servers.iter().map(|m| m.config.clone()).collect::<Vec<_>>(),
                 ));
+                warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
 
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),
@@ -689,18 +679,6 @@ pub(super) async fn bundle_import_commit_impl(
                     .map(|cf| json!({ "path": cf.path, "content": cf.content }))
                     .collect();
 
-                // include_mcp_servers selects by source_path (§3.0), never
-                // by a JSON "name" field. The write path projects to
-                // .config, matching the §3.0 amendment.
-                let include_mcp: std::collections::HashSet<&str> =
-                    req.include_mcp_servers.iter().map(|s| s.as_str()).collect();
-                let selected_mcp_servers: Vec<&serde_json::Value> = parsed
-                    .mcp_servers
-                    .iter()
-                    .filter(|m| include_mcp.contains(m.source_path.as_str()))
-                    .map(|m| &m.config)
-                    .collect();
-
                 let resolved_reqs = resolve_account_requirements(id_store, &parsed.requirements)
                     .map_err(|e| format!("bundle.import.commit: {e}"))?;
                 // codex P2, PR #2381 round 12: commit's response reuses the
@@ -835,8 +813,8 @@ pub(super) async fn bundle_import_commit_impl(
                     description: parsed.description,
                     is_blank: false,
                     is_global: false,
-                    // Like `description` above (and unlike instructions/
-                    // context/mcp), provider/model are structural identity
+                    // Like `description` above (and unlike instructions and
+                    // context files), provider/model are structural identity
                     // fields, not opt-in components — there's no
                     // include_provider toggle in the preview/commit UI, so
                     // these always carry straight through when present.
@@ -847,8 +825,7 @@ pub(super) async fn bundle_import_commit_impl(
                         .unwrap_or_else(|_| "{}".to_string()),
                     context_files: serde_json::to_string(&selected_context_files)
                         .unwrap_or_else(|_| "[]".to_string()),
-                    mcp_servers: serde_json::to_string(&selected_mcp_servers)
-                        .unwrap_or_else(|_| "[]".to_string()),
+                    mcp_servers: "[]".to_string(),
                     skills: serde_json::to_string(&imported_skill_ids)
                         .unwrap_or_else(|_| "[]".to_string()),
                     sort_order: 0,
@@ -870,15 +847,15 @@ pub(super) async fn bundle_import_commit_impl(
                 }
 
                 // Ref tables are authoritative — bind after the bundle row
-                // exists. Only the servers the user actually selected.
+                // exists.
                 warnings.extend(bind_imported_components(
                     &mstore,
                     &id_store,
                     &identity_store,
                     &memory.id,
                     &imported_skill_ids,
-                    &selected_mcp_servers.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
                 ));
+                warnings.extend(mcp_servers_not_imported_warning(&parsed.mcp_servers));
 
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "memories:changed".to_string(),

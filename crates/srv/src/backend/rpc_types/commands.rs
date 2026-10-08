@@ -660,13 +660,6 @@ pub const COMMAND_MCP_CATALOG_BIND: &str = "mcp.catalog.bind";
 pub const COMMAND_MCP_CATALOG_LIST_FOR_AGENT: &str = "mcp.catalog.list_for_agent";
 pub const COMMAND_MCP_CATALOG_UNBIND: &str = "mcp.catalog.unbind";
 
-// Bundle-scoped siblings of the three above — see the identical comment on
-// the skill.catalog.* trio above (SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md).
-pub const COMMAND_MCP_CATALOG_BIND_TO_BUNDLE: &str = "mcp.catalog.bind_to_bundle";
-pub const COMMAND_MCP_CATALOG_UNBIND_FROM_BUNDLE: &str = "mcp.catalog.unbind_from_bundle";
-pub const COMMAND_MCP_CATALOG_LIST_FOR_BUNDLE: &str = "mcp.catalog.list_for_bundle";
-// See the identical comment on COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE above.
-pub const COMMAND_MCP_CATALOG_UPSERT_FOR_BUNDLE: &str = "mcp.catalog.upsert_for_bundle";
 
 // Pane-open resume preflight — "will this conversation resume, or start new?"
 // answered before anything is spawned. See crate::backend::resume_preflight.

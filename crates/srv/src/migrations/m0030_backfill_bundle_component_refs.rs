@@ -1,8 +1,15 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Backfill `db_bundle_skills_ref` / `db_bundle_mcp_ref` from the inline
-//! `db_bundles.skills` / `db_bundles.mcp_servers` JSON columns.
+//! Backfill `db_bundle_skills_ref` from the inline `db_bundles.skills` JSON
+//! column.
+//!
+//! **Skills only, since bundles stopped carrying MCP servers**
+//! (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1). This also
+//! carried the inline `mcp_servers` column into `db_bundle_mcp_ref`;
+//! `m0036_drop_bundle_mcp` now deletes those refs and clears that column, so
+//! a store that hasn't run this yet would only have the servers dropped again
+//! straight after. That half went with the store code it called.
 //!
 //! Phase 0b of `SPEC_INSTRUCTION_AND_MEMORY_PORTABILITY_2026_09_09.md`. The
 //! two stores were never synced: binding a skill in the Armory wrote only a
@@ -31,20 +38,16 @@
 //! local catalog copy) and is left as a historical record of why the two
 //! stores were split, not a claim about the current schema.
 //!
-//! Idempotent three times over: `INSERT OR IGNORE` on the ref tables, name
-//! uniqueness on the MCP catalog rows, and a per-bundle skip when nothing is
-//! left to carry. Re-running changes nothing.
+//! Idempotent: `INSERT OR IGNORE` on the ref table. Re-running changes
+//! nothing.
 //!
-//! Best-effort per bundle. One malformed `mcp_servers` blob must not abort a
+//! Best-effort per bundle. One malformed `skills` blob must not abort a
 //! migration that is otherwise carrying real data across — the alternative
 //! leaves the store half-converted with the read switch already live. Every
 //! skip is logged with the bundle id.
 
 use std::sync::Arc;
 
-use serde_json::Value;
-
-use crate::backend::storage::mcp_servers::McpServer;
 use crate::backend::storage::store::Store;
 
 use super::{Migration, MigrationContext, MigrationError, MigrationScope, VerifyOutcome};
@@ -71,27 +74,17 @@ fn resolve_bundle_store(ctx: &MigrationContext, mstore: &Arc<Store>) -> Arc<Stor
     }
 }
 
-/// Milliseconds since the epoch, for the catalog rows this creates.
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-/// Carry one bundle's inline components across into the ref tables.
+/// Carry one bundle's inline skills across into the ref table.
 ///
-/// Returns `(skills_bound, mcp_bound)`. Never returns `Err` for bad data —
-/// see the module doc on why one bad bundle must not stop the rest.
+/// Returns how many were bound. Never returns `Err` for bad data — see the
+/// module doc on why one bad bundle must not stop the rest.
 fn backfill_one_bundle(
     mstore: &Store,
     bundle_store: &Store,
     bundle_id: &str,
     skills_json: &str,
-    mcp_json: &str,
-) -> (usize, usize) {
+) -> usize {
     let mut skills_bound = 0usize;
-    let mut mcp_bound = 0usize;
 
     // ---- skills: the inline column holds bare ids into db_skills ----
     match serde_json::from_str::<Vec<String>>(skills_json) {
@@ -134,30 +127,7 @@ fn backfill_one_bundle(
         Err(_) => {} // genuinely blank is not an error
     }
 
-    // ---- mcp servers: the inline column holds whole config objects ----
-    match serde_json::from_str::<Vec<Value>>(mcp_json) {
-        Ok(entries) => {
-            // One shared path with the ABF import handlers, so a server
-            // recovered from an old bundle and one that arrives in an import
-            // end up identical — including how duplicate names are kept apart
-            // and how a re-run decides it has nothing to do.
-            let (created, warnings) =
-                mstore.bundle_mcp_bind_inline_entries(mstore, bundle_store, bundle_id, &entries, now_ms());
-            mcp_bound += created;
-            for w in warnings {
-                tracing::warn!(bundle_id, warning = %w, "backfill_bundle_component_refs");
-            }
-        }
-        Err(e) if !mcp_json.trim().is_empty() && mcp_json.trim() != "[]" => {
-            tracing::warn!(
-                bundle_id, error = %e,
-                "backfill_bundle_component_refs: malformed inline mcp_servers JSON — nothing carried across"
-            );
-        }
-        Err(_) => {}
-    }
-
-    (skills_bound, mcp_bound)
+    skills_bound
 }
 
 impl Migration for M0030BackfillBundleComponentRefs {
@@ -170,7 +140,7 @@ impl Migration for M0030BackfillBundleComponentRefs {
     }
 
     fn description(&self) -> &'static str {
-        "Carry inline bundle skills/mcp_servers across into the bundle ref tables"
+        "Carry inline bundle skills across into the bundle ref table"
     }
 
     fn up(&self, ctx: &MigrationContext) -> Result<(), MigrationError> {
@@ -187,23 +157,13 @@ impl Migration for M0030BackfillBundleComponentRefs {
         })?;
 
         let mut total_skills = 0usize;
-        let mut total_mcp = 0usize;
         for bundle in &bundles {
-            let (s, m) = backfill_one_bundle(
-                &mstore,
-                &bundle_store,
-                &bundle.id,
-                &bundle.skills,
-                &bundle.mcp_servers,
-            );
-            total_skills += s;
-            total_mcp += m;
+            total_skills += backfill_one_bundle(&mstore, &bundle_store, &bundle.id, &bundle.skills);
         }
 
         tracing::info!(
             bundles = bundles.len(),
             skills_bound = total_skills,
-            mcp_bound = total_mcp,
             "backfill_bundle_component_refs: complete"
         );
         Ok(())
@@ -219,10 +179,7 @@ impl Migration for M0030BackfillBundleComponentRefs {
                 let skills: i64 = conn
                     .query_row("SELECT COUNT(*) FROM db_bundle_skills_ref", [], |r| r.get(0))
                     .unwrap_or(0);
-                let mcp: i64 = conn
-                    .query_row("SELECT COUNT(*) FROM db_bundle_mcp_ref", [], |r| r.get(0))
-                    .unwrap_or(0);
-                VerifyOutcome::Ok(format!("{skills} skill ref(s), {mcp} mcp ref(s)"))
+                VerifyOutcome::Ok(format!("{skills} skill ref(s)"))
             }
             Ok(None) => VerifyOutcome::Ok("no channel store".to_string()),
             Err(e) => VerifyOutcome::Error(e),
@@ -243,7 +200,7 @@ mod tests {
         Store::open_in_memory().unwrap()
     }
 
-    fn insert_bundle(s: &Store, id: &str, skills: &str, mcp: &str) {
+    fn insert_bundle(s: &Store, id: &str, skills: &str) {
         let bundle = crate::backend::storage::store::Bundle {
             id: id.to_string(),
             name: format!("Bundle {id}"),
@@ -255,7 +212,7 @@ mod tests {
             instructions: String::new(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
-            mcp_servers: mcp.to_string(),
+            mcp_servers: "[]".to_string(),
             skills: skills.to_string(),
             sort_order: 0,
             created_at: 1,
@@ -281,25 +238,12 @@ mod tests {
     }
 
     #[test]
-    fn carries_inline_skills_and_mcp_servers_into_the_ref_tables() {
+    fn carries_inline_skills_into_the_ref_table() {
         let s = store();
         insert_skill(&s, "skill-1", "Deploy");
-        insert_bundle(
-            &s,
-            "bundle-1",
-            r#"["skill-1"]"#,
-            r#"[{"name":"github","command":"gh-mcp","env":{"GITHUB_TOKEN":""}}]"#,
-        );
+        insert_bundle(&s, "bundle-1", r#"["skill-1"]"#);
 
-        let (sk, mc) = backfill_one_bundle(
-            &s,
-            &s,
-            "bundle-1",
-            r#"["skill-1"]"#,
-            r#"[{"name":"github","command":"gh-mcp","env":{"GITHUB_TOKEN":""}}]"#,
-        );
-        assert_eq!((sk, mc), (1, 1));
-
+        assert_eq!(backfill_one_bundle(&s, &s, "bundle-1", r#"["skill-1"]"#), 1);
         let bound_skills: Vec<_> = s
             .bundle_skill_list(&s, "bundle-1")
             .unwrap()
@@ -308,175 +252,28 @@ mod tests {
             .collect();
         assert_eq!(bound_skills.len(), 1, "skill must be bound to the bundle");
 
-        let bound_mcp: Vec<_> = s
-            .bundle_mcp_list(&s, "bundle-1")
-            .unwrap()
-            .into_iter()
-            .filter(|i| i.bound_to_bundle)
-            .collect();
-        assert_eq!(bound_mcp.len(), 1);
-        assert_eq!(bound_mcp[0].server.name, "github");
-        assert!(
-            bound_mcp[0].server.config.contains("gh-mcp"),
-            "the config object must survive verbatim: {}",
-            bound_mcp[0].server.config
-        );
-    }
-
-    #[test]
-    fn rerunning_binds_nothing_new() {
-        let s = store();
-        insert_skill(&s, "skill-1", "Deploy");
-        let skills = r#"["skill-1"]"#;
-        let mcp = r#"[{"name":"github","command":"gh-mcp"}]"#;
-        insert_bundle(&s, "bundle-1", skills, mcp);
-
-        let first = backfill_one_bundle(&s, &s, "bundle-1", skills, mcp);
-        assert_eq!(first, (1, 1));
-
-        // Second pass: the skill bind is INSERT OR IGNORE (still reports
-        // bound), the MCP name already resolves for this bundle (reports 0).
-        let second = backfill_one_bundle(&s, &s, "bundle-1", skills, mcp);
-        assert_eq!(second.1, 0, "a second pass must not create a second server");
-
-        let bound_mcp = s
-            .bundle_mcp_list(&s, "bundle-1")
+        // Re-running binds the same ref again, idempotently.
+        backfill_one_bundle(&s, &s, "bundle-1", r#"["skill-1"]"#);
+        let count = s
+            .bundle_skill_list(&s, "bundle-1")
             .unwrap()
             .into_iter()
             .filter(|i| i.bound_to_bundle)
             .count();
-        assert_eq!(bound_mcp, 1, "exactly one server after two passes");
+        assert_eq!(count, 1);
     }
 
     #[test]
-    fn a_malformed_blob_is_logged_and_the_rest_of_the_bundle_still_migrates() {
+    fn a_malformed_blob_is_logged_not_fatal() {
         let s = store();
-        insert_skill(&s, "skill-1", "Deploy");
-        insert_bundle(&s, "bundle-1", r#"["skill-1"]"#, "not an array at all");
-
-        let (sk, mc) = backfill_one_bundle(&s, &s, "bundle-1", r#"["skill-1"]"#, "not an array at all");
-        assert_eq!(sk, 1, "the good half must still be carried across");
-        assert_eq!(mc, 0);
+        insert_bundle(&s, "bundle-1", "not an array at all");
+        assert_eq!(backfill_one_bundle(&s, &s, "bundle-1", "not an array at all"), 0);
     }
 
     #[test]
     fn an_inline_skill_id_with_no_catalog_row_is_dropped_not_fatal() {
         let s = store();
-        insert_bundle(&s, "bundle-1", r#"["ghost"]"#, "[]");
-        let (sk, mc) = backfill_one_bundle(&s, &s, "bundle-1", r#"["ghost"]"#, "[]");
-        assert_eq!((sk, mc), (0, 0));
-    }
-
-    #[test]
-    fn two_entries_sharing_a_name_are_both_kept() {
-        // The validator permits duplicate names and the old exporter kept
-        // both by slugging them apart. Rejecting the second on the catalog's
-        // name-uniqueness check would lose it permanently now that export
-        // reads only bound refs (Codex, PR #3152).
-        let s = store();
-        let mcp = r#"[{"name":"github","command":"a"},{"name":"github","command":"b"}]"#;
-        insert_bundle(&s, "bundle-1", "[]", mcp);
-
-        let (_, mc) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
-        assert_eq!(mc, 2, "both entries must survive the backfill");
-
-        let names: Vec<String> = s
-            .bundle_mcp_list(&s, "bundle-1")
-            .unwrap()
-            .into_iter()
-            .filter(|i| i.bound_to_bundle)
-            .map(|i| i.server.name)
-            .collect();
-        assert!(names.contains(&"github".to_string()), "got {names:?}");
-        assert!(names.contains(&"github-2".to_string()), "got {names:?}");
-
-        // ...and a re-run still creates nothing.
-        let (_, again) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
-        assert_eq!(again, 0, "re-run must be a no-op even with duplicate names");
-    }
-
-    #[test]
-    fn an_inline_entry_is_kept_when_a_different_server_already_holds_its_name() {
-        // ReAgent P1 on #3152: a server bound through the Armory (or by an
-        // earlier import that only wrote inline columns) can share a name with
-        // an inline entry while being a completely different server. Deciding
-        // "already migrated" by name would drop the inline one permanently and
-        // silently, now that export reads only bound refs — the exact failure
-        // this backfill exists to prevent. Identity is the config.
-        let s = store();
-        insert_bundle(&s, "bundle-1", "[]", "[]");
-
-        // Bound through the Armory: same name, different server.
-        let armory = crate::backend::storage::mcp_servers::McpServer {
-            id: "srv-armory".to_string(),
-            name: "github".to_string(),
-            transport: "stdio".to_string(),
-            config: r#"{"name":"github","command":"a-totally-different-binary"}"#.to_string(),
-            is_global: false,
-            created_at: 1,
-            updated_at: 1,
-        };
-        s.bundle_mcp_upsert_unique(&s, &s, "bundle-1", &armory, true).unwrap();
-
-        let mcp = r#"[{"name":"github","command":"gh-mcp"}]"#;
-        let (_, mc) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
-        assert_eq!(mc, 1, "the inline entry must be carried across, not swallowed");
-
-        let bound: Vec<_> = s
-            .bundle_mcp_list(&s, "bundle-1")
-            .unwrap()
-            .into_iter()
-            .filter(|i| i.bound_to_bundle)
-            .collect();
-        assert_eq!(bound.len(), 2, "both servers must exist");
-        assert!(
-            bound.iter().any(|i| i.server.config.contains("gh-mcp")),
-            "the inline entry's own config must survive"
-        );
-        assert!(
-            bound.iter().any(|i| i.server.config.contains("a-totally-different-binary")),
-            "the pre-existing server must survive"
-        );
-
-        // ...and re-running still creates nothing, because the match is by
-        // config and both configs are now accounted for.
-        let (_, again) = backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
-        assert_eq!(again, 0, "re-run must remain a no-op");
-    }
-
-    #[test]
-    fn an_entrys_own_type_becomes_the_transport() {
-        // Hardcoding stdio would give the row a transport column that
-        // contradicts its own config JSON (ReAgent, PR #3152).
-        let s = store();
-        let mcp = r#"[{"name":"remote","type":"sse","url":"https://example.test"}]"#;
-        insert_bundle(&s, "bundle-1", "[]", mcp);
-        backfill_one_bundle(&s, &s, "bundle-1", "[]", mcp);
-
-        let bound: Vec<_> = s
-            .bundle_mcp_list(&s, "bundle-1")
-            .unwrap()
-            .into_iter()
-            .filter(|i| i.bound_to_bundle)
-            .collect();
-        assert_eq!(bound[0].server.transport, "sse");
-    }
-
-    #[test]
-    fn a_nameless_mcp_entry_gets_a_stable_synthetic_name() {
-        let s = store();
-        insert_bundle(&s, "bundle-1", "[]", r#"[{"command":"x"},{"command":"y"}]"#);
-        let (_, mc) = backfill_one_bundle(&s, &s, "bundle-1", "[]", r#"[{"command":"x"},{"command":"y"}]"#);
-        assert_eq!(mc, 2, "two nameless entries must not collide on name");
-
-        let names: Vec<String> = s
-            .bundle_mcp_list(&s, "bundle-1")
-            .unwrap()
-            .into_iter()
-            .filter(|i| i.bound_to_bundle)
-            .map(|i| i.server.name)
-            .collect();
-        assert!(names.contains(&"mcp-server-1".to_string()), "got {names:?}");
-        assert!(names.contains(&"mcp-server-2".to_string()), "got {names:?}");
+        insert_bundle(&s, "bundle-1", r#"["ghost"]"#);
+        assert_eq!(backfill_one_bundle(&s, &s, "bundle-1", r#"["ghost"]"#), 0);
     }
 }

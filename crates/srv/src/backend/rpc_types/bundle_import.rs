@@ -56,12 +56,14 @@ pub struct BundleImportMcpServerDisplay {
     pub command: Option<String>,
 }
 
-/// One MCP server offered for selection. Carries only `display`, never the
-/// full config — a bundle's server config can hold secrets.
+/// One MCP server the archive carries. Listed so the user knows it isn't
+/// imported: a bundle carries no MCP servers, so they add it in Connectors
+/// (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1). Carries only
+/// `display`, never the full config — a server config can hold secrets.
 #[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct BundleImportMcpServerPreview {
-    /// Stable selection key.
+    /// Where the archive keeps it.
     pub source_path: String,
     pub display: BundleImportMcpServerDisplay,
 }
@@ -235,9 +237,6 @@ pub struct CommandBundleImportCommitData {
     pub include_context_files: Vec<usize>,
     #[serde(default)]
     pub include_skills: Vec<BundleImportSkillSelection>,
-    /// `source_path` values from the preview's `mcp_servers`.
-    #[serde(default)]
-    pub include_mcp_servers: Vec<String>,
 }
 
 // Request-shape tests for the two `bundle.import.*` commands.
@@ -291,7 +290,6 @@ mod req_shape_tests {
             "include_instructions": true,
             "include_context_files": [0, 2],
             "include_skills": [{"source_dir": "skills/deploy", "import_as": "deploy2"}],
-            "include_mcp_servers": ["mcp/github.json"],
         }))
         .expect("commit must accept the full selection payload");
         assert_eq!(req.include_context_files, vec![0, 2]);
