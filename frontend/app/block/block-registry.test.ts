@@ -91,6 +91,7 @@ describe("built-in pane tabs (block-registry.ts)", () => {
         // shim renders one of them until its block remounts.
         expect(holders("paneZoom")).toEqual(["agent", "armory", "connectors", "editor", "memory", "swarm", "term", "warden"]);
         expect(paneTabCapability("editor", "paneZoom")?.baseFontSize).toBe(13);
+        expect(paneTabCapability("files", "paneZoom")?.baseFontSize).toBe(12);
         expect(paneTabCapability("term", "paneZoom")?.baseFontSize).toBeUndefined();
         expect(holders("acceptsInput")).toEqual(["term"]);
         expect(holders("shellKeys")).toEqual(["term"]);
