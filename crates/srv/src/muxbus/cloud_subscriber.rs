@@ -980,6 +980,8 @@ fn shared_token_rejection_outcome(status: reqwest::StatusCode, agent_id: &str) -
             agent_id = %agent_id,
             "cloud_subscriber: shared token rejected (binding mismatch) for this agent — skipping this cycle, not reconnecting"
         );
+        // Not reconnecting, but this agent's messages aren't arriving either.
+        delivery_status::pull_failed(agent_id, "the relay refused this agent's messages (403)");
         return AgentSyncOutcome::Ok;
     }
     AgentSyncOutcome::ReconnectSharedTokenExpired

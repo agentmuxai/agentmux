@@ -261,7 +261,7 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // that has never seen this install's keys; publications
                         // are recorded per directory, so the pass this nudge
                         // starts finds them all pending there.
-                        crate::muxbus::delivery_status::saw_session(Some(email.clone()));
+                        crate::muxbus::delivery_status::fresh_sign_in(Some(email.clone()));
                         clear_wan_peer_cache();
                         crate::muxbus::wan_publish::nudge();
                         // And publish this install's presence now, whatever

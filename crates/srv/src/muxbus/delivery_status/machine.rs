@@ -25,6 +25,10 @@ pub enum Link {
     /// Signed in, but the relay isn't reachable or the token can't be
     /// refreshed for now (the reason). The loop retries on its own.
     Unreachable(String),
+    /// A sign-in was just made and saved; the loop is on its way to the
+    /// relay. The broker may still hold the previous sign-in's refusal, which
+    /// says nothing about this one.
+    Connecting,
     /// The WebSocket to the relay is open.
     Connected,
 }
@@ -55,6 +59,7 @@ pub fn derive(
         Link::Connected => (MuxBusDeliveryState::Connected, None),
         _ if !session_known => (MuxBusDeliveryState::SignedOut, None),
         Link::SignInStale(reason) => (MuxBusDeliveryState::NeedsSignIn, Some(reason.clone())),
+        Link::Connecting => (MuxBusDeliveryState::Reconnecting, Some("connecting".to_string())),
         // Signed in before, and now nothing readable is stored: the sign-in
         // was lost, not given up (a deliberate sign-out clears `session_known`).
         Link::NoSignIn => (
@@ -135,6 +140,17 @@ impl Machine {
             self.link = Link::Unreachable("connecting".to_string());
         }
         self.update(broker, now_ms)
+    }
+
+    /// The user just signed in (`muxbus.login` saved it): connecting, whatever
+    /// the broker still says about the sign-in this one replaces.
+    pub fn fresh_sign_in(&mut self, email: Option<String>, now_ms: i64) -> Vec<Effect> {
+        self.session_known = true;
+        if email.as_deref().is_some_and(|e| !e.is_empty()) {
+            self.email = email;
+        }
+        self.link = Link::Connecting;
+        self.update(None, now_ms)
     }
 
     /// The user signed out on purpose: not a lost sign-in.
@@ -426,6 +442,22 @@ mod tests {
         assert_eq!(m.status().state, Reconnecting);
         m.keep_pull_errors_of(&["b".to_string()]);
         m.tick(None, T0 + 4 * PAUSE_NOTICE_MS + 1);
+        assert_eq!(m.status().state, Connected);
+    }
+
+    #[test]
+    fn a_fresh_sign_in_is_not_judged_by_the_refusal_it_replaces() {
+        let mut m = connected_machine();
+        m.set_link(Link::Unreachable("x".into()), Some(&refused()), T0 + 1);
+        assert_eq!(m.status().state, NeedsSignIn);
+        m.signed_out(T0 + 2);
+        let fx = m.fresh_sign_in(Some("a@b.c".into()), T0 + 3);
+        assert_eq!(m.status().state, Reconnecting);
+        assert!(!kinds(&fx).contains(&"notify"));
+        // The broker still holds the old refusal until the loop refreshes.
+        assert_eq!(m.tick(Some(&refused()), T0 + 4).len(), 0);
+        assert_eq!(m.status().state, Reconnecting);
+        m.set_link(Link::Connected, Some(&refused()), T0 + 5);
         assert_eq!(m.status().state, Connected);
     }
 

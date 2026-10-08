@@ -133,6 +133,12 @@ pub fn saw_session(email: Option<String>) {
     apply(effects);
 }
 
+/// The user just signed in (`muxbus.login`).
+pub fn fresh_sign_in(email: Option<String>) {
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).fresh_sign_in(email, now_ms());
+    apply(effects);
+}
+
 /// The user signed out (`muxbus.disconnect`).
 pub fn signed_out() {
     let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).signed_out(now_ms());
