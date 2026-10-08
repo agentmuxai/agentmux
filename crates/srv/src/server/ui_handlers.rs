@@ -880,19 +880,33 @@ pub(crate) async fn handle_ui_browser_set_files(
         Ok(p) => p,
         Err(e) => return err_response(StatusCode::FORBIDDEN, e),
     };
-    let names: Vec<&str> = paths
-        .iter()
-        .map(|p| std::path::Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(""))
-        .collect();
+    // The page gets the bytes srv read through each file's checked handle,
+    // never a path the browser would open later (spec §5.3).
+    let files = match crate::server::browser_uploads::read_upload_files(&workspace, &paths) {
+        Ok(f) => f,
+        Err(e) => return err_response(StatusCode::FORBIDDEN, e),
+    };
+    let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
     tracing::info!(
         agent_id = %req.auth.agent_id, block_id = %block_id, r#ref = %req.ref_, files = ?names,
         "[ui-automation] browser upload"
     );
+    use base64::Engine as _;
+    let files: Vec<serde_json::Value> = files
+        .iter()
+        .map(|f| {
+            json!({
+                "name": f.name,
+                "type": f.mime,
+                "data": base64::engine::general_purpose::STANDARD.encode(&f.bytes),
+            })
+        })
+        .collect();
     proxy_data(
         &state,
         "set_files",
-        json!({ "block_id": block_id, "ref": req.ref_, "paths": paths }),
-        std::time::Duration::from_secs(20),
+        json!({ "block_id": block_id, "ref": req.ref_, "files": files }),
+        std::time::Duration::from_secs(60),
     )
     .await
 }

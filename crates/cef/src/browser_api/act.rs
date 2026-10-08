@@ -757,9 +757,36 @@ pub struct SetFilesReq {
     pub block_id: String,
     #[serde(rename = "ref")]
     pub ref_: String,
-    /// Absolute paths, already checked by srv against the agent's workspace.
-    pub paths: Vec<String>,
+    /// The files' contents, which srv read through handles it checked against
+    /// the agent's workspace. The page gets these bytes, never a path the
+    /// browser would open later.
+    pub files: Vec<UploadFile>,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UploadFile {
+    pub name: String,
+    #[serde(rename = "type", default)]
+    pub mime: String,
+    /// Base64.
+    pub data: String,
+}
+
+/// Put files in a file input from their bytes, as the user picking them
+/// would: a DataTransfer of File objects, then the input and change events.
+const SET_FILES: &str = r#"function (files) {
+  const dt = new DataTransfer();
+  for (const f of files) {
+    const bin = atob(f.data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    dt.items.add(new File([bytes], f.name, { type: f.type || "" }));
+  }
+  this.files = dt.files;
+  this.dispatchEvent(new Event("input", { bubbles: true }));
+  this.dispatchEvent(new Event("change", { bubbles: true }));
+  return this.files.length;
+}"#;
 
 #[derive(Debug, Deserialize)]
 pub struct WaitForReq {
@@ -797,7 +824,7 @@ pub async fn set_files_route(
     if !super::routes::authorized_pub(&headers, &state.ipc_token) {
         return unauthorized();
     }
-    if req.paths.is_empty() {
+    if req.files.is_empty() {
         return fail("no files given");
     }
     let Some(table) = state.browser_api.ref_tables.get(&req.block_id) else {
@@ -829,12 +856,13 @@ async fn set_files(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &S
     if !facts.is_file_input() {
         return Err(format!("{} is not a file input; the snapshot names file inputs as \"file input\"", req.ref_));
     }
-    if req.paths.len() > 1 && !facts.attrs.contains_key("multiple") {
+    if req.files.len() > 1 && !facts.attrs.contains_key("multiple") {
         return Err("this file input takes one file".to_string());
     }
-    call(cdp, "DOM.setFileInputFiles", json!({ "files": req.paths, "backendNodeId": backend })).await?;
     let ctx = isolated_context(cdp).await?;
     let obj = resolve(cdp, backend, ctx, &req.ref_).await?;
+    let files = serde_json::to_value(&req.files).map_err(|e| e.to_string())?;
+    call_on(cdp, &obj, SET_FILES, vec![files]).await?;
     call_on(cdp, &obj, FILES_READ_BACK, vec![]).await
 }
 
