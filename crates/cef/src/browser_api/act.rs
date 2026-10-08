@@ -243,7 +243,9 @@ const COMMIT_INFO: &str = r#"function () {
       else if (ty === "file") v = Array.from(el.files || []).map(f => f.name + ":" + f.size).join(",");
       else if (el.tagName === "SELECT") v = Array.from(el.selectedOptions).map(o => o.value).join(",");
       else v = el.value;
-      sent.push([el.tagName, ty, el.name || el.id || "", el.disabled ? 1 : 0, v == null ? null : String(v)]);
+      // name and id apart: only a named control is submitted, so adding a
+      // name to an id-only one changes what is sent.
+      sent.push([el.tagName, ty, el.getAttribute("name"), el.id || null, el.disabled ? 1 : 0, v == null ? null : String(v)]);
     }
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
