@@ -94,12 +94,29 @@ fn run(rx: Receiver<(String, Job)>, delay: Duration) {
 
 #[cfg(test)]
 mod tests {
+    // These check the writer's guarantees, not the test thread's sleep
+    // accuracy: a loaded CI runner (macOS especially) can oversleep a 30 ms
+    // sleep past an 80 ms deadline, so "has it run yet?" is polled with a
+    // generous timeout, and "not before the delay" is measured from when the
+    // job actually ran.
     use super::TrailingWriter;
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     fn writer(delay_ms: u64) -> &'static TrailingWriter {
         Box::leak(Box::new(TrailingWriter::new("test", Duration::from_millis(delay_ms))))
+    }
+
+    /// Poll `done` until it holds or 5 s pass.
+    fn wait_until(mut done: impl FnMut() -> bool) -> bool {
+        let until = Instant::now() + Duration::from_secs(5);
+        while !done() {
+            if Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        true
     }
 
     /// A burst for one key (a drag, a slider) collapses to the last value.
@@ -110,9 +127,10 @@ mod tests {
         for i in 0..5 {
             let seen = seen.clone();
             w.schedule("window-a", move || seen.lock().unwrap().push(i));
-            std::thread::sleep(Duration::from_millis(5));
         }
-        std::thread::sleep(Duration::from_millis(150));
+        assert!(wait_until(|| !seen.lock().unwrap().is_empty()));
+        // Room for a wrongly-kept earlier job to run too.
+        std::thread::sleep(Duration::from_millis(100));
         assert_eq!(*seen.lock().unwrap(), vec![4]);
     }
 
@@ -125,7 +143,7 @@ mod tests {
             let seen = seen.clone();
             w.schedule(key, move || seen.lock().unwrap().push(key));
         }
-        std::thread::sleep(Duration::from_millis(150));
+        assert!(wait_until(|| seen.lock().unwrap().len() == 2));
         let mut got = seen.lock().unwrap().clone();
         got.sort();
         assert_eq!(got, vec!["window-a", "window-b"]);
@@ -135,13 +153,13 @@ mod tests {
     #[test]
     fn waits_out_the_delay() {
         let w = writer(80);
-        let seen = Arc::new(Mutex::new(0));
-        let s = seen.clone();
-        w.schedule("window-a", move || *s.lock().unwrap() += 1);
-        std::thread::sleep(Duration::from_millis(30));
-        assert_eq!(*seen.lock().unwrap(), 0);
-        std::thread::sleep(Duration::from_millis(150));
-        assert_eq!(*seen.lock().unwrap(), 1);
+        let ran_at = Arc::new(Mutex::new(None));
+        let r = ran_at.clone();
+        let scheduled = Instant::now();
+        w.schedule("window-a", move || *r.lock().unwrap() = Some(Instant::now()));
+        assert!(wait_until(|| ran_at.lock().unwrap().is_some()), "the job never ran");
+        let waited = ran_at.lock().unwrap().unwrap() - scheduled;
+        assert!(waited >= Duration::from_millis(80), "ran after {waited:?}, before the 80 ms delay");
     }
 
     /// Spaced-out jobs (deliberate clicks, separate drags) each get written.
@@ -152,7 +170,7 @@ mod tests {
         for i in 0..3 {
             let s = seen.clone();
             w.schedule("window-a", move || s.lock().unwrap().push(i));
-            std::thread::sleep(Duration::from_millis(80));
+            assert!(wait_until(|| seen.lock().unwrap().len() == i + 1), "job {i} never ran");
         }
         assert_eq!(*seen.lock().unwrap(), vec![0, 1, 2]);
     }
