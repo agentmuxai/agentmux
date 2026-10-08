@@ -32,7 +32,43 @@ permissions:
   contents: read
 
 jobs:
+  # A release PR touches Cargo.toml and Cargo.lock, which the paths above
+  # match, but only moves the version: nothing the image is built from. The
+  # same classifier ci-pr.yml uses proves that from the diff (R7 in
+  # scripts/ci-classify-changes.mjs) and skips the image build. Anything it
+  # can't prove, including an API or classifier failure, builds.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      version_only: ${{ steps.classify.outputs.version_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: scripts/ci-classify-changes.mjs
+          sparse-checkout-cone-mode: false
+      - id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FILES="$(gh api \
+            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --paginate --jq '.[] | {filename, patch}' 2>/dev/null | jq -s '.')" || FILES=""
+          if printf '%s\n' "$FILES" | node scripts/ci-classify-changes.mjs >/tmp/classify.out 2>/tmp/classify.err; then
+            grep '^version_only=' /tmp/classify.out >> "$GITHUB_OUTPUT"
+            echo "::notice::$(cat /tmp/classify.err)"
+          else
+            echo "version_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-and-smoke:
+    needs: changes
+    # Runs unless the PR is proven version-only; on workflow_dispatch `changes`
+    # is skipped, and this still runs.
+    if: ${{ !cancelled() && needs.changes.outputs.version_only != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

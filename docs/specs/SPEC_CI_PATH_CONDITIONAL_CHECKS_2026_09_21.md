@@ -120,6 +120,37 @@ not in a YAML expression. YAML conditionals cannot be tested, and R1–R3 are
 exactly the kind of logic that is wrong in ways nobody notices — the whole
 point is that a wrong answer is invisible. A reviewer can read the tests.
 
+### R7 — A PR that only moves the release version needs no build (added 2026-10-08)
+
+A release PR (`scripts/release.sh`, `task release:patch`) bumps the version
+in `Cargo.toml`, `Cargo.lock`, `package.json` and `package-lock.json`, adds
+`VERSION_HISTORY.md` lines and deletes the consumed changesets. The manifests
+are code by path, so it ran the full Rust, frontend and specs-index jobs, plus
+the srv image build (about 35 runner-minutes, 14 minutes wall clock for
+#4462) to re-test code nothing changed; the post-merge release build compiles
+and packages everything anyway.
+
+`classifyPullFiles` reads the PR files API's entries **with their diffs** and
+calls a PR version-only only when all of these hold:
+
+- every file is documentation (R1's list) or one of those four manifests at
+  the repo root (a crate's own `Cargo.toml` is code);
+- `package.json` is among them, and every manifest has a diff (the API omits
+  one for a huge or binary file);
+- every added or removed manifest line is a version line;
+- every removed version is one value A, every added one is one value B, A ≠ B,
+  as many added as removed.
+
+A dependency bump fails the last two (its own version pair, a lockfile
+checksum or dependency line), so a "release" PR that also changes a
+dependency runs everything, and so does a Dependabot lockfile PR. Malformed or
+missing input still runs everything (R2). A version-only PR sets
+`rust`, `frontend` and `docs_index` false and `version_only` true; the `docs`
+job and the other quick gates still run, as does the release consistency
+check. `srv-image.yml`'s build is skipped the same way (it isn't a required
+check). The decision is proven from the diff, never from a path, branch name
+or title.
+
 ## 3. Design
 
 ```
