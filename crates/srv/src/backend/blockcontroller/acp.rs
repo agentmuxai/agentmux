@@ -89,15 +89,18 @@ fn is_session_replay(loading: bool, is_session_response: bool) -> bool {
 }
 
 /// The absolute directory ACP's `session/new` and `session/load` take as
-/// `cwd`: the pane's working directory (`~` expanded), else the directory the
-/// agent process itself starts in, which is where an unset one runs.
+/// `cwd`: the pane's working directory (`~` expanded; a relative one resolved
+/// against the server's, as `Command::current_dir` resolves it), else the
+/// directory the agent process itself starts in.
 fn session_cwd(working_dir: &str) -> String {
-    if !working_dir.is_empty() {
-        return super::core::expand_home_dir(working_dir);
-    }
-    std::env::current_dir()
-        .map(|d| d.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| ".".to_string())
+    let here = std::env::current_dir().unwrap_or_default();
+    let dir = if working_dir.is_empty() {
+        here.clone()
+    } else {
+        let expanded = std::path::PathBuf::from(super::core::expand_home_dir(working_dir));
+        if expanded.is_absolute() { expanded } else { here.join(expanded) }
+    };
+    dir.to_string_lossy().into_owned()
 }
 
 /// `session/prompt` params: the prompt is an array of content blocks.
@@ -222,6 +225,9 @@ pub struct AcpController {
     /// stdout-reader tasks, no ordering guarantee between them). codex P2
     /// on PR #2338 (twenty-seventh through thirtieth re-reviews).
     outstanding_prompt_ids: Arc<Mutex<HashSet<u64>>>,
+    /// Serializes `ensure_started`, so two deliveries that find the agent
+    /// stopped can't both start it.
+    start_lock: Mutex<()>,
 }
 
 impl AcpController {
@@ -260,6 +266,7 @@ impl AcpController {
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
             outstanding_prompt_ids: Arc::new(Mutex::new(HashSet::new())),
+            start_lock: Mutex::new(()),
         }
     }
 
@@ -829,6 +836,17 @@ fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<Str
 
 
 impl AcpController {
+    /// Start the agent again if its process has exited, from the pane's
+    /// meta; a no-op when it is running. One start at a time: a second
+    /// delivery waits here and then finds it running.
+    pub fn ensure_started(&self, block_meta: super::super::obj::MetaMapType) -> Result<(), String> {
+        let _one_at_a_time = self.start_lock.lock().unwrap();
+        if self.is_running() {
+            return Ok(());
+        }
+        Controller::start(self, block_meta, None, false)
+    }
+
     /// A user message from `agentinput` / `agent.send` (`run_agent_turn`):
     /// sent as `session/prompt`, then acknowledged the way the other
     /// controllers acknowledge theirs, so the pane stops showing it as pending.
@@ -1374,9 +1392,27 @@ mod tests {
         assert!(c.inner.lock().unwrap().pending_prompt.is_none());
     }
 
+    /// A running agent is left alone; a stopped one is started from the pane's
+    /// meta (here with none, so the start itself reports it).
+    #[tokio::test]
+    async fn ensure_started_only_starts_a_stopped_agent() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        assert!(c.ensure_started(Default::default()).is_ok(), "running: nothing to do");
+        c.inner.lock().unwrap().stdin_tx = None;
+        let err = c.ensure_started(Default::default()).unwrap_err();
+        assert!(err.contains("no cmd"), "stopped: it tries to start: {err}");
+    }
+
     #[test]
     fn the_session_directory_is_never_empty() {
-        assert_eq!(super::session_cwd("C:/work/a"), "C:/work/a");
+        let abs = std::env::current_dir().unwrap().join("work").join("a");
+        assert_eq!(super::session_cwd(&abs.to_string_lossy()), abs.to_string_lossy());
+        // A relative one resolves against the server's directory.
+        let rel = super::session_cwd("work/a");
+        assert!(std::path::Path::new(&rel).is_absolute(), "{rel}");
+        assert!(rel.ends_with("a"), "{rel}");
         let fallback = super::session_cwd("");
         assert!(!fallback.is_empty());
         assert!(std::path::Path::new(&fallback).is_absolute(), "{fallback}");

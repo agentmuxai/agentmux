@@ -60,7 +60,9 @@ so either would escape the sandbox. This matches `agent_open.rs`.
 through `AcpController::send_message` (its `send_input`, then the same
 message-accepted event the other controllers emit). If the agent's process
 has exited, the branch first starts the controller again from the pane's
-meta; `start` forgets the old session, so the message waits for the new one.
+meta (`AcpController::ensure_started`, serialized, so two deliveries can't
+both start it); `start` forgets the old session, so the message waits for the
+new one.
 
 ### 3. The ACP v1 handshake (srv)
 
@@ -80,7 +82,8 @@ meta; `start` forgets the old session, so the message waits for the new one.
   answers the load, and the pane already has those turns (their tool-call ids
   would collide). The load's own answer is not part of the replay.
 - `cwd` is always an absolute directory: the pane's working directory
-  (`~` expanded), else the directory the agent process starts in.
+  (`~` expanded; a relative one resolved against the server's), else the
+  directory the agent process starts in.
 - After `initialize` or `session/new` is refused, a send returns an error ("couldn't open a
   session") instead of queuing for a session that can never open; restarting
   the agent starts a fresh handshake.
