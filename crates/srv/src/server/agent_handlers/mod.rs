@@ -62,11 +62,18 @@ pub fn register_agent_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// them is the same bug reachable by the other route (ReAgent P1 on
 /// PR #3262). Best-effort — the agent row is already gone by the time this
 /// runs, so a failure here is leftover rows to log, not a failed delete.
+///
+/// MuxBus keeps the cached cloud credentials in `id_store`, a third database
+/// in a normal boot, so the agent's rows there go too, in every channel.
 pub(super) fn purge_identity_store_rows(
     identity_store: &crate::backend::storage::store::Store,
+    id_store: &crate::backend::storage::store::Store,
     agent_id: &str,
     caller: &'static str,
 ) {
+    if let Err(e) = id_store.agent_credentials_purge_agent(agent_id) {
+        tracing::warn!(agent_id, caller, error = %e, "cloud credentials left behind for deleted agent");
+    }
     match identity_store.agent_dependents_purge(agent_id) {
         Ok(0) => {}
         Ok(removed) => tracing::debug!(

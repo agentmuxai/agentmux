@@ -34,9 +34,17 @@ impl AgentCredential {
     }
 }
 
+/// The row key for `agent_id` in this channel's sign-in: the lowercased agent
+/// id, behind the channel's prefix when channels share the store. These cached
+/// credentials belong to the account a channel is signed in as, and two
+/// channels may be signed in as different accounts.
+fn scoped_key(agent_id: &str) -> String {
+    format!("{}{}", super::muxbus::current_agent_credential_prefix(), agent_id.to_lowercase())
+}
+
 impl Store {
     pub fn agent_credential_load(&self, agent_id: &str) -> Result<Option<AgentCredential>, StoreError> {
-        let key = agent_id.to_lowercase();
+        let key = scoped_key(agent_id);
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT client_id, client_secret, token_endpoint, access_token, expires_at
@@ -67,7 +75,7 @@ impl Store {
         client_secret: &str,
         token_endpoint: &str,
     ) -> Result<(), StoreError> {
-        let key = agent_id.to_lowercase();
+        let key = scoped_key(agent_id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO db_agent_credentials
@@ -91,7 +99,7 @@ impl Store {
         access_token: &str,
         expires_at: i64,
     ) -> Result<(), StoreError> {
-        let key = agent_id.to_lowercase();
+        let key = scoped_key(agent_id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE db_agent_credentials SET access_token = ?2, expires_at = ?3 WHERE agent_id = ?1",
@@ -108,7 +116,7 @@ impl Store {
     /// of retrying the exact same rejected token. No-op if the agent has no
     /// row. reagentx P1 on PR #2342.
     pub fn agent_credential_invalidate_token(&self, agent_id: &str) -> Result<(), StoreError> {
-        let key = agent_id.to_lowercase();
+        let key = scoped_key(agent_id);
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "UPDATE db_agent_credentials SET access_token = '', expires_at = 0 WHERE agent_id = ?1",
@@ -123,7 +131,7 @@ impl Store {
     /// `ensure_agent_credential` re-provisions it. No-op if there is no row.
     /// docs/specs/SPEC_CLOUD_SETTINGS_DISCOVERY_2026_09_27.md §3.4.
     pub fn agent_credential_delete(&self, agent_id: &str) -> Result<(), StoreError> {
-        let key = agent_id.to_lowercase();
+        let key = scoped_key(agent_id);
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM db_agent_credentials WHERE agent_id = ?1", params![key])?;
         Ok(())
@@ -140,8 +148,33 @@ impl Store {
     /// not just the ones that turn out to matter — is the safe default.
     /// reagentx P0 on PR #2342.
     pub fn agent_credentials_clear_all(&self) -> Result<(), StoreError> {
+        self.agent_credentials_clear_prefix(&super::muxbus::current_agent_credential_prefix())
+    }
+
+    /// Every channel's row for one agent: what deleting the agent removes.
+    pub fn agent_credentials_purge_agent(&self, agent_id: &str) -> Result<usize, StoreError> {
         let conn = self.conn.lock().unwrap();
-        conn.execute("DELETE FROM db_agent_credentials", [])?;
+        Ok(conn.execute(
+            "DELETE FROM db_agent_credentials
+             WHERE agent_id = ?1 OR (instr(agent_id, '/') > 0 AND substr(agent_id, instr(agent_id, '/') + 1) = ?1)",
+            params![agent_id.to_lowercase()],
+        )?)
+    }
+
+    /// The rows behind `prefix` (a channel's `<channel>/`), or, with an empty
+    /// prefix, the unprefixed ones.
+    fn agent_credentials_clear_prefix(&self, prefix: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        if prefix.is_empty() {
+            // The host-wide set (and a channel's own store): rows with no
+            // channel prefix. Other channels' rows are theirs.
+            conn.execute("DELETE FROM db_agent_credentials WHERE instr(agent_id, '/') = 0", [])?;
+        } else {
+            conn.execute(
+                "DELETE FROM db_agent_credentials WHERE substr(agent_id, 1, length(?1)) = ?1",
+                params![prefix],
+            )?;
+        }
         Ok(())
     }
 }
@@ -155,6 +188,60 @@ mod tests {
     // lives in the shared schema (SHARED_STORE_SCHEMA_VERSION v3), not objects.db.
     fn shared_store() -> Store {
         Store::open_shared(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    /// Channels sharing the store keep their cached credentials apart; the
+    /// host-wide set (`stable`) and each channel clear only their own.
+    #[test]
+    fn a_channels_credentials_are_its_own_rows_and_clear_all_clears_only_those() {
+        let store = shared_store();
+        let conn = store.conn.lock().unwrap();
+        for key in ["agentx", "local-main-x/agentx", "local-main-y/agentx"] {
+            conn.execute(
+                "INSERT INTO db_agent_credentials (agent_id, client_id) VALUES (?1, 'c')",
+                params![key],
+            )
+            .unwrap();
+        }
+        let count = |conn: &rusqlite::Connection| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM db_agent_credentials", [], |r| r.get(0)).unwrap()
+        };
+        assert_eq!(count(&conn), 3);
+        drop(conn);
+        let left = |store: &Store| -> Vec<String> {
+            let conn = store.conn.lock().unwrap();
+            let mut stmt = conn.prepare("SELECT agent_id FROM db_agent_credentials ORDER BY agent_id").unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+        };
+        // The host-wide set clears only the unprefixed row.
+        store.agent_credentials_clear_prefix("").unwrap();
+        assert_eq!(left(&store), vec!["local-main-x/agentx".to_string(), "local-main-y/agentx".to_string()]);
+        // A channel clears only its own.
+        store.agent_credentials_clear_prefix("local-main-x/").unwrap();
+        assert_eq!(left(&store), vec!["local-main-y/agentx".to_string()]);
+    }
+
+    /// Deleting an agent removes its row in every channel and no one else's.
+    #[test]
+    fn purging_an_agent_removes_its_rows_in_every_channel() {
+        let store = shared_store();
+        {
+            let conn = store.conn.lock().unwrap();
+            for key in ["agentx", "local-main-x/agentx", "dev-main-y/agentx", "agentxy", "local-main-x/agenty"] {
+                conn.execute("INSERT INTO db_agent_credentials (agent_id, client_id) VALUES (?1, 'c')", params![key])
+                    .unwrap();
+            }
+        }
+        assert_eq!(store.agent_credentials_purge_agent("AgentX").unwrap(), 3);
+        let conn = store.conn.lock().unwrap();
+        let left: Vec<String> = conn
+            .prepare("SELECT agent_id FROM db_agent_credentials ORDER BY agent_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["agentxy".to_string(), "local-main-x/agenty".to_string()]);
     }
 
     #[test]

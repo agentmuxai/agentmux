@@ -3921,6 +3921,30 @@
         assert_eq!(count("SELECT COUNT(*) FROM db_agent_identity_links WHERE agent_id='gone'"), 0);
     }
 
+    /// A channel's cached cloud credentials sit behind its `<channel>/` prefix
+    /// when channels share the store (SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md),
+    /// so deleting an agent must remove them in every channel, and leave other
+    /// agents' rows alone.
+    #[test]
+    fn agent_dependents_purge_removes_the_agents_credentials_in_every_channel() {
+        let store = Store::open_identity_store(":memory:".as_ref()).unwrap();
+        {
+            let conn = store.conn.lock().unwrap();
+            for key in ["gone", "local-main-x/gone", "dev-feat-y/gone", "local-main-x/kept", "kept"] {
+                conn.execute(
+                    "INSERT INTO db_agent_credentials (agent_id, client_id) VALUES (?1, 'c')",
+                    rusqlite::params![key],
+                )
+                .unwrap();
+            }
+        }
+        assert_eq!(store.agent_dependents_purge("gone").unwrap(), 3);
+        let conn = store.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT agent_id FROM db_agent_credentials ORDER BY agent_id").unwrap();
+        let left: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap();
+        assert_eq!(left, vec!["kept".to_string(), "local-main-x/kept".to_string()]);
+    }
+
     /// The reported bug: "the icon on the card disappears, but the card
     /// stays." Deleting an agent removed its definition but left its
     /// instance-registry record active, and `listrecentsessions` builds its

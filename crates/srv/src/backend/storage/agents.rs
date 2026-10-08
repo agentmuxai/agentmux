@@ -2984,6 +2984,16 @@ fn purge_agent_dependents(
             }
         }
     }
+    // A channel's cached cloud credentials sit behind its `<channel>/` prefix
+    // when channels share the store (`muxbus::agent_credential_prefix_for`), so
+    // the plain delete above misses them: a deleted agent's client secret must
+    // not stay on disk in any channel's rows.
+    if present.contains("db_agent_credentials") {
+        removed += conn.execute(
+            "DELETE FROM db_agent_credentials WHERE instr(agent_id, '/') > 0 AND substr(agent_id, instr(agent_id, '/') + 1) = ?1",
+            params![id],
+        )?;
+    }
     // The two that key on the agent differently.
     if present.contains("db_conversation_trust_grants") {
         removed += conn.execute(

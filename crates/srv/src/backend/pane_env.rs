@@ -238,6 +238,8 @@ mod spawn_site_coverage {
          "sanitized: our own binary re-run as `__extract` to parse one attachment in isolation; it needs no instance identity, so sanitize_external_std_command"),
         ("src/backend/attachments/extract.rs", "harness", 1,
          "test: re-runs the test harness as a child that sleeps, to prove the extraction deadline kills it"),
+        ("src/backend/storage/muxbus.rs", "std::env::current_exe(", 1,
+         "test: re-runs the test harness as children that save and read one keychain sign-in at once (ignored; real keychain)"),
         ("src/backend/blockcontroller/app_server.rs", "fake_server_binary(", 1,
          "test: runs the fixture server built above; lives and dies with the test"),
         ("src/backend/remote/ssh.rs", "ssh", 1,
