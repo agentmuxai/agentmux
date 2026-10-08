@@ -659,7 +659,7 @@ fn read_any_layout(ns: &str) -> Option<MuxBusTokens> {
 /// freshness against a coexisting blob use the second element; callers that
 /// don't (the common case) just ignore it.
 fn read_split_tokens(ns: &str) -> Result<Option<(MuxBusTokens, String)>, StoreError> {
-    match read_split_state(ns)? {
+    match read_split_settled(ns)? {
         SplitRead::Complete(tokens, generation) => Ok(Some((tokens, generation))),
         SplitRead::Absent => Ok(None),
         SplitRead::Torn => {
@@ -1133,7 +1133,13 @@ impl Store {
         // tokens are its own. Only the same account's: `stable` may be signed
         // in as another, and its tokens must not pair with this row.
         if ns != GLOBAL_KEYCHAIN_NS {
-            if let Some(tokens) = read_any_layout(GLOBAL_KEYCHAIN_NS).filter(|t| same_account(t, user_sub)) {
+            // Its own lock: `stable` saves the host-wide set under that one.
+            // Always taken after this channel's, never the other way round.
+            let global_tokens = {
+                let _global = lock_namespace(GLOBAL_KEYCHAIN_NS);
+                read_any_layout(GLOBAL_KEYCHAIN_NS)
+            };
+            if let Some(tokens) = global_tokens.filter(|t| same_account(t, user_sub)) {
                 tracing::info!(
                     namespace = %ns,
                     "muxbus: adopting the host-wide session for this channel (one-time, pre-per-channel sign-in)"
