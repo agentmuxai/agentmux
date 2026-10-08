@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# package-macos.test.sh — tests for the source-map policy in
-# scripts/package-macos.sh.
+# package-macos.test.sh — tests for the source-map policy and srv's signing
+# identifier in scripts/package-macos.sh.
 #
 # Regression coverage for a real defect: the map-strip block defaulted to
 # STRIP_MAPS=1 (strip) on macOS — the opposite of every other platform, and
@@ -94,6 +94,46 @@ if grep -q "STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package-macos.sh" "
     ok "package:release:macos sets STRIP_MAPS=1"
 else
     bad "package:release:macos sets STRIP_MAPS=1" "release DMGs would ship with source maps"
+fi
+
+# srv must sign with a FIXED code identifier, not one derived from its
+# versioned file name (agentmux-srv-<version>-darwin.<arch>). srv is the only
+# process that reads the Keychain, and a Keychain item trusts an app by its
+# designated requirement, which includes the identifier: with the version in
+# it, "Always Allow" never carried over and every new version asked for the
+# login keychain on first launch (retro-keychain-prompt-recurs-per-build-
+# identity-2026-08-21.md). Run the script's real srv signing line, ad hoc, on
+# two copies named for different versions: both must come out the same.
+SIGN_LINE="$(grep -E '^"\$\{SIGN\[@\]\}".*\$\(basename "\$SRV"\)' "$SCRIPT")"
+if [ -z "$SIGN_LINE" ]; then
+    bad "extract srv's signing line" "not found — did the signing step change shape?"
+elif ! command -v codesign > /dev/null 2>&1; then
+    printf '  SKIP  srv signing identifier (no codesign; macOS only)\n'
+else
+    srv_identifier() { # $1 = version in the file name. Prints the signed identifier.
+        local app="$TMP/sign-$1/AgentMux.app"
+        mkdir -p "$app/Contents/MacOS" "$TMP/sign-$1/dist/bin"
+        local srv="$TMP/sign-$1/dist/bin/agentmux-srv-$1-darwin.arm64"
+        cp /usr/bin/true "$srv"
+        cp "$srv" "$app/Contents/MacOS/"
+        # shellcheck disable=SC2034  # all four are read by the eval'd signing line
+        (
+            APP="$app"; SRV="$srv"
+            ENTITLEMENTS="$HERE/../build/entitlements.mac.plist"
+            SIGN=(codesign --force --sign -)
+            eval "$SIGN_LINE"
+        ) > /dev/null 2>&1
+        codesign -dv "$app/Contents/MacOS/$(basename "$srv")" 2>&1 \
+            | sed -n 's/^Identifier=//p'
+    }
+    id_a="$(srv_identifier 0.0.1)"
+    id_b="$(srv_identifier 0.0.2)"
+    if [ "$id_a" = "ai.agentmux.srv" ] && [ "$id_b" = "ai.agentmux.srv" ]; then
+        ok "srv signs as ai.agentmux.srv whatever its version"
+    else
+        bad "srv signs as ai.agentmux.srv whatever its version" \
+            "got '$id_a' and '$id_b' — each version is a new app to the Keychain"
+    fi
 fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
