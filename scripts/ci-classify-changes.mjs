@@ -20,15 +20,24 @@
  *   R3  CI configuration is never documentation — a PR editing the test setup
  *       must not be able to skip the tests it edits.
  *
+ *   R7  A PR that only moves the release version (a release PR) needs none
+ *       of the build jobs: every changed file is documentation or a version
+ *       manifest, and every changed manifest line is that one version moving
+ *       from A to B. Proven from the diff itself, never from a path or a
+ *       title, so a "release" PR that also bumps a dependency runs everything.
+ *
  * Usage:
  *   ci-classify-changes.mjs            # newline-separated paths on stdin
  *   ci-classify-changes.mjs a.md b.rs  # or as arguments
+ *   ... | ci-classify-changes.mjs      # or a JSON array of {filename, patch}
+ *                                      # (the PR files API), which R7 needs
  *
  * Prints `key=value` lines suitable for $GITHUB_OUTPUT:
- *   rust=true|false        run the Rust compile/test job
- *   frontend=true|false    run vitest / tsc
- *   docs_only=true|false   every changed file was documentation
- *   docs_index=true|false  run the specs-index generator on all three OSes
+ *   rust=true|false          run the Rust compile/test job
+ *   frontend=true|false      run vitest / tsc
+ *   docs_only=true|false     every changed file was documentation
+ *   docs_index=true|false    run the specs-index generator on all three OSes
+ *   version_only=true|false  the PR only moves the release version (R7)
  */
 
 /**
@@ -100,6 +109,81 @@ function normalize(rawPath) {
     return p.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
+/**
+ * The files a release bumps (scripts/release.sh via bump-wrapper.sh), each with
+ * the shape of its version line. Only these, at the repo root: a crate's own
+ * Cargo.toml inherits the workspace version and never changes in a release.
+ */
+const VERSION_MANIFESTS = {
+    "Cargo.toml": /^\s*version\s*=\s*"([^"]+)"\s*$/,
+    "Cargo.lock": /^\s*version\s*=\s*"([^"]+)"\s*$/,
+    "package.json": /^\s*"version"\s*:\s*"([^"]+)"\s*,?\s*$/,
+    "package-lock.json": /^\s*"version"\s*:\s*"([^"]+)"\s*,?\s*$/,
+};
+
+/**
+ * R7: whether the changed files only move the release version, from their
+ * unified-diff patches (the PR files API's `patch`). Requires, all at once:
+ *  - every file is documentation (isDocsOnlyPath) or a VERSION_MANIFESTS file;
+ *  - package.json is among them (it carries the release version), and every
+ *    manifest has a patch (the API omits it for a huge or binary diff);
+ *  - every added or removed line of every manifest is a version line;
+ *  - every removed version is the same value A and every added one the same
+ *    value B, A != B, as many added as removed. A dependency bump has its
+ *    own versions (and a lockfile checksum line), so it can't pass.
+ * Returns { ok: true, from, to } or { ok: false, reason }.
+ */
+export function versionOnlyChange(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    const manifests = [];
+    for (const e of list) {
+        const filename = normalize(typeof e === "string" ? e : e?.filename);
+        if (filename === "") return { ok: false, reason: "an entry has no file name" };
+        if (VERSION_MANIFESTS[filename]) {
+            manifests.push({ filename, patch: typeof e === "object" ? e.patch : undefined });
+        } else if (!isDocsOnlyPath(filename)) {
+            return { ok: false, reason: `${filename} is neither documentation nor a version manifest` };
+        }
+    }
+    if (!manifests.some((m) => m.filename === "package.json")) return { ok: false, reason: "package.json's version doesn't change" };
+    const removed = new Set();
+    const added = new Set();
+    let removedCount = 0;
+    let addedCount = 0;
+    for (const { filename, patch } of manifests) {
+        if (typeof patch !== "string" || patch === "") return { ok: false, reason: `no diff available for ${filename}` };
+        for (const line of patch.split(/\r?\n/)) {
+            if (line.startsWith("@@") || line === "" || line.startsWith(" ") || line.startsWith("\\")) continue;
+            const sign = line[0];
+            if (sign !== "+" && sign !== "-") return { ok: false, reason: `unexpected diff line in ${filename}` };
+            const m = VERSION_MANIFESTS[filename].exec(line.slice(1));
+            if (!m) return { ok: false, reason: `${filename} changes more than its version` };
+            if (sign === "-") {
+                removed.add(m[1]);
+                removedCount++;
+            } else {
+                added.add(m[1]);
+                addedCount++;
+            }
+        }
+    }
+    if (removed.size !== 1 || added.size !== 1 || removedCount !== addedCount || removedCount === 0) {
+        return { ok: false, reason: "the version lines don't all move from one value to one other" };
+    }
+    const [from] = removed;
+    const [to] = added;
+    if (from === to) return { ok: false, reason: "the version doesn't change" };
+    // A value Cargo and npm would reject still agrees across the files, and the
+    // release consistency check only checks agreement: build it (Codex, #4494).
+    for (const v of [from, to]) {
+        if (!SEMVER.test(v)) return { ok: false, reason: `"${v}" isn't a valid version` };
+    }
+    return { ok: true, from, to };
+}
+
+/** A semantic version as Cargo and npm accept it: X.Y.Z, optional -pre and +build. */
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
+
 /** True when this single path provably cannot affect any build output. */
 export function isDocsOnlyPath(rawPath) {
     const p = normalize(rawPath);
@@ -158,6 +242,33 @@ export function classifyChanges(files) {
     };
 }
 
+/**
+ * Classify the PR files API's entries ({filename, patch}). A version-only PR
+ * (R7) skips the build jobs; anything else is classified by its paths exactly
+ * as classifyChanges does, and an entry without a string filename is malformed
+ * (R2: run everything).
+ */
+export function classifyPullFiles(entries) {
+    const list = Array.isArray(entries) ? entries : [];
+    const names = list.map((e) => (e && typeof e === "object" && typeof e.filename === "string" ? e.filename : null));
+    if (list.length === 0 || names.some((n) => n === null)) {
+        return { ...classifyChanges([]), version_only: false };
+    }
+    const version = versionOnlyChange(list);
+    if (version.ok) {
+        return {
+            rust: false,
+            frontend: false,
+            docs_only: false,
+            docs_index: false,
+            version_only: true,
+            reason: `version-only change, ${version.from} -> ${version.to} (R7)`,
+        };
+    }
+    const byPath = classifyChanges(names);
+    return { ...byPath, version_only: false, reason: `${byPath.reason}; not version-only: ${version.reason}` };
+}
+
 async function readStdin() {
     if (process.stdin.isTTY) return "";
     let data = "";
@@ -170,11 +281,25 @@ async function readStdin() {
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/").split("/").pop());
 if (isMain) {
     const fromArgs = process.argv.slice(2);
-    const files = fromArgs.length > 0 ? fromArgs : (await readStdin()).split("\n");
-    const result = classifyChanges(files);
+    const input = fromArgs.length > 0 ? null : await readStdin();
+    let result;
+    if (input !== null && input.trimStart().startsWith("[")) {
+        // The PR files API's entries, with patches (R7). Unparseable JSON is
+        // malformed input: run everything (R2).
+        let entries = null;
+        try {
+            entries = JSON.parse(input);
+        } catch {
+            entries = null;
+        }
+        result = classifyPullFiles(entries);
+    } else {
+        result = { ...classifyChanges(fromArgs.length > 0 ? fromArgs : input.split("\n")), version_only: false };
+    }
     console.log(`rust=${result.rust}`);
     console.log(`frontend=${result.frontend}`);
     console.log(`docs_only=${result.docs_only}`);
     console.log(`docs_index=${result.docs_index}`);
+    console.log(`version_only=${result.version_only}`);
     console.error(`ci-classify-changes: ${result.reason}`);
 }
