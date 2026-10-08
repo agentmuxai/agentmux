@@ -50,7 +50,11 @@ fn builtin_widgets() -> &'static HashMap<String, WidgetConfigType> {
 /// Built-in widgets that were renamed: a user entry under the old key still
 /// replaces the widget, now under its new key. Mirrors `RENAMED_PINS` in
 /// frontend/app/window/action-widgets-config.ts, which reads pins the same way.
-const RENAMED_WIDGETS: &[(&str, &str)] = &[("defwidget@knowledge", "defwidget@memory")];
+const RENAMED_WIDGETS: &[(&str, &str)] = &[
+    ("defwidget@knowledge", "defwidget@memory"),
+    // Remotes became a section of Connectors.
+    ("defwidget@remotes", "defwidget@connectors"),
+];
 
 /// The built-ins with the user's entries merged over them.
 pub fn merge_widgets(
@@ -203,6 +207,14 @@ mod tests {
         let merged = merge_widgets(&builtin, both);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged["defwidget@memory"].label, "New");
+    }
+
+    #[test]
+    fn an_entry_for_the_remotes_widget_replaces_connectors() {
+        let builtin = HashMap::from([("defwidget@connectors".to_string(), widget("Connectors"))]);
+        let merged = merge_widgets(&builtin, HashMap::from([("defwidget@remotes".to_string(), widget("Mine"))]));
+        assert_eq!(merged.len(), 1, "no stray Remotes widget");
+        assert_eq!(merged["defwidget@connectors"].label, "Mine");
     }
 
     #[test]

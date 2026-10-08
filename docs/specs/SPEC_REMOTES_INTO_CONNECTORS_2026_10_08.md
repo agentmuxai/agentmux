@@ -61,7 +61,9 @@ Opening Remotes never jumps to another pane.
 
 - Command palette "Open Remotes" stays (people look for it by that name) and opens a new Connectors pane on Remotes.
 - The `defwidget@remotes` launcher widget is removed: Connectors is already a widget, one click from Remotes. A
-  pinned list that names `remotes` reads it as `connectors` (`RENAMED_PINS`, as for `armory`).
+  pinned list that names `remotes` reads it as `connectors` (`RENAMED_PINS`, as for `armory`), and a
+  `defwidget@remotes` entry in the user's own `widgets.json` is moved to `defwidget@connectors` by srv
+  (`RENAMED_WIDGETS`, as for `knowledge`), so it leaves no stray Remotes widget.
 
 ### 3.4 Saved panes and layout files
 
