@@ -132,17 +132,24 @@ function clearSuggestion(blockId: string): void {
 }
 
 /**
+ * Whether `phase` rules out continuing the turn: it failed, was stopped, or is
+ * being stopped. A stop's `Interrupting` can still be the phase when the
+ * backend's turn-end edge arrives (#4476). `Idle` and `Streaming` don't rule it
+ * out: the edge can also arrive before `TurnEnd`.
+ */
+function turnWasCutShort(phase: TurnPhase): boolean {
+    return phase.kind === "Interrupting" || (phase.kind === "Done" && phase.outcome !== "completed");
+}
+
+/**
  * Whether a turn's end is worth a suggestion call. Not while the user is already
  * typing: the reply would be thrown away by guard 3 anyway, after being paid for.
  * Not after a turn that failed or was stopped: there is no finished work to
- * continue. The phase can still read `Idle` or `Streaming` here (the backend's
- * turn-end edge can arrive before `TurnEnd`), and those don't rule it out.
- * The backend makes the remaining checks that need the transcript
+ * continue. The backend makes the remaining checks that need the transcript
  * (`digest::TurnEnding`).
  */
 export function shouldRequestSuggestion(phase: TurnPhase, composerEmpty: boolean): boolean {
-    if (!composerEmpty) return false;
-    return !(phase.kind === "Done" && phase.outcome !== "completed");
+    return composerEmpty && !turnWasCutShort(phase);
 }
 
 export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): void {
@@ -195,7 +202,8 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
             if (result.tokens) {
                 recordTurn("ambient:next_prompt_suggestion", result.tokens);
             }
-            if (result.suggestion && isComposerEmpty()) {
+            // Checked again: the turn's outcome may have settled while the call ran.
+            if (result.suggestion && isComposerEmpty() && !turnWasCutShort(turnPhase())) {
                 writeSuggestionMeta(blockId, result.suggestion);
             }
         }).catch(() => {

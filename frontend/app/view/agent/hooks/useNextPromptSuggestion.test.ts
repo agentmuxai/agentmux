@@ -155,6 +155,28 @@ describe("useNextPromptSuggestion — no call when there's nothing to suggest", 
         }
     });
 
+    it("doesn't call while the turn is being stopped", async () => {
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+        await endTurn(setPhase, bumpTurnEnded, { kind: "Interrupting", reason: "user", sigintSentAt: 2 } as TurnPhase);
+        expect(hub.nextPromptSuggestion).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("doesn't write a suggestion if the turn turns out stopped while the call ran", async () => {
+        let resolve!: (v: unknown) => void;
+        hub.nextPromptSuggestion.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+        await endTurn(setPhase, bumpTurnEnded);
+        expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+        setPhase({ kind: "Done", outcome: "stopped", finishedAt: 3 });
+        resolve({ suggestion: "next thing", tokens: null });
+        await Promise.resolve();
+        await Promise.resolve();
+        const wrote = hub.updateMeta.mock.calls.some(([, patch]) => patch["term:next_prompt_suggestion"] === "next thing");
+        expect(wrote).toBe(false);
+        dispose();
+    });
+
     it("calls after a completed turn", async () => {
         const { setPhase, bumpTurnEnded, dispose } = setup();
         await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome: "completed", finishedAt: 2 });
@@ -167,5 +189,6 @@ describe("useNextPromptSuggestion — no call when there's nothing to suggest", 
         expect(shouldRequestSuggestion({ kind: "Done", outcome: "completed", finishedAt: 1 }, true)).toBe(true);
         expect(shouldRequestSuggestion({ kind: "Done", outcome: "completed", finishedAt: 1 }, false)).toBe(false);
         expect(shouldRequestSuggestion({ kind: "Done", outcome: "errored", finishedAt: 1 }, true)).toBe(false);
+        expect(shouldRequestSuggestion({ kind: "Interrupting", reason: "user", sigintSentAt: 1 } as TurnPhase, true)).toBe(false);
     });
 });
