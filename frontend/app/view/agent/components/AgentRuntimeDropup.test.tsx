@@ -369,12 +369,15 @@ describe("AgentRuntimeDropup — effort only where it applies", () => {
         expect(screen.getAllByRole("option").some((o) => /^max/i.test(o.textContent ?? ""))).toBe(true);
     });
 
-    it("Haiku does not: no effort rows to pick, no effort in the label, and it says why", async () => {
+    it("Haiku does not: the effort rows can't be picked, no effort in the label, and it says why", async () => {
         renderWith("haiku");
         const trigger = screen.getByRole("button", { name: /Runtime settings/i });
         expect(trigger.textContent).not.toMatch(/high/);
         await userEvent.click(trigger);
-        expect(screen.getAllByRole("option").some((o) => /^max/i.test(o.textContent ?? ""))).toBe(false);
+        const max = screen.getAllByRole("option").find((o) => /^max/i.test(o.textContent ?? ""))!;
+        expect(max.getAttribute("aria-disabled")).toBe("true");
+        await userEvent.click(max);
+        expect(patchRuntime).not.toHaveBeenCalled();
         expect(screen.getByText(/Not applied — Haiku does not use it/)).toBeTruthy();
     });
 
@@ -539,5 +542,80 @@ describe("AgentRuntimeDropup — says what the CLI resolved the model to", () =>
         await openPanel();
         const n = notes().find((t) => t.includes("Last reply"))!;
         expect(n).not.toContain("⚠");
+    });
+});
+
+describe("AgentRuntimeDropup — a pick doesn't resize the panel (SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md §6)", () => {
+    const [model, setModel] = createSignal("sonnet");
+    const block = () => ({ meta: { "agent:runtime": { model: model(), permissionMode: "default", effort: "high" } } }) as unknown as Block;
+    const renderLive = () => render(() => <AgentRuntimeDropup blockId="block-1" blockAtom={block} providerId="claude" />);
+    // Everything that takes a line in the panel, in order.
+    const lines = () =>
+        Array.from(document.querySelectorAll(".agent-runtime-dropup-panel [role=listbox] > *")).map((el) => el.className.split(" ")[0]);
+
+    beforeEach(() => setModel("sonnet"));
+
+    it("keeps the same lines when the model becomes Haiku and back", async () => {
+        renderLive();
+        await openPanel();
+        const before = lines();
+        const effortRows = () => Array.from(document.querySelectorAll(".agent-runtime-dropup-row")).slice(-5);
+        expect(effortRows().map((r) => r.textContent)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+        setModel("haiku");
+        expect(effortRows().every((r) => r.getAttribute("aria-disabled") === "true")).toBe(true);
+        expect(lines()).toEqual(before);
+        setModel("opus");
+        expect(lines()).toEqual(before);
+    });
+
+    it("keeps the effort rows out of the keyboard's reach while they don't apply", async () => {
+        setModel("haiku");
+        renderLive();
+        await openPanel();
+        // All the way round, twice: never onto an effort row.
+        for (let i = 0; i < 40; i++) {
+            fireEvent.keyDown(document, { key: "ArrowDown" });
+            const active = document.querySelector(".agent-runtime-dropup-row.active")!;
+            expect(active.classList.contains("is-disabled")).toBe(false);
+        }
+    });
+
+    it("has the status line and the running-model line before anything is known", async () => {
+        renderLive();
+        await openPanel();
+        expect(screen.getByRole("status").textContent).toContain("Changes apply on the next turn.");
+        const note = document.querySelector(".agent-runtime-dropup-note")!;
+        expect(note.classList.contains("is-placeholder")).toBe(true);
+        expect(note.textContent).toContain("shown after the first reply");
+    });
+
+    it("keeps the restart button's place, hidden and out of reach, while it isn't needed", async () => {
+        renderLive();
+        await openPanel();
+        expect(screen.queryByRole("button", { name: /Restart to apply/i })).toBeNull();
+        const btn = document.querySelector(".agent-runtime-dropup-drift-btn") as HTMLButtonElement;
+        expect(btn.classList.contains("is-hidden")).toBe(true);
+        expect(btn.tabIndex).toBe(-1);
+        expect(btn.disabled).toBe(true);
+    });
+
+    it("holds the trigger's width while the panel is open, and lets go on close", async () => {
+        // The trigger's laid-out width, as the strip gives it.
+        const sheet = document.createElement("style");
+        sheet.textContent = ".agent-runtime-dropup-trigger { width: 123.5px; }";
+        document.head.appendChild(sheet);
+        try {
+            renderLive();
+            const trigger = screen.getByRole("button", { name: /Runtime settings/i });
+            expect(trigger.style.width).toBe("");
+            await openPanel();
+            expect(trigger.style.width).toBe("123.5px");
+            setModel("haiku");
+            expect(trigger.style.width).toBe("123.5px");
+            await userEvent.click(screen.getByRole("button", { name: "Close" }));
+            expect(trigger.style.width).toBe("");
+        } finally {
+            sheet.remove();
+        }
     });
 });
