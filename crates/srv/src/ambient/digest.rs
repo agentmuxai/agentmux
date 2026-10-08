@@ -168,14 +168,13 @@ fn ends_in_question(message: &str) -> bool {
 
 /// Whether any question mark in `line` ends a sentence: only closing formatting
 /// (`**`, `_`, quotes, brackets, a code span's backtick) stands between it and
-/// the end of the line or the next space. Not a `?` inside code (`` `?` ``), a
-/// URL's query, or `a?.b`.
+/// the end of the line or the next space. Not a `?` inside code (`` `?` ``,
+/// `` `result?` ``), a URL's query, or `a?.b`.
 fn ends_a_question(line: &str) -> bool {
     line.char_indices().filter(|&(_, c)| c == '?' || c == '\u{FF1F}').any(|(i, c)| {
-        let before = line[..i].chars().next_back();
         let rest: String = line[i + c.len_utf8()..].chars().take_while(|c| !c.is_whitespace()).collect();
-        // A `?` that opens a code span (`` `?` ``) is code, not a question.
-        let in_code = before == Some('`') && rest.starts_with('`');
+        // Inside a code span: an odd number of backticks before it on the line.
+        let in_code = line[..i].matches('`').count() % 2 == 1;
         !in_code
             && rest.chars().all(|c| matches!(c, '*' | '_' | '`' | '"' | '\'' | '\u{201D}' | '\u{2019}' | ')' | ']'))
     })
@@ -768,6 +767,15 @@ mod turn_ending_tests {
         assert_eq!(
             turn_ending(&parts(&["[user] go", "[assistant] Fixed `parse()`. The `?` operator now propagates it."])),
             TurnEnding::Statement
+        );
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Use `result?` to propagate the error, as in `load()?`."])),
+            TurnEnding::Statement
+        );
+        // A question about code is still a question.
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Should I run `cargo test`?"])),
+            TurnEnding::AssistantAsked
         );
         assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[tool] Bash"])), TurnEnding::Statement);
     }
