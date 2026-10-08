@@ -1,7 +1,7 @@
 # SPEC: each channel signs in to MuxBus on its own
 
 **Date:** 2026-10-08
-**Status:** implemented (#4477; repair and refresh leadership in #NNNN) — §6 lists what is not built.
+**Status:** implemented (#4477; repair and refresh leadership in #4490) — §6 lists what is not built.
 **Author:** Camper, at the operator's direction
 **Amends:** `SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md` (reverses it for MuxBus sign-in only),
 restoring the per-channel half of `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` for every channel.
