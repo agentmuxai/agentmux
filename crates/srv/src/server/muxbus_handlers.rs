@@ -371,7 +371,21 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         };
                         Ok(resp)
                     }
-                    Err(e) => Err(format!("muxbus.status: {e}")),
+                    // The UI already reads a failed status as disconnected;
+                    // answering that shape keeps it so, and still carries
+                    // `delivery`, which is what says the sign-in is unreadable.
+                    Err(e) => {
+                        tracing::warn!(error = %e, "muxbus.status: stored sign-in unreadable");
+                        Ok(MuxBusStatusResp {
+                            connected: false,
+                            email: String::new(),
+                            cognito_domain: String::new(),
+                            expires_at: 0,
+                            valid: false,
+                            needs_reauth: false,
+                            delivery: Some(crate::muxbus::delivery_status::status()),
+                        })
+                    }
                 }
             }
         },

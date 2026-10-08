@@ -83,9 +83,13 @@ pub struct Machine {
     session_known: bool,
     email: Option<String>,
     link: Link,
+    /// The relay's REST pull is failing (the reason) though the WebSocket may
+    /// be open: messages can't be fetched, so that is not connected either.
+    /// Cleared by the next pull that answers.
+    pull_error: Option<String>,
     status: MuxBusDeliveryStatus,
     /// When the current pause began; open until delivery is connected again.
-    /// A sign-out neither starts nor ends one.
+    /// A sign-out ends one only if the agents weren't told about it.
     paused_since_ms: Option<i64>,
     /// The agents were told about the current pause.
     pause_noted: bool,
@@ -99,6 +103,7 @@ impl Machine {
             session_known: false,
             email: None,
             link: Link::NoSignIn,
+            pull_error: None,
             status: MuxBusDeliveryStatus { since_ms: now_ms, ..Default::default() },
             paused_since_ms: None,
             pause_noted: false,
@@ -134,6 +139,7 @@ impl Machine {
         self.session_known = false;
         self.email = None;
         self.link = Link::NoSignIn;
+        self.pull_error = None;
         self.update(None, now_ms)
     }
 
@@ -143,8 +149,16 @@ impl Machine {
     }
 
     /// The relay answered a pull: delivery is healthy as of `now_ms`.
-    pub fn relay_answered(&mut self, now_ms: i64) {
+    pub fn relay_answered(&mut self, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
         self.status.last_ok_ms = Some(now_ms);
+        self.pull_error = None;
+        self.update(broker, now_ms)
+    }
+
+    /// A pull (fetch or claim) got no usable answer from the relay.
+    pub fn pull_failed(&mut self, reason: String, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
+        self.pull_error = Some(reason);
+        self.update(broker, now_ms)
     }
 
     /// Re-derive (the broker may have moved on its own) and release the
@@ -161,7 +175,11 @@ impl Machine {
     }
 
     fn update(&mut self, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
-        let (state, error) = derive(self.session_known, &self.link, broker);
+        let link = match (&self.link, &self.pull_error) {
+            (Link::Connected, Some(e)) => Link::Unreachable(e.clone()),
+            (link, _) => link.clone(),
+        };
+        let (state, error) = derive(self.session_known, &link, broker);
         let mut out = Vec::new();
         let prev = self.status.state;
         let changed = state != prev || error != self.status.last_error || self.email != self.status.account_email;
@@ -375,6 +393,23 @@ mod tests {
         assert!(!kinds(&m.tick(None, later + 1)).contains(&"pause"), "no note dated from the old outage");
         let fx = m.tick(None, later + PAUSE_NOTICE_MS);
         assert!(fx.contains(&Effect::PauseNote { since_ms: later, reason: pause_reason(Reconnecting) }));
+    }
+
+    #[test]
+    fn an_open_link_whose_pulls_fail_is_not_connected() {
+        let mut m = connected_machine();
+        m.pull_failed("the relay answered 503 to a message fetch".into(), None, T0 + 1);
+        assert_eq!(m.status().state, Reconnecting);
+        assert_eq!(m.status().last_error.as_deref(), Some("the relay answered 503 to a message fetch"));
+        let fx = m.tick(None, T0 + 1 + PAUSE_NOTICE_MS);
+        assert!(kinds(&fx).contains(&"pause"), "the agents are told, as for any pause");
+        let fx = m.relay_answered(None, T0 + 2 * PAUSE_NOTICE_MS);
+        assert_eq!(m.status().state, Connected);
+        assert!(kinds(&fx).contains(&"resumed"));
+        // A failing pull while the link itself is down changes nothing more.
+        m.set_link(Link::Unreachable("closed".into()), None, T0 + 3 * PAUSE_NOTICE_MS);
+        m.pull_failed("x".into(), None, T0 + 3 * PAUSE_NOTICE_MS + 1);
+        assert_eq!(m.status().last_error.as_deref(), Some("closed"));
     }
 
     #[test]

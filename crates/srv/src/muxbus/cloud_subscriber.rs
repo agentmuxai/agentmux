@@ -1069,6 +1069,7 @@ async fn sync_agent_reactive(
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: fetch pending failed");
+                delivery_status::pull_failed("couldn't fetch messages from the relay");
                 return AgentSyncOutcome::Ok;
             }
         };
@@ -1116,6 +1117,7 @@ async fn sync_agent_reactive(
                 agent_id = %agent_id,
                 "cloud_subscriber: fetch pending non-2xx"
             );
+            delivery_status::pull_failed(format!("the relay answered {} to a message fetch", resp.status().as_u16()));
             return AgentSyncOutcome::Ok;
         }
 
@@ -1123,6 +1125,7 @@ async fn sync_agent_reactive(
             Ok(b) => b,
             Err(e) => {
                 tracing::warn!(error = %e, "cloud_subscriber: parse pending failed");
+                delivery_status::pull_failed("the relay's message list couldn't be read");
                 return AgentSyncOutcome::Ok;
             }
         };
@@ -1161,6 +1164,7 @@ async fn sync_agent_reactive(
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(agent_id = %agent_id, error = %e, "cloud_subscriber: claim request failed");
+                delivery_status::pull_failed("couldn't claim messages from the relay");
                 return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
             }
         };
@@ -1204,6 +1208,7 @@ async fn sync_agent_reactive(
                 agent_id = %agent_id,
                 "cloud_subscriber: claim request non-2xx"
             );
+            delivery_status::pull_failed(format!("the relay answered {} to a message claim", claim_resp.status().as_u16()));
             return AgentSyncOutcome::Ok; // nothing claimed — retried on the next wake/poll
         }
 

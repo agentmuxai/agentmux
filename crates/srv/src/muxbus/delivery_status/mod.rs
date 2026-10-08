@@ -24,6 +24,7 @@
 mod machine;
 pub mod notes;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -99,6 +100,7 @@ fn run_tick() {
     let now = now_ms();
     let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).tick(broker.as_ref(), now);
     apply(effects);
+    send_owed_sign_in_notice();
     let notes = {
         let mut book = rt().book.lock().unwrap_or_else(|e| e.into_inner());
         let mut notes = book.pause_late_joiners(&subscribed_agents());
@@ -137,9 +139,33 @@ pub fn set_link(link: Link) {
 /// reported `expired`. Sends its resume or expiry note, if it has one; call
 /// after the pull's own messages are delivered, so the note comes last.
 pub fn fetched(agent: &str, delivered: usize, expired: &[ExpiredItem]) {
-    rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(now_ms());
+    let broker = broker_state();
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(broker.as_ref(), now_ms());
+    apply(effects);
     let note = rt().book.lock().unwrap_or_else(|e| e.into_inner()).fetched(agent, delivered, expired);
     deliver(note.into_iter().collect());
+}
+
+/// A pull (fetch or claim) got no usable answer from the relay, though the
+/// WebSocket may be open: messages aren't arriving.
+pub fn pull_failed(reason: impl Into<String>) {
+    let broker = broker_state();
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).pull_failed(reason.into(), broker.as_ref(), now_ms());
+    apply(effects);
+}
+
+/// The episode's notification is owed but had no router to go to (no window
+/// had connected yet); [`run_tick`] sends it once one exists.
+static SIGN_IN_NOTICE_OWED: AtomicBool = AtomicBool::new(false);
+
+fn send_owed_sign_in_notice() {
+    if SIGN_IN_NOTICE_OWED.load(Ordering::SeqCst) {
+        if let Some(router) = router() {
+            if SIGN_IN_NOTICE_OWED.swap(false, Ordering::SeqCst) {
+                router.cloud_signed_out();
+            }
+        }
+    }
 }
 
 fn apply(effects: Vec<Effect>) {
@@ -160,11 +186,11 @@ fn apply(effects: Vec<Effect>) {
                 }
             }
             Effect::NotifySignInNeeded => {
-                if let Some(router) = router() {
-                    router.cloud_signed_out();
-                }
+                SIGN_IN_NOTICE_OWED.store(true, Ordering::SeqCst);
+                send_owed_sign_in_notice();
             }
             Effect::RetractSignInNeeded => {
+                SIGN_IN_NOTICE_OWED.store(false, Ordering::SeqCst);
                 if let Some(router) = router() {
                     router.resolve("", crate::backend::notify::policy::Family::Cloud);
                 }
@@ -185,7 +211,7 @@ fn router() -> Option<Arc<crate::backend::notify::router::Router>> {
     let sinks = rt().sinks.get()?;
     let router = crate::backend::notify::router::get(&sinks.broker);
     if router.is_none() {
-        tracing::info!("muxbus delivery: no notification router yet (no window connected)");
+        tracing::debug!("muxbus delivery: no notification router yet (no window connected)");
     }
     router
 }
