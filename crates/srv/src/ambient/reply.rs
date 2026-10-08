@@ -36,8 +36,10 @@ pub enum Parsed {
 }
 
 /// Read a reply. Case is ignored for the prefix and for `SKIP`, as is trailing
-/// punctuation on `SKIP` and a reply wrapped in quotes or backticks (the
-/// sanitizer already removed those). The text after `ANSWER:` must be one line.
+/// punctuation on `SKIP`. The text after `ANSWER:` must be one line, and is
+/// cleaned by `sanitize_ambient_text` (wrapping quotes and fences, a filler
+/// opener): the CLI sanitizes the whole reply, whose start is now the prefix, so
+/// that pass no longer reaches the answer itself.
 pub fn parse(raw: &str) -> Parsed {
     let text = raw.trim();
     if text.is_empty() {
@@ -53,11 +55,11 @@ pub fn parse(raw: &str) -> Parsed {
     if !head.eq_ignore_ascii_case(ANSWER_PREFIX) {
         return Parsed::Malformed;
     }
-    let answer = text[ANSWER_PREFIX.len()..].trim();
+    let answer = super::sanitize::sanitize_ambient_text(text[ANSWER_PREFIX.len()..].trim());
     if answer.is_empty() || answer.contains('\n') {
         return Parsed::Malformed;
     }
-    Parsed::Answer(answer.to_string())
+    Parsed::Answer(answer)
 }
 
 #[cfg(test)]
@@ -96,6 +98,19 @@ mod tests {
         ] {
             assert_eq!(parse(s), Parsed::Malformed, "{s:?}");
         }
+    }
+
+    /// The answer gets the clean-up the whole reply used to get, which can no
+    /// longer reach it past the prefix.
+    #[test]
+    fn the_answer_text_is_cleaned_of_quotes_fences_and_filler() {
+        assert_eq!(parse("ANSWER: \"Run the tests\""), Parsed::Answer("Run the tests".into()));
+        assert_eq!(parse("ANSWER: `Run the tests`"), Parsed::Answer("Run the tests".into()));
+        assert_eq!(
+            parse("ANSWER: Yeah, let's debug the blank preview bug"),
+            Parsed::Answer("Debug the blank preview bug".into())
+        );
+        assert_eq!(parse("ANSWER: \"\""), Parsed::Malformed);
     }
 
     #[test]
