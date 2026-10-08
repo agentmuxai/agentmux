@@ -1,6 +1,6 @@
 # A filter for the Help pane, on one shared filter box
 
-**Status:** active — built in #NNNN.
+**Status:** active — built in #4484.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "add a filter to the help pane … write a separate spec to file"; "the new help
 pane's filter input naturally would autoselect like all the rest"; "make sure we keep the filter DRY … how DRY is our
