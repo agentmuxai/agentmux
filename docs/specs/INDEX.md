@@ -436,6 +436,7 @@ partial list.
 | [`SPEC_SOUND_NOTIFICATIONS_2026_06_05`](SPEC_SOUND_NOTIFICATIONS_2026_06_05.md) | SPEC — Sound notifications subsystem |
 | [`SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03`](SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md) | SPEC: srv hang-while-alive detection (#942 family) |
 | [`SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18`](SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18.md) | SPEC: the status bar's Disk pill must not be Windows-only |
+| [`SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08`](SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md) | SPEC: a setting to hide the MuxBus cloud dot and sign-in info in the status bar |
 | [`SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25`](SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md) | SPEC: status bar host popover — drop the "Instance" row, add "open in file manager" |
 | [`SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30`](SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md) | Spec: Token stats panel — break out by agent + value-add details |
 | [`SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24`](SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md) | Spec: Status-Bar Token Usage Indicator + Per-Service Breakdown |
