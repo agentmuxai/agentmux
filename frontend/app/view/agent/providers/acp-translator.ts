@@ -54,6 +54,17 @@ export class AcpTranslator implements OutputTranslator {
             return [{ type: "session_end", stats: {} }];
         }
 
+        // A JSON-RPC error: a failed prompt, or a session the agent refused to
+        // open (pi's "Authentication required"). Shown; it does not end the
+        // turn by itself, since it may answer only a steering prompt while the
+        // first still runs. srv writes a `stopReason` after an error that did
+        // end the turn (TURN_ENDED_BY_ERROR in blockcontroller/acp.rs).
+        const error = rawEvent.error;
+        if (error && typeof error === "object" && rawEvent.id != null) {
+            const message = typeof error.message === "string" && error.message ? error.message : "the agent returned an error";
+            return [{ type: "text", content: `**Error:** ${message}` }];
+        }
+
         // The raw event may be the full JSON-RPC envelope or just the params.
         const params = rawEvent.params ?? rawEvent;
         const update = params?.update;

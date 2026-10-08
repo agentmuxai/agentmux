@@ -614,6 +614,14 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         };
                         subprocess_ctrl.spawn_turn(config)?;
                     }
+                } else if let Some(acp_ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::acp::AcpController>()
+                {
+                    // If the agent exited, start it again; the message waits
+                    // for the new session.
+                    acp_ctrl.ensure_started(block.meta.clone())?;
+                    acp_ctrl.send_message(cmd.message, None)?;
                 } else {
                     return Err("NOT_RUNNING: controller type not supported".to_string());
                 }

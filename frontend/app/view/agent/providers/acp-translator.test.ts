@@ -162,3 +162,36 @@ describe("AcpTranslator — the earlier flat shape still works", () => {
         expect(res).toMatchObject({ type: "tool_result", id: "t1", status: "success" });
     });
 });
+
+// SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md §6: a JSON-RPC error (a refused
+// session/new, a failed prompt) is shown, not dropped. It doesn't end the turn
+// by itself: it may answer only a steering prompt while the first still runs.
+// srv writes a `stopReason: "error"` line after an error that did end it.
+describe("AcpTranslator — JSON-RPC errors", () => {
+    it("shows the agent's error without ending the turn", () => {
+        const t = new AcpTranslator();
+        expect(
+            t.translate({
+                jsonrpc: "2.0",
+                id: 2,
+                error: { code: -32000, message: "Authentication required: Configure an API key or log in with an OAuth provider." },
+            }),
+        ).toEqual([
+            { type: "text", content: "**Error:** Authentication required: Configure an API key or log in with an OAuth provider." },
+        ]);
+    });
+
+    it("still says something for an error with no message", () => {
+        const t = new AcpTranslator();
+        expect(t.translate({ jsonrpc: "2.0", id: 3, error: { code: -32603 } })).toEqual([
+            { type: "text", content: "**Error:** the agent returned an error" },
+        ]);
+    });
+
+    it("ends the turn on srv's turn-end line after an error", () => {
+        const t = new AcpTranslator();
+        expect(t.translate({ jsonrpc: "2.0", result: { stopReason: "error" } })).toEqual([
+            { type: "session_end", stats: {} },
+        ]);
+    });
+});

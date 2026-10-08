@@ -48,6 +48,104 @@ pub const ACP_OUTPUT_SUBJECT: &str = "output";
 
 pub const BLOCK_CONTROLLER_ACP: &str = "acp";
 
+/// Written to the output after an error that ended the turn (no prompt left
+/// running, or the session couldn't open). The translator ends a turn on a
+/// `stopReason`; it can't tell from an error alone, which may answer only a
+/// mid-turn steering prompt while the first one still runs.
+const TURN_ENDED_BY_ERROR: &str = r#"{"jsonrpc":"2.0","result":{"stopReason":"error"}}"#;
+
+// ---- ACP v1 messages (SPEC_ACP_CLIENT_CONFORMANCE_2026_10_07.md) ----
+// Checked against @agentclientprotocol/sdk 0.26.0 (`PROTOCOL_VERSION = 1`).
+
+/// `initialize`: the protocol version and what this client can do. AgentMux
+/// offers no file system or terminal to the agent; it runs its own tools.
+fn initialize_params() -> serde_json::Value {
+    serde_json::json!({
+        "protocolVersion": 1,
+        "clientCapabilities": {
+            "fs": { "readTextFile": false, "writeTextFile": false },
+            "terminal": false,
+        },
+        "clientInfo": { "name": "AgentMux", "version": env!("CARGO_PKG_VERSION") },
+    })
+}
+
+/// `session/new`, or `session/load` of `resume` when the agent can load one.
+fn session_request(resume: Option<&str>, load_session: bool, cwd: &str) -> (&'static str, serde_json::Value) {
+    match resume.filter(|_| load_session) {
+        Some(sid) => (
+            "session/load",
+            serde_json::json!({ "sessionId": sid, "cwd": cwd, "mcpServers": [] }),
+        ),
+        None => ("session/new", serde_json::json!({ "cwd": cwd, "mcpServers": [] })),
+    }
+}
+
+/// Whether a line from the agent is part of a `session/load` replay: the
+/// agent streams the earlier conversation as `session/update`s before it
+/// answers the load, and the load's own answer is not one of them.
+fn is_session_replay(loading: bool, is_session_response: bool) -> bool {
+    loading && !is_session_response
+}
+
+/// The absolute directory ACP's `session/new` and `session/load` take as
+/// `cwd`: the pane's working directory (`~` expanded; a relative one resolved
+/// against the server's, as `Command::current_dir` resolves it), else the
+/// directory the agent process itself starts in.
+fn session_cwd(working_dir: &str) -> String {
+    let here = std::env::current_dir().unwrap_or_default();
+    let dir = if working_dir.is_empty() {
+        here.clone()
+    } else {
+        let expanded = std::path::PathBuf::from(super::core::expand_home_dir(working_dir));
+        if expanded.is_absolute() { expanded } else { here.join(expanded) }
+    };
+    dir.to_string_lossy().into_owned()
+}
+
+/// `session/prompt` params: the prompt is an array of content blocks.
+fn prompt_params(session_id: &str, text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "sessionId": session_id,
+        "prompt": [{ "type": "text", "text": text }],
+    })
+}
+
+/// The reply to a request the agent sends us, if `json` is one (it has both
+/// `method` and `id`). AgentMux approves tool use by default, as it does for
+/// every harness: the first `allow_always` option, else `allow_once`, else
+/// cancelled. Anything else (`fs/*`, `terminal/*`, which this client does not
+/// offer) gets "method not found", so the agent never waits on us.
+fn reply_to_agent_request(json: &serde_json::Value) -> Option<serde_json::Value> {
+    let method = json.get("method")?.as_str()?;
+    // A request carries an `id`, which ACP lets be null and requires us to
+    // echo; a notification has none.
+    let id = json.get("id")?.clone();
+    if method == "session/request_permission" {
+        let options = json
+            .pointer("/params/options")
+            .and_then(|o| o.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let pick = |kind: &str| {
+            options
+                .iter()
+                .find(|o| o.get("kind").and_then(|k| k.as_str()) == Some(kind))
+                .and_then(|o| o.get("optionId").cloned())
+        };
+        let outcome = match pick("allow_always").or_else(|| pick("allow_once")) {
+            Some(option_id) => serde_json::json!({ "outcome": "selected", "optionId": option_id }),
+            None => serde_json::json!({ "outcome": "cancelled" }),
+        };
+        return Some(serde_json::json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": outcome } }));
+    }
+    Some(serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": -32601, "message": format!("AgentMux does not offer {method}") },
+    }))
+}
+
 /// Remove `resolved_id` from the set of outstanding (sent, not yet
 /// resolved) prompts and report whether the set is now EMPTY — i.e.
 /// whether every prompt sent so far has now been resolved, by either a
@@ -85,6 +183,25 @@ struct AcpInner {
     kill_tx: Option<tokio::sync::oneshot::Sender<bool>>,
     /// First user prompt, deferred until session/create completes.
     pending_prompt: Option<String>,
+    /// ACP v1 handshake: the `initialize` request, whose result decides
+    /// between `session/new` and `session/load`.
+    init_request_id: Option<u64>,
+    /// The `session/new` or `session/load` request in flight.
+    session_request_id: Option<u64>,
+    /// The session being loaded: its result carries no id of its own.
+    loading_session: Option<String>,
+    /// `session/new` was refused (pi: "Authentication required"): no session
+    /// will open until the agent restarts.
+    session_failed: bool,
+    /// Counts spawns. A process's waiter cleans up the shared state only
+    /// while its generation is current, so one that finishes after a restart
+    /// can't disconnect the new process.
+    generation: u64,
+    /// The pane's previous session (`agent:sessionid`), offered to
+    /// `session/load` when the agent supports it.
+    resume_session_id: Option<String>,
+    /// The session's working directory.
+    session_cwd: String,
 }
 
 /// AcpController manages an ACP-speaking agent process.
@@ -111,6 +228,9 @@ pub struct AcpController {
     /// stdout-reader tasks, no ordering guarantee between them). codex P2
     /// on PR #2338 (twenty-seventh through thirtieth re-reviews).
     outstanding_prompt_ids: Arc<Mutex<HashSet<u64>>>,
+    /// Serializes `ensure_started`, so two deliveries that find the agent
+    /// stopped can't both start it.
+    start_lock: Mutex<()>,
 }
 
 impl AcpController {
@@ -135,6 +255,13 @@ impl AcpController {
                 stdin_tx: None,
                 kill_tx: None,
                 pending_prompt: None,
+                init_request_id: None,
+                session_request_id: None,
+                loading_session: None,
+                session_failed: false,
+                generation: 0,
+                resume_session_id: None,
+                session_cwd: String::new(),
             })),
             broker,
             event_bus,
@@ -143,6 +270,7 @@ impl AcpController {
             health_monitor,
             next_rpc_id: Arc::new(AtomicU64::new(1)),
             outstanding_prompt_ids: Arc::new(Mutex::new(HashSet::new())),
+            start_lock: Mutex::new(()),
         }
     }
 
@@ -173,7 +301,7 @@ impl AcpController {
         }
     }
 
-    fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.stdin_tx.is_some()
     }
@@ -337,12 +465,92 @@ impl AcpController {
                 if line.is_empty() {
                     continue;
                 }
+                // A failed `session/load` the handshake recovers from (it
+                // opens a new session): not shown, or the pane reads it as
+                // an error that ended a turn.
+                let mut recovered_error = false;
+                // A line the agent sends while it replays a loaded session.
+                let mut replaying = false;
+                // An error that ended the turn: a turn end follows it (below),
+                // since the error itself doesn't say whether other prompts are
+                // still running.
+                let mut turn_ended_by_error = false;
                 // Parse as JSON to check for session/update notifications
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
-                    // Extract session ID from initialize result or session/create result
-                    if let Some(result) = json.get("result") {
-                        if let Some(sid) = result.get("sessionId").and_then(|v| v.as_str()) {
-                            let sid_owned = sid.to_string();
+                    // A request from the agent (permission, fs, terminal):
+                    // answer it, or the agent waits forever.
+                    if let Some(reply) = reply_to_agent_request(&json) {
+                        let inner = inner_clone.lock().unwrap();
+                        if let Some(ref tx) = inner.stdin_tx {
+                            if tx.try_send(reply.to_string()).is_err() {
+                                tracing::warn!(block_id = %block_id_stdout, "[acp] reply to an agent request dropped — channel full or closed");
+                            }
+                        }
+                    }
+                    // Handshake: `initialize` answered → open or load the
+                    // session; a failed `session/load` → open a new one. A
+                    // loaded session's result carries no id: it is the one
+                    // we asked for.
+                    let msg_id = json.get("id").and_then(|v| v.as_u64());
+                    let mut loaded: Option<String> = None;
+                    {
+                        let mut inner = inner_clone.lock().unwrap();
+                        let is = |id: Option<u64>| msg_id.is_some() && msg_id == id;
+                        replaying = is_session_replay(inner.loading_session.is_some(), is(inner.session_request_id));
+                        let next = if is(inner.init_request_id) && json.get("result").is_some() {
+                            inner.init_request_id = None;
+                            let can_load = json
+                                .pointer("/result/agentCapabilities/loadSession")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false);
+                            let resume = inner.resume_session_id.clone();
+                            let loading = if can_load { resume.clone() } else { None };
+                            Some((session_request(resume.as_deref(), can_load, &inner.session_cwd), loading))
+                        } else if is(inner.session_request_id) && json.get("error").is_some() && inner.loading_session.is_some() {
+                            inner.loading_session = None;
+                            recovered_error = true;
+                            Some((session_request(None, false, &inner.session_cwd), None))
+                        } else {
+                            None
+                        };
+                        if is(inner.session_request_id) && json.get("result").is_some() {
+                            loaded = inner.loading_session.take();
+                        }
+                        if next.is_none() && is(inner.init_request_id) && json.get("error").is_some() {
+                            // initialize refused (an unsupported protocol
+                            // version): no session will ever open.
+                            inner.init_request_id = None;
+                            inner.pending_prompt = None;
+                            inner.session_failed = true;
+                            turn_ended_by_error = true;
+                        }
+                        if next.is_none() && is(inner.session_request_id) && json.get("error").is_some() {
+                            // session/new refused (pi: "Authentication
+                            // required"): the queued prompt can't run.
+                            inner.pending_prompt = None;
+                            inner.session_failed = true;
+                            turn_ended_by_error = true;
+                        }
+                        if let Some(((method, params), loading)) = next {
+                            let id = rpc_id_clone.fetch_add(1, Ordering::Relaxed);
+                            inner.session_request_id = Some(id);
+                            inner.loading_session = loading;
+                            let req = serde_json::json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }).to_string();
+                            if let Some(ref tx) = inner.stdin_tx {
+                                if tx.try_send(req).is_err() {
+                                    tracing::error!(block_id = %block_id_stdout, method, "[acp] session request dropped — channel full or closed; agent will not start");
+                                }
+                            }
+                        }
+                    }
+                    let session = json
+                        .pointer("/result/sessionId")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                        .or(loaded);
+                    if let Some(sid_owned) = session {
+                        {
+                            let sid = sid_owned.as_str();
                             {
                                 let mut inner = inner_clone.lock().unwrap();
                                 inner.session_id = Some(sid_owned.clone());
@@ -377,10 +585,7 @@ impl AcpController {
                                         "jsonrpc": "2.0",
                                         "id": id,
                                         "method": "session/prompt",
-                                        "params": {
-                                            "sessionId": sid,
-                                            "prompt": { "type": "text", "text": prompt },
-                                        }
+                                        "params": prompt_params(sid, &prompt),
                                     }).to_string();
                                     if let Some(ref tx) = inner.stdin_tx {
                                         if tx.try_send(req).is_err() {
@@ -456,6 +661,9 @@ impl AcpController {
                             let mut outstanding = outstanding_prompt_ids_clone.lock().unwrap();
                             resolve_prompt_and_check_idle(&mut outstanding, resolved_id)
                         };
+                        if turn_is_over && json.get("error").is_some() {
+                            turn_ended_by_error = true;
+                        }
                         if turn_is_over {
                             health_clone.set_active_turn(false);
                             // Publish the flip so live controllerstatus
@@ -495,7 +703,12 @@ impl AcpController {
                 }
 
                 // Persist + broadcast via the shared helper (same as subprocess/host_spawn.rs)
-                if let Some(ref broker) = broker_clone {
+                if recovered_error {
+                    tracing::info!(block_id = %block_id_stdout, "[acp] session/load refused; opening a new session");
+                } else if replaying {
+                    // Earlier turns the agent replays while loading: the pane
+                    // already has them, and their tool-call ids would collide.
+                } else if let Some(ref broker) = broker_clone {
                     let line_with_newline = format!("{}\n", line);
                     super::shell::handle_append_block_file(
                         broker,
@@ -505,11 +718,23 @@ impl AcpController {
                         filestore_clone.as_ref(),
                         global_output_zone.as_deref(),
                     );
+                    if turn_ended_by_error {
+                        let end = format!("{}\n", TURN_ENDED_BY_ERROR);
+                        super::shell::handle_append_block_file(
+                            broker,
+                            &block_id_stdout,
+                            ACP_OUTPUT_SUBJECT,
+                            end.as_bytes(),
+                            filestore_clone.as_ref(),
+                            global_output_zone.as_deref(),
+                        );
+                    }
                 }
             }
         });
 
         // Spawn process waiter task
+        let generation = self.begin_process();
         let block_id_wait = self.block_id.clone();
         let inner_wait = self.inner.clone();
         let broker_wait = self.broker.clone();
@@ -522,6 +747,10 @@ impl AcpController {
                     tracing::info!(block_id = %block_id_wait, "ACP process killed");
 
                     let mut inner = inner_wait.lock().unwrap();
+                    if inner.generation != generation {
+                        // A newer process owns the controller now.
+                        return;
+                    }
                     inner.stdin_tx = None;
                     inner.current_pid = None;
                     AcpController::set_status(&mut inner, STATUS_DONE);
@@ -556,6 +785,10 @@ impl AcpController {
                         "ACP process exited"
                     );
                     let mut inner = inner_wait.lock().unwrap();
+                    if inner.generation != generation {
+                        // A newer process owns the controller now.
+                        return;
+                    }
                     inner.proc_exit_code = exit_code;
                     inner.stdin_tx = None;
                     AcpController::set_status(&mut inner, STATUS_DONE);
@@ -574,30 +807,22 @@ impl AcpController {
             }
         });
 
-        // Send ACP initialize handshake
-        let init_req = self.make_request("initialize", serde_json::json!({
-            "clientInfo": {
-                "name": "AgentMux",
-                "version": env!("CARGO_PKG_VERSION"),
-            },
-            "capabilities": {
-                "tools": true,
-                "fileAccess": true,
-            },
-            "workspaceRoots": [working_dir],
-        }));
-        let init_notification = self.make_notification("initialized", serde_json::json!({}));
-        let session_req = self.make_request("session/create", serde_json::json!({
-            "cwd": working_dir,
-        }));
-
-        // Queue the handshake messages
-        let inner = self.inner.lock().unwrap();
+        // ACP v1 handshake: `initialize` only. Its result decides between
+        // `session/new` and `session/load`; the stdout reader sends that.
+        let init_id = self.next_id();
+        let init_req = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": init_id,
+            "method": "initialize",
+            "params": initialize_params(),
+        })
+        .to_string();
+        let mut inner = self.inner.lock().unwrap();
+        inner.init_request_id = Some(init_id);
+        inner.session_cwd = session_cwd(&working_dir);
         if let Some(ref tx) = inner.stdin_tx {
-            for (label, msg) in [("initialize", init_req), ("initialized", init_notification), ("session/create", session_req)] {
-                if tx.try_send(msg).is_err() {
-                    tracing::error!(block_id = %self.block_id, method = label, "[acp] handshake message dropped — channel full or closed; agent will not start");
-                }
+            if tx.try_send(init_req).is_err() {
+                tracing::error!(block_id = %self.block_id, "[acp] initialize dropped — channel full or closed; agent will not start");
             }
         }
 
@@ -619,6 +844,40 @@ fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<Str
 
 
 impl AcpController {
+    /// A new process takes over the controller: the generation moves on, and
+    /// the prompts the previous process never answered are forgotten. Its
+    /// waiter, which sees the new generation, no longer clears them; left
+    /// there they would keep the turn active for good.
+    fn begin_process(&self) -> u64 {
+        self.outstanding_prompt_ids.lock().unwrap().clear();
+        self.health_monitor.set_active_turn(false);
+        let mut inner = self.inner.lock().unwrap();
+        inner.generation += 1;
+        inner.generation
+    }
+
+    /// Start the agent again if its process has exited, from the pane's
+    /// meta; a no-op when it is running. One start at a time: a second
+    /// delivery waits here and then finds it running.
+    pub fn ensure_started(&self, block_meta: super::super::obj::MetaMapType) -> Result<(), String> {
+        let _one_at_a_time = self.start_lock.lock().unwrap();
+        if self.is_running() {
+            return Ok(());
+        }
+        Controller::start(self, block_meta, None, false)
+    }
+
+    /// A user message from `agentinput` / `agent.send` (`run_agent_turn`):
+    /// sent as `session/prompt`, then acknowledged the way the other
+    /// controllers acknowledge theirs, so the pane stops showing it as pending.
+    pub fn send_message(&self, message: String, message_id: Option<&str>) -> Result<(), String> {
+        Controller::send_input(self, BlockInputUnion::data(message.into_bytes()), None)?;
+        if let (Some(id), Some(broker)) = (message_id, self.broker.as_ref()) {
+            super::publish_message_accepted(broker, &self.block_id, id);
+        }
+        Ok(())
+    }
+
     /// The env this block's ACP process is spawned with: `cmd:env` (either
     /// shape), with the block's row UID + token carried onto it — identity
     /// M4b-2. Buys no attribution today (ACP agents are not given
@@ -658,6 +917,18 @@ impl Controller for AcpController {
         // object) or as a JSON string — before M4b-2 only the string form was
         // read, so an `agent.open` launch lost both (spec §6.5.8).
         let args = meta_string_list(&block_meta, super::META_KEY_CMD_ARGS);
+        let resume = super::super::obj::meta_get_string(&block_meta, super::core::META_SESSION_ID, "");
+        {
+            // A restart (the agent exited) starts a new handshake: a prompt
+            // must wait for the new session, never go to the old one.
+            let mut inner = self.inner.lock().unwrap();
+            inner.resume_session_id = Some(resume).filter(|s| !s.is_empty());
+            inner.session_id = None;
+            inner.init_request_id = None;
+            inner.session_request_id = None;
+            inner.loading_session = None;
+            inner.session_failed = false;
+        }
         let mut env_vars = self.spawn_env(&block_meta);
         if let Some(pi) = crate::backend::providers::pi_beside_pi_acp(&cmd) {
             env_vars.entry("PI_ACP_PI_COMMAND".to_string()).or_insert(pi);
@@ -720,8 +991,25 @@ impl Controller for AcpController {
             }
 
             let session_id = {
-                let inner = self.inner.lock().unwrap();
-                inner.session_id.clone().unwrap_or_default()
+                let mut inner = self.inner.lock().unwrap();
+                match inner.session_id.clone() {
+                    Some(sid) => sid,
+                    None if inner.session_failed => {
+                        return Err("The agent couldn't open a session (see the error above). Fix that, then restart the agent.".to_string());
+                    }
+                    None => {
+                        // The handshake hasn't opened the session yet (the
+                        // startup message is sent right after launch): queue
+                        // it; the stdout reader sends it once the session
+                        // exists. Sent with no session id, the agent would
+                        // reject it and the message would be lost.
+                        inner.pending_prompt = Some(match inner.pending_prompt.take() {
+                            Some(earlier) => format!("{earlier}\n\n{message}"),
+                            None => message,
+                        });
+                        return Ok(());
+                    }
+                }
             };
             // Not built via make_request: the id must be captured so it can
             // be tracked as outstanding (see outstanding_prompt_ids's doc
@@ -735,13 +1023,7 @@ impl Controller for AcpController {
                 "jsonrpc": "2.0",
                 "id": prompt_id,
                 "method": "session/prompt",
-                "params": {
-                    "sessionId": session_id,
-                    "prompt": {
-                        "type": "text",
-                        "text": message,
-                    }
-                }
+                "params": prompt_params(&session_id, &message),
             }).to_string();
             // `mark_turn_active_returning_was_active` (not the plain
             // `set_active_turn(true)` this used to call) is atomic across
@@ -845,6 +1127,70 @@ impl Controller for AcpController {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn initialize_states_protocol_version_1_and_offers_no_fs_or_terminal() {
+        let p = super::initialize_params();
+        assert_eq!(p["protocolVersion"], 1);
+        assert_eq!(p["clientCapabilities"]["fs"]["readTextFile"], false);
+        assert_eq!(p["clientCapabilities"]["terminal"], false);
+        assert_eq!(p["clientInfo"]["name"], "AgentMux");
+    }
+
+    #[test]
+    fn a_session_is_loaded_only_when_the_agent_can_and_there_is_one() {
+        let (m, p) = super::session_request(Some("s1"), true, "C:/w");
+        assert_eq!(m, "session/load");
+        assert_eq!(p, serde_json::json!({ "sessionId": "s1", "cwd": "C:/w", "mcpServers": [] }));
+        assert_eq!(super::session_request(Some("s1"), false, "C:/w").0, "session/new");
+        let (m, p) = super::session_request(None, true, "C:/w");
+        assert_eq!(m, "session/new");
+        assert_eq!(p, serde_json::json!({ "cwd": "C:/w", "mcpServers": [] }));
+    }
+
+    #[test]
+    fn the_prompt_is_an_array_of_content_blocks() {
+        assert_eq!(
+            super::prompt_params("s1", "hi"),
+            serde_json::json!({ "sessionId": "s1", "prompt": [{ "type": "text", "text": "hi" }] })
+        );
+    }
+
+    #[test]
+    fn permission_requests_are_approved_preferring_allow_always() {
+        let req = |options: serde_json::Value| {
+            serde_json::json!({ "jsonrpc": "2.0", "id": 7, "method": "session/request_permission",
+                "params": { "sessionId": "s", "toolCall": { "toolCallId": "t" }, "options": options } })
+        };
+        let both = req(serde_json::json!([
+            { "optionId": "once", "kind": "allow_once", "name": "Allow" },
+            { "optionId": "always", "kind": "allow_always", "name": "Always" },
+            { "optionId": "no", "kind": "reject_once", "name": "Reject" },
+        ]));
+        assert_eq!(
+            super::reply_to_agent_request(&both).unwrap(),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 7, "result": { "outcome": { "outcome": "selected", "optionId": "always" } } })
+        );
+        let once = req(serde_json::json!([{ "optionId": "once", "kind": "allow_once", "name": "Allow" }]));
+        assert_eq!(super::reply_to_agent_request(&once).unwrap()["result"]["outcome"]["optionId"], "once");
+        let reject = req(serde_json::json!([{ "optionId": "no", "kind": "reject_once", "name": "Reject" }]));
+        assert_eq!(
+            super::reply_to_agent_request(&reject).unwrap()["result"]["outcome"],
+            serde_json::json!({ "outcome": "cancelled" })
+        );
+    }
+
+    #[test]
+    fn other_agent_requests_get_method_not_found_and_notifications_get_nothing() {
+        let fs = serde_json::json!({ "jsonrpc": "2.0", "id": "a", "method": "fs/read_text_file", "params": {} });
+        let reply = super::reply_to_agent_request(&fs).unwrap();
+        assert_eq!(reply["id"], "a");
+        assert_eq!(reply["error"]["code"], -32601);
+        let note = serde_json::json!({ "jsonrpc": "2.0", "method": "session/update", "params": {} });
+        assert!(super::reply_to_agent_request(&note).is_none());
+        let response = serde_json::json!({ "jsonrpc": "2.0", "id": 3, "result": {} });
+        assert!(super::reply_to_agent_request(&response).is_none());
+    }
 
     /// Identity M4b-2 (spec §6.5.8): `agent.open` stores `cmd:args` as an
     /// array and `cmd:env` as an object; ACP read only JSON strings, so
@@ -1034,6 +1380,113 @@ mod tests {
     /// `send_input` marks the turn active via `mark_turn_active_returning_was_active`
     /// — pins the call-site contract that `turn_active` flips true once a
     /// message is actually sent to an already-running process.
+    /// A message sent before the handshake has opened the session (the
+    /// startup message, sent right after launch) is queued for the stdout
+    /// reader to send once the session exists, never sent with an empty
+    /// session id (#4447).
+    #[tokio::test]
+    async fn a_message_before_the_session_exists_is_queued_not_sent() {
+        let c = controller();
+        let (tx, mut rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        assert!(c.send_input(BlockInputUnion::data(b"startup".to_vec()), None).is_ok());
+        assert!(c.send_input(BlockInputUnion::data(b"second".to_vec()), None).is_ok());
+        assert!(rx.try_recv().is_err(), "nothing goes to the agent before the session exists");
+        assert_eq!(c.inner.lock().unwrap().pending_prompt.as_deref(), Some("startup\n\nsecond"));
+        assert!(!c.health_monitor.is_active_turn());
+    }
+
+    /// After `session/new` is refused nothing will ever open a session, so a
+    /// send is an error the user sees, not a message queued for good.
+    #[tokio::test]
+    async fn a_send_after_the_session_was_refused_is_an_error() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_failed = true;
+        }
+        let err = c.send_input(BlockInputUnion::data(b"hi".to_vec()), None).unwrap_err();
+        assert!(err.contains("couldn't open a session"), "{err}");
+        assert!(c.inner.lock().unwrap().pending_prompt.is_none());
+    }
+
+    /// A running agent is left alone; a stopped one is started from the pane's
+    /// meta (here with none, so the start itself reports it).
+    #[tokio::test]
+    async fn ensure_started_only_starts_a_stopped_agent() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        assert!(c.ensure_started(Default::default()).is_ok(), "running: nothing to do");
+        c.inner.lock().unwrap().stdin_tx = None;
+        let err = c.ensure_started(Default::default()).unwrap_err();
+        assert!(err.contains("no cmd"), "stopped: it tries to start: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_new_process_forgets_the_old_ones_unanswered_prompts() {
+        let c = controller();
+        c.outstanding_prompt_ids.lock().unwrap().insert(41);
+        c.health_monitor.set_active_turn(true);
+        let first = c.begin_process();
+        assert!(c.outstanding_prompt_ids.lock().unwrap().is_empty());
+        assert!(!c.health_monitor.is_active_turn());
+        assert_eq!(c.begin_process(), first + 1);
+    }
+
+    /// ACP lets a request id be null and requires the reply to echo it; only a
+    /// message with no `id` at all is a notification.
+    #[test]
+    fn a_null_request_id_is_echoed() {
+        let req = serde_json::json!({ "jsonrpc": "2.0", "id": null, "method": "fs/read_text_file", "params": {} });
+        let reply = super::reply_to_agent_request(&req).unwrap();
+        assert!(reply["id"].is_null());
+        assert_eq!(reply["error"]["code"], -32601);
+    }
+
+    /// The previous process's waiter finishing after a restart must not clear
+    /// the new process's state.
+    #[tokio::test]
+    async fn a_stale_process_waiter_leaves_a_restart_alone() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(8);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.generation = 2;
+        }
+        // What the waiter of generation 1 checks before cleaning up.
+        let stale = 1;
+        let cleaned = {
+            let mut inner = c.inner.lock().unwrap();
+            if inner.generation != stale { false } else { inner.stdin_tx = None; true }
+        };
+        assert!(!cleaned);
+        assert!(c.is_running(), "the new process stays connected");
+    }
+
+    #[test]
+    fn the_session_directory_is_never_empty() {
+        let abs = std::env::current_dir().unwrap().join("work").join("a");
+        assert_eq!(super::session_cwd(&abs.to_string_lossy()), abs.to_string_lossy());
+        // A relative one resolves against the server's directory.
+        let rel = super::session_cwd("work/a");
+        assert!(std::path::Path::new(&rel).is_absolute(), "{rel}");
+        assert!(rel.ends_with("a"), "{rel}");
+        let fallback = super::session_cwd("");
+        assert!(!fallback.is_empty());
+        assert!(std::path::Path::new(&fallback).is_absolute(), "{fallback}");
+    }
+
+    #[test]
+    fn lines_during_a_session_load_are_replay_except_the_loads_own_answer() {
+        assert!(super::is_session_replay(true, false));
+        assert!(!super::is_session_replay(true, true));
+        assert!(!super::is_session_replay(false, false));
+    }
+
     #[tokio::test]
     async fn send_input_marks_the_turn_active() {
         let c = controller();
@@ -1041,7 +1494,11 @@ mod tests {
         // turn-active logic when `is_running()` is true (otherwise it
         // stashes the message as `pending_prompt` for the next start()).
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         assert!(!c.health_monitor.is_active_turn());
         let res = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
@@ -1058,7 +1515,11 @@ mod tests {
     async fn repeated_send_input_while_active_does_not_error() {
         let c = controller();
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());
         assert!(c.send_input(BlockInputUnion::data(b"second".to_vec()), None).is_ok());
@@ -1088,7 +1549,11 @@ mod tests {
             None,
         );
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         assert!(c.send_input(BlockInputUnion::data(b"hello".to_vec()), None).is_ok());
 
@@ -1129,7 +1594,11 @@ mod tests {
         );
         let (tx, rx) = mpsc::channel::<String>(8);
         drop(rx); // Receiver gone — try_send fails with TrySendError::Closed.
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         let res = c.send_input(BlockInputUnion::data(b"hello".to_vec()), None);
         assert!(res.is_err(), "send_input should surface the enqueue failure, got {res:?}");
@@ -1170,7 +1639,11 @@ mod tests {
     async fn send_input_does_not_roll_back_an_already_active_turn_on_a_failed_steering_send() {
         let c = controller();
         let (tx, _rx) = mpsc::channel::<String>(8);
-        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.session_id = Some("s1".to_string());
+        }
 
         // First send succeeds — turn is now genuinely active.
         assert!(c.send_input(BlockInputUnion::data(b"first".to_vec()), None).is_ok());

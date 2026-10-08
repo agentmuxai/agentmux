@@ -48,6 +48,21 @@ export function isPersistentLaunch(provider: LaunchArgsProvider, agentMode: stri
 }
 
 /**
+ * The block controller a launch runs under. A container agent always runs on
+ * the per-turn subprocess path, which execs into its container: the
+ * persistent and ACP controllers spawn on the host, so either would escape the
+ * sandbox. Matches srv's `agent_open.rs`.
+ */
+export function launchController(
+    provider: LaunchArgsProvider & { controllerType?: string },
+    agentMode: string | undefined,
+): "persistent" | "subprocess" | "acp" {
+    if (agentMode === "container") return "subprocess";
+    if (provider.controllerType === "acp") return "acp";
+    return isPersistentLaunch(provider, agentMode) ? "persistent" : "subprocess";
+}
+
+/**
  * The args to launch with. Falls back to `launchArgs` whenever the provider
  * declares no persistent variant, matching the previous inline behaviour.
  */
