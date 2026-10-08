@@ -739,11 +739,7 @@ impl AcpController {
         });
 
         // Spawn process waiter task
-        let generation = {
-            let mut inner = self.inner.lock().unwrap();
-            inner.generation += 1;
-            inner.generation
-        };
+        let generation = self.begin_process();
         let block_id_wait = self.block_id.clone();
         let inner_wait = self.inner.clone();
         let broker_wait = self.broker.clone();
@@ -853,6 +849,18 @@ fn meta_string_list(meta: &super::super::obj::MetaMapType, key: &str) -> Vec<Str
 
 
 impl AcpController {
+    /// A new process takes over the controller: the generation moves on, and
+    /// the prompts the previous process never answered are forgotten. Its
+    /// waiter, which sees the new generation, no longer clears them; left
+    /// there they would keep the turn active for good.
+    fn begin_process(&self) -> u64 {
+        self.outstanding_prompt_ids.lock().unwrap().clear();
+        self.health_monitor.set_active_turn(false);
+        let mut inner = self.inner.lock().unwrap();
+        inner.generation += 1;
+        inner.generation
+    }
+
     /// Start the agent again if its process has exited, from the pane's
     /// meta; a no-op when it is running. One start at a time: a second
     /// delivery waits here and then finds it running.
@@ -1420,6 +1428,17 @@ mod tests {
         c.inner.lock().unwrap().stdin_tx = None;
         let err = c.ensure_started(Default::default()).unwrap_err();
         assert!(err.contains("no cmd"), "stopped: it tries to start: {err}");
+    }
+
+    #[tokio::test]
+    async fn a_new_process_forgets_the_old_ones_unanswered_prompts() {
+        let c = controller();
+        c.outstanding_prompt_ids.lock().unwrap().insert(41);
+        c.health_monitor.set_active_turn(true);
+        let first = c.begin_process();
+        assert!(c.outstanding_prompt_ids.lock().unwrap().is_empty());
+        assert!(!c.health_monitor.is_active_turn());
+        assert_eq!(c.begin_process(), first + 1);
     }
 
     /// ACP lets a request id be null and requires the reply to echo it; only a
