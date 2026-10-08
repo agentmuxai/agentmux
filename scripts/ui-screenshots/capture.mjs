@@ -305,52 +305,76 @@ async function main() {
         const shot = selected[i];
         const n = String(i + 1).padStart(2, "0");
         process.stdout.write(`[${n}/${selected.length}] ${shot.id} ... `);
-        try {
-            if (shot.prep) await shot.prep(session);
-            await session.wait(shot.settleMs ?? 400);
-
-            // One capture, or one per size: the viewport is set to the size and
-            // the selector re-measured, so each crop fits that layout.
-            const variants = shot.sizes ? args.sizes : [null];
-            for (const size of variants) {
-                if (size) {
-                    await session.setViewport(SIZES[size]);
-                    await session.wait(shot.sizeSettleMs ?? 600);
-                }
-                const pngBuffer = await captureOne(session, shot);
-                const filename = shotFilename(n, shot.id, size);
-                writeFileSync(join(args.out, filename), pngBuffer);
-                const { width, height } = pngDimensions(pngBuffer);
-                manifest.push({
-                    id: shot.id,
-                    title: shot.title,
-                    description: shot.description,
-                    ...(size ? { size, viewport: SIZES[size] } : {}),
-                    // Whether a human must check the image for this machine's
-                    // data before it's published (spec §7/§8): true, false or "review".
-                    ...(shot.containsWorkspaceData !== undefined ? { containsWorkspaceData: shot.containsWorkspaceData } : {}),
-                    file: filename,
-                    capturedAt: new Date().toISOString(),
-                    width,
-                    height,
-                });
-            }
-            console.log(shot.sizes ? `ok (${variants.join(", ")})` : "ok");
-        } catch (err) {
-            console.log(`FAILED — ${err.message}`);
-            failures.push({ id: shot.id, error: err.message });
-        } finally {
-            // Undo the shot's setup (a tab it opened, a viewport it set) even
-            // when it failed, so the next shot starts from the same state.
+        const variants = shot.sizes ? args.sizes : [null];
+        // A shot may allow `retries` (UI timing makes the odd attempt fail);
+        // each attempt is cleaned up before the next, and only the images of
+        // the attempt that succeeded go into the manifest.
+        const attempts = (shot.retries ?? 0) + 1;
+        let entries = [];
+        let lastErr = null;
+        let stop = false;
+        for (let attempt = 1; attempt <= attempts; attempt++) {
+            entries = [];
+            lastErr = null;
             try {
-                // SHOTS_DEBUG=keep leaves the shot's state in place to inspect.
-                if (process.env.SHOTS_DEBUG === "keep") continue;
+                if (shot.prep) await shot.prep(session);
+                await session.wait(shot.settleMs ?? 400);
+
+                // One capture, or one per size: the viewport is set to the size
+                // and the selector re-measured, so each crop fits that layout.
+                for (const size of variants) {
+                    if (size) {
+                        await session.setViewport(SIZES[size]);
+                        await session.wait(shot.sizeSettleMs ?? 600);
+                    }
+                    const pngBuffer = await captureOne(session, shot);
+                    const filename = shotFilename(n, shot.id, size);
+                    writeFileSync(join(args.out, filename), pngBuffer);
+                    const { width, height } = pngDimensions(pngBuffer);
+                    entries.push({
+                        id: shot.id,
+                        title: shot.title,
+                        description: shot.description,
+                        ...(size ? { size, viewport: SIZES[size] } : {}),
+                        // Whether a human must check the image for this machine's
+                        // data before it's published (spec §7/§8): true, false or "review".
+                        ...(shot.containsWorkspaceData !== undefined ? { containsWorkspaceData: shot.containsWorkspaceData } : {}),
+                        file: filename,
+                        capturedAt: new Date().toISOString(),
+                        width,
+                        height,
+                    });
+                }
+            } catch (err) {
+                lastErr = err;
+            }
+            // SHOTS_DEBUG=keep leaves the shot's state in place to inspect.
+            if (process.env.SHOTS_DEBUG === "keep") break;
+            // Undo the shot's setup (a tab it opened, a viewport it set) even
+            // when it failed, so the next attempt or shot starts from the same
+            // state.
+            try {
                 if (shot.cleanup) await shot.cleanup(session);
                 else if (shot.sizes) await session.clearViewport();
             } catch (err) {
-                console.log(`  cleanup failed — ${err.message}`);
+                // State the shot left behind (a tab that didn't close) can
+                // change every later shot, so a failed cleanup fails the shot
+                // and ends the run (Codex on #4471).
+                lastErr = new Error(`cleanup: ${err.message}`);
+                stop = true;
+                break;
             }
+            if (!lastErr) break;
+            if (attempt < attempts) process.stdout.write(`retrying (${lastErr.message}) ... `);
         }
+        if (lastErr) {
+            console.log(`FAILED — ${lastErr.message}${stop ? "; stopping the run" : ""}`);
+            failures.push({ id: shot.id, error: lastErr.message });
+        } else {
+            manifest.push(...entries);
+            console.log(shot.sizes ? `ok (${variants.join(", ")})` : "ok");
+        }
+        if (stop) break;
     }
 
     writeFileSync(
@@ -359,7 +383,9 @@ async function main() {
     );
     session.close();
 
-    const done = selected.length - failures.length;
+    // Shots with at least one image (a failure can come from cleanup after a
+    // capture, and a stopped run leaves later shots unrun).
+    const done = new Set(manifest.map((m) => m.id)).size;
     console.log(`\n${done}/${selected.length} shots captured (${manifest.length} images) to ${args.out}`);
     if (failures.length) {
         console.log(`${failures.length} FAILED:`);

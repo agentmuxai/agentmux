@@ -70,6 +70,13 @@ const OVERRIDES = {
         containsWorkspaceData: true,
         description: "The tools AgentMux uses on this computer, with their versions and where they're installed.",
     },
+    remotes: {
+        // Lists the hosts in the OS user's ~/.ssh/config, which
+        // AGENTMUX_HOME_OVERRIDE doesn't redirect (Codex on #4471). Clean only
+        // on a capturing machine with no SSH hosts.
+        containsWorkspaceData: true,
+        description: "The SSH hosts AgentMux knows: those in ~/.ssh/config and any you've connected to.",
+    },
 };
 
 /** The widgets to capture, from the app's widget config: visible ones with a
@@ -246,6 +253,9 @@ function widgetShot(w) {
         title: o.title ?? w.label,
         description: o.description ?? `The ${w.label} widget, in a pane of its own.`,
         sizes: true,
+        // The UI's timing (a tab still settling, a click on a pane that's still
+        // mounting) makes the odd attempt fail; one retry, after cleanup.
+        retries: 1,
         settleMs: o.settleMs ?? 800,
         containsWorkspaceData: o.containsWorkspaceData ?? "review",
         prep: async (session) => {
@@ -275,12 +285,18 @@ function widgetShot(w) {
                 }
             }
             if (!paneSelector) throw new Error(`opening ${w.label} (via ${route}) didn't open or focus a visible pane`);
-            await session.clickSelector(`${paneSelector} .block-frame-default-header [title="Maximize"]`);
-            await session.wait(600);
             // Maximized means it fills the tab's width (less the pane gaps).
-            const fills = await session.evaluate(
-                `(() => { const r = document.querySelector(${JSON.stringify(paneSelector)}).getBoundingClientRect(); return r.width > window.innerWidth * 0.95; })()`
-            );
+            // Poll rather than check once: a click on a pane still settling
+            // after it opened can be missed, so it's clicked once more.
+            const fillsTab = `(() => { const r = document.querySelector(${JSON.stringify(paneSelector)}).getBoundingClientRect(); return r.width > window.innerWidth * 0.95; })()`;
+            let fills = false;
+            for (let attempt = 0; attempt < 2 && !fills; attempt++) {
+                await session.clickSelector(`${paneSelector} .block-frame-default-header [title="Maximize"]`);
+                for (let i = 0; i < 12 && !fills; i++) {
+                    await session.wait(250);
+                    fills = await session.evaluate(fillsTab);
+                }
+            }
             if (!fills) throw new Error(`${w.label}'s pane didn't maximize`);
             if (o.afterOpen) await o.afterOpen(session, paneSelector);
         },

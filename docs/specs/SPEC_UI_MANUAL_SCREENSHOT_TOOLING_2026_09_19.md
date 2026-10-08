@@ -295,7 +295,11 @@ Things learned while building it, which any new shot should respect:
 - The pointer is moved off the page before every capture (`parkMouse`), so no
   hover state or tooltip is in a shot.
 
-`cleanup(session)` runs after every shot, failed or not. `SHOTS_DEBUG=1` logs
+`cleanup(session)` runs after every attempt, failed or not; a failed cleanup
+fails the shot and ends the run, since what it left behind can spoil every
+later shot. A shot's `retries` (one, for widget shots) re-runs it after a
+failed attempt, because the UI's timing makes the odd attempt fail; only the
+succeeding attempt's images reach the manifest. `SHOTS_DEBUG=1` logs
 each crop; `SHOTS_DEBUG=keep` skips cleanup so the state can be inspected.
 
 ### 8.3 Isolation and the demo environment
@@ -310,8 +314,9 @@ starts Hangar, Terminal and Editor in it. The demo path shows in those
 screenshots, so `--demo` is required and a path that contains the user name or
 lies under the home folder is refused.
 
-Some widgets always show the machine's own data (Toolchain lists its installs
-and their paths); their shots set `containsWorkspaceData: true`. Every other
+Some widgets show the machine's own data whatever the data folder: Toolchain
+lists its installs and their paths, and Remotes lists the hosts in the OS
+user's `~/.ssh/config`. Their shots set `containsWorkspaceData: true`. Every other
 shot is `"review"`: a person checks each image before it is published.
 
 ### 8.4 Running it

@@ -52,10 +52,12 @@ describe("widget suite", () => {
         for (const s of shots) {
             expect(s.id).toMatch(/^widget-[a-z]+$/);
             expect(s.sizes).toBe(true);
+            expect(s.retries).toBe(1);
             expect(typeof s.prep).toBe("function");
             expect(typeof s.cleanup).toBe("function");
         }
         expect(shots.find((s) => s.id === "widget-toolchain").containsWorkspaceData).toBe(true);
+        expect(shots.find((s) => s.id === "widget-remotes").containsWorkspaceData).toBe(true);
         expect(shots.find((s) => s.id === "widget-files").containsWorkspaceData).toBe("review");
     });
 });
