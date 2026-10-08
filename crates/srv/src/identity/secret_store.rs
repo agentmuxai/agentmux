@@ -39,7 +39,10 @@
 //! CALLER waits (and any lock it's holding) instead of hanging it forever.
 //! This is safe specifically because a read has no side effect: if the
 //! timeout fires, the detached thread's eventual (possibly much later)
-//! result is just discarded — nothing acts on a stale read.
+//! result is just discarded — nothing acts on a stale read. At most one
+//! read per account is in flight ([`SharedReads`]): a retry while one is
+//! still waiting on a dialog joins it rather than queueing another dialog
+//! behind it.
 //!
 //! `put`/`delete` deliberately do NOT use this timeout (reagent + Codex,
 //! PR #2679 round 2): the same "detached thread keeps running after the
@@ -55,8 +58,9 @@
 //! prompt on a write still blocks its caller indefinitely; only reads are
 //! protected today.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use keyring::Entry;
@@ -87,26 +91,98 @@ enum RunOutcome {
     WorkerPanicked,
 }
 
-/// Run `f` on a detached thread and wait up to `timeout` for it. The
-/// `RunOutcome` distinction is separate from any error `f` itself can
-/// return — callers fold it into their own error type at the call site
-/// (see `put`/`get`/`get_optional`/`delete` below), not here, so this stays
-/// reusable for a future caller with a different error shape.
-fn run_with_timeout<T: Send + 'static>(
-    timeout: Duration,
-    f: impl FnOnce() -> T + Send + 'static,
-) -> Result<T, RunOutcome> {
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        // The receiver may already be gone (we timed out and moved on) —
-        // a failed send here just means nobody's listening anymore, not a
-        // bug; the value is dropped.
-        let _ = tx.send(f());
-    });
-    rx.recv_timeout(timeout).map_err(|e| match e {
-        mpsc::RecvTimeoutError::Timeout => RunOutcome::TimedOut,
-        mpsc::RecvTimeoutError::Disconnected => RunOutcome::WorkerPanicked,
-    })
+/// What a keychain read returns: `Ok(None)` when there's no entry.
+type ReadResult = Result<Option<Zeroizing<String>>, String>;
+
+/// Keychain reads, at most one in flight per account.
+///
+/// A read runs on a detached thread, and its caller gives up after a
+/// timeout; the platform call underneath can't be cancelled and stays
+/// queued behind an unanswered consent dialog. Without this, every retry
+/// queued another one: on 2026-10-08 an hour of once-a-minute retries
+/// behind one open dialog meant each Deny showed the next queued read's
+/// dialog, six in two seconds. Now a read of an account that already has
+/// one in flight waits on that one, under its own timeout, so an open
+/// dialog stays one dialog. Nothing is cached: a read that starts after the
+/// answer arrived reads again.
+struct SharedReads {
+    in_flight: Arc<Mutex<HashMap<String, Arc<PendingRead>>>>,
+}
+
+#[derive(Default)]
+struct PendingRead {
+    /// `None` until the read finishes; `Err(())` if it panicked.
+    result: Mutex<Option<Result<ReadResult, ()>>>,
+    done: Condvar,
+}
+
+impl SharedReads {
+    fn new() -> Self {
+        Self { in_flight: Arc::new(Mutex::new(HashMap::new())) }
+    }
+
+    /// Wait up to `timeout` for `account_id`'s read, starting it with `read`
+    /// unless one is already in flight. The `RunOutcome` is separate from
+    /// any error the read itself returns; callers fold it into their own
+    /// message (`run_outcome_message`).
+    fn read(
+        &self,
+        account_id: &str,
+        timeout: Duration,
+        read: impl FnOnce() -> ReadResult + Send + 'static,
+    ) -> Result<ReadResult, RunOutcome> {
+        let pending = {
+            let mut in_flight = lock(&self.in_flight);
+            match in_flight.get(account_id) {
+                Some(pending) => pending.clone(),
+                None => {
+                    let pending = Arc::new(PendingRead::default());
+                    in_flight.insert(account_id.to_string(), pending.clone());
+                    let (worker, map, id) = (pending.clone(), self.in_flight.clone(), account_id.to_string());
+                    std::thread::spawn(move || {
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(read)).map_err(|_| ());
+                        // Leave the map first, so a read that starts once the
+                        // answer is out reads again. Only if this is still the
+                        // account's entry: `forget` may have replaced it.
+                        let mut in_flight = lock(&map);
+                        if in_flight.get(&id).is_some_and(|p| Arc::ptr_eq(p, &worker)) {
+                            in_flight.remove(&id);
+                        }
+                        drop(in_flight);
+                        *lock(&worker.result) = Some(result);
+                        worker.done.notify_all();
+                    });
+                    pending
+                }
+            }
+        };
+        let result = lock(&pending.result);
+        let (result, _) = pending
+            .done
+            .wait_timeout_while(result, timeout, |r| r.is_none())
+            .unwrap_or_else(PoisonError::into_inner);
+        match result.as_ref() {
+            None => Err(RunOutcome::TimedOut),
+            Some(Err(())) => Err(RunOutcome::WorkerPanicked),
+            Some(Ok(answer)) => Ok(answer.clone()),
+        }
+    }
+
+    /// Stop sharing `account_id`'s in-flight read: the next read starts its
+    /// own. Called after a write, so no read that starts after it can get
+    /// the value from before it.
+    fn forget(&self, account_id: &str) {
+        lock(&self.in_flight).remove(account_id);
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn shared_reads() -> &'static SharedReads {
+    static READS: OnceLock<SharedReads> = OnceLock::new();
+    READS.get_or_init(SharedReads::new)
 }
 
 fn entry(account_id: &str) -> Result<Entry, String> {
@@ -151,9 +227,11 @@ pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
     if let Some(dir) = FILE_STORE.get() {
         return file::put(dir, &account_key(account_id), secret);
     }
-    entry(account_id)?
+    let written = entry(account_id)?
         .set_password(secret)
-        .map_err(|e| format!("keychain write failed: {e}"))
+        .map_err(|e| format!("keychain write failed: {e}"));
+    shared_reads().forget(account_id);
+    written
 }
 
 /// Read the secret for `account_id`. Returned wrapped in `Zeroizing` so it
@@ -163,18 +241,8 @@ pub fn get(account_id: &str) -> Result<Zeroizing<String>, String> {
         return file::get_optional(dir, &account_key(account_id))?
             .ok_or_else(|| "secret store read failed: no entry for this account".to_string());
     }
-    let account_id = account_id.to_string();
-    match run_with_timeout(TIMEOUT, move || get_now(&account_id)) {
-        Ok(result) => result,
-        Err(outcome) => Err(run_outcome_message("read", outcome)),
-    }
-}
-
-fn get_now(account_id: &str) -> Result<Zeroizing<String>, String> {
-    let pw = entry(account_id)?
-        .get_password()
-        .map_err(|e| format!("keychain read failed: {e}"))?;
-    Ok(Zeroizing::new(pw))
+    get_optional(account_id)?
+        .ok_or_else(|| format!("keychain read failed: {}", keyring::Error::NoEntry))
 }
 
 /// Read the secret for `account_id`, distinguishing "no entry stored yet"
@@ -190,8 +258,8 @@ pub fn get_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, Strin
     if let Some(dir) = FILE_STORE.get() {
         return file::get_optional(dir, &account_key(account_id));
     }
-    let account_id = account_id.to_string();
-    match run_with_timeout(TIMEOUT, move || get_optional_now(&account_id)) {
+    let id = account_id.to_string();
+    match shared_reads().read(account_id, TIMEOUT, move || get_optional_now(&id)) {
         Ok(result) => result,
         Err(outcome) => Err(run_outcome_message("read", outcome)),
     }
@@ -214,11 +282,13 @@ pub fn delete(account_id: &str) -> Result<(), String> {
     if let Some(dir) = FILE_STORE.get() {
         return file::delete(dir, &account_key(account_id));
     }
-    match entry(account_id)?.delete_password() {
+    let deleted = match entry(account_id)?.delete_password() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("keychain delete failed: {e}")),
-    }
+    };
+    shared_reads().forget(account_id);
+    deleted
 }
 
 fn run_outcome_message(op: &str, outcome: RunOutcome) -> String {
@@ -375,30 +445,129 @@ mod tests {
         assert_eq!(account_key("abc123"), "acct:abc123");
     }
 
-    #[test]
-    fn run_with_timeout_returns_the_value_when_the_work_finishes_in_time() {
-        let result = run_with_timeout(Duration::from_secs(5), || 42);
-        assert_eq!(result, Ok(42));
+    const SHORT: Duration = Duration::from_millis(50);
+    const LONG: Duration = Duration::from_secs(10);
+
+    /// A fake platform read: counts how often it's called, and each call
+    /// blocks until `open`, like a read held by an unanswered dialog.
+    struct Gate {
+        calls: std::sync::atomic::AtomicUsize,
+        open: Mutex<bool>,
+        opened: Condvar,
+    }
+
+    impl Gate {
+        fn new() -> Arc<Self> {
+            Arc::new(Self { calls: Default::default(), open: Mutex::new(false), opened: Condvar::new() })
+        }
+        fn read(self: &Arc<Self>, value: &'static str) -> impl FnOnce() -> ReadResult + Send + 'static {
+            let gate = self.clone();
+            move || {
+                gate.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                drop(gate.opened.wait_while(lock(&gate.open), |open| !*open).unwrap());
+                Ok(Some(Zeroizing::new(value.to_string())))
+            }
+        }
+        fn open(&self) {
+            *lock(&self.open) = true;
+            self.opened.notify_all();
+        }
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    fn secret(value: &str) -> ReadResult {
+        Ok(Some(Zeroizing::new(value.to_string())))
     }
 
     #[test]
-    fn run_with_timeout_gives_up_when_the_work_outlives_the_deadline() {
-        let result: Result<(), RunOutcome> = run_with_timeout(Duration::from_millis(50), || {
-            std::thread::sleep(Duration::from_secs(5));
-        });
-        assert_eq!(result, Err(RunOutcome::TimedOut));
+    fn a_read_that_finishes_in_time_returns_its_value() {
+        let reads = SharedReads::new();
+        assert_eq!(reads.read("a", LONG, || secret("v")), Ok(secret("v")));
+        assert_eq!(reads.read("b", LONG, || Ok(None)), Ok(Ok(None)));
     }
 
     #[test]
-    fn run_with_timeout_reports_a_panic_distinctly_from_a_timeout() {
-        // reagent P2: a panicking closure must not be misreported as
-        // "timed out" — it failed immediately, not after waiting the full
-        // deadline. Give it a generous deadline so a slow test runner can't
-        // turn this into a race against the (much shorter) real timeout.
-        let result: Result<(), RunOutcome> = run_with_timeout(Duration::from_secs(5), || {
-            panic!("simulated worker panic");
-        });
-        assert_eq!(result, Err(RunOutcome::WorkerPanicked));
+    fn retries_behind_an_unanswered_read_share_it_instead_of_queueing_more() {
+        // 2026-10-08: once-a-minute retries behind one open dialog queued a
+        // read each, and every Deny showed the next one's dialog.
+        let reads = SharedReads::new();
+        let gate = Gate::new();
+        for _ in 0..5 {
+            assert_eq!(reads.read("muxbus", SHORT, gate.read("v")), Err(RunOutcome::TimedOut));
+        }
+        std::thread::sleep(SHORT);
+        assert_eq!(gate.calls(), 1, "each retry started its own platform read");
+        gate.open();
+    }
+
+    #[test]
+    fn callers_that_join_a_read_all_get_its_answer() {
+        let reads = Arc::new(SharedReads::new());
+        let gate = Gate::new();
+        let waiters: Vec<_> = (0..3)
+            .map(|_| {
+                let (reads, read) = (reads.clone(), gate.read("secret"));
+                std::thread::spawn(move || reads.read("acct", LONG, read))
+            })
+            .collect();
+        std::thread::sleep(Duration::from_millis(300)); // all three are waiting
+        gate.open();
+        for waiter in waiters {
+            assert_eq!(waiter.join().unwrap(), Ok(secret("secret")));
+        }
+        assert_eq!(gate.calls(), 1);
+    }
+
+    #[test]
+    fn a_read_after_the_answer_reads_again() {
+        // No caching: a later read must see a later value.
+        let reads = SharedReads::new();
+        let gate = Gate::new();
+        gate.open();
+        assert_eq!(reads.read("acct", LONG, gate.read("v")), Ok(secret("v")));
+        assert_eq!(reads.read("acct", LONG, gate.read("v")), Ok(secret("v")));
+        assert_eq!(gate.calls(), 2);
+    }
+
+    #[test]
+    fn accounts_are_read_separately() {
+        let reads = SharedReads::new();
+        let gate = Gate::new();
+        assert_eq!(reads.read("a", SHORT, gate.read("v")), Err(RunOutcome::TimedOut));
+        assert_eq!(reads.read("b", SHORT, gate.read("v")), Err(RunOutcome::TimedOut));
+        std::thread::sleep(SHORT);
+        assert_eq!(gate.calls(), 2);
+        gate.open();
+    }
+
+    #[test]
+    fn after_forget_the_next_read_starts_its_own_and_later_ones_share_that() {
+        let reads = SharedReads::new();
+        let (old, new) = (Gate::new(), Gate::new());
+        assert_eq!(reads.read("acct", SHORT, old.read("before")), Err(RunOutcome::TimedOut));
+        reads.forget("acct"); // a write happened
+        assert_eq!(reads.read("acct", SHORT, new.read("after")), Err(RunOutcome::TimedOut));
+        // The old read finishing must not drop the new one from the map.
+        old.open();
+        std::thread::sleep(SHORT);
+        assert_eq!(reads.read("acct", SHORT, new.read("after")), Err(RunOutcome::TimedOut));
+        std::thread::sleep(SHORT);
+        assert_eq!((old.calls(), new.calls()), (1, 1));
+        new.open();
+    }
+
+    #[test]
+    fn a_panicking_read_is_reported_as_such_and_the_next_read_tries_again() {
+        // reagent P2: a panic must not be misreported as "timed out" — it
+        // failed immediately, not after waiting the full deadline.
+        let reads = SharedReads::new();
+        assert_eq!(
+            reads.read("acct", LONG, || panic!("simulated worker panic")),
+            Err(RunOutcome::WorkerPanicked)
+        );
+        assert_eq!(reads.read("acct", LONG, || Ok(None)), Ok(Ok(None)));
     }
 
     #[test]
