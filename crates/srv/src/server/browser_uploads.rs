@@ -193,32 +193,62 @@ fn handle_path(_file: &std::fs::File) -> std::io::Result<PathBuf> {
 }
 
 /// A content type for the file, from its extension, as a browser's own file
-/// picker would give it. Unknown types go as generic bytes.
+/// picker would give it. An extension not known here gets no type at all
+/// (empty), as the picker gives one it doesn't know, rather than a forced
+/// generic one a page might reject.
 fn mime_for(name: &str) -> &'static str {
     let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
         "txt" | "log" => "text/plain",
+        "md" => "text/markdown",
         "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
         "htm" | "html" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" => "text/javascript",
+        "rtf" => "application/rtf",
         "json" => "application/json",
-        "xml" => "application/xml",
+        "xml" => "text/xml",
         "pdf" => "application/pdf",
         "zip" => "application/zip",
-        "gz" => "application/gzip",
+        "gz" | "tgz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "7z" => "application/x-7z-compressed",
+        "rar" => "application/vnd.rar",
         "png" => "image/png",
         "jpg" | "jpeg" => "image/jpeg",
         "gif" => "image/gif",
         "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "tif" | "tiff" => "image/tiff",
+        "heic" => "image/heic",
+        "avif" => "image/avif",
         "svg" => "image/svg+xml",
-        "mp4" => "video/mp4",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
         "webm" => "video/webm",
+        "avi" => "video/x-msvideo",
+        "mkv" => "video/x-matroska",
+        "mpeg" | "mpg" => "video/mpeg",
         "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
         "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "flac" => "audio/flac",
         "doc" => "application/msword",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "exe" | "dll" | "msi" => "application/x-msdownload",
-        _ => "application/octet-stream",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "odp" => "application/vnd.oasis.opendocument.presentation",
+        "exe" | "dll" => "application/x-msdownload",
+        "msi" => "application/x-msi",
+        "apk" => "application/vnd.android.package-archive",
+        _ => "",
     }
 }
 
@@ -293,7 +323,10 @@ mod tests {
         assert_eq!(files[0].name, "report.txt");
         assert_eq!(files[0].bytes, b"x");
         assert_eq!(files[0].mime, "text/plain");
-        assert_eq!(files[1].mime, "application/octet-stream");
+        // Unknown to the table: no type, as a browser's picker gives it.
+        assert_eq!(files[1].mime, "");
+        assert_eq!(mime_for("Deck.PPTX"), "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        assert_eq!(mime_for("clip.mov"), "video/quicktime");
     }
 
     #[test]
