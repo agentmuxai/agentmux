@@ -566,6 +566,7 @@ partial list.
 | [`SPEC_GATED_RENDERER_RECOVERY_2026_06_01`](SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md) | Gated Renderer Recovery — Memory-Aware Crash Handling |
 | [`SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27`](SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md) | Spec: Global Memory delivery into agents — single source of truth |
 | [`SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24`](SPEC_GPU_MEMORY_TRACING_SCAFFOLDING_2026_07_24.md) | Spec: GPU Memory Tracing Scaffolding — a real trace, not another process-level guess |
+| [`SPEC_HANGAR_ZOOM_2026_10_08`](SPEC_HANGAR_ZOOM_2026_10_08.md) | Zoom in the Hangar, through the shared pane zoom |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
 | [`SPEC_HELP_PANE_FILTER_2026_10_08`](SPEC_HELP_PANE_FILTER_2026_10_08.md) | A filter for the Help pane, on one shared filter box |
 | [`SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14`](SPEC_HOST_UI_THREAD_HANG_WATCHDOG_2026_08_14.md) | SPEC: Host UI-thread hang detection, forensic dump, and auto-recovery |

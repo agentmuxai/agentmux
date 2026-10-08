@@ -245,6 +245,19 @@ describe("the Files pane: listing", () => {
     });
 });
 
+// SPEC_HANGAR_ZOOM_2026_10_08.md: the shared per-pane zoom (`term:zoom`).
+describe("the Files pane: zoom", () => {
+    it("scales with the pane's term:zoom, and is 1 when unset", async () => {
+        const v = mount();
+        const root = () => v.container.querySelector(".files-view") as HTMLElement;
+        expect(root().style.zoom).toBe("1");
+        await v.ctx.setMeta({ "term:zoom": 1.5 });
+        expect(root().style.zoom).toBe("1.5");
+        await v.ctx.setMeta({ "term:zoom": null });
+        expect(root().style.zoom).toBe("1");
+    });
+});
+
 describe("the Files pane: navigation", () => {
     it("opens a folder on double-click, and goes back, forward and up", async () => {
         const v = mount();
