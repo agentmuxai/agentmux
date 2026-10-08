@@ -178,6 +178,13 @@ impl Machine {
                 self.sign_in_notified = false;
                 out.push(Effect::RetractSignInNeeded);
             }
+            // A sign-out ends a pause the agents were never told about, so a
+            // later sign-in starts a new one rather than dating it from the
+            // old outage. A pause they were told about stays open for its
+            // resume note.
+            if state == MuxBusDeliveryState::SignedOut && !self.pause_noted {
+                self.paused_since_ms = None;
+            }
             if state.is_paused() && self.paused_since_ms.is_none() {
                 self.paused_since_ms = Some(now_ms);
             }
@@ -355,6 +362,19 @@ mod tests {
         assert!(!kinds(&fx).contains(&"notify"));
         let fx = m.set_link(Link::Connected, None, T0 + 5 * PAUSE_NOTICE_MS);
         assert!(kinds(&fx).contains(&"resumed"));
+    }
+
+    #[test]
+    fn a_short_pause_ended_by_a_sign_out_is_not_dated_from_later() {
+        let mut m = connected_machine();
+        m.set_link(Link::Unreachable("closed".into()), None, T0);
+        m.signed_out(T0 + PAUSE_NOTICE_MS / 2);
+        assert_eq!(m.paused_since_ms(), None);
+        let later = T0 + 100 * PAUSE_NOTICE_MS;
+        m.saw_session(None, None, later);
+        assert!(!kinds(&m.tick(None, later + 1)).contains(&"pause"), "no note dated from the old outage");
+        let fx = m.tick(None, later + PAUSE_NOTICE_MS);
+        assert!(fx.contains(&Effect::PauseNote { since_ms: later, reason: pause_reason(Reconnecting) }));
     }
 
     #[test]

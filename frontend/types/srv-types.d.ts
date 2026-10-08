@@ -1203,6 +1203,7 @@ declare global {
         "notify:os:turnerrored"?: boolean;
         "notify:os:agentcrashed"?: boolean;
         "notify:os:messageneedsreview"?: boolean;
+        "notify:os:cloudsignedout"?: boolean;
         "notify:pause:until"?: number;
         "notify:pause:allowattention"?: boolean;
         "notify:taskbar:attention"?: boolean;
