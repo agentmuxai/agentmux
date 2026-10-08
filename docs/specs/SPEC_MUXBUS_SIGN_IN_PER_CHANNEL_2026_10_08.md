@@ -75,8 +75,10 @@ Otherwise `stable`'s account could pair with this channel's row.
 `muxbus_save_lock` serializes threads of one process. A save on Windows is about a dozen keychain writes,
 and the keychain is host-wide. An OS advisory lock on a file beside the shared store (`flock` /
 `LockFileEx`, the same primitive as `registry::LeaseStore`) now wraps `muxbus_save`, `muxbus_load` and
-`muxbus_clear`, taken after the in-process lock. It waits up to five seconds and then proceeds without
-it, logging, so a suspended holder cannot stop sign-in. The lock file is never deleted.
+`muxbus_clear`, taken after the in-process lock. It waits up to five seconds; if it still can't take the
+lock, the operation fails as a temporary error rather than running unlocked: a load is retried with
+backoff, and a sign-in or sign-out reports an error to try again. The OS releases the lock when its
+holder exits, so a crashed holder blocks nothing. The lock file is never deleted.
 
 ### 3.4 A torn read
 
@@ -136,8 +138,8 @@ as.
 
 - Namespace, row id and credential prefix per channel and for `stable`, including an isolated store
   keeping its existing keys; two channels never share a keychain entry.
-- The lock: a second holder waits and then proceeds without the lock after the wait; it is free once
-  released.
+- The lock: a second holder waits, then fails the operation if the lock is still held; it is free once
+  released; locks are per namespace.
 - A torn read is retried until it settles, gives up after the allowed tries, and an absent sign-in is not
   retried.
 - The host-wide fallback adopts only the same account's tokens.

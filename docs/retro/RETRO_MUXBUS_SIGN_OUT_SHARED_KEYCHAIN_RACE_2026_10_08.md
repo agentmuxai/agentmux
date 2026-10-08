@@ -85,8 +85,8 @@ tore it, then stayed torn.
    installed releases stay signed in.
 2. **One critical section across processes.** An OS advisory lock beside the shared store
    covers every sign-in save, load and clear, so two processes in one channel (two live
-   versions of `stable`, say) cannot interleave. The wait is bounded; a stuck holder cannot
-   stop sign-in.
+   versions of `stable`, say) cannot interleave. The wait is bounded; past it the operation
+   fails as temporary and is retried, never run unlocked.
 3. **A torn read is retried before it means "signed out".** An older build with no lock
    may be mid-save; the read is repeated a few times first.
 

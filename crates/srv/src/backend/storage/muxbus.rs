@@ -78,8 +78,9 @@ pub(super) fn current_agent_credential_prefix() -> String {
 // interleaving left a torn set that reads treated as signed out. An OS file
 // lock makes save, load and clear one critical section across processes.
 
-/// How long a save or load waits for another process before going ahead
-/// without the lock (a stuck holder must not stop sign-in for good).
+/// How long a save, load or clear waits for another process. Past it the
+/// operation fails as transient (a load is retried, a sign-in reports an
+/// error) instead of running unlocked, which is what tore sign-ins.
 const XPROC_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// A held OS advisory lock; released when dropped (the handle closes).
@@ -88,8 +89,8 @@ pub(super) struct CrossProcessGuard {
 }
 
 /// Take the lock at `path`, polling until `wait` has passed. `None` when it
-/// couldn't be taken (another process held it the whole time, or the file
-/// couldn't be opened): the caller proceeds, as the in-process lock alone did.
+/// couldn't be taken: another process held it the whole time, or the file
+/// couldn't be opened.
 pub(super) fn lock_file(path: &std::path::Path, wait: std::time::Duration) -> Option<CrossProcessGuard> {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -109,13 +110,23 @@ pub(super) fn lock_file(path: &std::path::Path, wait: std::time::Duration) -> Op
     }
 }
 
-fn lock_namespace(ns: &str) -> Option<CrossProcessGuard> {
-    let dir = crate::registry::resolve_global_shared_root()?.join("muxbus-locks");
-    let guard = lock_file(&dir.join(format!("{}.lock", ns.replace(':', "_"))), XPROC_LOCK_WAIT);
-    if guard.is_none() {
-        tracing::warn!(namespace = %ns, "muxbus: another process held the keychain lock for {XPROC_LOCK_WAIT:?}; going ahead without it");
-    }
-    guard
+/// The lock for keychain namespace `ns`, under `root`'s `muxbus-locks`. With
+/// no shared root (some test setups) there is nowhere to put it: `Ok(None)`.
+fn lock_in(
+    root: Option<std::path::PathBuf>,
+    ns: &str,
+    wait: std::time::Duration,
+) -> Result<Option<CrossProcessGuard>, StoreError> {
+    let Some(root) = root else { return Ok(None) };
+    let path = root.join("muxbus-locks").join(format!("{}.lock", ns.replace(':', "_")));
+    lock_file(&path, wait).map(Some).ok_or_else(|| {
+        tracing::warn!(namespace = %ns, "muxbus: couldn't take the keychain lock within {wait:?}");
+        StoreError::Other(format!("muxbus: couldn't take the keychain lock for {ns} within {wait:?}; try again"))
+    })
+}
+
+fn lock_namespace(ns: &str) -> Result<Option<CrossProcessGuard>, StoreError> {
+    lock_in(crate::registry::resolve_global_shared_root(), ns, XPROC_LOCK_WAIT)
 }
 
 /// Single-entry key holding all three tokens as one JSON blob. Two different
@@ -826,7 +837,7 @@ impl Store {
         //     it only serializes this read against `muxbus_save`/
         //     `muxbus_clear`'s writes, which already take the same lock.
         let _migration_guard = self.muxbus_save_lock.lock().unwrap();
-        let _xproc = lock_namespace(&keychain_namespace());
+        let _xproc = lock_namespace(&keychain_namespace())?;
         let row_id = current_row_id();
         let row = {
             let conn = self.conn.lock().unwrap();
@@ -1136,7 +1147,7 @@ impl Store {
             // Its own lock: `stable` saves the host-wide set under that one.
             // Always taken after this channel's, never the other way round.
             let global_tokens = {
-                let _global = lock_namespace(GLOBAL_KEYCHAIN_NS);
+                let _global = lock_namespace(GLOBAL_KEYCHAIN_NS)?;
                 read_any_layout(GLOBAL_KEYCHAIN_NS)
             };
             if let Some(tokens) = global_tokens.filter(|t| same_account(t, user_sub)) {
@@ -1174,7 +1185,7 @@ impl Store {
         // already-committed credential.
         let _save_guard = self.muxbus_save_lock.lock().unwrap();
         let ns = keychain_namespace();
-        let _xproc = lock_namespace(&ns);
+        let _xproc = lock_namespace(&ns)?;
 
         // Read the outgoing account's user_sub now, before it's overwritten
         // below, so a genuine account switch (vs. a same-account token
@@ -1274,7 +1285,7 @@ impl Store {
         // against each other for.
         let _clear_guard = self.muxbus_save_lock.lock().unwrap();
         let ns = keychain_namespace();
-        let _xproc = lock_namespace(&ns);
+        let _xproc = lock_namespace(&ns)?;
         // Best-effort — a missing/inaccessible keychain entry must not block
         // clearing the (still-useful) SQL row. Clears every chunk + count/gen
         // entry the Windows-only chunked layout could have written (harmless
@@ -1548,6 +1559,21 @@ mod tests {
         drop(first);
         // Released: the next holder gets it at once.
         assert!(lock_file(&path, std::time::Duration::from_millis(150)).is_some());
+    }
+
+    /// A namespace whose lock another process holds fails the operation
+    /// instead of running it unlocked; with no shared root there is no lock.
+    #[test]
+    fn a_lock_that_cant_be_taken_fails_the_operation() {
+        let dir = tempfile::tempdir().unwrap();
+        let wait = std::time::Duration::from_millis(100);
+        let held = lock_in(Some(dir.path().to_path_buf()), "muxbus:global", wait).unwrap();
+        assert!(held.is_some());
+        assert!(lock_in(Some(dir.path().to_path_buf()), "muxbus:global", wait).is_err());
+        assert!(lock_in(Some(dir.path().to_path_buf()), "muxbus:channel:dev-x", wait).unwrap().is_some(), "per namespace");
+        drop(held);
+        assert!(lock_in(Some(dir.path().to_path_buf()), "muxbus:global", wait).unwrap().is_some());
+        assert!(lock_in(None, "muxbus:global", wait).unwrap().is_none());
     }
 
     /// A torn read that heals (an older build finished its save) is retried,
