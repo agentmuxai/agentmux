@@ -279,6 +279,17 @@ describe("focusManager", () => {
             expect(document.activeElement).toBe(input);
         });
 
+        it("selects what the data-pane-focus input still holds, so typing replaces it", () => {
+            bcmForBlockId = { "block-1": { viewModel: {} } };
+            document.body.innerHTML = `<div data-blockid="block-1"><input id="filter" data-pane-focus value="old query" /></div>`;
+            const input = document.body.querySelector<HTMLInputElement>("#filter")!;
+            input.checkVisibility = () => true;
+
+            focusManager.ensureSelectionFocused("selection");
+
+            expect([input.selectionStart, input.selectionEnd]).toEqual([0, "old query".length]);
+        });
+
         it("skips a disabled or hidden data-pane-focus input", () => {
             bcmForBlockId = { "block-1": { viewModel: {} } };
             document.body.innerHTML = `<div data-blockid="block-1"><input id="a" data-pane-focus disabled /><input id="b" data-pane-focus /><input id="c" data-pane-focus /></div>`;
@@ -317,9 +328,31 @@ describe("focusManager", () => {
             expect(giveFocus).toHaveBeenCalledTimes(1);
         });
 
+        // Cmd+, from a terminal: Settings is selected but not mounted yet, and
+        // the caret is still in the terminal the selection left.
+        it("keeps retrying while the caret is still in the pane the selection left", () => {
+            giveFocus.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
+            document.body.innerHTML = `<div data-blockid="term"><textarea id="xterm"></textarea></div><div data-blockid="block-1"></div>`;
+            (document.getElementById("xterm") as HTMLTextAreaElement).focus();
+            focusManager.ensureSelectionFocused("selection");
+            runFrames(2);
+            expect(giveFocus).toHaveBeenCalledTimes(3);
+        });
+
+        // The hamburger menu opened Settings: the caret is on its button.
+        it("keeps retrying while the caret is on a window-chrome button", () => {
+            giveFocus.mockReturnValueOnce(false).mockReturnValueOnce(false).mockReturnValue(true);
+            document.body.innerHTML = `<button id="menu">≡</button><div data-blockid="block-1"></div>`;
+            (document.getElementById("menu") as HTMLButtonElement).focus();
+            focusManager.ensureSelectionFocused("selection");
+            runFrames(2);
+            expect(giveFocus).toHaveBeenCalledTimes(3);
+        });
+
         it("stops retrying once the user puts the caret somewhere", () => {
             giveFocus.mockReturnValue(false);
             focusManager.ensureSelectionFocused("selection");
+            caretOutsidePanes = true; // a text field outside the panes
             document.body.innerHTML = `<input id="elsewhere" />`;
             document.body.querySelector<HTMLInputElement>("#elsewhere")!.focus();
             runFrames(3);

@@ -4,8 +4,8 @@
 // SPEC_PANE_CLICK_THROUGH_INPUT_FOCUS_2026_09_23.md §4.1 — the one guard every
 // pane-selection focus path consults before moving the caret.
 
-import { afterEach, describe, expect, it } from "vitest";
-import { eventBelongsToBlock, eventBelongsToPaneOf, isEditableTarget, userCaretInBlock } from "./focusutil";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { eventBelongsToBlock, eventBelongsToPaneOf, focusOnOpen, focusWhenRendered, isEditableTarget, userCaretInBlock } from "./focusutil";
 
 function mountBlock(blockId: string, inner: string): HTMLElement {
     const block = document.createElement("div");
@@ -168,5 +168,85 @@ describe("isEditableTarget", () => {
         expect(isEditableTarget(document.createElement("button"))).toBe(false);
         expect(isEditableTarget(document.createElement("div"))).toBe(false);
         expect(isEditableTarget(null)).toBe(false);
+    });
+});
+
+describe("focusOnOpen", () => {
+    it("focuses the element once it is in the document, without scrolling", async () => {
+        const input = document.createElement("input");
+        const focus = vi.spyOn(input, "focus");
+        focusOnOpen(input); // a Solid ref runs before the element is inserted
+        document.body.appendChild(input);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(input);
+        expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+        input.remove();
+    });
+
+    it("selects the existing text when asked (rename fields)", async () => {
+        const input = document.createElement("input");
+        input.value = "old name";
+        document.body.appendChild(input);
+        focusOnOpen(input, { select: true });
+        await Promise.resolve();
+        expect([input.selectionStart, input.selectionEnd]).toEqual([0, 8]);
+        input.remove();
+    });
+
+    it("does nothing for an element that never made it into the document", async () => {
+        const input = document.createElement("input");
+        focusOnOpen(input);
+        await Promise.resolve();
+        expect(document.activeElement).not.toBe(input);
+    });
+});
+
+describe("focusOnOpen guard", () => {
+    afterEach(() => {
+        document.body.innerHTML = "";
+    });
+
+    // A form that remounts in a background pane must not take the caret from
+    // the pane the user is typing in.
+    it("leaves a caret the user has in another pane's text field", async () => {
+        document.body.innerHTML = `<div data-blockid="a"><textarea id="typing"></textarea></div><div data-blockid="b"><input id="form" /></div>`;
+        const typing = document.getElementById("typing") as HTMLTextAreaElement;
+        typing.focus();
+        focusOnOpen(document.getElementById("form")!);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(typing);
+    });
+
+    it("takes it from a field in the same pane", async () => {
+        document.body.innerHTML = `<div data-blockid="a"><textarea id="t"></textarea><input id="form" /></div>`;
+        (document.getElementById("t") as HTMLTextAreaElement).focus();
+        const form = document.getElementById("form")!;
+        focusOnOpen(form);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(form);
+    });
+
+    // Terminal Find is portaled to <body>, outside every pane, and opens over
+    // the terminal whose caret it takes.
+    it("an input outside the panes takes the caret from a pane", async () => {
+        document.body.innerHTML = `<div data-blockid="a"><textarea id="t"></textarea></div><input id="find" />`;
+        (document.getElementById("t") as HTMLTextAreaElement).focus();
+        const find = document.getElementById("find")!;
+        focusOnOpen(find);
+        await Promise.resolve();
+        expect(document.activeElement).toBe(find);
+    });
+});
+
+describe("focusWhenRendered", () => {
+    it("finds the element after the render that adds it", async () => {
+        document.body.innerHTML = `<div id="list"></div>`;
+        const list = document.getElementById("list")!;
+        focusWhenRendered(() => list.querySelector<HTMLInputElement>("input:last-of-type"));
+        list.innerHTML = `<input id="old" /><input id="new" />`; // the "+ Add" render
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(document.activeElement?.id).toBe("new");
+        document.body.innerHTML = "";
     });
 });

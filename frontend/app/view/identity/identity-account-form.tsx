@@ -18,6 +18,7 @@ import { supportsOAuth } from "@/app/view/accounts/oauth-catalog";
 import "./identity-view.scss";
 import "@/app/view/accounts/oauth-connect.scss";
 import { Button } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 // Per-provider validation endpoint, surfaced in the egress help note next to
 // the Validate button so the user sees exactly where their key is sent before
@@ -237,6 +238,7 @@ export function AccountForm({ model }: { model: IdentityViewModel }): JSX.Elemen
                             value={name()}
                             onInput={(e) => setName(e.currentTarget.value)}
                             placeholder="GitHub agent1-workflow"
+                            ref={(el) => focusOnOpen(el, { select: true })}
                         />
                     </FormField>
 

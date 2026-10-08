@@ -18,6 +18,7 @@ import { RecordingSection } from "./sections/recording-section";
 import { DevicesSection } from "./sections/devices-section";
 import { AdvancedSection } from "./sections/advanced-section";
 import "./settings.scss";
+import { focusWhenRendered } from "@/util/focusutil";
 
 // ── Config error banner ───────────────────────────────────────────────────────
 
@@ -69,12 +70,21 @@ const SEARCH_HIGHLIGHT_CLASS = "setting-row--search-highlight";
 
 export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     const section = () => props.model.activeSection();
-    const setSection = (s: SettingsSection) => props.model.setSection(s);
+    let container!: HTMLDivElement;
+    let lastPressAt = Number.NEGATIVE_INFINITY;
+    // A section picked with the mouse hands the caret back to the search, its
+    // text selected, so the next keystrokes search. Arrow keys in the tab list
+    // keep it there, so keyboard navigation of the tabs still works.
+    const setSection = (s: SettingsSection) => {
+        props.model.setSection(s);
+        if (performance.now() - lastPressAt > 1000) return;
+        focusWhenRendered(() => container.querySelector<HTMLInputElement>(".settings-search-input"), { select: true });
+    };
 
     const openRaw = () => getApi().openSettingsFileInEditor();
 
     function handleSelectResult(entry: SettingsIndexEntry) {
-        setSection(entry.section);
+        props.model.setSection(entry.section);
         // The target section's row only exists in the DOM once its <Match>
         // arm has (re-)rendered for the new section — queueMicrotask, not a
         // same-tick lookup, mirrors the same pattern the command palette
@@ -89,7 +99,13 @@ export function SettingsView(props: { model: SettingsViewModel }): JSX.Element {
     }
 
     return (
-        <div class="settings-view-container">
+        <div
+            ref={container}
+            class="settings-view-container"
+            onPointerDown={() => {
+                lastPressAt = performance.now();
+            }}
+        >
             {/* One tablist along the top: icons only when narrow, labels when
                 there's room (SPEC_UI_LINE_STYLE_COMPONENT_SYSTEM_2026_10_05.md §5.4). */}
             <TabbedPane items={RAIL} value={section()} onChange={setSection} ariaLabel="Settings section">

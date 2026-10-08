@@ -365,6 +365,7 @@ partial list.
 | [`SPEC_MONOLITH_MODULE_SPLITS_2026_09_22`](SPEC_MONOLITH_MODULE_SPLITS_2026_09_22.md) | SPEC — Split the two largest `agentmux-srv` files into directory modules |
 | [`SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04`](SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md) | Plan: muxbus cross-channel duplicate delivery |
 | [`SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02`](SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md) | MuxBus cloud sign-in: scope the keychain tokens to the channel |
+| [`SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08`](SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md) | SPEC: each channel signs in to MuxBus on its own |
 | [`SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27`](SPEC_MUXLOG_AGENT_ADMISSION_TIMELINE_2026_09_27.md) | SPEC: `muxlog admission` — one cross-instance timeline for "why won't this agent run here" |
 | [`SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22`](SPEC_MUXLOG_SWARM_DISPATCH_VERDICT_2026_08_22.md) | SPEC: `muxlog swarm -d/--dispatch` — a correlated dispatch-lifecycle verdict |
 | [`SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22`](SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md) | SPEC: `muxspect find` — cross-instance block/agent lookup |

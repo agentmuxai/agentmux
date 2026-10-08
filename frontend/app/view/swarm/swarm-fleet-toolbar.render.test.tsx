@@ -132,4 +132,19 @@ describe("FleetToolbar — broadcast composer vs. Stop button", () => {
 
         expect(queryByText("Stop 1")).not.toBeNull();
     });
+
+    // REPORT_FOCUS_ON_OPEN_AUDIT_2026_10_08.md: the composer replaces the
+    // button that opened it, so without an explicit focus the caret fell to
+    // <body> and the user had to click into the field before typing.
+    it("puts the caret in the message field when Broadcast opens it", async () => {
+        const model = modelStub(["a"]);
+        const { getByText, container } = render(() => <FleetToolbar model={model} allBlockIds={() => ["a"]} />);
+        const button = getByText("Broadcast").closest("button")!;
+        button.focus();
+
+        fireEvent.click(button);
+        await Promise.resolve();
+
+        expect(document.activeElement).toBe(container.querySelector(".swarm-fleet-broadcast-input"));
+    });
 });

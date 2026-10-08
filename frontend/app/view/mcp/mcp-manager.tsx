@@ -19,6 +19,7 @@ import { getMcpCapability, watchMcpCapability, type McpCapabilityStatus } from "
 import "../agent/components/AgentPrimitiveModal.scss";
 import "./mcp-status-pill.scss";
 import { Button } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 const STATUS_LABEL: Record<McpCapabilityStatus, string> = {
     unknown: "Not checked",
@@ -191,6 +192,7 @@ export const McpManager = (): JSX.Element => {
                                     onContextMenu={showTextInputContextMenu}
                                     placeholder="e.g. filesystem"
                                     required
+                                    ref={(el) => focusOnOpen(el, { select: true })}
                                 />
                                 <span class="agent-primitive-modal-field-label">Transport</span>
                                 <input

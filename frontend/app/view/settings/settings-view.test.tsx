@@ -100,6 +100,32 @@ describe("SettingsView section tabs", () => {
         expect(screen.getByTestId("terminal-section")).toBeInTheDocument();
         expect(screen.queryByTestId("appearance-section")).not.toBeInTheDocument();
     });
+
+    // REPORT_FOCUS_ON_OPEN_AUDIT_2026_10_08.md: switching sections with the
+    // mouse used to leave the caret on the tab, so typing didn't search.
+    it("a tab picked with the mouse hands the caret back to the search, its text selected", async () => {
+        const { model } = renderSettings();
+        model.setQuery("font");
+        const tab = screen.getByRole("tab", { name: "Terminal" });
+        fireEvent.pointerDown(tab);
+        tab.focus();
+        tab.click();
+        await Promise.resolve();
+        await Promise.resolve();
+        const search = document.querySelector<HTMLInputElement>(".settings-search-input")!;
+        expect(document.activeElement).toBe(search);
+        expect([search.selectionStart, search.selectionEnd]).toEqual([0, search.value.length]);
+    });
+
+    it("arrow keys in the tab list keep the caret on the tabs", async () => {
+        renderSettings();
+        const tab = screen.getByRole("tab", { name: "Appearance" });
+        tab.focus();
+        fireEvent.keyDown(tab, { key: "ArrowRight" });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Window & Panes" }));
+    });
 });
 
 describe("SettingsView pane title", () => {

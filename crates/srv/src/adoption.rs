@@ -12,7 +12,7 @@
 //! |---|---|---|
 //! | Global Memory (global, non-system bundles) and their versions | every channel store, newest wins | each channel kept its own; the same entry written twice is one entry |
 //! | Native memory and its versions | every channel store, newest wins | the shared store has none; the entries are scattered over older channels |
-//! | Accounts, per-agent cloud credentials | this channel's own isolated store and the newest same-branch predecessor | a login belongs to the build that made it; adopting every channel's would flood the Armory with test accounts |
+//! | Accounts | this channel's own isolated store and the newest same-branch predecessor | a login belongs to the build that made it; adopting every channel's would flood the Armory with test accounts |
 //!
 //! Everything else is left alone. Non-global bundles in particular are mostly
 //! per-agent bundles each channel made for itself (4,740 distinct ones across the
@@ -68,7 +68,6 @@ pub(crate) struct Report {
     pub native_memory_added: usize,
     pub native_memory_updated: usize,
     pub accounts_added: usize,
-    pub agent_credentials_added: usize,
     /// Rows the target refused (a name already taken by another id, a missing
     /// required column): skipped, not fatal.
     pub rows_refused: usize,
@@ -84,7 +83,6 @@ impl Report {
             + self.native_memory_added
             + self.native_memory_updated
             + self.accounts_added
-            + self.agent_credentials_added
             > 0
     }
 }
@@ -109,7 +107,7 @@ pub(crate) struct Inputs<'a> {
 pub(crate) struct Sources {
     /// Every channel's identity store, newest first.
     pub all: Vec<PathBuf>,
-    /// This channel's own store and its predecessor's, for accounts and credentials.
+    /// This channel's own store and its predecessor's, for accounts.
     pub accounts: Vec<PathBuf>,
 }
 
@@ -410,16 +408,14 @@ fn adopt_native_memory(src: &Connection, dst: &Connection, ledger: &mut Ledger, 
     }
 }
 
-/// Accounts and per-agent cloud credentials, from one source.
+/// Accounts, from one source. Per-agent cloud credentials are not adopted:
+/// they belong to the MuxBus account the source channel signed in as, which
+/// need not be this channel's, and they are provisioned again on first use.
 fn adopt_accounts(src: &Connection, dst: &Connection, ledger: &mut Ledger, r: &mut Report) {
     let a = copy_table(src, dst, &Spec { table: "db_accounts", cat: "acct", key: &["id"], newer: None, filter: "1 = 1".into() }, ledger);
     r.accounts_added += a.added.len();
     r.rows_refused += a.refused;
     r.deleted_stay_deleted += a.deleted_stay_deleted;
-    let c = copy_table(src, dst, &Spec { table: "db_agent_credentials", cat: "cred", key: &["agent_id"], newer: None, filter: "1 = 1".into() }, ledger);
-    r.agent_credentials_added += c.added.len();
-    r.rows_refused += c.refused;
-    r.deleted_stay_deleted += c.deleted_stay_deleted;
 }
 
 /// Run one pass into `target`. Never fails the boot: a source that cannot be
@@ -510,7 +506,6 @@ pub(crate) fn run_at_boot(target: &Store, target_path: &Path) {
             global_memory = r.global_memory_added + r.global_memory_updated,
             native_memory = r.native_memory_added + r.native_memory_updated,
             accounts = r.accounts_added,
-            agent_credentials = r.agent_credentials_added,
             refused = r.rows_refused,
             kept_deleted = r.deleted_stay_deleted,
             budget_exhausted = r.budget_exhausted,
@@ -762,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn accounts_and_credentials_come_only_from_this_channel_and_its_predecessor() {
+    fn accounts_come_only_from_this_channel_and_its_predecessor_and_credentials_not_at_all() {
         let f = Fixture::new();
         let own = f.channel_store("local-main-b28b7a-0000000c");
         let pred = f.channel_store("local-main-b28b7a-0000000b");
@@ -781,7 +776,7 @@ mod tests {
 
         let r = f.run("local-main-b28b7a-0000000c");
         assert_eq!(r.accounts_added, 2, "{r:?}");
-        assert_eq!(r.agent_credentials_added, 2, "{r:?}");
+        assert_eq!(count(&f.target, "SELECT COUNT(*) FROM db_agent_credentials"), 0, "credentials are not adopted");
         let ids = text(&f.target, "SELECT group_concat(id) FROM (SELECT id FROM db_accounts ORDER BY id)");
         assert_eq!(ids, "acct-own,acct-pred");
         // the stored folder still points at the source channel, so the login works at once
