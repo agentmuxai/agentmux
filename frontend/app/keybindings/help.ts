@@ -69,3 +69,29 @@ export function helpSections(platform: KeyPlatform): HelpSection[] {
     }
     return CATEGORY_ORDER.filter((c) => sections.has(c)).map((category) => ({ category, entries: sections.get(category)! }));
 }
+
+/** macOS key symbols by name, for the Help pane's filter (SPEC_HELP_PANE_FILTER_2026_10_08.md §3). */
+const KEY_SYMBOL_WORDS: Record<string, string> = {
+    "⌘": "cmd command",
+    "⇧": "shift",
+    "⌥": "opt option alt",
+    "⌃": "ctrl control",
+    "↑": "up arrow",
+    "↓": "down arrow",
+    "←": "left arrow",
+    "→": "right arrow",
+    "⏎": "enter return",
+    "↩": "enter return",
+    "⌫": "backspace delete",
+    "⎋": "esc escape",
+};
+
+/** A key label plus the names of the symbols in it, so "cmd shift w" finds "⇧⌘W". */
+export function keyLabelWords(label: string): string {
+    let words = label;
+    for (const ch of label) {
+        const named = KEY_SYMBOL_WORDS[ch];
+        if (named) words += " " + named;
+    }
+    return words;
+}

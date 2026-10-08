@@ -87,3 +87,23 @@ describe("HelpView zoom", () => {
         expect(setMetaMock).not.toHaveBeenCalled();
     });
 });
+
+describe("HelpView filter", () => {
+    it("has a filter box that is the pane's typing target, and typing filters the list", async () => {
+        const ctx = {
+            blockId: "help-1",
+            meta: () => ({}),
+            setMeta: vi.fn(),
+            isFocused: () => true,
+            visibility: () => "active",
+        } as unknown as PaneTabHostContext;
+        const { getByLabelText, queryByText } = render(() => <HelpView ctx={ctx} />);
+        const input = getByLabelText("Filter help") as HTMLInputElement;
+        expect(input.hasAttribute("data-pane-focus")).toBe(true);
+        expect(queryByText("Need More Help?")).not.toBeNull();
+        input.value = "discord";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        expect(queryByText("Join Our Discord")).not.toBeNull();
+        expect(queryByText("Keyboard Shortcuts")).toBeNull();
+    });
+});
