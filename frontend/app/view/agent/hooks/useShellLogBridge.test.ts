@@ -140,6 +140,24 @@ describe("useShellLogBridge — shell focus", () => {
         });
     });
 
+    // The shell starts asynchronously; a caret the user moved meanwhile stays.
+    it("leaves the caret where the user moved it while the shell was starting", async () => {
+        await createRoot(async (dispose) => {
+            const bridge = useShellLogBridge("blk");
+            bridge.withShellFocus(() => {})();
+            const term = mountDrawer();
+            const composer = document.createElement("textarea");
+            document.body.appendChild(composer);
+            composer.focus();
+            bridge.onTermReady(() => {});
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(document.activeElement).toBe(composer);
+            expect(document.activeElement).not.toBe(term);
+            dispose();
+        });
+    });
+
     it("a toggle that closed the drawer doesn't arm the next auto-open", async () => {
         await createRoot(async (dispose) => {
             const bridge = useShellLogBridge("blk");

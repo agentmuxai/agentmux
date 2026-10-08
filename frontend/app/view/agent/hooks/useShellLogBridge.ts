@@ -109,8 +109,11 @@ export function useShellLogBridge(blockId?: string): ShellLogBridge {
     // then keeps the write function around so `log` above writes live from
     // here on.
     // Set by the user's toggle; a close clears it on dispose, so only an open
-    // they asked for focuses the shell.
+    // they asked for focuses the shell. `armedFrom`: where the caret was at the
+    // toggle; if the user moves it (back to the composer) while the shell is
+    // still starting, the shell doesn't take it.
     let focusOnReady = false;
+    let armedFrom: Element | null = null;
     const handleShellTermReady = (write: (text: string) => void) => {
         const all = logLines();
         for (let i = logFlushedCount; i < all.length; i++) {
@@ -120,6 +123,8 @@ export function useShellLogBridge(blockId?: string): ShellLogBridge {
         setTermWrite(() => write);
         if (!focusOnReady || blockId == null) return;
         focusOnReady = false;
+        const active = document.activeElement;
+        if (active !== armedFrom && active !== document.body && active != null) return;
         focusWhenRendered(() =>
             document.querySelector<HTMLElement>(`#agent-composer-details-${CSS.escape(blockId)} .xterm-helper-textarea`)
         );
@@ -136,6 +141,7 @@ export function useShellLogBridge(blockId?: string): ShellLogBridge {
         clearTermWrite: () => setTermWrite(null),
         withShellFocus: (toggle) => () => {
             focusOnReady = true;
+            armedFrom = document.activeElement;
             toggle();
         },
     };
