@@ -1,6 +1,6 @@
 # Focus follows the selection: after any close, you can type right away
 
-**Status:** active — R1, R2, R4 and R5's `closeNode` fix built in #NNNN (§8). R3 and R5's Windows browser reclaim are
+**Status:** active — R1, R2, R4 and R5's `closeNode` fix built in #4479 (§8). R3 and R5's Windows browser reclaim are
 not built yet.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "if I type exit or close a pane tab, or entire pane, and the next pane that is
@@ -199,7 +199,7 @@ overlay. Both go through the live script before merge.
 3. **Terminal not in `term` mode** (exit banner shown with close-on-exit off): today `giveFocus` returns false. With R1
    the dummy input gets the caret, so pane shortcuts work. Recommended: keep it that way; there is nothing to type into.
 
-## 8. As built (#NNNN)
+## 8. As built (#4479)
 
 The design above called `ensureSelectionFocused` from each place the selection can change. Building it showed one
 observer covers all of them, so that is what was built:
