@@ -560,8 +560,8 @@ mod tests {
 
     #[test]
     fn a_panicking_read_is_reported_as_such_and_the_next_read_tries_again() {
-        // reagent P2: a panic must not be misreported as "timed out" — it
-        // failed immediately, not after waiting the full deadline.
+        // A panic must not be reported as "timed out": it failed at once,
+        // not after the full deadline.
         let reads = SharedReads::new();
         assert_eq!(
             reads.read("acct", LONG, || panic!("simulated worker panic")),
