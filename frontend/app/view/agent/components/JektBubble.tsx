@@ -8,25 +8,31 @@
  * distinct, labeled block so the human operator can always tell a jekt
  * apart from a typed user message or agent output (design goals G1/G2).
  *
- * Collapsed by default, like AgentMessageBlock: a one-line summary showing
- * direction, sender/recipient, and the tier + delivery badges. Clicking
- * expands to show the message body plus metadata (full MSGID, timestamp,
- * raw marker payload) — spec §3.3's "click the bubble shows metadata".
+ * Closed by default, like a tool call: a one-line summary showing
+ * direction, sender/recipient, and the tier + delivery badges. A jekt that
+ * arrives live is held open until it scrolls off the top, a click pins it
+ * open, and a sensitive one starts open (virtualization/disclosure.ts,
+ * REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.1). Open, it shows
+ * the message body plus metadata (full MSGID, timestamp, raw marker payload)
+ * — spec §3.3's "click the bubble shows metadata".
  *
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
  */
 
-import { Show, onCleanup, type JSX } from "solid-js";
+import { Show, createEffect, untrack, type JSX } from "solid-js";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { CollapsibleMessage } from "./CollapsibleMessage";
-import { attachScrollHandoff } from "./scroll-handoff";
+import { arrivedLive } from "../virtualization/live-arrival";
+import { previewBox } from "./scroll-handoff";
 
 interface JektBubbleProps {
     node: JektMessageNode;
     collapsed: boolean;
     onToggle: () => void;
+    /** Hold the row open: called once when the jekt arrives live. */
+    onHoldOpen?: () => void;
 }
 
 function formatTimestamp(ts: number): string {
@@ -43,13 +49,23 @@ function formatHeldFor(secs: number): string {
     return m ? `${h} h ${m} min` : `${h} h`;
 }
 
-/** Both capped boxes (body, raw payload) hand scroll to the pane at their
- *  edges, like a tool preview (scroll-handoff.ts). */
-const handoff = (el: HTMLElement): void => {
-    onCleanup(attachScrollHandoff(el));
-};
+/** Both capped boxes (body, raw payload) skid and hand scroll to the pane at
+ *  their edges, like a tool preview (scroll-handoff.ts `previewBox`). */
+const handoff = previewBox();
 
-export const JektBubble = (props: JektBubbleProps): JSX.Element => (
+export const JektBubble = (props: JektBubbleProps): JSX.Element => {
+    // A jekt that arrives live is held open until it scrolls off, as a tool that
+    // finishes on screen is. Keyed on the id: the streaming buffer can reuse this
+    // row for another node. A sensitive jekt is open by default anyway.
+    let checkedId: string | undefined;
+    createEffect(() => {
+        const node = props.node;
+        if (node.id === checkedId) return;
+        checkedId = node.id;
+        if (node.tier !== "sensitive" && arrivedLive(node.timestamp)) untrack(() => props.onHoldOpen?.());
+    });
+
+    return (
     // Don't destructure props — see CollapsibleMessage for why. The row,
     // toggle, chevron and peek come from there; the peek adds a relative
     // time, which the expanded view's toLocaleString() line lacks.
@@ -110,6 +126,7 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => (
             </>
         }
     />
-);
+    );
+};
 
 JektBubble.displayName = "JektBubble";

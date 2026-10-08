@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createRoot } from "solid-js";
 import {
     SKID_FLASH_MS,
     SKID_GESTURE_IDLE_MS,
@@ -12,6 +13,7 @@ import {
     type ScrollHandoffOptions,
     type SkidInput,
     type WheelSkid,
+    previewBox,
 } from "./scroll-handoff";
 
 interface Geo {
@@ -141,6 +143,38 @@ describe("attachScrollHandoff", () => {
         expect(s.pane()).toBe(1120);
         s.wheel(s.box, 120);
         expect(s.pane()).toBe(1240);
+    });
+
+    // previewBox() is what every transcript preview box attaches; it skids
+    // when the box fits unless told not to
+    // (REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.3).
+    it("previewBox() skids when the box fits, and skidWhenFits: false opts out", () => {
+        const pane = document.createElement("div");
+        pane.className = "agent-document";
+        let paneTop = 1000;
+        Object.defineProperty(pane, "scrollTop", { configurable: true, get: () => paneTop, set: (v) => (paneTop = v) });
+        const fits = makeBox({ scrollTop: 0, clientHeight: 200, scrollHeight: 200 });
+        const optedOut = makeBox({ scrollTop: 0, clientHeight: 200, scrollHeight: 200 });
+        pane.append(fits, optedOut);
+        document.body.appendChild(pane);
+        const dispose = createRoot((d) => {
+            previewBox()(fits);
+            previewBox({ skidWhenFits: false })(optedOut);
+            return d;
+        });
+        const notch = (target: Element) => {
+            const e = new WheelEvent("wheel", { deltaY: 120, bubbles: true, cancelable: true });
+            Object.defineProperty(e, "wheelDeltaY", { value: -120 });
+            target.dispatchEvent(e);
+        };
+        notch(fits);
+        expect(paneTop).toBe(1000); // absorbed: the skid
+        expect(fits.classList.contains("scroll-handoff-box")).toBe(true);
+        notch(optedOut);
+        expect(paneTop).toBe(1120); // handed straight on
+        dispose();
+        expect(fits.classList.contains("scroll-handoff-box")).toBe(false); // removed with its owner
+        pane.remove();
     });
 
     it("with skidWhenFits (tool previews), a box that fits skids in either direction", () => {

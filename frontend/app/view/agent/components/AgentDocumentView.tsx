@@ -152,25 +152,25 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
 
     // Hold a tool expanded after it completes live on screen (added by
     // ToolBlock on the active→inactive transition). Stays open until its row
-    // scrolls off the top, at which point the VirtualList calls releaseToolOpen.
+    // scrolls off the top, at which point the VirtualList calls releaseNodeHold.
     // Replaces the old 3 s post-completion timer — see
     // docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
-    const holdToolOpen = (nodeId: string): void => {
+    const holdNodeOpen = (nodeId: string): void => {
         setDocumentState((prev) => {
-            if (prev.expandedTools.has(nodeId)) return prev; // already held — no churn
-            const expandedTools = new Set(prev.expandedTools);
-            expandedTools.add(nodeId);
-            return { ...prev, expandedTools };
+            if (prev.heldOpenNodes.has(nodeId)) return prev; // already held — no churn
+            const heldOpenNodes = new Set(prev.heldOpenNodes);
+            heldOpenNodes.add(nodeId);
+            return { ...prev, heldOpenNodes };
         });
     };
 
     // Release a held tool once it has scrolled off the top (latched collapse).
-    const releaseToolOpen = (nodeId: string): void => {
+    const releaseNodeHold = (nodeId: string): void => {
         setDocumentState((prev) => {
-            if (!prev.expandedTools.has(nodeId)) return prev;
-            const expandedTools = new Set(prev.expandedTools);
-            expandedTools.delete(nodeId);
-            return { ...prev, expandedTools };
+            if (!prev.heldOpenNodes.has(nodeId)) return prev;
+            const heldOpenNodes = new Set(prev.heldOpenNodes);
+            heldOpenNodes.delete(nodeId);
+            return { ...prev, heldOpenNodes };
         });
     };
 
@@ -197,8 +197,8 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             scrollToBottomRef={props.scrollToBottomRef}
             onToggleCollapse={toggleCollapse}
             onTogglePin={togglePin}
-            onHoldToolOpen={holdToolOpen}
-            onReleaseToolOpen={releaseToolOpen}
+            onHoldNodeOpen={holdNodeOpen}
+            onReleaseNodeHold={releaseNodeHold}
             zoomFactor={props.zoomFactor}
             blockId={props.blockId}
             layoutView={props.layoutView}

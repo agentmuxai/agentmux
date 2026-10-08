@@ -30,7 +30,7 @@ import { rowDisclosureIn } from "./disclosure";
 const baseDocState = (): DocumentState => ({
     collapsedNodes: new Set<string>(),
     pinnedNodes: new Set<string>(),
-    expandedTools: new Set<string>(),
+    heldOpenNodes: new Set<string>(),
     scrollPosition: 0,
     selectedNode: null,
     filter: {
@@ -365,20 +365,26 @@ describe("estimateJektMessage (expanded jekt body is height-capped)", () => {
         priority: "normal", direction: "incoming", timestamp: 0,
     });
 
+    // A jekt is closed by default like a tool call, so "expanded" means pinned
+    // (REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.1).
+    const pinned = () => {
+        const state = baseDocState();
+        state.pinnedNodes.add("j1");
+        return state;
+    };
+
     it("a very long expanded jekt is clamped, not estimated at the text maximum", () => {
-        const est = estimateNode(jekt("x".repeat(50_000)), baseDocState());
+        const est = estimateNode(jekt("x".repeat(50_000)), pinned());
         expect(est).toBe(jektExpandedMaxEstimatePx());
         expect(est).toBeLessThan(estimateTextHeight("x".repeat(50_000)));
     });
 
     it("a short expanded jekt keeps its natural estimate", () => {
-        expect(estimateNode(jekt("hi"), baseDocState())).toBe(estimateTextHeight("hi"));
+        expect(estimateNode(jekt("hi"), pinned())).toBe(estimateTextHeight("hi"));
     });
 
-    it("a collapsed jekt is one line", () => {
-        const state = baseDocState();
-        state.collapsedNodes.add("j1");
-        expect(estimateNode(jekt("x".repeat(50_000)), state)).toBe(32);
+    it("a jekt is one line by default", () => {
+        expect(estimateNode(jekt("x".repeat(50_000)), baseDocState())).toBe(32);
     });
 
     it("estimateNodeForState agrees with the clamp when expanded", () => {

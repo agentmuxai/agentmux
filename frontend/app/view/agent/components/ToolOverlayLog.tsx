@@ -23,7 +23,7 @@ import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contrac
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";
-import { attachScrollHandoff } from "./scroll-handoff";
+import { previewBox } from "./scroll-handoff";
 import { renderCompactDefault } from "./tool-renderers/builtins";
 import { registerToolRenderers } from "./tool-renderers";
 import { resolveToolRenderer, type ToolRenderContext } from "./tool-renderers/registry";
@@ -134,12 +134,12 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         return "empty";
     };
 
-    // Scroll hand-off to the outer pane once this box can't scroll further
-    // (scroll-handoff.ts; this box carries `overscroll-behavior: contain` in
-    // _tool-overlay-portal.scss). A tool preview skids at its edge even when its
-    // content fits, so a short preview under the pointer still holds the wheel.
+    // Scroll hand-off to the outer pane at this box's edges, with the skid, as
+    // every preview box has (scroll-handoff.ts `previewBox`; this box carries
+    // `overscroll-behavior: contain` in _tool-overlay-portal.scss).
+    const handoff = previewBox();
     onMount(() => {
-        if (scrollRef) onCleanup(attachScrollHandoff(scrollRef, { skidWhenFits: true }));
+        if (scrollRef) handoff(scrollRef);
     });
 
     // Track whether the overlay panel is collapsed (content-visibility: hidden).

@@ -18,12 +18,12 @@ import type { DocumentNode, DocumentState } from "../types";
 import { rowDisclosureIn } from "./disclosure";
 
 /** The only `documentState` the mapping depends on — the collapse/pin sets plus
- *  the scroll-driven `expandedTools` hold. Narrowed from the full
+ *  the scroll-driven `heldOpenNodes` hold. Narrowed from the full
  *  `DocumentState` so the dependency is explicit (a full `DocumentState` still
  *  satisfies it at the call site). */
 export type ExpansionInputs = Pick<
     DocumentState,
-    "collapsedNodes" | "pinnedNodes" | "expandedTools"
+    "collapsedNodes" | "pinnedNodes" | "heldOpenNodes"
 >;
 
 /** The layout slice's view of `rowDisclosure()` (disclosure.ts). */

@@ -14,11 +14,11 @@ import type {
 const inputs = (
     collapsed: string[] = [],
     pinned: string[] = [],
-    expandedTools: string[] = [],
+    heldOpenNodes: string[] = [],
 ): ExpansionInputs => ({
     collapsedNodes: new Set(collapsed),
     pinnedNodes: new Set(pinned),
-    expandedTools: new Set(expandedTools),
+    heldOpenNodes: new Set(heldOpenNodes),
 });
 
 const tool = (id: string, status: ToolNode["status"]): ToolNode => ({
@@ -49,7 +49,7 @@ describe("currentExpansion — parity with the per-kind expansion rules", () => 
             expect(currentExpansion(tool("t", "success"), inputs([], ["t"]))).toEqual({ open: true, via: "pin" });
             expect(currentExpansion(tool("t", "running"), inputs([], ["t"]))).toEqual({ open: true, via: "pin" });
         });
-        it("a completed tool held in expandedTools stays open (scroll-driven hold)", () => {
+        it("a completed tool held in heldOpenNodes stays open (scroll-driven hold)", () => {
             // Held open after live completion → expanded until it scrolls off.
             expect(currentExpansion(tool("t", "success"), inputs([], [], ["t"]))).toEqual({ open: true, via: "auto" });
             expect(currentExpansion(tool("t", "failed"), inputs([], [], ["t"]))).toEqual({ open: true, via: "auto" });

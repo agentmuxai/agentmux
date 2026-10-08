@@ -163,7 +163,7 @@ export function AgentHistoryView(props: AgentHistoryViewProps) {
     const [docState, setDocState] = createSignal<DocumentState>({
         collapsedNodes: new Set<string>(),
         pinnedNodes: new Set<string>(),
-        expandedTools: new Set<string>(),
+        heldOpenNodes: new Set<string>(),
         scrollPosition: 0,
         selectedNode: null,
         filter: HISTORY_FILTER,

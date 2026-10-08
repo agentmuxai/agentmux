@@ -97,7 +97,7 @@ function makeScrollable(el: HTMLElement, geo: Geo) {
 const emptyDocumentState = (): DocumentState => ({
     collapsedNodes: new Set(),
     pinnedNodes: new Set(),
-    expandedTools: new Set(),
+    heldOpenNodes: new Set(),
     scrollPosition: 0,
     selectedNode: null,
     filter: { showThinking: true } as DocumentState["filter"],
@@ -217,7 +217,7 @@ describe("pin-to-bottom without forced layout (Phase 1)", () => {
         // its scroll event is a trusted pin batch, which skips it.
         const [nodes] = createSignal<DocumentNode[]>([md("a")]);
         const viewState = createAgentViewState(nodes);
-        const held = { ...emptyDocumentState(), expandedTools: new Set(["tool-off-screen"]) };
+        const held = { ...emptyDocumentState(), heldOpenNodes: new Set(["tool-off-screen"]) };
         const [docState] = createSignal(held);
         const release = vi.fn();
         const utils = render(() => (
@@ -226,7 +226,7 @@ describe("pin-to-bottom without forced layout (Phase 1)", () => {
                 documentState={docState}
                 onToggleCollapse={() => {}}
                 onTogglePin={() => {}}
-                onReleaseToolOpen={release}
+                onReleaseNodeHold={release}
             />
         ));
         const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;

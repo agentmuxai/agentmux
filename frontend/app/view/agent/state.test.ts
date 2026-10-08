@@ -35,7 +35,7 @@ describe("createAgentAtoms (view-local state only)", () => {
         const state = getState();
         expect(state.collapsedNodes.size).toBe(0);
         expect(state.pinnedNodes.size).toBe(0);
-        expect(state.expandedTools.size).toBe(0);
+        expect(state.heldOpenNodes.size).toBe(0);
         expect(state.scrollPosition).toBe(0);
         expect(state.selectedNode).toBeNull();
     });

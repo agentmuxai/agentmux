@@ -24,6 +24,8 @@
  * browser's out of the loop.
  */
 
+import { onCleanup } from "solid-js";
+
 /** A continuous gesture (trackpad, high-res wheel) at the edge is absorbed
  *  until this long passes between two of its events: momentum arrives every
  *  frame, so a quarter second of silence means the gesture ended. */
@@ -135,6 +137,20 @@ export interface ScrollHandoffOptions {
     /** Skid even when the content fits, so the box has no scrollbar. A box that
      *  fits is at both edges at once, so every arrival over it skids. */
     skidWhenFits?: boolean;
+}
+
+/**
+ * The ref callback for a capped transcript preview box: a tool's log, a jekt's
+ * body or raw payload, a context delivery's text. It hands scroll to the pane at
+ * the box's edges and skids there, also when the content fits, so every preview
+ * holds the wheel the same way
+ * (REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.3). The box takes the
+ * `transcript-preview-box` mixin (_document-nodes.scss) for its cap and
+ * `overscroll-behavior: contain`. Call it in a component, so the hand-off is
+ * removed with it.
+ */
+export function previewBox(opts: ScrollHandoffOptions = {}): (el: HTMLElement) => void {
+    return (el) => onCleanup(attachScrollHandoff(el, { skidWhenFits: true, ...opts }));
 }
 
 /** Returns the cleanup. The box must carry `overscroll-behavior: contain`. */

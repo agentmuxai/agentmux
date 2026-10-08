@@ -27,7 +27,7 @@ afterEach(() => cleanup());
 const docState = (s: { pinned?: string[]; collapsed?: string[]; held?: string[] } = {}): DocumentState => ({
     collapsedNodes: new Set(s.collapsed ?? []),
     pinnedNodes: new Set(s.pinned ?? []),
-    expandedTools: new Set(s.held ?? []),
+    heldOpenNodes: new Set(s.held ?? []),
     scrollPosition: 0,
     selectedNode: null,
     filter: { showThinking: true } as DocumentState["filter"],

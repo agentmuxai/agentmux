@@ -88,7 +88,7 @@ afterEach(() => {
 const emptyDocumentState = (): DocumentState => ({
     collapsedNodes: new Set(),
     pinnedNodes: new Set(),
-    expandedTools: new Set(),
+    heldOpenNodes: new Set(),
     scrollPosition: 0,
     selectedNode: null,
     filter: { showThinking: true } as DocumentState["filter"],
@@ -164,7 +164,7 @@ describe("height handoff from the streaming buffer to the virtualized head", () 
 
     it("a height measured in a different expansion state is not handed off", () => {
         // Same hazard through documentState: a completed tool held open
-        // (expandedTools) is released — collapses — in the update that
+        // (heldOpenNodes) is released — collapses — in the update that
         // migrates it.
         const heldTool = { type: "tool", id: "md0", tool: "Bash", params: {}, status: "success", collapsed: true, summary: "t" } as DocumentNode;
         const [nodes, setNodes] = createSignal<DocumentNode[]>(
@@ -172,7 +172,7 @@ describe("height handoff from the streaming buffer to the virtualized head", () 
         );
         const [view, setView] = createSignal<LayoutView | undefined>(undefined);
         registerPane(BID, { layout: setView, zoom: () => {} });
-        const [docState, setDocState] = createSignal({ ...emptyDocumentState(), expandedTools: new Set<string>(["md0"]) });
+        const [docState, setDocState] = createSignal({ ...emptyDocumentState(), heldOpenNodes: new Set<string>(["md0"]) });
         const utils = render(() => (
             <AgentDocumentVirtualList
                 blockId={BID}
