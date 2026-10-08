@@ -59,7 +59,7 @@ export function useLiveFeedRollOff(opts: {
         // runs with the live feed off too (Codex P2 on #4126).
         paneModel.dispatchDoc({
             type: "UnloadToolResults",
-            keepIds: new Set([...pinnedIds, ...untrack(docState).expandedTools]),
+            keepIds: new Set([...pinnedIds, ...untrack(docState).heldOpenNodes]),
         });
         if (!liveFeedOn()) return;
         const events = paneModel.dispatchDoc({
@@ -92,13 +92,13 @@ export function useLiveFeedRollOff(opts: {
             // The view's own id sets must not keep ids that are gone.
             setDocState((prev) => {
                 const collapsedNodes = prune(prev.collapsedNodes);
-                const expandedTools = prune(prev.expandedTools);
+                const heldOpenNodes = prune(prev.heldOpenNodes);
                 const pinnedNodes = prune(prev.pinnedNodes);
                 return collapsedNodes === prev.collapsedNodes &&
-                    expandedTools === prev.expandedTools &&
+                    heldOpenNodes === prev.heldOpenNodes &&
                     pinnedNodes === prev.pinnedNodes
                     ? prev
-                    : { ...prev, collapsedNodes, expandedTools, pinnedNodes };
+                    : { ...prev, collapsedNodes, heldOpenNodes, pinnedNodes };
             });
         });
         if (ev.blockedTurns > 0) {

@@ -8,7 +8,7 @@
  * element — jsdom's own default `getBoundingClientRect()` already returns
  * all-zero for everything, which is exactly the hidden-pane signature, so
  * these tests exercise it directly without any extra stubbing. Before the
- * fix, `collapseScrolledOffTools()` treated every held-open tool as
+ * fix, `releaseScrolledOffHolds()` treated every held-open tool as
  * "scrolled off" the instant it ran against a zero-size container, even
  * though nothing had actually scrolled.
  */
@@ -63,20 +63,20 @@ const toolNode: ToolNode = {
     summary: "Bash ls",
 };
 
-const documentState = (expandedTools: Set<string>): DocumentState => ({
+const documentState = (heldOpenNodes: Set<string>): DocumentState => ({
     collapsedNodes: new Set(),
     pinnedNodes: new Set(),
-    expandedTools,
+    heldOpenNodes,
     scrollPosition: 0,
     selectedNode: null,
     filter: { showThinking: true } as DocumentState["filter"],
 });
 
-function setup(expandedTools: Set<string>) {
+function setup(heldOpenNodes: Set<string>) {
     const documentAtom = createSignal<DocumentNode[]>([toolNode]);
     const viewState = createAgentViewState(documentAtom[0]);
-    const [docState] = createSignal(documentState(expandedTools));
-    const onReleaseToolOpen = vi.fn();
+    const [docState] = createSignal(documentState(heldOpenNodes));
+    const onReleaseNodeHold = vi.fn();
 
     const utils = render(() => (
         <AgentDocumentVirtualList
@@ -84,13 +84,13 @@ function setup(expandedTools: Set<string>) {
             documentState={docState}
             onToggleCollapse={() => {}}
             onTogglePin={() => {}}
-            onReleaseToolOpen={onReleaseToolOpen}
+            onReleaseNodeHold={onReleaseNodeHold}
         />
     ));
 
     const scrollRef = utils.container.querySelector(".agent-document") as HTMLElement;
     makeScrollable(scrollRef, { scrollTop: 0, scrollHeight: 500, clientHeight: 200 });
-    return { scrollRef, onReleaseToolOpen };
+    return { scrollRef, onReleaseNodeHold };
 }
 
 describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", () => {
@@ -109,7 +109,7 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
     });
 
     it("does NOT release a held-open tool when the container reports a zero-size rect (hidden pane)", () => {
-        const { scrollRef, onReleaseToolOpen } = setup(new Set(["tc-1"]));
+        const { scrollRef, onReleaseNodeHold } = setup(new Set(["tc-1"]));
 
         // jsdom's default getBoundingClientRect() is already all-zero for
         // every element — exactly the display:none / minimized-window
@@ -117,11 +117,11 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
         scrollRef.dispatchEvent(new Event("scroll"));
         flushRaf();
 
-        expect(onReleaseToolOpen).not.toHaveBeenCalled();
+        expect(onReleaseNodeHold).not.toHaveBeenCalled();
     });
 
     it("still releases a held-open tool once it has genuinely scrolled off the top", () => {
-        const { scrollRef, onReleaseToolOpen } = setup(new Set(["tc-1"]));
+        const { scrollRef, onReleaseNodeHold } = setup(new Set(["tc-1"]));
 
         // Give the container real, non-zero geometry...
         scrollRef.getBoundingClientRect = () =>
@@ -136,6 +136,6 @@ describe("AgentDocumentVirtualList — hidden-pane scroll-off collapse guard", (
         scrollRef.dispatchEvent(new Event("scroll"));
         flushRaf();
 
-        expect(onReleaseToolOpen).toHaveBeenCalledWith("tc-1");
+        expect(onReleaseNodeHold).toHaveBeenCalledWith("tc-1");
     });
 });

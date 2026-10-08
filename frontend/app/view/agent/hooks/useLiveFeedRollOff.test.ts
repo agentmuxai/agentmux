@@ -13,7 +13,7 @@ function mount(opts: { outputFormat?: string; rollOff?: { prefixTurns: number; g
     const [doc] = createSignal<DocumentNode[]>([userMsg("u1"), userMsg("u2"), userMsg("keep")]);
     const [docState, setDocState] = createSignal({
         collapsedNodes: new Set<string>(),
-        expandedTools: new Set<string>(),
+        heldOpenNodes: new Set<string>(),
         pinnedNodes: new Set<string>(),
     });
     const paneModel = {

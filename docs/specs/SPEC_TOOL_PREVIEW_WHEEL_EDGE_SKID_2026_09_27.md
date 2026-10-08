@@ -1,6 +1,7 @@
 # SPEC: Wheel edge skid — a nested preview absorbs a few wheel notches before the pane scrolls
 
 **Status:** implemented — #4335 (2026-10-04), in `components/scroll-handoff.ts`
+**Amended 2026-10-07:** §8 decision 4 is reversed for jekt and context-delivery boxes. Every capped transcript preview box now skids when its content fits, through one helper, `previewBox()`, and one SCSS mixin, `transcript-preview-box`. Operator's request; see `docs/reports/REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md` §2.2–2.3.
 **Date:** 2026-09-27, revised 2026-10-04 against main before implementing (see §0)
 **Author:** Camper (agent), at operator request
 **Related:** `SPEC_TOOL_PREVIEW_SCROLL_CHAINING_2026_07_03.md` (the hand-off this spec

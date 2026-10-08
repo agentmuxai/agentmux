@@ -8,7 +8,7 @@ import { rowDisclosureIn, toggleDisclosure, type DisclosureInputs } from "./disc
 const state = (s: { pinned?: string[]; collapsed?: string[]; held?: string[] } = {}): DisclosureInputs => ({
     pinnedNodes: new Set(s.pinned ?? []),
     collapsedNodes: new Set(s.collapsed ?? []),
-    expandedTools: new Set(s.held ?? []),
+    heldOpenNodes: new Set(s.held ?? []),
 });
 
 const tool = (status: ToolNode["status"], toolName = "Bash"): ToolNode => ({
@@ -20,6 +20,10 @@ const msg: DocumentNode = {
 const user = (isStartup: boolean): DocumentNode => ({ type: "user_message", id: "n", message: "hi", timestamp: 0, isStartup });
 const md = (canceled: boolean): DocumentNode => ({ type: "markdown", id: "n", content: "c", metadata: canceled ? { canceled: true } : undefined });
 const shell = { type: "shell", id: "n" } as unknown as DocumentNode;
+const jekt = (tier: "coord" | "sensitive" = "coord"): DocumentNode => ({
+    type: "jekt_message", id: "n", from: "a", to: "b", message: "hi", raw: "", tier, deliveryTier: "host",
+    trust: "host-verified", msgId: "m", priority: "normal", direction: "incoming", timestamp: 0,
+});
 
 // [case, node, state, open, via, toggle]
 // prettier-ignore
@@ -38,6 +42,13 @@ const CASES: Array<[string, DocumentNode, DisclosureInputs, boolean, string, str
     ["tool: content-first while running", tool("running", "WebSearch"), state(), true, "auto", "pin"],
     ["agent message: open", msg, state(), true, "default", "collapse"],
     ["agent message: collapsed", msg, state({ collapsed: ["n"] }), false, "default", "collapse"],
+    // A jekt collapses like a tool call (REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.1).
+    ["jekt: closed by default", jekt(), state(), false, "default", "pin"],
+    ["jekt: pinned", jekt(), state({ pinned: ["n"] }), true, "pin", "pin"],
+    ["jekt: held after arriving live", jekt(), state({ held: ["n"] }), true, "auto", "pin"],
+    ["jekt: an old collapse no longer applies", jekt(), state({ collapsed: ["n"] }), false, "default", "pin"],
+    ["jekt: sensitive, open by default", jekt("sensitive"), state(), true, "default", "collapse"],
+    ["jekt: sensitive, user-collapsed", jekt("sensitive"), state({ collapsed: ["n"] }), false, "default", "collapse"],
     ["user message: normal, fixed", user(false), state(), true, "default", null],
     ["user message: startup, closed", user(true), state(), false, "default", "pin"],
     ["user message: startup, pinned", user(true), state({ pinned: ["n"] }), true, "pin", "pin"],

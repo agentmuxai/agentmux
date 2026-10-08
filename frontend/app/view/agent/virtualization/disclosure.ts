@@ -28,7 +28,8 @@ export interface RowFlags {
     pinned?: boolean;
     /** In `collapsedNodes`: the user closed an open-by-default row. */
     collapsed?: boolean;
-    /** In `expandedTools`: a tool held open after finishing on screen. */
+    /** In `heldOpenNodes`: a row held open after arriving live on screen (a tool
+     *  that finished there, a jekt that came in), until it scrolls off the top. */
     held?: boolean;
 }
 
@@ -41,13 +42,13 @@ export interface Disclosure {
     toggle: "pin" | "collapse" | null;
 }
 
-export type DisclosureInputs = Pick<DocumentState, "collapsedNodes" | "pinnedNodes" | "expandedTools">;
+export type DisclosureInputs = Pick<DocumentState, "collapsedNodes" | "pinnedNodes" | "heldOpenNodes">;
 
 export function rowFlags(id: string, state: DisclosureInputs): RowFlags {
     return {
         pinned: state.pinnedNodes.has(id),
         collapsed: state.collapsedNodes.has(id),
-        held: state.expandedTools.has(id),
+        held: state.heldOpenNodes.has(id),
     };
 }
 
@@ -68,15 +69,23 @@ export function rowDisclosure(node: DocumentNode, f: RowFlags): Disclosure {
             const status = TOOL_STATUS[node.status];
             if (status?.active) return OPEN("auto", "pin");
             // A dismissed tool (denied / canceled) never holds open, even if
-            // it entered `expandedTools` on its active → inactive transition.
+            // it entered `heldOpenNodes` on its active → inactive transition.
             if (f.held && !status?.dismissed) return OPEN("auto", "pin");
             return CLOSED("pin");
         }
 
         case "agent_message":
-        case "jekt_message":
             // A message must be visible by default, not opt-in.
             return collapsible(f);
+        case "jekt_message":
+            // Like a tool call: closed, held open after arriving live until it
+            // scrolls off, and pinned open by a click. A sensitive jekt stays
+            // open, since it may need the operator's attention
+            // (REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.1, D1–D2).
+            if (node.tier === "sensitive") return collapsible(f);
+            if (f.pinned) return OPEN("pin", "pin");
+            if (f.held) return OPEN("auto", "pin");
+            return CLOSED("pin");
 
         case "user_message":
             // Only the startup payload collapses

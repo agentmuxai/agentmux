@@ -39,7 +39,7 @@ export type SignalPair<T> = [Accessor<T>, Setter<T>];
  */
 export interface AgentAtoms {
     /**
-     * Collapse/pin sets, `expandedTools` hold, scroll position, selection
+     * Collapse/pin sets, `heldOpenNodes` hold, scroll position, selection
      * and filter — UI state owned by the document view, not by a reducer.
      * `useSnapshotPersistence` snapshots it and `onSnapshotOverlay`
      * restores it.
@@ -105,7 +105,7 @@ export function createAgentAtoms(): AgentAtoms {
         documentStateAtom: createSignal<DocumentState>({
             collapsedNodes: new Set<string>(),
             pinnedNodes: new Set<string>(),
-            expandedTools: new Set<string>(),
+            heldOpenNodes: new Set<string>(),
             scrollPosition: 0,
             selectedNode: null,
             filter: {

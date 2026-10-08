@@ -976,7 +976,7 @@ interface SessionEndEvent {
  * Document state (managed by Jotai atoms)
  */
 export interface DocumentState {
-    collapsedNodes: Set<string>; // Node IDs that are collapsed (agent messages)
+    collapsedNodes: Set<string>; // Rows the user closed that are open by default (agent messages, sensitive jekts, content-first tools)
     /**
      * Nodes the user has clicked to PIN expanded. For tool nodes this opens
      * the portal overlay with tool-specific content; for other kinds this is
@@ -985,14 +985,16 @@ export interface DocumentState {
      */
     pinnedNodes: Set<string>;
     /**
-     * Tool nodes currently held EXPANDED after completing live on screen. A
-     * completed tool is added here on its active→inactive transition and removed
-     * once its row scrolls off the top of the viewport (latched collapse) —
-     * replacing the old 3 s post-completion timer. Loaded-history tools never
-     * transition this session, so they're never added and render collapsed.
+     * Rows currently held EXPANDED after arriving live on screen: a tool that
+     * finished there (added on its active→inactive transition, or on a fast
+     * finish seen already done), or a jekt that came in
+     * (virtualization/live-arrival.ts). Removed once the row scrolls off the
+     * top of the viewport (latched collapse), replacing the old 3 s
+     * post-completion timer. Loaded history never arrives live, so it's never
+     * added and renders collapsed. Named `expandedTools` until jekts joined.
      * See docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
      */
-    expandedTools: Set<string>;
+    heldOpenNodes: Set<string>;
     scrollPosition: number;
     selectedNode: string | null; // For keyboard navigation
     filter: FilterState;

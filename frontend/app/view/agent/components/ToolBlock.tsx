@@ -11,7 +11,7 @@
  *     terminated statuses.
  *   - Auto-expand: `running` and `pending_approval` keep the panel open
  *     in flow. After a terminal transition the panel stays open while the
- *     tool is held (`props.heldOpen`, backed by `documentState.expandedTools`)
+ *     tool is held (`props.heldOpen`, backed by `documentState.heldOpenNodes`)
  *     — i.e. while it's still on screen — and collapses once its row scrolls
  *     off the top. This replaced the old fixed post-completion timer; see
  *     docs/specs/PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md.
@@ -55,6 +55,7 @@ import { hasAuthoredSummary, toolHeaderParts } from "./tool-header";
 import { TOOL_STATUS } from "../tool-meta/tool-status";
 import { mcpDisplayName, toolNameOf, toolPill } from "../tool-meta/tool-descriptors";
 import { rowDisclosure } from "../virtualization/disclosure";
+import { arrivedLive } from "../virtualization/live-arrival";
 import { useToolResultLoader } from "../tool-result-loader";
 
 /**
@@ -108,7 +109,7 @@ interface ToolBlockProps {
     /** User has clicked to pin this tool block open. */
     pinned: boolean;
     /**
-     * Held expanded after completing live on screen (`documentState.expandedTools`).
+     * Held expanded after completing live on screen (`documentState.heldOpenNodes`).
      * Set by `onHoldOpen` on completion; cleared by the pane's scroll-off scan
      * once the row leaves the top — the scroll-driven replacement for the old
      * 3 s post-completion timer.
@@ -154,9 +155,6 @@ interface ToolBlockProps {
 // Ctrl+wheel over a preview now simply zooms the pane, which already
 // scales previews correctly, hardcoded pixels included.
 
-/** How recent a finished row's call stamp must be for it to count as a live completion. */
-const LIVE_ARRIVAL_WINDOW_MS = 5000;
-
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Drives the peek tooltip's live "time ago" text (§2.3 of
     // SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md). Unconditional, same
@@ -166,7 +164,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const peekTick = useTick(1000);
 
     // A tool stays expanded after completing live until its row scrolls off the
-    // top — the "post-completion hold" now lives in `documentState.expandedTools`
+    // top — the "post-completion hold" now lives in `documentState.heldOpenNodes`
     // (read via props.heldOpen) instead of a 3 s timer. Here we just detect the
     // active → inactive TRANSITION and mark the tool held-open via onHoldOpen.
     //
@@ -191,7 +189,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const holdIfFinishedOnArrival = (): void => {
         const n = props.node;
         if (isActive(n.status) || TOOL_STATUS[n.status]?.dismissed) return;
-        if (n.timestamp == null || Date.now() - n.timestamp > LIVE_ARRIVAL_WINDOW_MS) return;
+        if (!arrivedLive(n.timestamp)) return;
         props.onHoldOpen?.();
     };
     createEffect(() => {

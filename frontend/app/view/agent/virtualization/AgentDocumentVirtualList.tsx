@@ -106,10 +106,10 @@ export interface AgentDocumentVirtualListProps {
     onTogglePin: (id: string) => void;
     /** Hold a tool expanded after it completes live on screen (ToolBlock calls
      *  this on the active→inactive transition). */
-    onHoldToolOpen?: (id: string) => void;
+    onHoldNodeOpen?: (id: string) => void;
     /** Release a held tool once its row has scrolled off the top (latched
      *  collapse). Invoked by the scroll-off scan in `handleScroll`. */
-    onReleaseToolOpen?: (id: string) => void;
+    onReleaseNodeHold?: (id: string) => void;
     /** Re-run the provider login flow — forwarded to each row so an inline
      *  auth-error node can offer a "Login Again" CTA (SPEC_REAUTH_FROM_AUTH_ERROR §7). */
     onAgentErrorLogin?: () => void;
@@ -994,7 +994,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // virtualized region (its height IS totalSize) or of the streaming buffer
     // (new or grown rows), and the content ResizeObserver below observes both:
     // its callback runs after layout and before paint, so the same pin — plus
-    // syncOverflowState and collapseScrolledOffTools — happens there with the
+    // syncOverflowState and releaseScrolledOffHolds — happens there with the
     // layout already clean, and still before the frame is shown.
     //
     // Fallback only for an environment with no ResizeObserver (never the CEF
@@ -1009,7 +1009,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 queueMicrotask(() => {
                     if (!scrollRef || !props.viewState.stickToBottom()) return;
                     scrollToTrueBottom();
-                    collapseScrolledOffTools();
+                    releaseScrolledOffHolds();
                 });
             }
         });
@@ -1048,7 +1048,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                 // skips it in handleScrollNow. A viewport shrink while pinned
                 // (working row / composer growing below) can push a held-open
                 // tool off the top just as content growth can (ReAgent P1, #3599).
-                collapseScrolledOffTools();
+                releaseScrolledOffHolds();
             }
             // Phase 3: the scroll container resizing changes the viewport the
             // slice windows against — feed it (covers hidden→visible 0→N and
@@ -1121,7 +1121,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // without a user scroll event — collapse it now (pinned to bottom,
             // so no visible jump). Formerly done by the pin effect's microtask;
             // here the rects it reads are already laid out.
-            collapseScrolledOffTools();
+            releaseScrolledOffHolds();
         });
         if (virtualContainerRef) ro.observe(virtualContainerRef);
         if (streamingBufferRef) ro.observe(streamingBufferRef);
@@ -1195,13 +1195,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // Release (latched-collapse) any held-open tool whose row has scrolled fully
     // above the viewport top. DOM-based so it works uniformly for virtualized
     // and streaming-buffer rows and is zoom-safe (both rects share the zoomed
-    // space). `expandedTools` is tiny (a few recently-completed tools), so this
+    // space). `heldOpenNodes` is tiny (a few recently-completed tools), so this
     // is a handful of lookups per scroll. Pinned tools are skipped — pin wins.
-    const collapseScrolledOffTools = (): void => {
-        const release = props.onReleaseToolOpen;
+    const releaseScrolledOffHolds = (): void => {
+        const release = props.onReleaseNodeHold;
         if (!release || !scrollRef) return;
         const ds = props.documentState();
-        if (ds.expandedTools.size === 0) return;
+        if (ds.heldOpenNodes.size === 0) return;
         const containerRect = scrollRef.getBoundingClientRect(); // perf:allow-layout-read — pin pass (RO) or a user scroll batch
         // A hidden pane (inactive tab: display:none, same "0×0" signature the
         // ResizeObserver comment above already relies on) or a minimized window
@@ -1213,7 +1213,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // collapsing on tab-switch/window-minimize with no actual scroll).
         if (containerRect.width === 0 && containerRect.height === 0) return;
         const containerTop = containerRect.top;
-        for (const id of ds.expandedTools) {
+        for (const id of ds.heldOpenNodes) {
             if (ds.pinnedNodes.has(id)) continue;
             const el = scrollRef.querySelector(
                 `[data-node-id="${id}"]`,
@@ -1290,7 +1290,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         // A trusted pin batch skips it: the pin pass that caused this scroll
         // already ran it with layout clean (content ResizeObserver).
         if (props.viewState.stickToBottom() && !trustPin) {
-            collapseScrolledOffTools();
+            releaseScrolledOffHolds();
         }
 
         // This pane's content has overflowed its viewport for the first
@@ -1662,7 +1662,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             // Collapsing held-open tools that scrolled off the top changes
             // layout, so it runs before the observation is measured and its
             // effect is compensated in the same frame.
-            prepare: () => collapseScrolledOffTools(),
+            prepare: () => releaseScrolledOffHolds(),
             observed: (geo) => {
                 syncOverflowState(geo);
                 sampleOneWayFrame(paneTag());
@@ -1742,7 +1742,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         highlightNodeId={props.highlightNodeId}
                                         onToggleCollapse={props.onToggleCollapse}
                                         onTogglePin={props.onTogglePin}
-                                        onHoldToolOpen={props.onHoldToolOpen}
+                                        onHoldNodeOpen={props.onHoldNodeOpen}
                                         onAgentErrorLogin={props.onAgentErrorLogin}
                                         onOpenHistory={props.onOpenHistory}
                                         dispatchMatches={props.dispatchMatches}
@@ -1832,7 +1832,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         highlightNodeId={props.highlightNodeId}
                                         onToggleCollapse={props.onToggleCollapse}
                                         onTogglePin={props.onTogglePin}
-                                        onHoldToolOpen={props.onHoldToolOpen}
+                                        onHoldNodeOpen={props.onHoldNodeOpen}
                                         onAgentErrorLogin={props.onAgentErrorLogin}
                                         onOpenHistory={props.onOpenHistory}
                                         dispatchMatches={props.dispatchMatches}

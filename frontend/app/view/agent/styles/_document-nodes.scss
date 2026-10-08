@@ -33,6 +33,16 @@ $tool-name-colors: (
 // SPEC_COMPOSER_ACCOUNT_SWITCH_AND_JEKT_HEIGHT_CAP_2026_09_26.md §3.
 $transcript-preview-max-height: calc(50vh / 3);
 
+// A capped transcript preview box: a long body scrolls inside it instead of
+// pushing the conversation off-screen. `contain` is what the scroll hand-off
+// needs (components/scroll-handoff.ts `previewBox`, which every such box
+// attaches), so the cap, the scroll and the hand-off always travel together.
+@mixin transcript-preview-box {
+    max-height: $transcript-preview-max-height;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
 // The default look of a meta row: a divider, notice, pill or card that is context
 // about the conversation rather than part of it. Small and quiet. The pane's own
 // size (--font-agent-size, 15px) is for conversation text, and an element that sets
@@ -702,14 +712,6 @@ $transcript-preview-max-height: calc(50vh / 3);
                 @include tool-preview-markdown;
             }
 
-            .agent-tool-agent-result {
-                font-size: var(--text-sm);
-                white-space: pre-wrap;
-                overflow-wrap: anywhere;
-                max-height: 200px;
-                overflow-y: auto;
-                overscroll-behavior: contain;
-            }
         }
 
         // DispatchCard — compact live-status card replacing the raw JSON
@@ -1235,16 +1237,9 @@ $transcript-preview-max-height: calc(50vh / 3);
                 border-radius: 0;
                 margin: 0 0 var(--space-1) 0;
                 white-space: pre-wrap;
-                // A long jekt scrolls inside its own box instead of pushing
-                // the conversation off-screen. Only the body is capped, so the
-                // metadata line (sender / trust / MSGID) below it stays in
-                // view. At either end the wheel hands off to the pane on the
-                // next tick (scroll-handoff.ts), like a tool preview: native
-                // chaining latches mid-gesture, which is what
-                // SPEC_TOOL_PREVIEW_SCROLL_CHAINING replaced.
-                max-height: $transcript-preview-max-height;
-                overflow-y: auto;
-                overscroll-behavior: contain;
+                // Only the body is capped, so the metadata line (sender /
+                // trust / MSGID) below it stays in view.
+                @include transcript-preview-box;
             }
 
             .agent-jekt-meta {
@@ -1272,10 +1267,8 @@ $transcript-preview-max-height: calc(50vh / 3);
                     padding: var(--space-1) var(--space-1-5);
                     margin: var(--space-1) 0 0 0;
                     // The raw payload repeats the whole message plus the
-                    // marker, so it takes the same cap.
-                    max-height: $transcript-preview-max-height;
-                    overflow-y: auto;
-                    overscroll-behavior: contain;
+                    // marker, so it takes the same box.
+                    @include transcript-preview-box;
                 }
             }
         }
@@ -1409,10 +1402,7 @@ $transcript-preview-max-height: calc(50vh / 3);
             font-size: var(--text-xs);
             line-height: 1.35;
             white-space: pre-wrap;
-            // Same cap and scroll hand-off as a jekt body.
-            max-height: $transcript-preview-max-height;
-            overflow-y: auto;
-            overscroll-behavior: contain;
+            @include transcript-preview-box;
         }
     }
 

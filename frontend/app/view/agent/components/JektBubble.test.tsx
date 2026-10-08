@@ -37,6 +37,45 @@ const hover = (container: HTMLElement) => {
     vi.advanceTimersByTime(100);
 };
 
+// Held open when it arrives live, like a tool that finishes on screen; never
+// for a loaded one, or for a sensitive one (open by default anyway).
+// REPORT_JEKT_COLLAPSE_AND_PREVIEW_SKID_2026_10_07.md §2.1, D1–D2.
+describe("JektBubble — the live-arrival hold", () => {
+    const at = (timestamp: number, tier: JektMessageNode["tier"] = "coord"): JektMessageNode => ({ ...node, timestamp, tier });
+
+    it("asks to be held open when it arrives live", () => {
+        const onHoldOpen = vi.fn();
+        render(() => <JektBubble node={at(Date.now())} collapsed={false} onToggle={() => {}} onHoldOpen={onHoldOpen} />);
+        expect(onHoldOpen).toHaveBeenCalledTimes(1);
+    });
+
+    it("counts a held jekt from when it was delivered, not when it was sent", () => {
+        const onHoldOpen = vi.fn();
+        const held: JektMessageNode = { ...node, timestamp: Date.now() - 600_000, heldForSecs: 600 };
+        render(() => <JektBubble node={held} collapsed={false} onToggle={() => {}} onHoldOpen={onHoldOpen} />);
+        expect(onHoldOpen).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not for a jekt loaded from history", () => {
+        const onHoldOpen = vi.fn();
+        render(() => <JektBubble node={at(Date.now() - 60_000)} collapsed={true} onToggle={() => {}} onHoldOpen={onHoldOpen} />);
+        expect(onHoldOpen).not.toHaveBeenCalled();
+    });
+
+    it("does not for a sensitive jekt", () => {
+        const onHoldOpen = vi.fn();
+        render(() => (
+            <JektBubble node={at(Date.now(), "sensitive")} collapsed={false} onToggle={() => {}} onHoldOpen={onHoldOpen} />
+        ));
+        expect(onHoldOpen).not.toHaveBeenCalled();
+    });
+
+    it("gives its boxes the shared preview-box scroll hand-off", () => {
+        const { container } = render(() => <JektBubble node={node} collapsed={false} onToggle={() => {}} />);
+        expect(container.querySelector(".agent-jekt-body")!.classList.contains("scroll-handoff-box")).toBe(true);
+    });
+});
+
 describe("JektBubble — peek tooltip", () => {
     it("shows time + estimate on hover", () => {
         vi.useFakeTimers();

@@ -52,7 +52,7 @@ export interface DocumentRowProps {
     onTogglePin: (id: string) => void;
     /** Hold a tool expanded after it completes live on screen (ToolBlock calls
      *  this on the active→inactive transition). */
-    onHoldToolOpen?: (id: string) => void;
+    onHoldNodeOpen?: (id: string) => void;
     /** Re-run the provider login flow. Threaded down so an `agent_error` node
      *  carrying an auth status (401/403) can offer an inline "Login Again" CTA
      *  — the same action as the failure banner. See
@@ -74,6 +74,18 @@ export interface DocumentRowProps {
     dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
 }
 
+/** Flip whichever set the shared rule names for this row (`pinnedNodes` or
+ *  `collapsedNodes`); nothing for a fixed row. The row's click and the `e` key. */
+function flipRow(
+    node: DocumentNode,
+    state: DocumentState,
+    on: { onTogglePin: (id: string) => void; onToggleCollapse: (id: string) => void },
+): void {
+    const t = rowDisclosureIn(node, state).toggle;
+    if (t === "pin") on.onTogglePin(node.id);
+    else if (t === "collapse") on.onToggleCollapse(node.id);
+}
+
 export function DocumentRow(props: DocumentRowProps): JSX.Element {
     // Phase 3: per-kind row mount perf probe. markRowMount returns a
     // closer that we invoke after onMount fires (i.e., after the row
@@ -89,14 +101,8 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
     // The `e` key flips the same set the row's own header click does: the
     // shared rule says which (virtualization/disclosure.ts), or that the row
     // isn't toggleable at all (normal user input, fixed rows).
-    const toggle = () => rowDisclosureIn(props.node(), props.documentState()).toggle;
-    const canExpand = (): boolean => toggle() !== null;
-
-    const onExpand = (): void => {
-        const id = props.node().id;
-        if (toggle() === "pin") props.onTogglePin(id);
-        else if (toggle() === "collapse") props.onToggleCollapse(id);
-    };
+    const canExpand = (): boolean => rowDisclosureIn(props.node(), props.documentState()).toggle !== null;
+    const onExpand = (): void => flipRow(props.node(), props.documentState(), props);
 
     const handleRowKey = (e: KeyboardEvent): void => {
         if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -134,7 +140,7 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 documentState={props.documentState}
                 onToggleCollapse={props.onToggleCollapse}
                 onTogglePin={props.onTogglePin}
-                onHoldToolOpen={props.onHoldToolOpen}
+                onHoldNodeOpen={props.onHoldNodeOpen}
                 onAgentErrorLogin={props.onAgentErrorLogin}
                 onOpenHistory={props.onOpenHistory}
                 dispatchMatches={props.dispatchMatches}
@@ -148,7 +154,7 @@ interface DocumentNodeBodyProps {
     documentState: Accessor<DocumentState>;
     onToggleCollapse: (id: string) => void;
     onTogglePin: (id: string) => void;
-    onHoldToolOpen?: (id: string) => void;
+    onHoldNodeOpen?: (id: string) => void;
     /** Re-run the provider login flow — drives the inline auth-error CTA. */
     onAgentErrorLogin?: () => void;
     /** Open/focus the Agent History tab — drives the `history_link` row's click. */
@@ -171,6 +177,10 @@ interface DocumentNodeBodyProps {
  * though ToolBlock uses props.pinned correctly. See PR #346.
  */
 function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
+    // The message rows (agent message, jekt, context delivery) take their open
+    // state and their click from the shared rule, as the `e` key does.
+    const disclosure = () => rowDisclosureIn(props.node(), props.documentState());
+    const onExpand = (): void => flipRow(props.node(), props.documentState(), props);
     // SolidJS <Show> with keyed:false (the default) calls the child
     // factory ONCE when `when` first becomes truthy and never re-runs
     // it. The previous version of this function was:
@@ -233,9 +243,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 <ToolBlock
                     node={props.node() as Extract<DocumentNode, { type: "tool" }>}
                     pinned={props.documentState().pinnedNodes.has(props.node().id)}
-                    heldOpen={props.documentState().expandedTools.has(props.node().id)}
+                    heldOpen={props.documentState().heldOpenNodes.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
-                    onHoldOpen={() => props.onHoldToolOpen?.(props.node().id)}
+                    onHoldOpen={() => props.onHoldNodeOpen?.(props.node().id)}
                     userCollapsed={props.documentState().collapsedNodes.has(props.node().id)}
                     onToggleCollapse={() => props.onToggleCollapse(props.node().id)}
                     dispatchMatch={dispatchMatch()}
@@ -244,22 +254,23 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "agent_message"}>
                 <AgentMessageBlock
                     node={props.node() as Extract<DocumentNode, { type: "agent_message" }>}
-                    collapsed={props.documentState().collapsedNodes.has(props.node().id)}
-                    onToggle={() => props.onToggleCollapse(props.node().id)}
+                    collapsed={!disclosure().open}
+                    onToggle={onExpand}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "jekt_message"}>
                 <JektBubble
                     node={props.node() as Extract<DocumentNode, { type: "jekt_message" }>}
-                    collapsed={props.documentState().collapsedNodes.has(props.node().id)}
-                    onToggle={() => props.onToggleCollapse(props.node().id)}
+                    collapsed={!disclosure().open}
+                    onToggle={onExpand}
+                    onHoldOpen={() => props.onHoldNodeOpen?.(props.node().id)}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "context_delivery"}>
                 <ContextDeliveryCard
                     node={props.node() as ContextDeliveryNode}
-                    pinned={props.documentState().pinnedNodes.has(props.node().id)}
-                    onTogglePin={() => props.onTogglePin(props.node().id)}
+                    collapsed={!disclosure().open}
+                    onToggle={onExpand}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "user_message"}>

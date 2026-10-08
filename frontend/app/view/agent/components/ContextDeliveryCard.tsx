@@ -16,18 +16,18 @@
  */
 
 import clsx from "clsx";
-import { For, Show, onCleanup, type JSX } from "solid-js";
+import { For, Show, type JSX } from "solid-js";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { formatCompactNumber } from "@/util/format-count";
 import { contextDeliveryTitle, isCompactionSummaryCard } from "../context-delivery";
 import type { ContextDeliveryNode, ContextItem } from "../types";
 import { CollapsibleMessage } from "./CollapsibleMessage";
-import { attachScrollHandoff } from "./scroll-handoff";
+import { previewBox } from "./scroll-handoff";
 
 interface ContextDeliveryCardProps {
     node: ContextDeliveryNode;
-    pinned: boolean;
-    onTogglePin: () => void;
+    collapsed: boolean;
+    onToggle: () => void;
 }
 
 const ITEM_ICON: Record<ContextItem["kind"], string> = {
@@ -62,9 +62,7 @@ function sizeText(item: ContextItem): string {
 }
 
 /** A long body scrolls inside its own box and hands scroll to the pane at its edges. */
-const handoff = (el: HTMLElement): void => {
-    onCleanup(attachScrollHandoff(el));
-};
+const handoff = previewBox();
 
 const totalTokens = (node: ContextDeliveryNode): number => node.items.reduce((sum, i) => sum + i.tokens, 0);
 
@@ -139,7 +137,7 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
             <span class="agent-context-delivery-icon">{summaryCard() ? ITEM_ICON.compaction_summary : "📥"}</span>
             <span class="agent-context-delivery-title">{contextDeliveryTitle(props.node)}</span>
             <span class="agent-context-delivery-size">~{fmt(totalTokens(props.node))} tok (est.)</span>
-            <Show when={summaryCard() && !props.pinned && props.node.items[0]?.excerpt}>
+            <Show when={summaryCard() && props.collapsed && props.node.items[0]?.excerpt}>
                 <span class="agent-context-delivery-excerpt">{props.node.items[0].excerpt}</span>
             </Show>
             {/* Memory deliveries list every item without opening the card. */}
@@ -170,8 +168,8 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
                 rootClass="agent-context-delivery"
                 classPrefix="agent-context-delivery"
                 classes={classes()}
-                collapsed={!props.pinned}
-                onToggle={props.onTogglePin}
+                collapsed={props.collapsed}
+                onToggle={props.onToggle}
                 peekText={props.node.items.map((i) => i.body ?? "").join("\n")}
                 timestamp={props.node.timestamp}
                 summary={summary()}

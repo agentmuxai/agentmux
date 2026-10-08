@@ -76,7 +76,7 @@ afterEach(() => {
 const emptyDocumentState = (): DocumentState => ({
     collapsedNodes: new Set(),
     pinnedNodes: new Set(),
-    expandedTools: new Set(),
+    heldOpenNodes: new Set(),
     scrollPosition: 0,
     selectedNode: null,
     filter: { showThinking: true } as DocumentState["filter"],

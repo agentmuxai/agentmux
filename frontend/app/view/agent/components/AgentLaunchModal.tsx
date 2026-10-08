@@ -32,6 +32,7 @@ import { refreshAccountCache, subscribeAccountChanges } from "@/app/view/identit
 import { useContinueOrNewMode } from "../hooks/useContinueOrNewMode";
 import { useLaunchAuthGate } from "../hooks/useLaunchAuthGate";
 import type { AgentDefinition } from "@/app/store/rpc-api";
+import { formatTimeAgo } from "@/util/format-time";
 
 export interface LaunchOverrides {
     /** Instance name — written into AGENTMUX_AGENT_ID and used to
@@ -369,15 +370,6 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
         initialContinueOfId: props.initialFormState?.continueOfId,
     });
 
-    const formatRelative = (ms: number): string => {
-        if (!ms) return "";
-        const delta = Date.now() - ms;
-        if (delta < 60_000) return "just now";
-        if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
-        if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
-        return `${Math.floor(delta / 86_400_000)}d ago`;
-    };
-
     const hasName = () => name().trim().length > 0;
     const containerSupported = () => catalog()?.containerSupported ?? true;
 
@@ -555,7 +547,7 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                                 row.identity_name?.trim(),
                                                 row.memory_name?.trim() || "(vanilla CLI)",
                                             ].filter(Boolean);
-                                            if (row.started_at) parts.push(formatRelative(row.started_at));
+                                            if (row.started_at) parts.push(formatTimeAgo(row.started_at));
                                             return (
                                                 <option value={row.instance_id}>
                                                     {parts.join(" · ")}
