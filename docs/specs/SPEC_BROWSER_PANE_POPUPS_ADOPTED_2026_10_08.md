@@ -1,6 +1,6 @@
 # SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them
 
-**Status:** P1 implemented (this PR): popups open as panes beside the opener (§3.2 Option B), ownership is inherited, snapshots list popups. P2 and P3 open.
+**Status:** active — P1 implemented (agentmux#4478): popups open as panes beside the opener (§3.2 Option B), ownership is inherited, snapshots list popups. P2 and P3 open.
 **Author:** AgentX@narko, 2026-10-08
 **Builds on:** `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` (ownership, `BrowserHandoff`),
 `SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md` (the popup-redirect rule),
