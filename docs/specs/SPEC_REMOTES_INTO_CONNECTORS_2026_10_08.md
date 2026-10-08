@@ -1,6 +1,6 @@
 # Remotes becomes a section of Connectors; the model/effort panel keeps its size
 
-**Status:** active.
+**Status:** implemented — both parts (§3 Remotes in Connectors, §6 the model/effort panel) in PR #4491.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "i think we should get rid of the remotes pane and add it as a section to
 Connectors"; "you can still see multiple remotes at the same time by opening multiple connector panes"; and, for §6,
