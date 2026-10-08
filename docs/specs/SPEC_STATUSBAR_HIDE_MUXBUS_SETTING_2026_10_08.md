@@ -2,7 +2,7 @@
 
 **Author:** Clamk
 **Date:** 2026-10-08
-**Status:** implemented — PR pending (branch `clamk/statusbar-hide-muxbus-cloud`)
+**Status:** implemented — PR #4495
 
 ---
 
