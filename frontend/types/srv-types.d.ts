@@ -808,6 +808,21 @@ declare global {
     };
 
     // waveobj.MetaTSType
+    type BrowserAttention = {
+        id: string;
+        kind: "handoff" | "approval";
+        agent?: string;
+        /** Hand-off: what the user should do. */
+        reason?: string;
+        /** Approval: the action, e.g. `Click "Submit"`. */
+        what?: string;
+        page?: string;
+        /** Approval: where the form is sent. */
+        action?: string;
+        /** Approval: the form's values, secrets masked. */
+        fields?: [string, string][];
+    };
+
     type MetaType = {
         view?: string;
         controller?: string;
@@ -818,6 +833,10 @@ declare global {
          *  Written by srv only; the human's Take over clears it
          *  (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3, §5.5). */
         "browser:owner_agent"?: string | null;
+        /** A request from the agent driving this pane, shown as a banner: a
+         *  hand-off or an approval. Written by srv; the user's answer goes back
+         *  through the host (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4). */
+        "browser:attention"?: BrowserAttention | null;
         // Floating-pane window state (host-written; `pane:floating_*` family).
         "pane:floating_placement"?: "normal" | "maximized";
         "pane:floating_normal_rect"?: { left: number; top: number; right: number; bottom: number };

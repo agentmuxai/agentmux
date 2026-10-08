@@ -56,6 +56,9 @@ pub fn delete_block(
     // An agent's ownership of a browser pane ends with the pane
     // (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §3).
     crate::server::browser_owner::forget(block_id);
+    // So does anything it was waiting on the user for: an agent mid
+    // hand-off or approval gets Cancelled now, not after the timeout.
+    crate::server::browser_attention::cancel_for(block_id);
     Ok(())
 }
 

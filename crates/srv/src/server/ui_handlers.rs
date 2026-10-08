@@ -138,14 +138,14 @@ pub(crate) fn target_block_id(
     use crate::server::browser_owner::{self, Denied};
     let own = verified_block_id(state, caller, auth).map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
     let Some(pane) = pane.map(str::trim).filter(|p| !p.is_empty()) else {
-        return Ok(own);
+        return not_waiting_on_user(&own).map(|()| own);
     };
     let block = state
         .mstore
         .get::<crate::backend::obj::Block>(pane)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("load pane {pane:?}: {e}")))?;
     match browser_owner::check(block.as_ref(), browser_owner::owner_of(pane).as_deref(), &auth.agent_id, pane) {
-        Ok(()) => Ok(pane.to_string()),
+        Ok(()) => not_waiting_on_user(pane).map(|()| pane.to_string()),
         Err(Denied::NotFound(m)) => {
             // The pane is gone: drop any owner entry it left behind.
             browser_owner::forget(pane);
@@ -172,12 +172,29 @@ async fn proxy_to_host(
     route: &str,
     body: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
+    proxy_to_host_timeout(state, host, route, body, None).await
+}
+
+/// `proxy_to_host` with a request timeout of its own, for host routes that
+/// legitimately take longer than the shared client's default (a snapshot of
+/// a large page, `wait_for`).
+async fn proxy_to_host_timeout(
+    state: &AppState,
+    host: &HostIpc,
+    route: &str,
+    body: serde_json::Value,
+    timeout: Option<std::time::Duration>,
+) -> Result<serde_json::Value, String> {
     let url = format!("http://127.0.0.1:{}/agentmux/browser/{route}", host.port);
-    let resp = state
+    let mut request = state
         .http_client
         .post(&url)
         .header("Authorization", format!("Bearer {}", host.token))
-        .json(&body)
+        .json(&body);
+    if let Some(t) = timeout {
+        request = request.timeout(t);
+    }
+    let resp = request
         .send()
         .await
         .map_err(|e| format!("proxy to host {route}: {e}"))?;
@@ -330,6 +347,9 @@ pub(crate) async fn handle_ui_click(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    if let Err(resp) = refuse_on_driven_pane(&block_id, "UIClick", "BrowserSnapshot, then BrowserClick on a reference") {
+        return resp;
+    }
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -549,6 +569,13 @@ pub(crate) async fn handle_ui_browser_eval(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    if let Err(resp) = refuse_on_driven_pane(
+        &block_id,
+        "BrowserEval",
+        "BrowserSnapshot to read the page, and BrowserClick/Fill/Select/Check to act on it",
+    ) {
+        return resp;
+    }
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -594,6 +621,19 @@ pub(crate) async fn handle_ui_browser_dispatch_key(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    // Enter submits a form and Space presses the focused button: neither
+    // would pass the approval banner, so on a driven pane they're refused.
+    let presses = matches!(req.key.as_deref(), Some("Enter") | Some("NumpadEnter") | Some("Space"))
+        || req.text.as_deref().is_some_and(|t| t.contains('\n') || t.contains('\r'));
+    if presses {
+        if let Err(resp) = refuse_on_driven_pane(
+            &block_id,
+            "BrowserDispatchKey with Enter or Space",
+            "BrowserClick on the button (it asks the user when the click submits something)",
+        ) {
+            return resp;
+        }
+    }
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -755,25 +795,37 @@ pub(crate) async fn handle_ui_browser_open(
 
 /// Proxy a browser-pane request to the host and pass its `data` through:
 /// the shared tail of the snapshot and act handlers.
-async fn proxy_data(state: &AppState, route: &str, body: serde_json::Value) -> axum::response::Response {
-    let host = match get_host_ipc(state).await {
-        Ok(h) => h,
-        Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
-    };
-    let host_resp = match proxy_to_host(state, &host, route, body).await {
-        Ok(v) => v,
-        Err(e) => return err_response(StatusCode::BAD_GATEWAY, e),
-    };
+async fn proxy_value(
+    state: &AppState,
+    route: &str,
+    body: serde_json::Value,
+    timeout: std::time::Duration,
+) -> Result<serde_json::Value, (StatusCode, String)> {
+    let host = get_host_ipc(state).await.map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, e))?;
+    let host_resp = proxy_to_host_timeout(state, &host, route, body, Some(timeout))
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
     if host_resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
         let err = host_resp
             .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown host error")
             .to_string();
-        return err_response(StatusCode::BAD_REQUEST, err);
+        return Err((StatusCode::BAD_REQUEST, err));
     }
-    let data = host_resp.get("data").cloned().unwrap_or(serde_json::Value::Null);
-    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+    Ok(host_resp.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+async fn proxy_data(
+    state: &AppState,
+    route: &str,
+    body: serde_json::Value,
+    timeout: std::time::Duration,
+) -> axum::response::Response {
+    match proxy_value(state, route, body, timeout).await {
+        Ok(data) => (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response(),
+        Err((code, e)) => err_response(code, e),
+    }
 }
 
 /// `POST /api/v1/ui/browser/snapshot` — backs `BrowserSnapshot`
@@ -788,7 +840,217 @@ pub(crate) async fn handle_ui_browser_snapshot(
         Err((code, e)) => return err_response(code, e),
     };
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser snapshot");
-    proxy_data(&state, "snapshot", json!({ "block_id": block_id, "scope": req.scope })).await
+    proxy_data(
+        &state,
+        "snapshot",
+        json!({ "block_id": block_id, "scope": req.scope }),
+        std::time::Duration::from_secs(30),
+    )
+    .await
+}
+
+/// `POST /api/v1/ui/browser/set_files` — backs `BrowserSetFiles`. Only files
+/// inside the calling agent's own workspace (its block's launch directory,
+/// host agents only) are allowed (spec §5.3).
+pub(crate) async fn handle_ui_browser_set_files(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<agentmux_common::api_types::UiBrowserSetFilesRequest>,
+) -> impl IntoResponse {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
+        Ok(b) => b,
+        Err((code, e)) => return err_response(code, e),
+    };
+    let own = match verified_block_id(&state, caller.as_deref(), &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
+    // Where srv launched the agent, not its block's `cmd:cwd`, which any
+    // client can rewrite (spec §5.3).
+    let workspace = crate::server::browser_uploads::agent_workspace(&own);
+    let Some(workspace) = workspace else {
+        return err_response(
+            StatusCode::FORBIDDEN,
+            "uploads come only from an agent's own workspace, and this agent has none \
+             (a container agent, or no launch directory)"
+                .to_string(),
+        );
+    };
+    let paths = match crate::server::browser_uploads::check_upload_paths(&workspace, &req.paths) {
+        Ok(p) => p,
+        Err(e) => return err_response(StatusCode::FORBIDDEN, e),
+    };
+    let names: Vec<&str> = paths
+        .iter()
+        .map(|p| std::path::Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(""))
+        .collect();
+    tracing::info!(
+        agent_id = %req.auth.agent_id, block_id = %block_id, r#ref = %req.ref_, files = ?names,
+        "[ui-automation] browser upload"
+    );
+    proxy_data(
+        &state,
+        "set_files",
+        json!({ "block_id": block_id, "ref": req.ref_, "paths": paths }),
+        std::time::Duration::from_secs(20),
+    )
+    .await
+}
+
+/// `POST /api/v1/ui/browser/wait_for` — backs `BrowserWaitFor`.
+pub(crate) async fn handle_ui_browser_wait_for(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<agentmux_common::api_types::UiBrowserWaitForRequest>,
+) -> impl IntoResponse {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
+        Ok(b) => b,
+        Err((code, e)) => return err_response(code, e),
+    };
+    let timeout_ms = req.timeout_ms.unwrap_or(10_000).clamp(250, 60_000);
+    proxy_data(
+        &state,
+        "wait_for",
+        json!({
+            "block_id": block_id,
+            "text": req.text,
+            "url_contains": req.url_contains,
+            "gone": req.gone,
+            "timeout_ms": timeout_ms,
+        }),
+        std::time::Duration::from_millis(timeout_ms + 10_000),
+    )
+    .await
+}
+
+/// On a browser pane an agent drives (opened with `OpenBrowser`), refuse the
+/// general-purpose routes that could submit, send or delete without the
+/// approval banner (spec §5.4): arbitrary script, clicks by CSS selector,
+/// and the keys that press buttons. The reference tools do the same work
+/// with the approval check in front of committing clicks.
+#[allow(clippy::result_large_err)]
+fn refuse_on_driven_pane(block_id: &str, what: &str, instead: &str) -> Result<(), axum::response::Response> {
+    if crate::server::browser_owner::owner_of(block_id).is_none() {
+        return Ok(());
+    }
+    Err(err_response(
+        StatusCode::FORBIDDEN,
+        format!(
+            "{what} isn't allowed on a browser pane you opened with OpenBrowser: it could submit \
+             a form without the user's approval. Use {instead}."
+        ),
+    ))
+}
+
+/// Refuse a tool call on a pane that is waiting for the user: a hand-off
+/// (they're working in it) or an approval (they're reading the form the
+/// approved click will send, which mustn't change under them).
+fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
+    use crate::server::browser_attention::{waiting_on_user, Kind};
+    match waiting_on_user(pane) {
+        None => Ok(()),
+        Some(Kind::Handoff) => Err((
+            StatusCode::CONFLICT,
+            format!(
+                "the user is working in pane {pane:?} (your BrowserHandoff); your tools on it are \
+                 paused until they click Done or Cancel"
+            ),
+        )),
+        Some(Kind::Approval) => Err((
+            StatusCode::CONFLICT,
+            format!(
+                "pane {pane:?} is waiting for the user to approve your click; your tools on it are \
+                 paused until they answer"
+            ),
+        )),
+    }
+}
+
+/// `POST /api/v1/ui/browser/handoff` — backs `BrowserHandoff` (spec §5.2):
+/// a banner in the pane asks the user to do something the agent mustn't
+/// (sign in, a CAPTCHA), and the call waits for their Done or Cancel. The
+/// agent's tools on that pane are refused meanwhile (`target_block_id`).
+pub(crate) async fn handle_ui_browser_handoff(
+    State(state): State<AppState>,
+    caller: Option<axum::Extension<crate::server::caller::Caller>>,
+    Json(req): Json<agentmux_common::api_types::UiBrowserHandoffRequest>,
+) -> impl IntoResponse {
+    let block_id = match target_block_id(&state, caller.as_deref(), &req.auth, req.pane.as_deref()) {
+        Ok(b) => b,
+        Err((code, e)) => return err_response(code, e),
+    };
+    // Only a browser pane shows the banner; anywhere else the request would
+    // lock the agent's own tools with nothing for the user to click.
+    let is_browser = state
+        .mstore
+        .get::<crate::backend::obj::Block>(&block_id)
+        .ok()
+        .flatten()
+        .is_some_and(|b| b.meta.get("view").and_then(|v| v.as_str()) == Some("browser"));
+    if !is_browser {
+        return err_response(
+            StatusCode::BAD_REQUEST,
+            "BrowserHandoff needs a browser pane: pass the `pane` OpenBrowser returned".to_string(),
+        );
+    }
+    let reason: String = req.reason.trim().chars().take(300).collect();
+    if reason.is_empty() {
+        return err_response(StatusCode::BAD_REQUEST, "say what the user should do (`reason`)".to_string());
+    }
+    let minutes = req.timeout_minutes.unwrap_or(15).clamp(1, 60);
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser hand-off");
+    let answer = match crate::server::browser_attention::ask(
+        &state,
+        &block_id,
+        &req.auth.agent_id,
+        crate::server::browser_attention::Kind::Handoff,
+        json!({ "reason": reason }),
+        std::time::Duration::from_secs(minutes * 60),
+    )
+    .await
+    {
+        Ok((a, _waiting)) => a,
+        Err(e) => return err_response(StatusCode::CONFLICT, e),
+    };
+    let answer = match answer {
+        crate::server::browser_attention::Answer::Yes => "done",
+        crate::server::browser_attention::Answer::Cancelled => "cancelled",
+        crate::server::browser_attention::Answer::TimedOut => "timed_out",
+    };
+    (StatusCode::OK, Json(json!({ "ok": true, "data": { "answer": answer } }))).into_response()
+}
+
+/// `POST /api/v1/host/browser_attention` — the user's answer to a hand-off
+/// or approval banner, relayed by the CEF host. Only the host can call it:
+/// `X-Host-Token` must be the IPC token the host registered with
+/// (`host_ipc.Register`), which agents never see; the instance auth key
+/// alone, which every agent has, isn't enough.
+pub(crate) async fn handle_host_browser_attention(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let presented = headers.get("x-host-token").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let registered = state.host_ipc.lock().await.clone().map(|h| h.token).unwrap_or_default();
+    if registered.is_empty()
+        || presented.is_empty()
+        || !agentmux_common::secret_eq::secret_eq(presented.as_bytes(), registered.as_bytes())
+    {
+        return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can answer a pane's request".to_string());
+    }
+    let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let (block_id, id, decision) = (s("block_id"), s("id"), s("decision"));
+    let Some(answer) = crate::server::browser_attention::Answer::parse(&decision) else {
+        return err_response(StatusCode::BAD_REQUEST, format!("unknown decision {decision:?}"));
+    };
+    match crate::server::browser_attention::resolve(&id, &block_id, answer) {
+        Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
+        Err(e) => {
+            // Nothing waits on that banner any more: take it down.
+            crate::server::browser_attention::clear_stale(&state, &block_id, &id);
+            err_response(StatusCode::NOT_FOUND, e)
+        }
+    }
 }
 
 /// `POST /api/v1/ui/browser/act` — backs `BrowserClick`, `BrowserFill`,
@@ -807,9 +1069,10 @@ pub(crate) async fn handle_ui_browser_act(
         agent_id = %req.auth.agent_id, block_id = %block_id, action = %req.action, r#ref = %req.ref_,
         "[ui-automation] browser act"
     );
-    proxy_data(
-        &state,
-        "act",
+    // `approved` carries what the user was shown: the host checks the form
+    // still matches it before clicking (the page's own script could have
+    // changed it while they read the banner).
+    let body = |approved: Option<&serde_json::Value>| {
         json!({
             "block_id": block_id,
             "ref": req.ref_,
@@ -817,9 +1080,67 @@ pub(crate) async fn handle_ui_browser_act(
             "text": req.text,
             "option": req.option,
             "checked": req.checked,
-        }),
+            "approved": approved.is_some(),
+            "approved_as": approved,
+        })
+    };
+    let first = match proxy_value(&state, "act", body(None), std::time::Duration::from_secs(20)).await {
+        Ok(d) => d,
+        Err((code, e)) => return err_response(code, e),
+    };
+    // A committing click (submit, send, pay, delete, ...) waits for the
+    // user's approval in the pane; only their click there lets it through
+    // (spec §5.4).
+    let Some(ask) = first.pointer("/after/needs_approval").cloned() else {
+        return (StatusCode::OK, Json(json!({ "ok": true, "data": first }))).into_response();
+    };
+    tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser act waits for approval");
+    // `_waiting` keeps the pane locked until the approved click is done, so
+    // the form can't change between what the user approved and what's sent.
+    // The banner shows the summary, not the fingerprint of everything the
+    // click sends (hidden controls included): that stays here, for the check
+    // the host makes before the approved click.
+    let mut banner = ask.clone();
+    if let Some(b) = banner.as_object_mut() {
+        b.remove("fingerprint");
+    }
+    let owner_before = crate::server::browser_owner::owner_of(&block_id);
+    let (answer, _waiting) = match crate::server::browser_attention::ask(
+        &state,
+        &block_id,
+        &req.auth.agent_id,
+        crate::server::browser_attention::Kind::Approval,
+        banner,
+        std::time::Duration::from_secs(10 * 60),
     )
     .await
+    {
+        Ok(a) => a,
+        Err(e) => return err_response(StatusCode::CONFLICT, e),
+    };
+    match answer {
+        // The user may have taken the pane over while the banner was up:
+        // their Take over wins over an Approve that comes after it.
+        crate::server::browser_attention::Answer::Yes
+            if crate::server::browser_owner::owner_of(&block_id) != owner_before =>
+        {
+            err_response(
+                StatusCode::FORBIDDEN,
+                "the user took over this pane, so the approved click wasn't made".to_string(),
+            )
+        }
+        crate::server::browser_attention::Answer::Yes => {
+            proxy_data(&state, "act", body(Some(&ask)), std::time::Duration::from_secs(20)).await
+        }
+        crate::server::browser_attention::Answer::Cancelled => err_response(
+            StatusCode::FORBIDDEN,
+            "the user didn't approve this action: don't retry it; ask them what to do".to_string(),
+        ),
+        crate::server::browser_attention::Answer::TimedOut => err_response(
+            StatusCode::REQUEST_TIMEOUT,
+            "the user didn't answer the approval within 10 minutes; ask them in chat before trying again".to_string(),
+        ),
+    }
 }
 
 #[cfg(test)]

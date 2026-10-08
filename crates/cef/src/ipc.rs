@@ -653,6 +653,27 @@ async fn route_command(
             state.browser_panes.paste(block_id, state);
             Ok(serde_json::json!(true))
         }
+        "browser_attention_resolve" => {
+            // The user's Done/Approve/Cancel on an agent's browser-pane
+            // banner. Relayed to srv as the host, so no agent can answer its
+            // own request (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4).
+            let body = serde_json::json!({
+                "block_id": args.get("block_id").and_then(|v| v.as_str()).unwrap_or(""),
+                "id": args.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+                "decision": args.get("decision").and_then(|v| v.as_str()).unwrap_or(""),
+            });
+            let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
+            let auth_key = state.auth_key.lock().clone();
+            let ipc_token = state.ipc_token.clone();
+            tracing::info!("[ipc] browser_attention_resolve decision={}", body["decision"]);
+            let relayed: Result<(), String> = tokio::task::spawn_blocking(move || {
+                crate::client::backend_browser_attention(&web_endpoint, &auth_key, &ipc_token, &body)
+            })
+            .await
+            .map_err(|e| format!("browser_attention_resolve: {e}"))?;
+            relayed?;
+            Ok(serde_json::json!(true))
+        }
         "browser_pane_focus" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);

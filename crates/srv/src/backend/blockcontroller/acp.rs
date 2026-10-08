@@ -893,6 +893,7 @@ impl AcpController {
         }
         // The workspace the "Your workspace" Operator Config entry points at.
         crate::server::agent_handlers::input::carry_agent_workdir_env(&mut env_vars, block_meta);
+        crate::server::browser_uploads::record_launch_workspace(&self.block_id, &env_vars);
         crate::backend::gh_guard::apply_gh_guard(&mut env_vars);
         crate::backend::account_login_guard::strip_account_login(&mut env_vars);
         env_vars

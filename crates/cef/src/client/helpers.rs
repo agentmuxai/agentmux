@@ -168,6 +168,47 @@ fn parse_web_endpoint(web_endpoint: &str, caller: &str) -> Option<std::net::Sock
     }
 }
 
+/// Relay the user's answer to an agent's browser-pane request (a hand-off
+/// or an approval banner) to srv, as the host: `X-Host-Token` carries this
+/// host's IPC token, which srv checks against the one we registered and
+/// agents never see (SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.2, §5.4).
+pub(crate) fn backend_browser_attention(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    use std::io::{Read, Write};
+    let addr = parse_web_endpoint(web_endpoint, "backend_browser_attention").ok_or("no srv endpoint")?;
+    let body = body.to_string();
+    let request = format!(
+        "POST /api/v1/host/browser_attention HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {auth_key}\r\n\
+         X-Host-Token: {ipc_token}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {body}",
+        body.len()
+    );
+    let timeout = std::time::Duration::from_secs(10);
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout).map_err(|e| format!("connect to srv: {e}"))?;
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
+    stream.write_all(request.as_bytes()).map_err(|e| format!("write to srv: {e}"))?;
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).map_err(|e| format!("read from srv: {e}"))?;
+    let first = raw.lines().next().unwrap_or("");
+    if first.contains(" 200 ") {
+        Ok(())
+    } else {
+        let detail = raw.split("\r\n\r\n").nth(1).unwrap_or("").trim();
+        Err(format!("srv refused the answer: {first} {detail}"))
+    }
+}
+
 /// SPEC_PILLAR1_STEP2 Slice A Phase 2 — write-through the host's per-window
 /// opacity to srv's `Window.opacity` so a crashed/restarted host can restore
 /// it (via `backend_get_window_opacity` below). Fire-and-forget, same shape
