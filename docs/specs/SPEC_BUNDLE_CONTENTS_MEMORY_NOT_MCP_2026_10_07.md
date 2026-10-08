@@ -1,6 +1,6 @@
 # SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers
 
-**Status:** active — §5 step 1 (MCP servers out of bundles) in this PR; steps 2–4 to follow. Decisions D1–D3 taken by the operator (2026-10-07), D4–D7 on the recommendations (operator, 2026-10-08).
+**Status:** active — §5 step 1 (MCP servers out of bundles) in PR #4475; steps 2–4 (bundle memory, context files, docs and landing copy) remain. Decisions D1–D3 taken by the operator (2026-10-07), D4–D7 on the recommendations (operator, 2026-10-08).
 **Date:** 2026-10-07
 **Author:** agent3 (Agent3@narko), at the operator's request
 **Amends:** `SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md` §1 ("a bundle packages an agent's instructions, MCP servers, memory and skills"), `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` (bundle-level MCP references), and `SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md` §3.6 and §5 step 2c (the Launch button adding bundle MCP servers, which this cancels).
