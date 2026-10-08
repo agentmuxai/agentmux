@@ -279,6 +279,17 @@ describe("focusManager", () => {
             expect(document.activeElement).toBe(input);
         });
 
+        it("selects what the data-pane-focus input still holds, so typing replaces it", () => {
+            bcmForBlockId = { "block-1": { viewModel: {} } };
+            document.body.innerHTML = `<div data-blockid="block-1"><input id="filter" data-pane-focus value="old query" /></div>`;
+            const input = document.body.querySelector<HTMLInputElement>("#filter")!;
+            input.checkVisibility = () => true;
+
+            focusManager.ensureSelectionFocused("selection");
+
+            expect([input.selectionStart, input.selectionEnd]).toEqual([0, "old query".length]);
+        });
+
         it("skips a disabled or hidden data-pane-focus input", () => {
             bcmForBlockId = { "block-1": { viewModel: {} } };
             document.body.innerHTML = `<div data-blockid="block-1"><input id="a" data-pane-focus disabled /><input id="b" data-pane-focus /><input id="c" data-pane-focus /></div>`;

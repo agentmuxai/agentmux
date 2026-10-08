@@ -147,6 +147,10 @@ function focusBlockTarget(blockId: string): boolean {
     const el = paneFocusElement(blockId);
     if (el == null) return false;
     el.focus({ preventScroll: true });
+    // Coming back to a pane selects what its filter or search still holds, so
+    // typing replaces it (a click into the box itself places the caret instead:
+    // giveBlockFocus leaves a caret the user put in the pane alone).
+    if (el instanceof HTMLInputElement) el.select();
     return document.activeElement === el;
 }
 
