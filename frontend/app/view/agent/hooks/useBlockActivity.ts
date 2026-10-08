@@ -41,6 +41,7 @@ import { MOS } from "@/app/store/global";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { META_AWAITING_USER, META_LAST_PROMPT, META_RESTORED } from "@/app/store/swarm-line";
 import { META_HUMAN_TURNS, resetHumanTurns } from "@/app/store/title-schedule";
+import { META_OSC_TITLE, META_SUGGESTION, META_TITLE } from "@/app/store/meta-keys";
 
 export interface UseBlockActivityOptions {
     blockId: string;
@@ -53,14 +54,14 @@ function clearActivity(blockId: string): void {
     // a fresh title exists. Without this a restart opened onto a blank row.
     // Block meta persists across a restart, so this needs no new store.
     // docs/specs/SPEC_AMBIENT_SWARM_SUMMARY_HARDENING_2026_10_02.md section 5.5.
-    const ended = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta?.["term:ambient_summary"];
+    const ended = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta?.[META_TITLE];
     const restored = typeof ended === "string" && isUsableTitle(ended) ? ended.trim() : null;
     resetHumanTurns(blockId);
     fireAndForget(() =>
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-            "term:osc_title": null,
-            "term:ambient_summary": null,
-            "term:next_prompt_suggestion": null,
+            [META_OSC_TITLE]: null,
+            [META_TITLE]: null,
+            [META_SUGGESTION]: null,
             // The session is over: what it was asked and whether it was waiting
             // belong to it. Left in place, a new session in this pane, or one
             // after a restart, would open under the old session's last message
@@ -90,7 +91,7 @@ export function useBlockActivity(opts: UseBlockActivityOptions): void {
                 debounceTimer = setTimeout(() => {
                     fireAndForget(() =>
                         ObjectService.UpdateObjectMeta(makeORef("block", opts.blockId), {
-                            "term:osc_title": activity,
+                            [META_OSC_TITLE]: activity,
                         } as any)
                     );
                 }, 300);

@@ -37,9 +37,12 @@ describe("subagentToActivity", () => {
         expect(a.endedAt).toBe(900);
     });
 
-    it("prefers display_name, falling back to slug then agent_id", () => {
+    it("uses the Swarm row's label: the name, else the slug and a short id", () => {
         expect(subagentToActivity(mk({ agent_id: "a1", display_name: "Fixing auth" })).title).toBe("Fixing auth");
-        expect(subagentToActivity(mk({ agent_id: "a1", display_name: null, slug: "cool-slug" })).title).toBe("cool-slug");
+        // Same-slug siblings stay distinguishable, as in the Swarm (subagentDisplayLabel).
+        expect(subagentToActivity(mk({ agent_id: "abc1234def", display_name: null, slug: "cool-slug" })).title).toBe(
+            "cool-slug · abc1234",
+        );
         expect(subagentToActivity(mk({ agent_id: "a1", display_name: null, slug: "" })).title).toBe("a1");
     });
 

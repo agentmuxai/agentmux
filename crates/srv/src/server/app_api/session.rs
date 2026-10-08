@@ -311,12 +311,14 @@ fn empty_summary_result() -> ActivitySummaryResult {
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
+    let event_bus = state.event_bus.clone();
 
     engine.register_typed(
         COMMAND_SESSION_ACTIVITY_SUMMARY,
         move |cmd: CommandActivitySummaryData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
+            let event_bus = event_bus.clone();
             async move {
                 // Admit through the Ambient Model Call gateway BEFORE doing any
                 // work: a stale (superseded) request does zero FileStore reads
@@ -364,7 +366,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // accepted, such as `(none yet)`) counts as NO title: it is never fed
                 // back into the prompt, so it cannot sustain itself. The first draft
                 // fed it back as the "current title" and told the model to repeat it.
-                let stored_title = obj::meta_get_string(&block.meta, "term:ambient_summary", "");
+                let stored_title = obj::meta_get_string(&block.meta, ambient::title::META_TITLE, "");
                 let current_title = if ambient::validate::is_usable_title(&stored_title) {
                     stored_title
                 } else {
@@ -396,12 +398,23 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     })
                     .await;
 
-                // The frontend writes `term:ambient_summary` after receiving this
-                // response so it can discard results from turns that were
-                // superseded before they returned (belt-and-suspenders on top of
-                // the gateway's own cancellation). Empty text leaves the current
-                // title in place.
-                Ok(ActivitySummaryResult { summary: reply.text, tokens: reply.tokens })
+                // Stored here, not by the pane: one writer with the recovery sweep,
+                // in one transaction, so a rewording never replaces the title and
+                // neither writer overwrites what the other stored while its call ran
+                // (`ambient::title`). A call superseded by a newer message was
+                // cancelled by the gateway and has no text.
+                let mut stored = false;
+                if !reply.text.is_empty() {
+                    match ambient::title::store_title(&mstore, &cmd.block_id, &reply.text, ambient::title::Replace::IfNews) {
+                        Ok(true) => {
+                            stored = true;
+                            crate::backend::blockcontroller::core::broadcast_block_update(&mstore, &event_bus, &cmd.block_id);
+                        }
+                        Ok(false) => {}
+                        Err(e) => tracing::warn!(block_id = %cmd.block_id, error = %e, "session:activity_summary: could not store the title"),
+                    }
+                }
+                Ok(ActivitySummaryResult { summary: if stored { reply.text } else { String::new() }, tokens: reply.tokens })
             }
         },
     );

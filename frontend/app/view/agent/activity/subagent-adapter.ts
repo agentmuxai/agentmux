@@ -38,7 +38,7 @@
  * Spec: docs/specs/SPEC_LONG_RUNNING_SHELL_PINNED_DOCK_2026_06_15.md (§3, §7)
  */
 
-import type { ActiveSubagent } from "../../swarm/swarm-model";
+import { subagentDisplayLabel, type ActiveSubagent } from "../../swarm/swarm-model";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
 /** One dock row summarizing every member of a shared `dispatch_id` — the
@@ -110,10 +110,9 @@ export function subagentToActivity(s: ActiveSubagent): PinnedActivity {
     return {
         id: s.agent_id,
         kind: "subagent",
-        // `||`, not `??` — an empty-string slug (before the watcher reads the
-        // JSONL's first line) must fall through to agent_id, same as
-        // swarm-view.tsx's own equivalent fallback chain.
-        title: s.display_name || s.slug || s.agent_id,
+        // The Swarm row's label, so the two never disagree; same-slug siblings
+        // get a short id to tell them apart (see subagentDisplayLabel).
+        title: subagentDisplayLabel(s),
         status: subagentStatusToActivity(s.status),
         startedAt: s.spawned_at,
         // last_event_at at the moment a subagent completes (or is reconciled

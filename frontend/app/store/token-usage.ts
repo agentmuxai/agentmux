@@ -13,9 +13,9 @@
  * Also aggregates the same turns keyed by agent (`byAgent`, added by
  * SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md) — real agent turns
  * (the only call site with pane identity, useTurnLifecycle.ts) are keyed
- * by blockId; the four ambient/internal call sites (background
- * suggestions, activity summaries, subagent naming — all pass no `agent`
- * argument) collapse into a single "__ambient__" bucket instead of
+ * by blockId; AgentMux's own model calls (titles, names, suggestions and
+ * the rest, all recorded by ambient-spend.ts with no `agent` argument)
+ * collapse into a single "__ambient__" bucket instead of
  * appearing as peer rows next to real agents.
  *
  * Session-local only — no persistence across AgentMux restarts.
@@ -124,7 +124,7 @@ function accumulateServiceUsage(current: ServiceUsage, tokens: ServiceUsage): Se
 /**
  * Record a completed turn's tokens under `provider`, and — for real
  * agent turns — under the agent identified by `agent`. Omitting `agent`
- * (the four ambient/internal call sites) files the turn under the
+ * (ambient-spend.ts, for AgentMux's own model calls) files the turn under the
  * shared ambient bucket instead.
  *
  * No-op if there is genuinely nothing to record: both token counts are
@@ -160,8 +160,7 @@ export function recordTurn(
     // separate `freshInput` for the fresh-only count. The backend
     // TokenCounts shape — srv-types.d.ts's `{input, output, cacheCreation,
     // cacheRead}`, no `freshInput` field at all, reaching recordTurn via
-    // useNextPromptSuggestion/useAgentActivitySummary/ActivityDock/
-    // swarm-view's ambient `result.tokens` — uses `input` to mean
+    // ambient-spend.ts's `ambient:spent` events — uses `input` to mean
     // fresh-only directly. Without this normalization, getCacheHitRate's
     // denominator silently drops that caller's fresh tokens (cacheCreation/
     // cacheRead are present, freshInput isn't), inflating the reported

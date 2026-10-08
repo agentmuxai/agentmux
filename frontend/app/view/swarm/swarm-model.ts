@@ -24,6 +24,7 @@ import { remoteSections, type SwarmOtherInstances } from "./swarm-remote";
 import { createSignal, type Accessor, type Setter } from "solid-js";
 import { groupBackgroundTasks, type AgentBackgroundTasks } from "./swarm-background";
 import { toolDetail } from "@/app/view/agent/tool-meta/tool-descriptors";
+import { onSubagentNamed, withSubagentName } from "./subagent-naming";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -1321,18 +1322,9 @@ export class SwarmViewModel {
         // Patch display_name in place (not a full loadSubagents() reload) so
         // every client watching this session picks up a generated name —
         // not just the one whose expand click triggered subagent.GenerateName.
-        const unsubNamed = muxEventSubscribe({
-            eventType: "subagent:named",
-            handler: (event: MuxEvent) => {
-                const data = event?.data as any;
-                const agentId = data?.agentId;
-                const displayName = data?.displayName;
-                if (!agentId || !displayName) return;
-                this.setSubagents((prev) =>
-                    prev.map((s) => (s.agent_id === agentId ? { ...s, display_name: displayName } : s))
-                );
-            },
-        });
+        const unsubNamed = onSubagentNamed((agentId, displayName) =>
+            this.setSubagents((prev) => withSubagentName(prev, agentId, displayName))
+        );
         if (unsubNamed) this.unsubs.push(unsubNamed);
 
         // When process trackers change, refresh the block list

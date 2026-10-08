@@ -30,7 +30,9 @@ pub mod prompt;
 pub mod purpose;
 pub mod reply;
 pub mod sanitize;
+pub mod spend;
 pub mod tasks;
+pub mod title;
 pub mod validate;
 
 use std::collections::HashMap;

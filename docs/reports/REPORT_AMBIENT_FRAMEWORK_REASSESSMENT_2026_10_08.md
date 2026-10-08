@@ -345,6 +345,15 @@ The hidden-reinjection filter stays. It is about AgentMux's own message, not the
 - **Token accounting:** the background purposes' tokens go into the status-bar totals (`PurposeSpec::counts_toward_totals`), served by the backend.
 - **Gate the suggestion hook** on providers that can produce a digest (6.5).
 
+**What was built (PR 6), and what changed on the way.**
+- The title is stored by `ambient::title::store_title`, in one transaction, for both the pane's request and the recovery sweep (`Replace::IfNews` and `Replace::IfEmpty`); `isTitleNews` moved there with its cases. The title hook now only schedules the request.
+- Spend is published by srv from `call::Slot::run` as an `ambient:spent` event, for every purpose, and recorded by one listener (`frontend/app/store/ambient-spend.ts`). No call site records spend any more, so none can be counted twice, and the five background purposes reach the totals. `PurposeSpec::counts_toward_totals` was not needed: every purpose counts.
+- `requestSubagentName`, `onSubagentNamed` and `withSubagentName` (`frontend/app/view/swarm/subagent-naming.ts`) replace the three name requests and two identical `subagent:named` handlers. The dock's subagent title uses `subagentDisplayLabel`, the Swarm's label, so same-slug siblings no longer look identical there.
+- `frontend/app/store/meta-keys.ts` names the title, OSC title and suggestion keys; Rust reads the title key as `ambient::title::META_TITLE`.
+- **`useAmbientPull` was not written.** Once the title hook stopped writing and neither hook records spend, what the two share is one RPC call with a timeout and a silent catch. Their triggers, guards and results differ, so a shared hook would be a wrapper around a function call.
+- **The provider gate is moot:** after PR 5 every pane can produce a digest.
+- The Tab/→ mask shipped in PR 1.
+
 ## 7. Plan
 
 Each PR is independently useful and reviewable. Order by value.

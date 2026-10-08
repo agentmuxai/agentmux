@@ -59,6 +59,7 @@ import { setProviderModels } from "@/app/view/agent/providers";
 import { scheduleRevealLift } from "@/store/tab-reveal";
 import { installLauncherEventBridge } from "@/util/launcher-events";
 import { installSrvEventBridge } from "@/util/srv-events";
+import { installAmbientSpendListener } from "@/app/store/ambient-spend";
 import { installFloatingRedockHoverListener } from "@/app/workspace/redock-ghost";
 import {
     seedKnownEntriesFromSnapshot,
@@ -450,6 +451,8 @@ async function initAppInner() {
     // events as soon as the srv pipe is connected; install before
     // any host-touching call so early events aren't dropped.
     installSrvEventBridge();
+    // AgentMux's own model calls' spend, for the status bar (store/ambient-spend.ts).
+    installAmbientSpendListener();
 
     // Register context menu click handler now that window.api exists.
     ContextMenuModel.init();

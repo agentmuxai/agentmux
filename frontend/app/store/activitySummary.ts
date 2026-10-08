@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isUsableTitle } from "./ambient-title";
+import { META_OSC_TITLE, META_TITLE } from "./meta-keys";
 
 
 /**
@@ -20,12 +21,12 @@ import { isUsableTitle } from "./ambient-title";
  * See docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md §3.4.
  */
 export function readActivitySummary(meta: Record<string, unknown> | undefined): string | undefined {
-    const ambient = meta?.["term:ambient_summary"] as string | undefined;
+    const ambient = meta?.[META_TITLE] as string | undefined;
     // A stored value that is about the ABSENCE of a title (`(none yet)`, the title
     // prompt's own placeholder echoed back and stored by an older build) is not shown:
     // it falls through to the OSC title, or to nothing. See ambient-title.ts.
     if (ambient && isUsableTitle(ambient)) return ambient;
-    const oscTitle = meta?.["term:osc_title"] as string | undefined;
+    const oscTitle = meta?.[META_OSC_TITLE] as string | undefined;
     if (oscTitle && oscTitle.length > 0) return oscTitle;
     return undefined;
 }

@@ -13,6 +13,7 @@ import { fireAndForget } from "@/util/util";
 import { Terminal } from "@xterm/xterm";
 import { handleAgentIdChange } from "./termagent";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { META_OSC_TITLE } from "@/app/store/meta-keys";
 
 // OSC 9283 — AgentMux meta commands
 export function handleOscMuxCommand(data: string, blockId: string, loaded: boolean): boolean {
@@ -165,7 +166,7 @@ export function handleOscTitleCommand(data: string, blockId: string, loaded: boo
         titleUpdateDebounceMap.delete(blockId);
         fireAndForget(async () => {
             await services.ObjectService.UpdateObjectMeta(MOS.makeORef("block", blockId), {
-                "term:osc_title": activity,
+                [META_OSC_TITLE]: activity,
             } as any);
         });
     }, TITLE_UPDATE_DEBOUNCE_MS);

@@ -189,6 +189,10 @@ impl Slot {
                 };
                 let logged = self.purpose.logs_reply.then_some(raw.as_str());
                 super::outcome::record_timed(self.purpose.tag, &self.entity_id, outcome, logged, Some(timing));
+                // Spent whatever the verdict, so counted whatever the verdict.
+                if let Some(tokens) = &tokens {
+                    super::spend::report(self.purpose.tag, tokens);
+                }
                 Reply { text, tokens, error: None }
             }
         }
