@@ -718,6 +718,56 @@ mod tests {
         DomFacts { local_name: tag.into(), attrs: attrs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }
     }
 
+    /// POST `body` to a local server with the set_files body limit and
+    /// return the HTTP status line.
+    async fn post_to_limited(body: Vec<u8>) -> String {
+        use axum::routing::post;
+        let app = axum::Router::new().route(
+            "/set_files",
+            post(|axum::Json(r): axum::Json<SetFilesReq>| async move { r.files.len().to_string() })
+                .layer(set_files_body_limit()),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        tokio::task::spawn_blocking(move || {
+            use std::io::{Read, Write};
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            let head = format!(
+                "POST /set_files HTTP/1.1
+Host: x
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+",
+                body.len()
+            );
+            s.write_all(head.as_bytes()).unwrap();
+            let _ = s.write_all(&body);
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+            out.lines().next().unwrap_or("").to_string()
+        })
+        .await
+        .unwrap()
+    }
+
+    fn upload_body(raw_bytes: usize) -> Vec<u8> {
+        // Base64 of `raw_bytes` bytes, as srv sends it.
+        let data = "A".repeat(raw_bytes.div_ceil(3) * 4);
+        format!(r#"{{"block_id":"b","ref":"e1","files":[{{"name":"f.bin","type":"","data":"{data}"}}]}}"#).into_bytes()
+    }
+
+    #[tokio::test]
+    async fn the_host_accepts_an_upload_at_srvs_25_mb_limit() {
+        // srv's limit, base64-encoded, has to fit; axum's 2 MiB default didn't.
+        let status = post_to_limited(upload_body(25 * 1024 * 1024)).await;
+        assert!(status.contains(" 200 "), "{status}");
+        let status = post_to_limited(upload_body(SET_FILES_BODY_LIMIT)).await;
+        assert!(status.contains(" 413 "), "{status}");
+    }
+
     #[test]
     fn any_change_to_the_submission_changes_the_digest_without_showing_it() {
         let d = |fp: &str, v: Value| submission_digest(Some(&json!(fp)), Some(&v));
@@ -766,6 +816,11 @@ pub struct SetFilesReq {
 /// The set_files request body limit: srv's 25 MB of files as base64 (4/3)
 /// plus JSON overhead, with room to spare.
 pub const SET_FILES_BODY_LIMIT: usize = 40 * 1024 * 1024;
+
+/// The body limit layer the set_files route is served with.
+pub fn set_files_body_limit() -> axum::extract::DefaultBodyLimit {
+    axum::extract::DefaultBodyLimit::max(SET_FILES_BODY_LIMIT)
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UploadFile {

@@ -49,7 +49,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         // files, so well past axum's 2 MiB default body limit.
         .route(
             "/agentmux/browser/set_files",
-            post(act::set_files_route).layer(axum::extract::DefaultBodyLimit::max(act::SET_FILES_BODY_LIMIT)),
+            post(act::set_files_route).layer(act::set_files_body_limit()),
         )
         .route("/agentmux/browser/wait_for", post(act::wait_for_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
