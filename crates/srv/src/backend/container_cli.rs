@@ -379,6 +379,12 @@ mod tests {
     fn the_scripts_behave_in_a_real_shell() {
         use std::os::unix::fs::PermissionsExt;
         use std::process::Command;
+        // The install script runs in the Linux agent container, which has
+        // coreutils `timeout`; a host without it (macOS) can't run it.
+        if !Command::new("sh").args(["-c", "command -v timeout"]).output().is_ok_and(|o| o.status.success()) {
+            eprintln!("skipped: no `timeout` on this host; the script targets the Linux agent container");
+            return;
+        }
         let dir = std::env::temp_dir().join(format!("agentmux-cli-script-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
