@@ -34,10 +34,7 @@ pub(crate) fn record(
 /// Record a level and push it to every top-level window. UI thread only (the
 /// emit runs JavaScript); callers on other threads post a task.
 pub fn emit(state: &AppState, payload: serde_json::Value) {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or_default();
+    let now_ms = agentmux_common::time::now_ms_u64();
     let payload = record(&mut state.health_signals.lock(), payload, now_ms);
     crate::events::emit_event_to_top_level_windows(state, EVENT, &payload);
 }
