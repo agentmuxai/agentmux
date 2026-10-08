@@ -12,6 +12,7 @@ The operator, 2026-10-07:
 2. In the agent pane's model / effort panel, the descriptive text overflows the panel. Shorten it and make it fit.
 3. A tool call's expanded preview should show only the output. The command is already in the hover, so don't print it again.
 4. In Read, Edit, Write and similar rows, a long path should show its end, with the ellipsis on the left: "Read …<end of path>", not "Read <beginning of path>…". It stays responsive as before. (Added later the same day.)
+5. The same left-side ellipsis for Bash commands. (Added after #4466 merged.)
 
 ## 1. Theme menu stays open after a choice
 
@@ -137,7 +138,24 @@ Bash commands, Grep and Glob patterns, and web queries are not paths and keep th
 - `tool-descriptors.parity.test.ts` accepts the new field.
 - jsdom can't measure an ellipsis, so the left-side cut itself is checked in an isolated `task dev`.
 
-## 5. Delivery
+## 5. Bash commands are cut from the left too
+
+**Why it differs from the path rows.** A Bash row's detail is the command, shell-coloured by `ShellTokens` (`SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md` §3.7). It isn't a path, so `detailIsPath` stays false for it and keeps meaning only that.
+
+**Fix.**
+- `ToolBlock` decides the cut itself: `cutFromStart = detailIsPath || (isBash && detail)`.
+- A Bash row gets the same flex layout, and its coloured command sits in the same right-to-left span, inside a `<bdi>`. The colours, the text and the hover are unchanged.
+- The CSS classes are renamed from `agent-tool-name--path` / `agent-tool-detail--path` to `--cut-start`, which says what they do now that they cover more than paths.
+
+**The trade-off.** A command's start (`git`, `npm`) is often its most telling part, and the cut hides it in favour of the end. The operator asked for the end. If it reads worse in practice, the cut can apply only past a length, or Bash can go back to a right-side cut.
+
+**Tests.** `ToolBlock.test.tsx`:
+- the path tests use the new class names;
+- a Bash row has the cut-start layout, with its colours and full text inside the `<bdi>`.
+
+The existing Bash colouring test still passes unchanged.
+
+## 6. Delivery
 
 - **One agentmux PR**, frontend only, with a changeset and the tests above. The four tweaks are small and independent; commit each separately so a review note on one doesn't hold the others.
 - **Visual check** in an isolated `task dev`, which this report needs for the §1 submenu question and the §2 layout. Include before/after notes in the PR description.

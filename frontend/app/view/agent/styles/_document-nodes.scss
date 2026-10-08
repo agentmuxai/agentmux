@@ -437,12 +437,12 @@ $transcript-preview-max-height: calc(50vh / 3);
                 font-weight: 400;
             }
 
-            // A file path (Read, Write, Edit): the icon, label and line range keep
-            // their width and only the path shrinks, cut from the left, so a
-            // narrow row reads "Read …/view/agent/a.ts", not "Read /c/Users/…".
-            // A flex row drops the spaces between its items, so `column-gap`
-            // stands in for them.
-            .agent-tool-name--path {
+            // A file path (Read, Write, Edit) or a Bash command: the icon, label
+            // and line range keep their width and only the detail shrinks, cut
+            // from the left, so a narrow row reads "Read …/view/agent/a.ts", not
+            // "Read /c/Users/…". A flex row drops the spaces between its items,
+            // so `column-gap` stands in for them.
+            .agent-tool-name--cut-start {
                 display: flex;
                 align-items: baseline;
                 column-gap: 0.3em;
@@ -451,7 +451,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                     flex: none;
                 }
 
-                > .agent-tool-detail--path {
+                > .agent-tool-detail--cut-start {
                     flex: 0 1 auto;
                     min-width: 0;
                     overflow: hidden;

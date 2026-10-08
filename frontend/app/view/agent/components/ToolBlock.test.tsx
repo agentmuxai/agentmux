@@ -331,15 +331,27 @@ describe("ToolBlock — panel mode", () => {
             const path = "/c/Users/me/projects/agentmux/frontend/app/view/agent/a.ts";
             const read: ToolNode = { ...baseTool, id: "tc-r", tool: "Read", toolName: "Read", params: { file_path: path }, summary: `Read ${path}` };
             const { container } = render(() => <ToolBlock node={read} pinned={false} onTogglePin={() => {}} />);
-            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--path")).toBe(true);
-            const detail = container.querySelector(".agent-tool-detail--path")!;
+            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--cut-start")).toBe(true);
+            const detail = container.querySelector(".agent-tool-detail--cut-start")!;
             expect(detail.querySelector("bdi")!.textContent).toBe(path);
             cleanup();
 
             const grep: ToolNode = { ...baseTool, id: "tc-g2", tool: "Grep", toolName: "Grep", params: { pattern: "x" }, summary: "Grep x" };
             const other = render(() => <ToolBlock node={grep} pinned={false} onTogglePin={() => {}} />);
-            expect(other.container.querySelector(".agent-tool-name--path")).toBeNull();
-            expect(other.container.querySelector(".agent-tool-detail--path")).toBeNull();
+            expect(other.container.querySelector(".agent-tool-name--cut-start")).toBeNull();
+            expect(other.container.querySelector(".agent-tool-detail--cut-start")).toBeNull();
+        });
+
+        // A Bash command is cut from the left too, keeping its shell colours.
+        it("lays out a Bash command to be cut from the left, colours and full text intact", () => {
+            const cmd = "cd /c/Users/me/projects/agentmux && npm run build -- --mode production | tail -20";
+            const bash: ToolNode = { ...baseTool, id: "tc-b", params: { command: cmd }, summary: `Bash ${cmd}` };
+            const { container } = render(() => <ToolBlock node={bash} pinned={false} onTogglePin={() => {}} />);
+            expect(container.querySelector(".agent-tool-name")!.classList.contains("agent-tool-name--cut-start")).toBe(true);
+            const detail = container.querySelector(".agent-tool-detail--cut-start")!;
+            expect(detail.classList.contains("agent-shell-inline")).toBe(true);
+            expect(detail.querySelector("bdi .sh-program")?.textContent).toBe("cd");
+            expect(detail.textContent).toBe(cmd);
         });
 
         // SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.7: a Bash command is
