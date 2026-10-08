@@ -12,7 +12,8 @@
 pub const AMBIENT_SYSTEM_PROMPT: &str = "You are a text-generation function inside a developer tool, not a \
 conversational assistant. You are given an instruction and some source material. Output only the requested \
 text. Never address the reader, ask questions, explain, apologize, or mention missing context. If the \
-instruction cannot be met from the material, output nothing at all.";
+instruction cannot be met from the material, give the reply the instruction names for that case, and only \
+that reply; if it names none, output nothing.";
 
 /// Formatting rules shared by every call whose output is a bare line of text.
 pub const PLAIN_TEXT_RULES: &str =
@@ -104,19 +105,25 @@ pub fn build_session_title_from_activity_prompt(word_target: u32, digest: &str) 
 }
 
 /// The prompt for `session:next_prompt_suggestion`. A pure function so its shape
-/// is unit-testable. The activity goes in a tagged block and the model is told
-/// when to say nothing: asked to guess with too little to go on, it answered as
-/// an assistant, and that text reached the composer.
+/// is unit-testable. The activity goes in a tagged block, and the reply is in the
+/// `reply` format: `ANSWER: <instruction>` or `SKIP`. Asked to "output nothing",
+/// the model wrote sentences about doing so, and one reached the composer.
+///
+/// When the assistant's last message plainly waits for the user (a question in
+/// its last paragraph, a tool that asks them), no call is made at all
+/// (`digest::TurnEnding`). The SKIP case for waiting stays as the fallback for a
+/// wait the gate can't see, such as "Tell me which one and I'll start."
 pub fn build_next_prompt_prompt(digest: &str) -> String {
     let instruction = [
         "Predict the ONE short instruction the user will most likely type next to continue this work, using only the activity below.",
-        "Write it the way someone types a task into a prompt box: a direct imperative that begins with the action itself (\"Debug the blank preview bug\", not \"Yeah, let's debug the blank preview bug\"). One line, under 20 words.",
-        "Output nothing at all if any of these hold: the activity doesn't show what the work is; the assistant's last message asks the user a question or waits for a decision; the work looks finished with nothing obvious left.",
+        "Write it the way someone types a task into a prompt box: a direct imperative that begins with the action itself (\"Debug the blank preview bug\", not \"Yeah, let's debug the blank preview bug\"). Under 20 words.",
+        "Reply SKIP if the activity doesn't show what the work is, if the work looks finished with nothing obvious left, or if the assistant's last message is waiting for the user to answer or decide something.",
         "Never suggest deleting data, force-pushing, or touching credentials.",
-        crate::ambient::prompt::PLAIN_TEXT_RULES,
+        PLAIN_TEXT_RULES,
+        crate::ambient::reply::FORMAT_RULES,
     ]
     .join(" ");
-    crate::ambient::prompt::with_material(&instruction, "recent_activity", digest)
+    with_material(&instruction, "recent_activity", digest)
 }
 
 /// Build the prompt for one narration `kind`.
@@ -239,7 +246,8 @@ mod tests {
     #[test]
     fn the_system_prompt_forbids_talking_to_the_reader() {
         assert!(AMBIENT_SYSTEM_PROMPT.contains("not a conversational assistant"));
-        assert!(AMBIENT_SYSTEM_PROMPT.contains("output nothing at all"));
+        // A prompt that names its own way to decline (SKIP, KEEP) wins.
+        assert!(AMBIENT_SYSTEM_PROMPT.contains("give the reply the instruction names for that case"));
     }
 }
 
@@ -397,12 +405,17 @@ mod build_next_prompt_prompt_tests {
         assert!(p.find("Predict the ONE").unwrap() < p.find("<recent_activity>").unwrap());
     }
 
+    /// SKIP is the only way to decline, and the prompt never says "output nothing":
+    /// that wording is what the model echoed into the composer.
     #[test]
-    fn it_says_when_to_stay_silent() {
+    fn it_declines_with_skip_in_the_reply_format() {
         let p = build_next_prompt_prompt("[user] x");
-        assert!(p.contains("Output nothing at all"));
-        assert!(p.contains("asks the user a question"));
+        assert!(p.contains("Reply SKIP if"));
         assert!(p.contains("looks finished"));
+        assert!(p.contains(crate::ambient::reply::FORMAT_RULES));
+        assert!(!p.to_lowercase().contains("output nothing"), "{p}");
+        // Gated in code before the call (digest::TurnEnding), not asked of the model.
+        assert!(!p.contains("asks the user a question"), "{p}");
     }
 
     #[test]

@@ -428,17 +428,26 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                let Some(digest) = ambient::digest::read_recent_activity_digest(&filestore, &cmd.block_id) else {
+                let Some(activity) = ambient::digest::read_recent_activity(&filestore, &cmd.block_id) else {
+                    slot.abandon(ambient::outcome::Outcome::EmptyDigest);
                     return Ok(empty_suggestion_result());
                 };
+                // The turn ended waiting for the user (a question, a tool that asks
+                // them) or before the assistant answered: there is no next
+                // instruction to predict, so no call. Asked to judge this itself,
+                // the model wrote prose about declining, and it reached the composer.
+                if activity.ending != ambient::digest::TurnEnding::Statement {
+                    slot.abandon(ambient::outcome::Outcome::Gated);
+                    return Ok(empty_suggestion_result());
+                }
 
                 let Some(target) = ambient::call::CliTarget::from_meta(&block.meta) else {
                     tracing::debug!(block_id = %cmd.block_id, "session:next_prompt_suggestion: no CLI path in meta");
                     return Ok(empty_suggestion_result());
                 };
 
-                let prompt = ambient::prompt::build_next_prompt_prompt(&digest);
-                let reply = slot.run(&target, &prompt, ambient::validate::accept_next_prompt).await;
+                let prompt = ambient::prompt::build_next_prompt_prompt(&activity.text);
+                let reply = slot.run_formatted(&target, &prompt, ambient::validate::accept_next_prompt).await;
 
                 // The tokens were spent either way, so they are still reported;
                 // only the text is withheld when it is not a usable next prompt.

@@ -476,6 +476,27 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
         expect(ta.placeholder).toBe("Send message to Test...");
     });
 
+    // The placeholder hides the previous turn's suggestion at send, but its
+    // clear is an async write: until it lands, the meta still holds the text.
+    // Tab and → must offer what the placeholder shows, not the raw meta.
+    it("Tab and → don't insert a suggestion hidden at send while its clear is still pending", async () => {
+        const onSendMessage = vi.fn();
+        render(() => (
+            <AgentFooter agentName="Test" viewModel={makeViewModel("Run the tests")} onSendMessage={onSendMessage} />
+        ));
+        const user = userEvent.setup();
+        const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+        await user.type(ta, "let's refactor instead");
+        keyOn(ta, "Enter");
+        expect(ta.placeholder).toBe("Send message to Test...");
+
+        keyOn(ta, "Tab");
+        expect(ta.value).toBe("");
+        keyOn(ta, "ArrowRight");
+        expect(ta.value).toBe("");
+    });
+
     it("shows a genuinely new suggestion normally once meta actually updates after send", async () => {
         const { vm, setState } = makeReactiveViewModel({ suggestion: "Run the tests", gen: 1 });
         const onSendMessage = vi.fn();

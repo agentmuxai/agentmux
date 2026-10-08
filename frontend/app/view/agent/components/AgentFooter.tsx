@@ -682,12 +682,19 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // version of this fix did exactly that and silently never worked —
     // caught by its own regression test, not by inspection).
     const [suggestionGenMaskedAtSend, setSuggestionGenMaskedAtSend] = createSignal<number | undefined>(undefined);
-    const placeholder = createMemo(() => {
-        const vm = props.viewModel;
-        const meta = vm?.blockAtom()?.meta;
+    // The suggestion as the composer shows it: absent while masked. Tab/→ accept
+    // reads this too, so a suggestion hidden at send time can't be inserted
+    // while its clear is still on its way.
+    const visibleSuggestion = createMemo((): string | undefined => {
+        const meta = props.viewModel?.blockAtom()?.meta;
         const suggestion = meta?.["term:next_prompt_suggestion"] as string | undefined;
         const suggestionGen = meta?.["term:next_prompt_suggestion_gen"] as number | undefined;
-        if (suggestion && suggestionGen !== suggestionGenMaskedAtSend()) return suggestion;
+        return suggestion && suggestionGen !== suggestionGenMaskedAtSend() ? suggestion : undefined;
+    });
+    const placeholder = createMemo(() => {
+        const vm = props.viewModel;
+        const suggestion = visibleSuggestion();
+        if (suggestion) return suggestion;
         const listeningHere =
             !!vm && voice.isListening() && voice.currentTargetId() === vm.blockId;
         return listeningHere
@@ -1115,8 +1122,9 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
         // state the slash-autocomplete branch below can't be in (it requires
         // a `/prefix`) — these handlers never compete with it.
         if ((e.key === "Tab" || e.key === "ArrowRight") && textareaRef && textareaRef.value.length === 0) {
-            const vm = props.viewModel;
-            const suggestion = vm?.blockAtom()?.meta?.["term:next_prompt_suggestion"] as string | undefined;
+            // What the placeholder shows, not the raw meta: a suggestion masked
+            // at send time is not offered.
+            const suggestion = visibleSuggestion();
             if (suggestion) {
                 e.preventDefault();
                 setComposerValue(suggestion);
