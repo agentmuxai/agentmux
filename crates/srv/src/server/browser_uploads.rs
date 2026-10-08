@@ -87,6 +87,171 @@ pub(crate) fn check_upload_paths(workspace: &Path, paths: &[String]) -> Result<V
     Ok(out)
 }
 
+/// At most this many bytes in one upload, all files together. Bigger files
+/// are for the user to pick (`BrowserHandoff`).
+pub(crate) const MAX_UPLOAD_BYTES: u64 = 25 * 1024 * 1024;
+
+/// A file ready to hand to the page: its name, a content type from its
+/// extension, and its bytes.
+pub(crate) struct UploadFile {
+    pub name: String,
+    pub mime: &'static str,
+    pub bytes: Vec<u8>,
+}
+
+/// Read the files `check_upload_paths` approved. Each is opened once, and the
+/// check is repeated on the open handle: the file it really refers to must be
+/// a regular file inside the workspace. The bytes are read from that same
+/// handle and the page is given the bytes, never a path, so replacing a
+/// checked file with a link afterwards changes nothing.
+pub(crate) fn read_upload_files(workspace: &Path, checked: &[String]) -> Result<Vec<UploadFile>, String> {
+    use std::io::Read;
+    let ws = canonical(workspace).map_err(|e| format!("your workspace {} can't be read: {e}", workspace.display()))?;
+    let mut total: u64 = 0;
+    let mut out = Vec::with_capacity(checked.len());
+    for p in checked {
+        let file = std::fs::File::open(p).map_err(|_| format!("no such file: {p}"))?;
+        let real = handle_path(&file).map_err(|e| format!("can't tell where {p} is ({e}), so it isn't uploaded"))?;
+        if !real.starts_with(&ws) {
+            return Err(format!("{p} is outside your workspace ({})", ws.display()));
+        }
+        let meta = file.metadata().map_err(|e| format!("{p}: {e}"))?;
+        if !meta.is_file() {
+            return Err(format!("{p} is not a file"));
+        }
+        total += meta.len();
+        if total > MAX_UPLOAD_BYTES {
+            return Err(format!(
+                "uploads are limited to {} MB in all; for bigger files, ask the user to pick them (BrowserHandoff)",
+                MAX_UPLOAD_BYTES / (1024 * 1024)
+            ));
+        }
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        file.take(MAX_UPLOAD_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("{p}: {e}"))?;
+        if bytes.len() as u64 != meta.len() {
+            return Err(format!("{p} changed while it was being read; try again"));
+        }
+        let name = real.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+        out.push(UploadFile { mime: mime_for(&name), name, bytes });
+    }
+    Ok(out)
+}
+
+/// The path the open file really is, after every link: what the OS says
+/// about the handle, not a lookup of the name.
+#[cfg(windows)]
+fn handle_path(file: &std::fs::File) -> std::io::Result<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{GetFinalPathNameByHandleW, FILE_NAME_NORMALIZED, VOLUME_NAME_DOS};
+    let mut buf = vec![0u16; 1024];
+    loop {
+        let n = unsafe {
+            GetFinalPathNameByHandleW(
+                file.as_raw_handle() as _,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+            )
+        } as usize;
+        if n == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if n < buf.len() {
+            let p = PathBuf::from(std::ffi::OsString::from_wide(&buf[..n]));
+            let s = p.to_string_lossy();
+            return Ok(match s.strip_prefix(r"\\?\") {
+                Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
+                _ => p,
+            });
+        }
+        buf.resize(n + 1, 0);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn handle_path(file: &std::fs::File) -> std::io::Result<PathBuf> {
+    use std::os::fd::AsRawFd;
+    std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
+}
+
+#[cfg(target_os = "macos")]
+fn handle_path(file: &std::fs::File) -> std::io::Result<PathBuf> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::ffi::OsStrExt;
+    let mut buf = vec![0u8; libc::PATH_MAX as usize];
+    if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETPATH, buf.as_mut_ptr()) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+    Ok(PathBuf::from(std::ffi::OsStr::from_bytes(&buf[..end])))
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+fn handle_path(_file: &std::fs::File) -> std::io::Result<PathBuf> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "not supported on this platform"))
+}
+
+/// A content type for the file, from its extension, as a browser's own file
+/// picker would give it. An extension not known here gets no type at all
+/// (empty), as the picker gives one it doesn't know, rather than a forced
+/// generic one a page might reject.
+fn mime_for(name: &str) -> &'static str {
+    let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+    match ext.as_str() {
+        "txt" | "log" => "text/plain",
+        "md" => "text/markdown",
+        "csv" => "text/csv",
+        "tsv" => "text/tab-separated-values",
+        "htm" | "html" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" => "text/javascript",
+        "rtf" => "application/rtf",
+        "json" => "application/json",
+        "xml" => "text/xml",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "gz" | "tgz" => "application/gzip",
+        "tar" => "application/x-tar",
+        "7z" => "application/x-7z-compressed",
+        "rar" => "application/vnd.rar",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "tif" | "tiff" => "image/tiff",
+        "heic" => "image/heic",
+        "avif" => "image/avif",
+        "svg" => "image/svg+xml",
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "webm" => "video/webm",
+        "avi" => "video/x-msvideo",
+        "mkv" => "video/x-matroska",
+        "mpeg" | "mpg" => "video/mpeg",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "wav" => "audio/wav",
+        "ogg" => "audio/ogg",
+        "flac" => "audio/flac",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "ppt" => "application/vnd.ms-powerpoint",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "odt" => "application/vnd.oasis.opendocument.text",
+        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+        "odp" => "application/vnd.oasis.opendocument.presentation",
+        "exe" | "dll" => "application/x-msdownload",
+        "msi" => "application/x-msi",
+        "apk" => "application/vnd.android.package-archive",
+        _ => "",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,5 +313,52 @@ mod tests {
         record_launch_workspace("ws-test-a", &spawn(&[("cmd:cwd", "C:/work/agent"), ("agentMode", "container")]));
         assert_eq!(agent_workspace("ws-test-a"), None);
         assert_eq!(agent_workspace("ws-test-never-launched"), None);
+    }
+
+    #[test]
+    fn checked_files_are_read_from_the_handle_with_a_content_type() {
+        let (_d, ws) = ws();
+        let checked = check_upload_paths(&ws, &["report.txt".into(), "sub/a.bin".into()]).unwrap();
+        let files = read_upload_files(&ws, &checked).unwrap();
+        assert_eq!(files[0].name, "report.txt");
+        assert_eq!(files[0].bytes, b"x");
+        assert_eq!(files[0].mime, "text/plain");
+        // Unknown to the table: no type, as a browser's picker gives it.
+        assert_eq!(files[1].mime, "");
+        assert_eq!(mime_for("Deck.PPTX"), "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        assert_eq!(mime_for("clip.mov"), "video/quicktime");
+    }
+
+    #[test]
+    fn the_handle_check_refuses_a_file_outside_the_workspace_on_its_own() {
+        // As if the path had been swapped after check_upload_paths: hand the
+        // reader an outside file directly. The open handle, not the name, has
+        // to stop it.
+        let (d, ws) = ws();
+        let outside = d.path().join("secret.txt").to_string_lossy().into_owned();
+        let e = read_upload_files(&ws, &[outside]).err().expect("refused");
+        assert!(e.contains("outside your workspace"), "{e}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_swapped_in_after_the_check_is_caught_by_the_handle() {
+        let (d, ws) = ws();
+        let checked = check_upload_paths(&ws, &["report.txt".into()]).unwrap();
+        std::fs::remove_file(ws.join("report.txt")).unwrap();
+        std::os::unix::fs::symlink(d.path().join("secret.txt"), ws.join("report.txt")).unwrap();
+        let e = read_upload_files(&ws, &checked).err().expect("refused");
+        assert!(e.contains("outside your workspace"), "{e}");
+    }
+
+    #[test]
+    fn uploads_over_the_size_limit_are_refused() {
+        let (_d, ws) = ws();
+        let big = ws.join("big.bin");
+        let f = std::fs::File::create(&big).unwrap();
+        f.set_len(MAX_UPLOAD_BYTES + 1).unwrap();
+        let checked = check_upload_paths(&ws, &["big.bin".into()]).unwrap();
+        let e = read_upload_files(&ws, &checked).err().expect("refused");
+        assert!(e.contains("limited to"), "{e}");
     }
 }
