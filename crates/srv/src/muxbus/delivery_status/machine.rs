@@ -5,6 +5,8 @@
 //! the cloud subscriber and the credential broker last said, and what to do
 //! when it changes. No clock, no I/O; every call takes `now_ms`.
 
+use std::collections::BTreeMap;
+
 use crate::backend::rpc_types::{MuxBusDeliveryState, MuxBusDeliveryStatus};
 use crate::broker::CredentialState;
 
@@ -83,10 +85,11 @@ pub struct Machine {
     session_known: bool,
     email: Option<String>,
     link: Link,
-    /// The relay's REST pull is failing (the reason) though the WebSocket may
-    /// be open: messages can't be fetched, so that is not connected either.
-    /// Cleared by the next pull that answers.
-    pull_error: Option<String>,
+    /// Agents whose REST pull is failing (agent → reason) though the
+    /// WebSocket may be open: their messages can't be fetched, so that is
+    /// not connected either. An agent's entry clears when its own pull
+    /// answers, not another agent's.
+    pull_errors: BTreeMap<String, String>,
     status: MuxBusDeliveryStatus,
     /// When the current pause began; open until delivery is connected again.
     /// A sign-out ends one only if the agents weren't told about it.
@@ -103,7 +106,7 @@ impl Machine {
             session_known: false,
             email: None,
             link: Link::NoSignIn,
-            pull_error: None,
+            pull_errors: BTreeMap::new(),
             status: MuxBusDeliveryStatus { since_ms: now_ms, ..Default::default() },
             paused_since_ms: None,
             pause_noted: false,
@@ -139,7 +142,7 @@ impl Machine {
         self.session_known = false;
         self.email = None;
         self.link = Link::NoSignIn;
-        self.pull_error = None;
+        self.pull_errors.clear();
         self.update(None, now_ms)
     }
 
@@ -148,17 +151,23 @@ impl Machine {
         self.update(broker, now_ms)
     }
 
-    /// The relay answered a pull: delivery is healthy as of `now_ms`.
-    pub fn relay_answered(&mut self, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
+    /// The relay answered `agent`'s pull: delivery is healthy as of `now_ms`.
+    pub fn relay_answered(&mut self, agent: &str, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
         self.status.last_ok_ms = Some(now_ms);
-        self.pull_error = None;
+        self.pull_errors.remove(agent);
         self.update(broker, now_ms)
     }
 
-    /// A pull (fetch or claim) got no usable answer from the relay.
-    pub fn pull_failed(&mut self, reason: String, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
-        self.pull_error = Some(reason);
+    /// `agent`'s pull (fetch or claim) got no usable answer from the relay.
+    pub fn pull_failed(&mut self, agent: &str, reason: String, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
+        self.pull_errors.insert(agent.to_string(), reason);
         self.update(broker, now_ms)
+    }
+
+    /// Forget pull failures of agents no longer subscribed: they won't pull
+    /// again to clear them.
+    pub fn keep_pull_errors_of(&mut self, agents: &[String]) {
+        self.pull_errors.retain(|agent, _| agents.contains(agent));
     }
 
     /// Re-derive (the broker may have moved on its own) and release the
@@ -175,7 +184,7 @@ impl Machine {
     }
 
     fn update(&mut self, broker: Option<&CredentialState>, now_ms: i64) -> Vec<Effect> {
-        let link = match (&self.link, &self.pull_error) {
+        let link = match (&self.link, self.pull_errors.values().next()) {
             (Link::Connected, Some(e)) => Link::Unreachable(e.clone()),
             (link, _) => link.clone(),
         };
@@ -398,18 +407,26 @@ mod tests {
     #[test]
     fn an_open_link_whose_pulls_fail_is_not_connected() {
         let mut m = connected_machine();
-        m.pull_failed("the relay answered 503 to a message fetch".into(), None, T0 + 1);
+        m.pull_failed("a", "the relay answered 503 to a message fetch".into(), None, T0 + 1);
         assert_eq!(m.status().state, Reconnecting);
         assert_eq!(m.status().last_error.as_deref(), Some("the relay answered 503 to a message fetch"));
         let fx = m.tick(None, T0 + 1 + PAUSE_NOTICE_MS);
         assert!(kinds(&fx).contains(&"pause"), "the agents are told, as for any pause");
-        let fx = m.relay_answered(None, T0 + 2 * PAUSE_NOTICE_MS);
+        m.relay_answered("b", None, T0 + 2 * PAUSE_NOTICE_MS - 1);
+        assert_eq!(m.status().state, Reconnecting, "another agent's pull doesn't clear a's failure");
+        let fx = m.relay_answered("a", None, T0 + 2 * PAUSE_NOTICE_MS);
         assert_eq!(m.status().state, Connected);
         assert!(kinds(&fx).contains(&"resumed"));
         // A failing pull while the link itself is down changes nothing more.
         m.set_link(Link::Unreachable("closed".into()), None, T0 + 3 * PAUSE_NOTICE_MS);
-        m.pull_failed("x".into(), None, T0 + 3 * PAUSE_NOTICE_MS + 1);
+        m.pull_failed("a", "x".into(), None, T0 + 3 * PAUSE_NOTICE_MS + 1);
         assert_eq!(m.status().last_error.as_deref(), Some("closed"));
+        // An agent that leaves can't clear its own failure; it is forgotten.
+        m.set_link(Link::Connected, None, T0 + 4 * PAUSE_NOTICE_MS);
+        assert_eq!(m.status().state, Reconnecting);
+        m.keep_pull_errors_of(&["b".to_string()]);
+        m.tick(None, T0 + 4 * PAUSE_NOTICE_MS + 1);
+        assert_eq!(m.status().state, Connected);
     }
 
     #[test]

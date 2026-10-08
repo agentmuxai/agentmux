@@ -31,7 +31,7 @@ use std::time::Duration;
 use agentmux_common::time::now_ms;
 pub use machine::Link;
 use machine::{Effect, Machine};
-use notes::{ExpiredItem, Note, NoteBook};
+use notes::{ExpiredItem, Note, NoteBook, RetryQueue};
 
 use crate::backend::eventbus::{EventBus, WSEventType};
 use crate::backend::mps::Broker;
@@ -53,6 +53,7 @@ struct Sinks {
 struct Runtime {
     machine: Mutex<Machine>,
     book: Mutex<NoteBook>,
+    retry: Mutex<RetryQueue>,
     sinks: OnceLock<Sinks>,
 }
 
@@ -62,6 +63,7 @@ fn rt() -> &'static Runtime {
     RUNTIME.get_or_init(|| Runtime {
         machine: Mutex::new(Machine::new(now_ms())),
         book: Mutex::new(NoteBook::default()),
+        retry: Mutex::new(RetryQueue::default()),
         sinks: OnceLock::new(),
     })
 }
@@ -98,12 +100,21 @@ pub fn install(event_bus: Arc<EventBus>, broker: Arc<Broker>) {
 fn run_tick() {
     let broker = broker_state();
     let now = now_ms();
-    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).tick(broker.as_ref(), now);
+    let agents = subscribed_agents();
+    let effects = {
+        let mut machine = rt().machine.lock().unwrap_or_else(|e| e.into_inner());
+        machine.keep_pull_errors_of(&agents);
+        machine.tick(broker.as_ref(), now)
+    };
     apply(effects);
     send_owed_sign_in_notice();
+    let retries = rt().retry.lock().unwrap_or_else(|e| e.into_inner()).take();
+    for (note, attempts) in retries {
+        deliver_one(note, attempts + 1);
+    }
     let notes = {
         let mut book = rt().book.lock().unwrap_or_else(|e| e.into_inner());
-        let mut notes = book.pause_late_joiners(&subscribed_agents());
+        let mut notes = book.pause_late_joiners(&agents);
         notes.extend(book.tick(now));
         notes
     };
@@ -140,17 +151,18 @@ pub fn set_link(link: Link) {
 /// after the pull's own messages are delivered, so the note comes last.
 pub fn fetched(agent: &str, delivered: usize, expired: &[ExpiredItem]) {
     let broker = broker_state();
-    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(broker.as_ref(), now_ms());
+    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).relay_answered(agent, broker.as_ref(), now_ms());
     apply(effects);
     let note = rt().book.lock().unwrap_or_else(|e| e.into_inner()).fetched(agent, delivered, expired);
     deliver(note.into_iter().collect());
 }
 
-/// A pull (fetch or claim) got no usable answer from the relay, though the
-/// WebSocket may be open: messages aren't arriving.
-pub fn pull_failed(reason: impl Into<String>) {
+/// `agent`'s pull (fetch or claim) got no usable answer from the relay,
+/// though the WebSocket may be open: its messages aren't arriving.
+pub fn pull_failed(agent: &str, reason: impl Into<String>) {
     let broker = broker_state();
-    let effects = rt().machine.lock().unwrap_or_else(|e| e.into_inner()).pull_failed(reason.into(), broker.as_ref(), now_ms());
+    let effects =
+        rt().machine.lock().unwrap_or_else(|e| e.into_inner()).pull_failed(agent, reason.into(), broker.as_ref(), now_ms());
     apply(effects);
 }
 
@@ -201,6 +213,7 @@ fn apply(effects: Vec<Effect>) {
                 deliver(notes);
             }
             Effect::Resumed { at_ms } => {
+                rt().retry.lock().unwrap_or_else(|e| e.into_inner()).drop_pause_notes();
                 rt().book.lock().unwrap_or_else(|e| e.into_inner()).resumed(at_ms);
             }
         }
@@ -217,10 +230,20 @@ fn router() -> Option<Arc<crate::backend::notify::router::Router>> {
 }
 
 fn deliver(notes: Vec<Note>) {
-    let handler = crate::backend::reactive::handler::get_global_handler();
     for note in notes {
-        if let Err(e) = handler.deliver_system_note(&note.agent, &note.text) {
-            tracing::warn!(agent = %note.agent, error = %e, "muxbus delivery: system note not delivered");
+        deliver_one(note, 1);
+    }
+}
+
+/// Deliver `note` (its `attempt`-th try); a failure is retried on later ticks.
+fn deliver_one(note: Note, attempt: u32) {
+    let handler = crate::backend::reactive::handler::get_global_handler();
+    if let Err(e) = handler.deliver_system_note(&note.agent, &note.text) {
+        let agent = note.agent.clone();
+        if rt().retry.lock().unwrap_or_else(|e| e.into_inner()).failed(note, attempt) {
+            tracing::info!(agent = %agent, attempt, error = %e, "muxbus delivery: system note not delivered, will retry");
+        } else {
+            tracing::warn!(agent = %agent, error = %e, "muxbus delivery: system note not delivered, giving up");
         }
     }
 }

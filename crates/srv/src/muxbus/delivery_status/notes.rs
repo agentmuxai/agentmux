@@ -283,11 +283,63 @@ impl NoteBook {
     }
 }
 
+/// Tries for a note whose local delivery failed (one per tick), before it is
+/// given up with a warning.
+pub const NOTE_ATTEMPTS: u32 = 8;
+
+/// Notes whose local delivery failed (the agent's input was briefly
+/// unavailable, say), retried on later ticks: the [`NoteBook`] has already
+/// counted them as told, so it won't produce them again.
+#[derive(Debug, Default)]
+pub struct RetryQueue {
+    notes: Vec<(Note, u32)>,
+}
+
+impl RetryQueue {
+    /// `note` failed on its `attempts`-th try: keep it for another, unless
+    /// that was the last. Returns whether it was kept.
+    pub fn failed(&mut self, note: Note, attempts: u32) -> bool {
+        if attempts >= NOTE_ATTEMPTS {
+            return false;
+        }
+        self.notes.push((note, attempts));
+        true
+    }
+
+    /// Everything due for another try, with the tries it has had.
+    pub fn take(&mut self) -> Vec<(Note, u32)> {
+        std::mem::take(&mut self.notes)
+    }
+
+    /// Delivery is back: a pause note still waiting would now be false.
+    pub fn drop_pause_notes(&mut self) {
+        self.notes.retain(|(note, _)| !note.text.starts_with(PAUSE_NOTE_START));
+    }
+}
+
+/// How every pause note begins (see [`pause_note`]).
+const PAUSE_NOTE_START: &str = "[AgentMux] Cloud messages are paused";
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const T0: i64 = 1_791_000_000_000;
+
+    #[test]
+    fn a_failed_note_is_retried_a_few_times_and_a_stale_pause_note_dropped() {
+        let note = |text: String| Note { agent: "a".into(), text };
+        let mut q = RetryQueue::default();
+        assert!(pause_note(T0, "x").starts_with(PAUSE_NOTE_START));
+        assert!(q.failed(note(pause_note(T0, "x")), 1));
+        assert!(q.failed(note(resume_note(T0, Some(1), &[])), 1));
+        assert!(!q.failed(note("last try".into()), NOTE_ATTEMPTS), "given up after the last try");
+        q.drop_pause_notes();
+        let due = q.take();
+        assert_eq!(due.len(), 1);
+        assert!(due[0].0.text.contains("resumed"));
+        assert!(q.take().is_empty());
+    }
 
     fn item(kind: ExpiredKind, from: &str, pr: Option<&str>) -> ExpiredItem {
         ExpiredItem { from: from.into(), pr: pr.map(str::to_string), created_at: None, kind }
