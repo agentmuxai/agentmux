@@ -2,7 +2,7 @@
 
 **Status:** retro
 **Trigger:** the operator: "figure out why muxbus keeps logging out automatically."
-**Outcome:** root-caused from the installed instances' logs and the source. Fixed by
+**Outcome:** root-caused from the logs and the source. Fixed by
 `SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md`: a channel signs in on its own, and
 sign-in reads and writes are one critical section across processes.
 **Author:** Camper
@@ -23,21 +23,14 @@ sign-in held for a few hours.
 
 ## Evidence
 
-Source: the installed launcher log, which carries every srv process's stderr, from Oct 6 to
-Oct 8. Times are UTC.
-
-- The log holds about 4,500 lines of `muxbus: split keychain entries have mismatched
-  generation stamps (a torn write from an interrupted save)`, from five srv processes of
-  versions 0.59.11 to 0.59.15 running at once.
-- Each sign-in is followed, hours later, by the same sequence: the mismatch warning, then
-  `token refresh failed error=no refresh_token stored`, then `credential needs a fresh login,
-  no longer auto-retrying`, repeating every minute from every process until the next
-  sign-in. Sign-ins were at Oct 7 16:30 and 19:37 and Oct 8 02:40 and 06:59; the mismatch
-  runs were from about Oct 7 22:00 to Oct 8 02:40, and from Oct 8 14:22.
-- The first mismatch ever logged (Oct 6 20:27:08.308) comes from one process 54 ms before
-  another process reports the sign-in fresh. On Oct 8 the run started at 14:22:16.305, 70
-  ms after two processes (v0.59.15 and v0.59.13) both reported it fresh.
-
+- Over the two days before the fix, several srv processes of different versions were running on
+  one machine at once, all sharing the host-wide sign-in.
+- The logs carry thousands of warnings that the split keychain entries had mismatched generation
+  stamps. Each run of them begins a few hours after a sign-in and is followed, every minute and
+  from every process, by a failed refresh ("no refresh_token stored") and the broker giving up
+  until someone signs in again.
+- Each run starts within a fraction of a second of two processes refreshing the sign-in,
+  which is the signature of interleaved writes rather than of a crash mid-write.
 - Reproduced on purpose afterwards: four processes saving and reading one sign-in in the real
   Windows keychain tore 35 to 59 of 160 reads without a cross-process lock, and none with it. A
   save took up to about 0.7 s, so collisions between processes were easy to hit.
@@ -62,7 +55,7 @@ Three things had to be true, and all were:
    indistinguishable from a real sign-out.
 
 Every process refreshes on its own schedule, and the access token lasts about an hour, so
-with five processes the collisions were routine. The sign-in survived until a collision
+with several processes the collisions were routine. The sign-in survived until a collision
 tore it, then stayed torn.
 
 ## Why it wasn't caught
@@ -122,5 +115,5 @@ tore it, then stayed torn.
    reason it was separate.** The 2026-10-02 spec existed because a channel's sign-in and
    sign-out had been hitting every other channel's.
 4. **A repeated WARN with a clear cause is a bug report.** A one-minute-cadence
-   warning from five processes for hours should have been something an operator could
+   warning from several processes for hours should have been something an operator could
    see.
