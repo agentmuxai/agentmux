@@ -231,11 +231,88 @@ mod live_cli_smoke {
         .await
         .expect("the CLI ran");
         assert!(tokens.is_some(), "usage is reported");
-        assert!(
-            crate::ambient::validate::accept_next_prompt(&text).is_none()
-                || text.split_whitespace().count() <= 20,
-            "unexpected reply: {text}"
-        );
+        // A thin digest: the answer is SKIP, in the reply format, never prose.
+        assert_ne!(crate::ambient::reply::parse(&text), crate::ambient::reply::Parsed::Malformed, "unexpected reply: {text}");
         assert!(!text.to_lowercase().contains("i don't have"), "{text}");
+    }
+
+    /// The reply format (`reply`) has to hold on the real model before it can be
+    /// relied on: every reply is `ANSWER: …` or `SKIP`, across activity that
+    /// clearly has a next step, finished work, and activity too thin to read.
+    /// `cargo test --bin agentmux-srv live_cli_reply_format -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "spawns the real claude CLI, about a dozen calls"]
+    async fn live_cli_reply_format_holds_across_digests() {
+        use crate::ambient::reply::{parse, Parsed};
+        let digests = [
+            // A clear next step.
+            "[user] fix the login redirect loop\n[assistant] Found it: the session cookie was set after the redirect. Fixed in auth.ts; the login flow works now.",
+            "[user] add a dark mode toggle\n[assistant] Added the toggle to the settings panel and wired it to the theme store. I haven't written tests yet.",
+            "[user] why is CI red\n[tool] Bash\n[error] npm test exited 1\n[assistant] Two snapshot tests fail after the button restyle; the snapshots need updating.",
+            "[user] profile the slow search\n[tool] Bash\n[assistant] Search spends 80% of its time re-sorting the whole index on every keystroke.",
+            "[user] bump the version\n[assistant] Bumped to 2.4.0 in package.json and the lockfile. The changelog still lists these changes under Unreleased.",
+            "[user] write the migration\n[assistant] The migration adds the column with a default and backfills in batches of 1000. It hasn't been run against staging.",
+            // Finished, nothing obvious left.
+            "[user] thanks, that's all\n[assistant] You're welcome. Everything is merged and deployed.",
+            "[user] merge it\n[assistant] Merged. The branch is deleted and main is green.",
+            // Thin or unreadable.
+            "[user] hi\n[assistant] Hello.",
+            "[user] ok\n[assistant] Done.",
+            "[tool] Read\n[tool] Read\n[tool] Grep\n[assistant] Looking.",
+            "[user] continue\n[assistant] Continuing with the next file.",
+        ];
+        let meta = obj::MetaMapType::new();
+        let mut bad = Vec::new();
+        let mut failed = 0;
+        for digest in digests {
+            let prompt = crate::ambient::prompt::build_next_prompt_prompt(digest);
+            // A CLI failure (most often the time limit) says nothing about the
+            // format; it is counted, not judged.
+            let text = match invoke_haiku("claude", &prompt, &meta, tokio_util::sync::CancellationToken::new()).await {
+                Ok((text, _)) => text,
+                Err(e) => {
+                    println!("CLI failed: {e}");
+                    failed += 1;
+                    continue;
+                }
+            };
+            let parsed = parse(&text);
+            println!("{parsed:?} <- {text:?}");
+            if parsed == Parsed::Malformed {
+                bad.push(text);
+            }
+        }
+        println!("{failed} of {} calls failed in the CLI", digests.len());
+        assert!(failed < digests.len(), "no call completed");
+        assert!(bad.is_empty(), "replies not in the format: {bad:?}");
+    }
+
+    /// A message that waits for the user without a question mark passes the
+    /// turn-ending gate, so the prompt's SKIP case is what keeps a guess out of
+    /// the composer (#4476). Live, like the test above.
+    #[tokio::test]
+    #[ignore = "calls the real claude CLI; run with --ignored"]
+    async fn live_cli_skips_a_wait_the_gate_cannot_see() {
+        use crate::ambient::reply::{parse, Parsed};
+        let digests = [
+            "[user] pick a cache\n[assistant] Redis or an in-process LRU would both work. Tell me which one and I'll start.",
+            "[user] plan the refactor\n[assistant] Here's the plan: split the parser, then move the tests. Let me know if that works for you before I begin.",
+            "[user] deploy it\n[assistant] Ready to deploy to production. Waiting for your go-ahead.",
+        ];
+        let meta = obj::MetaMapType::new();
+        let mut answered = Vec::new();
+        for digest in digests {
+            let prompt = crate::ambient::prompt::build_next_prompt_prompt(digest);
+            let Ok((text, _)) = invoke_haiku("claude", &prompt, &meta, tokio_util::sync::CancellationToken::new()).await
+            else {
+                continue;
+            };
+            let parsed = parse(&text);
+            println!("{parsed:?} <- {text:?}");
+            if parsed != Parsed::Skip {
+                answered.push(text);
+            }
+        }
+        assert!(answered.is_empty(), "answered a message that waits for the user: {answered:?}");
     }
 }

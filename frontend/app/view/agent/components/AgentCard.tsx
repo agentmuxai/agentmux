@@ -102,11 +102,36 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
+        if (typeToFilter(e)) return;
         if (props.disabled) return;
         if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             props.onLaunch(props.agent, e);
         }
+    };
+
+    // Type to filter: the picker focuses its first card (Enter launches it),
+    // but a printable key goes into the pane's filter box, so landing on the
+    // picker after a close still lets the user type right away.
+    // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md §2d.
+    const typeToFilter = (e: KeyboardEvent): boolean => {
+        const filter = () => cardEl?.closest("[data-blockid]")?.querySelector<HTMLInputElement>("input[data-pane-focus]");
+        // An IME composition starting (CJK and others): move the caret to the
+        // filter and let the composition happen there.
+        if (e.isComposing || e.key === "Process" || e.keyCode === 229) {
+            const input = filter();
+            input?.focus({ preventScroll: true });
+            return input != null;
+        }
+        if (e.key.length !== 1 || e.key === " " || e.ctrlKey || e.metaKey || e.altKey) return false;
+        const input = filter();
+        if (!input) return false;
+        e.preventDefault();
+        input.focus({ preventScroll: true });
+        const end = input.value.length;
+        input.setRangeText(e.key, end, end, "end");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
     };
 
     const handleNewClick = (e: MouseEvent) => {

@@ -24,6 +24,12 @@ pub enum Outcome {
     Accepted,
     /// The model abstained with the `KEEP` token: no change, the safe answer.
     Kept,
+    /// The model answered `SKIP` in the reply format (`reply`): nothing to write.
+    /// A healthy answer, like `Kept`.
+    Skipped,
+    /// No model call: a check in code already showed there is nothing to write
+    /// (for a suggestion, the assistant's last message waits for the user).
+    Gated,
     /// The reply was refused; the reason says by which rule.
     Rejected(RejectReason),
     /// There was nothing to send: no conversation in the digest, or no message
@@ -54,6 +60,8 @@ pub enum RejectReason {
     Refusal,
     /// Refused by a purpose-specific rule the generic classifier cannot name.
     Other,
+    /// Not in the reply format (`reply`): no `ANSWER:` prefix and not `SKIP`.
+    Format,
 }
 
 impl Outcome {
@@ -62,6 +70,9 @@ impl Outcome {
         match self {
             Outcome::Accepted => "accepted",
             Outcome::Kept => "kept",
+            Outcome::Skipped => "skipped",
+            Outcome::Gated => "gated",
+            Outcome::Rejected(RejectReason::Format) => "rejected:format",
             Outcome::Rejected(RejectReason::Empty) => "rejected:empty",
             Outcome::Rejected(RejectReason::Shape) => "rejected:shape",
             Outcome::Rejected(RejectReason::AbsencePattern) => "rejected:absence_pattern",
@@ -131,30 +142,48 @@ fn truncated(text: &str) -> String {
     out.replace('\n', " ⏎ ")
 }
 
-/// Record one outcome: count it, and log it at info with the purpose and entity.
-/// `text` is the model's raw reply, logged (truncated) for rejections only.
+/// How long a call waited and ran, for the outcome line. Both in milliseconds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Timing {
+    /// Waiting for a concurrency permit, from admission.
+    pub queued_ms: u64,
+    /// The CLI call itself, spawn to exit (or cancellation, or the time limit).
+    pub run_ms: u64,
+}
+
+/// Record one outcome without timings: count it, and log it at info with the
+/// purpose and entity. See [`record_timed`].
 pub fn record(purpose: &'static str, entity: &str, outcome: Outcome, text: Option<&str>) {
+    record_timed(purpose, entity, outcome, text, None);
+}
+
+/// Record one outcome: count it, and log it at info with the purpose, the entity
+/// and, when the call ran, how long it queued and ran. `text` is logged
+/// (truncated) for a rejected reply, which is the corpus the validators are tuned
+/// with, and for an accepted one, which is what the user is shown: without it, a
+/// bad answer that passed could not be found afterwards.
+pub fn record_timed(purpose: &'static str, entity: &str, outcome: Outcome, text: Option<&str>, timing: Option<Timing>) {
     if let Ok(mut map) = counts().lock() {
         *map.entry(purpose)
             .or_default()
             .entry(outcome.label())
             .or_default() += 1;
     }
-    match (outcome, text) {
-        (Outcome::Rejected(_), Some(t)) => tracing::info!(
-            purpose,
-            entity,
-            outcome = outcome.label(),
-            text = %truncated(t),
-            "ambient outcome"
-        ),
-        _ => tracing::info!(
-            purpose,
-            entity,
-            outcome = outcome.label(),
-            "ambient outcome"
-        ),
-    }
+    let text = match outcome {
+        Outcome::Rejected(_) | Outcome::Accepted => text.map(truncated),
+        _ => None,
+    };
+    let queued_ms = timing.map(|t| t.queued_ms);
+    let run_ms = timing.map(|t| t.run_ms);
+    tracing::info!(
+        purpose,
+        entity,
+        outcome = outcome.label(),
+        text = text.as_deref(),
+        queued_ms,
+        run_ms,
+        "ambient outcome"
+    );
 }
 
 /// Every count since this srv started, by purpose then outcome label.

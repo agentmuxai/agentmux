@@ -37,7 +37,7 @@ vi.mock("@/app/store/services", () => ({
 }));
 vi.mock("@/app/store/token-usage", () => ({ recordTurn: vi.fn() }));
 
-import { useNextPromptSuggestion } from "./useNextPromptSuggestion";
+import { shouldRequestSuggestion, useNextPromptSuggestion } from "./useNextPromptSuggestion";
 
 const BLOCK_ID = "b";
 
@@ -49,7 +49,7 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-function setup() {
+function setup(isComposerEmpty: () => boolean = () => true) {
     let setPhase!: (p: TurnPhase) => void;
     let bumpTurnEnded!: () => void;
     let dispose: () => void = () => {};
@@ -63,7 +63,7 @@ function setup() {
             blockId: BLOCK_ID,
             turnPhase: phase,
             turnJustEndedAtom: turnEnded,
-            isComposerEmpty: () => true,
+            isComposerEmpty,
         });
     });
     return { setPhase, bumpTurnEnded, dispose };
@@ -123,5 +123,72 @@ describe("useNextPromptSuggestion — hidden-turn suppression (reagentx P0, PR #
 
         expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
         dispose();
+    });
+});
+
+// A call that can only be thrown away, or has nothing to continue, isn't made.
+// docs/reports/REPORT_AMBIENT_FRAMEWORK_REASSESSMENT_2026_10_08.md section 6.2.
+describe("useNextPromptSuggestion — no call when there's nothing to suggest", () => {
+    async function endTurn(setPhase: (p: TurnPhase) => void, bumpTurnEnded: () => void, end?: TurnPhase) {
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "go", hidden: false });
+        await Promise.resolve();
+        if (end) setPhase(end);
+        bumpTurnEnded();
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
+    it("doesn't call while the user is already typing", async () => {
+        const { setPhase, bumpTurnEnded, dispose } = setup(() => false);
+        await endTurn(setPhase, bumpTurnEnded);
+        expect(hub.nextPromptSuggestion).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("doesn't call after a turn that errored or was stopped", async () => {
+        for (const outcome of ["errored", "stopped", "interrupted"] as const) {
+            hub.nextPromptSuggestion.mockClear();
+            const { setPhase, bumpTurnEnded, dispose } = setup();
+            await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome, finishedAt: 2 });
+            expect(hub.nextPromptSuggestion, outcome).not.toHaveBeenCalled();
+            dispose();
+        }
+    });
+
+    it("doesn't call while the turn is being stopped", async () => {
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+        await endTurn(setPhase, bumpTurnEnded, { kind: "Interrupting", reason: "user", sigintSentAt: 2 } as TurnPhase);
+        expect(hub.nextPromptSuggestion).not.toHaveBeenCalled();
+        dispose();
+    });
+
+    it("doesn't write a suggestion if the turn turns out stopped while the call ran", async () => {
+        let resolve!: (v: unknown) => void;
+        hub.nextPromptSuggestion.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+        await endTurn(setPhase, bumpTurnEnded);
+        expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+        setPhase({ kind: "Done", outcome: "stopped", finishedAt: 3 });
+        resolve({ suggestion: "next thing", tokens: null });
+        await Promise.resolve();
+        await Promise.resolve();
+        const wrote = hub.updateMeta.mock.calls.some(([, patch]) => patch["term:next_prompt_suggestion"] === "next thing");
+        expect(wrote).toBe(false);
+        dispose();
+    });
+
+    it("calls after a completed turn", async () => {
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+        await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome: "completed", finishedAt: 2 });
+        expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
+    it("the rule itself: an empty composer, and any phase but a failed or stopped end", () => {
+        expect(shouldRequestSuggestion({ kind: "Idle" }, true)).toBe(true);
+        expect(shouldRequestSuggestion({ kind: "Done", outcome: "completed", finishedAt: 1 }, true)).toBe(true);
+        expect(shouldRequestSuggestion({ kind: "Done", outcome: "completed", finishedAt: 1 }, false)).toBe(false);
+        expect(shouldRequestSuggestion({ kind: "Done", outcome: "errored", finishedAt: 1 }, true)).toBe(false);
+        expect(shouldRequestSuggestion({ kind: "Interrupting", reason: "user", sigintSentAt: 1 } as TurnPhase, true)).toBe(false);
     });
 });

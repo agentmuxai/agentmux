@@ -81,6 +81,7 @@ import { acquireRegionLock, releaseRegionLock } from "./modal-region-lock";
 import { push, remove, isReachable, type StackEntry } from "./modal-stack";
 
 import "./modal.scss";
+import { focusManager } from "@/app/store/focusManager";
 
 export { ModalHeader, ModalBody, ModalFooter } from "./modal-parts";
 export { ConfirmModal } from "./confirm-modal";
@@ -322,6 +323,11 @@ export const Modal: Component<ModalProps> = (props) => {
         queueMicrotask(() => {
             if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === "function") {
                 previousFocus.focus();
+            } else {
+                // The opener is gone (the modal confirmed closing the pane it
+                // was opened from): the caret goes to the selection, not <body>.
+                // SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
+                focusManager.ensureSelectionFocused("modal-closed");
             }
             previousFocus = null;
         });

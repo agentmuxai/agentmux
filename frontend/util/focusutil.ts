@@ -71,8 +71,25 @@ export function userCaretInBlock(blockId: string): boolean {
     const el = document.activeElement;
     if (!(el instanceof HTMLElement) || el.classList.contains("dummy-focus")) return false;
     if (findBlockId(el) !== blockId) return false;
+    return isTextEntry(el);
+}
+
+/** A text-entry control: a text-like input, textarea, select or contenteditable. */
+function isTextEntry(el: HTMLElement): boolean {
     if (el instanceof HTMLInputElement) return !NON_TEXT_INPUT_TYPES.has(el.type);
     return el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el.isContentEditable === true;
+}
+
+/**
+ * True when the caret is in a text-entry control outside every pane (the tab
+ * rename field, a settings field, a search box in the chrome): the user chose
+ * where to type, and moving the selection must not take it from them.
+ * SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
+ */
+export function caretInEditableOutsidePanes(): boolean {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLElement) || findBlockId(el) != null) return false;
+    return isTextEntry(el);
 }
 
 /**

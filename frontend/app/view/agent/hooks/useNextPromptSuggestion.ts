@@ -84,6 +84,11 @@
  *      persist into a brand-new session started in the same pane. Don't
  *      duplicate that listener here — one `ControllerStatus` subscription
  *      per pane for this purpose is enough.
+ *
+ * Before any of these, `shouldRequestSuggestion` skips the call itself when
+ * the user is already typing or the turn failed or was stopped, and the
+ * backend skips it when the turn ended waiting for the user. See
+ * docs/reports/REPORT_AMBIENT_FRAMEWORK_REASSESSMENT_2026_10_08.md section 6.2.
  */
 
 import { createEffect, on, type Accessor } from "solid-js";
@@ -126,6 +131,27 @@ function clearSuggestion(blockId: string): void {
     writeSuggestionMeta(blockId, null);
 }
 
+/**
+ * Whether `phase` rules out continuing the turn: it failed, was stopped, or is
+ * being stopped. A stop's `Interrupting` can still be the phase when the
+ * backend's turn-end edge arrives (#4476). `Idle` and `Streaming` don't rule it
+ * out: the edge can also arrive before `TurnEnd`.
+ */
+function turnWasCutShort(phase: TurnPhase): boolean {
+    return phase.kind === "Interrupting" || (phase.kind === "Done" && phase.outcome !== "completed");
+}
+
+/**
+ * Whether a turn's end is worth a suggestion call. Not while the user is already
+ * typing: the reply would be thrown away by guard 3 anyway, after being paid for.
+ * Not after a turn that failed or was stopped: there is no finished work to
+ * continue. The backend makes the remaining checks that need the transcript
+ * (`digest::TurnEnding`).
+ */
+export function shouldRequestSuggestion(phase: TurnPhase, composerEmpty: boolean): boolean {
+    return composerEmpty && !turnWasCutShort(phase);
+}
+
 export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): void {
     const { blockId, turnPhase, turnJustEndedAtom, isComposerEmpty } = opts;
 
@@ -164,6 +190,7 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
     // useAgentActivitySummary.ts.
     createEffect(on(turnJustEndedAtom, () => {
         if (lastTurnWasHidden) return; // see lastTurnWasHidden's own doc comment above
+        if (!shouldRequestSuggestion(turnPhase(), isComposerEmpty())) return;
         const myTurnId = activeTurnId;
 
         RpcApi.NextPromptSuggestionCommand(
@@ -175,7 +202,8 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
             if (result.tokens) {
                 recordTurn("ambient:next_prompt_suggestion", result.tokens);
             }
-            if (result.suggestion && isComposerEmpty()) {
+            // Checked again: the turn's outcome may have settled while the call ran.
+            if (result.suggestion && isComposerEmpty() && !turnWasCutShort(turnPhase())) {
                 writeSuggestionMeta(blockId, result.suggestion);
             }
         }).catch(() => {

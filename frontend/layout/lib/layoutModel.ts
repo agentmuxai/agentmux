@@ -7,7 +7,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { atomWithThrottle, boundNumber, createSignalAtom, SignalAtom } from "@/util/util";
 import type { Properties as CSSProperties } from "csstype";
-import { createMemo, createRoot, getOwner, runWithOwner, Owner } from "solid-js";
+import { createEffect, createMemo, createRoot, getOwner, on, runWithOwner, Owner } from "solid-js";
 import { getLayoutStateAtomFromTab } from "./layoutAtom";
 import { findNode } from "./layoutNode";
 import {
@@ -552,6 +552,34 @@ export class LayoutModel {
                 return findNode(treeState.rootNode, treeState.focusedNodeId);
             });
             this.focusedNodeIdStack = [];
+
+            // The caret follows the selection: whenever this tab's selected
+            // pane, or the active tab inside it, changes for any reason (a pane
+            // or pane tab closing, a view swap, a backend batch), hand it the
+            // caret. A frame later, so a click that put the caret in an input
+            // has landed (the "already in the pane" guard sees it) and a view
+            // that mounted fresh has rendered. focusManager ignores a
+            // background tab's model. SPEC_FOCUS_FOLLOWS_SELECTION_2026_10_08.md R1.
+            const selectionKey = createMemo(() => {
+                // A pane-tab switch mutates the node in place, so focusedNode()
+                // can return the same object; the tree state is a new object
+                // on every commit.
+                this.localTreeStateAtom();
+                const node = this.focusedNode();
+                return node?.data?.blockId ? `${node.id}|${node.data.blockId}` : null;
+            });
+            createEffect(
+                on(
+                    selectionKey,
+                    (key) => {
+                        if (key == null || typeof requestAnimationFrame !== "function") return;
+                        requestAnimationFrame(() => {
+                            if (!this.disposed) focusManager.ensureSelectionFocused("selection", this);
+                        });
+                    },
+                    { defer: true }
+                )
+            );
 
             this.placeholderTransform = createMemo<CSSProperties>(() => {
                 const pendingAction = this.pendingTreeAction.throttledValueAtom();
