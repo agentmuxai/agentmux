@@ -1,0 +1,56 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Performance signal notices at the top of the backend status panel
+// (REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08 §3.5): chip-styled
+// cards, amber for warn, red-tinted for critical, the tints the top-of-window
+// banners used.
+
+@use "../mixins.scss";
+
+.status-bar-health-notices {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-1);
+}
+
+.status-bar-health-notice {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--warning-color);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--warning-color) 14%, transparent);
+
+    &--critical {
+        border-color: var(--error-color);
+        background: color-mix(in srgb, var(--error-color) 16%, transparent);
+    }
+
+    &-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-1);
+        font-weight: 600;
+    }
+
+    &-label {
+        flex: 1 1 auto;
+        min-width: 0;
+    }
+
+    &-since {
+        flex: 0 0 auto;
+        font-weight: normal;
+        opacity: 0.6;
+    }
+
+    &-text {
+        margin-top: var(--space-0-5);
+        line-height: 1.35;
+        opacity: 0.85;
+    }
+}
+
+.status-bar-sr-only {
+    @include mixins.sr-only;
+}

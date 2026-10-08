@@ -773,11 +773,7 @@ wrap_task! {
                     "commit_free_mb": self.free_mb,
                 })
             };
-            crate::events::emit_event_to_top_level_windows(
-                &self.state,
-                "memory-pressure",
-                &payload,
-            );
+            crate::health_signals::emit(&self.state, payload);
         }
     }
 }
@@ -852,7 +848,7 @@ wrap_task! {
                 "level": self.level,
                 "avg_ms": self.avg_ms,
             });
-            crate::events::emit_event_to_top_level_windows(&self.state, "memory-pressure", &payload);
+            crate::health_signals::emit(&self.state, payload);
         }
     }
 }

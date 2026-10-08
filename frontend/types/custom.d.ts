@@ -4,6 +4,7 @@
 // SolidJS migration: all Jotai/React types replaced with SolidJS equivalents.
 
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import type { HealthPayload } from "@/app/store/health-signals";
 import type { NodeModel } from "@/layout/index";
 import type { SignalAtom } from "@/util/util";
 import type { Placement } from "@floating-ui/dom";
@@ -297,6 +298,8 @@ declare global {
             pending_migrations?: number;
         }>;
         restartBackend: () => Promise<void>;
+        /** The performance health signals active right now (`health-signal` payloads). */
+        getHealthSignals: () => Promise<HealthPayload[]>;
         getDocsiteUrl: () => string;
         getZoomFactor: () => number;
         showContextMenu: (

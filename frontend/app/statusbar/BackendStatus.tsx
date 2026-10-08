@@ -10,6 +10,10 @@ import { Accessor, createEffect, createSignal, onCleanup, onMount, Show, type JS
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { formatUptime, resolveUptimeSecs } from "./backend-uptime";
 import { Button } from "@/app/element/ui";
+import { healthSignals, startHealthSignals, worstHealthLevel } from "@/app/store/health-signals";
+import { healthLabel } from "@/app/store/health-signals-text";
+import { HealthNotices } from "./HealthNotices";
+import { statusDotColor, statusDotTip } from "./backend-dot";
 
 function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
     switch (c) {
@@ -51,15 +55,7 @@ interface BackendStatusPanelProps {
 const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
     const backendStatus = atoms.backendStatusAtom;
     const backendInfo = props.backendInfo;
-
-    const color = () => {
-        switch (backendStatus()) {
-            case "running": return "var(--accent-color)";
-            case "connecting": return "var(--warning-color)";
-            case "crashed": return "var(--error-color)";
-            default: return null;
-        }
-    };
+    const color = () => statusDotColor(backendStatus(), worstHealthLevel());
 
     // Opens upward, left-aligned to the status dot. Positioning, chrome zoom, dismiss
     // and the airspace cut are AnchoredPopover's.
@@ -75,6 +71,7 @@ const BackendStatusPanel = (props: BackendStatusPanelProps): JSX.Element => {
             aria-label="Backend status"
             style={{ width: `${POPOVER_WIDTH}px` }}
         >
+            <HealthNotices />
             <div class="status-bar-popover-row">
                 <span class="status-bar-popover-label">Status</span>
                 <span style={{ color: color() }}>{backendStatus()}</span>
@@ -274,6 +271,8 @@ const BackendStatus = (): JSX.Element => {
         onCleanup(() => unsub?.());
     });
 
+    onMount(() => onCleanup(startHealthSignals()));
+
     const icon = () => {
         switch (backendStatus()) {
             case "running": return "●";
@@ -283,14 +282,8 @@ const BackendStatus = (): JSX.Element => {
         }
     };
 
-    const color = () => {
-        switch (backendStatus()) {
-            case "running": return "var(--accent-color)";
-            case "connecting": return "var(--warning-color)";
-            case "crashed": return "var(--error-color)";
-            default: return null;
-        }
-    };
+    const color = () => statusDotColor(backendStatus(), worstHealthLevel());
+    const healthLabels = () => healthSignals().map((s) => healthLabel(s.kind, s.payload));
 
     const iconSpin = () => backendStatus() === "connecting";
 
@@ -313,10 +306,14 @@ const BackendStatus = (): JSX.Element => {
             <div
                 ref={(el) => { triggerRef = el; }}
                 class="status-bar-item clickable"
-                data-tip="Backend status, click for details"
-                aria-label="Backend status"
+                data-tip={statusDotTip(healthLabels())}
+                aria-label={statusDotTip(healthLabels())}
                 onClick={handleClick}
             >
+                {/* Says a new signal aloud, as the old banner did; nothing visible. */}
+                <span class="status-bar-sr-only" aria-live="polite">
+                    {healthLabels().join(", ")}
+                </span>
                 <span class={`status-icon${iconSpin() ? " status-icon-spin" : ""}`} style={{ color: color() }}>
                     {icon()}
                 </span>
