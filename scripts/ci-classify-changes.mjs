@@ -173,8 +173,16 @@ export function versionOnlyChange(entries) {
     const [from] = removed;
     const [to] = added;
     if (from === to) return { ok: false, reason: "the version doesn't change" };
+    // A value Cargo and npm would reject still agrees across the files, and the
+    // release consistency check only checks agreement: build it (Codex, #4494).
+    for (const v of [from, to]) {
+        if (!SEMVER.test(v)) return { ok: false, reason: `"${v}" isn't a valid version` };
+    }
     return { ok: true, from, to };
 }
+
+/** A semantic version as Cargo and npm accept it: X.Y.Z, optional -pre and +build. */
+const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/;
 
 /** True when this single path provably cannot affect any build output. */
 export function isDocsOnlyPath(rawPath) {

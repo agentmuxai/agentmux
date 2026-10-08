@@ -323,6 +323,22 @@ describe("R7 — version-only release PRs", () => {
         expect(versionOnlyChange(release("0.59.15", "0.59.15")).ok).toBe(false);
     });
 
+    it("builds when the new or old version isn't a valid semver", () => {
+        // Every file agrees, so release consistency passes, but Cargo rejects it.
+        for (const [from, to] of [
+            ["0.59.15", "definitely not semver"],
+            ["0.59.15", "0.59"],
+            ["0.59.15", "v0.59.16"],
+            ["0.59.15", "0.59.016"],
+            ["garbage", "0.59.16"],
+        ]) {
+            expect(classifyPullFiles(release(from, to))).toMatchObject({ rust: true, version_only: false });
+        }
+        // Pre-release and build metadata are valid.
+        expect(versionOnlyChange(release("0.59.15", "0.60.0-rc.1")).ok).toBe(true);
+        expect(versionOnlyChange(release("0.59.15", "0.59.16+build.7")).ok).toBe(true);
+    });
+
     it("runs everything when a manifest's diff is missing", () => {
         // The API omits `patch` for a very large or binary diff.
         const noPatch = release();

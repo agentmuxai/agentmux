@@ -139,7 +139,10 @@ calls a PR version-only only when all of these hold:
   one for a huge or binary file);
 - every added or removed manifest line is a version line;
 - every removed version is one value A, every added one is one value B, A ≠ B,
-  as many added as removed.
+  as many added as removed;
+- A and B are valid semantic versions (`X.Y.Z`, optional `-pre` and `+build`).
+  A value Cargo or npm would reject can still agree across the files, which is
+  all the release consistency check verifies, so it builds.
 
 A dependency bump fails the last two (its own version pair, a lockfile
 checksum or dependency line), so a "release" PR that also changes a
