@@ -13,29 +13,109 @@ use crate::identity::secret_store;
 /// credential id, `crate::muxbus::CREDENTIAL_ID`.
 const GLOBAL_KEYCHAIN_NS: &str = crate::muxbus::CREDENTIAL_ID;
 
-/// The keychain namespace this process's MuxBus tokens live under. It follows
-/// exactly the rule that places the `db_muxbus_credentials` row
-/// (`registry::paths::resolve_shared_store_path`): with isolated auth and an
-/// instance dir, the row is in that channel's own `identity-store.db`, so the
-/// tokens are scoped to the channel too. Before this, the row was per channel
-/// but the tokens were one host-wide set, so one channel's sign-in replaced
-/// every other channel's tokens and one channel's sign-out deleted them
-/// (SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md).
-fn keychain_namespace() -> String {
-    let instance_dir = std::env::var_os("AGENTMUX_INSTANCE_DIR");
-    let channel = std::env::var("AGENTMUX_CHANNEL").ok();
-    namespace_for(
-        agentmux_common::isolated_auth_enabled(),
-        instance_dir.is_some_and(|d| !d.is_empty()),
-        channel.as_deref(),
-    )
+/// The channel whose own MuxBus sign-in this process uses. A channel is the
+/// unit of sign-in, not the host: every channel but `stable` (the installed
+/// releases, which have always used the host-wide set) signs in on its own, so
+/// two channels on one machine can be signed in at once, to the same account
+/// or to different ones, and one's refresh, sign-in or sign-out never touches
+/// the other's (SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md).
+fn sign_in_channel(channel: Option<&str>) -> Option<&str> {
+    channel.filter(|c| !c.is_empty() && *c != "stable")
 }
 
-fn namespace_for(isolated_auth: bool, has_instance_dir: bool, channel: Option<&str>) -> String {
-    match channel.filter(|c| !c.is_empty()) {
-        Some(ch) if isolated_auth && has_instance_dir => format!("muxbus:channel:{ch}"),
-        _ => GLOBAL_KEYCHAIN_NS.to_string(),
+/// The keychain namespace this process's MuxBus tokens live under.
+fn keychain_namespace() -> String {
+    namespace_for(std::env::var("AGENTMUX_CHANNEL").ok().as_deref())
+}
+
+fn namespace_for(channel: Option<&str>) -> String {
+    match sign_in_channel(channel) {
+        Some(ch) => format!("muxbus:channel:{ch}"),
+        None => GLOBAL_KEYCHAIN_NS.to_string(),
     }
+}
+
+/// Whether the store this process reads is already this channel's own file
+/// (isolated auth with an instance dir: `registry::paths::resolve_shared_store_path`),
+/// where the channel needs no per-row scoping.
+fn store_is_channel_local() -> bool {
+    agentmux_common::isolated_auth_enabled()
+        && std::env::var_os("AGENTMUX_INSTANCE_DIR").is_some_and(|d| !d.is_empty())
+}
+
+/// The `db_muxbus_credentials` row id: `global` for `stable` and for a store
+/// that is already the channel's own, `channel:<ch>` for a channel's row in the
+/// store channels share.
+fn row_id_for(channel: Option<&str>, own_store: bool) -> String {
+    match sign_in_channel(channel) {
+        Some(ch) if !own_store => format!("channel:{ch}"),
+        _ => "global".to_string(),
+    }
+}
+
+fn current_row_id() -> String {
+    row_id_for(std::env::var("AGENTMUX_CHANNEL").ok().as_deref(), store_is_channel_local())
+}
+
+/// Prefix for this channel's rows in `db_agent_credentials`, which is keyed by
+/// agent id alone: empty for `stable` and for the channel's own store. An agent
+/// id is `[A-Za-z0-9_-]`, so the `/` can't collide with one.
+fn agent_credential_prefix_for(channel: Option<&str>, own_store: bool) -> String {
+    match sign_in_channel(channel) {
+        Some(ch) if !own_store => format!("{ch}/"),
+        _ => String::new(),
+    }
+}
+
+pub(super) fn current_agent_credential_prefix() -> String {
+    agent_credential_prefix_for(std::env::var("AGENTMUX_CHANNEL").ok().as_deref(), store_is_channel_local())
+}
+
+// ---- Cross-process lock ----------------------------------------------------
+//
+// `muxbus_save_lock` only serializes threads of ONE process, but the keychain
+// is host-wide and a Windows save is about a dozen writes. Two processes
+// interleaving left a torn set that reads treated as signed out. An OS file
+// lock makes save, load and clear one critical section across processes.
+
+/// How long a save or load waits for another process before going ahead
+/// without the lock (a stuck holder must not stop sign-in for good).
+const XPROC_LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A held OS advisory lock; released when dropped (the handle closes).
+pub(super) struct CrossProcessGuard {
+    _file: std::fs::File,
+}
+
+/// Take the lock at `path`, polling until `wait` has passed. `None` when it
+/// couldn't be taken (another process held it the whole time, or the file
+/// couldn't be opened): the caller proceeds, as the in-process lock alone did.
+pub(super) fn lock_file(path: &std::path::Path, wait: std::time::Duration) -> Option<CrossProcessGuard> {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    // Never deleted: unlinking a locked file lets a waiter lock a different
+    // inode than a newcomer (registry/leases.rs `CriticalSection`).
+    let file = std::fs::OpenOptions::new().create(true).write(true).open(path).ok()?;
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match crate::registry::try_lock_exclusive(&file) {
+            Ok(true) => return Some(CrossProcessGuard { _file: file }),
+            Ok(false) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            Ok(false) | Err(_) => return None,
+        }
+    }
+}
+
+fn lock_namespace(ns: &str) -> Option<CrossProcessGuard> {
+    let dir = crate::registry::resolve_global_shared_root()?.join("muxbus-locks");
+    let guard = lock_file(&dir.join(format!("{}.lock", ns.replace(':', "_"))), XPROC_LOCK_WAIT);
+    if guard.is_none() {
+        tracing::warn!(namespace = %ns, "muxbus: another process held the keychain lock for {XPROC_LOCK_WAIT:?}; going ahead without it");
+    }
+    guard
 }
 
 /// Single-entry key holding all three tokens as one JSON blob. Two different
@@ -579,12 +659,60 @@ fn read_any_layout(ns: &str) -> Option<MuxBusTokens> {
 /// freshness against a coexisting blob use the second element; callers that
 /// don't (the common case) just ignore it.
 fn read_split_tokens(ns: &str) -> Result<Option<(MuxBusTokens, String)>, StoreError> {
+    match read_split_state(ns)? {
+        SplitRead::Complete(tokens, generation) => Ok(Some((tokens, generation))),
+        SplitRead::Absent => Ok(None),
+        SplitRead::Torn => {
+            tracing::warn!(
+                "muxbus: split keychain entries have mismatched generation stamps or are \
+                 incomplete (a torn write from an interrupted or concurrent save) — \
+                 treating as not signed in; signing in again repairs it"
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// What the three split entries held when read.
+enum SplitRead {
+    /// None of the three fields exist yet.
+    Absent,
+    /// All three, from one save.
+    Complete(MuxBusTokens, String),
+    /// Present but not from one save: a read that landed mid-write, or a
+    /// write that was interrupted.
+    Torn,
+}
+
+/// Read the split entries, retrying a few times while they look torn: a save
+/// by an older build (no cross-process lock) may be mid-write, and a moment
+/// later the same read is whole. A tear that persists is genuine.
+fn read_split_settled(ns: &str) -> Result<SplitRead, StoreError> {
+    retry_while_torn(|| read_split_state(ns), 4, std::time::Duration::from_millis(120))
+}
+
+fn retry_while_torn<F>(mut read: F, tries: u32, pause: std::time::Duration) -> Result<SplitRead, StoreError>
+where
+    F: FnMut() -> Result<SplitRead, StoreError>,
+{
+    let mut last = read()?;
+    for _ in 1..tries {
+        if !matches!(last, SplitRead::Torn) {
+            break;
+        }
+        std::thread::sleep(pause);
+        last = read()?;
+    }
+    Ok(last)
+}
+
+fn read_split_state(ns: &str) -> Result<SplitRead, StoreError> {
     let access = read_chunked_field(&field_key(ns, FIELD_ACCESS))?;
     let refresh = read_chunked_field(&field_key(ns, FIELD_REFRESH))?;
     let id = read_chunked_field(&field_key(ns, FIELD_ID))?;
 
     match (access, refresh, id) {
-        (None, None, None) => Ok(None),
+        (None, None, None) => Ok(SplitRead::Absent),
         (Some((access_token, gen_a)), Some((refresh_token, gen_r)), Some((id_token, gen_i))) => {
             // reagent P2: write_split_tokens's own writes are individually
             // consistent per-field (write_chunked_field's chunk+rollback
@@ -596,35 +724,22 @@ fn read_split_tokens(ns: &str) -> Result<Option<(MuxBusTokens, String)>, StoreEr
             // stamps only match when they came from the SAME
             // write_split_tokens call — a mismatch means a torn write.
             if gen_a == gen_r && gen_r == gen_i {
-                Ok(Some((
+                Ok(SplitRead::Complete(
                     MuxBusTokens {
                         access_token,
                         refresh_token,
                         id_token,
                     },
                     gen_a,
-                )))
+                ))
             } else {
-                tracing::warn!(
-                    "muxbus: split keychain entries have mismatched generation stamps (a torn \
-                     write from an interrupted save) — treating as not-yet-migrated"
-                );
-                Ok(None)
+                Ok(SplitRead::Torn)
             }
         }
-        _ => {
-            // Shouldn't happen in normal operation — write_split_tokens
-            // writes/rolls-back all three fields together — but could
-            // follow an interrupted write from a prior crash. Treat as "not
-            // yet on the split layout" so the caller falls through to the
-            // legacy-blob / legacy-plaintext migration paths rather than
-            // silently serving a token set with missing fields.
-            tracing::warn!(
-                "muxbus: inconsistent split keychain entries (some fields present, some absent) — \
-                 treating as not-yet-migrated"
-            );
-            Ok(None)
-        }
+        // Some fields present, some absent: shouldn't happen in normal
+        // operation (write_split_tokens writes and rolls back all three
+        // together) but follows an interrupted write.
+        _ => Ok(SplitRead::Torn),
     }
 }
 
@@ -697,14 +812,16 @@ impl Store {
         //     it only serializes this read against `muxbus_save`/
         //     `muxbus_clear`'s writes, which already take the same lock.
         let _migration_guard = self.muxbus_save_lock.lock().unwrap();
+        let _xproc = lock_namespace(&keychain_namespace());
+        let row_id = current_row_id();
         let row = {
             let conn = self.conn.lock().unwrap();
             let mut stmt = conn.prepare(
                 "SELECT cognito_domain, client_id, access_token, refresh_token, id_token,
                         expires_at, user_email, user_sub
-                 FROM db_muxbus_credentials WHERE id = 'global'",
+                 FROM db_muxbus_credentials WHERE id = ?1",
             )?;
-            match stmt.query_row([], |row| {
+            match stmt.query_row(params![row_id], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
@@ -767,9 +884,18 @@ impl Store {
         // `blob_key`'s doc comment for why they differ). No
         // migration needed on a hit here — it's already the right format.
         if cfg!(target_os = "windows") {
-            match read_split_tokens(&ns) {
-                Ok(Some((tokens, _generation))) => return Ok(tokens),
-                Ok(None) => {} // not yet on the split layout — check other sources below
+            match read_split_settled(&ns) {
+                Ok(SplitRead::Complete(tokens, _generation)) => return Ok(tokens),
+                // Not yet on the split layout, or torn and still torn after
+                // the retries: check the other sources below.
+                Ok(SplitRead::Absent) => {}
+                Ok(SplitRead::Torn) => {
+                    tracing::warn!(
+                        "muxbus: split keychain entries are torn (mismatched generation stamps \
+                         or incomplete) and stayed so on retry — treating as not signed in; \
+                         signing in again repairs it"
+                    );
+                }
                 Err(e) => {
                     if !legacy_access.is_empty() {
                         tracing::warn!(
@@ -968,8 +1094,8 @@ impl Store {
                         let _ = conn.execute(
                             "UPDATE db_muxbus_credentials
                              SET access_token = '', refresh_token = '', id_token = ''
-                             WHERE id = 'global'",
-                            [],
+                             WHERE id = ?1",
+                            params![current_row_id()],
                         );
                     }
                     Err(_) => {
@@ -1026,6 +1152,7 @@ impl Store {
         // already-committed credential.
         let _save_guard = self.muxbus_save_lock.lock().unwrap();
         let ns = keychain_namespace();
+        let _xproc = lock_namespace(&ns);
 
         // Read the outgoing account's user_sub now, before it's overwritten
         // below, so a genuine account switch (vs. a same-account token
@@ -1034,8 +1161,8 @@ impl Store {
         let previous_user_sub: Option<String> = {
             let conn = self.conn.lock().unwrap();
             conn.query_row(
-                "SELECT user_sub FROM db_muxbus_credentials WHERE id = 'global'",
-                [],
+                "SELECT user_sub FROM db_muxbus_credentials WHERE id = ?1",
+                params![current_row_id()],
                 |row| row.get(0),
             )
             .ok()
@@ -1070,13 +1197,14 @@ impl Store {
                 "INSERT OR REPLACE INTO db_muxbus_credentials
                      (id, cognito_domain, client_id, access_token, refresh_token, id_token,
                       expires_at, user_email, user_sub)
-                 VALUES ('global', ?1, ?2, '', '', '', ?3, ?4, ?5)",
+                 VALUES (?6, ?1, ?2, '', '', '', ?3, ?4, ?5)",
                 params![
                     creds.cognito_domain,
                     creds.client_id,
                     creds.expires_at,
                     creds.user_email,
                     creds.user_sub,
+                    current_row_id(),
                 ],
             )
         };
@@ -1124,6 +1252,7 @@ impl Store {
         // against each other for.
         let _clear_guard = self.muxbus_save_lock.lock().unwrap();
         let ns = keychain_namespace();
+        let _xproc = lock_namespace(&ns);
         // Best-effort — a missing/inaccessible keychain entry must not block
         // clearing the (still-useful) SQL row. Clears every chunk + count/gen
         // entry the Windows-only chunked layout could have written (harmless
@@ -1136,7 +1265,7 @@ impl Store {
         let _ = secret_store::delete(&blob_key(&ns));
         {
             let conn = self.conn.lock().unwrap();
-            conn.execute("DELETE FROM db_muxbus_credentials WHERE id = 'global'", [])?;
+            conn.execute("DELETE FROM db_muxbus_credentials WHERE id = ?1", params![current_row_id()])?;
         }
         // Logging out invalidates any per-agent credentials provisioned
         // under this account too. reagentx P0 on PR #2342.
@@ -1227,26 +1356,43 @@ mod tests {
     }
 
     #[test]
-    fn namespace_is_per_channel_exactly_when_the_sql_row_is() {
-        // stable / non-isolated: the host-wide set, as before.
-        assert_eq!(namespace_for(false, true, Some("stable")), "muxbus:global");
-        assert_eq!(namespace_for(false, true, Some("local-main-x")), "muxbus:global");
-        // Isolated auth with an instance dir: the row is in the channel's own
-        // identity-store.db, so the tokens are the channel's own too.
-        assert_eq!(namespace_for(true, true, Some("local-main-x")), "muxbus:channel:local-main-x");
-        assert_eq!(namespace_for(true, true, Some("dev-feat-a-1234")), "muxbus:channel:dev-feat-a-1234");
-        // Isolated but no instance dir: the row falls back to the global
-        // store (resolve_shared_store_path), so the tokens must too.
-        assert_eq!(namespace_for(true, false, Some("local-main-x")), "muxbus:global");
-        // No channel known: never invent one.
-        assert_eq!(namespace_for(true, true, None), "muxbus:global");
-        assert_eq!(namespace_for(true, true, Some("")), "muxbus:global");
+    fn every_channel_but_stable_signs_in_on_its_own() {
+        // stable (the installed releases) and no channel: the host-wide set,
+        // as ever.
+        assert_eq!(namespace_for(Some("stable")), "muxbus:global");
+        assert_eq!(namespace_for(None), "muxbus:global");
+        assert_eq!(namespace_for(Some("")), "muxbus:global");
+        // Any other channel is its own entry, whether or not auth is isolated:
+        // the channel is the unit of sign-in, not the host.
+        assert_eq!(namespace_for(Some("local-main-x")), "muxbus:channel:local-main-x");
+        assert_eq!(namespace_for(Some("dev-feat-a-1234")), "muxbus:channel:dev-feat-a-1234");
+    }
+
+    #[test]
+    fn a_channels_row_is_its_own_in_the_store_channels_share() {
+        assert_eq!(row_id_for(Some("stable"), false), "global");
+        assert_eq!(row_id_for(None, false), "global");
+        assert_eq!(row_id_for(Some("local-main-x"), false), "channel:local-main-x");
+        assert_eq!(row_id_for(Some("local-main-y"), false), "channel:local-main-y");
+        // A store that is already the channel's own keeps the row it has: an
+        // isolated channel's existing sign-in stays valid.
+        assert_eq!(row_id_for(Some("local-main-x"), true), "global");
+    }
+
+    #[test]
+    fn a_channels_agent_credentials_are_its_own_rows() {
+        assert_eq!(agent_credential_prefix_for(Some("stable"), false), "");
+        assert_eq!(agent_credential_prefix_for(None, false), "");
+        assert_eq!(agent_credential_prefix_for(Some("local-main-x"), false), "local-main-x/");
+        assert_eq!(agent_credential_prefix_for(Some("local-main-x"), true), "");
+        // An agent id has no `/`, so a prefix can't be mistaken for one.
+        assert!(!"agentx".contains('/'));
     }
 
     #[test]
     fn channel_namespaces_never_share_an_entry_with_each_other_or_the_global_set() {
-        let a = namespace_for(true, true, Some("local-main-a"));
-        let b = namespace_for(true, true, Some("local-main-b"));
+        let a = namespace_for(Some("local-main-a"));
+        let b = namespace_for(Some("local-main-b"));
         let g = GLOBAL_KEYCHAIN_NS.to_string();
         let keys = |ns: &str| {
             let mut k = vec![blob_key(ns)];
@@ -1364,5 +1510,54 @@ mod tests {
         // least 1 to distinguish "field written as empty" from "field never
         // written at all" (`Ok(None)`).
         assert_eq!(chunk_value(""), vec![""]);
+    }
+
+    /// The point of the lock: a second holder waits for the first, across
+    /// separate handles (what two processes have).
+    #[test]
+    fn the_cross_process_lock_makes_a_second_holder_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ns.lock");
+        let first = lock_file(&path, std::time::Duration::from_secs(1)).expect("first lock");
+        let started = std::time::Instant::now();
+        // Held: a short wait gives up without the lock.
+        assert!(lock_file(&path, std::time::Duration::from_millis(150)).is_none());
+        assert!(started.elapsed() >= std::time::Duration::from_millis(140));
+        drop(first);
+        // Released: the next holder gets it at once.
+        assert!(lock_file(&path, std::time::Duration::from_millis(150)).is_some());
+    }
+
+    /// A torn read that heals (an older build finished its save) is retried,
+    /// not reported as a sign-out; one that stays torn is reported as such.
+    #[test]
+    fn a_torn_read_is_retried_until_it_settles() {
+        let pause = std::time::Duration::from_millis(1);
+        let mut calls = 0;
+        let healed = retry_while_torn(
+            || {
+                calls += 1;
+                Ok(if calls < 3 {
+                    SplitRead::Torn
+                } else {
+                    SplitRead::Complete(MuxBusTokens::default(), "1".to_string())
+                })
+            },
+            4,
+            pause,
+        )
+        .unwrap();
+        assert!(matches!(healed, SplitRead::Complete(..)));
+        assert_eq!(calls, 3);
+
+        let mut calls = 0;
+        let stuck = retry_while_torn(|| { calls += 1; Ok(SplitRead::Torn) }, 4, pause).unwrap();
+        assert!(matches!(stuck, SplitRead::Torn));
+        assert_eq!(calls, 4, "gives up after the allowed tries");
+
+        let mut calls = 0;
+        let absent = retry_while_torn(|| { calls += 1; Ok(SplitRead::Absent) }, 4, pause).unwrap();
+        assert!(matches!(absent, SplitRead::Absent));
+        assert_eq!(calls, 1, "an absent login is not retried");
     }
 }
