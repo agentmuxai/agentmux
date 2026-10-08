@@ -151,6 +151,16 @@ impl Store {
         self.agent_credentials_clear_prefix(&super::muxbus::current_agent_credential_prefix())
     }
 
+    /// Every channel's row for one agent: what deleting the agent removes.
+    pub fn agent_credentials_purge_agent(&self, agent_id: &str) -> Result<usize, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        Ok(conn.execute(
+            "DELETE FROM db_agent_credentials
+             WHERE agent_id = ?1 OR (instr(agent_id, '/') > 0 AND substr(agent_id, instr(agent_id, '/') + 1) = ?1)",
+            params![agent_id.to_lowercase()],
+        )?)
+    }
+
     /// The rows behind `prefix` (a channel's `<channel>/`), or, with an empty
     /// prefix, the unprefixed ones.
     fn agent_credentials_clear_prefix(&self, prefix: &str) -> Result<(), StoreError> {
@@ -209,6 +219,29 @@ mod tests {
         // A channel clears only its own.
         store.agent_credentials_clear_prefix("local-main-x/").unwrap();
         assert_eq!(left(&store), vec!["local-main-y/agentx".to_string()]);
+    }
+
+    /// Deleting an agent removes its row in every channel and no one else's.
+    #[test]
+    fn purging_an_agent_removes_its_rows_in_every_channel() {
+        let store = shared_store();
+        {
+            let conn = store.conn.lock().unwrap();
+            for key in ["agentx", "local-main-x/agentx", "dev-main-y/agentx", "agentxy", "local-main-x/agenty"] {
+                conn.execute("INSERT INTO db_agent_credentials (agent_id, client_id) VALUES (?1, 'c')", params![key])
+                    .unwrap();
+            }
+        }
+        assert_eq!(store.agent_credentials_purge_agent("AgentX").unwrap(), 3);
+        let conn = store.conn.lock().unwrap();
+        let left: Vec<String> = conn
+            .prepare("SELECT agent_id FROM db_agent_credentials ORDER BY agent_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, vec!["agentxy".to_string(), "local-main-x/agenty".to_string()]);
     }
 
     #[test]

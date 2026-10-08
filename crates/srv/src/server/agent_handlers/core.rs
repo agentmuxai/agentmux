@@ -295,15 +295,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore_dfa = state.mstore.clone();
     let broker_dfa = state.broker.clone();
     let identity_store_dfa = state.identity_store.clone();
+    let id_store_dfa = state.id_store.clone();
     engine.register_typed(
         COMMAND_DELETE_AGENT,
         move |cmd: CommandDeleteAgentDefinitionData, _ctx| {
             let mstore = mstore_dfa.clone();
             let broker = broker_dfa.clone();
             let identity_store = identity_store_dfa.clone();
+            let id_store = id_store_dfa.clone();
             async move {
                 mstore.agent_def_delete(&cmd.id).map_err(|e| format!("deleteagent: {e}"))?;
-                super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagent");
+                super::purge_identity_store_rows(&identity_store, &id_store, &cmd.id, "deleteagent");
                 broker.publish(crate::backend::mps::MuxEvent {
                     event: "agents:changed".to_string(),
                     scopes: vec![],
