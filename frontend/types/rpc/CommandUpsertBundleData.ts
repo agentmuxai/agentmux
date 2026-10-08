@@ -33,7 +33,9 @@ instructions_by_provider: string,
  */
 context_files: string, 
 /**
- * JSON-encoded array of MCP server configs.
+ * Always `"[]"`: a bundle carries no MCP servers
+ * (`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md` §3.1). Kept on
+ * the wire for older clients; see [`NO_INLINE_MCP_SERVERS`].
  */
 mcp_servers: string, 
 /**
