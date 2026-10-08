@@ -109,13 +109,15 @@ pub fn build_session_title_from_activity_prompt(word_target: u32, digest: &str) 
 /// `reply` format: `ANSWER: <instruction>` or `SKIP`. Asked to "output nothing",
 /// the model wrote sentences about doing so, and one reached the composer.
 ///
-/// When the assistant's last message waits for the user, no call is made at all
-/// (`digest::TurnEnding`), so the prompt doesn't have to ask the model to judge it.
+/// When the assistant's last message plainly waits for the user (a question in
+/// its last paragraph, a tool that asks them), no call is made at all
+/// (`digest::TurnEnding`). The SKIP case for waiting stays as the fallback for a
+/// wait the gate can't see, such as "Tell me which one and I'll start."
 pub fn build_next_prompt_prompt(digest: &str) -> String {
     let instruction = [
         "Predict the ONE short instruction the user will most likely type next to continue this work, using only the activity below.",
         "Write it the way someone types a task into a prompt box: a direct imperative that begins with the action itself (\"Debug the blank preview bug\", not \"Yeah, let's debug the blank preview bug\"). Under 20 words.",
-        "Reply SKIP if the activity doesn't show what the work is, or the work looks finished with nothing obvious left.",
+        "Reply SKIP if the activity doesn't show what the work is, if the work looks finished with nothing obvious left, or if the assistant's last message is waiting for the user to answer or decide something.",
         "Never suggest deleting data, force-pushing, or touching credentials.",
         PLAIN_TEXT_RULES,
         crate::ambient::reply::FORMAT_RULES,

@@ -154,14 +154,31 @@ fn turn_ending(parts: &[String]) -> TurnEnding {
     }
 }
 
-/// Whether a message's last line ends in a question mark, past closing
-/// formatting (`**`, `_`, backticks, quotes, brackets).
+/// Whether a message's last paragraph asks something: one of its sentences ends
+/// in a question mark. The whole paragraph, not only its end, because a question
+/// is often followed by a line of courtesy ("Which do you prefer? Let me know and
+/// I'll proceed."). A question earlier in the message, which it went on to
+/// answer, is not in the last paragraph.
 fn ends_in_question(message: &str) -> bool {
-    let last_line = message.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
-    let end = last_line.trim_end_matches(|c: char| {
-        c.is_whitespace() || matches!(c, '*' | '_' | '`' | '"' | '\'' | '\u{201D}' | '\u{2019}' | ')' | ']')
-    });
-    end.ends_with('?') || end.ends_with('\u{FF1F}')
+    let lines: Vec<&str> = message.lines().map(str::trim).collect();
+    let end = lines.iter().rposition(|l| !l.is_empty()).map_or(0, |i| i + 1);
+    let start = lines[..end].iter().rposition(|l| l.is_empty()).map_or(0, |i| i + 1);
+    lines[start..end].iter().any(|line| ends_a_question(line))
+}
+
+/// Whether any question mark in `line` ends a sentence: only closing formatting
+/// (`**`, `_`, quotes, brackets, a code span's backtick) stands between it and
+/// the end of the line or the next space. Not a `?` inside code (`` `?` ``), a
+/// URL's query, or `a?.b`.
+fn ends_a_question(line: &str) -> bool {
+    line.char_indices().filter(|&(_, c)| c == '?' || c == '\u{FF1F}').any(|(i, c)| {
+        let before = line[..i].chars().next_back();
+        let rest: String = line[i + c.len_utf8()..].chars().take_while(|c| !c.is_whitespace()).collect();
+        // A `?` that opens a code span (`` `?` ``) is code, not a question.
+        let in_code = before == Some('`') && rest.starts_with('`');
+        !in_code
+            && rest.chars().all(|c| matches!(c, '*' | '_' | '`' | '"' | '\'' | '\u{201D}' | '\u{2019}' | ')' | ']'))
+    })
 }
 
 /// Entries kept, per-entry and total character caps for a digest. The old digest
@@ -722,15 +739,34 @@ mod turn_ending_tests {
             "[assistant] Want me to merge it?**",
             "[assistant] Is it the stable build you want?\n\n",
             "[assistant] Okay？",
+            // A question followed by a line of courtesy still waits (Codex P2, #4476).
+            "[assistant] Which approach do you prefer? Let me know and I'll proceed.",
+            "[assistant] Both work.\n\nShould I use A (\"simpler\")?\nOtherwise I'll go with B.",
         ] {
             assert_eq!(turn_ending(&parts(&["[user] go", last])), TurnEnding::AssistantAsked, "{last:?}");
+        }
+    }
+
+    /// These wait without a question mark, so the gate lets them through and the
+    /// prompt's SKIP case has to catch them (`cli::live_cli_skips_a_wait_the_gate_cannot_see`).
+    #[test]
+    fn a_wait_without_a_question_mark_passes_the_gate() {
+        for last in [
+            "[assistant] Redis or an in-process LRU would both work. Tell me which one and I'll start.",
+            "[assistant] Ready to deploy to production. Waiting for your go-ahead.",
+        ] {
+            assert_eq!(turn_ending(&parts(&["[user] go", last])), TurnEnding::Statement, "{last:?}");
         }
     }
 
     #[test]
     fn a_statement_is_a_statement_even_with_a_question_earlier() {
         assert_eq!(
-            turn_ending(&parts(&["[user] go", "[assistant] Should it be A? I went with A, and the tests pass."])),
+            turn_ending(&parts(&["[user] go", "[assistant] Should it be A?\n\nI went with A, and the tests pass."])),
+            TurnEnding::Statement
+        );
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Fixed `parse()`. The `?` operator now propagates it."])),
             TurnEnding::Statement
         );
         assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[tool] Bash"])), TurnEnding::Statement);

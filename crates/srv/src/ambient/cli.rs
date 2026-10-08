@@ -286,4 +286,33 @@ mod live_cli_smoke {
         assert!(failed < digests.len(), "no call completed");
         assert!(bad.is_empty(), "replies not in the format: {bad:?}");
     }
+
+    /// A message that waits for the user without a question mark passes the
+    /// turn-ending gate, so the prompt's SKIP case is what keeps a guess out of
+    /// the composer (Codex P2 on #4476). Live, like the test above.
+    #[tokio::test]
+    #[ignore = "calls the real claude CLI; run with --ignored"]
+    async fn live_cli_skips_a_wait_the_gate_cannot_see() {
+        use crate::ambient::reply::{parse, Parsed};
+        let digests = [
+            "[user] pick a cache\n[assistant] Redis or an in-process LRU would both work. Tell me which one and I'll start.",
+            "[user] plan the refactor\n[assistant] Here's the plan: split the parser, then move the tests. Let me know if that works for you before I begin.",
+            "[user] deploy it\n[assistant] Ready to deploy to production. Waiting for your go-ahead.",
+        ];
+        let meta = obj::MetaMapType::new();
+        let mut answered = Vec::new();
+        for digest in digests {
+            let prompt = crate::ambient::prompt::build_next_prompt_prompt(digest);
+            let Ok((text, _)) = invoke_haiku("claude", &prompt, &meta, tokio_util::sync::CancellationToken::new()).await
+            else {
+                continue;
+            };
+            let parsed = parse(&text);
+            println!("{parsed:?} <- {text:?}");
+            if parsed != Parsed::Skip {
+                answered.push(text);
+            }
+        }
+        assert!(answered.is_empty(), "answered a message that waits for the user: {answered:?}");
+    }
 }
