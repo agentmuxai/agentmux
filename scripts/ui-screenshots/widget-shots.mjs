@@ -191,6 +191,43 @@ async function closeActiveTab(session) {
     if (after >= before) throw new Error(`the shot's tab didn't close (${before} tabs before, ${after} after)`);
 }
 
+/** The block ids of the panes on screen (centre hit test, as paneVisible). */
+const VISIBLE_BLOCK_IDS = `[...document.querySelectorAll('.pane-stack')].filter((p) => {
+    const r = p.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+    return !!hit && p.contains(hit);
+}).map((p) => p.querySelector('[data-blockid]')?.getAttribute('data-blockid')).filter(Boolean).sort().join(',')`;
+
+/** Opens a new window tab and waits until it is the active tab and its
+ *  default panes have stopped changing. The app activates a new tab only once
+ *  its layout is built, which can take seconds on a slow instance; acting
+ *  before then puts the widget in the old tab, or takes the new tab's late
+ *  panes for the widget's (Codex on #4471). */
+async function openNewTab(session) {
+    const activeBefore = await session.evaluate(
+        `document.querySelector('.tab.active')?.getAttribute('data-tab-id') ?? null`
+    );
+    await session.clickSelector(".hamburger-btn");
+    await session.wait(300);
+    await session.clickText(".menu", "New Tab");
+    const deadline = Date.now() + 10000;
+    let last = null;
+    let stable = 0;
+    while (Date.now() < deadline) {
+        await session.wait(250);
+        const active = await session.evaluate(
+            `document.querySelector('.tab.active')?.getAttribute('data-tab-id') ?? null`
+        );
+        if (!active || active === activeBefore) continue;
+        const panes = await session.evaluate(VISIBLE_BLOCK_IDS);
+        stable = panes && panes === last ? stable + 1 : 0;
+        last = panes;
+        if (stable >= 3) return;
+    }
+    throw new Error("the new tab didn't become active with a settled layout within 10 s");
+}
+
 function widgetShot(w) {
     const o = OVERRIDES[w.name] ?? {};
     let paneSelector = null;
@@ -204,10 +241,7 @@ function widgetShot(w) {
         prep: async (session) => {
             await session.setViewport({ width: 1280, height: 800, scale: 1 });
             await session.pressKey("Escape");
-            await session.clickSelector(".hamburger-btn");
-            await session.wait(300);
-            await session.clickText(".menu", "New Tab");
-            await session.wait(1200);
+            await openNewTab(session);
             const before = new Set(await session.evaluate(BLOCK_IDS));
             const route = await openWidget(session, w);
             await session.wait(1200);
