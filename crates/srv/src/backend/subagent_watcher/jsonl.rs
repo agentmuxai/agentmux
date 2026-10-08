@@ -76,7 +76,7 @@ impl SubagentWatcher {
         };
 
         // Now lock and update state
-        let (is_new, info_snapshot, completed, id_learned) = {
+        let (is_new, info_snapshot, completed, id_learned, name_learned) = {
             let mut sessions = self.sessions.lock().unwrap();
             let session = sessions
                 .entry(session_id.clone())
@@ -170,7 +170,12 @@ impl SubagentWatcher {
                         event_count: 0,
                         model: None,
                         dispatch_id: dispatch_id.clone(),
-                        display_name: None,
+                        // The parent's own short description of the task
+                        // (the Agent tool's `description`), from the same
+                        // sidecar as the tool_use_id: a name with no model call,
+                        // shown before anyone opens the row. Haiku names a
+                        // subagent only when there is none (workflow members).
+                        display_name: super::completion::description_for(jsonl_path),
                         spawned_from_agent_id: None,
                         tool_use_id: super::completion::tool_use_id_for(jsonl_path),
                     },
@@ -189,6 +194,15 @@ impl SubagentWatcher {
                 !is_new && state.info.tool_use_id.is_some()
             } else {
                 false
+            };
+            // The description arrives with the same sidecar, so it can be learned
+            // as late as the id. `Some` for an already-known subagent that just
+            // gained its name, which is broadcast as `subagent:named` below.
+            let name_learned = if state.info.display_name.is_none() {
+                state.info.display_name = super::completion::description_for(jsonl_path);
+                state.info.display_name.clone().filter(|_| !is_new)
+            } else {
+                None
             };
 
             // A live observation outranks a replay's inference.
@@ -230,10 +244,15 @@ impl SubagentWatcher {
             }
 
             if new_events.is_empty() && !is_new {
-                if id_learned {
+                if id_learned || name_learned.is_some() {
                     let agent_id = state.info.agent_id.clone();
                     drop(sessions);
-                    self.broadcast_subagent_updated(&agent_id, parent_block_id);
+                    if id_learned {
+                        self.broadcast_subagent_updated(&agent_id, parent_block_id);
+                    }
+                    if let Some(name) = name_learned {
+                        self.broadcast_subagent_named(&agent_id, &name);
+                    }
                 }
                 return;
             }
@@ -288,12 +307,15 @@ impl SubagentWatcher {
             }
 
             let info_snapshot = state.info.clone();
-            (is_new, info_snapshot, completed, id_learned)
+            (is_new, info_snapshot, completed, id_learned, name_learned)
         };
         // Mutex released here — broadcast outside the lock
 
         if id_learned {
             self.broadcast_subagent_updated(&agent_id, parent_block_id);
+        }
+        if let Some(name) = name_learned {
+            self.broadcast_subagent_named(&agent_id, &name);
         }
 
         if is_new {
@@ -786,6 +808,26 @@ impl SubagentWatcher {
     /// `tool_use_id` arriving late from the sidecar. Swarm reloads the list on
     /// it so the subagent's background tasks move under its row. Deliberately
     /// NOT a re-sent `subagent:spawned`: the dock's sources add rows on that.
+    /// `subagent:named`: the subagent's display name is set (from the parent's
+    /// description, or by Haiku). The dock and the Swarm patch their row from it.
+    pub(super) fn broadcast_subagent_named(&self, agent_id: &str, display_name: &str) {
+        let event = WSEventType {
+            eventtype: WS_EVENT_RPC.to_string(),
+            oref: String::new(),
+            data: Some(json!({
+                "command": "eventrecv",
+                "data": {
+                    "event": "subagent:named",
+                    "data": {
+                        "agentId": agent_id,
+                        "displayName": display_name,
+                    }
+                }
+            })),
+        };
+        self.event_bus.broadcast_event(&event);
+    }
+
     pub(super) fn broadcast_subagent_updated(&self, agent_id: &str, parent_block_id: &str) {
         let event = WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),

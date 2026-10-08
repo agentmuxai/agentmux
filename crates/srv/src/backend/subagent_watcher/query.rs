@@ -162,21 +162,7 @@ impl SubagentWatcher {
         }
 
         if found {
-            let named_event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "subagent:named",
-                        "data": {
-                            "agentId": agent_id,
-                            "displayName": display_name,
-                        }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&named_event);
+            self.broadcast_subagent_named(agent_id, display_name);
         }
         found
     }

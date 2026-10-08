@@ -34,13 +34,22 @@ use std::path::{Path, PathBuf};
 
 use super::types::SubAgentStatus;
 
-/// One subagent's `.meta.json` sidecar. Only the field we correlate on is
-/// modelled; the sidecar also carries `agentType`/`description`/`spawnDepth`/
-/// `model`, which this module has no use for. `serde` ignores the rest.
+/// One subagent's `.meta.json` sidecar. Only the fields we use are modelled;
+/// the sidecar also carries `agentType`/`spawnDepth`/`model`. `serde` ignores
+/// the rest.
 #[derive(Debug, serde::Deserialize)]
 struct SubagentMeta {
     #[serde(rename = "toolUseId")]
     tool_use_id: Option<String>,
+    /// The Agent tool's `description`: the parent model's own 3–5 word summary
+    /// of the task. Absent for workflow members.
+    description: Option<String>,
+}
+
+fn read_meta(subagent_jsonl: &Path) -> Option<SubagentMeta> {
+    let meta_path = sidecar_path(subagent_jsonl)?;
+    let raw = std::fs::read_to_string(meta_path).ok()?;
+    serde_json::from_str::<SubagentMeta>(&raw).ok()
 }
 
 /// The parent-side `tool_use_id` for a subagent transcript, read from its
@@ -48,9 +57,32 @@ struct SubagentMeta {
 /// or it predates the field — all of which must degrade to the old
 /// conservative behaviour rather than erroring.
 pub(super) fn tool_use_id_for(subagent_jsonl: &Path) -> Option<String> {
-    let meta_path = sidecar_path(subagent_jsonl)?;
-    let raw = std::fs::read_to_string(meta_path).ok()?;
-    serde_json::from_str::<SubagentMeta>(&raw).ok()?.tool_use_id
+    read_meta(subagent_jsonl)?.tool_use_id
+}
+
+/// The subagent's display name from the parent's description of its task, read
+/// from the same sidecar. `None` when there is none (a workflow member, a
+/// sidecar not written yet); the subagent is then named by Haiku on demand.
+pub(super) fn description_for(subagent_jsonl: &Path) -> Option<String> {
+    display_name_from_description(&read_meta(subagent_jsonl)?.description?)
+}
+
+/// Longest description kept as a name. The tool asks for 3–5 words; this only
+/// stops a runaway one from filling the row.
+const DESCRIPTION_NAME_MAX_CHARS: usize = 80;
+
+/// A description as a one-line name: whitespace collapsed, capped, `None` if
+/// nothing is left.
+pub(super) fn display_name_from_description(description: &str) -> Option<String> {
+    let one_line = description.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.is_empty() {
+        return None;
+    }
+    if one_line.chars().count() <= DESCRIPTION_NAME_MAX_CHARS {
+        return Some(one_line);
+    }
+    let cut: String = one_line.chars().take(DESCRIPTION_NAME_MAX_CHARS - 1).collect();
+    Some(format!("{}…", cut.trim_end()))
 }
 
 /// `…/agent-<id>.jsonl` → `…/agent-<id>.meta.json`.

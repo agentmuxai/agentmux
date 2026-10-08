@@ -2675,3 +2675,99 @@ fn parent_block_closed_is_true_for_a_deleted_or_closing_block_only() {
     crate::backend::blockcontroller::unmark_closing(&block.oid);
     assert!(closing);
 }
+
+/// A subagent is named by the parent's own description of its task (the Agent
+/// tool's `description`, in its sidecar), with no model call.
+#[test]
+fn a_subagent_is_named_by_the_parents_description() {
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-test-described-");
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-d.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("agent-sub-d.meta.json"),
+        r#"{"agentType":"Explore","description":"Research pane color system","toolUseId":"toolu_d","spawnDepth":1}"#,
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    let sessions = watcher.sessions.lock().unwrap();
+    let info = &sessions.values().next().unwrap().subagents.get("sub-d").unwrap().info;
+    assert_eq!(info.display_name.as_deref(), Some("Research pane color system"));
+}
+
+/// A sidecar written after the transcript names the subagent when it lands, and
+/// the name is announced once, as `subagent:named`, next to the id's own update.
+#[test]
+fn a_late_sidecar_names_the_subagent_and_announces_it_once() {
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-test-late-name-");
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-n.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let mut rx = watcher.event_bus.register_ws("test-conn", "test-tab").priority;
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    let _ = drain_event_names(&mut rx);
+
+    std::fs::write(
+        dir.join("agent-sub-n.meta.json"),
+        r#"{"agentType":"general-purpose","description":"Build PR 2: widget colors","toolUseId":"toolu_n","spawnDepth":1}"#,
+    )
+    .unwrap();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert_eq!(
+        drain_event_names(&mut rx),
+        vec!["subagent:updated".to_string(), "subagent:named".to_string()]
+    );
+    {
+        let sessions = watcher.sessions.lock().unwrap();
+        let info = &sessions.values().next().unwrap().subagents.get("sub-n").unwrap().info;
+        assert_eq!(info.display_name.as_deref(), Some("Build PR 2: widget colors"));
+    }
+
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    assert!(drain_event_names(&mut rx).is_empty(), "name already known — nothing to announce");
+}
+
+/// A workflow member's sidecar has no description: it stays unnamed until Haiku
+/// names it on demand.
+#[test]
+fn a_workflow_member_without_a_description_stays_unnamed() {
+    let (_dir_scratch, dir) = temp_scratch("amx-subagent-test-wf-member-");
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-w.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("agent-sub-w.meta.json"), r#"{"agentType":"workflow-subagent","spawnDepth":1}"#).unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+    let sessions = watcher.sessions.lock().unwrap();
+    let info = &sessions.values().next().unwrap().subagents.get("sub-w").unwrap().info;
+    assert_eq!(info.display_name, None);
+}
+
+#[test]
+fn a_description_becomes_a_one_line_capped_name() {
+    use super::completion::display_name_from_description as name;
+    assert_eq!(name("  Research   pane\ncolor system "), Some("Research pane color system".to_string()));
+    assert_eq!(name("   "), None);
+    let long = "word ".repeat(40);
+    let capped = name(&long).unwrap();
+    assert!(capped.chars().count() <= 80, "{capped}");
+    assert!(capped.ends_with('…'));
+}

@@ -307,9 +307,15 @@ async fn generate_name_from_task_prompt(
     let block: Block = mstore.get(&info.parent_block_id).ok().flatten()?;
     let target = CliTarget::from_meta(&block.meta)?;
 
-    let prompt = build_prompt(&task_prompt);
+    let prompt = build_prompt(&prompt::clip_material(&task_prompt, TASK_HEAD_CHARS, TASK_TAIL_CHARS));
     finish(slot.run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &validate::NAME))).await)
 }
+
+/// How much of a subagent's task prompt a name call reads. Task prompts run to
+/// many kilobytes; what the task is comes first, and the whole prompt only made
+/// the call slower and gave the model more to mistake for its own instructions.
+const TASK_HEAD_CHARS: usize = 1200;
+const TASK_TAIL_CHARS: usize = 300;
 
 /// Generate a short user-facing line narrating an autonomous action.
 ///
