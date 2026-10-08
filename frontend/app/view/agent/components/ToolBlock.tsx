@@ -316,6 +316,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // A Bash command is shown with shell colours in the row and the popover
     // (SPEC_AGENT_PANE_BASH_HIGHLIGHTING_2026_10_04.md §3.7).
     const isBash = () => props.node.tool.toLowerCase() === "bash";
+    // A path or a command is cut from the left in the row, keeping its end in view.
+    const cutFromStart = () => header().detailIsPath || (isBash() && header().detail !== "");
     // The tool's name in front of its argument in the peek popover ("Bash ls",
     // "Read /a/b.ts"): the row shows an icon instead, so the popover names it.
     // MCP tools read "server · tool", not their raw mcp__server__tool name.
@@ -445,7 +447,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                         >
                             {/* One text run (no whitespace between spans) so
                                 the row's textContent reads "🌐 solid docs". */}
-                            <span class="agent-tool-name" classList={{ "agent-tool-name--path": header().detailIsPath }}>
+                            <span class="agent-tool-name" classList={{ "agent-tool-name--cut-start": cutFromStart() }}>
                                 <span class="agent-tool-icon">{header().icon}</span>
                                 <Show when={header().label}>
                                     {" "}
@@ -469,14 +471,18 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                                                 {/* Cut from the left so the file name stays: the span runs
                                                     right-to-left for the ellipsis, the <bdi> keeps the path
                                                     itself reading left to right. */}
-                                                <span class="agent-tool-detail agent-tool-detail--path">
+                                                <span class="agent-tool-detail agent-tool-detail--cut-start">
                                                     <bdi>{header().detail}</bdi>
                                                 </span>
                                             </Show>
                                         }
                                     >
-                                        <span class="agent-tool-detail agent-shell-inline">
-                                            <ShellTokens command={header().detail} />
+                                        {/* A command is cut from the left too, so its end (the
+                                            part that differs between calls) stays in view. */}
+                                        <span class="agent-tool-detail agent-shell-inline agent-tool-detail--cut-start">
+                                            <bdi>
+                                                <ShellTokens command={header().detail} />
+                                            </bdi>
                                         </span>
                                     </Show>
                                 </Show>
