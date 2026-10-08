@@ -160,6 +160,13 @@ pub struct SettingsType {
     #[serde(rename = "widget:icononly", default, skip_serializing_if = "Option::is_none")]
     pub widget_icon_only: Option<bool>,
 
+    // -- Status bar settings --
+    /// Whether the status bar shows MuxBus Cloud: the dot after the host name and
+    /// the sign-in block in the host popover. Absent means shown; only an explicit
+    /// `false` hides it. LAN is unaffected. SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md.
+    #[serde(rename = "statusbar:showmuxbuscloud", default, skip_serializing_if = "Option::is_none")]
+    pub statusbar_show_muxbus_cloud: Option<bool>,
+
     // -- Window settings --
     #[serde(rename = "window:*", default, skip_serializing_if = "is_false")]
     pub window_clear: bool,
@@ -863,4 +870,33 @@ pub struct FullConfigType {
     /// `docs/specs/SPEC_BROWSER_PANE_START_PAGE_2026_09_16.md`.
     #[serde(rename = "browserstartpage", default, skip_serializing_if = "Option::is_none")]
     pub browser_start_page: Option<String>,
+}
+
+#[cfg(test)]
+mod statusbar_muxbus_cloud_tests {
+    use super::SettingsType;
+
+    // SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md: absent means shown, so
+    // only an explicit false is ever stored, and the default writes nothing.
+    #[test]
+    fn absent_by_default_and_not_serialised() {
+        let s = SettingsType::default();
+        assert_eq!(s.statusbar_show_muxbus_cloud, None);
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(!json.contains("statusbar:showmuxbuscloud"), "{json}");
+    }
+
+    #[test]
+    fn explicit_false_round_trips() {
+        let s: SettingsType = serde_json::from_str(r#"{"statusbar:showmuxbuscloud": false}"#).unwrap();
+        assert_eq!(s.statusbar_show_muxbus_cloud, Some(false));
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains(r#""statusbar:showmuxbuscloud":false"#), "{json}");
+    }
+
+    #[test]
+    fn explicit_true_round_trips() {
+        let s: SettingsType = serde_json::from_str(r#"{"statusbar:showmuxbuscloud": true}"#).unwrap();
+        assert_eq!(s.statusbar_show_muxbus_cloud, Some(true));
+    }
 }

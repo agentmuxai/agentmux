@@ -33,7 +33,7 @@ vi.mock("@/store/global", () => ({
     lanDiscoverabilityAtom: () => null,
     lanFirewallAtom: () => null,
     setLanDiscoveryErrorAtom: vi.fn(),
-    settingsAtom: () => ({}),
+    settingsAtom: () => settingsMock(),
     viewerPairedAtom: () => null,
 }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: {} }));
@@ -54,7 +54,10 @@ vi.mock("@/util/platformutil", () => ({
     isLinux: () => platform === "linux",
 }));
 
-import { HostPopoverPanel } from "./HostPopover";
+import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
+import { HostPopover, HostPopoverPanel } from "./HostPopover";
+
+const settingsMock = vi.fn((): Record<string, unknown> => ({}));
 
 const DATA_DIR = "C:\\Users\\me\\.agentmux\\channels\\stable\\data";
 
@@ -226,6 +229,86 @@ describe("HostPopoverPanel — MuxBus Cloud row", () => {
         renderPanel(cloud({ connected: true, valid: true, needsReauth: false, email: "me@example.com" }));
         expect(screen.getByText("me@example.com")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
+    });
+});
+
+// SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md: `statusbar:showmuxbuscloud`
+// hides MuxBus Cloud (the dot and the sign-in block) and nothing else.
+describe("MuxBus Cloud visibility setting", () => {
+    const signedIn = {
+        ...muxbus,
+        isConfigured: () => true,
+        status: () => ({ connected: true, valid: true, needsReauth: false, email: "me@example.com" }),
+        disconnect: async () => {},
+    } as any;
+
+    beforeEach(() => {
+        settingsMock.mockReset();
+        settingsMock.mockReturnValue({});
+    });
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
+    it("panel: the cloud block shows when the setting is absent", () => {
+        renderPanel(signedIn);
+        expect(screen.getByText("MuxBus Cloud")).toBeInTheDocument();
+    });
+
+    it("panel: hides the whole cloud block when false, and keeps the rest", () => {
+        renderPanel(signedIn, { showMuxbusCloud: () => false, lanDiscoveryEnabled: () => true });
+        expect(screen.queryByText("MuxBus Cloud")).not.toBeInTheDocument();
+        expect(screen.queryByText("me@example.com")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+        // The Ports section and the LAN part are untouched.
+        expect(screen.getByText("IPC")).toBeInTheDocument();
+        expect(screen.getByText("Pair a device")).toBeInTheDocument();
+    });
+
+    it("panel: hides the sign-in prompt and the keychain notice for a signed-out user", () => {
+        platform = "mac";
+        const signedOut = { ...muxbus, isConfigured: () => true, status: () => ({ connected: false, valid: false, needsReauth: false, email: "" }) } as any;
+        renderPanel(signedOut, { showMuxbusCloud: () => false });
+        expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+        expect(screen.queryByText(/Keychain/)).not.toBeInTheDocument();
+        platform = "win";
+    });
+
+    const renderTrigger = (mux: any) => {
+        vi.mocked(useMuxBusStatus).mockReturnValue(mux);
+        return render(() => <HostPopover />);
+    };
+
+    it("trigger: shows the dot when the setting is absent", () => {
+        const { container } = renderTrigger(signedIn);
+        expect(container.querySelector(".status-muxbus-dot")).not.toBeNull();
+    });
+
+    it("trigger: no dot when false, but the LAN diamond and hostname stay", () => {
+        settingsMock.mockReturnValue({ "statusbar:showmuxbuscloud": false });
+        const { container } = renderTrigger(signedIn);
+        expect(container.querySelector(".status-muxbus-dot")).toBeNull();
+        expect(container.querySelector(".status-lan-diamond")).not.toBeNull();
+        expect(screen.getByText("narko")).toBeInTheDocument();
+    });
+
+    it("trigger: does not poll the cloud status while hidden", () => {
+        vi.useFakeTimers();
+        settingsMock.mockReturnValue({ "statusbar:showmuxbuscloud": false });
+        const refresh = vi.fn(async () => {});
+        renderTrigger({ ...signedIn, refresh });
+        vi.advanceTimersByTime(180_000);
+        expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it("trigger: polls while shown", () => {
+        vi.useFakeTimers();
+        const refresh = vi.fn(async () => {});
+        renderTrigger({ ...signedIn, refresh });
+        expect(refresh).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(60_000);
+        expect(refresh).toHaveBeenCalledTimes(2);
     });
 });
 

@@ -55,6 +55,12 @@ describe("searchSettings", () => {
         expect(searchSettings(SETTINGS_INDEX, "  ")).toBe(SETTINGS_INDEX);
     });
 
+    it("finds the MuxBus Cloud status-bar toggle by its synonyms", () => {
+        for (const q of ["muxbus", "cloud dot", "hide cloud"]) {
+            expect(labels(q)).toContain("Show MuxBus Cloud in the status bar");
+        }
+    });
+
     it("lists an exact setting name first", () => {
         expect(labels("Theme")[0]).toBe("Theme");
         expect(labels("model")[0]).toBe("Model");

@@ -10,11 +10,11 @@
 import { Button } from "@/app/element/ui";
 import { createEffect, createSignal, For, on, onMount, Show, type JSX } from "solid-js";
 
-import { viewerPairedAtom } from "@/app/store/global";
+import { settingsAtom, viewerPairedAtom } from "@/app/store/global";
 import { RpcApi, type ViewerDeviceInfo } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { SettingsIndexEntry } from "../settings-model";
-import { SectionHeader } from "../settings-controls";
+import { SectionHeader, set, SettingRow, ToggleControl } from "../settings-controls";
 import { CLOUD_PRESENCE_SETTING, CloudPresence } from "./cloud-presence";
 
 // ── Search index — see appearance-section.tsx's header comment for the pattern. ──
@@ -29,6 +29,14 @@ export const DEVICES_SETTINGS = {
         keywords: ["mobile", "device", "tablet", "pair", "revoke", "viewer", "live feed", "qr code"],
     },
     cloudPresence: CLOUD_PRESENCE_SETTING,
+    statusbarMuxbusCloud: {
+        id: "devices.statusbar_muxbus_cloud",
+        label: "Show MuxBus Cloud in the status bar",
+        description:
+            "The cloud dot next to the host name, and the sign-in block in the host menu. Turn it off if you don't use MuxBus Cloud; LAN is not affected. You can still sign in from Accounts, and a dead cloud sign-in is no longer flagged in the status bar.",
+        section: "devices",
+        keywords: ["muxbus", "cloud", "dot", "status bar", "statusbar", "hide", "sign in", "statusbar:showmuxbuscloud"],
+    },
 } satisfies Record<string, SettingsIndexEntry>;
 
 /** "just now", "5 min ago", "3 h ago", or a date. */
@@ -131,6 +139,17 @@ export function DevicesSection(): JSX.Element {
             </div>
             <SectionHeader label={DEVICES_SETTINGS.cloudPresence.label} />
             <CloudPresence />
+            <SettingRow
+                id={DEVICES_SETTINGS.statusbarMuxbusCloud.id}
+                label={DEVICES_SETTINGS.statusbarMuxbusCloud.label}
+                description={DEVICES_SETTINGS.statusbarMuxbusCloud.description}
+                control={
+                    <ToggleControl
+                        checked={settingsAtom()?.["statusbar:showmuxbuscloud"] !== false}
+                        onChange={(v) => set("statusbar:showmuxbuscloud", v)}
+                    />
+                }
+            />
         </div>
     );
 }

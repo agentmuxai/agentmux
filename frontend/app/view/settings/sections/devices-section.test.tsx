@@ -12,11 +12,14 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ViewerDevicesCommand: (...args: unknown[]) => listDevices(...args),
         ViewerRevokeCommand: (...args: unknown[]) => revoke(...args),
+        SetConfigCommand: (...args: unknown[]) => setConfig(...args),
         PresenceStatusCommand: () => Promise.resolve({ state: "signed_out", since_ms: 0, record_version: 2 }),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
-vi.mock("@/app/store/global", () => ({ viewerPairedAtom: () => null }));
+const setConfig = vi.fn();
+let settings: Record<string, unknown> = {};
+vi.mock("@/app/store/global", () => ({ viewerPairedAtom: () => null, settingsAtom: () => settings }));
 
 import { ago, DevicesSection } from "./devices-section";
 
@@ -36,6 +39,8 @@ describe("DevicesSection", () => {
     beforeEach(() => {
         listDevices.mockReset();
         revoke.mockReset();
+        setConfig.mockReset();
+        settings = {};
     });
     afterEach(() => cleanup());
 
@@ -91,5 +96,27 @@ describe("DevicesSection", () => {
         render(() => <DevicesSection />);
         expect(await screen.findByText("Sign in to publish")).toBeInTheDocument();
         expect(screen.getByText("Cloud presence")).toBeInTheDocument();
+    });
+    // SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md
+    it("offers the MuxBus Cloud status-bar toggle, on when the setting is absent", async () => {
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Show MuxBus Cloud in the status bar" });
+        expect(toggle).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("turning it off writes statusbar:showmuxbuscloud = false", async () => {
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        fireEvent.click(await screen.findByRole("switch", { name: "Show MuxBus Cloud in the status bar" }));
+        expect(setConfig).toHaveBeenCalledWith({}, { "statusbar:showmuxbuscloud": false });
+    });
+
+    it("reads off when the setting is false", async () => {
+        settings = { "statusbar:showmuxbuscloud": false };
+        listDevices.mockResolvedValue({ devices: [] });
+        render(() => <DevicesSection />);
+        const toggle = await screen.findByRole("switch", { name: "Show MuxBus Cloud in the status bar" });
+        expect(toggle).toHaveAttribute("aria-checked", "false");
     });
 });

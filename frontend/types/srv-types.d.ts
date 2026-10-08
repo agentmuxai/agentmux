@@ -1156,6 +1156,7 @@ declare global {
         "widget:*"?: boolean;
         "widget:showhelp"?: boolean;
         "widget:icononly"?: boolean;
+        "statusbar:showmuxbuscloud"?: boolean;
         "window:*"?: boolean;
         "window:transparent"?: boolean;
         "window:blur"?: boolean;
