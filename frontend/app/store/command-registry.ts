@@ -161,7 +161,8 @@ export function registerDefaultCommands(): void {
         label: "Open Remotes",
         category: "Open",
         icon: "server",
-        execute: () => createBlock({ meta: { view: "remotes" } }),
+        // A new Connectors pane on its Remotes section, so several can be open.
+        execute: () => createBlock({ meta: { view: "connectors", "connectors:section": "remotes" } }),
     });
 
     // ---- split ----

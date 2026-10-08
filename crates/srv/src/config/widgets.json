@@ -66,18 +66,6 @@
             }
         }
     },
-    "defwidget@remotes": {
-        "display:order": 16,
-        "display:pinned": false,
-        "icon": "server",
-        "label": "Remotes",
-        "description": "Remote machines (SSH, WSL)",
-        "blockdef": {
-            "meta": {
-                "view": "remotes"
-            }
-        }
-    },
     "defwidget@terminal": {
         "display:order": 6,
         "display:pinned": true,

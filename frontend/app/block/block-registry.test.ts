@@ -124,7 +124,7 @@ describe("built-in widget colors", () => {
     });
 
     it("gives the most used widgets distinct colors", () => {
-        const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "media", "help", "launcher", "remotes", "memory"];
+        const common = ["term", "agent", "browser", "editor", "files", "sysinfo", "swarm", "media", "help", "launcher", "memory"];
         expect(new Set(common.map((v) => getPaneTab(v)?.defaultHue)).size).toBe(common.length);
     });
 });

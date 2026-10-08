@@ -20,11 +20,14 @@ export const MEMORY_SECTION_KEY = "memory:section";
  *  layout files: the view resolves as an alias, the key is read as a fallback. */
 export const LEGACY_KNOWLEDGE_VIEW = "knowledge";
 export const LEGACY_KNOWLEDGE_SECTION_KEY = "knowledge:section";
+/** The Remotes pane's view id, from before it became a section of Connectors
+ *  (SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md): still in saved blocks. */
+export const LEGACY_REMOTES_VIEW = "remotes";
 
-export type ConnectorsSection = "accounts" | "mcp";
+export type ConnectorsSection = "accounts" | "mcp" | "remotes";
 export type MemorySection = "global" | "personal" | "skills" | "bundles";
 
-export const CONNECTORS_SECTIONS: readonly ConnectorsSection[] = ["accounts", "mcp"];
+export const CONNECTORS_SECTIONS: readonly ConnectorsSection[] = ["accounts", "mcp", "remotes"];
 export const MEMORY_SECTIONS: readonly MemorySection[] = ["global", "personal", "skills", "bundles"];
 
 /** Opens Connectors, or focuses the one already in this tab, on `section`. */

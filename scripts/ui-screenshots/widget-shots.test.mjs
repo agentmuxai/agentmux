@@ -57,7 +57,6 @@ describe("widget suite", () => {
             expect(typeof s.cleanup).toBe("function");
         }
         expect(shots.find((s) => s.id === "widget-toolchain").containsWorkspaceData).toBe(true);
-        expect(shots.find((s) => s.id === "widget-remotes").containsWorkspaceData).toBe(true);
         expect(shots.find((s) => s.id === "widget-files").containsWorkspaceData).toBe("review");
     });
 });

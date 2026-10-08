@@ -70,13 +70,6 @@ const OVERRIDES = {
         containsWorkspaceData: true,
         description: "The tools AgentMux uses on this computer, with their versions and where they're installed.",
     },
-    remotes: {
-        // Lists the hosts in the OS user's ~/.ssh/config, which
-        // AGENTMUX_HOME_OVERRIDE doesn't redirect (Codex on #4471). Clean only
-        // on a capturing machine with no SSH hosts.
-        containsWorkspaceData: true,
-        description: "The SSH hosts AgentMux knows: those in ~/.ssh/config and any you've connected to.",
-    },
 };
 
 /** The widgets to capture, from the app's widget config: visible ones with a

@@ -2,6 +2,7 @@
 
 **Date:** 2026-10-05
 **Status:** implemented — R1 (#4343, #4349), R2 (#4353), R3 (#4351), R4 (#4354), R5 (#4355), the helper in every package (#4339), "Remote settings…", the tab swatch and "Edit in ssh config" at the `Host` line (#4427), the editor's "Open from remote…" (#4432), the plain-SSH fallback when the helper is declined (#4429), and when the host is Windows, which the helper can't run on (this PR).
+**Superseded in part (2026-10-08):** Remotes is no longer a pane of its own but the Remotes section of Connectors (`SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md`). §4.1 (the pane, and where it opens) is replaced there; the list itself (§4.2 on) is unchanged.
 **Author:** Korp (narko), at the owner's request:
 - "should we have a pane called something like 'Remotes' .. those are the connections that are set, and then inside a terminal or file browser, there would be an interface to select the remote";
 - "lets use Remotes .. write the spec to file".

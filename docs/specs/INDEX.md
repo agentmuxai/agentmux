@@ -415,6 +415,7 @@ partial list.
 | [`SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18`](SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md) | SPEC: Provider System-Tool Prerequisites |
 | [`SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22`](SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md) | SPEC: PR title `Agent@host` prefix for shared-identity agents |
 | [`SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07`](SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md) | Split the low-memory banner into independent RAM and Page File warnings |
+| [`SPEC_REMOTES_INTO_CONNECTORS_2026_10_08`](SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md) | Remotes becomes a section of Connectors; the model/effort panel keeps its size |
 | [`SPEC_REMOTES_PANE_2026_10_05`](SPEC_REMOTES_PANE_2026_10_05.md) | SPEC: The Remotes pane: one place for every remote machine |
 | [`SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25`](SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md) | SPEC: Agent-pane status cleanup — remove "unresponsive" detection, consolidate Reconnecting/Compacting/Working |
 | [`SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06`](SPEC_REPLACECHILD_CRASH_FULL_ANALYSIS_AND_FIX_2026-06-06.md) | Spec: `replaceChild` crash in the agent-pane virtualizer — full analysis and fix plan |

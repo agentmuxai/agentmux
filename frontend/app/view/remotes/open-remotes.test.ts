@@ -36,19 +36,37 @@ describe("openRemotesInPane", () => {
         h.stack = ["term-1"];
     });
 
-    it("adds a Remotes tab to the pane, with the host to expand", async () => {
+    it("adds a Connectors tab on Remotes to the pane, with the host to expand", async () => {
         await openRemotesInPane("term-1", "db1");
         expect(h.addWidgetAsPaneTab).toHaveBeenCalledWith(expect.anything(), "node-1", {
-            meta: { view: "remotes", "remotes:expand": "db1" },
+            meta: { view: "connectors", "connectors:section": "remotes", "remotes:expand": "db1" },
         });
     });
 
-    it("switches to the pane's Remotes tab when it has one", async () => {
+    it("switches the pane's Connectors tab to Remotes when it has one", async () => {
+        h.views.set("conn-1", "connectors");
+        h.stack = ["term-1", "conn-1"];
+        await openRemotesInPane("term-1", "db1");
+        expect(h.addWidgetAsPaneTab).not.toHaveBeenCalled();
+        expect(h.setBlockMeta).toHaveBeenCalledWith("conn-1", {
+            "connectors:section": "remotes",
+            "remotes:expand": "db1",
+        });
+        expect(h.setActiveBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "conn-1");
+    });
+
+    it("switches to a Connectors tab without a host, too", async () => {
+        h.views.set("conn-1", "connectors");
+        h.stack = ["term-1", "conn-1"];
+        await openRemotesInPane("term-1");
+        expect(h.setBlockMeta).toHaveBeenCalledWith("conn-1", { "connectors:section": "remotes" });
+    });
+
+    it("reuses a saved Remotes tab not yet moved to Connectors", async () => {
         h.views.set("remotes-1", "remotes");
         h.stack = ["term-1", "remotes-1"];
         await openRemotesInPane("term-1", "db1");
         expect(h.addWidgetAsPaneTab).not.toHaveBeenCalled();
-        expect(h.setBlockMeta).toHaveBeenCalledWith("remotes-1", { "remotes:expand": "db1" });
         expect(h.setActiveBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "remotes-1");
     });
 });
@@ -66,14 +84,14 @@ describe("remoteSettingsMenuItems", () => {
         expect(remoteSettingsMenuItems("term-1", "local")).toEqual([]);
     });
 
-    it("opens Remotes in this pane on the pane's host", async () => {
+    it("opens Connectors → Remotes in this pane on the pane's host", async () => {
         const items = remoteSettingsMenuItems("term-1", "db1");
         const item = items.find((i) => i.label === "Remote settings…");
         expect(item).toBeDefined();
         item!.click!();
         await vi.waitFor(() => expect(h.addWidgetAsPaneTab).toHaveBeenCalled());
         expect(h.addWidgetAsPaneTab).toHaveBeenCalledWith(expect.anything(), "node-1", {
-            meta: { view: "remotes", "remotes:expand": "db1" },
+            meta: { view: "connectors", "connectors:section": "remotes", "remotes:expand": "db1" },
         });
     });
 });

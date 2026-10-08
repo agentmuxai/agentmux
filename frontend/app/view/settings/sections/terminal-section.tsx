@@ -56,7 +56,7 @@ export const TERMINAL_SETTINGS = {
         id: "terminal.durable_ssh",
         label: "Keep SSH sessions alive",
         description:
-            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. The Remotes pane can set it per host.",
+            "Durable SSH terminals keep their shell running on the host (in AgentMux's small helper there), so a dropped link, sleep or a restart reconnects instead of ending it. Connectors → Remotes can set it per host.",
         section: "terminal",
         keywords: ["durable", "ssh", "reconnect", "remote", "session", "term:durable"],
     },
@@ -64,7 +64,7 @@ export const TERMINAL_SETTINGS = {
         id: "terminal.helper_install",
         label: "Install the helper on new hosts",
         description:
-            "Durable terminals and file browsing on an SSH host need AgentMux's small helper there. Ask before installing it, install it without asking, or never install it. Each host can override this in Remotes, and an agent's install is always asked about.",
+            "Durable terminals and file browsing on an SSH host need AgentMux's small helper there. Ask before installing it, install it without asking, or never install it. Each host can override this in Connectors → Remotes, and an agent's install is always asked about.",
         section: "terminal",
         keywords: ["helper", "install", "ssh", "remote", "agentmux-remote", "conn:helper"],
     },

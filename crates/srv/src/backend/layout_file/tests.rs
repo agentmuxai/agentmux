@@ -654,6 +654,8 @@ fn connectors_and_memory_are_written_with_their_section() {
         // Memory was named Knowledge; a block saved then is written as Memory.
         (json!({ "view": "knowledge", "knowledge:section": "skills" }), "memory", "skills"),
         (json!({ "view": "knowledge", "memory:section": "bundles", "knowledge:section": "skills" }), "memory", "bundles"),
+        // Remotes became a section of Connectors; a block saved before is written as that.
+        (json!({ "view": "remotes", "remotes:expand": "db1" }), "connectors", "remotes"),
     ] {
         let v = view_from_block(&store, &meta(m), &ctx(false), &mut Vec::new());
         assert_eq!(v.view_type, kind);
@@ -687,6 +689,8 @@ fn connectors_memory_and_old_armory_or_knowledge_entries_open_the_new_panes() {
         (json!({ "type": "knowledge", "config": { "section": "personal" } }), "memory", "memory:section", "personal"),
         (json!({ "type": "armory", "config": { "section": "skills" } }), "memory", "memory:section", "skills"),
         (json!({ "type": "armory" }), "connectors", "connectors:section", "accounts"),
+        // Files saved before Remotes became a section of Connectors say "remotes".
+        (json!({ "type": "remotes" }), "connectors", "connectors:section", "remotes"),
     ] {
         let plan = plan_from_doc(&store, &one_pane(view.clone()), &opts(home.path(), false));
         let m = block_meta(&plan, 0, 0);

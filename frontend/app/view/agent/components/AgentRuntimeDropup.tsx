@@ -22,8 +22,15 @@
  * Also closes via an explicit button (top-right of the panel) in addition to
  * Esc/outside-click/re-clicking the trigger.
  *
+ * Its size never follows what is selected or running: the status line, the
+ * running-model line and the five effort rows are always there, each in a
+ * fixed space, and the trigger holds its width while the panel is open. A
+ * change made in the panel can't move the rows under the pointer
+ * (SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md §6).
+ *
  * Spec: docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md,
- * docs/specs/SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md.
+ * docs/specs/SPEC_AGENT_RUNTIME_DROPUP_CLOSE_BUTTON_2026_08_07.md,
+ * docs/specs/SPEC_REMOTES_INTO_CONNECTORS_2026_10_08.md §6.
  */
 
 import { AnchoredPopover } from "@/app/element/anchored-popover";
@@ -82,12 +89,15 @@ interface OptionRow {
     detail?: string;
     current: boolean;
     color?: string;
+    /** Shown but not selectable: the choice would be recorded and do nothing. */
+    disabled?: boolean;
 }
 
 type Row =
-    | { kind: "header"; section: Section }
-    // A line of text in a section whose options do not apply.
-    | { kind: "note"; section: Section; text: string }
+    // `note`: why the section's options do not apply, on the header's line.
+    | { kind: "header"; section: Section; note?: string }
+    // What the process runs, under the Model rows; `placeholder` until it is known.
+    | { kind: "note"; section: Section; text: string; placeholder?: boolean }
     | (OptionRow & { kind: "option" });
 
 interface AgentRuntimeDropupProps {
@@ -243,9 +253,10 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
             section: Section,
             opts: readonly T[],
             currentValue: string,
-            withColor: boolean
+            withColor: boolean,
+            notApplied?: string
         ) => {
-            rows.push({ kind: "header", section });
+            rows.push({ kind: "header", section, note: notApplied });
             for (const o of opts) {
                 const row: OptionRow = {
                     section,
@@ -255,9 +266,11 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     detail: o.detail,
                     current: currentValue === o.value,
                     color: withColor ? PERMISSION_COLORS[o.value as PermissionMode] : undefined,
+                    disabled: notApplied !== undefined,
                 };
                 rows.push({ kind: "option", ...row });
-                options.push(row);
+                // Keyboard navigation and selection walk only what can be picked.
+                if (!row.disabled) options.push(row);
             }
         };
 
@@ -286,15 +299,16 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
             lastReply: props.lastReplyModel,
             agreement: agreement(),
         });
-        if (last) rows.push({ kind: "note", section: "model", text: last.differs ? `⚠ ${last.text}` : last.text });
+        // Always there, so the panel doesn't grow when the first reply lands.
+        rows.push(
+            last
+                ? { kind: "note", section: "model", text: last.differs ? `⚠ ${last.text}` : last.text }
+                : { kind: "note", section: "model", text: "Running model: shown after the first reply", placeholder: true }
+        );
+        // The five rows whether or not effort applies (Haiku), so picking Haiku
+        // doesn't shrink the panel; they are just not selectable then.
         const notUsed = effortNotUsedReason(props.providerId, runningModel());
-        if (notUsed === null) {
-            addSection("effort", EFFORT_OPTIONS, r.effort, false);
-        } else {
-            // Shown, but not selectable: the choice would be recorded and do nothing.
-            rows.push({ kind: "header", section: "effort" });
-            rows.push({ kind: "note", section: "effort", text: `Not applied — ${notUsed}` });
-        }
+        addSection("effort", EFFORT_OPTIONS, r.effort, false, notUsed === null ? undefined : `Not applied — ${notUsed}`);
         return { rows, options };
     };
 
@@ -384,6 +398,15 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         });
     });
 
+    // The trigger's width while the panel is open: what it was when it opened.
+    // Its label changes with every pick, and the composer strip lays its slots
+    // out by measured width, so a trigger that resized could move, or move to
+    // another row, and take the panel (anchored to it) along.
+    const [heldWidth, setHeldWidth] = createSignal<number | null>(null);
+    createEffect(() => {
+        if (!open()) setHeldWidth(null);
+    });
+
     const toggleOpen = () => {
         if (open()) {
             setOpen(false);
@@ -392,8 +415,20 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
         const { options } = build();
         const idx = options.findIndex((o) => o.section === "mode" && o.current);
         setSelectedOptIndex(idx >= 0 ? idx : 0);
+        // The computed width, not the on-screen rect: it is in the trigger's own
+        // (possibly zoomed) CSS pixels, with fractions, so setting it back changes nothing.
+        const w = referenceEl ? parseFloat(getComputedStyle(referenceEl).width) : NaN;
+        setHeldWidth(Number.isFinite(w) && w > 0 ? w : null);
         setOpen(true);
     };
+
+    const statusHeadline = (): string => {
+        const kind = driftOf().length > 0 ? shownAgreement().kind : "agrees";
+        if (kind === "pending") return "Applies after the current turn.";
+        if (kind === "differs") return "The agent is not running what is selected.";
+        return "Changes apply on the next turn.";
+    };
+    const differs = () => driftOf().length > 0 && shownAgreement().kind === "differs";
 
     return (
         <>
@@ -406,7 +441,10 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     "agent-runtime-dropup-trigger--differs": shownAgreement().kind === "differs",
                     "agent-runtime-dropup-trigger--pending": shownAgreement().kind === "pending",
                 }}
-                style={{ "border-left": `3px solid ${PERMISSION_COLORS[shown().permissionMode] ?? PERMISSION_COLORS.default}` }}
+                style={{
+                    "border-left": `3px solid ${PERMISSION_COLORS[shown().permissionMode] ?? PERMISSION_COLORS.default}`,
+                    ...(heldWidth() != null ? { width: `${heldWidth()}px`, "flex-shrink": 0 } : {}),
+                }}
                 title={
                     applyError() != null
                         ? `Couldn't apply that change — the agent may still be running the previous settings. ${applyError()}`
@@ -462,29 +500,57 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                     >
                         {"✕"}
                     </button>
-                    <Show when={driftOf().length > 0}>
-                        <div class="agent-runtime-dropup-drift" role="status" data-kind={shownAgreement().kind}>
-                            <div class="agent-runtime-dropup-drift-text">
-                                {shownAgreement().kind === "pending"
-                                    ? "Applies after the current turn."
-                                    : "The agent is not running what is selected."}
-                                <For each={driftOf()}>{(d) => <div>{describeDrift(d)}</div>}</For>
+                    {/* Always there, two lines high, whatever the agent is doing: a
+                        notice that came and went would resize the panel. */}
+                    <div
+                        class="agent-runtime-dropup-drift"
+                        role="status"
+                        data-kind={driftOf().length > 0 ? shownAgreement().kind : "agrees"}
+                    >
+                        <div class="agent-runtime-dropup-drift-text">
+                            <div class="agent-runtime-dropup-drift-line">{statusHeadline()}</div>
+                            <div class="agent-runtime-dropup-drift-line" title={driftSummary() || undefined}>
+                                {driftSummary()}
                             </div>
-                            <Show when={shownAgreement().kind === "differs"}>
-                                <button type="button" class="agent-runtime-dropup-drift-btn" onClick={restartToApply}>
-                                    Restart to apply
-                                </button>
-                            </Show>
                         </div>
-                    </Show>
+                        {/* Keeps its place when not needed, so the text beside it wraps the same. */}
+                        <button
+                            type="button"
+                            class="agent-runtime-dropup-drift-btn"
+                            classList={{ "is-hidden": !differs() }}
+                            aria-hidden={differs() ? undefined : "true"}
+                            tabIndex={differs() ? undefined : -1}
+                            disabled={!differs()}
+                            onClick={restartToApply}
+                        >
+                            Restart to apply
+                        </button>
+                    </div>
                     <div role="listbox" aria-label="Runtime settings">
                         <For each={build().rows}>
                             {(row) => {
                                 if (row.kind === "header") {
-                                    return <div class="agent-runtime-dropup-section">{row.section}</div>;
+                                    return (
+                                        <div class="agent-runtime-dropup-section">
+                                            {row.section}
+                                            <Show when={row.note}>
+                                                <span class="agent-runtime-dropup-section-note" title={row.note}>
+                                                    {row.note}
+                                                </span>
+                                            </Show>
+                                        </div>
+                                    );
                                 }
                                 if (row.kind === "note") {
-                                    return <div class="agent-runtime-dropup-note">{row.text}</div>;
+                                    return (
+                                        <div
+                                            class="agent-runtime-dropup-note"
+                                            classList={{ "is-placeholder": !!row.placeholder }}
+                                            title={row.placeholder ? undefined : row.text}
+                                        >
+                                            {row.text}
+                                        </div>
+                                    );
                                 }
                                 const optIndex = () =>
                                     build().options.findIndex(
@@ -493,11 +559,17 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                 return (
                                     <div
                                         class="menu-item agent-runtime-dropup-row"
-                                        classList={{ active: optIndex() === selectedOptIndex() }}
+                                        classList={{
+                                            active: !row.disabled && optIndex() === selectedOptIndex(),
+                                            "is-disabled": !!row.disabled,
+                                        }}
                                         role="option"
                                         aria-selected={row.current}
+                                        aria-disabled={row.disabled ? "true" : undefined}
                                         title={row.detail}
-                                        onMouseEnter={() => setSelectedOptIndex(optIndex())}
+                                        onMouseEnter={() => {
+                                            if (!row.disabled) setSelectedOptIndex(optIndex());
+                                        }}
                                         // These rows are plain non-focusable divs — without this, a
                                         // mousedown here blurs the trigger and shifts
                                         // document.activeElement to <body> (outside the panel), which
@@ -507,6 +579,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                                         // this was a second, independent close path.
                                         onMouseDown={(e) => e.preventDefault()}
                                         onClick={() => {
+                                            if (row.disabled) return;
                                             const idx = optIndex();
                                             setSelectedOptIndex(idx);
                                             void applySelection(idx);
