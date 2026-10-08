@@ -1,7 +1,7 @@
 # SPEC: each channel signs in to MuxBus on its own
 
 **Date:** 2026-10-08
-**Status:** active — the sign-in isolation and the cross-process lock are built; §6 lists what is not.
+**Status:** implemented (#4477) — the sign-in isolation and the cross-process lock are built; §6 lists what is not.
 **Author:** Camper, at the operator's direction
 **Amends:** `SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md` (reverses it for MuxBus sign-in only),
 restoring the per-channel half of `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` for every channel.
