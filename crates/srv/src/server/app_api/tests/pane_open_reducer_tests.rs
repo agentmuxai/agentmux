@@ -1350,4 +1350,24 @@ async fn a_handoff_waits_for_the_users_answer_through_the_host_only() {
     assert_eq!(s, StatusCode::OK, "{body}");
     assert_eq!(body["data"]["answer"], "cancelled");
     assert_eq!(crate::server::browser_attention::waiting_on_user(&pane), None);
+
+    // So does closing the pane: the agent isn't left blocked until the timeout.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://example.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let second = body["data"]["pane"].as_str().unwrap().to_string();
+    let waiting = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": second, "reason": "Pick a seat" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    for _ in 0..100 {
+        if crate::server::browser_attention::waiting_on_user(&second).is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    crate::backend::wcore::delete_block(&state.mstore, &tab_id, &second).unwrap();
+    let (s, body) = tokio::time::timeout(std::time::Duration::from_secs(5), waiting).await.unwrap().unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "cancelled");
 }

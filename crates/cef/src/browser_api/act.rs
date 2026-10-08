@@ -193,6 +193,13 @@ const COMMIT_INFO: &str = r#"function () {
   // prototype's getters, which the page can't shadow that way.
   const formGet = (prop) => Object.getOwnPropertyDescriptor(HTMLFormElement.prototype, prop).get.call(form);
   let action = "";
+  // Outside a form, a committing link's destination is its href (read
+  // through the prototype, like the form's): shown in the banner and
+  // checked again after approval.
+  const link = !form && this.closest ? this.closest("a[href], area[href]") : null;
+  if (link) {
+    action = String(Object.getOwnPropertyDescriptor(link.tagName === "AREA" ? HTMLAreaElement.prototype : HTMLAnchorElement.prototype, "href").get.call(link));
+  }
   if (form) {
     const own = (t === "button" || t === "input") && this.hasAttribute("formaction");
     action = String(own ? Object.getOwnPropertyDescriptor(t === "button" ? HTMLButtonElement.prototype : HTMLInputElement.prototype, "formAction").get.call(this) : formGet("action"));
@@ -220,8 +227,11 @@ const COMMIT_INFO: &str = r#"function () {
   }
   // Everything the click would send, hidden controls included (an amount or
   // a recipient id can live in one), for the check after approval. srv keeps
-  // it out of the banner. Secret values go back separately (`secrets`): the
-  // host replaces them with a keyed digest before anything leaves it.
+  // it out of the banner. Every control counts, however many there are (a
+  // page could pad the form to push a changed one past a cutoff). Secret
+  // values go back separately (`secrets`); the host folds all of it into one
+  // keyed digest before anything leaves it. The element's own markup counts
+  // too: a click handler can read its target from a data attribute.
   const sent = [];
   const secrets = [];
   if (form) {
@@ -234,11 +244,10 @@ const COMMIT_INFO: &str = r#"function () {
       else if (el.tagName === "SELECT") v = Array.from(el.selectedOptions).map(o => o.value).join(",");
       else v = el.value;
       sent.push([el.tagName, ty, el.name || el.id || "", el.disabled ? 1 : 0, v == null ? null : String(v)]);
-      if (sent.length >= 500) break;
     }
   }
   const sub = ["formmethod", "formenctype", "formtarget", "name", "value"].map(a => this.getAttribute(a));
-  const fingerprint = JSON.stringify([action, form ? [formGet("method"), formGet("enctype"), formGet("target")] : null, sub, sent]);
+  const fingerprint = JSON.stringify([action, form ? [formGet("method"), formGet("enctype"), formGet("target")] : null, sub, this.outerHTML, link ? link.outerHTML : null, sent]);
   return { committing: submits || verb, name, action, fields, fingerprint, secrets };
 }"#;
 
@@ -572,12 +581,9 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
                 "action": info.get("action").cloned().unwrap_or(Value::Null),
                 "fields": info.get("fields").cloned().unwrap_or(json!([])),
                 // Not shown: srv strips it from the banner and sends it back
-                // with the approved click. Secret values are in it only as a
-                // digest keyed with a secret of this host process.
-                "fingerprint": json!([
-                    info.get("fingerprint").cloned().unwrap_or(Value::Null),
-                    secrets_digest(info.get("secrets")),
-                ]),
+                // with the approved click. One digest of the whole submission,
+                // secrets included, keyed with a secret of this host process.
+                "fingerprint": submission_digest(info.get("fingerprint"), info.get("secrets")),
             });
             if req.approved {
                 // Approved: but the page's own script had the whole wait to
@@ -658,19 +664,24 @@ async fn act(cdp: &mut CdpSession, table: &RefTable, backend: i64, req: &ActReq)
     })
 }
 
-/// A digest of a form's secret values, so the check after approval notices
-/// a password or card number the page changed during the wait, without the
-/// values leaving this process. SipHash keyed with a random key made once
-/// per host process: the digest can't be reversed or brute-forced by anyone
-/// without that key, and both checks of one approval run in this process.
-fn secrets_digest(secrets: Option<&Value>) -> String {
+/// One digest of everything an approved click would send (the page's
+/// `fingerprint` string and its secret values), so the check after approval
+/// notices any change during the wait, however large the form, without the
+/// values leaving this process. SipHash keyed with a random key made once per
+/// host process: nobody without the key can reverse it or aim for a match
+/// (the page gets no digest to compare against), and both checks of one
+/// approval run in this process.
+fn submission_digest(fingerprint: Option<&Value>, secrets: Option<&Value>) -> String {
     use std::hash::{BuildHasher, Hasher};
     static KEY: std::sync::OnceLock<std::collections::hash_map::RandomState> = std::sync::OnceLock::new();
     let mut h = KEY.get_or_init(Default::default).build_hasher();
-    for s in secrets.and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
-        let s = s.as_str().unwrap_or("");
+    let mut put = |s: &str| {
         h.write_usize(s.len());
         h.write(s.as_bytes());
+    };
+    put(fingerprint.and_then(|v| v.as_str()).unwrap_or(""));
+    for s in secrets.and_then(|v| v.as_array()).map(|a| a.as_slice()).unwrap_or(&[]) {
+        put(s.as_str().unwrap_or(""));
     }
     format!("{:016x}", h.finish())
 }
@@ -697,15 +708,19 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_secret_changes_the_digest_without_showing_it() {
-        let d = |v: Value| secrets_digest(Some(&v));
-        let a = d(json!(["hunter2", "4111111111111111"]));
-        assert_eq!(a, d(json!(["hunter2", "4111111111111111"])), "stable within a process");
-        assert_ne!(a, d(json!(["hunter3", "4111111111111111"])));
+    fn any_change_to_the_submission_changes_the_digest_without_showing_it() {
+        let d = |fp: &str, v: Value| submission_digest(Some(&json!(fp)), Some(&v));
+        let a = d("form-a", json!(["hunter2", "4111111111111111"]));
+        assert_eq!(a, d("form-a", json!(["hunter2", "4111111111111111"])), "stable within a process");
+        assert_ne!(a, d("form-a", json!(["hunter3", "4111111111111111"])), "a swapped secret");
+        assert_ne!(a, d("form-b", json!(["hunter2", "4111111111111111"])), "a changed control");
         // Boundaries count: ["ab","c"] isn't ["a","bc"].
-        assert_ne!(d(json!(["ab", "c"])), d(json!(["a", "bc"])));
+        assert_ne!(d("", json!(["ab", "c"])), d("", json!(["a", "bc"])));
         assert!(!a.contains("hunter2"));
-        assert_eq!(d(Value::Null), secrets_digest(None));
+        // A huge form still yields a short digest: nothing is cut off.
+        let big = "x".repeat(2_000_000);
+        assert_ne!(d(&big, json!([])), d(&(big.clone() + "y"), json!([])));
+        assert_eq!(d(&big, json!([])).len(), 16);
     }
 
     #[test]
