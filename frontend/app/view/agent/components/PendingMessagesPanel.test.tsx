@@ -8,7 +8,7 @@
  * claiming it "sends at the agent's next step" (the turn already ended;
  * only the async accept ack is left) and switch to honest "Sending…" copy.
  * Not a full component smoke test — the FIFO ordering / accept-removal
- * behavior is covered at the reducer level (reducer.test.ts).
+ * behavior is covered at the reducer level (agent-pane-state/reducer.input.test.ts).
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
