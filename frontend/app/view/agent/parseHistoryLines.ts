@@ -9,13 +9,13 @@
  * from onMount without touching SolidJS reactivity.
  */
 
-import { contextCompactedNodeId, parseCompactBoundaryFrame } from "./compact-boundary";
+import { contextCompactedNodeId } from "./compact-boundary";
 import { createTaskWakeDetector } from "./task-wake";
 import { CompactionSummaryTracker } from "./context-delivery";
+import { interceptFrame, type FrameSink } from "./frame-intercepts";
 import { createTranslator } from "./providers/translator-factory";
-import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcome";
-import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
-import { parseCliNoticeFrame } from "./cli-notice";
+import { sessionOutcomeNodeId } from "./session-outcome";
+import { buildMemoryInjectedNode } from "./memory-injected";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
 import { reportedContextWindowsFromResult } from "@/app/store/agent-pane-state/context-reading";
@@ -120,13 +120,13 @@ export class HistoryParser {
     // clump/call as "just now" (reagent P2 on PR #2392). See
     // ClaudeCodeStreamParser's isReplay doc comment.
     private readonly translator: ReturnType<typeof createTranslator>;
-    private readonly parser = new ClaudeCodeStreamParser({ isReplay: true });
+    readonly parser = new ClaudeCodeStreamParser({ isReplay: true });
     /** Pairs each compact_boundary with Claude Code's summary frame after it.
      *  A field, not a local: the two can straddle a history page. */
-    private readonly compactionSummaries = new CompactionSummaryTracker();
+    readonly compactionSummaries = new CompactionSummaryTracker();
     // A pass the CLI starts for a finished background task (task-wake.ts):
     // the same detector the live stream uses, so live and replay agree.
-    private readonly detectTaskWake = createTaskWakeDetector();
+    readonly detectTaskWake = createTaskWakeDetector();
     /** Ordered, deduped by id. Same-id events replace in place. */
     readonly nodes: DocumentNode[] = [];
     // Same-id events update IN PLACE rather than first-wins.
@@ -219,8 +219,92 @@ export class HistoryParser {
             return { ...replacement, timestamp: pts } as DocumentNode;
         };
 
+        // The current line, for the sink below.
+        let lineIdx = 0;
+        const sink: FrameSink = {
+            node: (node) => put(node, indexById.get(node.id)),
+            placeReleased: putReleased,
+            compactBoundary: (data, raw) => {
+                // The last call before a compaction measures a conversation
+                // that no longer exists, and the boundary's post_tokens is not
+                // the new size (summary messages only, no system prompt or
+                // tools): nothing to seed until the next call.
+                this.lastContext = null;
+                if (!data) return;
+                const parsedTs = typeof raw.timestamp === "string" ? Date.parse(raw.timestamp) : NaN;
+                const node: ContextCompactedNode = {
+                    type: "context_compacted",
+                    // The live path's id (compact-boundary.ts), so the same
+                    // boundary seen live and replayed merges into one node.
+                    id: contextCompactedNodeId(data),
+                    tokensBefore: data.preTokens,
+                    tokensAfter: data.postTokens,
+                    // Wire timestamp wins; batch stamp fills the timestamp-less
+                    // case; 0 only when neither exists (type requires number).
+                    timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
+                    source: "real",
+                    trigger: data.trigger,
+                    durationMs: data.durationMs,
+                };
+                put(node, indexById.get(node.id));
+                this.awaitingCompactionSize = node;
+            },
+            sessionOutcome: (data, raw) => {
+                if (data && data.outcome === "fresh") {
+                    // The next call belongs to the fresh conversation, not to a
+                    // compaction card above this boundary (a resumed one
+                    // continues the same conversation, so its call still does).
+                    this.awaitingCompactionSize = null;
+                    // Usage seen before this boundary belongs to the old
+                    // session, which the fresh model has none of; only
+                    // post-boundary usage may seed the meter (#2507).
+                    this.lastContext = null;
+                }
+                // `resumed` outcomes are demoted out of the working transcript
+                // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
+                // _2026_08_09.md §3.5): a confirmed resume fires on
+                // user-invisible process recycles and its persisted line lands
+                // AFTER the first post-resume exchange.
+                if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {
+                    const parsedTs = typeof raw.timestamp === "string" ? Date.parse(raw.timestamp) : NaN;
+                    const node: SessionOutcomeNode = {
+                        type: "session_outcome",
+                        id: sessionOutcomeNodeId(data),
+                        outcome: data.outcome,
+                        attemptedSid: data.attemptedSid,
+                        actualSid: data.actualSid,
+                        continued: data.continued,
+                        timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
+                    };
+                    put(node, indexById.get(node.id));
+                }
+            },
+            memoryInjected: (raw) => {
+                parser.flushPending();
+                putReleased();
+                // A fallback re-delivery's card (CD2b) stands for its hidden
+                // message. srv writes it right after that message's own line,
+                // whose row (the reply under it stays hidden) it replaces; a
+                // card ahead of its message marks the echo to come instead.
+                if ((raw as { fallback?: unknown }).fallback === true) {
+                    const card = buildMemoryInjectedNode(raw, { now: stampFor(lineIdx) ?? 0 });
+                    const last = nodes.length - 1;
+                    if (card && nodes[last]?.type === "memory_reinjection") {
+                        indexById.delete(nodes[last].id);
+                        nodes[last] = card;
+                        indexById.set(card.id, last);
+                        changed.add(card.id);
+                        return;
+                    }
+                    parser.noteFallbackCard();
+                }
+                const node = buildMemoryInjectedNode(raw, { now: stampFor(lineIdx) ?? 0 });
+                if (node) put(node, indexById.get(node.id));
+            },
+        };
+
         const source = opts?.source;
-        for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+        for (lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             const line = lines[lineIdx];
             const trimmed = line.trim();
             if (!trimmed || !trimmed.startsWith("{")) continue;
@@ -262,178 +346,9 @@ export class HistoryParser {
             // saw it (activity/task-outcomes.ts).
             if (rawEvent.type === "system" && opts?.onTaskFrame) opts.onTaskFrame(rawEvent, stampFor(lineIdx));
 
-            // Real compaction-boundary completion data. Same raw-frame
-            // interception as useAgentStream.ts's live path (shared parsing
-            // via compact-boundary.ts) — this frame has no StreamEvent shape
-            // in the provider translator, so without this the replay pipeline
-            // silently dropped every historical compact_boundary along with
-            // its exact token/duration record (Codex P1, PR #2378 round 2).
-            {
-                const wake = this.detectTaskWake(rawEvent, stampFor(lineIdx));
-                if (wake) put(wake, indexById.get(wake.id));
-            }
-            if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
-                // Bypassing parser.parseLine() below means the parser's
-                // currentTextNode/currentThinkingNode accumulator never sees
-                // this line — without closing it explicitly, text AFTER the
-                // boundary would keep accumulating onto the SAME node id as
-                // text BEFORE it (same bug class as Codex P1 #1104's
-                // tool_call/tool_result merge issue, just for the text
-                // accumulator instead), silently merging content across the
-                // compaction and reordering it before the compaction marker
-                // in the replayed transcript. Flushed unconditionally — even
-                // a boundary frame whose metadata fails to parse below is
-                // still a real boundary in the underlying conversation.
-                // flushPending()'s return value is discarded: those nodes are
-                // already correctly represented in `nodes` from when the
-                // per-line loop processed them.
-                parser.flushPending();
-                putReleased();
-                // The last call before a compaction measures a conversation
-                // that no longer exists, and the boundary's post_tokens is not
-                // the new size (summary messages only, no system prompt or
-                // tools): nothing to seed until the next call.
-                this.lastContext = null;
-                const data = parseCompactBoundaryFrame(rawEvent);
-                if (data) {
-                    this.compactionSummaries.noteBoundary(data);
-                    const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
-                    const node: ContextCompactedNode = {
-                        type: "context_compacted",
-                        // Codex P2, PR #2378 round 12: shares useAgentStream.ts's
-                        // exact id-construction function (including its
-                        // content-derived fallback for the timestamp-less
-                        // case) instead of independently reimplementing it here
-                        // with a different fallback (previously nodes.length,
-                        // a batch-relative counter) — the same underlying
-                        // boundary seen live AND via a history-replay overlap
-                        // must always land on the identical id, or the
-                        // document store's same-id dedup can't merge them.
-                        id: contextCompactedNodeId(data),
-                        tokensBefore: data.preTokens,
-                        tokensAfter: data.postTokens,
-                        // Wire timestamp wins; batch stamp fills the timestamp-less
-                        // case; 0 only when neither exists (type requires number).
-                        timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
-                        source: "real",
-                        trigger: data.trigger,
-                        durationMs: data.durationMs,
-                    };
-                    put(node, indexById.get(node.id));
-                    this.awaitingCompactionSize = node;
-                }
-                continue;
-            }
-
-            // AgentMux's own resume-outcome marker — same raw-frame interception
-            // as useAgentStream.ts's live path (shared parsing via
-            // session-outcome.ts). See
-            // docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.
-            if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
-                parser.flushPending();
-                putReleased();
-                // reagentx P1, PR #3502, second review round: a hidden
-                // memory-reinjection turn (tryParseMemoryReinjection) landing
-                // as the LAST turn of a session before this boundary would
-                // otherwise leave the parser's hiding-suppression state stuck
-                // on across it, silently dropping every event of the NEXT
-                // session until some future real user_message appears.
-                // Unconditional on this frame merely being SEEN (not gated on
-                // `data` parsing successfully or on which outcome it reports,
-                // unlike the narrower `lastContext` reset below) — any
-                // session boundary is a safe point to stop trusting a flag
-                // that was only ever meant to span a single turn, and a stuck
-                // suppression that silently eats real history is a worse
-                // failure than an occasional no-op reset.
-                parser.clearHiddenReinjectionState();
-                const data = parseSessionOutcomeFrame(rawEvent);
-                // `resumed` outcomes are demoted out of the working transcript
-                // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW
-                // _2026_08_09.md §3.5): a confirmed resume fires on
-                // user-invisible process recycles and its persisted line lands
-                // AFTER the first post-resume exchange — as a divider row it
-                // announces a non-event in the wrong place. The line stays in
-                if (data && data.outcome === "fresh") {
-                    // The next call belongs to the fresh conversation, not to a
-                    // compaction card above this boundary (a resumed one
-                    // continues the same conversation, so its call still does).
-                    this.awaitingCompactionSize = null;
-                    // Usage seen before this boundary belongs to the old
-                    // session, which the fresh model has none of; only
-                    // post-boundary usage may seed the meter (#2507).
-                    this.lastContext = null;
-                }
-                if (data && (data.outcome !== "resumed" || opts?.includeResumedOutcomes)) {
-                    const parsedTs = typeof rawEvent.timestamp === "string" ? Date.parse(rawEvent.timestamp) : NaN;
-                    const node: SessionOutcomeNode = {
-                        type: "session_outcome",
-                        // Shares useAgentStream.ts's exact id-construction
-                        // function — same rationale as context_compacted above.
-                        id: sessionOutcomeNodeId(data),
-                        outcome: data.outcome,
-                        attemptedSid: data.attemptedSid,
-                        actualSid: data.actualSid,
-                        continued: data.continued,
-                        // Same wire-wins-then-stamp rule as context_compacted above.
-                        timestamp: Number.isNaN(parsedTs) ? (stampFor(lineIdx) ?? 0) : parsedTs,
-                    };
-                    put(node, indexById.get(node.id));
-                }
-                continue;
-            }
-
-            // Claude Code's compaction summary: a card, not a user message
-            // (context-delivery.ts, shared with useAgentStream.ts).
-            // SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.3.
-            {
-                const summaryNode = this.compactionSummaries.take(rawEvent, stampFor(lineIdx) ?? 0);
-                if (summaryNode) {
-                    parser.flushPending();
-                    putReleased();
-                    put(summaryNode, indexById.get(summaryNode.id));
-                    continue;
-                }
-            }
-
-            // The notice for memory the `SessionStart` hook delivered — same
-            // shared parsing as useAgentStream.ts's live path
-            // (memory-injected.ts). SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
-            if (isMemoryInjectedFrame(rawEvent)) {
-                parser.flushPending();
-                putReleased();
-                // A fallback re-delivery's card (CD2b) stands for its hidden
-                // message. srv writes it right after that message's own line,
-                // whose row (the reply under it stays hidden) it replaces; a
-                // card ahead of its message marks the echo to come instead.
-                if ((rawEvent as { fallback?: unknown }).fallback === true) {
-                    const card = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
-                    const last = nodes.length - 1;
-                    if (card && nodes[last]?.type === "memory_reinjection") {
-                        indexById.delete(nodes[last].id);
-                        nodes[last] = card;
-                        indexById.set(card.id, last);
-                        changed.add(card.id);
-                        continue;
-                    }
-                    parser.noteFallbackCard();
-                }
-                const node = buildMemoryInjectedNode(rawEvent, { now: stampFor(lineIdx) ?? 0 });
-                if (node) put(node, indexById.get(node.id));
-                continue;
-            }
-
-            // CLI install / version-change notices (cli-notice.ts). An
-            // install's later frame has the same id, so it replaces the
-            // "installing" row instead of adding one.
-            {
-                const cliNode = parseCliNoticeFrame(rawEvent, stampFor(lineIdx) ?? 0);
-                if (cliNode) {
-                    parser.flushPending();
-                    putReleased();
-                    put(cliNode, indexById.get(cliNode.id));
-                    continue;
-                }
-            }
+            // The intercepts the live path runs too, in the same order
+            // (frame-intercepts.ts).
+            if (interceptFrame(rawEvent, this, sink, stampFor(lineIdx))) continue;
 
             // Translate provider-specific envelope → StreamEvent[]
             const streamEvents = translator.translate(rawEvent);
