@@ -1,8 +1,10 @@
 name: CI — nightly cross-platform build + test
 
 # Consolidates the former ci-nightly-build.yml (compile-only) and ci-fast.yml /
-# ci-nightly.yml (test-only) into one workflow. Since the CEF build is already
-# paid for the compile step, the test step costs only marginal runner time.
+# ci-nightly.yml (test-only) into one workflow. The release build and the test
+# run are separate matrix legs (`mode`), run in parallel: they never shared
+# their compile (release vs the test profile), and one after the other they
+# took Windows to 55-59 min of a 60-min limit and timed macOS out.
 #
 # Phase A of SPEC_NIGHTLY_CROSS_PLATFORM_BUILDS_2026_06_23.md (issue #1718):
 # compile the whole workspace (incl. agentmux-cef → the CEF build) on all three
@@ -47,11 +49,14 @@ concurrency:
 
 jobs:
   build-and-test:
-    name: cargo build + test (${{ matrix.os }})
+    name: cargo ${{ matrix.mode }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
+        # release: `cargo build --release --workspace`. test: the test suites
+        # and the bindings gate, in the test profile.
+        mode: [release, test]
     runs-on: ${{ matrix.os }}
     # Windows AND ubuntu block; macOS stays advisory.
     #
@@ -179,15 +184,19 @@ jobs:
         run: brew install ninja cmake
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # The two modes build different profiles; one cache each.
+          key: ${{ matrix.mode }}
 
       # Compile every crate, incl. agentmux-cef (pays the CEF download + build).
       # Surfaces cross-platform compile/link breaks; packaging is Phase B (#1718).
       - name: cargo build --release --workspace
+        if: matrix.mode == 'release'
         run: cargo build --release --workspace
 
-      # CEF build already paid above — run the full test suite at near-zero
-      # marginal cost. Serial (--test-threads=1) for determinism; see note above.
+      # Serial (--test-threads=1) for determinism; see note above.
       - name: cargo test --workspace
+        if: matrix.mode == 'test'
         run: cargo test --workspace -- --test-threads=1
 
       # agentmux-cef's `test-authfile` feature gates the authfile tests that
@@ -203,6 +212,7 @@ jobs:
       # near-zero marginal cost, and nightly is the lane that owns
       # agentmux-cef coverage.
       - name: cargo test -p agentmux-cef --features test-authfile
+        if: matrix.mode == 'test'
         run: cargo test -p agentmux-cef --features test-authfile -- --test-threads=1
 
       # Superset invariant (protocol §3). Needs a Rust toolchain and a built
@@ -216,7 +226,7 @@ jobs:
       # `continue-on-error` note on this job. If that is ever loosened back to
       # advisory, this gate silently stops gating.
       - name: RPC bindings are current
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && matrix.mode == 'test'
         run: bash scripts/check-rpc-bindings.sh
 
   frontend:
