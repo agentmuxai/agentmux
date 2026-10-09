@@ -34,7 +34,9 @@ function entriesFor(node: DocumentNode): string[] {
         case "jekt_message":
             return node.direction === "incoming" ? [`[user] ${node.message.trim()}`] : [];
         case "markdown":
-            return node.metadata?.thinking ? [] : [`[assistant] ${node.content.trim()}`];
+            // Reasoning, live or cut off by a session end (`canceled`), is not
+            // something the assistant said.
+            return node.metadata?.thinking || node.metadata?.canceled ? [] : [`[assistant] ${node.content.trim()}`];
         case "tool": {
             const name = node.toolName ?? node.tool;
             return node.status === "failed" ? [`[tool] ${name}`, `[error] ${name} failed`] : [`[tool] ${name}`];

@@ -34,6 +34,11 @@ describe("recentActivityEntries", () => {
         expect(recentActivityEntries(nodes)).toEqual(["[user] review done"]);
     });
 
+    it("leaves out reasoning cut off by a session end", () => {
+        const canceled = { type: "markdown", id: "c", content: "I wonder whether", metadata: { canceled: true } } as unknown as DocumentNode;
+        expect(recentActivityEntries([user("go"), canceled, said("Done.")])).toEqual(["[user] go", "[assistant] Done."]);
+    });
+
     it("follows a failed tool with an error entry", () => {
         expect(recentActivityEntries([tool("Bash", "failed")])).toEqual(["[tool] Bash", "[error] Bash failed"]);
     });
