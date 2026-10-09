@@ -18,7 +18,6 @@
 1543 crates/srv/src/backend/blockcontroller/app_server.rs
 2633 crates/srv/src/backend/blockcontroller/app_server_protocol.rs
 2030 crates/srv/src/backend/blockcontroller/durable_ssh.rs
-1751 crates/srv/src/backend/blockcontroller/mod.rs
 1742 crates/srv/src/backend/blockcontroller/persistent/mod.rs
 3070 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
 2912 crates/srv/src/backend/bundle_import.rs

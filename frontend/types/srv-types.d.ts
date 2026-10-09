@@ -65,30 +65,6 @@ declare global {
         subblockids?: string[];
     };
 
-    // blockcontroller.BlockControllerRuntimeStatus
-    type BlockControllerRuntimeStatus = {
-        blockid: string;
-        version: number;
-        shellprocstatus?: string;
-        shellprocconnname?: string;
-        shellprocexitcode: number;
-        // A durable SSH pane: its shell lives on the host.
-        durable?: boolean;
-        // PID of the controller's own child. Set by the shell controller —
-        // the agent pane's Shell drawer identifies its shell by PID.
-        shellprocpid?: number;
-        // Program name of that child ("pwsh", "bash", …). Not derivable from
-        // the process tracker, which omits each block's root process.
-        shellprocname?: string;
-        spawn_ts_ms?: number;
-        is_agent_pane?: boolean;
-        // True if a turn is in flight (message sent, no terminating "result"
-        // event observed yet). Only meaningful for persistent/ACP agent
-        // controllers with a health monitor wired to the NDJSON stream —
-        // absent/false for shell/PTY-backed panes, which have no such signal.
-        turn_active?: boolean;
-    };
-
     // agents.failure.AgentFailure — payload of the `agentfailure` wave event
     // (classified cause of a non-zero agent exit). snake_case `code`, camelCase rest.
     type AgentFailure = {

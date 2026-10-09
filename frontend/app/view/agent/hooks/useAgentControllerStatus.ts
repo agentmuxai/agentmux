@@ -51,6 +51,7 @@ import type { Account } from "@/app/view/identity/identity-model";
 
 import type { LogFn } from "../types";
 import { ensureProviderAuthDir } from "../agent-launch-env";
+import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 export type { LogFn };
 
 /**
