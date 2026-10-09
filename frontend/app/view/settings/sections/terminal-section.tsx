@@ -188,7 +188,7 @@ export function TerminalSection(): JSX.Element {
                     <NumberControl
                         class="setting-number setting-number--wide"
                         min={1000} max={100000} step={1000} parse="int"
-                        value={(s()["term:scrollback"] as number) ?? 10000}
+                        value={(s()["term:scrollback"] as number) ?? 2000}
                         onChange={(v) => set("term:scrollback", v)}
                     />
                 }
@@ -308,12 +308,12 @@ export function TerminalSection(): JSX.Element {
                 description={TERMINAL_SETTINGS.predictiveEcho.description}
                 control={
                     <ToggleControl
-                        checked={!!(s()["term:predictiveecho"] as boolean)}
+                        checked={s()["term:predictiveecho"] !== false}
                         onChange={(v) => set("term:predictiveecho", v)}
                     />
                 }
             />
-            <Show when={!!(s()["term:predictiveecho"] as boolean)}>
+            <Show when={s()["term:predictiveecho"] !== false}>
                 <SettingRow
                     id={TERMINAL_SETTINGS.predictiveEchoThreshold.id}
                     indent
@@ -323,7 +323,7 @@ export function TerminalSection(): JSX.Element {
                         <NumberControl
                             class="setting-number setting-number--wide"
                             min={0} step={1}
-                            value={(s()["term:predictiveecho:thresholdms"] as number) ?? 100}
+                            value={(s()["term:predictiveecho:thresholdms"] as number) ?? 0}
                             onChange={(v) => set("term:predictiveecho:thresholdms", v)}
                         />
                     }

@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * One setting's default is written in up to four places: `schema/settings.json`
+ * One setting's default is written in up to five places: `schema/settings.json`
  * (the source of truth), `settings-template.jsonc`, the Settings pane control
- * (`sections/*.tsx`, as the fallback for an unset key) and the backend's read
- * (srv, or the launcher for the few settings it owns). This test reads all four
- * and fails when they disagree, so a default changed in one place can't leave
- * the others showing or doing something else.
+ * (`sections/*.tsx`, as the fallback for an unset key), the frontend code that
+ * uses the setting, and the backend's read (srv, or the launcher for the few
+ * settings it owns). This test reads them all and fails when they disagree, so
+ * a default changed in one place can't leave the others showing or doing
+ * something else.
  *
  * Extraction is by pattern, not by running the code. Each source has a floor on
  * how many defaults it must yield, so a pattern that stops matching fails here
@@ -15,27 +16,23 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const read = (rel: string) => readFileSync(join(ROOT, rel), "utf8");
-const repoPath = (full: string) => relative(ROOT, full).split(sep).join("/");
 const lineOf = (text: string, index: number) => text.slice(0, index).split("\n").length;
 
 type Found = { value: unknown; at: string };
-type Source = "template" | "ui" | "srv";
+type Source = "template" | "ui" | "app" | "srv";
 
 // ── Known disagreements ─────────────────────────────────────────────────────
 // Each needs a decision about which value is right; until then it is listed
 // here. The test also fails when a listed key agrees again, so this only shrinks.
 const KNOWN_MISMATCHES: Record<string, string> = {
-    // TODO: pick one. The terminal itself uses 2000 (DEFAULT_TERM_SCROLLBACK in
-    // frontend/app/view/term/termscrollback.ts); the template says 1000, the pane 10000.
-    "term:scrollback": "template 1000, pane 10000, terminal 2000",
-    // TODO: pick one. The template says 0.9 and the pane 1.5; the layout falls
-    // back to 0.8 (layoutGeometry.ts) or 1.0 (tilelayout-shared.tsx).
+    // TODO: pick one. The template says 0.9 and the pane 1.5, and the layout
+    // itself disagrees: 0.8 in layoutGeometry.ts, 1.0 in tilelayout-shared.tsx.
     "window:magnifiedblocksize": "template 0.9, pane 1.5, layout 0.8 or 1.0",
 };
 
@@ -72,7 +69,15 @@ function templateValues(): Map<string, Found[]> {
 // Any other read (`as string | undefined`, tri-state `term:durable`) declares none.
 
 const SECTIONS_DIR = "frontend/app/view/settings/sections";
-const LITERAL = String.raw`"(?:[^"\\]|\\.)*"|-?\d+(?:\.\d+)?|true|false|\{\}`;
+const LITERAL = String.raw`"(?:[^"\\]|\\.)*"|-?\d[\d_]*(?:\.\d+)?|true|false|\{\}`;
+// A named constant used as a fallback (`DEFAULT_MASTER_VOLUME`, `DefaultTermTheme`).
+const CONST = String.raw`[A-Z]\w*(?![\w.(])`;
+
+/** A fallback token as a value: a literal, or a named constant resolved to its literal. */
+function tokenValue(rel: string, text: string, token: string): unknown {
+    if (/^[A-Z]/.test(token)) return resolveConst(rel, text, token);
+    return JSON.parse(/^-?\d/.test(token) ? token.replace(/_/g, "") : token);
+}
 
 /** Every key a section reads (`keys`), and the defaults its controls declare. */
 function uiValues(): { values: Map<string, Found[]>; keys: Set<string> } {
@@ -88,18 +93,8 @@ function uiValues(): { values: Map<string, Found[]>; keys: Set<string> } {
             const before = text.slice(Math.max(0, m.index! - 4), m.index!);
             const after = text.slice(m.index! + m[0].length, m.index! + m[0].length + 120);
             const at = `${rel}:${lineOf(text, m.index!)}`;
-            let value: unknown;
-            let fallback: RegExpExecArray | null;
-            if (/^\s*!==\s*false\b/.test(after)) value = true;
-            else if (/!\($/.test(before)) value = false;
-            else if (
-                (fallback = new RegExp(
-                    String.raw`^\s*(?:as\s[^)]*)?\)\s*(?:\?\?|\|\|)\s*(${LITERAL}|[A-Z][A-Z0-9_]*)`
-                ).exec(after))
-            ) {
-                value = /^[A-Z]/.test(fallback[1]) ? resolveConst(rel, text, fallback[1]) : JSON.parse(fallback[1]);
-            } else continue;
-            push(out, key, { value, at });
+            const token = fallbackToken(before, after);
+            if (token !== null) push(out, key, { value: tokenValue(rel, text, token), at });
         }
         const kindRow = /const kindRow = \([^)]*\bfallback = (true|false)\)/.exec(text);
         for (const m of text.matchAll(/kindRow\([^,()]+,\s*"([^"]+)"(?:\s*,\s*(true|false))?\s*\)/g)) {
@@ -111,16 +106,117 @@ function uiValues(): { values: Map<string, Found[]>; keys: Set<string> } {
     return { values: out, keys };
 }
 
-/** A SCREAMING_CASE fallback: a literal constant in this file or the module it is imported from. */
+/**
+ * The fallback a read implies, from the text just before and after it: the
+ * token after `??` / `||` (past closing parens and `as` casts), "true" for
+ * `!== false` / `=== false`, "false" for a negation. Null when it implies none.
+ */
+function fallbackToken(before: string, after: string): string | null {
+    const rest = after.replace(/^(?:\s*\)|\s+as\s+(?:<[^>]*>|[^)?;,}<])+)*/, "");
+    const m = new RegExp(String.raw`^\s*(?:\?\?|\|\|)\s*(${LITERAL}|${CONST})`).exec(rest);
+    if (m) return m[1];
+    if (/^\s*[!=]==\s*false\b/.test(rest)) return "true";
+    if (/!\(?\s*$/.test(before)) return "false";
+    return null;
+}
+
+/** A named constant's literal value, from this file or the module it is imported from. */
 function resolveConst(rel: string, text: string, name: string): unknown {
-    const local = new RegExp(String.raw`const ${name}(?::[^=]+)?\s*=\s*(${LITERAL}|[A-Z][A-Z0-9_]*)\s*;`).exec(text);
-    if (local) return /^[A-Z]/.test(local[1]) ? resolveConst(rel, text, local[1]) : JSON.parse(local[1]);
+    const local = new RegExp(String.raw`const ${name}(?::[^=]+)?\s*=\s*(${LITERAL}|${CONST})\s*;`).exec(text);
+    if (local) return tokenValue(rel, text, local[1]);
     const imp = new RegExp(String.raw`import\s*\{[^}]*\b${name}\b[^}]*\}\s*from\s*"([^"]+)"`).exec(text);
     if (!imp) throw new Error(`${rel}: can't resolve ${name}`);
     const from = imp[1].startsWith("@/") ? `frontend/${imp[1].slice(2)}` : join(dirname(rel), imp[1]);
     const file = [`${from}.ts`, `${from}.tsx`].find((f) => existsSync(join(ROOT, f)));
     if (!file) throw new Error(`${rel}: can't find ${imp[1]}`);
     return resolveConst(file, read(file), name);
+}
+
+// ── Where the frontend uses a setting ───────────────────────────────────────
+// A read is `getSettingsKeyAtom("k")()`, `getOverrideConfigAtom(id, "k")()` or
+// `<…settings…>["k"]`, used directly, or through a variable holding the atom
+// (`a = getSettingsKeyAtom("k")`, then `a()`) or the value (`v = <read>;`).
+// Each use gets fallbackToken, and a value variable also counts
+// `typeof v === "number" ? v : X` and `if (v == null …) return X`.
+
+const ATOM_READ = String.raw`(?:getSettingsKeyAtom|getOverrideConfigAtom)\((?:[^()"]*,\s*)?"([^"]+)"(?:\s+as\s+any)?\)`;
+const BRACKET_READ = String.raw`\b\w*[sS]ettings\w*(?:\(\))?(?:\?\.)?\["([^"]+)"\]`;
+
+/** Defaults the frontend applies through a helper or a stylesheet: file, and a pattern capturing the value. */
+const FRONTEND_CONSTANTS: Record<string, [string, RegExp]> = {
+    "term:scrollback": ["frontend/app/view/term/termscrollback.ts", /const DEFAULT_TERM_SCROLLBACK = (\d+);/],
+    "term:fontfamily": ["frontend/app/view/term/termfontfamily.ts", /const DEFAULT_TERM_FONT_FAMILY = ("[^"]*");/],
+    "term:scrollsensitivity": [
+        "frontend/app/view/term/termscrollsensitivity.ts",
+        /const DEFAULT_TERM_SCROLL_SENSITIVITY = ([\d.]+);/,
+    ],
+    "telemetry:numpoints": ["frontend/app/view/sysinfo/sysinfo-types.ts", /const DefaultNumPoints = (\d+);/],
+    "window:tilegapsize": ["frontend/layout/lib/layoutResize.ts", /const DefaultGapSizePx = (\d+);/],
+    "window:magnifiedblocksize": ["frontend/layout/lib/layoutGeometry.ts", /magnifiedNodeSizeAtom\) \?\? ([\d.]+);/],
+    "window:magnifiedblockopacity": ["frontend/app/block/block.scss", /--magnified-block-opacity: ([\d.]+);/],
+};
+
+function frontendFiles(dir: string, out: string[] = []): string[] {
+    for (const name of readdirSync(join(ROOT, dir))) {
+        const rel = `${dir}/${name}`;
+        if (statSync(join(ROOT, rel)).isDirectory()) {
+            if (name !== "node_modules" && rel !== "frontend/types" && rel !== SECTIONS_DIR) frontendFiles(rel, out);
+        } else if (/\.tsx?$/.test(name) && !/\.(test|bench)\.tsx?$|\.d\.ts$/.test(name)) out.push(rel);
+    }
+    return out;
+}
+
+function appValues(): Map<string, Found[]> {
+    const out = new Map<string, Found[]>();
+    for (const rel of frontendFiles("frontend")) {
+        const text = read(rel);
+        const add = (key: string, token: string | null, index: number) => {
+            if (token !== null && SCHEMA_KEYS.has(key))
+                push(out, key, { value: tokenValue(rel, text, token), at: `${rel}:${lineOf(text, index)}` });
+        };
+        const at = (start: number, end: number) =>
+            fallbackToken(text.slice(Math.max(0, start - 4), start), text.slice(end, end + 120));
+        // Direct reads.
+        for (const m of text.matchAll(new RegExp(String.raw`${ATOM_READ}\(\)`, "g")))
+            add(m[1], at(m.index!, m.index! + m[0].length), m.index!);
+        for (const m of text.matchAll(new RegExp(BRACKET_READ, "g")))
+            add(m[1], at(m.index!, m.index! + m[0].length), m.index!);
+        // Through a variable, up to its next declaration.
+        const scope = (name: string, from: number) => {
+            const next = new RegExp(String.raw`\b(?:const|let)\s+${name}\b`, "g");
+            next.lastIndex = from;
+            const end = next.exec(text)?.index ?? text.length;
+            return { start: from, body: text.slice(from, Math.min(end, from + 1500)) };
+        };
+        for (const m of text.matchAll(new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*${ATOM_READ}\s*;`, "g"))) {
+            const { start, body } = scope(m[1], m.index! + m[0].length);
+            for (const use of body.matchAll(new RegExp(String.raw`(?<![\w.])${m[1]}\(\)`, "g")))
+                add(m[2], at(start + use.index!, start + use.index! + use[0].length), m.index!);
+        }
+        const valueDecl = String.raw`(?:const|let)\s+(\w+)(?::[^=]+)?\s*=\s*(?:untrack\(\(\)\s*=>\s*)?(?:${ATOM_READ}\(\)|(?:\w+\??\.)*${BRACKET_READ})\)?\s*;`;
+        for (const m of text.matchAll(new RegExp(valueDecl, "g"))) {
+            const [, name, atomKey, bracketKey] = m;
+            const key = atomKey ?? bracketKey;
+            const { start, body } = scope(name, m.index! + m[0].length);
+            for (const use of body.matchAll(new RegExp(String.raw`(?<![\w.])${name}\b(?!\s*[(:=])`, "g")))
+                add(key, at(start + use.index!, start + use.index! + use[0].length), m.index!);
+            const typed = new RegExp(
+                String.raw`typeof ${name} === "\w+"[^?;]*\?\s*${name}\s*:\s*(${LITERAL}|${CONST})`
+            );
+            const nullish = new RegExp(String.raw`if \(${name} == null[^)]*\)\s*return (${LITERAL}|${CONST})`);
+            for (const re of [typed, nullish]) {
+                const hit = re.exec(body);
+                if (hit) add(key, hit[1], m.index!);
+            }
+        }
+    }
+    for (const [key, [rel, re]] of Object.entries(FRONTEND_CONSTANTS)) {
+        const text = read(rel);
+        const m = re.exec(text);
+        if (!m) throw new Error(`FRONTEND_CONSTANTS: ${re} no longer matches in ${rel} (for ${key})`);
+        push(out, key, { value: JSON.parse(m[1]), at: `${rel}:${lineOf(text, m.index)}` });
+    }
+    return out;
 }
 
 // ── The backend ─────────────────────────────────────────────────────────────
@@ -253,9 +349,9 @@ function mismatches(sources: Record<Source, Map<string, Found[]>>): Map<string, 
     for (const key of SCHEMA_KEYS) {
         const schema = schemaDefault(key);
         const found: Found[] = [];
-        for (const source of ["template", "ui", "srv"] as Source[]) {
+        for (const source of ["template", "ui", "app", "srv"] as Source[]) {
             for (const f of sources[source].get(key) ?? []) {
-                if (!schema && source === "ui" && isEmptyFallback(f.value)) continue;
+                if (!schema && isEmptyFallback(f.value)) continue;
                 found.push(f);
             }
         }
@@ -271,6 +367,7 @@ describe("setting defaults agree across the schema, template, Settings pane and 
     const sources: Record<Source, Map<string, Found[]>> = {
         template: templateValues(),
         ui: ui.values,
+        app: appValues(),
         srv: backendValues(),
     };
 
@@ -278,6 +375,7 @@ describe("setting defaults agree across the schema, template, Settings pane and 
         expect(Object.values(schemaProps).filter((p) => "default" in p).length).toBeGreaterThanOrEqual(40);
         expect(sources.template.size).toBeGreaterThanOrEqual(80);
         expect(sources.ui.size).toBeGreaterThanOrEqual(60);
+        expect(sources.app.size).toBeGreaterThanOrEqual(30);
         expect(sources.srv.size).toBeGreaterThanOrEqual(25);
     });
 

@@ -2,4 +2,4 @@
 type: patch
 ---
 
-The Settings pane shows the real defaults for terminal font size (15) and pane gap (3) when they are unset, and the settings template lists the real defaults for copy-on-select (off) and magnified pane opacity (1.0).
+The Settings pane and the settings template now show the defaults the app actually uses when a setting is unset: terminal font size 15 (font Hack), scrollback 2000 lines, predictive echo on with a 0 ms threshold, copy-on-select off, pane gap 3, window opacity 80%, magnified pane opacity 1.0, and the pane number overlay on.

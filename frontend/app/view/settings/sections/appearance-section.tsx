@@ -170,7 +170,7 @@ export function AppearanceSection(): JSX.Element {
                         control={
                             <SliderControl
                                 min={0.35} max={1} step={0.05}
-                                value={(s()["window:opacity"] as number) ?? 1}
+                                value={(s()["window:opacity"] as number) ?? 0.8}
                                 onChange={(v) => set("window:opacity", v)}
                             />
                         }

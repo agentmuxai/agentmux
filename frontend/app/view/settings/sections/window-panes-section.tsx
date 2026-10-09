@@ -79,7 +79,7 @@ export function WindowPanesSection(): JSX.Element {
                 description={WINDOW_SETTINGS.showPaneNumberOverlay.description}
                 control={
                     <ToggleControl
-                        checked={!!(s()["app:showoverlayblocknums"] as boolean)}
+                        checked={(s()["app:showoverlayblocknums"] as boolean | undefined) ?? true}
                         onChange={(v) => set("app:showoverlayblocknums", v)}
                     />
                 }
