@@ -1,7 +1,7 @@
 # The Read tool in the agent pane: which lines, why it sometimes collapses, and what the preview does and could do
 
 **Date:** 2026-10-01
-**Status:** analysis. §3 (the line range) and §4 (the collapse) are implemented in #4159; §3.1 (Edit and Write ranges, and the `start:end` format before the path) in the PR after it. §5–§7 are findings and recommendations; none is implemented.
+**Status:** implemented — §3 (the line range) and §4 (the collapse) in #4159; §3.1 (Edit and Write ranges, `start:end` before the path) in #4165; §5 (the 24 missing Shiki grammars) in #4192; §6.1 (images, PDFs, unchanged files, token-cap notes) in #4194. §7 lists further ideas, not commitments.
 **Author:** korp
 **Trigger:** Repo owner, 2026-10-01: *"in the read tool (agent pane) we want to know what range of lines are being read. Also I notice it sometimes comes out collapsed (instead of expanded until off the screen, then collapsing). Also investigate what previews and code highlighting we can get for Read, what is there currently, what is available?"*
 **Related:** `SPEC_AGENT_PANE_ROW_DISCLOSURE_2026_09_26.md`, `PLAN_TOOL_BLOCK_SCROLL_DRIVEN_COLLAPSE_2026_06_16.md`, `SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md`, `SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md`, `SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md`.

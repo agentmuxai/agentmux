@@ -1,7 +1,7 @@
 # SPEC — Tool Preview Refinements: Word-wrap + Independent Zoom
 
 **Date:** 2026-06-26  
-**Status:** proposed — Analysis complete — ready to implement
+**Status:** implemented — in #1798: streaming log lines stopped soft-wrapping, and Ctrl+Scroll zoomed the preview. The preview zoom was later removed (Ctrl+wheel zooms the pane). Finished string results still wrap; see `docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md`.
 
 ---
 

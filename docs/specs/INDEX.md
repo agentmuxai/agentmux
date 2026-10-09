@@ -468,8 +468,10 @@ partial list.
 | [`SPEC_TOOL_BLOCK_INTERACTION_HOLD_AND_GLOB_EXPAND_2026_06_09`](SPEC_TOOL_BLOCK_INTERACTION_HOLD_AND_GLOB_EXPAND_2026_06_09.md) | SPEC: Tool Block Interaction Hold + Glob Auto-Expand |
 | [`SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11`](SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md) | Tool block: live log popout + bottom action bar |
 | [`SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17`](SPEC_TOOL_OUTPUT_TEE_AND_TERMINAL_RENDER_2026_06_17.md) | SPEC: Tee redirected tool output to the feed + render tool output as a terminal |
+| [`SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14`](SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md) | Spec: Syntax highlighting inside the tool hover overlay |
 | [`SPEC_TOOL_PREVIEW_DEDENT_2026_08_08`](SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md) | SPEC: Tool preview common-indentation stripping (dedent) |
 | [`SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25`](SPEC_TOOL_PREVIEW_HEIGHT_THIRD_AND_FOLLOW_LATEST_2026_09_25.md) | SPEC: tool previews — cap at one third of today's height, and always follow the latest output |
+| [`SPEC_TOOL_PREVIEW_REFINEMENTS_2026_06_26`](SPEC_TOOL_PREVIEW_REFINEMENTS_2026_06_26.md) | SPEC — Tool Preview Refinements: Word-wrap + Independent Zoom |
 | [`SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08`](SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md) | SPEC: Tool preview scrollbar-to-edge padding removal |
 | [`SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27`](SPEC_TOOL_PREVIEW_WHEEL_EDGE_SKID_2026_09_27.md) | SPEC: Wheel edge skid — a nested preview absorbs a few wheel notches before the pane scrolls |
 | [`SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17`](SPEC_TOOL_RESULT_RENDERER_REGISTRY_2026_06_17.md) | SPEC: Tool-result renderer registry (rich, per-tool result UIs that scale) |
@@ -779,7 +781,6 @@ partial list.
 | [`SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22`](SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md) | Toolchain Manager — External Widgets Extension |
 | [`SPEC_TOOL_BLOCK_SINGLE_LEFT_BAR_2026_06_27`](SPEC_TOOL_BLOCK_SINGLE_LEFT_BAR_2026_06_27.md) | SPEC: Tool Block Single Left Bar |
 | [`SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23`](SPEC_TOOL_BLOCK_UX_POLISH_2026_05_23.md) | SPEC: Tool Block UX Polish — Hover Delay, Collapse Animation, Post-Completion Hold, Thinking Label, Scroll Isolation |
-| [`SPEC_TOOL_PREVIEW_REFINEMENTS_2026_06_26`](SPEC_TOOL_PREVIEW_REFINEMENTS_2026_06_26.md) | SPEC — Tool Preview Refinements: Word-wrap + Independent Zoom |
 | [`SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01`](SPEC_TRANSPARENCY_MACOS_LINUX_2026_07_01.md) | SPEC: Window Transparency on macOS and Linux |
 | [`SPEC_UNIFIED_MENU_SYSTEM_2026_05_11`](SPEC_UNIFIED_MENU_SYSTEM_2026_05_11.md) | Unified menu system |
 | [`SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13`](SPEC_UNIFIED_TOOL_HOVER_OVERLAY_2026_05_13.md) | Spec: Unified tool-block hover overlay (no double-popup) |
@@ -1035,7 +1036,6 @@ partial list.
 | [`SPEC_TEST_API_ACCESS`](SPEC_TEST_API_ACCESS.md) | SPEC: Test-Harness Access to the App API (+ /wave → /agentmux rename) |
 | [`SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16`](SPEC_TOOL_AUTO_EXPAND_PANEL_2026_05_16.md) | SPEC: Tool Auto-Expand Panel (Replace Portal Overlay) |
 | [`SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13`](SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md) | Spec: Tool Hover Overlay + Scroll-on-Type |
-| [`SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14`](SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md) | Spec: Syntax highlighting inside the tool hover overlay |
 | [`SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10`](SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md) | SPEC: Unified Agent Conversation-History Store |
 | [`SPEC_UNIFIED_CLIPBOARD_2026_05_18`](SPEC_UNIFIED_CLIPBOARD_2026_05_18.md) | SPEC: Unified Copy/Paste + Export |
 | [`SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21`](SPEC_UNIFIED_MODAL_SYSTEM_2026_05_21.md) | SPEC — Unified modal system (scope-based) |

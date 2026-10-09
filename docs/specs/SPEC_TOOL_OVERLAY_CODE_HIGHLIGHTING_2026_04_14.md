@@ -1,6 +1,6 @@
 # Spec: Syntax highlighting inside the tool hover overlay
 
-**Status:** Draft
+**Status:** implemented — in #388 (`components/HighlightedCode.tsx`). Its `:global(.line)` rules never applied (the stylesheet is not a CSS module); see `docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md` §3.4.
 **Date:** 2026-04-14
 **Scope:** `frontend/app/view/agent/components/ToolBlock.tsx` + children
 
