@@ -76,7 +76,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
                         .into_request(task_target.clone(), task_prompt.clone(), task_source.clone());
                     let _ = task_client
                         .post(&url)
-                        .header("X-AuthKey", &task_auth)
+                        .header(AUTH_KEY_HEADER, &task_auth)
                         .json(&req)
                         .send()
                         .await;

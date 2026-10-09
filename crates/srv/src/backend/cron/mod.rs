@@ -15,6 +15,7 @@
 //!
 //! See `docs/specs/SPEC_CRON_LOOP_ROBUSTNESS_2026_06_25.md §3.2`.
 
+use agentmux_common::AUTH_KEY_HEADER;
 use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -326,7 +327,7 @@ impl CronScheduler {
             source_agent: Some("cron".to_string()),
             ..Default::default()
         };
-        match self.http_client.post(&url).header("X-AuthKey", &self.auth_key).json(&req).send().await {
+        match self.http_client.post(&url).header(AUTH_KEY_HEADER, &self.auth_key).json(&req).send().await {
             Ok(r) if r.status().is_success() => Some(r.json().await.unwrap_or_default()),
             Ok(r) => {
                 tracing::warn!(id, status = %r.status(), "cron: inject returned non-2xx");

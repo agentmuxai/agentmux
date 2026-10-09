@@ -43,6 +43,7 @@ use agentmux_common::api_types::{
     WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest, ClosePaneRequest, QuitSelfRequest,
     RegisterDevServerRequest, RegisterDevServerResponse,
 };
+use agentmux_common::AUTH_KEY_HEADER;
 use anyhow::Result;
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

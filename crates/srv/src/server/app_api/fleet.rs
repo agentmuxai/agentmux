@@ -42,6 +42,7 @@
 //! jekt signing at all, same as `agent.stop` today) and IS exposed over
 //! HTTP (`POST /api/v1/fleet/bulk-stop`) for `FleetBulkStop`.
 
+use agentmux_common::AUTH_KEY_HEADER;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -250,7 +251,7 @@ pub(crate) async fn forward_broadcast_to_channel(
             "recipients": req.recipients,
         }));
     if !auth_key.is_empty() {
-        http = http.header("X-AuthKey", auth_key);
+        http = http.header(AUTH_KEY_HEADER, auth_key);
     }
     let resp = http.send().await.map_err(|e| format!("cross-channel forward failed: {e}"))?;
     if resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -436,7 +437,7 @@ pub(crate) async fn forward_stop_to_shared_channel(
         "signal": signal,
     }));
     if !entry.auth_key.is_empty() {
-        req = req.header("X-AuthKey", &entry.auth_key);
+        req = req.header(AUTH_KEY_HEADER, &entry.auth_key);
     }
     let outcome = async {
         let resp = req
@@ -581,7 +582,7 @@ async fn forward_stop_pending(
         "by": by,
     }));
     if !entry.auth_key.is_empty() {
-        req = req.header("X-AuthKey", &entry.auth_key);
+        req = req.header(AUTH_KEY_HEADER, &entry.auth_key);
     }
     let resp = match req.send().await {
         Ok(r) => r,

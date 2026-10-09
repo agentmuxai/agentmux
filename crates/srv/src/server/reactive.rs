@@ -238,7 +238,7 @@ async fn forward_inject_to_peer(
 
     let mut fwd = state.http_client.post(&forward_url).json(forwarded_req);
     if !peer.auth_key.is_empty() {
-        fwd = fwd.header("X-AuthKey", peer.auth_key);
+        fwd = fwd.header(AUTH_KEY_HEADER, peer.auth_key);
     }
 
     match fwd.send().await {
@@ -313,7 +313,7 @@ async fn forward_inject_to_peer(
 /// indefinite reuse.
 const JEKT_SIG_MAX_AGE_SECS: i64 = 300;
 
-use agentmux_common::time::now_secs as now_unix_secs;
+use agentmux_common::{time::now_secs as now_unix_secs, AUTH_KEY_HEADER};
 
 /// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
 /// §2.2). Mutates `req.sig_verified` in place based on whether the claimed
@@ -2220,7 +2220,7 @@ async fn handle_reactive_transcript_cross_channel(
     let resp = state
         .http_client
         .get(format!("{}/agentmux/reactive/transcript", entry.local_url))
-        .header("X-AuthKey", &entry.auth_key)
+        .header(AUTH_KEY_HEADER, &entry.auth_key)
         .query(&query)
         .send()
         .await;

@@ -22,6 +22,7 @@
 //! dead instance could do nothing useful (Phase 1 has no cold-start
 //! activation, spec §6.1).
 
+use agentmux_common::AUTH_KEY_HEADER;
 use std::sync::{Arc, OnceLock};
 
 use futures_util::{SinkExt, StreamExt};
@@ -390,7 +391,7 @@ async fn session(
     // Header auth (`X-AuthKey`), as srv's auth_middleware accepts for /ws.
     // ClientRequestBuilder generates the handshake headers itself — see
     // cloud_subscriber.rs for why a hand-built Request fails the handshake.
-    let request = ClientRequestBuilder::new(uri).with_header("X-AuthKey", ep.auth_key.clone());
+    let request = ClientRequestBuilder::new(uri).with_header(AUTH_KEY_HEADER, ep.auth_key.clone());
     let (ws, _) = match tokio_tungstenite::connect_async(request).await {
         Ok(s) => s,
         Err(e) => return SessionEnd::Closed(format!("connect: {e}")),

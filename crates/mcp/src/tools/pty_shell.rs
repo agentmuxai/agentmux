@@ -39,7 +39,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             };
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .timeout(crate::srv_http::SHELL_CREATE_TIMEOUT)
                 .json(&req)
                 .send()
@@ -78,7 +78,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ptyshell/input", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&PtyShellInputRequest {
                     shell_id: shell_id.to_string(),
                     agent_block_id: block_id.to_string(),
@@ -131,7 +131,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ptyshell/resize", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&PtyShellResizeRequest {
                     shell_id: shell_id.to_string(),
                     agent_block_id: block_id.to_string(),
@@ -178,7 +178,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ptyshell/read", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&PtyShellReadRequest {
                     shell_id: shell_id.to_string(),
                     agent_block_id: block_id.to_string(),
@@ -217,7 +217,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ptyshell/status", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&PtyShellStatusRequest {
                     shell_id: shell_id.to_string(),
                     agent_block_id: block_id.to_string(),
@@ -259,7 +259,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let url = format!("{}/api/v1/ptyshell/stop", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&PtyShellStopRequest {
                     shell_id: shell_id.to_string(),
                     agent_block_id: block_id.to_string(),

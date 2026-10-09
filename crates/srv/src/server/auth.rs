@@ -5,6 +5,7 @@
 //! Split out of server/mod.rs unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.1).
 
 use super::*;
+use agentmux_common::AUTH_KEY_HEADER;
 
 // ---- Origin checks ----
 
@@ -65,7 +66,7 @@ pub(super) async fn auth_middleware(
 
     let auth_key = req
         .headers()
-        .get("X-AuthKey")
+        .get(AUTH_KEY_HEADER)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
@@ -185,7 +186,7 @@ pub(super) async fn lan_or_full_auth_middleware(
 
     let auth_key = req
         .headers()
-        .get("X-AuthKey")
+        .get(AUTH_KEY_HEADER)
         .and_then(|v| v.to_str().ok());
 
     match auth_key {
