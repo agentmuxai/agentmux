@@ -25,7 +25,9 @@ export const filesPaneTab: PaneTabManifest = {
     label: "Hangar",
     icon: "folder-open",
     defaultHue: 180,
-    capabilities: { lifecycle: "keepAlive", noPadding: true },
+    // Zoom is the shared per-pane zoom (keys, Ctrl+scroll, the all-panes
+    // gesture); 12 px is the Hangar's font size. SPEC_HANGAR_ZOOM_2026_10_08.md.
+    capabilities: { lifecycle: "keepAlive", noPadding: true, paneZoom: { baseFontSize: 12 } },
     // A Hangar tab added with the pane's "+" starts in the folder the tab in
     // front shows, as a terminal's new tab starts in its directory.
     chrome: (_anchor, nodeModel) => ({

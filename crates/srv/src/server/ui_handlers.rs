@@ -913,14 +913,34 @@ pub(crate) async fn handle_ui_browser_set_files(
                 .to_string(),
         );
     };
-    let paths = match crate::server::browser_uploads::check_upload_paths(&workspace, &req.paths) {
-        Ok(p) => p,
-        Err(e) => return err_response(StatusCode::FORBIDDEN, e),
+    // The page gets the bytes srv read through each file's checked handle,
+    // never a path the browser would open later (spec §5.3). Up to 25 MB of
+    // file I/O and base64: off the async workers.
+    let requested = req.paths.clone();
+    let read = tokio::task::spawn_blocking(move || {
+        use base64::Engine as _;
+        let paths = crate::server::browser_uploads::check_upload_paths(&workspace, &requested)?;
+        let files = crate::server::browser_uploads::read_upload_files(&workspace, &paths)?;
+        Ok::<_, String>(
+            files
+                .iter()
+                .map(|f| {
+                    json!({
+                        "name": f.name,
+                        "type": f.mime,
+                        "data": base64::engine::general_purpose::STANDARD.encode(&f.bytes),
+                    })
+                })
+                .collect::<Vec<serde_json::Value>>(),
+        )
+    })
+    .await;
+    let files = match read {
+        Ok(Ok(f)) => f,
+        Ok(Err(e)) => return err_response(StatusCode::FORBIDDEN, e),
+        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("reading the files failed: {e}")),
     };
-    let names: Vec<&str> = paths
-        .iter()
-        .map(|p| std::path::Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(""))
-        .collect();
+    let names: Vec<&str> = files.iter().filter_map(|f| f["name"].as_str()).collect();
     tracing::info!(
         agent_id = %req.auth.agent_id, block_id = %block_id, r#ref = %req.ref_, files = ?names,
         "[ui-automation] browser upload"
@@ -928,8 +948,8 @@ pub(crate) async fn handle_ui_browser_set_files(
     proxy_data(
         &state,
         "set_files",
-        json!({ "block_id": block_id, "ref": req.ref_, "paths": paths }),
-        std::time::Duration::from_secs(20),
+        json!({ "block_id": block_id, "ref": req.ref_, "files": files }),
+        std::time::Duration::from_secs(60),
     )
     .await
 }

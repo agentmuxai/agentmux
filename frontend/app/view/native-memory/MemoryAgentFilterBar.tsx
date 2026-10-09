@@ -16,7 +16,8 @@
  * `native-memory-manager.tsx` owns the signals and does the actual filtering.
  */
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { type Accessor, type JSX } from "solid-js";
+import { FilterInput } from "@/app/element/ui";
 
 export type MemoryAgentSortOption = "name" | "count" | "provider";
 
@@ -33,15 +34,6 @@ export interface MemoryAgentFilterBarProps {
 }
 
 export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Element => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-        // Same convention as AgentPickerFilterBar: clears the field without
-        // hiding the bar (this bar has no hidden state to return to).
-        if (e.key === "Escape" && props.value()) {
-            e.preventDefault();
-            props.onClear();
-        }
-    };
-
     return (
         <div class="memory-agent-filter-bar" data-testid="memory-agent-filter-bar">
             {/* Icon + input + clear button share one flex child (ReAgent P2,
@@ -52,27 +44,17 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                 full row. Grouping them means the narrow-pane flex-basis:100%
                 rule (see the .scss) applies to the trio atomically. */}
             <span class="memory-agent-filter-search">
-                <i class="fa-solid fa-magnifying-glass memory-agent-filter-icon" aria-hidden="true" />
-                <input
-                    type="text"
-                    class="memory-agent-filter-input"
-                    placeholder="Filter agents..."
+                <FilterInput
+                    bare
                     value={props.value()}
-                    data-testid="memory-agent-filter-input"
-                    onInput={(e) => props.onInput(e.currentTarget.value)}
-                    onKeyDown={handleKeyDown}
+                    onInput={props.onInput}
+                    onClear={props.onClear}
+                    placeholder="Filter agents..."
+                    iconClass="memory-agent-filter-icon"
+                    inputClass="memory-agent-filter-input"
+                    clearClass="memory-agent-filter-clear"
+                    testId="memory-agent-filter"
                 />
-                <Show when={props.value()}>
-                    <button
-                        type="button"
-                        class="memory-agent-filter-clear"
-                        onClick={() => props.onClear()}
-                        aria-label="Clear filter"
-                        data-testid="memory-agent-filter-clear"
-                    >
-                        &times;
-                    </button>
-                </Show>
             </span>
             <label class="memory-agent-filter-toggle" data-testid="memory-agent-filter-toggle" title="Has memories">
                 <input

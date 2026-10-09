@@ -163,6 +163,22 @@ impl PersistentSubprocessController {
                         now_ms,
                     );
                 }
+                // A pass the CLI starts by itself: a finished background
+                // task's `task_notification`, then a fresh `system/init` with
+                // no input from srv (turn-model spec §4.2). Recorded so the
+                // agent reads busy for that pass, everywhere `turn_active`
+                // is read. Ignored from a replaced process.
+                if parsed.get("type").and_then(|v| v.as_str()) == Some("system") {
+                    let subtype = parsed.get("subtype").and_then(|v| v.as_str());
+                    let current = || inner_read.lock().unwrap().spawn_generation == my_generation_read;
+                    if subtype == Some("task_notification") && current() {
+                        health_read.note_cli_task_notification(parsed.get("summary").and_then(|v| v.as_str()));
+                    } else if subtype == Some("init") && current() && health_read.mark_turn_active_from_cli() {
+                        if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                            ctrl.cli_started_pass();
+                        }
+                    }
+                }
                 // The CLI version this agent now runs, from Claude's own
                 // `system/init` frame: every spawn path passes here, and
                 // it is the version that actually runs, so a self-update
@@ -222,6 +238,7 @@ impl PersistentSubprocessController {
                         &health_read,
                         &block_id_read,
                         my_generation_read,
+                        Some(crate::backend::blockcontroller::health::PassStats::from_result_frame(&parsed)),
                     );
                     // `None`: this reader's process has been replaced. Its
                     // `result` ends nothing the current process is doing,

@@ -24,6 +24,7 @@ import { PinnedEditorLayout } from "@/app/view/memory-editor/PinnedEditorLayout"
 import { globalMemoryHistorySource, type GlobalBundleViewModel, type GlobalMemoryDraft } from "./global-bundle-model";
 import { keyLabel } from "@/app/keybindings";
 import { Button } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 const SURFACE = "armory-global";
 
@@ -71,6 +72,9 @@ function EditorBar(props: { model: GlobalBundleViewModel; isNew: boolean }): JSX
                     onInput={(e) => draft.setDraft({ ...value(), name: e.currentTarget.value })}
                     onContextMenu={showTextInputContextMenu}
                     placeholder="e.g. Coding Standards"
+                    ref={(el) => {
+                        if (props.isNew) focusOnOpen(el);
+                    }}
                 />
             </label>
         </>
@@ -171,6 +175,7 @@ function EntryView(props: { model: GlobalBundleViewModel; id: string }): JSX.Ele
         <MemoryContent
             content={entry().instructions ?? ""}
             editing={draft.editingAtom()}
+            autoFocus
             draft={draft.draftAtom()?.instructions ?? ""}
             onDraftInput={(v) => draft.setDraft({ ...(draft.draftAtom() ?? { name: "", instructions: "" }), instructions: v })}
             emptyText="(empty)"

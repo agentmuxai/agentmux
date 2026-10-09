@@ -23,7 +23,8 @@ import {
     type RemoteGroup,
 } from "./remotes-sections";
 import "./remotes-view.scss";
-import { Button, IconButton } from "@/app/element/ui";
+import { Button, FilterInput, IconButton } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 interface MenuState {
     items: ContextMenuItem[];
@@ -52,14 +53,7 @@ export function RemotesView(props: { model: RemotesViewModel }): JSX.Element {
     return (
         <div class="remotes-view">
             <div class="remotes-toolbar">
-                <input
-                    class="remotes-filter"
-                    type="search"
-                    placeholder="Filter remotes"
-                    aria-label="Filter remotes"
-                    value={model.filter()}
-                    onInput={(e) => model.setFilter(e.currentTarget.value)}
-                />
+                <FilterInput value={model.filter()} onInput={model.setFilter} placeholder="Filter remotes" />
                 <IconButton icon="rotate-right" label="Refresh" class="remotes-icon-button" onClick={() => void model.refresh()} />
                 <Button icon="plus" class="remotes-add-button" aria-expanded={adding()} onClick={() => setAdding(!adding())}>
                     Add remote
@@ -431,7 +425,7 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
         <form class="remotes-add" onSubmit={(e) => void submit(e)}>
             <div class="remotes-settings">
                 <For each={ADD_FIELDS}>
-                    {(f) => (
+                    {(f, i) => (
                         <label class="remotes-setting">
                             <span>{f.label}</span>
                             <input
@@ -439,6 +433,9 @@ function AddRemoteForm(props: { model: RemotesViewModel; onDone: () => void }): 
                                 placeholder={f.placeholder}
                                 value={host()[f.key]}
                                 onInput={(e) => setHost({ ...host(), [f.key]: e.currentTarget.value })}
+                                ref={(el) => {
+                                    if (i() === 0) focusOnOpen(el);
+                                }}
                             />
                         </label>
                     )}

@@ -3,25 +3,25 @@
 
 //! The one path every ambient Haiku call takes: admit through the gateway,
 //! optionally wait for a concurrency permit, do the caller's own preparation,
-//! then run the CLI and validate the reply.
+//! then run the CLI and judge the reply.
 //!
 //! ```ignore
-//! let slot = call::admit(key, generation, Some(limits::pull_call_semaphore())).await?;
+//! let slot = call::admit(&purpose::ACTIVITY_SUMMARY, block_id, generation, Some(limits::pull_call_semaphore())).await?;
 //! // ... read the block, build the prompt (slot.cancellation() is available) ...
-//! let reply = slot.run(&target, &prompt, |t| validate::accept_line(t, &limits)).await;
+//! let reply = slot.run(&target, &prompt, |raw| reply::judge_line(raw, |t| validate::accept_line(t, &limits))).await;
 //! ```
-//!
-//! Before this, six call sites each hand-wrote the same admit / permit / invoke /
-//! drop-the-guard / trim-and-empty-check sequence, and only one of them
-//! validated what the model said.
 //!
 //! The slot holds the gateway guard and the permit, so every return path
 //! (including an early `?` while preparing) releases both, and a newer request
-//! for the same key still cancels this one's CLI.
+//! for the same key still cancels this one's CLI. Every admitted call ends in
+//! exactly one recorded outcome, taken from the judge's [`Verdict`].
 
 use tokio::sync::{Semaphore, SemaphorePermit};
 use tokio_util::sync::CancellationToken;
 
+use super::outcome::{Outcome, Timing};
+use super::purpose::Purpose;
+use super::reply::Verdict;
 use super::{gateway, Admission, AmbientCallGuard, AmbientCallKey};
 use crate::agents::TokenCounts;
 use crate::backend::obj::{self, MetaMapType};
@@ -43,10 +43,10 @@ impl CliTarget {
     }
 }
 
-/// What a call produced. `text` is already validated: empty means the model had
-/// nothing usable to say (or the call failed or was superseded). `tokens` is
-/// reported whenever the CLI reported usage, including when the text is withheld,
-/// because the spend happened either way.
+/// What a call produced. `text` is already judged: empty means there is nothing
+/// to use (the model skipped, the reply was refused, or the call failed or was
+/// superseded). `tokens` is reported whenever the CLI reported usage, including
+/// when the text is withheld, because the spend happened either way.
 #[derive(Debug, Default)]
 pub struct Reply {
     pub text: String,
@@ -69,44 +69,47 @@ impl Reply {
 /// An admitted call. Dropping it (any path) releases the gateway entry and the
 /// permit.
 pub struct Slot {
-    purpose: &'static str,
+    purpose: &'static Purpose,
     entity_id: String,
     cancel: CancellationToken,
     _permit: Option<SemaphorePermit<'static>>,
     _guard: AmbientCallGuard<'static>,
     /// Set once this call's outcome is recorded, so `Drop` records `NotRun` only
     /// for a call given up without one: every admitted call ends in exactly one
-    /// outcome (Codex P2 on #4243).
+    /// outcome.
     recorded: bool,
+    /// Time spent waiting for a concurrency permit after admission.
+    queued_ms: u64,
 }
 
 impl Drop for Slot {
     fn drop(&mut self) {
         if !self.recorded {
-            super::outcome::record(self.purpose, &self.entity_id, super::outcome::Outcome::NotRun, None);
+            super::outcome::record(self.purpose.tag, &self.entity_id, Outcome::NotRun, None);
         }
     }
 }
 
-/// Admit a call for `key` at `generation`; `None` if it is stale on arrival, or
-/// was superseded while queued for a permit. With a `limit`, waits for a permit
-/// raced against cancellation, so a request superseded in the queue never spawns
-/// a CLI at all.
+/// Admit a call for `purpose` on `entity_id` at `generation`; `None` if it is
+/// stale on arrival, or was superseded while queued for a permit. With a `limit`,
+/// waits for a permit raced against cancellation, so a request superseded in the
+/// queue never spawns a CLI at all.
 pub async fn admit(
-    key: AmbientCallKey,
+    purpose: &'static Purpose,
+    entity_id: impl Into<String>,
     generation: u64,
     limit: Option<&'static Semaphore>,
 ) -> Option<Slot> {
-    let purpose = key.purpose;
-    let entity_id = key.entity_id.clone();
-    let guard = match gateway().admit(key, generation) {
+    let entity_id = entity_id.into();
+    let guard = match gateway().admit(AmbientCallKey::new(entity_id.clone(), purpose.tag), generation) {
         Admission::Proceed(guard) => guard,
         Admission::StaleOnArrival => {
-            super::outcome::record(purpose, &entity_id, super::outcome::Outcome::Superseded, None);
+            super::outcome::record(purpose.tag, &entity_id, Outcome::Superseded, None);
             return None;
         }
     };
     let cancel = guard.cancellation();
+    let admitted_at = std::time::Instant::now();
     let permit = match limit {
         None => None,
         Some(sem) => {
@@ -117,12 +120,13 @@ pub async fn admit(
             };
             if permit.is_none() {
                 // Superseded while queued for a permit: never spawned.
-                super::outcome::record(purpose, &entity_id, super::outcome::Outcome::Superseded, None);
+                super::outcome::record(purpose.tag, &entity_id, Outcome::Superseded, None);
             }
             Some(permit?)
         }
     };
-    Some(Slot { purpose, entity_id, cancel, _permit: permit, _guard: guard, recorded: false })
+    let queued_ms = admitted_at.elapsed().as_millis() as u64;
+    Some(Slot { purpose, entity_id, cancel, _permit: permit, _guard: guard, recorded: false, queued_ms })
 }
 
 impl Slot {
@@ -133,40 +137,42 @@ impl Slot {
 
     /// Give the call up without running it, recording why (for example
     /// `EmptyDigest`), instead of the `NotRun` a plain drop records.
-    pub fn abandon(mut self, outcome: super::outcome::Outcome) {
-        super::outcome::record(self.purpose, &self.entity_id, outcome, None);
+    pub fn abandon(mut self, outcome: Outcome) {
+        super::outcome::record(self.purpose.tag, &self.entity_id, outcome, None);
         self.recorded = true;
     }
 
-    /// Run the CLI with `prompt` and keep the reply only if `accept` takes it.
-    /// Never fails: a CLI error, a cancellation and a rejected reply all come
-    /// back as a `Reply` with empty text.
-    pub async fn run(
-        mut self,
-        target: &CliTarget,
-        prompt: &str,
-        accept: impl Fn(&str) -> Option<String>,
-    ) -> Reply {
+    /// Run the CLI with `prompt`, within the purpose's time limit, and let `judge`
+    /// decide what the reply is worth (`reply::judge_line` for a one-line reply in
+    /// the `ANSWER:`/`SKIP` format). Never fails: a CLI error, a cancellation, a
+    /// skip and a refused reply all come back as a `Reply` with empty text.
+    pub async fn run(mut self, target: &CliTarget, prompt: &str, judge: impl Fn(&str) -> Verdict) -> Reply {
+        let started = std::time::Instant::now();
         let result = super::cli::invoke_haiku(
             &target.cli_path,
             prompt,
             &target.meta,
             self.cancel.clone(),
+            self.purpose.timeout,
         )
         .await;
+        let timing = Timing { queued_ms: self.queued_ms, run_ms: started.elapsed().as_millis() as u64 };
+        self.recorded = true;
         match result {
             Err(error) => {
                 let outcome = super::outcome::classify_error(&error, self.cancel.is_cancelled());
-                tracing::debug!(purpose = self.purpose, entity = %self.entity_id, error = %error, "ambient call failed");
-                super::outcome::record(self.purpose, &self.entity_id, outcome, None);
-                self.recorded = true;
+                tracing::debug!(purpose = self.purpose.tag, entity = %self.entity_id, error = %error, "ambient call failed");
+                super::outcome::record_timed(self.purpose.tag, &self.entity_id, outcome, None, Some(timing));
                 Reply { text: String::new(), tokens: None, error: Some(error) }
             }
             Ok((raw, tokens)) => {
-                let text = accept(&raw).unwrap_or_default();
-                let outcome = super::outcome::classify_reply(&raw, !text.is_empty());
-                super::outcome::record(self.purpose, &self.entity_id, outcome, Some(&raw));
-                self.recorded = true;
+                let (text, outcome) = match judge(&raw) {
+                    Verdict::Use(text) => (text, Outcome::Accepted),
+                    Verdict::Skip => (String::new(), Outcome::Skipped),
+                    Verdict::Reject(reason) => (String::new(), Outcome::Rejected(reason)),
+                };
+                let logged = self.purpose.logs_reply.then_some(raw.as_str());
+                super::outcome::record_timed(self.purpose.tag, &self.entity_id, outcome, logged, Some(timing));
                 Reply { text, tokens, error: None }
             }
         }
@@ -176,63 +182,74 @@ impl Slot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
-    fn key(entity: &str, purpose: &'static str) -> AmbientCallKey {
-        AmbientCallKey::new(entity, purpose)
+    /// Test purposes, each its own tag so parallel tests never share a gateway
+    /// key or an outcome counter.
+    macro_rules! test_purpose {
+        ($name:ident, $tag:literal) => {
+            static $name: Purpose = Purpose { tag: $tag, timeout: Duration::from_secs(1), logs_reply: true };
+        };
     }
+    test_purpose!(OUTCOMES, "test_purpose_slot_outcomes");
+    test_purpose!(STALE, "t_stale");
+    test_purpose!(NEWER, "t_newer");
+    test_purpose!(SIBLINGS, "t_sib");
+    test_purpose!(PERMIT, "t_permit");
+    test_purpose!(QUEUE, "t_queue");
+    test_purpose!(REDO, "t_redo");
 
     fn leaked_semaphore(permits: usize) -> &'static Semaphore {
         Box::leak(Box::new(Semaphore::new(permits)))
     }
 
-    /// Codex P2 on #4243: an admitted call given up before running (no block, no
-    /// CLI path) still ends in one outcome, and an explicit `abandon` records its
-    /// own outcome instead of `not_run`, never both.
+    /// An admitted call given up before running (no block, no CLI path) still ends
+    /// in one outcome, and an explicit `abandon` records its own outcome instead of
+    /// `not_run`, never both.
     #[tokio::test]
     async fn every_admitted_call_ends_in_exactly_one_outcome() {
-        const P: &str = "test_purpose_slot_outcomes";
         let count = |label: &str| {
             crate::ambient::outcome::snapshot()
-                .get(P)
+                .get(OUTCOMES.tag)
                 .and_then(|by| by.get(label).copied())
                 .unwrap_or(0)
         };
-        let dropped = admit(key("e1", P), 1, None).await.unwrap();
+        let dropped = admit(&OUTCOMES, "e1", 1, None).await.unwrap();
         drop(dropped);
         assert_eq!(count("not_run"), 1);
 
-        let abandoned = admit(key("e2", P), 1, None).await.unwrap();
-        abandoned.abandon(crate::ambient::outcome::Outcome::EmptyDigest);
+        let abandoned = admit(&OUTCOMES, "e2", 1, None).await.unwrap();
+        abandoned.abandon(Outcome::EmptyDigest);
         assert_eq!(count("empty_digest"), 1);
         assert_eq!(count("not_run"), 1, "abandon records once, not twice");
     }
 
     #[tokio::test]
     async fn a_stale_request_is_not_admitted() {
-        let _newer = admit(key("call-stale", "t_stale"), 5, None).await.expect("first is admitted");
-        assert!(admit(key("call-stale", "t_stale"), 5, None).await.is_none(), "same generation");
-        assert!(admit(key("call-stale", "t_stale"), 4, None).await.is_none(), "older generation");
+        let _newer = admit(&STALE, "call-stale", 5, None).await.expect("first is admitted");
+        assert!(admit(&STALE, "call-stale", 5, None).await.is_none(), "same generation");
+        assert!(admit(&STALE, "call-stale", 4, None).await.is_none(), "older generation");
     }
 
     #[tokio::test]
     async fn a_newer_request_cancels_the_older_ones_cli() {
-        let first = admit(key("call-newer", "t_newer"), 1, None).await.unwrap();
+        let first = admit(&NEWER, "call-newer", 1, None).await.unwrap();
         let cancelled = first.cancellation();
-        let _second = admit(key("call-newer", "t_newer"), 2, None).await.unwrap();
+        let _second = admit(&NEWER, "call-newer", 2, None).await.unwrap();
         assert!(cancelled.is_cancelled());
     }
 
     #[tokio::test]
     async fn different_entities_do_not_cancel_each_other() {
-        let first = admit(key("call-a", "t_sib"), 1, None).await.unwrap();
-        let _second = admit(key("call-b", "t_sib"), 1, None).await.unwrap();
+        let first = admit(&SIBLINGS, "call-a", 1, None).await.unwrap();
+        let _second = admit(&SIBLINGS, "call-b", 1, None).await.unwrap();
         assert!(!first.cancellation().is_cancelled());
     }
 
     #[tokio::test]
     async fn the_permit_is_held_until_the_slot_drops() {
         let sem = leaked_semaphore(1);
-        let slot = admit(key("call-permit", "t_permit"), 1, Some(sem)).await.unwrap();
+        let slot = admit(&PERMIT, "call-permit", 1, Some(sem)).await.unwrap();
         assert_eq!(sem.available_permits(), 0);
         drop(slot);
         assert_eq!(sem.available_permits(), 1);
@@ -241,13 +258,13 @@ mod tests {
     #[tokio::test]
     async fn a_request_superseded_while_queued_never_gets_a_permit() {
         let sem = leaked_semaphore(1);
-        let holder = admit(key("call-holder", "t_queue"), 1, Some(sem)).await.unwrap();
+        let holder = admit(&QUEUE, "call-holder", 1, Some(sem)).await.unwrap();
 
         // Queues behind the holder (a different entity, so the holder is not cancelled).
-        let queued = tokio::spawn(admit(key("call-queued", "t_queue"), 1, Some(sem)));
+        let queued = tokio::spawn(admit(&QUEUE, "call-queued", 1, Some(sem)));
         tokio::task::yield_now().await;
         // A newer request for the queued key supersedes it while it waits.
-        let newer = admit(key("call-queued", "t_queue"), 2, None).await.unwrap();
+        let newer = admit(&QUEUE, "call-queued", 2, None).await.unwrap();
 
         assert!(queued.await.unwrap().is_none(), "superseded in the queue");
         drop(holder);
@@ -257,10 +274,10 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_the_slot_lets_the_same_generation_be_admitted_again_only_if_newer() {
-        let slot = admit(key("call-redo", "t_redo"), 3, None).await.unwrap();
+        let slot = admit(&REDO, "call-redo", 3, None).await.unwrap();
         drop(slot);
         // The gateway clears the in-flight entry on drop, so the next request admits.
-        assert!(admit(key("call-redo", "t_redo"), 3, None).await.is_some());
+        assert!(admit(&REDO, "call-redo", 3, None).await.is_some());
     }
 
     #[test]

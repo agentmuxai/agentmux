@@ -3,6 +3,7 @@
 **Date:** 2026-10-03
 **Status:** active — Phase 1 built in #4281 (the default flip and adoption); the confirmation on destructive auth operations, the import action, the additive-migration CI test, the keychain-token reverse adoption and the pruner guard are not built. §10 records what Phase 1 does differently from §5.2, and why.
 **Author:** AgentY, at the owner's request
+**Amended by:** `SPEC_MUXBUS_SIGN_IN_PER_CHANNEL_2026_10_08.md` (2026-10-08): MuxBus sign-in is per channel again; everything else here still shares.
 **Amends:** `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md` (reverses its default), `SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md` (the opt-in mechanism stays), and the per-channel half of `SPEC_MUXBUS_KEYCHAIN_PER_CHANNEL_2026_10_02.md` (#4190).
 **Related:** `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` (invariant INV-PC), `SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`, `SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md`, `SPEC_MUXBUS_CROSS_CHANNEL_DUPLICATE_DELIVERY_2026_07_04.md`, `SPEC_LOCAL_CHANNEL_PRUNER_2026_06_25.md`, `SPEC_MY_AGENTS_TILES_AUTH_AND_HISTORY_2026_10_03.md` (this spec is its prerequisite).
 

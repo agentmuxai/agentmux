@@ -1,6 +1,7 @@
 # Split the low-memory banner into independent RAM and Page File warnings
 
 **Date:** 2026-08-07
+**Amended by:** `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md` (2026-10-08): the top-of-window banner is gone; the signals turn the status bar's backend dot yellow and show as notices at the top of its panel, and the event is now `health-signal`.
 **Status:** implemented — PR #2451 (P0 + P1); verified in code 2026-08-10.
 **Affected:** `agentmux-cef` (memory heartbeat, pressure classifier, banner emit) and
 `frontend` (banner component), Windows only.

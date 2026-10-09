@@ -17,6 +17,11 @@ path = "src/lib.rs"
 name = "agentmux-remote"
 path = "src/main.rs"
 
+[dependencies]
+# Tower's process frames (`procs`): the same readers srv uses locally. Itself
+# std + libc on Unix.
+agentmux-procstats = { path = "../procstats" }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

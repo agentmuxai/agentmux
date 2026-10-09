@@ -32,7 +32,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-bashwrap"
-version = "0.59.15"
+version = "0.59.16"
 dependencies = [
  "agentmux-common",
  "anyhow",
@@ -53,7 +53,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-cef"
-version = "0.59.15"
+version = "0.59.16"
 dependencies = [
  "agentmux-common",
  "ash",
@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-common"
-version = "0.59.15"
+version = "0.59.16"
 dependencies = [
  "base64",
  "dirs 5.0.1",
@@ -111,7 +111,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-launcher"
-version = "0.59.15"
+version = "0.59.16"
 dependencies = [
  "agentmux-common",
  "chrono",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "agentmux-mcp"
-version = "0.59.15"
+version = "0.59.16"
 dependencies = [
  "agentmux-common",
  "anyhow",
@@ -159,18 +159,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "agentmux-remote"
-version = "0.59.15"
+name = "agentmux-procstats"
+version = "0.59.16"
 dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "agentmux-remote"
+version = "0.59.16"
+dependencies = [
+ "agentmux-procstats",
  "libc",
  "tempfile",
 ]
 
 [[package]]
 name = "agentmux-srv"
-version = "0.59.15"
+version = "0.59.16"
 dependencies = [
  "agentmux-common",
+ "agentmux-procstats",
  "agentmux-remote",
  "async-stream",
  "axum 0.7.9",
@@ -204,6 +214,7 @@ dependencies = [
  "parking_lot",
  "portable-pty",
  "proptest",
+ "psl",
  "quick-xml 0.39.4",
  "rcgen",
  "reqwest",

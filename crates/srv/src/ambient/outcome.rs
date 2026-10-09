@@ -15,15 +15,17 @@
 use std::collections::BTreeMap;
 use std::sync::{Mutex, OnceLock};
 
-use super::prompt::KEEP_TOKEN;
-
 /// How an ambient call ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     /// The reply passed validation and was used.
     Accepted,
-    /// The model abstained with the `KEEP` token: no change, the safe answer.
-    Kept,
+    /// The model answered `SKIP` (`reply`): nothing to write, or for a title, no
+    /// change. A healthy answer.
+    Skipped,
+    /// No model call: a check in code already showed there is nothing to write
+    /// (for a suggestion, the assistant's last message waits for the user).
+    Gated,
     /// The reply was refused; the reason says by which rule.
     Rejected(RejectReason),
     /// There was nothing to send: no conversation in the digest, or no message
@@ -46,14 +48,11 @@ pub enum Outcome {
 pub enum RejectReason {
     /// Blank after trimming.
     Empty,
-    /// Wrong shape: several lines, too long, or no letters.
-    Shape,
-    /// About the absence of a title (`none`, `(none yet)`, `untitled`, ...).
-    AbsencePattern,
-    /// A refusal or an assistant-style reply instead of the thing asked for.
-    Refusal,
-    /// Refused by a purpose-specific rule the generic classifier cannot name.
+    /// Refused by the purpose's own check after a well-formed `ANSWER:` (too
+    /// long, a placeholder title, a risky suggestion).
     Other,
+    /// Not in the reply format (`reply`): no `ANSWER:` prefix and not `SKIP`.
+    Format,
 }
 
 impl Outcome {
@@ -61,11 +60,10 @@ impl Outcome {
     pub fn label(&self) -> &'static str {
         match self {
             Outcome::Accepted => "accepted",
-            Outcome::Kept => "kept",
+            Outcome::Skipped => "skipped",
+            Outcome::Gated => "gated",
+            Outcome::Rejected(RejectReason::Format) => "rejected:format",
             Outcome::Rejected(RejectReason::Empty) => "rejected:empty",
-            Outcome::Rejected(RejectReason::Shape) => "rejected:shape",
-            Outcome::Rejected(RejectReason::AbsencePattern) => "rejected:absence_pattern",
-            Outcome::Rejected(RejectReason::Refusal) => "rejected:refusal",
             Outcome::Rejected(RejectReason::Other) => "rejected:other",
             Outcome::EmptyDigest => "empty_digest",
             Outcome::Superseded => "superseded",
@@ -74,29 +72,6 @@ impl Outcome {
             Outcome::NotRun => "not_run",
         }
     }
-}
-
-/// Classify a reply the CLI returned. `accepted` is whether the purpose's own
-/// validator took it; when it did not, the reason is named by the generic rules
-/// (`validate::rejection_reason`), which cover every title-shaped purpose.
-pub fn classify_reply(raw: &str, accepted: bool) -> Outcome {
-    if accepted {
-        return Outcome::Accepted;
-    }
-    let trimmed = raw.trim();
-    // An abstain, bare or explained ("KEEP — the title still fits"): the reply
-    // leads with the token. Counted as kept, never as a refusal, or the Titles row
-    // would warn about a healthy pipeline and the logged rejected corpus would
-    // fill with abstains (ReAgent P2 on #4243). A real title that starts with the
-    // word ("Keep alive pings") is accepted above and never reaches this.
-    let first_word = trimmed.split_whitespace().next().unwrap_or("");
-    if first_word
-        .trim_matches(|c: char| !c.is_alphanumeric())
-        .eq_ignore_ascii_case(KEEP_TOKEN)
-    {
-        return Outcome::Kept;
-    }
-    Outcome::Rejected(super::validate::rejection_reason(trimmed))
 }
 
 /// Classify a failed CLI call. `cancelled` is whether the gateway cancelled it
@@ -131,30 +106,48 @@ fn truncated(text: &str) -> String {
     out.replace('\n', " ⏎ ")
 }
 
-/// Record one outcome: count it, and log it at info with the purpose and entity.
-/// `text` is the model's raw reply, logged (truncated) for rejections only.
+/// How long a call waited and ran, for the outcome line. Both in milliseconds.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Timing {
+    /// Waiting for a concurrency permit, from admission.
+    pub queued_ms: u64,
+    /// The CLI call itself, spawn to exit (or cancellation, or the time limit).
+    pub run_ms: u64,
+}
+
+/// Record one outcome without timings: count it, and log it at info with the
+/// purpose and entity. See [`record_timed`].
 pub fn record(purpose: &'static str, entity: &str, outcome: Outcome, text: Option<&str>) {
+    record_timed(purpose, entity, outcome, text, None);
+}
+
+/// Record one outcome: count it, and log it at info with the purpose, the entity
+/// and, when the call ran, how long it queued and ran. `text` is logged
+/// (truncated) for a rejected reply, which is the corpus the validators are tuned
+/// with, and for an accepted one, which is what the user is shown: without it, a
+/// bad answer that passed could not be found afterwards.
+pub fn record_timed(purpose: &'static str, entity: &str, outcome: Outcome, text: Option<&str>, timing: Option<Timing>) {
     if let Ok(mut map) = counts().lock() {
         *map.entry(purpose)
             .or_default()
             .entry(outcome.label())
             .or_default() += 1;
     }
-    match (outcome, text) {
-        (Outcome::Rejected(_), Some(t)) => tracing::info!(
-            purpose,
-            entity,
-            outcome = outcome.label(),
-            text = %truncated(t),
-            "ambient outcome"
-        ),
-        _ => tracing::info!(
-            purpose,
-            entity,
-            outcome = outcome.label(),
-            "ambient outcome"
-        ),
-    }
+    let text = match outcome {
+        Outcome::Rejected(_) | Outcome::Accepted => text.map(truncated),
+        _ => None,
+    };
+    let queued_ms = timing.map(|t| t.queued_ms);
+    let run_ms = timing.map(|t| t.run_ms);
+    tracing::info!(
+        purpose,
+        entity,
+        outcome = outcome.label(),
+        text = text.as_deref(),
+        queued_ms,
+        run_ms,
+        "ambient outcome"
+    );
 }
 
 /// Every count since this srv started, by purpose then outcome label.
@@ -179,47 +172,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_reply_is_classified_by_the_rule_that_refused_it() {
-        assert_eq!(
-            classify_reply("Fix the login race", true),
-            Outcome::Accepted
-        );
-        assert_eq!(classify_reply("KEEP", false), Outcome::Kept);
-        assert_eq!(classify_reply("  keep. ", false), Outcome::Kept);
-        // An explained abstain is still an abstain, not a refusal.
-        assert_eq!(
-            classify_reply("KEEP — the title still fits", false),
-            Outcome::Kept
-        );
-        assert_eq!(
-            classify_reply("Keep the current title", false),
-            Outcome::Kept
-        );
-        // A real title starting with the word was accepted, so it never gets here.
-        assert_eq!(classify_reply("Keep alive pings", true), Outcome::Accepted);
-        assert_eq!(
-            classify_reply("   ", false),
-            Outcome::Rejected(RejectReason::Empty)
-        );
-        assert_eq!(
-            classify_reply("(none yet)", false),
-            Outcome::Rejected(RejectReason::AbsencePattern)
-        );
-        assert_eq!(
-            classify_reply("Line one\nline two", false),
-            Outcome::Rejected(RejectReason::Shape)
-        );
-        assert_eq!(
-            classify_reply("12345", false),
-            Outcome::Rejected(RejectReason::Shape)
-        );
-        assert_eq!(
-            classify_reply("I'm sorry, but I can't help with that", false),
-            Outcome::Rejected(RejectReason::Refusal)
-        );
-    }
-
-    #[test]
     fn a_failure_is_superseded_timed_out_or_a_cli_failure() {
         assert_eq!(classify_error("cancelled", true), Outcome::Superseded);
         assert_eq!(
@@ -238,16 +190,13 @@ mod tests {
         let p = "test_purpose_outcome_counts";
         record(p, "b1", Outcome::Accepted, None);
         record(p, "b1", Outcome::Accepted, None);
-        record(
-            p,
-            "b2",
-            Outcome::Rejected(RejectReason::AbsencePattern),
-            Some("(none yet)"),
-        );
+        record(p, "b2", Outcome::Rejected(RejectReason::Format), Some("(none yet)"));
+        record(p, "b3", Outcome::Skipped, Some("SKIP"));
         let snap = snapshot();
         let by = &snap[p];
         assert_eq!(by["accepted"], 2);
-        assert_eq!(by["rejected:absence_pattern"], 1);
+        assert_eq!(by["rejected:format"], 1);
+        assert_eq!(by["skipped"], 1);
     }
 
     #[test]

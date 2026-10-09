@@ -66,18 +66,6 @@
             }
         }
     },
-    "defwidget@remotes": {
-        "display:order": 16,
-        "display:pinned": false,
-        "icon": "server",
-        "label": "Remotes",
-        "description": "Remote machines (SSH, WSL)",
-        "blockdef": {
-            "meta": {
-                "view": "remotes"
-            }
-        }
-    },
     "defwidget@terminal": {
         "display:order": 6,
         "display:pinned": true,
@@ -98,6 +86,18 @@
         "blockdef": {
             "meta": {
                 "view": "sysinfo"
+            }
+        }
+    },
+    "defwidget@tower": {
+        "display:order": 16,
+        "display:pinned": false,
+        "icon": "tower-observation",
+        "label": "Tower",
+        "description": "CPU and memory per pane and per process (read-only task manager)",
+        "blockdef": {
+            "meta": {
+                "view": "tower"
             }
         }
     },

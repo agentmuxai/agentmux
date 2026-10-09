@@ -143,6 +143,10 @@
         "widget:icononly": {
           "type": "boolean"
         },
+        "statusbar:showmuxbuscloud": {
+          "type": "boolean",
+          "description": "Show MuxBus Cloud in the status bar: the dot after the host name and the sign-in block in the host menu. Default true (absent means shown); set false to hide both. LAN discovery is unaffected. See docs/specs/SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md."
+        },
         "window:*": {
           "type": "boolean"
         },
@@ -363,6 +367,11 @@
           "type": "boolean",
           "default": true,
           "description": "Notify when an agent receives a message that needs your review before it acts (ESCALATE=required). The notification never contains the message."
+        },
+        "notify:os:cloudsignedout": {
+          "type": "boolean",
+          "default": true,
+          "description": "Notify once when this AgentMux is signed out of MuxBus and agents stop getting messages from other computers and GitHub."
         },
         "notify:pause:until": {
           "type": "integer",

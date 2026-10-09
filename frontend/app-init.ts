@@ -68,6 +68,7 @@ import { startSingletonCrashRelease } from "@/app/store/singleton-modal";
 import { installFileDropController } from "@/app/drag/file-drop";
 import { installWindowDragEvents } from "@/app/drag/window-drag-events";
 import { MuxInitFatalError, requireLoaded } from "@/app/init/require-loaded";
+import { installFocusFollowsSelection } from "@/app/store/focusManager";
 
 // Deferred — assigned inside initApp() after window.api is ready.
 // Do NOT call getApi() at module level: this file is statically imported by
@@ -989,6 +990,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     registerGlobalKeys();
+    // The caret follows the selected pane (window tab switches, the <body> safety net).
+    installFocusFollowsSelection();
     registerUserKeybindings();
     registerDefaultCommands();
     registerControlShiftTracking();

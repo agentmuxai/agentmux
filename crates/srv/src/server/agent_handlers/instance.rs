@@ -222,12 +222,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let broker = state.broker.clone();
     let identity_store_del = state.identity_store.clone();
+    let id_store_del = state.id_store.clone();
     engine.register_typed(
         COMMAND_DELETE_AGENT_INSTANCE,
         move |cmd: CommandDeleteAgentInstanceData, _ctx| {
             let mstore = mstore.clone();
             let broker = broker.clone();
             let identity_store = identity_store_del.clone();
+            let id_store = id_store_del.clone();
             async move {
                 // Read the row first so we can emit a scoped event after.
                 let definition_id = mstore
@@ -246,7 +248,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // deliver" bug, reproduced on this entry point. The purge
                 // is a no-op for an id with no rows, so there is nothing to
                 // gate on.
-                super::purge_identity_store_rows(&identity_store, &cmd.id, "deleteagentinstance");
+                super::purge_identity_store_rows(&identity_store, &id_store, &cmd.id, "deleteagentinstance");
                 if let Some(def_id) = definition_id.filter(|_| deleted) {
                     broker.publish(crate::backend::mps::MuxEvent {
                         event: format!("agentinstances:changed:{}", def_id),

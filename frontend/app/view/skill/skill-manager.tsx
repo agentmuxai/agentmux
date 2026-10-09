@@ -16,6 +16,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { SkillCatalogModel } from "./skill-model";
 import "../agent/components/AgentPrimitiveModal.scss";
 import { Button } from "@/app/element/ui";
+import { focusOnOpen } from "@/util/focusutil";
 
 export const SkillManager = (): JSX.Element => {
     const model = new SkillCatalogModel();
@@ -152,6 +153,7 @@ export const SkillManager = (): JSX.Element => {
                                     onContextMenu={showTextInputContextMenu}
                                     placeholder="e.g. pdf-extraction"
                                     required
+                                    ref={(el) => focusOnOpen(el, { select: true })}
                                 />
                                 <span class="agent-primitive-modal-field-label">Format</span>
                                 <select

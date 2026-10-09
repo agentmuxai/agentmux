@@ -7,6 +7,7 @@
 @use "./cpu-cores-popover";
 @use "./disk-volumes-popover";
 @use "./maintenance-section";
+@use "./health-notices";
 
 .status-bar {
     // Responsive 2-row wrap (§4.4 of SPEC_STATUSBAR_TOKEN_USAGE).
@@ -582,5 +583,18 @@
 
     &--ok {
         background: var(--success-color, #4caf50);
+    }
+}
+
+// ── Cloud delivery indicator (MuxBusIndicator.tsx) ─────────────────────────
+// Shown only when cloud messages stopped arriving: amber while MuxBus can't
+// be reached, red when the sign-in stopped working (click to sign in).
+.status-muxbus {
+    &--warn {
+        color: var(--warning-color);
+    }
+
+    &--error {
+        color: var(--error-color);
     }
 }

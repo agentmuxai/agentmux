@@ -3,7 +3,7 @@
 
 // Pure helpers behind the status bar's Disk readout + per-drive popover.
 // Kept free of Solid/DOM so the parsing/formatting is unit-testable
-// (same split as memory-pressure-banner's pure fns).
+// (same split as backend-uptime.ts and backend-dot.ts).
 
 export interface DiskVolume {
     /** Display label — mount point with a trailing backslash trimmed ("C:" from "C:\"). */

@@ -128,6 +128,7 @@ jobs:
       frontend: ${{ steps.classify.outputs.frontend }}
       docs_only: ${{ steps.classify.outputs.docs_only }}
       docs_index: ${{ steps.classify.outputs.docs_index }}
+      version_only: ${{ steps.classify.outputs.version_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -147,7 +148,7 @@ jobs:
         # whole design exists to prevent.
         run: |
           run_everything() {
-            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\n' >> "$GITHUB_OUTPUT"
+            printf 'rust=true\nfrontend=true\ndocs_only=false\ndocs_index=true\nversion_only=false\n' >> "$GITHUB_OUTPUT"
             echo "::notice::running all checks — $1"
           }
 
@@ -158,9 +159,18 @@ jobs:
             exit 0
           fi
 
-          FILES="$(gh api \
-            "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --paginate --jq '.[].filename' 2>/dev/null)" || FILES=""
+          # Each changed file with its diff (`patch`): the diff is what proves a
+          # release PR only moves the version (R7). gh's status is checked on
+          # its own, before `jq -s` joins the paginated objects into one array:
+          # in a pipeline the status would be jq's, and a page that failed after
+          # page 1 would leave a partial list that could pass as version-only.
+          # Any gh failure leaves FILES empty, which runs everything (R2).
+          FILES=""
+          if RAW="$(gh api \
+               "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+               --paginate --jq '.[] | {filename, patch}' 2>/dev/null)"; then
+            FILES="$(printf '%s' "$RAW" | jq -s '.')" || FILES=""
+          fi
 
           if printf '%s\n' "$FILES" | node scripts/ci-classify-changes.mjs \
                >/tmp/classify.out 2>/tmp/classify.err; then
@@ -315,7 +325,7 @@ jobs:
       # (missing fields); #1823 was a Windows `cfg` break in agentmux-cef
       # itself, which nightly (ci-nightly-build.yml) now owns catching.
       - name: cargo check --tests (CEF-free crates)
-        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote
+        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
       # in the same CEF-free scope.
@@ -336,7 +346,7 @@ jobs:
       # subset (the path-sensitive crates), not this full invocation.
       - name: cargo test (CEF-free crates)
         if: matrix.os != 'windows-latest'
-        run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -- --test-threads=1
+        run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats -- --test-threads=1
 
       # frontend/types/rpc/*.ts is generated from the Rust request/response
       # types by ts-rs. This turns the audit's "keep in sync with the

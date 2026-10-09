@@ -82,6 +82,8 @@ export function SettingsSearchBar(props: SettingsSearchBarProps): JSX.Element {
                 <input
                     ref={inputRef}
                     class="settings-search-input"
+                    // The pane's typing target when nothing else claims it (focusManager).
+                    data-pane-focus
                     type="text"
                     placeholder="Search settings..."
                     value={props.query()}

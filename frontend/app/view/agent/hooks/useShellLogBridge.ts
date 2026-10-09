@@ -4,6 +4,7 @@
 // Split out of agent-view.tsx (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §3.5 step 2).
 
 import { createSignal } from "solid-js";
+import { focusWhenRendered } from "@/util/focusutil";
 import { useActivityLog } from "./useActivityLog";
 
 // Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
@@ -61,9 +62,13 @@ export interface ShellLogBridge {
     onTermDispose: () => void;
     /** Stop writing to the terminal (its shell exited). */
     clearTermWrite: () => void;
+    /** Wrap the user's drawer toggle: a drawer they open gives its shell the
+     *  caret once the terminal is up. The `!cmd` auto-open doesn't go through
+     *  this, so it never takes the caret. */
+    withShellFocus: (toggle: () => void) => () => void;
 }
 
-export function useShellLogBridge(): ShellLogBridge {
+export function useShellLogBridge(blockId?: string): ShellLogBridge {
     // Activity log — collects per-session diagnostic entries from launch
     // flow, subprocess lifecycle, slash commands, errors, etc. `log` is
     // passed down to every hook whose signature takes a `LogFn`, but only
@@ -103,6 +108,12 @@ export function useShellLogBridge(): ShellLogBridge {
     // catch-up on a prior mount, or a live write while the drawer was open),
     // then keeps the write function around so `log` above writes live from
     // here on.
+    // Set by the user's toggle; a close clears it on dispose, so only an open
+    // they asked for focuses the shell. `armedFrom`: where the caret was at the
+    // toggle; if the user moves it (back to the composer) while the shell is
+    // still starting, the shell doesn't take it.
+    let focusOnReady = false;
+    let armedFrom: Element | null = null;
     const handleShellTermReady = (write: (text: string) => void) => {
         const all = logLines();
         for (let i = logFlushedCount; i < all.length; i++) {
@@ -110,13 +121,28 @@ export function useShellLogBridge(): ShellLogBridge {
         }
         logFlushedCount = all.length;
         setTermWrite(() => write);
+        if (!focusOnReady || blockId == null) return;
+        focusOnReady = false;
+        const active = document.activeElement;
+        if (active !== armedFrom && active !== document.body && active != null) return;
+        focusWhenRendered(() =>
+            document.querySelector<HTMLElement>(`#agent-composer-details-${CSS.escape(blockId)} .xterm-helper-textarea`)
+        );
     };
-    const handleShellTermDispose = () => setTermWrite(null);
+    const handleShellTermDispose = () => {
+        focusOnReady = false;
+        setTermWrite(null);
+    };
 
     return {
         log,
         onTermReady: handleShellTermReady,
         onTermDispose: handleShellTermDispose,
         clearTermWrite: () => setTermWrite(null),
+        withShellFocus: (toggle) => () => {
+            focusOnReady = true;
+            armedFrom = document.activeElement;
+            toggle();
+        },
     };
 }

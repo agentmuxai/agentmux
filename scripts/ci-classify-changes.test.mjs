@@ -11,7 +11,7 @@
 // and every case that should RUN is written as the assertion, not implied.
 
 import { describe, expect, it } from "vitest";
-import { classifyChanges, isDocsOnlyPath } from "./ci-classify-changes.mjs";
+import { classifyChanges, classifyPullFiles, isDocsOnlyPath, versionOnlyChange } from "./ci-classify-changes.mjs";
 
 describe("isDocsOnlyPath — things that genuinely cannot affect a build", () => {
     it("accepts documentation and licence files", () => {
@@ -257,5 +257,112 @@ describe("classifyChanges — docs_index, the cross-platform specs-index job", (
     it("tolerates git quoting and Windows separators, like the other outputs", () => {
         expect(classifyChanges(['"scripts/gen-docs-index.mjs"']).docs_index).toBe(true);
         expect(classifyChanges(["scripts\\gen-docs-index.mjs"]).docs_index).toBe(true);
+    });
+});
+
+// R7: a release PR (scripts/release.sh) moves the version in four manifests and
+// adds changelog lines; it needs none of the build jobs. The patches below have
+// the shape of the PR files API's `patch` for a real release (#4493).
+describe("R7 — version-only release PRs", () => {
+    const toml = (from, to) => `@@ -9,7 +9,7 @@ members = [\n [workspace.package]\n-version = "${from}"\n+version = "${to}"\n edition = "2021"`;
+    const lock = (from, to) =>
+        `@@ -32,7 +32,7 @@ dependencies = [\n \n [[package]]\n name = "agentmux-srv"\n-version = "${from}"\n+version = "${to}"\n dependencies = [\n@@ -53,7 +53,7 @@\n name = "agentmux-cef"\n-version = "${from}"\n+version = "${to}"`;
+    const pkg = (from, to) => `@@ -1,6 +1,6 @@\n {\n     "name": "agentmux",\n-    "version": "${from}",\n+    "version": "${to}",\n     "private": true,`;
+    const lockJson = (from, to) =>
+        `@@ -1,12 +1,12 @@\n {\n     "name": "agentmux",\n-    "version": "${from}",\n+    "version": "${to}",\n@@ -8,7 +8,7 @@\n         "": {\n-            "version": "${from}",\n+            "version": "${to}",`;
+    const release = (from = "0.59.15", to = "0.59.16") => [
+        { filename: "Cargo.toml", patch: toml(from, to) },
+        { filename: "Cargo.lock", patch: lock(from, to) },
+        { filename: "package.json", patch: pkg(from, to) },
+        { filename: "package-lock.json", patch: lockJson(from, to) },
+        { filename: "VERSION_HISTORY.md", patch: "@@ -1,3 +1,8 @@\n+## 0.59.16\n+- a fix" },
+        { filename: ".changesets/1791-fix-abcd.md", patch: "@@ -1,4 +0,0 @@\n----\n-type: patch\n-----\n-a fix" },
+    ];
+
+    it("skips the build jobs for a release PR", () => {
+        expect(versionOnlyChange(release())).toEqual({ ok: true, from: "0.59.15", to: "0.59.16" });
+        expect(classifyPullFiles(release())).toMatchObject({
+            rust: false,
+            frontend: false,
+            docs_index: false,
+            docs_only: false,
+            version_only: true,
+        });
+    });
+
+    it("runs everything when the release also changes code or CI", () => {
+        for (const extra of ["crates/srv/src/main.rs", "frontend/app/app.tsx", ".github/workflows/ci-pr.yml", "scripts/release.sh"]) {
+            const r = classifyPullFiles([...release(), { filename: extra, patch: "@@ -1 +1 @@\n-a\n+b" }]);
+            expect(r).toMatchObject({ rust: true, frontend: true, version_only: false });
+        }
+    });
+
+    it("runs everything when a manifest changes more than its version", () => {
+        // A dependency bump next to the version bump: a second version pair.
+        const dep = release();
+        dep[1] = { filename: "Cargo.lock", patch: lock("0.59.15", "0.59.16") + '\n name = "serde"\n-version = "1.0.210"\n+version = "1.0.211"' };
+        expect(classifyPullFiles(dep)).toMatchObject({ rust: true, version_only: false });
+        // A lockfile checksum, or a new dependency line.
+        const sum = release();
+        sum[1] = { filename: "Cargo.lock", patch: lock("0.59.15", "0.59.16") + '\n-checksum = "aa"\n+checksum = "bb"' };
+        expect(classifyPullFiles(sum).version_only).toBe(false);
+        const added = release();
+        added[2] = { filename: "package.json", patch: pkg("0.59.15", "0.59.16") + '\n+        "left-pad": "^1.3.0",' };
+        expect(classifyPullFiles(added).version_only).toBe(false);
+    });
+
+    it("needs the release version itself to move, in package.json", () => {
+        // A Dependabot lockfile bump: version lines, but not the release version.
+        const lockOnly = [{ filename: "package-lock.json", patch: lockJson("7.1.4", "7.1.5") }];
+        expect(classifyPullFiles(lockOnly)).toMatchObject({ frontend: true, version_only: false });
+        // Two different moves.
+        const mixed = release();
+        mixed[0] = { filename: "Cargo.toml", patch: toml("0.59.14", "0.59.16") };
+        expect(classifyPullFiles(mixed).version_only).toBe(false);
+        // No move at all.
+        expect(versionOnlyChange(release("0.59.15", "0.59.15")).ok).toBe(false);
+    });
+
+    it("builds when the new or old version isn't a valid semver", () => {
+        // Every file agrees, so release consistency passes, but Cargo rejects it.
+        for (const [from, to] of [
+            ["0.59.15", "definitely not semver"],
+            ["0.59.15", "0.59"],
+            ["0.59.15", "v0.59.16"],
+            ["0.59.15", "0.59.016"],
+            ["garbage", "0.59.16"],
+        ]) {
+            expect(classifyPullFiles(release(from, to))).toMatchObject({ rust: true, version_only: false });
+        }
+        // Pre-release and build metadata are valid.
+        expect(versionOnlyChange(release("0.59.15", "0.60.0-rc.1")).ok).toBe(true);
+        expect(versionOnlyChange(release("0.59.15", "0.59.16+build.7")).ok).toBe(true);
+    });
+
+    it("runs everything when a manifest's diff is missing", () => {
+        // The API omits `patch` for a very large or binary diff.
+        const noPatch = release();
+        delete noPatch[3].patch;
+        expect(classifyPullFiles(noPatch)).toMatchObject({ rust: true, version_only: false });
+    });
+
+    it("only counts the root manifests", () => {
+        // A crate's own Cargo.toml inherits the workspace version, so a change there is code.
+        const crate = [...release(), { filename: "crates/srv/Cargo.toml", patch: toml("0.1.0", "0.2.0") }];
+        expect(classifyPullFiles(crate)).toMatchObject({ rust: true, version_only: false });
+    });
+
+    it("treats malformed API input as run-everything (R2)", () => {
+        for (const bad of [null, [], [{}], [{ filename: 42 }], ["Cargo.toml"]]) {
+            expect(classifyPullFiles(bad)).toMatchObject({ rust: true, frontend: true, version_only: false });
+        }
+    });
+
+    it("still classifies a docs-only PR by its paths", () => {
+        expect(classifyPullFiles([{ filename: "docs/A.md", patch: "@@ -1 +1 @@\n-a\n+b" }])).toMatchObject({
+            rust: false,
+            docs_only: true,
+            version_only: false,
+        });
     });
 });

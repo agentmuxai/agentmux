@@ -3,6 +3,7 @@
 
 import type { PaneTabHostContext, PaneTabManifest } from "@/app/block/pane-tab-registry";
 import { QuickTips } from "@/app/element/quicktips";
+import { FilterInput } from "@/app/element/ui";
 import { showZoomIndicator } from "@/app/store/zoom";
 import { fireAndForget } from "@/util/util";
 import { createSignal, onMount, type JSX } from "solid-js";
@@ -14,7 +15,8 @@ const WHEEL_STEP = 0.05;
 
 /**
  * Help — QuickTips with Ctrl+/- / Ctrl+Wheel zoom, persisted in block meta as
- * "help:zoom". The first NATIVE pane tab (Pane Tab contract Phase 2b,
+ * "help:zoom", and a filter box pinned on top (SPEC_HELP_PANE_FILTER_2026_10_08.md)
+ * that is the pane's typing target, so opening Help and typing filters it. The first NATIVE pane tab (Pane Tab contract Phase 2b,
  * SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md §4): it reaches its block only
  * through the host context, never MOS/RpcApi/nodeModel directly.
  */
@@ -30,6 +32,7 @@ export const helpPaneTab: PaneTabManifest = {
 function HelpView(props: { ctx: PaneTabHostContext }): JSX.Element {
     const ctx = props.ctx;
     const [zoom, setZoom] = createSignal(1.0);
+    const [filter, setFilter] = createSignal("");
 
     onMount(() => {
         const saved = ctx.meta()?.["help:zoom"];
@@ -72,11 +75,14 @@ function HelpView(props: { ctx: PaneTabHostContext }): JSX.Element {
             onKeyDown={handleKeyDown}
             onWheel={handleWheel}
         >
+            <div class="help-filter-bar sticky top-0 z-[1] flex px-[5px] pt-[10px] pb-[6px] bg-[var(--main-bg-color)]">
+                <FilterInput value={filter()} onInput={setFilter} placeholder="Filter shortcuts and tips" ariaLabel="Filter help" />
+            </div>
             {/* CSS zoom (not font-size) is intentional: scales the full layout box so
                 @container breakpoints respond and the grid reflows responsively.
                 Chromium handles CSS zoom correctly; font-size only scales text. */}
-            <div style={{ zoom: zoom(), padding: "10px 5px" }}>
-                <QuickTips />
+            <div style={{ zoom: zoom(), padding: "4px 5px 10px" }}>
+                <QuickTips filter={filter()} />
             </div>
         </div>
     );

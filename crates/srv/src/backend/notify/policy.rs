@@ -35,6 +35,10 @@ pub enum NotifyKind {
     /// Rate-limit overflow digest (§5.1 step 6).
     Summary,
     Test,
+    /// This channel's MuxBus sign-in stopped working, so agents stopped
+    /// getting cloud messages (`muxbus::delivery_status`). About no agent;
+    /// once per episode.
+    CloudSignedOut,
 }
 
 impl NotifyKind {
@@ -46,6 +50,7 @@ impl NotifyKind {
             NotifyKind::TurnErrored => Some("turnerrored"),
             NotifyKind::AgentCrashed => Some("agentcrashed"),
             NotifyKind::MessageNeedsReview => Some("messageneedsreview"),
+            NotifyKind::CloudSignedOut => Some("cloudsignedout"),
             // Follows the master switch only: a shutdown the user can still
             // stop must not be silenceable per kind.
             NotifyKind::ShutdownPending => None,
@@ -63,7 +68,7 @@ impl NotifyKind {
             NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed => 10_000,
             NotifyKind::MessageNeedsReview => 2_000,
             // The window is only 15 s: tell the user at once.
-            NotifyKind::ShutdownPending => 0,
+            NotifyKind::ShutdownPending | NotifyKind::CloudSignedOut => 0,
             NotifyKind::Summary | NotifyKind::Test => 0,
         }
     }
@@ -73,7 +78,8 @@ impl NotifyKind {
             NotifyKind::InputWaiting
             | NotifyKind::AgentCrashed
             | NotifyKind::MessageNeedsReview
-            | NotifyKind::ShutdownPending => {
+            | NotifyKind::ShutdownPending
+            | NotifyKind::CloudSignedOut => {
                 Priority::Attention
             }
             _ => Priority::Normal,
@@ -92,13 +98,14 @@ impl NotifyKind {
             NotifyKind::ShutdownPending => format!("shutdown:{block_id}"),
             NotifyKind::Summary => "summary".to_string(),
             NotifyKind::Test => "test".to_string(),
+            NotifyKind::CloudSignedOut => "cloud".to_string(),
         }
     }
 
     /// Kinds about one agent carry its summary line; the digest and the test
     /// toast are about no agent.
     fn has_summary(self) -> bool {
-        !matches!(self, NotifyKind::Summary | NotifyKind::Test)
+        !matches!(self, NotifyKind::Summary | NotifyKind::Test | NotifyKind::CloudSignedOut)
     }
 
     /// Within one group, a later event must not replace a more informative
@@ -237,6 +244,8 @@ pub enum Family {
     Turn,
     /// A pending external shutdown was kept or went ahead (§6.5).
     Shutdown,
+    /// This channel's MuxBus sign-in works again, or the user signed out.
+    Cloud,
 }
 
 impl Family {
@@ -247,6 +256,7 @@ impl Family {
                 matches!(kind, NotifyKind::TurnCompleted | NotifyKind::TurnErrored | NotifyKind::AgentCrashed)
             }
             Family::Shutdown => kind == NotifyKind::ShutdownPending,
+            Family::Cloud => kind == NotifyKind::CloudSignedOut,
         }
     }
 }
@@ -345,6 +355,7 @@ pub fn title_for(kind: NotifyKind, agent_name: &str) -> String {
         // Count-bearing; see `summary_title`.
         NotifyKind::Summary => "More agent updates".to_string(),
         NotifyKind::Test => "AgentMux notifications are working".to_string(),
+        NotifyKind::CloudSignedOut => "AgentMux is signed out of MuxBus".to_string(),
     }
 }
 
@@ -685,6 +696,24 @@ mod tests {
     }
     fn retracts(a: &[Action]) -> usize {
         a.iter().filter(|x| matches!(x, Action::Retract { .. })).count()
+    }
+
+    #[test]
+    fn cloud_signed_out_shows_at_once_even_while_focused_and_retracts_when_resolved() {
+        let k = NotifyKind::CloudSignedOut;
+        assert_eq!(k.setting_suffix(), Some("cloudsignedout"));
+        assert_eq!(title_for(k, ""), "AgentMux is signed out of MuxBus");
+        let s = Settings::default();
+        let mut p = PolicyState::new();
+        p.step(focus(true, Some("b1")), 0, &s);
+        let blockless = Request { kind: k, block_id: String::new(), agent_name: String::new(), body: Some("x".into()), summary: Some("s".into()) };
+        p.step(Input::Emit(blockless), 0, &s);
+        let a = p.step(Input::Tick, 0, &s);
+        let n = shows(&a);
+        assert_eq!(n.len(), 1, "attention reaches a user looking at a pane");
+        assert_eq!(n[0].summary, None, "about no agent");
+        assert_eq!(retracts(&p.step(Input::Resolve { block_id: String::new(), family: Family::Turn }, 1, &s)), 0);
+        assert_eq!(retracts(&p.step(Input::Resolve { block_id: String::new(), family: Family::Cloud }, 1, &s)), 1);
     }
 
     #[test]

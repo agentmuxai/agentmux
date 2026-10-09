@@ -4,6 +4,7 @@
 import clsx from "clsx";
 import { createSignal, JSX, splitProps } from "solid-js";
 
+import { focusOnOpen } from "@/util/focusutil";
 import "./input.scss";
 
 interface InputGroupProps {
@@ -109,6 +110,8 @@ const Input = (props: InputProps): JSX.Element => {
                 inputRef = el;
                 if (typeof props.ref === "function") props.ref(el);
                 else if (props.ref != null) (props as any).ref = el;
+                // The `autofocus` attribute only works at page load.
+                if (props.autoFocus) focusOnOpen(el, { select: props.autoSelect });
             }}
             value={inputValue()}
             onInput={handleInputChange}
@@ -117,7 +120,6 @@ const Input = (props: InputProps): JSX.Element => {
             onBlur={handleBlur}
             placeholder={props.placeholder}
             maxLength={props.maxLength}
-            autofocus={props.autoFocus}
             disabled={props.disabled}
         />
     );

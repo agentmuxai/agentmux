@@ -18,6 +18,7 @@ use crate::fsproto::{self, Entry, ErrKind, Kind, Reply, Request, Splitter, MAX_R
 /// Serve requests from `input`, answering on `output`, until `input` ends.
 /// `home` is the user's home directory ([`home_dir`]).
 pub fn run(home: &Path, input: &mut impl Read, output: &mut impl Write) -> io::Result<()> {
+    let mut server = Server::new(home.to_path_buf());
     let mut splitter = Splitter::new();
     let mut buf = vec![0u8; 64 * 1024];
     loop {
@@ -30,12 +31,32 @@ pub fn run(home: &Path, input: &mut impl Read, output: &mut impl Write) -> io::R
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         for body in bodies {
             let reply = match Request::decode(&body) {
-                Ok((id, req)) => (id, handle(home, req)),
+                Ok((id, req)) => (id, server.handle(req)),
                 // A request that cannot be read: the stream is broken.
                 Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
             };
             output.write_all(&reply.1.encode(reply.0))?;
             output.flush()?;
+        }
+    }
+}
+
+/// One connection's server: [`handle`], plus what lasts between requests
+/// (Tower's CPU rates, `procs`).
+pub struct Server {
+    home: PathBuf,
+    procs: crate::procs::Sampler,
+}
+
+impl Server {
+    pub fn new(home: PathBuf) -> Self {
+        Self { home, procs: crate::procs::Sampler::new() }
+    }
+
+    pub fn handle(&mut self, req: Request) -> Reply {
+        match req {
+            Request::Procs { top, filter } => Reply::Procs(self.procs.frame(top, &filter)),
+            req => handle(&self.home, req),
         }
     }
 }
@@ -80,9 +101,12 @@ fn invalid(message: &str) -> Reply {
     }
 }
 
-/// The reply to one request; `home` is the user's home directory.
+/// The reply to one request; `home` is the user's home directory. A `Procs`
+/// here has no previous round, so its frame has no CPU rates: the serve loop
+/// answers it through [`Server`] instead.
 pub fn handle(home: &Path, req: Request) -> Reply {
     let result = match req {
+        Request::Procs { top, filter } => Ok(Reply::Procs(crate::procs::Sampler::new().frame(top, &filter))),
         Request::Hello => Ok(Reply::Hello {
             protocol: fsproto::PROTOCOL,
             home: home.to_string_lossy().into_owned(),

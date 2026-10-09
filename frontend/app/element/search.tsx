@@ -170,6 +170,7 @@ const SearchComponent = (props: SearchProps): JSX.Element => {
                         onChange={(v) => searchAtom._set(v)}
                         onKeyDown={onKeyDown}
                         autoFocus
+                        autoSelect
                     />
                     <div
                         class={clsx("search-results", { hidden: numResultsAtom() === 0 })}

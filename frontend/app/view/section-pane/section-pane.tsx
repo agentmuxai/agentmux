@@ -23,7 +23,8 @@ export interface PaneSection<Id extends string> {
     tooltip?: string;
     /** A standing accent on the section's icon (Bundles, for ABF). */
     highlight?: boolean;
-    component: () => JSX.Element;
+    /** Given the pane, for a section that needs its block (Remotes). */
+    component: (pane: SectionPaneModel<Id>) => JSX.Element;
 }
 
 export interface SectionPaneSpec<Id extends string> {
@@ -45,6 +46,8 @@ export class SectionPaneModel<Id extends string> {
     viewType: string;
     blockId: string;
     spec: SectionPaneSpec<Id>;
+    /** The block's meta, reactive. */
+    meta: Accessor<MetaType | undefined>;
     setMeta: (patch: Record<string, unknown>) => void;
     /** Per-pane zoom, the same `term:zoom` key as the editor, terminal and agent. */
     zoomAtom: Accessor<number>;
@@ -58,6 +61,7 @@ export class SectionPaneModel<Id extends string> {
         this.spec = spec;
         this.setMeta = (patch) => void ctx.setMeta(patch);
         const meta = ctx.meta;
+        this.meta = meta;
         this.zoomAtom = createMemo<number>(() => readZoom(meta()));
         this.sectionAtom = createMemo<Id>(() => {
             const m = meta() as Record<string, unknown> | undefined;
@@ -126,7 +130,7 @@ export function SectionPaneView<Id extends string>(props: { model: SectionPaneMo
                     <For each={sections}>
                         {(item) => (
                             <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== item.id }}>
-                                {item.component()}
+                                {item.component(model)}
                             </div>
                         )}
                     </For>

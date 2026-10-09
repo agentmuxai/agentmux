@@ -23,6 +23,7 @@ const PURPOSE_NAMES: ReadonlyArray<readonly [purpose: string, name: string]> = [
     ["dispatch_name", "Workflow names"],
     ["definition_summary", "Agent previews"],
     ["ambient_narration", "Narration"],
+    ["continuity_state", "Running summaries"],
 ];
 
 type Bucket = "accepted" | "kept" | "refused" | "skipped" | "failed";
@@ -31,9 +32,11 @@ type Bucket = "accepted" | "kept" | "refused" | "skipped" | "failed";
  *  doesn't know, which still counts toward the total and shows in the hover. */
 function bucketOf(label: string): Bucket | null {
     if (label === "accepted") return "accepted";
-    if (label === "kept") return "kept";
+    // `skipped` is the model's SKIP: like `kept`, a healthy "nothing to write".
+    if (label === "kept" || label === "skipped") return "kept";
     if (label.startsWith("rejected")) return "refused";
-    if (label === "empty_digest" || label === "superseded") return "skipped";
+    // `gated`: a check in code showed there was nothing to ask, so no call.
+    if (label === "empty_digest" || label === "superseded" || label === "gated") return "skipped";
     if (label === "cli_failed" || label === "timeout" || label === "not_run") return "failed";
     return null;
 }

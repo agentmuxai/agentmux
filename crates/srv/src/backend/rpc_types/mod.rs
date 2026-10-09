@@ -28,11 +28,13 @@ mod native_memory;
 mod mcp;
 mod layout;
 mod misc;
+mod muxbus_delivery;
 mod presence;
 mod remotes;
 mod session;
 mod skill;
 mod toolchain;
+mod tower;
 mod viewer;
 mod websocket;
 
@@ -53,11 +55,13 @@ pub use bundle_import::*;
 pub use native_memory::*;
 pub use mcp::*;
 pub use misc::*;
+pub use muxbus_delivery::*;
 pub use presence::*;
 pub use remotes::*;
 pub use session::*;
 pub use skill::*;
 pub use toolchain::*;
+pub use tower::*;
 pub use viewer::*;
 pub use websocket::*;
 

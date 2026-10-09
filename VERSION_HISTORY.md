@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.59.16 — 2026-10-08
+
+- Screenshot tooling: capture every widget at three sizes from an isolated instance (capture.mjs --suite widgets --sizes), with a demo project so no shot shows the machine's own files
+- Bundles no longer carry MCP servers: they belong to Connectors. On upgrade, MCP servers an agent got only through a bundle are removed (the srv log names each one), bundle exports leave them out, and importing a bundle lists its MCP servers as not imported, to add in Connectors.
+- Agent pane: the next-message suggestion no longer shows the model's notes to itself ("Output nothing at all - …"). It's skipped when the agent's last message asks you something, when the turn failed, or while you're typing, and Tab no longer inserts a suggestion that was already hidden.
+- MuxBus sign-in is now per channel, and saving it is safe across processes: a read that raced a write is retried instead of signing you out, which was why MuxBus kept logging out.
+- After closing a pane, a pane tab or a window tab, or typing exit, the highlighted pane takes the keyboard right away: its terminal, agent composer, editor, search box or filter, so you can type without clicking. Typing on the My Agents picker's cards goes into its filter.
+- test(window): the trailing-writer tests no longer fail on a slow CI runner
+- Inputs you open now take the cursor right away, so you can type without clicking first: Swarm Broadcast, Find in a terminal (which used to send your search to the shell), the Change connection picker, Open from remote, Deny with feedback, new and edited memories, bundles, skills, MCP servers, accounts and remotes, Drone's New and Add rows, the agent shell drawer when you open it, and the Settings search when Settings is opened from a terminal.
+- Browser uploads by agents send the page the file's contents, read from the workspace file srv checked, instead of a path; uploads are limited to 25 MB.
+- fix(macos): the login keychain prompt no longer comes back on every upgrade — the backend now keeps the same code identity across versions
+- Help has a filter box: open Help (Cmd+/ or F1) and type to see only the shortcuts and tips that match, keys included ("cmd shift" works). My Agents, Personal Memory and Remotes now share the same filter box, and Remotes matches every word you type.
+- The Hangar zooms like the other panes: Cmd/Ctrl + and - (0 resets), Ctrl+scroll over it, and the all-panes zoom. The level is kept per pane.
+- test(containers): the CLI-install script test skips on a host without coreutils timeout, such as macOS
+- Performance warnings (low RAM, low page file, slow backend) no longer push a banner across the top of the window: the status bar's backend dot turns yellow and the details appear at the top of its panel, coming and going as AgentMux recovers.
+- fix(srv): an unanswered keychain dialog no longer turns into a stack of dialogs — retries join the read that is already waiting
+- A MuxBus sign-in left torn by an older AgentMux running alongside now repairs itself from its refresh token instead of asking you to sign in again, and a channel waiting for sign-in notices one made by another process within a minute.
+
 ## 0.59.15 — 2026-10-07
 
 - Copilot, OpenClaw and Pi agents can now talk to AgentMux: its ACP client now speaks ACP v1 (the right handshake, prompt format and session resume), launches these agents with the ACP controller, delivers your messages to them, answers their permission requests, and shows their errors.

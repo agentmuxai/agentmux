@@ -245,17 +245,33 @@
 // grouped section headers, which FlyoutMenu's flat MenuItem[] list can't
 // express — see docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
 .menu.agent-runtime-dropup-panel {
-    min-width: 180px;
-    // Capped, so a long label or note wraps inside the panel instead of
-    // widening it past the pane (and the window on a narrow one).
-    max-width: min(300px, calc(100vw - 16px));
+    // One width, not a range: a note that changes with a pick wraps inside the
+    // panel instead of resizing it. Capped by the window on a narrow one.
+    width: min(300px, calc(100vw - 16px));
     font-size: 10px;
+
+    // `.menu` is a column that sizes its children to their content; these fill
+    // the fixed width, so the rows and dividers run edge to edge.
+    > .agent-runtime-dropup-drift,
+    > [role="listbox"] {
+        align-self: stretch;
+    }
 
     .agent-runtime-dropup-row {
         padding: 2px var(--space-1-5);
         min-height: 0;
         // The check icon lines up with the label, the first line.
         align-items: flex-start;
+
+        // Effort on a model that doesn't use it: shown, not selectable.
+        &.is-disabled {
+            opacity: 0.45;
+            cursor: default;
+
+            &:hover {
+                background: transparent;
+            }
+        }
     }
 }
 
@@ -317,6 +333,25 @@
     letter-spacing: 0.05em;
     color: var(--secondary-text-color);
     opacity: 0.75;
+
+    // Why the section's options don't apply (effort on Haiku), on the
+    // header's own line so it takes no space of its own.
+    display: flex;
+    gap: var(--space-1-5);
+    white-space: nowrap;
+
+    .agent-runtime-dropup-section-note {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-weight: normal;
+        font-style: italic;
+        text-transform: none;
+        letter-spacing: normal;
+        // Room for the italic's last glyph, which leans past its box and
+        // would be clipped by the overflow.
+        padding-right: 0.25em;
+    }
 
     &:not(:first-child) {
         margin-top: var(--space-0-5);
@@ -715,24 +750,35 @@
     pointer-events: none;
 }
 
-// Inside the Runtime panel: what differs, and how to fix it.
+// Inside the Runtime panel: what differs, and how to fix it. Always shown, two
+// lines high: a headline and the details, each one line, the full text in its tooltip.
 .agent-runtime-dropup-drift {
     display: flex;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-1-5) var(--space-2);
+    // Clear of the close button, which sits over this line's top-right corner.
+    padding-right: calc(var(--space-2) + 18px);
     margin-bottom: var(--space-1);
     border-bottom: 1px solid var(--border-color);
     font-size: 10px;
     color: var(--warning-color);
 
-    &[data-kind="pending"] {
+    &[data-kind="pending"],
+    &[data-kind="agrees"] {
         color: var(--secondary-text-color);
     }
 }
 .agent-runtime-dropup-drift-text {
     flex: 1 1 auto;
     min-width: 0;
+}
+.agent-runtime-dropup-drift-line {
+    height: 14px;
+    line-height: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .agent-runtime-dropup-drift-btn {
     flex: 0 0 auto;
@@ -742,14 +788,31 @@
     font: inherit;
     padding: 1px var(--space-1-5);
     cursor: pointer;
+
+    // Not needed now, but keeps its place.
+    &.is-hidden {
+        visibility: hidden;
+    }
 }
 
-// A section whose options do not apply to this pane (e.g. effort on Haiku).
-// Built from runtime text such as a full model id, so it wraps too.
+// What the process runs, under the Model rows. Built from runtime text such as
+// a full model id, so it wraps, in a fixed two lines (the rest is in its
+// tooltip): the line is there before the first reply too.
 .agent-runtime-dropup-note {
     overflow-wrap: anywhere;
     padding: 2px var(--space-2);
     font-size: 10px;
+    line-height: 13px;
+    height: calc(2 * 13px);
+    box-sizing: content-box;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
     color: var(--secondary-text-color);
     font-style: italic;
+
+    &.is-placeholder {
+        opacity: 0.6;
+    }
 }

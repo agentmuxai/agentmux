@@ -135,6 +135,13 @@ export function registerDefaultCommands(): void {
         execute: () => createBlock({ meta: { view: "sysinfo" } }),
     });
     commandRegistry.register({
+        id: "open:tower",
+        label: "Open Tower (Task Manager)",
+        category: "Open",
+        icon: "tower-observation",
+        execute: () => createBlock({ meta: { view: "tower" } }),
+    });
+    commandRegistry.register({
         id: "open:help",
         label: "Open Help",
         category: "Open",
@@ -161,7 +168,8 @@ export function registerDefaultCommands(): void {
         label: "Open Remotes",
         category: "Open",
         icon: "server",
-        execute: () => createBlock({ meta: { view: "remotes" } }),
+        // A new Connectors pane on its Remotes section, so several can be open.
+        execute: () => createBlock({ meta: { view: "connectors", "connectors:section": "remotes" } }),
     });
 
     // ---- split ----

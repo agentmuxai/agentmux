@@ -501,9 +501,11 @@ fn fold(c: char) -> char {
 }
 
 /// Marker words whose delimiters a delivered body must not be able to write:
-/// the jekt block, and the Swarm broadcast header (`broadcast_turn_message`).
-/// Each is quoted as `[<WORD>-QUOTED...`.
-const MARKER_WORDS: &[(&str, &str)] = &[("jekt", "JEKT"), ("broadcast", "BROADCAST")];
+/// the jekt block, the Swarm broadcast header (`broadcast_turn_message`), and
+/// the `[AgentMux]` that begins srv's own system notes
+/// (`muxbus::delivery_status::notes::NOTE_MARKER`; only srv writes one, and
+/// delivers it without a jekt block). Each is quoted as `[<WORD>-QUOTED...`.
+const MARKER_WORDS: &[(&str, &str)] = &[("jekt", "JEKT"), ("broadcast", "BROADCAST"), ("agentmux", "AGENTMUX")];
 
 /// If `chars[i..]` starts a marker delimiter — `[`, optional `/`, `word`,
 /// then `:` or `]`, with whitespace/ZWJ/ZWNJ allowed between the parts and

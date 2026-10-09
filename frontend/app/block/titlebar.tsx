@@ -9,6 +9,7 @@ import type { JSX } from "solid-js";
 import { createSignal, Show } from "solid-js";
 import "./titlebar.scss";
 import { setBlockMeta } from "@/app/store/block-meta";
+import { focusOnOpen } from "@/util/focusutil";
 
 interface TitleBarProps {
     blockId: string;
@@ -98,7 +99,7 @@ function TitleBar(props: TitleBarProps): JSX.Element {
                             onBlur={handleSave}
                             onKeyDown={handleKeyDown}
                             maxLength={maxLength()}
-                            autofocus
+                            ref={(el) => focusOnOpen(el, { select: true })}
                             placeholder="Enter pane title..."
                         />
                     </Show>

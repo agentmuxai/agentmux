@@ -8,6 +8,7 @@
 
 export { Button, IconButton, type ButtonProps, type IconButtonProps } from "./Button";
 export { Field, useField, type FieldProps } from "./Field";
+export { FilterInput, type FilterInputProps } from "./FilterInput";
 export {
     NumberInput,
     Select,

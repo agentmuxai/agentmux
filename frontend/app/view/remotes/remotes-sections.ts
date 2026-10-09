@@ -5,6 +5,7 @@
 // (docs/specs/SPEC_REMOTES_PANE_2026_10_05.md §4.2). Pure: no Solid, no RPC.
 
 import type { RemoteHelper, RemotePlatform, RemoteRecord, RemoteStatus } from "@/app/store/rpc-api/remotes";
+import { matchesEveryWord } from "@/app/util/fuzzysearch";
 
 /** Block meta: the host whose row a Remotes tab should expand, once (open-remotes.ts). */
 export const META_REMOTES_EXPAND = "remotes:expand";
@@ -84,9 +85,7 @@ function sortIn(section: RemoteSection, records: RemoteRecord[]): RemoteRecord[]
 }
 
 export function matchesFilter(r: RemoteRecord, filter: string): boolean {
-    const f = filter.trim().toLowerCase();
-    if (!f) return true;
-    return r.name.toLowerCase().includes(f) || displayName(r).toLowerCase().includes(f);
+    return matchesEveryWord(filter, r.name, displayName(r));
 }
 
 export interface RemoteGroup {

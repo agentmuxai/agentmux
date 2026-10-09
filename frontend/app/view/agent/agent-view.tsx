@@ -80,6 +80,7 @@ import { useLiveFeedRollOff } from "./hooks/useLiveFeedRollOff";
 import { LIVE_FEED_RESTORE_BYTES } from "./live-feed";
 import { useShellLogBridge } from "./hooks/useShellLogBridge";
 import { useContextReading } from "./hooks/useContextReading";
+import { useTurnLedger } from "./hooks/useTurnLedger";
 import { useFocusRepoll, useHeldMessageDelivery } from "./hooks/useTurnReconciliation";
 import { useAmbientNarration } from "./hooks/useAmbientNarration";
 import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
@@ -306,6 +307,8 @@ export const AgentPresentationView = ({
 
     // The context meter and its Swarm mirror (hooks/useContextReading.ts).
     const { reading: contextReading, note: contextNote, autoCompact } = useContextReading(model.blockId, paneModel, block);
+    // srv's turn ledger, so the working row covers the whole turn (hooks/useTurnLedger.ts).
+    useTurnLedger(model.blockId, paneModel);
 
     // ── Layout slice lifecycle. The slice is FED from
     //    AgentDocumentVirtualList (Phase 3): it owns `partition()`, so it can
@@ -333,7 +336,8 @@ export const AgentPresentationView = ({
         onTermReady: handleShellTermReady,
         onTermDispose: handleShellTermDispose,
         clearTermWrite,
-    } = useShellLogBridge();
+        withShellFocus,
+    } = useShellLogBridge(model.blockId);
 
     /**
      * The drawer's shell process exited cleanly — the human typed `exit`.
@@ -1405,7 +1409,7 @@ export const AgentPresentationView = ({
                 sessionTotals={paneModel.state.sessionTotals}
                 loading={paneBusy()}
                 logOpen={paneModel.state.detailsOpen}
-                onToggleLog={() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user")}
+                onToggleLog={withShellFocus(() => paneModel.dispatchPane({ type: "DetailsToggle" }, "user"))}
                 contextTokens={contextReading()?.tokens ?? null}
                 contextWindow={contextReading()?.window ?? undefined}
                 contextNote={contextNote()}

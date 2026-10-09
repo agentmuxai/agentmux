@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
 import { recordCompactionSample } from "../compaction-estimate";
+import type { TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
 import { ObjectService } from "@/app/store/services";
 import type { AgentViewModel } from "../agent-model";
 import { requestComposerFocus } from "../composer-focus";
@@ -476,6 +477,27 @@ describe("AgentFooter ghost-text next-prompt suggestion (SPEC_NEXT_PROMPT_SUGGES
         expect(ta.placeholder).toBe("Send message to Test...");
     });
 
+    // The placeholder hides the previous turn's suggestion at send, but its
+    // clear is an async write: until it lands, the meta still holds the text.
+    // Tab and → must offer what the placeholder shows, not the raw meta.
+    it("Tab and → don't insert a suggestion hidden at send while its clear is still pending", async () => {
+        const onSendMessage = vi.fn();
+        render(() => (
+            <AgentFooter agentName="Test" viewModel={makeViewModel("Run the tests")} onSendMessage={onSendMessage} />
+        ));
+        const user = userEvent.setup();
+        const ta = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+        await user.type(ta, "let's refactor instead");
+        keyOn(ta, "Enter");
+        expect(ta.placeholder).toBe("Send message to Test...");
+
+        keyOn(ta, "Tab");
+        expect(ta.value).toBe("");
+        keyOn(ta, "ArrowRight");
+        expect(ta.value).toBe("");
+    });
+
     it("shows a genuinely new suggestion normally once meta actually updates after send", async () => {
         const { vm, setState } = makeReactiveViewModel({ suggestion: "Run the tests", gen: 1 });
         const onSendMessage = vi.fn();
@@ -739,6 +761,182 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
 
         const left = container.querySelector(".agent-working-row-left") as HTMLElement;
         expect(left.className).toBe("agent-working-row-left");
+    });
+});
+
+/**
+ * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4: the row times and
+ * counts the turn the user sees, over its CLI passes, from srv's ledger.
+ */
+describe("AgentWorkingRow across a turn's passes", () => {
+    const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
+        turnId: 7,
+        seq: 1,
+        origin: "user",
+        trigger: { kind: "user", from: null },
+        absorbed: [],
+        startedAtMs: Date.now() - 125_000,
+        passes: 1,
+        active: true,
+        inputs: 0,
+        countedPasses: 0,
+        outputTokens: 0,
+        costUsd: 0,
+        steps: 0,
+        durationApiMs: 0,
+        lastPassEndedAtMs: null,
+        settleUntilMs: null,
+        endedAtMs: null,
+        end: null,
+        ...over,
+    });
+
+    it("runs the clock from the turn's start, not from this pass", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} turnLedger={ledger({ passes: 3 })} />);
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^2m \d+s$/);
+    });
+
+    it("adds the running pass's output to the passes srv has counted", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                turnLedger={ledger({ passes: 2, countedPasses: 1, outputTokens: 2_000 })}
+                turnTokens={{ input: 9_000, output: 300, ledgerTurnId: 7, ledgerPass: 2 }}
+            />
+        ));
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^↓ 2\.3k tokens {2}·  2m \d+s$/);
+    });
+
+    it("between two passes stays the live row, dimmed and with no arrow, not a Worked line", () => {
+        const now = Date.now();
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                activitySummary="Fix the login redirect loop"
+                // The pass that just ended: its own stats, which the old row showed as "Worked".
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1 }}
+                turnLedger={ledger({
+                    active: false,
+                    countedPasses: 1,
+                    outputTokens: 2_000,
+                    lastPassEndedAtMs: now,
+                    settleUntilMs: now + 2_000,
+                })}
+            />
+        ));
+
+        const row = container.querySelector(".agent-working-row--loading");
+        expect(row?.classList.contains("is-settling")).toBe(true);
+        expect(container.querySelector(".agent-working-row--worked")).toBeNull();
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^2\.0k tokens {2}·  2m \d+s$/);
+    });
+
+    it("reports the whole turn when it ends: wall time, every pass's output, cost, steps and passes", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1, cost_usd: 0.01 }}
+                turnLedger={ledger({
+                    startedAtMs: end - 192_000,
+                    active: false,
+                    passes: 2,
+                    countedPasses: 2,
+                    outputTokens: 4_200,
+                    costUsd: 0.41,
+                    steps: 9,
+                    lastPassEndedAtMs: end,
+                    endedAtMs: end,
+                    end: "completed",
+                })}
+            />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  3m 12s  ·  4.2k tokens");
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.410  ·  9 steps  ·  2 passes");
+    });
+
+    it("opens an external turn by naming what started it, then goes back to its usual text", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX" } })}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("↳ jekt from AgentX");
+
+        const later = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                turnLedger={ledger({ startedAtMs: Date.now() - 10_000, trigger: { kind: "agent", from: "AgentX" } })}
+            />
+        ));
+        expect(later.container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("a turn the user started opens with its usual text", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix it" turnLedger={ledger({ startedAtMs: Date.now() - 500 })} />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix it");
+    });
+
+    it("names an external turn on its Worked line, with what joined it", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1 }}
+                turnLedger={ledger({
+                    trigger: { kind: "service", from: "github-consumer" },
+                    absorbed: [{ kind: "user", from: null }],
+                    inputs: 1,
+                    startedAtMs: end - 42_000,
+                    active: false,
+                    countedPasses: 2,
+                    passes: 2,
+                    outputTokens: 900,
+                    costUsd: 0.05,
+                    steps: 4,
+                    lastPassEndedAtMs: end,
+                    endedAtMs: end,
+                    end: "completed",
+                })}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe(
+            "✓ Worked on github-consumer's notice  ·  42s  ·  900 tokens",
+        );
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe(
+            "$0.050  ·  4 steps  ·  2 passes  ·  +1 your message",
+        );
+    });
+
+    it("reports the turn from the pane's own carry when srv counted no passes (ACP, App Server, subprocess)", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 40, num_turns: 1, cost_usd: 0.01 }}
+                turnLedger={ledger({ startedAtMs: end - 30_000, active: false, passes: 2, lastPassEndedAtMs: end, endedAtMs: end, end: "completed" })}
+                turnCarry={{ turnId: 7, passes: 2, outputTokens: 640, costUsd: 0.09, steps: 5 }}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  30s  ·  640 tokens");
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.090  ·  5 steps  ·  2 passes");
+    });
+
+    it("calls result.num_turns steps, which is what it counts", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} sessionStats={{ duration_ms: 42_000, num_turns: 3, cost_usd: 0.2 }} />
+        ));
+
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.200  ·  3 steps");
     });
 });
 

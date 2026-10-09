@@ -26,6 +26,7 @@
 
 import type { PendingMessage } from "../../view/agent/state";
 import type { ContextReading, ContextSource, ContextWindowMap, ReportedContextWindows } from "./context-reading";
+import type { TurnLedger } from "./turn-ledger";
 import type {
     SessionStats,
     StreamingState,
@@ -252,6 +253,15 @@ export type TurnPhase =
           reason: DisconnectReason;
       };
 
+/** See `AgentPaneState.turnCarry`. */
+export interface TurnCarry {
+    turnId: number;
+    passes: number;
+    outputTokens: number;
+    costUsd: number;
+    steps: number;
+}
+
 /**
  * The reducer's state. Each field maps 1:1 to a Solid signal that the
  * agent pane projects from. The reducer enforces invariants ACROSS
@@ -291,6 +301,20 @@ export interface AgentPaneState {
      * gap. Hard ends (disconnect, failure, timeouts, reset) clear it.
      */
     turnTokens: TurnTokens | null;
+    /**
+     * The turn as the user sees it, over however many CLI passes: srv's
+     * `agentturn` event, verbatim (turn-ledger.ts). Null until srv has
+     * published one for this block. The working row runs its clock and counter
+     * from it; `turnPhase` and `turnTokens` stay per pass.
+     */
+    turnLedger: TurnLedger | null;
+    /**
+     * Each pass's own figures (its `TurnEnd` stats), summed over the turn srv
+     * reported it in. For providers whose passes srv doesn't count (ACP, App
+     * Server, one-shot subprocess: no `result` usage reaches the ledger), the
+     * Worked line reports the turn from this.
+     */
+    turnCarry: TurnCarry | null;
     /**
      * True for the duration of a turn started specifically to send a
      * manual "/compact" (the composer's "Compact now" button, or a user
@@ -488,6 +512,8 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentTool: null,
     currentToolArg: null,
     turnTokens: null,
+    turnLedger: null,
+    turnCarry: null,
     pendingCompactTurn: false,
     context: null,
     contextSeedable: true,
@@ -737,6 +763,9 @@ export type AgentPaneCommand =
      * pending or streaming.
      */
     | { type: "TurnReset" }
+    /** srv published the block's turn ledger (`agentturn`). An older turn's,
+     *  or an older state of this one, landing late is ignored. */
+    | { type: "TurnObserved"; ledger: TurnLedger }
     /**
      * Revert an OPTIMISTIC `TurnStart` when the turn never actually began —
      * the initiating send's own RPC call failed synchronously (no

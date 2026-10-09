@@ -2,6 +2,7 @@
 
 **Status:** active — "no PR yet" was true for a few hours. §8's P0 shipped the same day in two PRs: #1493 (`agentmux-launcher/src/mem_supervisor.rs` — memory-aware host relaunch, OOM-class exit classification, backed-off relaunch on its own budget) and #1494 (`agentmux-cef/src/memory_pressure.rs` + `memory_heartbeat.rs` — debounced detection and observability). §5.D's `commit_free_mb()`/`WARN_FLOOR` probes are live in the host, so P1 is at least partly in. **P2 and P3 are not built** — no Job-Object notification limit and no `CreateMemoryResourceNotification` anywhere in the tree. P0 alone was stated to close the 2026-06-16 incident, and it did.
 **Date:** 2026-06-16
+**Amended by:** `docs/reports/REPORT_PERFORMANCE_INDICATORS_TO_STATUS_BAR_2026_10_08.md` (2026-10-08): the top-of-window banner is gone; the signals turn the status bar's backend dot yellow and show as notices at the top of its panel, and the event is now `health-signal`.
 **Author:** AgentA
 **Motivating incident:** `docs/retro/retro-oom-crash-2026-06-16.md`
 **Complements (does not replace):** `SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md`

@@ -67,6 +67,40 @@ pub fn read_recent_activity_digest(
     filestore: &crate::backend::storage::filestore::FileStore,
     block_id: &str,
 ) -> Option<String> {
+    read_recent_activity(filestore, block_id).map(|activity| activity.text)
+}
+
+/// How the newest exchange in a block's recent activity ends. Decided in code,
+/// from the same entries the digest is built from, so a call that could only
+/// decline is never made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnEnding {
+    /// The assistant's last message ends in a question.
+    AssistantAsked,
+    /// After the assistant's last message, it called a tool that asks the user
+    /// (`AskUserQuestion`, `ExitPlanMode`).
+    AskedUser,
+    /// The newest message is the user's: the assistant has not answered it.
+    UserLast,
+    /// The assistant's last message is a statement.
+    Statement,
+}
+
+/// A block's recent activity: the digest text, and how it ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentActivity {
+    pub text: String,
+    pub ending: TurnEnding,
+}
+
+/// Tools that end a turn by asking the user something.
+const ASKS_USER_TOOLS: &[&str] = &["AskUserQuestion", "ExitPlanMode"];
+
+/// [`read_recent_activity_digest`]'s digest, with how the newest exchange ends.
+pub fn read_recent_activity(
+    filestore: &crate::backend::storage::filestore::FileStore,
+    block_id: &str,
+) -> Option<RecentActivity> {
     // Authoritative gate — checked before any byte is read. See
     // HIDDEN_REINJECTION_BLOCKS's own doc comment for why this can't be
     // reconstructed from the tail window below.
@@ -97,7 +131,53 @@ pub fn read_recent_activity_digest(
         return None;
     }
 
-    finalize_digest(extract_digest_parts(&window))
+    let parts = extract_digest_parts(&window);
+    let ending = turn_ending(&parts);
+    finalize_digest(parts).map(|text| RecentActivity { text, ending })
+}
+
+/// How `parts` (oldest first) end. See [`TurnEnding`].
+fn turn_ending(parts: &[String]) -> TurnEnding {
+    let Some(newest) = parts.iter().rposition(|p| p.starts_with("[user] ") || p.starts_with("[assistant] ")) else {
+        return TurnEnding::Statement;
+    };
+    let asks_user = parts[newest + 1..]
+        .iter()
+        .any(|p| p.strip_prefix("[tool] ").is_some_and(|tool| ASKS_USER_TOOLS.contains(&tool)));
+    if asks_user {
+        return TurnEnding::AskedUser;
+    }
+    match parts[newest].strip_prefix("[assistant] ") {
+        None => TurnEnding::UserLast,
+        Some(message) if ends_in_question(message) => TurnEnding::AssistantAsked,
+        Some(_) => TurnEnding::Statement,
+    }
+}
+
+/// Whether a message's last paragraph asks something: one of its sentences ends
+/// in a question mark. The whole paragraph, not only its end, because a question
+/// is often followed by a line of courtesy ("Which do you prefer? Let me know and
+/// I'll proceed."). A question earlier in the message, which it went on to
+/// answer, is not in the last paragraph.
+fn ends_in_question(message: &str) -> bool {
+    let lines: Vec<&str> = message.lines().map(str::trim).collect();
+    let end = lines.iter().rposition(|l| !l.is_empty()).map_or(0, |i| i + 1);
+    let start = lines[..end].iter().rposition(|l| l.is_empty()).map_or(0, |i| i + 1);
+    lines[start..end].iter().any(|line| ends_a_question(line))
+}
+
+/// Whether any question mark in `line` ends a sentence: only closing formatting
+/// (`**`, `_`, quotes, brackets, a code span's backtick) stands between it and
+/// the end of the line or the next space. Not a `?` inside code (`` `?` ``,
+/// `` `result?` ``), a URL's query, or `a?.b`.
+fn ends_a_question(line: &str) -> bool {
+    line.char_indices().filter(|&(_, c)| c == '?' || c == '\u{FF1F}').any(|(i, c)| {
+        let rest: String = line[i + c.len_utf8()..].chars().take_while(|c| !c.is_whitespace()).collect();
+        // Inside a code span: an odd number of backticks before it on the line.
+        let in_code = line[..i].matches('`').count() % 2 == 1;
+        !in_code
+            && rest.chars().all(|c| matches!(c, '*' | '_' | '`' | '"' | '\'' | '\u{201D}' | '\u{2019}' | ')' | ']'))
+    })
 }
 
 /// Entries kept, per-entry and total character caps for a digest. The old digest
@@ -639,6 +719,85 @@ mod finalize_digest_tests {
         let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
         let digest = finalize_digest(extract_digest_parts(&refs)).unwrap();
         assert!(digest.contains("fix the login bug"));
+    }
+}
+
+#[cfg(test)]
+mod turn_ending_tests {
+    use super::*;
+
+    fn parts(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn an_assistant_question_is_asked() {
+        for last in [
+            "[assistant] Fixed it. Shall I start on PR 1?",
+            "[assistant] Two options:\n- A\n- B\n\nWhich do you want?",
+            "[assistant] Want me to merge it?**",
+            "[assistant] Is it the stable build you want?\n\n",
+            "[assistant] Okay？",
+            // A question followed by a line of courtesy still waits (#4476).
+            "[assistant] Which approach do you prefer? Let me know and I'll proceed.",
+            "[assistant] Both work.\n\nShould I use A (\"simpler\")?\nOtherwise I'll go with B.",
+        ] {
+            assert_eq!(turn_ending(&parts(&["[user] go", last])), TurnEnding::AssistantAsked, "{last:?}");
+        }
+    }
+
+    /// These wait without a question mark, so the gate lets them through and the
+    /// prompt's SKIP case has to catch them (`cli::live_cli_skips_a_wait_the_gate_cannot_see`).
+    #[test]
+    fn a_wait_without_a_question_mark_passes_the_gate() {
+        for last in [
+            "[assistant] Redis or an in-process LRU would both work. Tell me which one and I'll start.",
+            "[assistant] Ready to deploy to production. Waiting for your go-ahead.",
+        ] {
+            assert_eq!(turn_ending(&parts(&["[user] go", last])), TurnEnding::Statement, "{last:?}");
+        }
+    }
+
+    #[test]
+    fn a_statement_is_a_statement_even_with_a_question_earlier() {
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Should it be A?\n\nI went with A, and the tests pass."])),
+            TurnEnding::Statement
+        );
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Fixed `parse()`. The `?` operator now propagates it."])),
+            TurnEnding::Statement
+        );
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Use `result?` to propagate the error, as in `load()?`."])),
+            TurnEnding::Statement
+        );
+        // A question about code is still a question.
+        assert_eq!(
+            turn_ending(&parts(&["[user] go", "[assistant] Should I run `cargo test`?"])),
+            TurnEnding::AssistantAsked
+        );
+        assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[tool] Bash"])), TurnEnding::Statement);
+    }
+
+    #[test]
+    fn a_tool_that_asks_the_user_after_the_last_message_is_asked() {
+        assert_eq!(
+            turn_ending(&parts(&["[user] plan it", "[assistant] Here is the plan.", "[tool] ExitPlanMode"])),
+            TurnEnding::AskedUser
+        );
+        assert_eq!(turn_ending(&parts(&["[assistant] Let me check.", "[tool] AskUserQuestion"])), TurnEnding::AskedUser);
+        // Asked earlier and answered: the newest message decides.
+        assert_eq!(
+            turn_ending(&parts(&["[tool] AskUserQuestion", "[assistant] Thanks, done."])),
+            TurnEnding::Statement
+        );
+    }
+
+    #[test]
+    fn an_unanswered_user_message_is_user_last() {
+        assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[user] now the docs"])), TurnEnding::UserLast);
+        assert_eq!(turn_ending(&parts(&["[assistant] Done.", "[user] why?"])), TurnEnding::UserLast);
     }
 }
 

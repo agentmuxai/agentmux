@@ -14,7 +14,7 @@ import {
 } from "@/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { Accessor, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { Accessor, createEffect, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { firewallMessage, resolveLanIndicator } from "./lan-indicator";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
 import { useMuxBusStatus, type MuxBusController } from "@/app/view/accounts/AgentMuxConnectPanel";
@@ -53,6 +53,8 @@ interface HostPopoverPanelProps {
     lanFirewall: Accessor<LanFirewall | null>;
     onLanToggle: (enabled: boolean) => void;
     muxbus: MuxBusController;
+    /** `statusbar:showmuxbuscloud`: false hides the MuxBus Cloud block. Absent means shown. */
+    showMuxbusCloud?: Accessor<boolean>;
 }
 
 /**
@@ -77,6 +79,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
     };
 
     const muxbus = props.muxbus;
+    const showMuxbusCloud = () => props.showMuxbusCloud?.() ?? true;
     const muxbusOk = () => isMuxBusSessionOk(muxbus.status());
     const signInAgain = () => muxbusNeedsSignInAgain(muxbus.status());
 
@@ -245,7 +248,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                 <PairDevicePanel lanDiscoveryEnabled={props.lanDiscoveryEnabled} />
 
                 {/* MuxBus Cloud */}
-                <Show when={muxbus.isConfigured()}>
+                <Show when={showMuxbusCloud() && muxbus.isConfigured()}>
                     <div class="status-bar-popover-divider" />
                     <div class="status-bar-popover-row">
                         <span class="status-bar-popover-label">MuxBus Cloud</span>
@@ -362,12 +365,20 @@ const HostPopover = (): JSX.Element => {
     let triggerRef: HTMLDivElement | undefined;
     const muxbus = useMuxBusStatus();
 
+    // `statusbar:showmuxbuscloud`: only an explicit false hides MuxBus Cloud (the
+    // dot and the popover's sign-in block). LAN is separate and never hidden.
+    // SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md.
+    const showMuxbusCloud = () => settingsAtom()?.["statusbar:showmuxbuscloud"] !== false;
+
     // Keep the trigger's muxbus dot current without requiring the popover
     // to ever be opened — a dead session must be visible at a glance (the
     // popover-only Sign in state let the 0.55.8 rollout sit with WAN jekt
-    // delivery silently dead for hours).
-    onMount(() => {
-        void muxbus.refresh();
+    // delivery silently dead for hours). Not polled while the user has hidden
+    // MuxBus Cloud; turning it back on refreshes straight away.
+    createEffect(() => {
+        if (!showMuxbusCloud()) return;
+        // untrack: refresh() reads its own signals, which must not re-run this.
+        untrack(() => void muxbus.refresh());
         const timer = window.setInterval(() => void muxbus.refresh(), 60_000);
         onCleanup(() => window.clearInterval(timer));
     });
@@ -424,7 +435,7 @@ const HostPopover = (): JSX.Element => {
             // Fallback for a host build without get_host_info
             setHostInfo(null);
         }
-        void muxbus.refresh();
+        if (showMuxbusCloud()) void muxbus.refresh();
         setPopoverOpen(true);
     };
 
@@ -456,7 +467,7 @@ const HostPopover = (): JSX.Element => {
                 >
                     {lanIndicator().glyph}
                 </span>
-                <Show when={muxbus.isConfigured() && muxbus.status() !== null}>
+                <Show when={showMuxbusCloud() && muxbus.isConfigured() && muxbus.status() !== null}>
                     <span
                         class="status-muxbus-dot"
                         classList={{ "status-muxbus-dot--ok": muxbusOk() }}
@@ -479,6 +490,7 @@ const HostPopover = (): JSX.Element => {
                     lanFirewall={lanFirewallAtom}
                     onLanToggle={(enabled) => void handleLanToggle(enabled)}
                     muxbus={muxbus}
+                    showMuxbusCloud={showMuxbusCloud}
                 />
             </Show>
         </Show>

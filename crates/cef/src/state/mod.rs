@@ -95,6 +95,9 @@ pub struct AppState {
     /// launcher path). Non-zero means run_pending_migrations failed at startup;
     /// the status-bar shows "Migration failed — restart to retry."
     pub pending_migrations: Mutex<usize>,
+    /// Each performance health signal that is not normal right now, by kind
+    /// (`health_signals.rs`), so a window opened mid-episode can catch up.
+    pub health_signals: Mutex<std::collections::BTreeMap<String, serde_json::Value>>,
 
     /// Guard against concurrent `run_migrations` invocations from the maintenance panel.
     pub migration_running: Mutex<bool>,
@@ -733,6 +736,7 @@ impl Default for AppState {
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(0)
             ),
+            health_signals: Mutex::new(Default::default()),
             migration_running: Mutex::new(false),
             zoom_factor: Mutex::new(1.0),
             client_id: Mutex::new(None),

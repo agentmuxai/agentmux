@@ -45,7 +45,12 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/eval", post(routes::eval))
         .route("/agentmux/browser/snapshot", post(act::snapshot_route))
         .route("/agentmux/browser/act", post(act::act_route))
-        .route("/agentmux/browser/set_files", post(act::set_files_route))
+        // Uploads carry the files' bytes (base64 in JSON): up to 25 MB of
+        // files, so well past axum's 2 MiB default body limit.
+        .route(
+            "/agentmux/browser/set_files",
+            post(act::set_files_route).layer(act::set_files_body_limit()),
+        )
         .route("/agentmux/browser/wait_for", post(act::wait_for_route))
         .route("/agentmux/browser/screenshot", post(routes::screenshot))
         .route("/agentmux/browser/click_element", post(routes::click_element))

@@ -261,6 +261,11 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         "help" => {
             meta.insert("view".to_string(), json!("help"));
         }
+        // Tower, the read-only task manager. Opening one is harmless: its data
+        // goes only to the window (`tower.*` refuses agents).
+        "tower" => {
+            meta.insert("view".to_string(), json!("tower"));
+        }
         "media" => {
             let file = cmd.file.as_deref().filter(|s| !s.is_empty())
                 .ok_or_else(|| "MISSING_ARG: view=media requires 'file'".to_string())?;
@@ -288,7 +293,7 @@ pub(crate) fn build_pane_meta(cmd: &CommandPaneOpenData) -> Result<MetaMapType, 
         }
         other => {
             return Err(format!(
-                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help/media/files)"
+                "INVALID_VIEW: unsupported view '{other}' (expected editor/term/browser/sysinfo/help/media/files/tower)"
             ));
         }
     }

@@ -131,6 +131,11 @@ fn pids_in(dir: &Path) -> Vec<u32> {
         .collect()
 }
 
+/// `usage_usec` from a `cpu.stat`.
+fn usage_usec(stat: &str) -> Option<u64> {
+    stat.lines().find_map(|l| l.strip_prefix("usage_usec ")).and_then(|v| v.trim().parse().ok())
+}
+
 fn populated(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join("cgroup.events"))
         .map(|t| t.lines().any(|l| l == "populated 1"))
@@ -223,6 +228,17 @@ impl TrackerHandle for CgroupTracker {
         self.pids().len()
     }
 
+    fn member_pids(&self) -> Vec<u32> {
+        self.pids()
+    }
+
+    /// `cpu.stat`'s `usage_usec` exists whether or not the cpu controller is
+    /// enabled, and counts members that have exited.
+    fn cpu_time_ns(&self) -> Option<u64> {
+        let stat = std::fs::read_to_string(self.dir.join("cpu.stat")).ok()?;
+        usage_usec(&stat).map(|us| us * 1000)
+    }
+
     fn spawn_target(&self) -> Option<PathBuf> {
         Some(self.dir.join("cgroup.procs"))
     }
@@ -288,6 +304,17 @@ pub fn join_before_exec_pty(cmd: &mut portable_pty::CommandBuilder, procs: PathB
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_usec_is_read_from_cpu_stat() {
+        let stat = "usage_usec 1234567
+user_usec 1000000
+system_usec 234567
+";
+        assert_eq!(usage_usec(stat), Some(1_234_567));
+        assert_eq!(usage_usec("user_usec 5
+"), None);
+    }
 
     /// A delegated scope for this test binary, or `None` where there is no
     /// systemd user manager (CI containers): the tests then skip.

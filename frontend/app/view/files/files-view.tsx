@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/app/components/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";
 import { formatBytes } from "@/app/element/local-media";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
+import { readZoom } from "@/app/store/zoom-factor";
 import type { FsEntry } from "@/types/rpc/FsEntry";
 import type { FsGitState } from "@/types/rpc/FsGitState";
 import type { FsGitStatus } from "@/types/rpc/FsGitStatus";
@@ -780,7 +781,14 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
     const placeLabel = (path: string): string => model.protectedPlace(path)?.label ?? path;
 
     return (
-        <div class="files-view" onContextMenu={(e) => e.preventDefault()} onKeyDown={onPaneKeyDown}>
+        <div
+            class="files-view"
+            // CSS zoom from the shared `term:zoom`: everything scales together, and
+            // the @container on this element measures in zoomed pixels.
+            style={{ zoom: readZoom(props.ctx.meta()) }}
+            onContextMenu={(e) => e.preventDefault()}
+            onKeyDown={onPaneKeyDown}
+        >
             <div class="files-toolbar">
                 <IconButton icon="arrow-left" label={`Back (${shortcutFor("files:back")})`} class="files-tool" disabled={!model.canBack()} onClick={() => model.goBack()} />
                 <IconButton icon="arrow-right" label={`Forward (${shortcutFor("files:forward")})`} class="files-tool" disabled={!model.canForward()} onClick={() => model.goForward()} />
