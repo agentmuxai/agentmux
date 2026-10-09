@@ -253,7 +253,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/lsp/supervisor.rs", "&resolved", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/srv/src/backend/process_tracker/registry.rs", "\"cmd\"", 4,
+    ("crates/srv/src/backend/process_tracker/registry.rs", "\"cmd\"", 5,
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/process_tracker/registry.rs", "\"sh\"", 1,
      "test: unit-test or fixture code, never on a user machine"),

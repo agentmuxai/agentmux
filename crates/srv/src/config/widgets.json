@@ -90,7 +90,7 @@
         }
     },
     "defwidget@tower": {
-        "display:order": 11,
+        "display:order": 16,
         "display:pinned": false,
         "icon": "tower-observation",
         "label": "Tower",
