@@ -14,6 +14,14 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...args: unknown[]) => reveal(...args) }));
+const remoteRecords = [
+    { name: "build-box", kind: "ssh", platform: { os: "linux", arch: "x86_64" } },
+    { name: "mac-mini", kind: "ssh", platform: { os: "macos", arch: "arm64" } },
+    { name: "pi", kind: "ssh", platform: { os: "linux", arch: "armv7l" }, helper: { state: "unsupported" } },
+    { name: "wsl://Ubuntu", kind: "wsl", platform: null },
+    { name: "win-server", kind: "ssh", platform: { os: "mingw64_nt-10.0", arch: "x86_64" } },
+];
+vi.mock("@/app/store/remotes-store", () => ({ remotesList: () => () => remoteRecords }));
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import type { TowerSnapshot } from "@/app/store/rpc-api";
@@ -30,6 +38,7 @@ function snapshot(host = false): TowerSnapshot {
         cpu_count: 4,
         memory_metric: "private working set",
         interval_ms: 2000,
+        remote: false,
         tasks: [
             {
                 id: "block-a",
@@ -65,6 +74,8 @@ function snapshot(host = false): TowerSnapshot {
                   unmeasured: 1,
                   cpu: 0.51,
                   mem: GB / 2 + 1024,
+                  total: 3,
+                  matched: 3,
               }
             : undefined,
     };
@@ -185,6 +196,126 @@ describe("Tower", () => {
         fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "agentx" } });
         await waitFor(() => expect(screen.queryByText("System")).toBeNull());
         expect(screen.getByText("claude.exe")).toBeInTheDocument();
+    });
+
+    it("lists the machines, and can't pick an SSH host the helper doesn't run on", async () => {
+        renderTower();
+        await screen.findByTestId("tower-task-block-a");
+        const picker = screen.getByRole("combobox", { name: "Machine" }) as HTMLSelectElement;
+        const options = Array.from(picker.options).map((o) => [o.value, o.disabled]);
+        expect(options).toEqual([
+            ["", false],
+            ["build-box", false],
+            ["mac-mini", false],
+            ["pi", true],
+            ["wsl://Ubuntu", false],
+            ["win-server", true],
+        ]);
+        fireEvent.change(picker, { target: { value: "build-box" } });
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:connection": "build-box" });
+    });
+
+    it("another machine: its processes only, asked for with the pane's id, no command lines", async () => {
+        vi.useFakeTimers();
+        sample.mockImplementation((_c: unknown, req: { connection?: string; filter?: string }) =>
+            Promise.resolve({
+                ...snapshot(),
+                remote: true,
+                hostname: req.connection,
+                tasks: [],
+                host: {
+                    processes: [{ id: "77:1", pid: 77, name: req.filter ? "sshd" : "cargo", cpu: 1.25, mem: GB }],
+                    unmeasured: 0,
+                    cpu: 2,
+                    mem: 8 * GB,
+                    total: 410,
+                    matched: req.filter ? 2 : 410,
+                },
+            })
+        );
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenLastCalledWith(
+            expect.anything(),
+            { host: true, connection: "build-box", filter: "", block_id: "tower-1" },
+            { timeout: 180000 }
+        );
+        expect(screen.queryByRole("tab", { name: "Tasks" })).toBeNull();
+        const cargo = screen.getByText("cargo").closest("tr")!;
+        expect(within(cargo).queryByRole("button", { name: "Show command line" })).toBeNull();
+        expect(screen.getByText(/410 processes/)).toBeInTheDocument();
+        expect(screen.getByText(/showing the 1 busiest and largest/)).toBeInTheDocument();
+
+        // Its filter is applied there, once typing pauses.
+        fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "ssh" } });
+        await vi.advanceTimersByTimeAsync(300);
+        expect(sample).toHaveBeenLastCalledWith(
+            expect.anything(),
+            expect.objectContaining({ connection: "build-box", filter: "ssh" }),
+            expect.anything()
+        );
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByText(/of 2 matching/)).toBeInTheDocument();
+    });
+
+    it("another machine that failed isn't asked again until Retry", async () => {
+        vi.useFakeTimers();
+        sample.mockRejectedValueOnce(new Error("no helper for armv7l"));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByRole("alert").textContent).toContain("armv7l");
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(sample).toHaveBeenCalledTimes(1);
+        // Hiding and showing the pane, or a new filter, doesn't try again.
+        setVisibility("dormant");
+        await vi.advanceTimersByTimeAsync(0);
+        setVisibility("active");
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(sample).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(2);
+    });
+
+    it("a new filter waits for the request already in flight", async () => {
+        vi.useFakeTimers();
+        const remote = () => ({ ...snapshot(true), remote: true, tasks: [] });
+        sample.mockImplementation(() => Promise.resolve(remote()));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(1);
+        // The next poll is slow to answer.
+        let answer: (s: TowerSnapshot) => void = () => {};
+        sample.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(sample).toHaveBeenCalledTimes(2);
+        fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "ssh" } });
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(sample).toHaveBeenCalledTimes(2);
+        answer(remote());
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(3);
+        expect(sample).toHaveBeenLastCalledWith(
+            expect.anything(),
+            expect.objectContaining({ filter: "ssh" }),
+            expect.anything()
+        );
+    });
+
+    it("switching machines doesn't wait for another machine's slow request", async () => {
+        vi.useFakeTimers();
+        sample.mockImplementationOnce(() => new Promise(() => {}));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(1);
+        setMeta({});
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(2);
+        expect(sample).toHaveBeenLastCalledWith(expect.anything(), { host: false });
     });
 
     it("polls only while visible", async () => {

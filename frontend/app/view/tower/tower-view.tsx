@@ -5,8 +5,10 @@
 // AgentMux itself), and every process on the machine
 // (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md). Read-only.
 
-import { Button, FilterInput, IconButton, SegmentedControl, tabPanelId, Tabs } from "@/app/element/ui";
+import type { SelectOption } from "@/app/element/ui";
+import { Button, FilterInput, IconButton, SegmentedControl, Select, tabPanelId, Tabs } from "@/app/element/ui";
 import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
+import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { revealBlock } from "@/app/util/reveal-block";
 import clsx from "clsx";
 import { createMemo, For, type JSX, Match, Show, Switch } from "solid-js";
@@ -37,6 +39,29 @@ const KIND_LABELS: Record<TowerTask["kind"], string> = {
     agentmux: "app",
 };
 
+/** The machine picker: this computer, then every SSH host and WSL
+ *  distribution AgentMux knows (the Remotes pane's list). The helper runs on
+ *  Linux and macOS only, so other SSH hosts are listed but can't be picked. */
+export function machineOptions(current: string, remotes: RemoteRecord[]): SelectOption[] {
+    const options: SelectOption[] = [{ value: "", label: "This computer" }];
+    for (const r of remotes) {
+        if (r.kind !== "ssh" && r.kind !== "wsl") continue;
+        const os = r.platform?.os;
+        // The Remotes list reports `os` lowercased: `linux`, `macos`, else uname -s.
+        const supported =
+            r.kind === "wsl" || (r.helper?.state !== "unsupported" && (!os || os === "linux" || os === "macos"));
+        options.push({
+            value: r.name,
+            label: supported
+                ? r.name
+                : `${r.name} (${[os, r.platform?.arch].filter(Boolean).join(" ")}: not supported)`,
+            disabled: !supported,
+        });
+    }
+    if (current && !options.some((o) => o.value === current)) options.push({ value: current, label: current });
+    return options;
+}
+
 export function TowerView(props: { model: TowerViewModel }): JSX.Element {
     const m = props.model;
     const idPrefix = `tower-${m.blockId}`;
@@ -45,12 +70,34 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
     return (
         <div class="tower-view" data-testid="tower-view">
             <div class="tower-toolbar">
+                <Select
+                    density="compact"
+                    ariaLabel="Machine"
+                    class="tower-machine"
+                    value={m.connection()}
+                    onChange={(c) => m.setConnection(c)}
+                    options={machineOptions(m.connection(), m.remotes())}
+                />
                 <Tabs<TowerViewKind>
-                    items={[
-                        { id: "tasks", label: "Tasks", icon: "layer-group", tooltip: "Each pane and what it started" },
-                        { id: "host", label: "Host", icon: "server", tooltip: "Every process on this machine" },
-                    ]}
-                    value={m.view()}
+                    items={
+                        m.remote()
+                            ? [{ id: "host", label: "Host", icon: "server", tooltip: "Every process on that machine" }]
+                            : [
+                                  {
+                                      id: "tasks",
+                                      label: "Tasks",
+                                      icon: "layer-group",
+                                      tooltip: "Each pane and what it started",
+                                  },
+                                  {
+                                      id: "host",
+                                      label: "Host",
+                                      icon: "server",
+                                      tooltip: "Every process on this machine",
+                                  },
+                              ]
+                    }
+                    value={m.effectiveView()}
                     onChange={(v) => m.setView(v)}
                     idPrefix={idPrefix}
                     ariaLabel="Tower view"
@@ -80,6 +127,12 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 {(err) => (
                     <div class="tower-error" role="alert">
                         Couldn't read processes: {err()}
+                        <Show when={m.stalled()}>
+                            {" "}
+                            <Button density="compact" onClick={() => m.retry()}>
+                                Retry
+                            </Button>
+                        </Show>
                     </div>
                 )}
             </Show>
@@ -87,10 +140,10 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 <Show when={m.snapshot()} fallback={<div class="tower-empty">Measuring…</div>}>
                     {(snap) => (
                         <Switch>
-                            <Match when={m.view() === "tasks"}>
+                            <Match when={m.effectiveView() === "tasks"}>
                                 <TasksTable model={m} cpu={cpu} />
                             </Match>
-                            <Match when={m.view() === "host"}>
+                            <Match when={m.effectiveView() === "host"}>
                                 <Show when={snap().host} fallback={<div class="tower-empty">Measuring…</div>}>
                                     <HostTable model={m} cpu={cpu} />
                                 </Show>
@@ -265,6 +318,8 @@ function ProcessRow(props: {
 function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) => string }) {
     const m = props.model;
     const host = () => m.snapshot()?.host;
+    /** Another machine sends only its busiest and largest processes. */
+    const partial = () => (host()?.processes.length ?? 0) < (host()?.matched ?? 0);
     const rows = createMemo(() => {
         const all = host()?.processes ?? [];
         return sortProcesses(filterProcesses(all, m.filter(), m.taskLabel), m.sort());
@@ -272,8 +327,14 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
     return (
         <>
             <div class="tower-summary">
-                {count(host()?.processes.length ?? 0, "process")} · CPU {props.cpu(host()?.cpu)} · Memory{" "}
-                {formatMem(host()?.mem)}
+                {count(host()?.total ?? 0, "process")} · CPU {props.cpu(host()?.cpu)} · Memory {formatMem(host()?.mem)}
+                <Show when={partial()}>
+                    <span class="tower-muted">
+                        {" "}
+                        · showing the {host()?.processes.length} busiest and largest
+                        {(host()?.matched ?? 0) < (host()?.total ?? 0) ? ` of ${host()?.matched} matching` : ""}
+                    </span>
+                </Show>
                 <Show when={(host()?.unmeasured ?? 0) > 0}>
                     <span class="tower-muted">
                         {" "}

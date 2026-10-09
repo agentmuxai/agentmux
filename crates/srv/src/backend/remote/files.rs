@@ -276,6 +276,21 @@ impl RemoteFiles {
         self.done(Request::Sync { path: path.into() }).await
     }
 
+    /// The host's processes for Tower: the `top` busiest and largest among
+    /// those matching `filter`, with totals (`agentmux_remote::procs`).
+    pub async fn procs(&self, top: u32, filter: &str) -> Result<fsproto::ProcFrame, RemoteError> {
+        match self
+            .call(Request::Procs {
+                top,
+                filter: filter.to_string(),
+            })
+            .await?
+        {
+            Reply::Procs(f) => Ok(f),
+            r => Err(unexpected(&r)),
+        }
+    }
+
     pub async fn mkdir(&self, path: &str, parents: bool) -> Result<(), RemoteError> {
         self.done(Request::Mkdir {
             path: path.into(),
@@ -579,6 +594,7 @@ pub(crate) mod testing {
         let (client_read, mut helper_write) = tokio::io::duplex(size);
         let (mut helper_read, client_write) = tokio::io::duplex(size);
         tokio::spawn(async move {
+            let mut server = agentmux_remote::serve::Server::new(home);
             let mut s = Splitter::new();
             let mut buf = vec![0u8; 65536];
             loop {
@@ -591,7 +607,7 @@ pub(crate) mod testing {
                         tokio::time::sleep(delay).await;
                     }
                     let (id, req) = Request::decode(&body).unwrap();
-                    let reply = agentmux_remote::serve::handle(&home, req);
+                    let reply = server.handle(req);
                     helper_write.write_all(&reply.encode(id)).await.unwrap();
                 }
             }

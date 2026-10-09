@@ -115,6 +115,11 @@ pub struct TowerHost {
     /// All processes' private memory, bytes.
     #[ts(type = "number")]
     pub mem: u64,
+    /// Every process the machine listed. On another machine `processes` holds
+    /// only the busiest and the largest of those matching the filter.
+    pub total: u32,
+    /// Those matching the request's filter (`total` without one).
+    pub matched: u32,
 }
 
 /// `tower.sample`.
@@ -132,6 +137,9 @@ pub struct TowerSnapshot {
     pub memory_metric: String,
     /// How often to ask again while the pane is visible.
     pub interval_ms: u32,
+    /// Another machine's (`TowerSampleReq::connection`): no tasks, no
+    /// command lines.
+    pub remote: bool,
     pub tasks: Vec<TowerTask>,
     /// Present when the request asked for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -147,4 +155,17 @@ pub struct TowerSampleReq {
     #[serde(default)]
     #[ts(optional)]
     pub host: Option<bool>,
+    /// Another machine: an SSH connection or `wsl://<distro>`, as a pane's
+    /// `connection` meta names it. Absent or `local`: this computer.
+    #[serde(default)]
+    #[ts(optional)]
+    pub connection: Option<String>,
+    /// On another machine, only processes whose name or PID holds every word.
+    #[serde(default)]
+    #[ts(optional)]
+    pub filter: Option<String>,
+    /// The asking pane, where ssh's prompts (a password, a host key) go.
+    #[serde(default)]
+    #[ts(optional)]
+    pub block_id: Option<String>,
 }

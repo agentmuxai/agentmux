@@ -104,6 +104,7 @@ pub mod posix_shell;
 pub mod shellintegration;
 pub mod swarm_remote;
 pub mod sysinfo;
+pub mod tower_remote;
 pub mod tower_sampler;
 pub mod storage;
 pub mod subagent_watcher;

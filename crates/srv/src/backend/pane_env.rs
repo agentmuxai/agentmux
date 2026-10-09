@@ -304,6 +304,8 @@ mod spawn_site_coverage {
          "test: runs the install scripts in a real sh against a temp home"),
         ("src/backend/fs_ops/host_jobs.rs", "\"mkfifo\"", 1,
          "test: makes a FIFO for the host transfer tests (Linux only)"),
+        ("src/backend/tower_remote.rs", "\"wsl.exe\"", 1,
+         "sanitized: Tower's helper inside a WSL distribution, sanitize_external_command"),
         ("src/backend/remote/wsl.rs", "\"wsl.exe\"", 1,
          "probe: `wsl.exe --list --quiet`, output parsed then discarded"),
         ("src/backend/shell_node.rs", "\"cmd\"", 1,

@@ -13,8 +13,8 @@
 //! helper stays dependency-free (a few hundred KB on the host), and a file's
 //! bytes need no escaping.
 
-/// The protocol version both ends must share (`Hello`).
-pub const PROTOCOL: u32 = 1;
+/// The protocol version both ends must share (`Hello`). 2 added `Procs`.
+pub const PROTOCOL: u32 = 2;
 
 /// Largest message accepted; a longer length means a broken stream.
 pub const MAX_MESSAGE: usize = 40 << 20;
@@ -91,6 +91,51 @@ pub enum Request {
     Sync {
         path: String,
     },
+    /// The host's processes for Tower (`crate::procs`): the `top` busiest by
+    /// CPU and the `top` largest by memory among those whose name or PID
+    /// matches every word of `filter`. [`Reply::Procs`].
+    Procs {
+        top: u32,
+        filter: String,
+    },
+}
+
+/// One process in a [`ProcFrame`]. Absent values are ones the host's OS
+/// wouldn't give without elevation, never zeros.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcRow {
+    pub pid: u32,
+    pub ppid: Option<u32>,
+    /// With `pid`, tells the process apart from a later one with its PID.
+    pub start_key: u64,
+    pub started_at_ms: Option<u64>,
+    /// The executable's name. Never its command line.
+    pub name: String,
+    /// CPU since the previous `Procs`, in thousandths of one core.
+    pub cpu_milli: Option<u32>,
+    /// Private memory, bytes (`ProcFrame::memory_metric`).
+    pub mem: Option<u64>,
+    pub mem_resident: Option<u64>,
+}
+
+/// The answer to [`Request::Procs`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProcFrame {
+    /// Logical CPUs on the host.
+    pub cpu_count: u32,
+    pub memory_metric: String,
+    /// Every process the host listed.
+    pub total: u32,
+    /// Those matching the filter (all of them without one).
+    pub matched: u32,
+    /// Listed without CPU or memory (other users' on macOS).
+    pub unmeasured: u32,
+    /// Every process's CPU, thousandths of one core; absent on a connection's
+    /// first frame, before there is anything to measure against.
+    pub cpu_milli: Option<u64>,
+    /// Every process's private memory, bytes.
+    pub mem: u64,
+    pub rows: Vec<ProcRow>,
 }
 
 /// What kind of thing an entry is (a symlink is reported as what it points
@@ -187,6 +232,7 @@ pub enum Reply {
     Done,
     /// A path ([`Request::Realpath`]).
     Path(String),
+    Procs(ProcFrame),
     Err {
         kind: ErrKind,
         message: String,
@@ -207,6 +253,7 @@ mod op {
     pub const REALPATH: u8 = 11;
     pub const SETMETA: u8 = 12;
     pub const SYNC: u8 = 13;
+    pub const PROCS: u8 = 14;
 }
 
 mod status {
@@ -216,6 +263,7 @@ mod status {
     pub const READ: u8 = 4;
     pub const DONE: u8 = 5;
     pub const PATH: u8 = 6;
+    pub const PROCS: u8 = 7;
     pub const ERR: u8 = 255;
 }
 
@@ -255,6 +303,23 @@ impl W {
             .u32(e.mode)
             .u8(u8::from(e.symlink))
             .str(&e.link_target)
+    }
+    /// An optional number: the type's maximum stands for "absent".
+    fn opt_u32(&mut self, v: Option<u32>) -> &mut Self {
+        self.u32(v.unwrap_or(u32::MAX))
+    }
+    fn opt_u64(&mut self, v: Option<u64>) -> &mut Self {
+        self.u64(v.unwrap_or(u64::MAX))
+    }
+    fn proc_row(&mut self, p: &ProcRow) -> &mut Self {
+        self.u32(p.pid)
+            .opt_u32(p.ppid)
+            .u64(p.start_key)
+            .opt_u64(p.started_at_ms)
+            .str(&p.name)
+            .opt_u32(p.cpu_milli)
+            .opt_u64(p.mem)
+            .opt_u64(p.mem_resident)
     }
     /// The message: length, then body.
     fn message(self) -> Vec<u8> {
@@ -311,6 +376,24 @@ impl<'a> R<'a> {
             mode: self.u32()?,
             symlink: self.u8()? != 0,
             link_target: self.str()?,
+        })
+    }
+    fn opt_u32(&mut self) -> Result<Option<u32>, String> {
+        Ok(Some(self.u32()?).filter(|&v| v != u32::MAX))
+    }
+    fn opt_u64(&mut self) -> Result<Option<u64>, String> {
+        Ok(Some(self.u64()?).filter(|&v| v != u64::MAX))
+    }
+    fn proc_row(&mut self) -> Result<ProcRow, String> {
+        Ok(ProcRow {
+            pid: self.u32()?,
+            ppid: self.opt_u32()?,
+            start_key: self.u64()?,
+            started_at_ms: self.opt_u64()?,
+            name: self.str()?,
+            cpu_milli: self.opt_u32()?,
+            mem: self.opt_u64()?,
+            mem_resident: self.opt_u64()?,
         })
     }
     fn done(&self) -> Result<(), String> {
@@ -375,6 +458,9 @@ impl Request {
             Request::Sync { path } => {
                 w.u8(op::SYNC).str(path);
             }
+            Request::Procs { top, filter } => {
+                w.u8(op::PROCS).u32(*top).str(filter);
+            }
         }
         w.message()
     }
@@ -422,6 +508,10 @@ impl Request {
             },
             op::REALPATH => Request::Realpath { path: r.str()? },
             op::SYNC => Request::Sync { path: r.str()? },
+            op::PROCS => Request::Procs {
+                top: r.u32()?,
+                filter: r.str()?,
+            },
             op::SETMETA => Request::SetMeta {
                 path: r.str()?,
                 mode: r.u32()?,
@@ -461,6 +551,20 @@ impl Reply {
             Reply::Path(p) => {
                 w.u8(status::PATH).str(p);
             }
+            Reply::Procs(f) => {
+                w.u8(status::PROCS)
+                    .u32(f.cpu_count)
+                    .str(&f.memory_metric)
+                    .u32(f.total)
+                    .u32(f.matched)
+                    .u32(f.unmeasured)
+                    .opt_u64(f.cpu_milli)
+                    .u64(f.mem)
+                    .u32(f.rows.len() as u32);
+                for p in &f.rows {
+                    w.proc_row(p);
+                }
+            }
             Reply::Err { kind, message } => {
                 w.u8(status::ERR).u8(*kind as u8).str(message);
             }
@@ -498,6 +602,30 @@ impl Reply {
             },
             status::DONE => Reply::Done,
             status::PATH => Reply::Path(r.str()?),
+            status::PROCS => {
+                let (cpu_count, memory_metric) = (r.u32()?, r.str()?);
+                let (total, matched, unmeasured) = (r.u32()?, r.u32()?, r.u32()?);
+                let (cpu_milli, mem) = (r.opt_u64()?, r.u64()?);
+                let n = r.u32()? as usize;
+                // Each row is at least 48 bytes: a count past that is a lie.
+                if n > body.len() / 48 {
+                    return Err("procs: impossible row count".into());
+                }
+                let mut rows = Vec::with_capacity(n);
+                for _ in 0..n {
+                    rows.push(r.proc_row()?);
+                }
+                Reply::Procs(ProcFrame {
+                    cpu_count,
+                    memory_metric,
+                    total,
+                    matched,
+                    unmeasured,
+                    cpu_milli,
+                    mem,
+                    rows,
+                })
+            }
             status::ERR => Reply::Err {
                 kind: ErrKind::from_u8(r.u8()?),
                 message: r.str()?,
@@ -606,6 +734,10 @@ mod tests {
                 mode: 0o755,
                 mtime_ms: 1_700_000_000_000,
             },
+            Request::Procs {
+                top: 100,
+                filter: "node agent".into(),
+            },
         ];
         let replies = vec![
             Reply::Hello {
@@ -628,6 +760,38 @@ mod tests {
                 kind: ErrKind::NotFound,
                 message: "no such file".into(),
             },
+            Reply::Procs(ProcFrame {
+                cpu_count: 8,
+                memory_metric: "anonymous resident + swap".into(),
+                total: 300,
+                matched: 2,
+                unmeasured: 1,
+                cpu_milli: Some(1500),
+                mem: 1 << 30,
+                rows: vec![
+                    ProcRow {
+                        pid: 42,
+                        ppid: Some(1),
+                        start_key: 98_765,
+                        started_at_ms: Some(1_700_000_000_000),
+                        name: "node".into(),
+                        cpu_milli: Some(1000),
+                        mem: Some(200 << 20),
+                        mem_resident: Some(300 << 20),
+                    },
+                    // Another user's process on macOS: nothing measured.
+                    ProcRow {
+                        pid: 1,
+                        ppid: None,
+                        start_key: 0,
+                        started_at_ms: None,
+                        name: "launchd".into(),
+                        cpu_milli: None,
+                        mem: None,
+                        mem_resident: None,
+                    },
+                ],
+            }),
         ];
         let mut stream = Vec::new();
         for (i, r) in requests.iter().enumerate() {

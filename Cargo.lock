@@ -168,6 +168,7 @@ dependencies = [
 name = "agentmux-remote"
 version = "0.59.16"
 dependencies = [
+ "agentmux-procstats",
  "libc",
  "tempfile",
 ]

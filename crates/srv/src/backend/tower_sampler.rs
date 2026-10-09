@@ -453,6 +453,8 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
             unmeasured: procs.iter().filter(|p| !p.measured()).count() as u32,
             cpu: sum_known(rates.iter().copied()),
             mem: procs.iter().filter_map(|p| p.mem_private).sum(),
+            total: procs.len() as u32,
+            matched: procs.len() as u32,
         }
     });
 
@@ -463,6 +465,7 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
         cpu_count: agentmux_procstats::cpu_count() as u32,
         memory_metric: agentmux_procstats::MEMORY_METRIC.to_string(),
         interval_ms: INTERVAL.as_millis() as u32,
+        remote: false,
         tasks,
         host,
     }

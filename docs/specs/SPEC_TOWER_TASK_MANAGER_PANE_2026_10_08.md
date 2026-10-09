@@ -1,7 +1,8 @@
 # SPEC: Tower, a read-only task manager pane (CPU and memory per task)
 
 **Status:** active. The Tasks and Host views (§9 phases 1-3) are
-implemented (#4498); remote hosts (§8) are next. Name chosen by the
+implemented (#4498); SSH and WSL remotes (§8.2) follow; LAN peers (§8.3)
+are next. Name chosen by the
 operator: **Tower**. Defaults taken as recommended (2026-10-08): CPU as a share
 of the whole machine with a per-core toggle; one AgentMux row that expands to
 its processes; one-time pairing for LAN viewing; internet hosts in a separate
@@ -270,46 +271,52 @@ little:
 
 1. **Sample on the remote host**, with the same reader code (§6.1). Never
    ship raw `/proc` text or run `ps` per tick over the wire.
-2. **Only while someone is looking.** The viewer holds a lease (renewed every
-   ~10 s by an open Tower pane on that host's tab); the remote sampler stops
-   when the lease lapses. Zero cost for hosts nobody is viewing.
-3. **Latest value, never a queue.** A slow link skips frames instead of
-   buffering them (the `fleet_feed` `watch`-channel pattern); a reconnect
-   gets one full snapshot.
-4. **Deltas and caps.** After the first snapshot, each frame carries only
-   rows whose CPU or memory moved past a threshold, plus added and exited
-   (pid, start time) keys. The Host view sends the top 50 by the current sort
-   key and one "other processes" total row. Names are interned per
-   connection. Target: well under 2 KB per frame for the Tasks view and
-   under 8 KB for the Host view, at 2 s (5 s when the pane isn't focused).
-5. **No command lines by default.** Process command lines routinely hold
-   tokens and paths. Remote frames carry the executable name only; full
-   command lines are an opt-in per remote host, fetched on demand for one
-   row, never streamed.
+2. **Only while someone is looking.** Like the local view, sampling is
+   driven by the pane: one request per refresh while it is visible, nothing
+   otherwise. No lease or push stream is needed; the connection itself closes
+   when idle (§8.2). Two panes asking within 900 ms share one frame.
+3. **Small frames.** A frame carries totals for every process plus rows for
+   the 100 busiest by CPU and the 100 largest by memory (their union, so at
+   most 200, usually far fewer), in the helper's binary protocol: about 50
+   bytes per row, so a few KB per refresh. A filter is applied on the host
+   first, so a search still finds a process outside both lists, and `matched`
+   says how many there were.
+4. **Rates on the host.** CPU is the change since the previous frame on that
+   connection, computed by the helper, so srv keeps no per-host state.
+5. **No command lines.** Process command lines routinely hold tokens and
+   paths. Frames carry the executable name only, and the pane offers no
+   command line for another machine's processes.
 
 ### 8.2 SSH and WSL remotes (first)
 
 These already have a channel and a consent model, and need no new network
 surface.
 
-- **SSH (Linux, macOS hosts):** add a `procs --stdio` subcommand to the
-  `agentmux-remote` helper (`crates/remote/src/main.rs`, beside `serve
-  --stdio` and `attach`). srv keeps one `ssh -T` connection per viewed host
-  open, as `backend/remote/files.rs` does for file operations, and closes it
-  when the lease lapses. The helper's existing install consent (`conn:helper`,
-  `helper_consent.rs`) and per-agent host access (`remote/agent_access.rs`)
-  apply unchanged.
-- srv answers `tower.sample` for that connection from the latest frame (the
-  pane names the connection; the lease is renewed by the pane's own polling).
-  The same feed could later populate the System Info pane's `connection`
-  scope, which the frontend already supports but nothing publishes.
-- **WSL:** run the Linux helper inside the distribution with `wsl.exe -d
-  <distro> -- … procs --stdio`. No network and no SSH.
-- **Windows SSH hosts:** no helper exists for them. Out of scope until one
-  does; Tower shows the host as "not supported".
+- **The protocol:** a `Procs { top, filter }` request in the helper's file
+  protocol (`agentmux_remote::fsproto`, version 2), answered from
+  `agentmux_remote::procs` by `serve --stdio`, which keeps the CPU rates
+  between requests. Not a separate subcommand: it rides the connection file
+  browsing already keeps per host.
+- **SSH (Linux, macOS hosts):** `tower_remote` asks `remote::files::connect`
+  for the host's helper connection (one `ssh -T host -- agentmux-remote serve
+  --stdio`, closed after 10 minutes unused). The helper's install consent
+  (`conn:helper`, `helper_consent.rs`) applies unchanged, and ssh's prompts go
+  to the window of the Tower pane that asked.
+- **WSL:** the Linux helper this package ships under `tools/remote/<target>/`
+  is run inside the distribution straight from there: `wsl.exe -d <distro>
+  --cd <its folder> --exec ./agentmux-remote serve --stdio`. Nothing is
+  copied in and there is no network. It is stopped after two minutes unused.
+- **The pane:** a machine picker (this computer, then every SSH host and WSL
+  distribution from the Remotes list). Another machine shows the Host view
+  only, with "showing the N busiest and largest of M". Its filter is sent to
+  the host once typing pauses.
+- **Windows SSH hosts:** no helper exists for them. They are listed but
+  can't be picked ("not supported").
 - What a remote "task" is: on an SSH host Tower has no panes to group by, so
   it shows the Host view only. (An SSH pane's local `blockstats` measures the
   local `ssh` client, which is correct for the Tasks view on this machine.)
+- Later: the same frames could populate the System Info pane's `connection`
+  scope, which the frontend already supports but nothing publishes.
 
 ### 8.3 Other AgentMux instances on the LAN (second)
 
@@ -362,7 +369,7 @@ is not proposed here.
 3. **Done.** Host view (§7).
    - **Follow-up:** point the `blockstats` badge at the same sampler, so badge
      and pane agree (today the badge shows working set / RSS, per core).
-4. **SSH and WSL remotes** (§8.2).
+4. **Done.** SSH and WSL remotes (§8.2).
 5. **LAN peers** (§8.3).
 6. **Later, separately specced:** WAN hosts (§8.4), actions (kill tree,
    already safe with Job Objects/`cgroup.kill`), per-task memory via an

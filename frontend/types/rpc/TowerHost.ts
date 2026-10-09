@@ -18,4 +18,13 @@ cpu?: number,
 /**
  * All processes' private memory, bytes.
  */
-mem: number, };
+mem: number, 
+/**
+ * Every process the machine listed. On another machine `processes` holds
+ * only the busiest and the largest of those matching the filter.
+ */
+total: number, 
+/**
+ * Those matching the request's filter (`total` without one).
+ */
+matched: number, };
