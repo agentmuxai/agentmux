@@ -868,15 +868,10 @@ pub(crate) async fn handle_ui_browser_snapshot(
 pub(crate) fn popup_listing(state: &AppState, opener: &str, agent_id: &str) -> Vec<serde_json::Value> {
     use crate::backend::obj::Block;
     let load = |id: &str| state.mstore.get::<Block>(id).ok().flatten();
-    let root = chain_root(state, opener);
-    crate::server::browser_popup::open_popups(&root, |id| load(id).is_some())
+    crate::server::browser_popup::open_popups(opener, |id| load(id).is_some())
         .into_iter()
         .filter_map(|pane| {
             let block = load(&pane)?;
-            // The chain's popups are recorded together; list this pane's own.
-            if popup_of(&block).as_deref() != Some(opener) {
-                return None;
-            }
             let url = block.meta.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let yours = owning_agent(&block, &pane).is_some_and(|a| a.eq_ignore_ascii_case(agent_id));
             Some(json!({ "pane": pane, "url": url, "yours": yours }))
@@ -1012,6 +1007,9 @@ fn opener_allows(
         not_waiting_on_user(&opener)?;
         next = popup_of(&opener_block);
     }
+    if next.is_none() {
+        return Ok(());
+    }
     Err((StatusCode::FORBIDDEN, format!("popup {pane:?} is too many popups deep to drive")))
 }
 
@@ -1031,8 +1029,8 @@ fn popup_of(block: &crate::backend::obj::Block) -> Option<String> {
 
 /// The pane a chain of popups started in: `pane` itself unless it is a popup
 /// pane, else its opener's root, as far up as the panes still exist. Popups
-/// are counted against it, so a popup opening popups shares its root's cap
-/// rather than getting its own.
+/// are counted over its whole tree, so a popup opening popups shares its
+/// root's cap rather than getting its own.
 fn chain_root(state: &AppState, pane: &str) -> String {
     let mut root = pane.to_string();
     for _ in 0..POPUP_CHAIN_LIMIT {
@@ -1211,6 +1209,7 @@ pub(crate) async fn handle_host_browser_popup(
     // doesn't open.
     let root = chain_root(&state, &opener);
     let reservation = match popup::reserve(
+        &opener,
         &root,
         |id| matches!(state.mstore.get::<crate::backend::obj::Block>(id), Ok(Some(_))),
         |taken| popup::decide(&url, &opener_url, user_gesture, owner.is_some(), taken),

@@ -116,7 +116,7 @@ pub(crate) fn check(
 
 /// Meta keys only srv writes, from its own records: who drives a pane, the
 /// banner that asks the person something, and what opened a popup.
-fn srv_only_keys() -> [&'static str; 4] {
+pub(crate) fn srv_only_keys() -> [&'static str; 4] {
     [
         OWNER_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,

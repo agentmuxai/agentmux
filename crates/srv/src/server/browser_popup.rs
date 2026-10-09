@@ -194,16 +194,35 @@ fn release(p: &mut Popups, opener: &str) {
     }
 }
 
-/// Admit one more popup pane for `opener` if `admit` agrees, given how many
-/// it has open or being opened, and hold its slot. The count and the slot are
-/// taken under one lock.
+/// Popup panes open or being opened anywhere below `node`: its own, and
+/// theirs, and so on. Records stay with each popup's direct opener, so when a
+/// pane in the middle of a chain closes, the subtree under it still counts
+/// for whichever pane is now its root.
+fn count_tree(p: &mut Popups, node: &str, exists: &dyn Fn(&str) -> bool, depth: usize) -> usize {
+    let kids = prune(p, node, exists);
+    let mut n = kids.len() + p.pending.get(node).copied().unwrap_or(0);
+    if depth < CHAIN_DEPTH_LIMIT {
+        for k in kids {
+            n += count_tree(p, &k, exists, depth + 1);
+        }
+    }
+    n
+}
+
+/// How deep `count_tree` follows popups of popups.
+const CHAIN_DEPTH_LIMIT: usize = 16;
+
+/// Admit one more popup pane from `opener` if `admit` agrees, given how many
+/// popup panes the chain it belongs to (rooted at `root`) has open or being
+/// opened, and hold its slot. The count and the slot are taken under one lock.
 pub(crate) fn reserve<E>(
     opener: &str,
+    root: &str,
     exists: impl Fn(&str) -> bool,
     admit: impl FnOnce(usize) -> Result<(), E>,
 ) -> Result<Reservation, E> {
     let mut p = lock();
-    let taken = prune(&mut p, opener, exists).len() + p.pending.get(opener).copied().unwrap_or(0);
+    let taken = count_tree(&mut p, root, &exists, 0);
     admit(taken)?;
     *p.pending.entry(opener.to_string()).or_default() += 1;
     Ok(Reservation { opener: opener.to_string(), held: true })
@@ -306,19 +325,40 @@ mod tests {
         let cap = |taken: usize| if taken < 2 { Ok(()) } else { Err(taken) };
         // Two admitted at once: both slots count, so a third doesn't fit,
         // although nothing is open yet.
-        let a = reserve(opener, |_| true, cap).unwrap();
-        let b = reserve(opener, |_| true, cap).unwrap();
-        assert_eq!(reserve(opener, |_| true, cap).err(), Some(2));
+        let a = reserve(opener, opener, |_| true, cap).unwrap();
+        let b = reserve(opener, opener, |_| true, cap).unwrap();
+        assert_eq!(reserve(opener, opener, |_| true, cap).err(), Some(2));
         // One opens, the other fails: the failed one's slot comes back.
         a.commit("test-reserve-p1");
         drop(b);
         assert_eq!(open_popups(opener, |_| true), vec!["test-reserve-p1"]);
-        let c = reserve(opener, |_| true, cap).unwrap();
-        assert_eq!(reserve(opener, |_| true, cap).err(), Some(2));
+        let c = reserve(opener, opener, |_| true, cap).unwrap();
+        assert_eq!(reserve(opener, opener, |_| true, cap).err(), Some(2));
         drop(c);
         // A closed popup frees its slot too.
-        assert!(reserve(opener, |id| id != "test-reserve-p1", cap).is_ok());
+        assert!(reserve(opener, opener, |id| id != "test-reserve-p1", cap).is_ok());
         assert!(open_popups(opener, |_| true).is_empty());
+    }
+
+    #[test]
+    fn a_chain_counts_together_and_survives_its_root_closing() {
+        // R opened A; A opened B.
+        remember("test-tree-r", "test-tree-a");
+        remember("test-tree-a", "test-tree-b");
+        let count = |root: &str, exists: &dyn Fn(&str) -> bool| {
+            let mut taken = None;
+            let _ = reserve("test-tree-probe", root, |id| exists(id), |n| {
+                taken = Some(n);
+                Err::<(), ()>(())
+            });
+            taken.unwrap()
+        };
+        assert_eq!(count("test-tree-r", &|_| true), 2);
+        // R closed: A is the root now, and B still counts for it.
+        assert_eq!(count("test-tree-a", &|id| id != "test-tree-r"), 1);
+        assert_eq!(open_popups("test-tree-a", |_| true), vec!["test-tree-b"]);
+        open_popups("test-tree-r", |_| false);
+        open_popups("test-tree-a", |_| false);
     }
 
     #[test]
