@@ -279,6 +279,16 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     </div>
                 )}
             </Show>
+            <Show when={model.popupFromAtom()}>
+                {(from) => (
+                    <div class="browser-popup-from" role="note">
+                        <i class="fa-solid fa-window-restore" aria-hidden="true" />
+                        <span>
+                            Popup from <b>{from()}</b>
+                        </span>
+                    </div>
+                )}
+            </Show>
             <Show when={model.driverAgentAtom()}>
                 {(agent) => (
                     <div class="browser-driven-by" role="status">

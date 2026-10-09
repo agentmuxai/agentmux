@@ -42,10 +42,11 @@ pub(super) async fn handle_object_service(state: &AppState, call: &WebCallType) 
             WebReturnType::success(serde_json::json!(results))
         }
         "CreateBlock" => {
-            let block_def: BlockDef = match service::get_arg(args, 0) {
+            let mut block_def: BlockDef = match service::get_arg(args, 0) {
                 Ok(v) => v,
                 Err(e) => return WebReturnType::error(e),
             };
+            crate::server::browser_owner::strip_srv_only_keys(&mut block_def.meta);
             // Optional explicit tab_id at args[2] (args[1] is rtOpts).
             // When present, overrides uicontext.active_tab_id — lets
             // callers like applyTabPreset (frontend) target a specific

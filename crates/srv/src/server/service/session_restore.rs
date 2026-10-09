@@ -481,9 +481,17 @@ pub(crate) async fn replay_tabs(
 
         let mut new_block_ids: Vec<String> = Vec::new();
         for meta in &tab.blocks {
+            // A replayed pane is a new pane: not an agent's, not a popup of
+            // a pane that no longer has this id, no banner from before.
+            let mut meta = meta.clone();
+            if let Some(obj) = meta.as_object_mut() {
+                for key in crate::server::browser_owner::srv_only_keys() {
+                    obj.remove(key);
+                }
+            }
             let blk_events = dispatch_to_reducer(
                 state,
-                Command::CreateBlock { tab_id: tab_id.clone(), meta: meta.clone() },
+                Command::CreateBlock { tab_id: tab_id.clone(), meta },
             )
             .await;
             if let Some(err) = find_error(&blk_events) {

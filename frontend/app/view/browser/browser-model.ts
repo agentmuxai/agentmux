@@ -157,6 +157,9 @@ export class BrowserViewModel {
     /** The agent driving this pane, when an agent opened it with `OpenBrowser`
      *  (`browser:owner_agent`, written by srv; SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md §5.5). */
     driverAgentAtom: Accessor<string | undefined>;
+    /** The site of the page that opened this pane as a popup
+     *  (`browser:popup_from`, written by srv; SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5). */
+    popupFromAtom: Accessor<string | undefined>;
     /** The driving agent's pending request to the user (hand-off or approval). */
     attentionAtom: Accessor<BrowserAttention | undefined>;
 
@@ -371,6 +374,10 @@ export class BrowserViewModel {
             });
             this.driverAgentAtom = createMemo(() => {
                 const v = this.meta()?.["browser:owner_agent"];
+                return typeof v === "string" && v.trim() ? v.trim() : undefined;
+            });
+            this.popupFromAtom = createMemo(() => {
+                const v = this.meta()?.["browser:popup_from"];
                 return typeof v === "string" && v.trim() ? v.trim() : undefined;
             });
             return dispose;

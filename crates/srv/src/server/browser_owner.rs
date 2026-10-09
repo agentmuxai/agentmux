@@ -114,6 +114,27 @@ pub(crate) fn check(
     Ok(())
 }
 
+/// Meta keys only srv writes, from its own records: who drives a pane, the
+/// banner that asks the person something, and what opened a popup.
+pub(crate) fn srv_only_keys() -> [&'static str; 4] {
+    [
+        OWNER_META_KEY,
+        crate::server::browser_attention::ATTENTION_META_KEY,
+        crate::server::browser_popup::POPUP_OF_META_KEY,
+        crate::server::browser_popup::POPUP_FROM_META_KEY,
+    ]
+}
+
+/// Remove srv-only keys from the meta a client gives a NEW block
+/// (`pane.open` over RPC or HTTP, `object.CreateBlock`). Removed rather than
+/// refused, so duplicating a pane still works: the copy is an ordinary pane,
+/// without an owner, a banner, or a claim to be a popup. srv's own callers
+/// (`OpenBrowser`, the popup route) set these keys after this check, through
+/// `open_pane` directly. Returns the keys it removed.
+pub(crate) fn strip_srv_only_keys(meta: &mut MetaMapType) -> Vec<&'static str> {
+    srv_only_keys().into_iter().filter(|k| meta.remove(*k).is_some()).collect()
+}
+
 /// Guard for meta updates that come from a client (the `setmeta` WebSocket
 /// command and the `UpdateObjectMeta` service call), not from srv itself.
 /// `browser:owner_agent` is srv's to write: a client may only clear it, which
@@ -123,11 +144,17 @@ pub(crate) fn check(
 /// a client that could write it could keep a real request's id and change
 /// what the banner tells the human they're approving.
 pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<(), String> {
-    if meta.contains_key(crate::server::browser_attention::ATTENTION_META_KEY) {
-        return Err(format!(
-            "{} is written only by AgentMux itself",
-            crate::server::browser_attention::ATTENTION_META_KEY
-        ));
+    // The popup keys name the pane that opened this one and its site, shown
+    // to the person as "Popup from …": a client that could write them could
+    // make any pane claim to come from a site it doesn't.
+    for key in [
+        crate::server::browser_attention::ATTENTION_META_KEY,
+        crate::server::browser_popup::POPUP_OF_META_KEY,
+        crate::server::browser_popup::POPUP_FROM_META_KEY,
+    ] {
+        if meta.contains_key(key) {
+            return Err(format!("{key} is written only by AgentMux itself"));
+        }
     }
     let Some(value) = meta.get(OWNER_META_KEY) else {
         return Ok(());
@@ -264,6 +291,30 @@ mod tests {
         let forged = json!({ "id": "real-id", "kind": "approval", "what": "Click \"Cancel\"" });
         assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, forged)).is_err());
         assert!(guard_client_meta_write("block:test-guard-attn", &meta(key, serde_json::Value::Null)).is_err());
+    }
+
+    #[test]
+    fn a_client_cannot_write_the_popup_keys() {
+        use crate::server::browser_popup::{POPUP_FROM_META_KEY, POPUP_OF_META_KEY};
+        for key in [POPUP_OF_META_KEY, POPUP_FROM_META_KEY] {
+            assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, json!("x"))).is_err());
+            assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, serde_json::Value::Null)).is_err());
+        }
+    }
+
+    #[test]
+    fn a_new_block_from_a_client_starts_without_srv_only_keys() {
+        let mut m = MetaMapType::new();
+        m.insert("view".into(), json!("browser"));
+        m.insert("url".into(), json!("https://example.com"));
+        m.insert(OWNER_META_KEY.into(), json!("lark"));
+        m.insert(crate::server::browser_popup::POPUP_FROM_META_KEY.into(), json!("https://bank.example"));
+        m.insert(crate::server::browser_popup::POPUP_OF_META_KEY.into(), json!("some-pane"));
+        let mut removed = strip_srv_only_keys(&mut m);
+        removed.sort();
+        assert_eq!(removed, vec!["browser:owner_agent", "browser:popup_from", "browser:popup_of"]);
+        assert_eq!(m.len(), 2);
+        assert!(strip_srv_only_keys(&mut m).is_empty());
     }
 
     #[test]

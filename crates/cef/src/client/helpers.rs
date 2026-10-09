@@ -178,11 +178,44 @@ pub(crate) fn backend_browser_attention(
     ipc_token: &str,
     body: &serde_json::Value,
 ) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_attention", body)
+        .map(|_| ())
+        .map_err(|e| format!("srv refused the answer: {e}"))
+}
+
+/// Report a popup a browser pane's page opened, as the host, and return
+/// srv's `data`: `{admitted: true, pane}` when srv opened it as a pane beside
+/// its opener, `{admitted: false, reason}` when the caller should open it in
+/// the system browser (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md).
+/// Blocking: run it off the UI thread.
+pub(crate) fn backend_browser_popup(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let raw = post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_popup", body)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("srv answered something that isn't JSON: {e}"))?;
+    Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
+}
+
+/// POST `body` to srv's `path` as the host: `X-Host-Token` carries this
+/// host's IPC token, which srv checks against the one we registered and
+/// agents never see. Returns the response body on a 200, else an error with
+/// the status line and body.
+fn post_as_host(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<String, String> {
     use std::io::{Read, Write};
-    let addr = parse_web_endpoint(web_endpoint, "backend_browser_attention").ok_or("no srv endpoint")?;
+    let addr = parse_web_endpoint(web_endpoint, path).ok_or("no srv endpoint")?;
     let body = body.to_string();
     let request = format!(
-        "POST /api/v1/host/browser_attention HTTP/1.1\r\n\
+        "POST {path} HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
          X-AuthKey: {auth_key}\r\n\
          X-Host-Token: {ipc_token}\r\n\
@@ -201,11 +234,11 @@ pub(crate) fn backend_browser_attention(
     let mut raw = String::new();
     stream.read_to_string(&mut raw).map_err(|e| format!("read from srv: {e}"))?;
     let first = raw.lines().next().unwrap_or("");
+    let detail = raw.split("\r\n\r\n").nth(1).unwrap_or("").trim().to_string();
     if first.contains(" 200 ") {
-        Ok(())
+        Ok(detail)
     } else {
-        let detail = raw.split("\r\n\r\n").nth(1).unwrap_or("").trim();
-        Err(format!("srv refused the answer: {first} {detail}"))
+        Err(format!("{first} {detail}"))
     }
 }
 

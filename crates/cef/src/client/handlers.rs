@@ -648,7 +648,7 @@ wrap_life_span_handler! {
             target_url: Option<&CefString>,
             _target_frame_name: Option<&CefString>,
             target_disposition: WindowOpenDisposition,
-            _user_gesture: ::std::os::raw::c_int,
+            user_gesture: ::std::os::raw::c_int,
             _popup_features: Option<&PopupFeatures>,
             _window_info: Option<&mut WindowInfo>,
             _client: Option<&mut Option<Client>>,
@@ -657,7 +657,7 @@ wrap_life_span_handler! {
             _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
             let mut inner = self.inner.lock();
-            if inner.on_before_popup(browser, frame, target_url, target_disposition) {
+            if inner.on_before_popup(browser, frame, target_url, target_disposition, user_gesture != 0) {
                 1
             } else {
                 0

@@ -145,7 +145,10 @@ pub(crate) fn target_block_id(
         .get::<crate::backend::obj::Block>(pane)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("load pane {pane:?}: {e}")))?;
     match browser_owner::check(block.as_ref(), browser_owner::owner_of(pane).as_deref(), &auth.agent_id, pane) {
-        Ok(()) => not_waiting_on_user(pane).map(|()| pane.to_string()),
+        Ok(()) => {
+            opener_allows(state, block.as_ref(), &auth.agent_id, pane)?;
+            not_waiting_on_user(pane).map(|()| pane.to_string())
+        }
         Err(Denied::NotFound(m)) => {
             // The pane is gone: drop any owner entry it left behind.
             browser_owner::forget(pane);
@@ -840,13 +843,40 @@ pub(crate) async fn handle_ui_browser_snapshot(
         Err((code, e)) => return err_response(code, e),
     };
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser snapshot");
-    proxy_data(
+    let mut data = match proxy_value(
         &state,
         "snapshot",
         json!({ "block_id": block_id, "scope": req.scope }),
         std::time::Duration::from_secs(30),
     )
     .await
+    {
+        Ok(d) => d,
+        Err((code, e)) => return err_response(code, e),
+    };
+    // The popups this page opened, which an agent finds no other way
+    // (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §3.4).
+    let popups = popup_listing(&state, &block_id, &req.auth.agent_id);
+    if let Some(obj) = data.as_object_mut() {
+        obj.insert("popups".to_string(), json!(popups));
+    }
+    (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+/// `opener`'s open popups for its snapshot: each one's pane id, address, and
+/// whether `agent_id` may drive it (not if the person took it over).
+pub(crate) fn popup_listing(state: &AppState, opener: &str, agent_id: &str) -> Vec<serde_json::Value> {
+    use crate::backend::obj::Block;
+    let load = |id: &str| state.mstore.get::<Block>(id).ok().flatten();
+    crate::server::browser_popup::open_popups(opener, |id| load(id).is_some())
+        .into_iter()
+        .filter_map(|pane| {
+            let block = load(&pane)?;
+            let url = block.meta.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let yours = owning_agent(&block, &pane).is_some_and(|a| a.eq_ignore_ascii_case(agent_id));
+            Some(json!({ "pane": pane, "url": url, "yours": yours }))
+        })
+        .collect()
 }
 
 /// `POST /api/v1/ui/browser/set_files` — backs `BrowserSetFiles`. Only files
@@ -962,6 +992,79 @@ fn refuse_on_driven_pane(block_id: &str, what: &str, instead: &str) -> Result<()
     ))
 }
 
+/// A popup pane (`browser:popup_of`) is driven as part of its opener: while
+/// the opener exists, the agent must still own it (the person's Take over on
+/// the opener ends its hold on the popups it opened too), and the opener
+/// must not be waiting on the person (a hand-off there pauses its popups).
+/// A popup whose opener was closed stands on its own.
+fn opener_allows(
+    state: &AppState,
+    block: Option<&crate::backend::obj::Block>,
+    agent_id: &str,
+    pane: &str,
+) -> Result<(), (StatusCode, String)> {
+    // Every pane up the chain, not just the one that opened this popup: a
+    // popup opened by a popup is still driven as part of the pane the chain
+    // started in, so Take over or a hand-off anywhere above stops it.
+    let mut next = block.and_then(popup_of);
+    for _ in 0..POPUP_CHAIN_LIMIT {
+        let Some(opener) = next else {
+            return Ok(());
+        };
+        let Ok(Some(opener_block)) = state.mstore.get::<crate::backend::obj::Block>(&opener) else {
+            // The rest of the chain was closed: from here the popup stands on its own.
+            return Ok(());
+        };
+        if !owning_agent(&opener_block, &opener).is_some_and(|a| a.eq_ignore_ascii_case(agent_id)) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                format!(
+                    "the user took over pane {opener:?}, which opened popup {pane:?} (directly or \
+                     through other popups); open a new pane with OpenBrowser if you still need a browser"
+                ),
+            ));
+        }
+        not_waiting_on_user(&opener)?;
+        next = popup_of(&opener_block);
+    }
+    if next.is_none() {
+        return Ok(());
+    }
+    Err((StatusCode::FORBIDDEN, format!("popup {pane:?} is too many popups deep to drive")))
+}
+
+/// How many openers up a popup's chain the checks follow. A chain this deep
+/// is a page opening popups from popups on purpose; driving stops there.
+const POPUP_CHAIN_LIMIT: usize = 8;
+
+/// The pane that opened `block` as a popup pane, if it is one.
+fn popup_of(block: &crate::backend::obj::Block) -> Option<String> {
+    block
+        .meta
+        .get(crate::server::browser_popup::POPUP_OF_META_KEY)
+        .and_then(|v| v.as_str())
+        .filter(|o| !o.is_empty())
+        .map(str::to_string)
+}
+
+/// The pane a chain of popups started in: `pane` itself unless it is a popup
+/// pane, else its opener's root, as far up as the panes still exist. Popups
+/// are counted over its whole tree, so a popup opening popups shares its
+/// root's cap rather than getting its own.
+fn chain_root(state: &AppState, pane: &str) -> String {
+    let mut root = pane.to_string();
+    for _ in 0..POPUP_CHAIN_LIMIT {
+        let Some(up) = state.mstore.get::<crate::backend::obj::Block>(&root).ok().flatten().as_ref().and_then(popup_of) else {
+            break;
+        };
+        if !matches!(state.mstore.get::<crate::backend::obj::Block>(&up), Ok(Some(_))) {
+            break;
+        }
+        root = up;
+    }
+    root
+}
+
 /// Refuse a tool call on a pane that is waiting for the user: a hand-off
 /// (they're working in it) or an approval (they're reading the form the
 /// approved click will send, which mustn't change under them).
@@ -1050,12 +1153,7 @@ pub(crate) async fn handle_host_browser_attention(
     headers: axum::http::HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> impl IntoResponse {
-    let presented = headers.get("x-host-token").and_then(|v| v.to_str().ok()).unwrap_or("");
-    let registered = state.host_ipc.lock().await.clone().map(|h| h.token).unwrap_or_default();
-    if registered.is_empty()
-        || presented.is_empty()
-        || !agentmux_common::secret_eq::secret_eq(presented.as_bytes(), registered.as_bytes())
-    {
+    if !from_host(&state, &headers).await {
         return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can answer a pane's request".to_string());
     }
     let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1071,6 +1169,149 @@ pub(crate) async fn handle_host_browser_attention(
             err_response(StatusCode::NOT_FOUND, e)
         }
     }
+}
+
+/// Is this request from the CEF host? `X-Host-Token` must be the IPC token
+/// the host registered with (`host_ipc.Register`), which agents never see;
+/// the instance auth key alone, which every agent has, isn't enough.
+async fn from_host(state: &AppState, headers: &axum::http::HeaderMap) -> bool {
+    let presented = headers.get("x-host-token").and_then(|v| v.to_str().ok()).unwrap_or("");
+    let registered = state.host_ipc.lock().await.clone().map(|h| h.token).unwrap_or_default();
+    !registered.is_empty()
+        && !presented.is_empty()
+        && agentmux_common::secret_eq::secret_eq(presented.as_bytes(), registered.as_bytes())
+}
+
+/// The agent that owns `block_id`, if one does and the person hasn't taken
+/// the pane over: the same test every `pane` argument passes.
+fn owning_agent(block: &crate::backend::obj::Block, block_id: &str) -> Option<String> {
+    let agent = crate::server::browser_owner::owner_of(block_id)?;
+    crate::server::browser_owner::check(Some(block), Some(agent.as_str()), &agent, block_id)
+        .ok()
+        .map(|()| agent)
+}
+
+/// `POST /api/v1/host/browser_popup` — a browser pane's page opened a popup
+/// (docs/specs/SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md). Only the host
+/// calls it, from `on_before_popup`. Answers `{admitted: true, pane}` when
+/// srv opened the popup as a pane beside its opener, or `{admitted: false,
+/// reason}`, and the host opens it in the system browser as it always did.
+pub(crate) async fn handle_host_browser_popup(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use crate::server::browser_popup as popup;
+    if !from_host(&state, &headers).await {
+        return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can report a popup".to_string());
+    }
+    let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let (opener, url, opener_url) = (s("opener"), s("url"), s("opener_url"));
+    let user_gesture = body.get("user_gesture").and_then(|v| v.as_bool()).unwrap_or(false);
+    let refused = |reason: &str| {
+        (StatusCode::OK, Json(json!({ "ok": true, "data": { "admitted": false, "reason": reason } }))).into_response()
+    };
+    let block = match state.mstore.get::<crate::backend::obj::Block>(&opener) {
+        Ok(Some(b)) => b,
+        Ok(None) => return refused("the pane that opened it is gone"),
+        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, format!("load pane {opener:?}: {e}")),
+    };
+    if block.meta.get("view").and_then(|v| v.as_str()) != Some("browser") {
+        return refused("it was not opened by a browser pane");
+    }
+    // The opener's owner, if the whole chain above it (when the opener is a
+    // popup pane itself) is still that agent's: a popup from a popup of a pane
+    // the person took over belongs to nobody.
+    let owner = owning_agent(&block, &opener)
+        .filter(|agent| opener_allows(&state, Some(&block), agent, &opener).is_ok());
+    // The count and the slot are taken together: two popups reported at once
+    // can't both fit under the cap. The slot is given back if the pane
+    // doesn't open.
+    let root = chain_root(&state, &opener);
+    let reservation = match popup::reserve(
+        &opener,
+        &root,
+        |id| matches!(state.mstore.get::<crate::backend::obj::Block>(id), Ok(Some(_))),
+        |taken| popup::decide(&url, &opener_url, user_gesture, owner.is_some(), taken),
+    ) {
+        Ok(r) => r,
+        Err(r) => {
+            tracing::info!(opener = %opener, url = %url, reason = r.reason(), "[browser-popup] not opened as a pane");
+            return refused(r.reason());
+        }
+    };
+
+    let mut cmd = crate::backend::rpc_types::CommandPaneOpenData {
+        view: "browser".to_string(),
+        file: None,
+        url: Some(url.clone()),
+        cwd: None,
+        title: None,
+        tab_id: None,
+        split_direction: Some("right".to_string()),
+        split_reference_block_id: Some(opener.clone()),
+        // The person clicked: show them the popup. An agent's popup opens
+        // beside its pane without taking the person's focus, like OpenBrowser.
+        focus: Some(owner.is_none()),
+        tree_expanded: None,
+        floating: None,
+        meta: None,
+        skip_placement: None,
+        stack_onto_block_id: None,
+        connection: None,
+        auth: None,
+        reuse_editor_pane: None,
+        select: None,
+        line: None,
+    };
+    let mut meta = match crate::server::app_api::pane::build_pane_meta(&cmd) {
+        Ok(m) => m,
+        Err(e) => return err_response(StatusCode::BAD_REQUEST, e),
+    };
+    meta.insert(popup::POPUP_OF_META_KEY.to_string(), json!(opener));
+    meta.insert(popup::POPUP_FROM_META_KEY.to_string(), json!(popup::origin_of(&opener_url)));
+    if let Some(agent) = &owner {
+        meta.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), json!(agent));
+    }
+    cmd.meta = Some(meta);
+    let result = match crate::server::app_api::open_pane(&state, cmd).await {
+        Ok(r) => r,
+        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+    };
+    // The opener's owner owns its popup: written here, from srv's own record,
+    // never from anything the page or a client said. Checked again now the
+    // pane is open: the person may have taken the opener over meanwhile, and
+    // then the agent gets neither.
+    let mut owner = owner;
+    if let Some(agent) = owner.clone() {
+        let still = state
+            .mstore
+            .get::<crate::backend::obj::Block>(&opener)
+            .ok()
+            .flatten()
+            .and_then(|b| owning_agent(&b, &opener))
+            .is_some_and(|a| a.eq_ignore_ascii_case(&agent));
+        if still {
+            crate::server::browser_owner::record(&result.block_id, &agent);
+        } else {
+            owner = None;
+            let mut clear = crate::backend::obj::MetaMapType::new();
+            clear.insert(crate::server::browser_owner::OWNER_META_KEY.to_string(), serde_json::Value::Null);
+            if let Err(e) = crate::server::http_shell::broadcast_meta_update(&state, &result.block_id, &clear) {
+                tracing::warn!(pane = %result.block_id, error = %e, "[browser-popup] couldn't clear the popup's owner");
+            }
+        }
+    }
+    reservation.commit(&result.block_id);
+    tracing::info!(
+        opener = %opener, pane = %result.block_id, url = %url, owner = ?owner,
+        "[browser-popup] popup opened as a pane"
+    );
+    (
+        StatusCode::OK,
+        Json(json!({ "ok": true, "data": { "admitted": true, "pane": result.block_id } })),
+    )
+        .into_response()
 }
 
 /// `POST /api/v1/ui/browser/act` — backs `BrowserClick`, `BrowserFill`,
