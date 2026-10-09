@@ -78,6 +78,19 @@ describe("a srv too old to send srvinfo", () => {
         expect(m.versionSkew()).toBe(m.OLDER_SRV);
     });
 
+    it("a srvinfo without a version doesn't count as the connection's report", async () => {
+        vi.resetModules();
+        const m = await import("./srv-info");
+        m.noteSrvConnectionOpened();
+        m.noteSrvInfoMessage(info(m.UI_VERSION));
+        m.noteSrvInfoMessage(reply);
+        m.noteSrvConnectionOpened();
+        m.noteSrvInfoMessage({ command: "eventrecv", data: { event: "srvinfo", data: { hostName: "other" } } });
+        m.noteSrvInfoMessage(reply);
+        expect(m.srvInfo()).toBeNull();
+        expect(m.versionSkew()).toBe(m.OLDER_SRV);
+    });
+
     it("a reconnect to a srv that sends srvinfo keeps a report the whole time", async () => {
         vi.resetModules();
         const m = await import("./srv-info");

@@ -414,3 +414,13 @@ describe("HostPopoverPanel — firewall warning", () => {
         expect(screen.queryByTestId("lan-firewall")).not.toBeInTheDocument();
     });
 });
+
+describe("sameMachine", () => {
+    it("is true only for the same, non-empty name, in any case", async () => {
+        const { sameMachine } = await import("./HostPopover");
+        expect(sameMachine("Box", "box")).toBe(true);
+        expect(sameMachine("box", "other")).toBe(false);
+        expect(sameMachine("", "")).toBe(false);
+        expect(sameMachine(undefined, "box")).toBe(false);
+    });
+});

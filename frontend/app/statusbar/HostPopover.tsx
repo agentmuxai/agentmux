@@ -25,6 +25,11 @@ import { PairDevicePanel } from "./PairDevicePanel";
 
 import { Switch } from "@/app/element/ui";
 
+/** Whether the host's reported name is srv's machine (names compare case-insensitively). */
+export function sameMachine(hostName: string | undefined, srvHostName: string | undefined): boolean {
+    return !!hostName && !!srvHostName && hostName.toLowerCase() === srvHostName.toLowerCase();
+}
+
 type HostInfo = {
     hostname: string;
     os: string;
@@ -430,7 +435,10 @@ const HostPopover = (): JSX.Element => {
         }
         try {
             const info = (await getApi().getHostInfo()) as unknown as HostInfo;
-            setHostInfo(info);
+            // The chip names srv's machine. The host's own details (its OS, IP,
+            // PID, data folder) describe that machine only when the host runs
+            // on it; for a host elsewhere they'd silently describe another one.
+            setHostInfo(sameMachine(info?.hostname, getHostName()) ? info : null);
         } catch {
             // Fallback for a host build without get_host_info
             setHostInfo(null);

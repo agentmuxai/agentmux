@@ -66,17 +66,17 @@ export function noteSrvInfoMessage(
     msg: { command?: string; resid?: string; data?: { event?: string; data?: unknown } } | null,
 ): void {
     if (msg?.command === "eventrecv" && msg.data?.event === "srvinfo") {
-        connSentInfo = true;
-        onSrvInfo(msg.data.data as Partial<SrvInfo> | null);
+        // Only a report srv's info can be taken from counts as one.
+        if (onSrvInfo(msg.data.data as Partial<SrvInfo> | null)) connSentInfo = true;
     } else if (msg?.resid && !connAnswered) {
         connAnswered = true;
         if (!connSentInfo) noteSrvInfoMissing();
     }
 }
 
-/** Records a `srvinfo` payload. Ignores one without a version. */
-export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): void {
-    if (typeof data?.version !== "string" || data.version === "") return;
+/** Records a `srvinfo` payload; false (and nothing recorded) for one without a version. */
+export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): boolean {
+    if (typeof data?.version !== "string" || data.version === "") return false;
     setSrvSilent(false);
     setSrvInfo({
         version: data.version,
@@ -85,6 +85,7 @@ export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): void {
         hostName: data.hostName ?? "",
         homeDir: data.homeDir ?? null,
     });
+    return true;
 }
 
 /** srv's version when it differs from this UI's (`OLDER_SRV` for one too old
