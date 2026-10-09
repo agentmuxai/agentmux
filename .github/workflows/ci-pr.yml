@@ -47,7 +47,7 @@ name: CI (PR) — compile tests + run
 #
 # NOTE: adding this workflow makes the checks RUN on PRs; to ENFORCE them, add
 # "CI required" (the aggregate job below) as a required status check in
-# branch protection — NOT "check --tests + test (windows-latest)" or "vitest"
+# branch protection — NOT "check --tests + test (windows-latest)" or "vitest (1/2)"
 # individually. #3506: pinning the matrix leg by its expanded name broke the
 # instant that leg was made path-conditional (#3491) — a matrix job skipped
 # by a job-level `if:` reports under its UNEXPANDED name only, so the pinned
@@ -652,12 +652,19 @@ jobs:
         shell: bash
         run: bash scripts/gen-docs-index.sh --check
 
+  # Two shards: the suite alone took about 3.6 min on one runner even with
+  # jsdom limited to DOM tests (vitest.config.ts). `needs.frontend.result`
+  # covers both legs, so "CI required" gates on them without naming either.
   frontend:
-    name: vitest
+    name: vitest (${{ matrix.shard }}/2)
     needs: changes
     # See the `rust` job's note — same inversion, same reason.
     if: ${{ !cancelled() && needs.changes.outputs.frontend != 'false' }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -690,7 +697,10 @@ jobs:
       #     tsc's. A pipeline exits with its LAST command. That reads as a
       #     confident green while the checker was failing.
       # Run it bare and read the exit code:  npx tsc --noEmit -p tsconfig.citypecheck.json; echo $?
+      #
+      # The checker runs on shard 1 and the lint below on shard 2, once each.
       - name: tsc --noEmit
+        if: matrix.shard == 1
         run: npx tsc --noEmit -p tsconfig.citypecheck.json
       # Standalone, narrow config (eslint.theme-colors.config.js) --
       # deliberately NOT eslint.config.js's general ruleset, which has
@@ -701,9 +711,10 @@ jobs:
       # on whichever theme polarity the author wasn't looking at -- see
       # docs/specs/SPEC_COLOR_THEME_TOKEN_HARDENING_2026_09_21.md.
       - name: Theme-aware color lint (no hardcoded Tailwind palette colors)
+        if: matrix.shard == 2
         run: npm run lint:theme-colors
       - name: vitest run
-        run: npx vitest run
+        run: npx vitest run --shard=${{ matrix.shard }}/2
 
   # Single context for branch protection to point at, instead of pinning
   # `rust` and `frontend` individually. #3506: `rust` is a matrix job, and a
