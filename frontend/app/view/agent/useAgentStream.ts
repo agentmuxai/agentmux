@@ -49,6 +49,7 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { noteTaskFrame } from "./activity/task-outcomes";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { createTaskWakeDetector } from "./task-wake";
 import { compactionModelKey, parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
@@ -311,6 +312,9 @@ export function useAgentStream({
     let awaitingCompactionSize: ContextCompactedNode | null = null;
     // Fed every line in stream order: true for a new CLI session's `init`.
     const isNewSession = createSessionStartDetector();
+    // A pass the CLI starts for a finished background task (task-wake.ts):
+    // the same detector parseHistoryLines uses, so live and replay agree.
+    const detectTaskWake = createTaskWakeDetector();
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
@@ -638,6 +642,14 @@ export function useAgentStream({
                 // shared with `parseHistoryLines.ts`'s replay path via
                 // `compact-boundary.ts` (Codex P1, PR #2378 round 2) so the two
                 // can't drift on what counts as a valid frame.
+                {
+                    const wake = detectTaskWake(rawEvent);
+                    if (wake && !hasNodeId(wake.id)) {
+                        addNodeId(wake.id);
+                        queue.pushNewNode(wake);
+                        queue.scheduleFlush();
+                    }
+                }
                 if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
                     // Feeds only the compaction-time ESTIMATE (the working row's
                     // progress bar) with its own parser — it reads the frame's

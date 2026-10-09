@@ -23,8 +23,8 @@ export function cachedTurnLedger(blockId: string): TurnLedger | undefined {
 }
 
 /**
- * Feed srv's turn ledger (`agentturn`) into the pane reducer as `TurnObserved`:
- * the cached one at once on mount, then every change.
+ * Feed srv's turn ledger (`agentturn`) into the pane reducer as `TurnObserved`
+ * (the cached one at once on mount, then every change).
  * docs/specs/SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4.
  */
 export function useTurnLedger(blockId: string, paneModel: Pick<AgentPaneModel, "dispatchPane">): void {

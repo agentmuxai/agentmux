@@ -19,12 +19,34 @@ import { turnOutputTokens } from "./turn-contribution";
 
 export type TurnLedgerOrigin = "user" | "automated" | "system";
 
+/** What started, or joined, a turn (srv's `TurnTrigger`, spec §5.2). */
+export type TriggerKind = "user" | "broadcast" | "agent" | "service" | "schedule" | "task" | "system";
+
+export interface TurnTrigger {
+    kind: TriggerKind;
+    /** The sender (a jekt's FROM), or a task's summary. Absent for the user. */
+    from: string | null;
+}
+
+const TRIGGER_KINDS: ReadonlySet<string> = new Set(["user", "broadcast", "agent", "service", "schedule", "task", "system"]);
+
+function parseTrigger(v: unknown): TurnTrigger | null {
+    if (!v || typeof v !== "object") return null;
+    const t = v as Record<string, unknown>;
+    if (typeof t.kind !== "string" || !TRIGGER_KINDS.has(t.kind)) return null;
+    return { kind: t.kind as TriggerKind, from: typeof t.from === "string" && t.from ? t.from : null };
+}
+
 export interface TurnLedger {
     turnId: number;
     /** srv bumps it on every change; within one turn, a lower one is older. */
     seq: number;
     /** What started the turn; null when its first pass was unlabelled. */
     origin: TurnLedgerOrigin | null;
+    /** The same, for display: what kind of thing, and who. */
+    trigger: TurnTrigger | null;
+    /** Labelled inputs that arrived after the turn started, in order (capped). */
+    absorbed: TurnTrigger[];
     startedAtMs: number;
     /** CLI passes so far, the running one included. */
     passes: number;
@@ -63,6 +85,8 @@ export function parseTurnLedger(data: unknown): TurnLedger | null {
         turnId,
         seq: num(d.seq) ?? 0,
         origin,
+        trigger: parseTrigger(d.trigger),
+        absorbed: Array.isArray(d.absorbed) ? d.absorbed.map(parseTrigger).filter((t): t is TurnTrigger => t != null) : [],
         startedAtMs,
         passes: num(d.passes) ?? 1,
         active: d.active,
