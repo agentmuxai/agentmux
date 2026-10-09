@@ -83,6 +83,10 @@ fn is_web_url(url: &str) -> bool {
     url::Url::parse(url).is_ok_and(|u| matches!(u.scheme(), "http" | "https"))
 }
 
+fn is_ip_host(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|u| matches!(u.host(), Some(url::Host::Ipv4(_)) | Some(url::Host::Ipv6(_))))
+}
+
 fn host_of(url: &str) -> Option<String> {
     let u = url::Url::parse(url).ok()?;
     if !matches!(u.scheme(), "http" | "https") {
@@ -96,6 +100,12 @@ fn host_of(url: &str) -> Option<String> {
 /// do; `a.github.io` and `b.github.io` don't)? A host with no registrable
 /// domain (an IP address, `localhost`) matches only itself.
 pub(crate) fn same_site(a: &str, b: &str) -> bool {
+    // An IP address is a site of its own: the public suffix list would read
+    // its last octet as an unknown top-level domain and call `192.0.2.5` and
+    // `198.51.2.5` one site.
+    if is_ip_host(a) || is_ip_host(b) {
+        return host_of(a).is_some() && host_of(a) == host_of(b);
+    }
     let (Some(a), Some(b)) = (host_of(a), host_of(b)) else {
         return false;
     };
@@ -234,6 +244,12 @@ mod tests {
         assert!(!same_site("http://localhost", "http://127.0.0.1"));
         assert!(same_site("http://192.0.2.5/a", "http://192.0.2.5/b"));
         assert!(!same_site("http://192.0.2.5", "http://192.0.2.6"));
+        // Not the same site because their last two octets match.
+        assert!(!same_site("http://192.0.2.5/", "http://198.51.2.5/"));
+        assert!(!same_site("http://[2001:db8::1]/", "http://[2001:db8::2]/"));
+        assert!(same_site("http://[2001:db8::1]:80/a", "http://[2001:db8::1]/b"));
+        // A name and an address are never one site.
+        assert!(!same_site("http://example.com/", "http://192.0.2.5/"));
     }
 
     #[test]
