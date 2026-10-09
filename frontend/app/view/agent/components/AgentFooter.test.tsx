@@ -867,7 +867,9 @@ describe("AgentWorkingRow across a turn's passes", () => {
                 turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX" } })}
             />
         ));
-        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("↳ jekt from AgentX");
+        expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("↳ jekt from AgentX");
+        // The goal beside it, muted (truncated first).
+        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
 
         const later = render(() => (
             <AgentWorkingRow
@@ -957,7 +959,8 @@ describe("AgentWorkingRow live status", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 3_000)} />
         ));
-        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Running the srv test suite");
+        expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("Running the srv test suite");
+        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
     });
 
     it("keeps the goal while a call is too young to mention", () => {

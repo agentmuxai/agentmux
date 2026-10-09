@@ -69,3 +69,28 @@ describe("activity: tools in flight", () => {
         expect(s.activity).toMatchObject({ phase: null, tools: [], plan: null });
     });
 });
+
+describe("activity: subagent steps, progress, the thinking headline", () => {
+    it("a subagent's call keeps its parent; progress lands on its call; a new call drops the headline", () => {
+        let s = inCall();
+        s = at(s, { type: "ToolStart", name: "Agent", id: "a1", params: { description: "map" } }, 2_000);
+        s = at(s, { type: "ToolStart", name: "Read", id: "s1", params: { file_path: "a.ts" }, parentId: "a1" }, 2_100);
+        expect(s.activity.tools[1]).toMatchObject({ id: "s1", parentId: "a1" });
+        s = at(s, { type: "ToolProgress", id: "a1", text: "41/123" }, 2_200);
+        expect(s.activity.tools[0].progress).toBe("41/123");
+        s = at(s, { type: "ThinkingHeadline", text: "Weighing it" }, 2_300);
+        expect(s.activity.thinkingHeadline).toBe("Weighing it");
+        s = at(s, { type: "TokensIn", input: 2_000 }, 3_000);
+        expect(s.activity.thinkingHeadline).toBeUndefined();
+    });
+});
+
+describe("activity: this pane's waits for the model", () => {
+    it("records how long each request waited before the answer began", () => {
+        let s = at(inCall(), { type: "RequestStarted" }, 5_000);
+        s = at(s, { type: "TokensIn", input: 2_000 }, 8_500);
+        expect(s.activity.waits).toEqual([3_500]);
+        s = at(s, { type: "TokensIn", input: 2_100 }, 9_000); // no request was waiting
+        expect(s.activity.waits).toEqual([3_500]);
+    });
+});

@@ -479,7 +479,10 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
             >
                 <span class="agent-spinner-dot" />
                 <span class="agent-working-row-left">
-                    {leftText().slice(0, revealed())}
+                    <span class="agent-working-row-primary">{leftText().slice(0, revealed())}</span>
+                    <Show when={revealed() === Number.POSITIVE_INFINITY && status().detail}>
+                        {(detail) => <span class="agent-working-row-detail">{` · ${detail()}`}</span>}
+                    </Show>
                 </span>
                 <span
                     class="agent-working-row-right"

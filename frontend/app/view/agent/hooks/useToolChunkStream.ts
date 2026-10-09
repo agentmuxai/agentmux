@@ -26,6 +26,9 @@ import type { StreamFlushQueue } from "../stream-flush-queue";
 export interface UseToolChunkStreamOptions {
     blockId: string;
     queue: StreamFlushQueue;
+    /** Every output chunk's text, by tool call id (the live status reads a
+     *  test runner's progress from it). */
+    onOutput?: (toolId: string, content: string) => void;
 }
 
 /**
@@ -89,6 +92,7 @@ export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
                 return;
             }
             if (data.op !== "chunk") return;
+            if (opts.onOutput && typeof data.content === "string") opts.onOutput(toolId, data.content);
             opts.queue.pushToolChunk(toolId, {
                 kind: data.kind ?? "stdout",
                 content: data.content ?? "",

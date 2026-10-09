@@ -48,6 +48,8 @@ export const TIMING = {
     slowRequestMs: 20_000,
     /** A single running call shows its elapsed time from here on. */
     showElapsedAfterMs: 10_000,
+    /** A command that wrote output and then fell silent this long is worth saying. */
+    quietToolMs: 60_000,
 } as const;
 
 export interface StatusInput {
@@ -69,6 +71,9 @@ export interface StatusInput {
 
 export interface StatusLine {
     text: string;
+    /** Shown after the text, muted, and truncated first: the session's goal,
+     *  beside a line about what is happening right now (ranks 2–5). */
+    detail?: string;
     rank: number;
     /** Same key: the same line, its counters moved. A new key types out. */
     key: string;
@@ -86,23 +91,34 @@ function line(rank: number, text: string, key = text): StatusLine {
     return { rank, text, key: `${rank}:${key}` };
 }
 
-/** Rank 4: what is running, once it has lasted long enough. */
+/** Rank 4: what is running, once it has lasted long enough. A subagent's
+ *  own calls show under its Agent call ("Explore agent: map it · Reading
+ *  a.ts"); one call shows its test progress, else its time once long. */
 function nowLine(a: ActivityState, nowMs: number): StatusLine | null {
-    const tools = a.tools.filter((t) => t.activity.family !== "plan");
+    const running = a.tools.filter((t) => t.activity.family !== "plan");
+    const ids = new Set(running.map((t) => t.id).filter((id): id is string => id != null));
+    const tools = running.filter((t) => !t.parentId || !ids.has(t.parentId));
     if (tools.length > 0) {
         const oldest = Math.min(...tools.map((t) => t.startedAt));
         if (nowMs - oldest < TIMING.toolPromoteMs) return null;
         const label = foldActivities(tools.map((t) => t.activity));
         if (!label) return null;
         const age = nowMs - oldest;
-        const text = tools.length === 1 && age >= TIMING.showElapsedAfterMs ? `${label} · ${formatElapsedCompact(age)}` : label;
-        return line(RANK.now, text, label);
+        if (tools.length === 1) {
+            const only = tools[0];
+            const step = running.filter((t) => t.parentId != null && t.parentId === only.id).at(-1);
+            if (step) return line(RANK.now, `${label} · ${step.activity.label}`, label);
+            if (only.progress) return line(RANK.now, `${label} · ${only.progress}`, label);
+            if (age >= TIMING.showElapsedAfterMs) return line(RANK.now, `${label} · ${formatElapsedCompact(age)}`, label);
+        }
+        return line(RANK.now, label);
     }
     if (a.phase == null) return null;
     const age = nowMs - a.phaseSince;
     switch (a.phase) {
         case "thinking":
-            return age >= TIMING.thinkingPromoteMs ? line(RANK.now, "Thinking") : null;
+            if (age < TIMING.thinkingPromoteMs) return null;
+            return a.thinkingHeadline ? line(RANK.now, `Thinking: ${a.thinkingHeadline}`) : line(RANK.now, "Thinking");
         case "writing":
             return age >= TIMING.writingPromoteMs ? line(RANK.now, "Writing the reply") : null;
         case "composing":
@@ -112,11 +128,32 @@ function nowLine(a: ActivityState, nowMs: number): StatusLine | null {
     }
 }
 
+/** Rank 2: a command that wrote output and then went quiet for a long while
+ *  ("Running the build · no output for 2m"). Only commands that stream
+ *  output at all: silence from one that never writes is not news. */
+function quietLine(a: ActivityState, nowMs: number): StatusLine | null {
+    const quiet = a.tools.find((t) => t.activity.family === "bash" && t.outputAt != null && nowMs - t.outputAt >= TIMING.quietToolMs);
+    if (!quiet || quiet.outputAt == null) return null;
+    return line(RANK.anomaly, `${quiet.activity.label} · no output for ${formatElapsedCompact(nowMs - quiet.outputAt)}`, `quiet:${quiet.id}`);
+}
+
+/** When a wait for the model counts as slow in this pane: SLOW_REQUEST, or
+ *  twice its typical wait once it has enough of them (a model that is
+ *  always slow shouldn't cry wolf every request). */
+export function slowRequestMs(waits: readonly number[] | undefined): number {
+    if (!waits || waits.length < 5) return TIMING.slowRequestMs;
+    const sorted = [...waits].sort((x, y) => x - y);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    return Math.max(TIMING.slowRequestMs, 2 * median);
+}
+
 /** Rank 2: a request still waiting for the model's first token. */
 function anomalyLine(a: ActivityState, nowMs: number): StatusLine | null {
+    const quiet = quietLine(a, nowMs);
+    if (quiet) return quiet;
     if (a.phase !== "requesting" || a.tools.length > 0) return null;
     const age = nowMs - a.phaseSince;
-    return age >= TIMING.slowRequestMs ? line(RANK.anomaly, `Waiting on the model · ${formatElapsedCompact(age)}`, "waiting") : null;
+    return age >= slowRequestMs(a.waits) ? line(RANK.anomaly, `Waiting on the model · ${formatElapsedCompact(age)}`, "waiting") : null;
 }
 
 /** Every line eligible now, best first. */
@@ -140,8 +177,19 @@ export function statusCandidates(input: StatusInput): StatusLine[] {
     return out;
 }
 
+/** The goal beside a line about the moment (ranks 2–5), never beside itself
+ *  or a status that owns the row. */
+function withDetail(l: StatusLine, goal: string | null): StatusLine {
+    return goal && l.rank >= RANK.anomaly && l.rank <= RANK.plan ? { ...l, detail: goal } : l;
+}
+
 /** The line to show now, and the memory to pass next time. */
 export function presentStatus(input: StatusInput, memory: StatusMemory | null): { line: StatusLine; memory: StatusMemory } {
+    const r = choose(input, memory);
+    return { line: withDetail(r.line, input.goal), memory: r.memory };
+}
+
+function choose(input: StatusInput, memory: StatusMemory | null): { line: StatusLine; memory: StatusMemory } {
     const now = input.nowMs;
     const candidates = statusCandidates(input);
     const best = candidates[0];

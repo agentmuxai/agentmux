@@ -1014,7 +1014,7 @@ export function update(
                     turnTokens: next,
                     lastContextModel: model,
                     contextSeedable: false,
-                    activity: withPhase(state.activity, "responding", nowMs),
+                    activity: { ...withPhase(withWaitRecorded(state.activity, nowMs), "responding", nowMs), thinkingHeadline: undefined },
                 },
                 reading,
                 prevReading == null || plausibleReading(prevReading) != null,
@@ -1099,6 +1099,25 @@ export function update(
         // the call still streaming, and the ↑/↓ phase. Not liveness events:
         // the same lines already reach the reducer as StreamFlushObserved.
         // Before the turn's first call there is nothing to count yet.
+        case "ToolProgress": {
+            const i = state.activity.tools.findIndex((t) => t.id === command.id);
+            if (i < 0 || state.activity.tools[i].progress === command.text) return { state, events: [] };
+            const tools = state.activity.tools.map((t, j) => (j === i ? { ...t, progress: command.text } : t));
+            return { state: { ...state, activity: { ...state.activity, tools } }, events: [] };
+        }
+
+        case "ToolOutput": {
+            const i = state.activity.tools.findIndex((t) => t.id === command.id);
+            if (i < 0) return { state, events: [] };
+            const tools = state.activity.tools.map((t, j) => (j === i ? { ...t, outputAt: command.at } : t));
+            return { state: { ...state, activity: { ...state.activity, tools } }, events: [] };
+        }
+
+        case "ThinkingHeadline": {
+            if (state.activity.thinkingHeadline === command.text) return { state, events: [] };
+            return { state: { ...state, activity: { ...state.activity, thinkingHeadline: command.text } }, events: [] };
+        }
+
         case "OutputStreamed": {
             const t = state.turnTokens;
             if (!t || command.chars <= 0) return { state, events: [] };
@@ -1824,6 +1843,15 @@ function carryPass(carry: TurnCarry | null, turnId: number | undefined, stats: S
     };
 }
 
+/** How many of a pane's recent waits for the model it keeps. */
+const WAIT_SAMPLES = 20;
+
+/** A request was waiting and the model's answer begins: keep how long it took. */
+function withWaitRecorded(a: ActivityState, nowMs: number): ActivityState {
+    if (a.phase !== "requesting") return a;
+    return { ...a, waits: [...(a.waits ?? []), nowMs - a.phaseSince].slice(-WAIT_SAMPLES) };
+}
+
 /** The model's phase moves on; `phaseSince` changes only with it. */
 function withPhase(a: ActivityState, phase: ModelActivityPhase, nowMs: number): ActivityState {
     return a.phase === phase ? a : { ...a, phase, phaseSince: nowMs };
@@ -1832,10 +1860,13 @@ function withPhase(a: ActivityState, phase: ModelActivityPhase, nowMs: number): 
 /** A tool call starts: it joins the running list; a todo list sets the plan. */
 function activityWithTool(
     a: ActivityState,
-    c: { name: string; id?: string; params?: Record<string, unknown> },
+    c: { name: string; id?: string; params?: Record<string, unknown>; parentId?: string },
     nowMs: number,
 ): ActivityState {
-    const tools = [...a.tools, { id: c.id ?? null, activity: toolActivity(c.name, c.params), startedAt: nowMs }];
+    const tools = [
+        ...a.tools,
+        { id: c.id ?? null, activity: toolActivity(c.name, c.params), startedAt: nowMs, ...(c.parentId ? { parentId: c.parentId } : {}) },
+    ];
     if (c.name === "TodoWrite") return { ...a, tools, plan: planFromTodoWrite(c.params), planAt: nowMs };
     return { ...a, tools };
 }

@@ -43,8 +43,23 @@ export interface ActivityState {
     /** The model's phase, and since when; null outside a pass. */
     phase: ModelActivityPhase | null;
     phaseSince: number;
-    /** The main agent's tool calls in flight, oldest first. */
-    tools: Array<{ id: string | null; activity: ToolActivity; startedAt: number }>;
+    /** Tool calls in flight, oldest first. A subagent's own calls carry
+     *  `parentId` (its Agent call's id); `progress` is what a known test
+     *  runner's output says so far. */
+    tools: Array<{
+        id: string | null;
+        activity: ToolActivity;
+        startedAt: number;
+        parentId?: string;
+        progress?: string;
+        /** When it last wrote output (live chunks; throttled). Absent: none yet. */
+        outputAt?: number;
+    }>;
+    /** What the model's current thinking block is about, from its own text. */
+    thinkingHeadline?: string;
+    /** This pane's recent waits for the model (request sent → its answer
+     *  began), newest last, at most WAIT_SAMPLES: what "slow" means here. */
+    waits?: number[];
     /** The agent's plan from its latest todo list, and when it was set. Kept
      *  across passes; the presenter reads it only when set this turn. */
     plan: PlanState | null;
@@ -812,7 +827,13 @@ export type AgentPaneCommand =
     // ── Tool ───────────────────────────────────────────────────────
     /** `id`: the tool_use id, so its end removes exactly it; `params`: its
      *  input, for the live status's words (status/tool-labels.ts). */
-    | { type: "ToolStart"; name: string; arg?: string; id?: string; params?: Record<string, unknown> }
+    | { type: "ToolStart"; name: string; arg?: string; id?: string; params?: Record<string, unknown>; parentId?: string }
+    /** A running call's test progress, from its live output (status/test-progress.ts). */
+    | { type: "ToolProgress"; id: string; text: string }
+    /** A running call wrote output (at most every few seconds per call). */
+    | { type: "ToolOutput"; id: string; at: number }
+    /** The model's thinking block's gist (status/thinking-headline.ts). */
+    | { type: "ThinkingHeadline"; text: string }
     | { type: "ToolEnd"; id?: string }
 
     // freshInput/cacheCreation/cacheRead: optional breakdown of `input` by

@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) and phase 3a (the live status, §6.8) follow it; see §4.7 for how the build differs from the design below. Phase 2b, the rest of phase 3, and phase 4 are proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) and phase 3a (the live status, §6.8, and 3b, §6.9) follow it; see §4.7 for how the build differs from the design below. Phase 2b and phase 4 are proposed.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -495,6 +495,19 @@ The row's statuses are rank 1, and phase 2a's lead-in is rank 3. The presenter r
 - Per-pane thresholds.
 
 These belong to phase 4. Live tuning of `TIMING` also waits for `muxlog` data.
+
+### 6.9 As built (phase 3b: the richer sources)
+
+- **Subagent steps.** `ToolStart` carries the raw line's `parent_tool_use_id` as `parentId`. A subagent's own calls no longer count as calls of their own: the row reads `Explore agent: map the code · Reading health.rs`. The key stays the Agent call's, so a new step swaps in without re-typing.
+- **Test progress** (`status/test-progress.ts`). It reads Bash's live output chunks (`useToolChunkStream`'s new `onOutput`) for known runners: cargo test's `running N tests` and per-test lines (`41/123, 1 failed`), the cargo, vitest and jest summaries, and pytest's `[ 45%]` and final line. It shows in place of the call's elapsed time. Unknown output shows nothing, never a guess.
+- **The thinking headline** (`status/thinking-headline.ts`). From the main agent's `thinking_delta`s, it takes a bold heading the model wrote, else its first sentence, else the start of a long run (up to 80 characters). That gives `Thinking: Weighing the join rule`. It is read once per thinking block and dropped at the next call. A model whose thinking is redacted stays at `Thinking`.
+- **The goal beside.** For ranks 2–5, the presenter returns the ambient summary as `detail`. The row shows it muted after the line (` · Fix the login redirect loop`), and it only takes the room left over, so it is truncated first.
+
+- **A command gone quiet.** Each call's last output time comes from its live chunks, reported at most every 5 s (`ToolOutput`). A Bash call that wrote output and then went silent for `quietToolMs` (60 s) is rank 2: `Running the build · no output for 2m 5s`. A command that never writes anything is not reported as quiet.
+
+- **What slow means in this pane.** The reducer keeps the pane's last 20 waits for the model, from request sent to its answer beginning (`activity.waits`). "Waiting on the model" fires at 20 s, or at twice the pane's median wait once it has 5 or more, whichever is later (`slowRequestMs`). A model that is always slow doesn't cry wolf on every request.
+
+Still open: tuning `TIMING` from real `[turn]` and `[wave-turn]` log data.
 
 ---
 

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { IDLE_ACTIVITY, type ActivityState } from "@/app/store/agent-pane-state/types";
-import { presentStatus, RANK, statusCandidates, TIMING, type StatusInput, type StatusMemory } from "./present-status";
+import { presentStatus, RANK, slowRequestMs, statusCandidates, TIMING, type StatusInput, type StatusMemory } from "./present-status";
 import { toolActivity } from "./tool-labels";
 
 const T0 = 1_000_000;
@@ -133,5 +133,61 @@ describe("presentStatus: when to change", () => {
         const b = presentStatus(input({ nowMs: T0 + 1_000, activity: bashAt(T0 - 11_000) }), memory);
         expect(a.line.text).not.toBe(b.line.text);
         expect(a.line.key).toBe(b.line.key);
+    });
+});
+
+describe("phase 3b: subagent steps, test progress, the thinking headline, the goal beside", () => {
+    it("a subagent's own call shows under its Agent call, not as a call of its own", () => {
+        const agent = tool("Agent", { subagent_type: "Explore", description: "map the code" }, T0 - 5_000, "a1");
+        const step = { ...tool("Read", { file_path: "/x/health.rs" }, T0 - 300, "s1"), parentId: "a1" };
+        const l = statusCandidates(input({ activity: act({ tools: [agent, step] }) }))[0];
+        expect(l.text).toBe("Explore agent: map the code · Reading health.rs");
+        expect(l.key).toBe(statusCandidates(input({ activity: act({ tools: [agent] }) }))[0].key); // a new step never re-types
+    });
+
+    it("a test run's progress, in place of its time", () => {
+        const bash = { ...tool("Bash", { description: "Run the tests" }, T0 - 30_000), progress: "41/123" };
+        expect(statusCandidates(input({ activity: act({ tools: [bash] }) }))[0].text).toBe("Running the tests · 41/123");
+    });
+
+    it("thinking names what it is about once the model has said", () => {
+        const a = act({ phase: "thinking", phaseSince: T0 - 5_000, thinkingHeadline: "Weighing the join rule" });
+        expect(statusCandidates(input({ activity: a }))[0].text).toBe("Thinking: Weighing the join rule");
+    });
+
+    it("the goal rides beside a line about the moment, never beside itself or a status", () => {
+        const busy = act({ tools: [tool("Bash", { description: "Run it" }, T0 - 5_000)] });
+        expect(presentStatus(input({ activity: busy }), null).line.detail).toBe("Fix the login redirect loop");
+        expect(presentStatus(input(), null).line.detail).toBeUndefined(); // the goal itself
+        expect(presentStatus(input({ activity: busy, held: "Stopping…" }), null).line.detail).toBeUndefined();
+    });
+});
+
+describe("a command gone quiet", () => {
+    it("says so once it wrote output and then nothing for a minute", () => {
+        const bash = (outputAt?: number) => ({ ...tool("Bash", { description: "Run the build" }, T0 - 300_000, "b1"), outputAt });
+        expect(statusCandidates(input({ activity: act({ tools: [bash(T0 - 125_000)] }) }))[0]).toMatchObject({
+            rank: RANK.anomaly,
+            text: "Running the build · no output for 2m 5s",
+        });
+        expect(statusCandidates(input({ activity: act({ tools: [bash(T0 - 10_000)] }) }))[0].rank).toBe(RANK.now);
+        // Never wrote anything: not news.
+        expect(statusCandidates(input({ activity: act({ tools: [bash(undefined)] }) }))[0].rank).toBe(RANK.now);
+    });
+});
+
+describe("what slow means in this pane", () => {
+    it("20 s, or twice its typical wait once it has enough", () => {
+        expect(slowRequestMs(undefined)).toBe(TIMING.slowRequestMs);
+        expect(slowRequestMs([30_000, 30_000, 30_000, 30_000])).toBe(TIMING.slowRequestMs); // too few
+        expect(slowRequestMs([2_000, 3_000, 4_000, 3_000, 5_000])).toBe(TIMING.slowRequestMs);
+        expect(slowRequestMs([18_000, 20_000, 22_000, 19_000, 21_000])).toBe(40_000);
+    });
+
+    it("a pane whose model is always slow doesn't call each wait slow", () => {
+        const waits = [18_000, 20_000, 22_000, 19_000, 21_000];
+        const at = (age: number) => statusCandidates(input({ activity: act({ phase: "requesting", phaseSince: T0 - age, waits }) }))[0].rank;
+        expect(at(30_000)).toBe(RANK.goal);
+        expect(at(41_000)).toBe(RANK.anomaly);
     });
 });
