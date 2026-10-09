@@ -11,7 +11,7 @@
  * `docs/specs/SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md`.
  */
 
-import { update as authUpdate } from "@/app/view/agent/auth/auth-state";
+import { update as authUpdate } from "@/app/store/launch-flow-state/auth-state";
 
 import type {
     LaunchFlowCommand,

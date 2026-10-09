@@ -14,7 +14,7 @@ import { createTaskWakeDetector } from "./task-wake";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { interceptFrame, type FrameSink } from "./frame-intercepts";
 import { createTranslator } from "./providers/translator-factory";
-import { sessionOutcomeNodeId } from "./session-outcome";
+import { sessionOutcomeNodeId } from "@/app/store/agent-document/session-outcome";
 import { buildMemoryInjectedNode } from "./memory-injected";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import { mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";

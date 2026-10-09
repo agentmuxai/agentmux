@@ -32,7 +32,7 @@ import { createInstallSession } from "@/element/install/install-session";
 import { SystemStepTracker } from "@/element/install/system-steps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { CORE_TOOLS } from "@/app/view/agent/providers/toolchain-catalog";
+import { CORE_TOOLS } from "@/app/store/toolchain-catalog";
 import "./SystemToolInstallInline.scss";
 
 type Resolution = "checking" | "unavailable" | "ready";

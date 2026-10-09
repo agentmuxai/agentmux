@@ -6,7 +6,7 @@
  * useAgentControllerStatus.ts's relogin) is actually doing right now,
  * surfaced to AgentFooter's working row instead of a generic "Working…"
  * for every phase. Mirrors the discriminated-union pattern of
- * auth/auth-state.ts's `AuthState.kind` (a different, pre-launch-modal flow).
+ * store/launch-flow-state/auth-state.ts's `AuthState.kind` (a different, pre-launch-modal flow).
  *
  * Any variant carrying `deadlineMs` represents a real timer/poll the user
  * is waiting on — formatPhaseLabel renders its remaining time so no wait

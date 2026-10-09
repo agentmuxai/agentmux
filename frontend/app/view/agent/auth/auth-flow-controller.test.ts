@@ -5,7 +5,7 @@ import { createRoot } from "solid-js";
 import { describe, expect, it } from "vitest";
 
 import { AuthFlowController, type AuthRpc } from "./auth-flow-controller";
-import type { AuthSessionStatusWire } from "./auth-state";
+import type { AuthSessionStatusWire } from "@/app/store/launch-flow-state/auth-state";
 
 function flush(): Promise<void> {
     return new Promise((r) => setTimeout(r, 0));
