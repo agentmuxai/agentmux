@@ -222,13 +222,13 @@ fn is_wrapped_note(text: &str) -> bool {
     depth == 0
 }
 
+/// The word the title prompts used for "no change" before the reply format.
+const LEGACY_KEEP_TOKEN: &str = "KEEP";
+
 /// A reply that LEADS with the abstain token in capitals, "KEEP — the title still
 /// fits": the model said "no change" and explained itself. Case-sensitive on purpose:
 /// "Keep alive pings" and "Keep the swarm summary fresh" are real titles, while an
 /// upper-case KEEP is the token the prompt asked for.
-/// The word the title prompts used for "no change" before the reply format.
-const LEGACY_KEEP_TOKEN: &str = "KEEP";
-
 fn leads_with_abstain_token(text: &str) -> bool {
     let first = text.trim().split_whitespace().next().unwrap_or("");
     first.trim_matches(|c: char| !c.is_alphanumeric()) == LEGACY_KEEP_TOKEN

@@ -87,12 +87,25 @@ pub fn parse(raw: &str) -> Parsed {
     if answer.is_empty() || answer.contains('\n') {
         return Parsed::Malformed;
     }
+    // `ANSWER: SKIP` mixes the two forms; the model meant the skip, and the word
+    // must never be stored as a title, a name or a suggestion.
+    if answer.trim_matches(|c: char| !c.is_alphanumeric()).eq_ignore_ascii_case(SKIP) {
+        return Parsed::Skip;
+    }
     Parsed::Answer(answer)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_answer_that_is_only_skip_is_a_skip() {
+        for raw in ["ANSWER: SKIP", "answer: skip.", "ANSWER: \"SKIP\""] {
+            assert_eq!(parse(raw), Parsed::Skip, "{raw:?}");
+        }
+        assert_eq!(parse("ANSWER: Skip the flaky test"), Parsed::Answer("Skip the flaky test".into()));
+    }
 
     #[test]
     fn an_answer_is_its_text() {
