@@ -773,7 +773,7 @@ describe("AgentWorkingRow across a turn's passes", () => {
         turnId: 7,
         seq: 1,
         origin: "user",
-        trigger: { kind: "user", from: null },
+        trigger: { kind: "user", from: null, external: false },
         absorbed: [],
         startedAtMs: Date.now() - 125_000,
         passes: 1,
@@ -864,7 +864,7 @@ describe("AgentWorkingRow across a turn's passes", () => {
             <AgentWorkingRow
                 loading={true}
                 activitySummary="Fix the login redirect loop"
-                turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX" } })}
+                turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX", external: true } })}
             />
         ));
         expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("↳ jekt from AgentX");
@@ -875,7 +875,7 @@ describe("AgentWorkingRow across a turn's passes", () => {
             <AgentWorkingRow
                 loading={true}
                 activitySummary="Fix the login redirect loop"
-                turnLedger={ledger({ startedAtMs: Date.now() - 10_000, trigger: { kind: "agent", from: "AgentX" } })}
+                turnLedger={ledger({ startedAtMs: Date.now() - 10_000, trigger: { kind: "agent", from: "AgentX", external: true } })}
             />
         ));
         expect(later.container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
@@ -895,8 +895,8 @@ describe("AgentWorkingRow across a turn's passes", () => {
                 loading={false}
                 sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1 }}
                 turnLedger={ledger({
-                    trigger: { kind: "service", from: "github-consumer" },
-                    absorbed: [{ kind: "user", from: null }],
+                    trigger: { kind: "service", from: "github-consumer", external: true },
+                    absorbed: [{ kind: "user", from: null, external: false }],
                     inputs: 1,
                     startedAtMs: end - 42_000,
                     active: false,

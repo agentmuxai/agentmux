@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import { parseTurnLedger, type TurnTrigger } from "@/app/store/agent-pane-state/turn-ledger";
 import { absorbedSummary, isExternalTrigger, triggerLeadIn, workedVerb } from "./turn-trigger-text";
 
-const t = (kind: TurnTrigger["kind"], from: string | null = null): TurnTrigger => ({ kind, from });
+/** srv's `TriggerKind::is_external`, as srv would set it. */
+const EXTERNAL = new Set(["agent", "service", "schedule", "task"]);
+const t = (kind: TurnTrigger["kind"], from: string | null = null): TurnTrigger => ({ kind, from, external: EXTERNAL.has(kind) });
 
 describe("turn trigger words", () => {
     it("a turn the user started needs none", () => {
@@ -49,11 +51,11 @@ describe("parseTurnLedger: trigger and absorbed", () => {
             turn_id: 1,
             started_at_ms: 1,
             active: true,
-            trigger: { kind: "agent", from: "agentx" },
+            trigger: { kind: "agent", from: "agentx", external: true },
             absorbed: [{ kind: "user" }, { kind: "telepathy" }, null],
         });
-        expect(l?.trigger).toEqual({ kind: "agent", from: "agentx" });
-        expect(l?.absorbed).toEqual([{ kind: "user", from: null }]);
+        expect(l?.trigger).toEqual({ kind: "agent", from: "agentx", external: true });
+        expect(l?.absorbed).toEqual([{ kind: "user", from: null, external: false }]);
         expect(parseTurnLedger({ turn_id: 1, started_at_ms: 1, active: true })?.absorbed).toEqual([]);
     });
 });

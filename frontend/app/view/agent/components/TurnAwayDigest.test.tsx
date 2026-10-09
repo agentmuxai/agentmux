@@ -13,7 +13,7 @@ const jektTurn = (turnId: number, from: string): TurnLedger => ({
     turnId,
     seq: 1,
     origin: "automated",
-    trigger: { kind: "agent", from },
+    trigger: { kind: "agent", from, external: true },
     absorbed: [],
     startedAtMs: 1,
     passes: 1,

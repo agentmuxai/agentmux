@@ -66,12 +66,6 @@ function fmtTurnTokens(output: number, t: TurnTokens | null | undefined): string
     return `${arrow}${fmtOutputTokens(output)}`;
 }
 
-/** "42s", "1m 4s". */
-function fmtWorkedDuration(ms: number): string {
-    const s = Math.round(ms / 1000);
-    return s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-}
-
 // \u2500\u2500 Composer draft persistence \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Module-level (not per-component-instance), keyed by blockId, so a draft
 // survives this component's own unmount \u2014 which now happens on every
@@ -398,7 +392,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         // Named for what started it when that wasn't the user.
         const parts: string[] = ["✓ " + (turn ? workedVerb(turn.l.trigger) : ingToEd(lastPhrase()))];
         const durationMs = turn?.durationMs ?? stats.duration_ms;
-        if (durationMs != null) parts.push(fmtWorkedDuration(durationMs));
+        if (durationMs != null) parts.push(formatElapsedCompact(Math.max(1_000, durationMs)));
         // The turn's output: the results' exact figures (summed over its
         // calls and passes), where the live row showed it growing.
         const figures = turnFigures();
