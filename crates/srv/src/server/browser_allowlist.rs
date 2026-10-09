@@ -209,8 +209,12 @@ pub(crate) async fn handle_host_browser_navigation(
         (StatusCode::OK, Json(json!({ "ok": true, "data": { "asked": asked, "reason": reason } }))).into_response()
     };
     let Some(list) = browser_allowlist::list_for(&pane) else {
-        // Taken over or closed since: the host's copy was behind.
+        // Taken over or closed since: the host's copy was behind. Send it
+        // the current one, and let the navigation it stopped go on.
         crate::server::browser_host_sync::push(&state).await;
+        if kind == "navigate" {
+            replay_navigation(&state, &target, &url).await;
+        }
         return answered(false, "the pane isn't limited to any sites");
     };
     if allowed_origins::allows(&list, &url) {

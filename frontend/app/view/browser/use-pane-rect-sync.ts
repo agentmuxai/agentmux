@@ -198,7 +198,9 @@ export function usePaneRectSync(params: {
                 url || "about:blank",
                 windowLabel,
                 paneRect(),
-                model.allowedOriginsAtom(),
+                // Only while an agent drives the pane: Take over ends the limit
+                // but leaves the meta key behind.
+                model.driverAgentAtom() ? model.allowedOriginsAtom() : undefined,
             );
             if (disposed) {
                 if (releaseNativePane(model.blockId, token)) {

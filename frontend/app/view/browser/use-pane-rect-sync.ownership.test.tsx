@@ -45,9 +45,15 @@ globalThis.ResizeObserver ??= class {
     unobserve() {}
 } as any;
 
-function Mount(props: { blockId: string }) {
+function Mount(props: { blockId: string; driver?: string; allowed?: string[] }) {
     let ph: HTMLDivElement | undefined;
-    const model = { blockId: props.blockId, closed: false, urlAtom: () => "https://agentmux.ai/", allowedOriginsAtom: () => [] } as any;
+    const model = {
+        blockId: props.blockId,
+        closed: false,
+        urlAtom: () => "https://agentmux.ai/",
+        driverAgentAtom: () => props.driver,
+        allowedOriginsAtom: () => props.allowed ?? [],
+    } as any;
     usePaneRectSync({ model, placeholderRef: () => ph, windowLabel: "main", diag: () => {} });
     return <div ref={ph} />;
 }
@@ -60,6 +66,23 @@ afterEach(() => {
     calls.length = 0;
     pendingCreates.length = 0;
     setVisibility("active");
+});
+
+describe("usePaneRectSync — an agent's site limit goes with the page's creation", () => {
+    const created = () => calls.find((c) => c.cmd === "browser_pane_create")?.args;
+
+    it("passes the pane's site list while an agent drives it", async () => {
+        render(() => <Mount blockId="lim1" driver="lark" allowed={["https://a.example"]} />);
+        await flush();
+        expect(created()?.allowed_origins).toEqual(["https://a.example"]);
+    });
+
+    it("not once the person took it over: the meta key outlives the limit", async () => {
+        render(() => <Mount blockId="lim2" allowed={["https://a.example"]} />);
+        await flush();
+        expect(created()).toBeDefined();
+        expect(created()?.allowed_origins).toBeUndefined();
+    });
 });
 
 describe("usePaneRectSync — the native page follows the tab's visibility", () => {
