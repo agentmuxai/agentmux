@@ -485,8 +485,9 @@ pub const COMMAND_VIEWER_AGENT_HIDDEN: &str = "viewer.agent-hidden";
 pub const COMMAND_PRESENCE_STATUS: &str = "presence.status";
 pub const COMMAND_PRESENCE_PUBLISH_NOW: &str = "presence.publish-now";
 
-// Tower, the read-only task manager pane (backend::tower_sampler). UI only: agents
-// get neither (process command lines can hold secrets).
+// Tower, the read-only task manager pane (backend::tower_sampler). The
+// window's, not an agent API: a registered agent connection is refused (not a
+// security boundary; see server/app_api/tower_pane.rs).
 pub const COMMAND_TOWER_SAMPLE: &str = "tower.sample";
 pub const COMMAND_TOWER_COMMAND_LINE: &str = "tower.command-line";
 

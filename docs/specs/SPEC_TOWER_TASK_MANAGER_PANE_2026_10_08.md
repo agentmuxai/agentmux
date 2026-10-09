@@ -206,9 +206,15 @@ memory. It sets each row's `role` instead: `main` (the CLI or shell),
   a `TowerSnapshot`; `tower.command-line { id }` returns one process's command
   line, only if that exact (pid, start) is still running. Windows reads it
   with `NtQueryInformationProcess(ProcessCommandLineInformation)`, which needs
-  only `PROCESS_QUERY_LIMITED_INFORMATION`. **Both refuse an agent's
-  connection** (`RpcContext.agent_id` set): a process list shows what every
-  other agent runs, and command lines can hold secrets.
+  only `PROCESS_QUERY_LIMITED_INFORMATION`. They are the window's, not an
+  agent API: a connection registered as an agent (`RpcContext.agent_id`) is
+  refused. **That is not a security boundary.** Every agent shell carries the
+  instance's `AGENTMUX_AUTH_KEY`, so an agent can open `/ws` without
+  registering and look exactly like the window (srv holds no credential only
+  the renderer has). And there is nothing to protect: an agent runs as the
+  same OS user and can read every number and command line Tower shows with
+  its own shell (`ps`, `/proc`, `Get-CimInstance`). A real window-only gate
+  would need a renderer-only credential; out of scope here.
 - **Request-driven, not an event.** An earlier draft published a `taskstats`
   event on the background lane. Having the pane ask instead means nothing is
   sampled while no Tower is open, without any subscription bookkeeping, and

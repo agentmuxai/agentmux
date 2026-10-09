@@ -5,9 +5,18 @@
 //! SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md): `tower.sample` and
 //! `tower.command-line`.
 //!
-//! For the AgentMux window only. An agent's connection is refused: a process
-//! list names what every other agent is running, and command lines can hold
-//! secrets.
+//! **Who may call them.** They are the window's, not an agent API, so a
+//! connection registered as an agent (`bus:register`) is refused. That is
+//! **not a security boundary**, and nothing here claims to keep a process
+//! list from an agent:
+//! - every agent shell carries this instance's `AGENTMUX_AUTH_KEY`
+//!   (`pane_env`), so an agent can open `/ws`, skip `bus:register`, and be
+//!   indistinguishable from the window: srv has no credential only the
+//!   renderer holds, and the window's loopback `Origin` is forgeable;
+//! - more to the point, an agent runs as the same OS user, and every number
+//!   and command line Tower shows is one its own shell can read without
+//!   AgentMux (`ps`, `/proc`, `Get-CimInstance`). Tower reads nothing that
+//!   user can't (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md §3).
 
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
@@ -18,7 +27,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_TOWER_SAMPLE, move |req: TowerSampleReq, ctx| {
         let (mstore, hostname, tracker) = (mstore.clone(), hostname.clone(), tracker.clone());
         async move {
-            ui_only(&ctx)?;
+            not_an_agent_api(&ctx)?;
             // The process table, and a store read per pane: off the async workers.
             tokio::task::spawn_blocking(move || {
                 Tower::global()
@@ -30,7 +39,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }
     });
     engine.register_typed(COMMAND_TOWER_COMMAND_LINE, |req: TowerCommandLineReq, ctx| async move {
-        ui_only(&ctx)?;
+        not_an_agent_api(&ctx)?;
         let key = crate::backend::tower_sampler::parse_proc_id(&req.id).ok_or_else(|| format!("tower.command-line: bad id {:?}", req.id))?;
         tokio::task::spawn_blocking(move || {
             // Only the process the pane showed: a newer one that reused the
@@ -48,11 +57,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-fn ui_only(ctx: &RpcContext) -> Result<(), String> {
+/// Refuse a connection registered as an agent: these RPCs aren't offered to
+/// agents. Not a security boundary (module doc): an unregistered connection
+/// can't be told apart from the window.
+fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
     if ctx.agent_id.is_empty() {
         Ok(())
     } else {
-        Err("FORBIDDEN: Tower is for the AgentMux window, not agents".to_string())
+        Err("FORBIDDEN: Tower is the AgentMux window's, not an agent API".to_string())
     }
 }
 
@@ -122,8 +134,18 @@ mod tests {
         assert!(host.processes.iter().any(|p| p.pid == std::process::id()));
     }
 
+    /// What the gate does and doesn't do (module doc): a registered agent is
+    /// refused; an unregistered connection is served, because srv can't tell
+    /// it from the window. Pinned so the gate is never mistaken for more.
     #[tokio::test(flavor = "multi_thread")]
-    async fn an_agent_is_refused() {
+    async fn an_unregistered_connection_is_served_as_the_window_is() {
+        let (data, err) = call(COMMAND_TOWER_SAMPLE, json!({}), "").await;
+        assert_eq!(err, "");
+        assert!(data.get("tasks").is_some(), "{data}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_registered_agent_is_refused() {
         let (_, err) = call(COMMAND_TOWER_SAMPLE, json!({}), "AgentX").await;
         assert!(err.contains("FORBIDDEN"), "{err}");
         let (_, err) = call(COMMAND_TOWER_COMMAND_LINE, json!({ "id": "1:1" }), "AgentX").await;
