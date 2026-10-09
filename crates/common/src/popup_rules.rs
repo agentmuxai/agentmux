@@ -142,6 +142,41 @@ pub fn loopback_allowed(url: &str, opener_url: &str, own_origins: &[String]) -> 
         && !own_origins.iter().any(|o| o.trim_end_matches('/').eq_ignore_ascii_case(&origin))
 }
 
+/// The title for a popup window, which has no address bar: where it is,
+/// then the page's own title, e.g. `accounts.google.com — Sign in`
+/// (native-popups spec §8.4, N2). A page can set its title to anything, so
+/// the part it can't set comes first. `None` for an address with nothing to
+/// show (`devtools:` and the like): leave the title as the page set it.
+pub fn popup_window_title(url: &str, page_title: &str) -> Option<String> {
+    let place = popup_place(url)?;
+    let page_title = page_title.trim();
+    Some(if page_title.is_empty() { place } else { format!("{place} — {page_title}") })
+}
+
+/// Where a popup is, as its title shows it: the host (a non-default port
+/// added, `http://` kept so an insecure page reads as one; an
+/// internationalised name in its ASCII form, so look-alike letters can't
+/// pass for another site), or the scheme for a page with no host.
+fn popup_place(url: &str) -> Option<String> {
+    let u = url::Url::parse(url).ok()?;
+    match u.scheme() {
+        "http" | "https" | "blob" => match u.origin() {
+            url::Origin::Tuple(scheme, host, port) => {
+                let default_port = if scheme == "https" { 443 } else { 80 };
+                let mut place = if scheme == "http" { format!("http://{host}") } else { host.to_string() };
+                if port != default_port {
+                    place.push_str(&format!(":{port}"));
+                }
+                Some(place)
+            }
+            url::Origin::Opaque(_) => Some(format!("{}:", u.scheme())),
+        },
+        "about" => Some(format!("about:{}", u.path())),
+        "data" | "file" => Some(format!("{}:", u.scheme())),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,5 +280,33 @@ mod tests {
         assert!(!loopback_allowed("http://127.0.0.1:29705/x", "http://127.0.0.1:29705/", &own));
         // Not a loopback target at all.
         assert!(!loopback_allowed("https://example.com/", "https://example.com/", &own));
+    }
+
+    #[test]
+    fn a_popup_title_starts_with_where_the_page_is() {
+        let t = |url, title| popup_window_title(url, title);
+        assert_eq!(t("https://accounts.example.com/signin?x=1", "Sign in").as_deref(), Some("accounts.example.com — Sign in"));
+        // The page's title can't push the real host out of first place.
+        assert_eq!(
+            t("https://evil.example/login", "accounts.google.com — Sign in").as_deref(),
+            Some("evil.example — accounts.google.com — Sign in")
+        );
+        // No title: just the place.
+        assert_eq!(t("https://example.com/", "  ").as_deref(), Some("example.com"));
+        // Insecure and non-default ports show.
+        assert_eq!(t("http://example.com/", "A").as_deref(), Some("http://example.com — A"));
+        assert_eq!(t("https://example.com:8443/", "A").as_deref(), Some("example.com:8443 — A"));
+        assert_eq!(t("http://127.0.0.2:8000/p", "A").as_deref(), Some("http://127.0.0.2:8000 — A"));
+        assert_eq!(t("http://[::1]:3000/", "A").as_deref(), Some("http://[::1]:3000 — A"));
+        // A look-alike name shows in its ASCII form.
+        assert_eq!(t("https://аpple.com/", "A").as_deref(), Some("xn--pple-43d.com — A"));
+        // A blob shows the origin it belongs to.
+        assert_eq!(t("blob:https://example.com/0f0e", "A").as_deref(), Some("example.com — A"));
+        // Pages with no host still say what they are.
+        assert_eq!(t("about:blank", "Sign in").as_deref(), Some("about:blank — Sign in"));
+        assert_eq!(t("data:text/html,hi", "A").as_deref(), Some("data: — A"));
+        // Nothing to show: leave the title alone.
+        assert_eq!(t("devtools://devtools/bundled/inspector.html", "DevTools"), None);
+        assert_eq!(t("not a url", "A"), None);
     }
 }

@@ -1,6 +1,6 @@
 # SPEC: A browser pane's new windows open the way the page asked, and the agent that owns the opener drives them
 
-**Status:** active — N1 implemented (stacked on agentmux#4478); N2 and N3 open.
+**Status:** active — N1 implemented (agentmux#4502); N2's title half implemented, its `allowed_origins` half waits on that option existing (§8.6); N3 open.
 **Author:** AgentX@narko, 2026-10-08
 **Builds on:** `SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md` (P1, agentmux#4478: popups as
 panes beside the opener), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` (ownership, hand-off,
@@ -45,7 +45,8 @@ Observed on 2026-10-08 (Windows, CEF Chrome runtime, a `task dev` build): the na
 in front of the AgentMux window, **without an address bar**. Its window title is the page's
 title, or its address when the page has none: the Google error page showed
 `accounts.google.com/signin/oauth/…`, while a test page titled "Popup page" showed just that. So
-the title bar is no proof of where the window is; the opener's strip is (§7, §8.4).
+the title bar was no proof of where the window is; the opener's strip is (§7, §8.4). Since N2 the
+title leads with where the window is (§8.4).
 
 ## 3. Which requests are honored
 
@@ -151,13 +152,19 @@ A bare popup has no AgentMux header; what would appear there appears on the **op
    which clicked requests open in-app.
 3. **Popup registration uses the host IPC token**, which agents never see.
 4. **The address is always visible**: a popup pane has its address bar; a bare popup's address
-   is in the opener's strip. Its own title bar shows whatever title the page chose (§2), so a page
-   can name its window anything; N2 puts the origin in front of it.
+   is in the opener's strip. Its title bar leads with where it is, then the page's own title:
+   `accounts.google.com — Sign in` (N2, `popup_rules::popup_window_title`). The page can set its
+   title to anything, but not that first part, which is rebuilt on every navigation. It is the
+   host, with `http://` kept for an insecure page, a non-default port, and an internationalised
+   name in its ASCII form so look-alike letters can't pass for another site; a page with no host
+   shows its scheme (`about:blank`, `data:`). This covers every native popup, AgentMux's own
+   sign-in popup included.
 5. **Profile:** both kinds use the opener's request context
    (`SPEC_BROWSER_PANE_IDENTITIES` §G6 must hold for private-identity panes).
 6. **The pane's own allowlist** (`OpenBrowser({allowed_origins})`, 2026-10-07 spec §8) applies
    to its popups and popup panes: a target it would refuse to navigate to is refused here too.
-   (Decided, was P1 §9 Q4.)
+   (Decided, was P1 §9 Q4.) **The option doesn't exist yet**: it is in that spec's B3b, unbuilt
+   as of 2026-10-09. It is built next, with its popup half, in its own PR.
 
 ## 9. Where it lives
 
@@ -184,7 +191,7 @@ the rule moves to `agentmux-common`.
 
 | Question | Decision |
 |---|---|
-| Does a bare popup show its address? | Not as a bar (by design, like the OAuth popup). The opener's strip shows it; the title bar shows the page's own title (§2, §8.4), and N2 prefixes it with the origin. |
+| Does a bare popup show its address? | Not as a bar (by design, like the OAuth popup). The opener's strip shows it, and its title bar leads with where it is (§8.4). |
 | Where does it open on Windows? | In front of AgentMux, at the size the page asked (§2). Show in the strip covers it falling behind later. |
 | Window or pane? | What the page asked for: popup features → bare window; tab or window → pane (§1, §2). |
 | A person's pane, other site? | System browser, as today (§3). |
@@ -215,5 +222,5 @@ the rule moves to `agentmux-common`.
 |---|---|
 | **P1** (#4478) | Popup panes, inherited ownership, snapshot listing. Merge as is. |
 | **N1** | The disposition split; native admission in the host (rule in `agentmux-common`, the owned-pane push, loopback rule); bare-popup registration and close; resolver Path 0; srv popup records and the `pane` popup branch; banners on the opener; the popup-windows strip. |
-| **N2** | The popup window's title prefixed with its origin; `allowed_origins` for popups. |
+| **N2** | The popup window's title led by where it is (done); `allowed_origins` for popups, with the option itself (next). |
 | **N3** | A `popup` condition for `BrowserWaitFor`; a setting to send all new windows to the system browser. |

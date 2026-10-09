@@ -8,6 +8,45 @@ use cef::*;
 
 use super::AgentMuxHandler;
 
+/// `page_title` led by where `browser`'s main frame is
+/// (`popup_rules::popup_window_title`), or `None` if it has nothing to show.
+fn popup_title(browser: &Browser, page_title: &str) -> Option<String> {
+    let url = browser.main_frame().map(|f| CefString::from(&ImplFrame::url(&f)).to_string())?;
+    agentmux_common::popup_rules::popup_window_title(&url, page_title)
+}
+
+/// Set `browser`'s window title: through CEF Views, and for Alloy-style
+/// native windows on Windows through Win32.
+fn set_window_title(browser: &mut Option<Browser>, title: Option<&str>) {
+    let owned = title.map(CefString::from);
+    if let Some(browser_view) = browser_view_get_for_browser(browser.as_mut()) {
+        if let Some(window) = browser_view.window() {
+            window.set_title(owned.as_ref());
+        }
+    }
+    // Reagent P1 on #876: only call SetWindowTextW when CEF gave us an
+    // actual title. CEF fires `on_title_change` with `title = None` in
+    // several paths (e.g. about:blank, popup blockers) — passing "" to
+    // SetWindowTextW would blank the application window title in those
+    // cases. Preserve the existing title by skipping the Win32 update
+    // when title is None.
+    #[cfg(target_os = "windows")]
+    if let (Some(title), Some(browser)) = (title, browser.as_ref()) {
+        if let Some(host) = browser.host() {
+            let hwnd = host.window_handle();
+            if !hwnd.0.is_null() {
+                let title_wide: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+                unsafe {
+                    windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW(
+                        hwnd.0 as *mut std::ffi::c_void,
+                        title_wide.as_ptr(),
+                    );
+                }
+            }
+        }
+    }
+}
+
 impl AgentMuxHandler {
     pub(crate) fn on_title_change(&mut self, browser: Option<&mut Browser>, title: Option<&CefString>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
@@ -32,44 +71,19 @@ impl AgentMuxHandler {
         {
             display_title_str.push_str(" — Sandbox Disabled");
         }
-        let had_title = title.is_some();
-        let owned_title = CefString::from(display_title_str.as_str());
-        let title: Option<&CefString> = if had_title { Some(&owned_title) } else { None };
+        let mut had_title = title.is_some();
 
-        // Update the window title via CEF Views.
         let mut browser = browser.cloned();
-        if let Some(browser_view) = browser_view_get_for_browser(browser.as_mut()) {
-            if let Some(window) = browser_view.window() {
-                window.set_title(title);
+        // A popup window has no address bar, so its title leads with where it
+        // is, which the page can't set (native-popups spec §8.4, N2).
+        if let Some(b) = browser.as_ref().filter(|b| self.popup_browser_ids.contains(&b.identifier())) {
+            self.popup_titles.insert(b.identifier(), title_str.clone());
+            if let Some(t) = popup_title(b, &title_str) {
+                display_title_str = t;
+                had_title = true;
             }
         }
-        // For Alloy-style native windows on Windows, update via Win32 API.
-        // Reagent P1 on #876: only call SetWindowTextW when CEF gave us an
-        // actual title. CEF fires `on_title_change` with `title = None` in
-        // several paths (e.g. about:blank, popup blockers) — passing "" to
-        // SetWindowTextW would blank the application window title in those
-        // cases. Preserve the existing title by skipping the Win32 update
-        // when title is None.
-        #[cfg(target_os = "windows")]
-        if title.is_some() {
-            if let Some(browser) = browser.as_ref() {
-                if let Some(host) = browser.host() {
-                    let hwnd = host.window_handle();
-                    if !hwnd.0.is_null() {
-                        let title_wide: Vec<u16> = display_title_str
-                            .encode_utf16()
-                            .chain(std::iter::once(0))
-                            .collect();
-                        unsafe {
-                            windows_sys::Win32::UI::WindowsAndMessaging::SetWindowTextW(
-                                hwnd.0 as *mut std::ffi::c_void,
-                                title_wide.as_ptr(),
-                            );
-                        }
-                    }
-                }
-            }
-        }
+        set_window_title(&mut browser, had_title.then_some(display_title_str.as_str()));
 
         // Emit live title to frontend for browser panes.
         if self.is_browser_pane {
@@ -91,6 +105,24 @@ impl AgentMuxHandler {
                     );
                 }
             }
+        }
+    }
+
+    /// A popup window that navigates gets its new place in the title at once,
+    /// rather than keeping the old site's until the new page sets a title.
+    pub(crate) fn on_address_change(
+        &mut self,
+        browser: Option<&mut Browser>,
+        frame: Option<&mut Frame>,
+        url: Option<&CefString>,
+    ) {
+        let (Some(b), Some(url)) = (browser, url) else { return };
+        if !frame.is_some_and(|f| f.is_main() == 1) {
+            return;
+        }
+        let Some(page_title) = self.popup_titles.get(&b.identifier()) else { return };
+        if let Some(t) = agentmux_common::popup_rules::popup_window_title(&url.to_string(), page_title) {
+            set_window_title(&mut Some(b.clone()), Some(&t));
         }
     }
 
