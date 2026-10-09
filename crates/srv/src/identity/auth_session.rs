@@ -193,25 +193,31 @@ impl AuthSessionManager {
     /// in to one directory at once race on its credential files (the
     /// desktop host's single login slot has the same rule).
     pub fn start_session(&self, provider_id: String, exclusive_key: Option<String>) -> StartSessionResult {
-        if let Some(key) = exclusive_key.as_deref() {
-            let superseded: Vec<String> = self
-                .sessions
-                .lock()
-                .unwrap()
-                .iter()
-                .filter(|(_, s)| !s.status.is_terminal() && s.exclusive_key.as_deref() == Some(key))
-                .map(|(id, _)| id.clone())
-                .collect();
-            for id in superseded {
-                self.end_session(&id, "replaced by a newer sign-in for the same account".to_string());
-            }
-        }
         let session_id = format!("auth-{}", uuid::Uuid::new_v4());
-        let session = Session::new(provider_id, exclusive_key);
-        self.sessions
-            .lock()
-            .unwrap()
-            .insert(session_id.clone(), session);
+        // Replacing the live session and inserting this one happen under one
+        // lock, so two concurrent starts for the same directory can't both
+        // find nothing to replace. The replaced CLIs are stopped after it.
+        let superseded: Vec<String> = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let superseded: Vec<String> = match exclusive_key.as_deref() {
+                Some(key) => sessions
+                    .iter_mut()
+                    .filter(|(_, s)| s.exclusive_key.as_deref() == Some(key))
+                    .filter_map(|(id, s)| {
+                        s.finish(AuthSessionStatus::Failed {
+                            error: "replaced by a newer sign-in for the same account".to_string(),
+                        })
+                        .then(|| id.clone())
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            sessions.insert(session_id.clone(), Session::new(provider_id, exclusive_key));
+            superseded
+        };
+        for id in &superseded {
+            self.stop_process(id);
+        }
         StartSessionResult {
             session_id,
             auth_url: None,
@@ -383,6 +389,14 @@ impl AuthSessionManager {
     /// refs go either way, so ending a session twice is harmless.
     fn end_session(&self, session_id: &str, error: String) -> bool {
         let transitioned = self.finish_failure(session_id, error);
+        self.stop_process(session_id);
+        transitioned
+    }
+
+    /// Stop a session's CLI and drop its process refs: abort the drain task
+    /// (the pipe path's child goes with it, `kill_on_drop`), drop its stdin,
+    /// and kill a PTY child by PID.
+    fn stop_process(&self, session_id: &str) {
         let mut refs = self.process_refs.lock().unwrap();
         if let Some(handle) = refs.drain_tasks.remove(session_id) {
             handle.abort();
@@ -398,15 +412,27 @@ impl AuthSessionManager {
                 tracing::info!(pid, session_id, "end_session: PTY child killed");
             }
         }
-        transitioned
+    }
+
+    fn is_terminal(&self, session_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .is_none_or(|s| s.status.is_terminal())
     }
 
     /// Register the PID of a PTY-backed auth subprocess so
     /// `cancel_session` can terminate it. Called by `auth.start`
     /// after spawning a PTY login (in addition to `attach_process`).
     pub fn attach_pty_pid(&self, session_id: &str, pid: u32) {
-        let mut refs = self.process_refs.lock().unwrap();
-        refs.pty_pids.insert(session_id.to_string(), pid);
+        self.process_refs.lock().unwrap().pty_pids.insert(session_id.to_string(), pid);
+        // Registered first, checked second: a session ended (replaced,
+        // cancelled, timed out) before this, whose end found nothing to stop,
+        // has its CLI stopped here; one ended after finds it registered.
+        if self.is_terminal(session_id) {
+            self.stop_process(session_id);
+        }
     }
 
     /// Register the drain task + stdin sender for a session. Called
@@ -417,9 +443,15 @@ impl AuthSessionManager {
         drain_task: tokio::task::JoinHandle<()>,
         stdin_sender: tokio::sync::mpsc::Sender<String>,
     ) {
-        let mut refs = self.process_refs.lock().unwrap();
-        refs.drain_tasks.insert(session_id.to_string(), drain_task);
-        refs.stdin_senders.insert(session_id.to_string(), stdin_sender);
+        {
+            let mut refs = self.process_refs.lock().unwrap();
+            refs.drain_tasks.insert(session_id.to_string(), drain_task);
+            refs.stdin_senders.insert(session_id.to_string(), stdin_sender);
+        }
+        // As in `attach_pty_pid`: a session that already ended stops now.
+        if self.is_terminal(session_id) {
+            self.stop_process(session_id);
+        }
     }
 
     /// Forward a pasted callback URL to the spawned CLI's stdin.
@@ -786,5 +818,20 @@ mod tests {
         );
         assert_eq!(m.poll_session(&second.session_id).unwrap().status, AuthSessionStatus::Pending);
         assert_eq!(m.poll_session(&other.session_id).unwrap().status, AuthSessionStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn a_cli_attached_after_its_session_was_replaced_is_stopped_at_once() {
+        let m = mgr();
+        let dir = Some("/home/u/.agentmux/accounts/claude-1".to_string());
+        let older = m.start_session("claude".to_string(), dir.clone());
+        // The newer start replaces the older session before its CLI exists.
+        let _newer = m.start_session("claude".to_string(), dir);
+        // The older request's CLI arrives afterwards.
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        m.attach_process(&older.session_id, tokio::spawn(std::future::pending::<()>()), tx);
+
+        assert!(!m.send_to_stdin(&older.session_id, "code".to_string()).await, "the replaced CLI keeps no stdin");
+        assert!(m.process_refs.lock().unwrap().drain_tasks.get(&older.session_id).is_none());
     }
 }
