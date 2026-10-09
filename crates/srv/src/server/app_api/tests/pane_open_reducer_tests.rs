@@ -1534,10 +1534,9 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
         assert!(admitted <= crate::server::browser_popup::MAX_POPUPS_PER_PANE, "the cap never held");
     }
     let exists = |id: &str| matches!(state.mstore.get::<crate::backend::obj::Block>(id), Ok(Some(_)));
-    assert_eq!(
-        crate::server::browser_popup::open_popups(&agents, exists).len(),
-        crate::server::browser_popup::MAX_POPUPS_PER_PANE
-    );
+    // The whole chain: the root's own popups and p1's (p3, and p4 if it opened).
+    let open = |id: &str| crate::server::browser_popup::open_popups(id, exists).len();
+    assert_eq!(open(&agents) + open(&p1) + open(&p3), crate::server::browser_popup::MAX_POPUPS_PER_PANE);
     // A popup can't get round it by opening its own.
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", popup(&p1, "https://idp.other.org/login", "https://idp.other.org/x", true), &host).await;
     assert_eq!(body["data"]["admitted"], false, "{body}");
