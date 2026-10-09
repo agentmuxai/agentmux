@@ -67,16 +67,54 @@ function closingBrace(text, open) {
     return text.length - 1;
 }
 
+// The value of a `cfg` predicate in a build without `test`: false, true, or
+// null when it depends on something else (a target, a feature, …). Three-valued,
+// so `all(any(test, debug_assertions), unix)` is null, not false.
+function cfgWithoutTest(expr) {
+    let i = 0;
+    const skip = () => {
+        while (/\s/.test(expr[i] ?? "")) i++;
+    };
+    const parse = () => {
+        skip();
+        const name = expr.slice(i).match(/^\w+/)?.[0];
+        if (!name) throw new Error(`cfg: expected a predicate in "${expr}"`);
+        i += name.length;
+        skip();
+        if (expr[i] === "=") {
+            // key = "value": never `test`.
+            i++;
+            skip();
+            i = expr.indexOf('"', i + 1) + 1;
+            return null;
+        }
+        if (expr[i] !== "(") return name === "test" ? false : null;
+        i++;
+        const args = [];
+        for (skip(); expr[i] !== ")"; skip()) {
+            args.push(parse());
+            skip();
+            if (expr[i] === ",") i++;
+        }
+        i++;
+        if (name === "not") return args[0] === null ? null : !args[0];
+        if (name === "all") return args.includes(false) ? false : args.every((a) => a === true) ? true : null;
+        if (name === "any") return args.includes(true) ? true : args.every((a) => a === false) ? false : null;
+        throw new Error(`cfg: unknown operator ${name}`);
+    };
+    return parse();
+}
+
 // The file with every inline test-only module blanked out: `mod x { … }` under
-// a `#[cfg(…)]` that requires `test` (`test`, `all(test, …)`, not `not(test)`).
-// Line breaks are kept, so line numbers still match.
+// a `#[cfg(…)]` that can't hold without `test` (`test`, `all(test, …)`; not
+// `not(test)`, `any(test, …)` or `all(any(test, x), …)`). Line breaks are kept,
+// so line numbers still match.
 function withoutTestMods(text) {
     const head = /#\[cfg\(([^\]]*)\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{/g;
     let out = "";
     let from = 0;
     for (let m = head.exec(text); m; m = head.exec(text)) {
-        const cfg = m[1];
-        if (!/\btest\b/.test(cfg) || /\bnot\s*\(\s*test\b/.test(cfg) || /^\s*any\s*\(/.test(cfg)) continue;
+        if (cfgWithoutTest(m[1]) !== false) continue;
         const end = closingBrace(text, m.index + m[0].length - 1);
         out += text.slice(from, m.index) + text.slice(m.index, end + 1).replace(/[^\n]/g, " ");
         from = end + 1;
