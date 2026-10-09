@@ -19,7 +19,8 @@
 use std::sync::{Arc, Mutex};
 
 /// Who delivered input to an agent (SPEC_AGENT_SELF_QUIT_2026_09_24.md §6.3).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum TurnOrigin {
     /// The human typing in the agent's own pane.
@@ -60,7 +61,8 @@ pub const ABSORBED_CAP: usize = 20;
 
 /// What kind of thing started, or joined, a turn (turn-model spec §5.2).
 /// Display data next to [`TurnOrigin`], which stays the security class.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum TriggerKind {
     /// The human, in this pane.
@@ -79,20 +81,35 @@ pub enum TriggerKind {
     System,
 }
 
+impl TriggerKind {
+    /// Started by something other than the user: another agent, a service, a
+    /// schedule, a background task (spec §5.2). The one place this is decided:
+    /// srv publishes it on every trigger (`TurnTrigger::external`) and the
+    /// pane and the notification router read that.
+    pub fn is_external(self) -> bool {
+        matches!(self, TriggerKind::Agent | TriggerKind::Service | TriggerKind::Schedule | TriggerKind::Task)
+    }
+}
+
 /// What started, or joined, a turn: its kind, and who or what, for display.
 /// Built by srv from what it wrote itself (the jekt marker it composed, the
 /// CLI's task notification), never from message body text.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TurnTrigger {
     pub kind: TriggerKind,
     /// The sender (a jekt's `FROM`), or the task's summary. Absent for the user.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub from: Option<String>,
+    /// `kind.is_external()`, carried so readers don't keep their own list.
+    #[serde(default)]
+    pub external: bool,
 }
 
 impl TurnTrigger {
     fn of(kind: TriggerKind, from: Option<&str>) -> Self {
-        TurnTrigger { kind, from: from.map(str::to_string) }
+        TurnTrigger { kind, from: from.map(str::to_string), external: kind.is_external() }
     }
 
     /// Classify an input by its origin and the envelope srv put on it.
@@ -121,7 +138,7 @@ impl TurnTrigger {
                 s.to_string()
             }
         });
-        TurnTrigger { kind: TriggerKind::Task, from: summary }
+        TurnTrigger { kind: TriggerKind::Task, from: summary, external: TriggerKind::Task.is_external() }
     }
 }
 
@@ -136,7 +153,8 @@ fn jekt_sender(text: &str) -> Option<&str> {
 }
 
 /// Why a turn ended.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
 pub enum TurnEnd {
     /// Its last pass finished and nothing joined it.
@@ -147,25 +165,32 @@ pub enum TurnEnd {
 
 /// The turn as the user sees it: from leaving idle to returning to it with
 /// nothing queued, over however many CLI passes that took (turn-model spec
-/// §3.1, §4.3). Published as `agentturn` on every change.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+/// §3.1, §4.3). Published as `agentturn` on every change; the pane's parser is
+/// typed against the generated `frontend/types/rpc/TurnLedger.ts`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TurnLedger {
     /// Unique per block: the start time in ms, bumped past the previous id.
+    #[ts(type = "number")]
     pub turn_id: u64,
     /// Bumped on every change, under the tracker's lock. Publishes run after
     /// the lock is released, so two can land out of order; the pane keeps the
     /// highest `seq` (#4492).
+    #[ts(type = "number")]
     pub seq: u64,
     /// What started the turn; `None` when its first pass was unlabelled.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub origin: Option<TurnOrigin>,
     /// The same, for display: what kind of thing, and who.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub trigger: Option<TurnTrigger>,
     /// The labelled inputs that arrived after the turn started, in order,
     /// up to [`ABSORBED_CAP`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub absorbed: Vec<TurnTrigger>,
+    #[ts(type = "number")]
     pub started_at_ms: u64,
     /// CLI passes so far, the running one included.
     pub passes: u32,
@@ -179,20 +204,26 @@ pub struct TurnLedger {
     /// counted yet, so a pass is never counted twice.
     pub counted_passes: u32,
     /// Summed over the counted passes' `result` frames.
+    #[ts(type = "number")]
     pub output_tokens: u64,
     pub cost_usd: f64,
     /// Model calls (`result.num_turns`, which counts steps, not turns).
     pub steps: u32,
+    #[ts(type = "number")]
     pub duration_api_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub last_pass_ended_at_ms: Option<u64>,
     /// Between passes, while a next pass is expected: the turn is over if
     /// none starts by then.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub settle_until_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
     pub ended_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub end: Option<TurnEnd>,
 }
 
@@ -217,9 +248,18 @@ impl TurnLedger {
         !self.active && self.ended_at_ms.is_none() && self.settle_until_ms.is_some_and(|u| now <= u)
     }
 
-    /// End a settling turn whose window ran out, at its last pass's end.
+    /// When the turn ended: its recorded end, or its last pass's end once
+    /// it is done settling with no next pass (nothing writes the end then).
+    /// `None` while a pass runs or a next one is expected.
+    fn ended_at(&self, now: u64) -> Option<u64> {
+        self.ended_at_ms
+            .or_else(|| (!self.active && !self.settling_at(now)).then_some(self.last_pass_ended_at_ms).flatten())
+    }
+
+    /// Record the end of a turn that is over by `ended_at` but has no end
+    /// written yet: one whose settle window ran out.
     fn close_if_lapsed(&mut self, now: u64) {
-        if !self.active && self.ended_at_ms.is_none() && !self.settling_at(now) {
+        if self.ended_at_ms.is_none() && !self.active && !self.settling_at(now) {
             self.ended_at_ms = Some(self.last_pass_ended_at_ms.unwrap_or(now));
             self.end = Some(TurnEnd::Completed);
             self.settle_until_ms = None;
@@ -330,13 +370,12 @@ pub fn ledger_transition(before: Option<&TurnLedger>, after: Option<&TurnLedger>
 /// ended at its last pass. `None` for a ledger that isn't settling. Same `seq`:
 /// it is the same state, only now known to be over.
 pub fn closed_when_lapsed(ledger: &TurnLedger) -> Option<TurnLedger> {
-    if ledger.active || ledger.ended_at_ms.is_some() || ledger.settle_until_ms.is_none() {
+    let lapsed_at = ledger.settle_until_ms?.saturating_add(1);
+    if ledger.active || ledger.ended_at_ms.is_some() {
         return None;
     }
     let mut closed = ledger.clone();
-    closed.ended_at_ms = closed.last_pass_ended_at_ms;
-    closed.end = Some(TurnEnd::Completed);
-    closed.settle_until_ms = None;
+    closed.close_if_lapsed(lapsed_at);
     Some(closed)
 }
 
@@ -459,12 +498,7 @@ impl TurnActivityTrackerInner {
         };
         if let Some(ledger) = self.ledger.as_mut() {
             let settling = ledger.settling_at(now);
-            // Ended, or done settling with no next pass (nothing writes the end
-            // then): it ended at its last pass, as the pane reads it (#4492).
-            let ended_at = ledger
-                .ended_at_ms
-                .or_else(|| (!ledger.active && !settling).then_some(ledger.last_pass_ended_at_ms).flatten());
-            let recently_ended = ended_at.is_some_and(|e| now.saturating_sub(e) <= HELD_FLUSH_JOIN_MS);
+            let recently_ended = ledger.ended_at(now).is_some_and(|e| now.saturating_sub(e) <= HELD_FLUSH_JOIN_MS);
             let joins = match start {
                 // A fresh message the user typed after the agent stopped is a
                 // new turn, even inside the settle window (D3); only the
@@ -1471,7 +1505,7 @@ mod tests {
     }
 
     fn trig(kind: TriggerKind, from: Option<&str>) -> TurnTrigger {
-        TurnTrigger { kind, from: from.map(str::to_string) }
+        TurnTrigger::of(kind, from)
     }
 
     #[test]
@@ -1559,8 +1593,20 @@ mod tests {
         let (t, _, _) = ledger_tracker();
         t.mark_turn_active_from(Some(jekt_from("agentx")));
         let v = serde_json::to_value(t.ledger().unwrap()).unwrap();
-        assert_eq!(v["trigger"], serde_json::json!({"kind": "agent", "from": "agentx"}));
+        assert_eq!(v["trigger"], serde_json::json!({"kind": "agent", "from": "agentx", "external": true}));
         assert!(v.get("absorbed").is_none(), "empty: absent");
+    }
+
+    #[test]
+    fn only_a_turn_something_else_started_is_external() {
+        use TriggerKind::*;
+        for kind in [Agent, Service, Schedule, Task] {
+            assert!(TurnTrigger::of(kind, None).external, "{kind:?}");
+        }
+        for kind in [User, Broadcast, System] {
+            assert!(!TurnTrigger::of(kind, None).external, "{kind:?}");
+        }
+        assert!(TurnTrigger::task(Some("done")).external);
     }
 
     /// A task the CLI wakes for inside a turn is listed as what joined it (#4503).

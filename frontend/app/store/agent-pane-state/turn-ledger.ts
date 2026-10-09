@@ -15,26 +15,44 @@
  */
 
 import type { TurnTokens } from "@/app/view/agent/types";
+import type { TriggerKind } from "@/types/rpc/TriggerKind";
+import type { TurnLedger as TurnLedgerWire } from "@/types/rpc/TurnLedger";
+import type { TurnOrigin } from "@/types/rpc/TurnOrigin";
+import type { TurnTrigger as TurnTriggerWire } from "@/types/rpc/TurnTrigger";
 import { turnOutputTokens } from "./turn-contribution";
 
-export type TurnLedgerOrigin = "user" | "automated" | "system";
+export type { TriggerKind };
+export type TurnLedgerOrigin = TurnOrigin;
 
 /** What started, or joined, a turn (srv's `TurnTrigger`, spec §5.2). */
-export type TriggerKind = "user" | "broadcast" | "agent" | "service" | "schedule" | "task" | "system";
-
 export interface TurnTrigger {
     kind: TriggerKind;
     /** The sender (a jekt's FROM), or a task's summary. Absent for the user. */
     from: string | null;
+    /** Started by something other than the user; srv decides
+     *  (`TriggerKind::is_external`). */
+    external: boolean;
 }
 
-const TRIGGER_KINDS: ReadonlySet<string> = new Set(["user", "broadcast", "agent", "service", "schedule", "task", "system"]);
+/** Every kind srv sends: a missing or extra one fails to compile. */
+const TRIGGER_KINDS: Readonly<Record<TriggerKind, true>> = {
+    user: true,
+    broadcast: true,
+    agent: true,
+    service: true,
+    schedule: true,
+    task: true,
+    system: true,
+};
+
+/** The wire's own field names, so a renamed field fails to compile here. */
+type Wire<T> = { [K in keyof T]?: unknown };
 
 function parseTrigger(v: unknown): TurnTrigger | null {
     if (!v || typeof v !== "object") return null;
-    const t = v as Record<string, unknown>;
-    if (typeof t.kind !== "string" || !TRIGGER_KINDS.has(t.kind)) return null;
-    return { kind: t.kind as TriggerKind, from: typeof t.from === "string" && t.from ? t.from : null };
+    const t = v as Wire<TurnTriggerWire>;
+    if (typeof t.kind !== "string" || (TRIGGER_KINDS as Record<string, true | undefined>)[t.kind] !== true) return null;
+    return { kind: t.kind as TriggerKind, from: typeof t.from === "string" && t.from ? t.from : null, external: t.external === true };
 }
 
 export interface TurnLedger {
@@ -75,7 +93,7 @@ function num(v: unknown): number | null {
 /** Parse an `agentturn` event's data; null if it isn't one. */
 export function parseTurnLedger(data: unknown): TurnLedger | null {
     if (!data || typeof data !== "object") return null;
-    const d = data as Record<string, unknown>;
+    const d = data as Wire<TurnLedgerWire>;
     const turnId = num(d.turn_id);
     const startedAtMs = num(d.started_at_ms);
     if (turnId == null || startedAtMs == null || typeof d.active !== "boolean") return null;
@@ -123,18 +141,11 @@ export function turnOpen(l: TurnLedger | null | undefined, nowMs: number): boole
     return !!l && (l.active || turnSettling(l, nowMs));
 }
 
-/** How long after a turn ended srv still lets a held message join it
- *  (`HELD_FLUSH_JOIN_MS` in health.rs). */
-export const HELD_FLUSH_JOIN_MS = 10_000;
-
-/** The turn a held message being flushed now should join: the one still open,
- *  or the one that only just ended. The message was held because a turn was
- *  running, and the flush follows that turn's end at once. */
-export function turnToJoin(l: TurnLedger | null | undefined, nowMs: number): number | undefined {
-    if (!l) return undefined;
-    if (turnOpen(l, nowMs)) return l.turnId;
-    const endedAt = turnEndedAt(l, nowMs);
-    return endedAt != null && nowMs - endedAt <= HELD_FLUSH_JOIN_MS ? l.turnId : undefined;
+/** The turn a held message being flushed now asks to join: the latest one.
+ *  srv decides whether it still may (open, or ended within its
+ *  `HELD_FLUSH_JOIN_MS`), so the pane keeps no copy of that window. */
+export function turnToJoin(l: TurnLedger | null | undefined): number | undefined {
+    return l?.turnId;
 }
 
 /** When the turn ended: its end, or the last pass's end once the settle window lapsed. */

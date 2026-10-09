@@ -16,8 +16,10 @@
 //! same process — tests, or any future multi-state setup — never has its
 //! events published onto someone else's bus.
 
+use serde::Deserialize;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::backend::blockcontroller::health::{TriggerKind, TurnEnd, TurnTrigger};
 use crate::backend::mps::{Broker, MuxEvent};
 use crate::backend::obj::{Block, Tab, Window, Workspace};
 use crate::backend::storage::store::Store;
@@ -83,19 +85,34 @@ pub struct LedgerEnd {
     pub system: bool,
 }
 
+/// The fields of a published ledger the router reads, typed by the same
+/// enums srv serializes it with.
+#[derive(serde::Deserialize)]
+struct PublishedLedger {
+    block_id: String,
+    turn_id: u64,
+    #[serde(default)]
+    ended_at_ms: Option<u64>,
+    #[serde(default)]
+    end: Option<TurnEnd>,
+    #[serde(default)]
+    trigger: Option<TurnTrigger>,
+}
+
 /// The turn is over by its ledger: `end: "completed"` (an exit is a crash,
 /// which `agentfailure` reports). `None` for a turn still running or settling.
 pub fn parse_ledger_end(d: &serde_json::Value) -> Option<LedgerEnd> {
-    if d.get("end").and_then(|v| v.as_str()) != Some("completed") {
+    let l = PublishedLedger::deserialize(d).ok()?;
+    if l.end != Some(TurnEnd::Completed) {
         return None;
     }
-    let kind = d.pointer("/trigger/kind").and_then(|v| v.as_str());
+    let kind = l.trigger.map(|t| t.kind);
     Some(LedgerEnd {
-        block_id: d.get("block_id")?.as_str()?.to_string(),
-        turn_id: d.get("turn_id")?.as_u64()?,
-        ended_at_ms: d.get("ended_at_ms").and_then(|v| v.as_u64()).unwrap_or(0),
-        external: matches!(kind, Some("agent" | "service" | "schedule" | "task")),
-        system: kind == Some("system"),
+        block_id: l.block_id,
+        turn_id: l.turn_id,
+        ended_at_ms: l.ended_at_ms.unwrap_or(0),
+        external: kind.is_some_and(TriggerKind::is_external),
+        system: kind == Some(TriggerKind::System),
     })
 }
 

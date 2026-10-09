@@ -3,7 +3,8 @@
 
 import { Show, createEffect, createSignal, type Accessor, type JSX } from "solid-js";
 import { IconButton } from "@/app/element/ui";
-import { awaySummary, markTurnsSeen, unseenTurnsFor } from "@/app/store/turn-awareness";
+import { markTurnsSeen, unseenTurnsFor } from "@/app/store/turn-awareness";
+import { awaySummary } from "../turn-trigger-text";
 
 /**
  * When you come back to a pane where turns you didn't start finished unseen,
