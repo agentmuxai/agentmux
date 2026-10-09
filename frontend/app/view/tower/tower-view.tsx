@@ -9,7 +9,7 @@ import { Button, FilterInput, IconButton, SegmentedControl, tabPanelId, Tabs } f
 import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
 import { revealBlock } from "@/app/util/reveal-block";
 import clsx from "clsx";
-import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
+import { createMemo, For, type JSX, Match, Show, Switch } from "solid-js";
 import type { TowerViewModel } from "./tower-model";
 import {
     count,
@@ -238,24 +238,6 @@ function ProcessRow(props: {
     nested?: boolean;
     taskLabel?: string;
 }) {
-    // undefined: not asked; null: asked, none; string: the line.
-    const [line, setLine] = createSignal<string | null | undefined>(undefined);
-    const [loading, setLoading] = createSignal(false);
-    const toggleLine = async () => {
-        if (line() !== undefined) {
-            setLine(undefined);
-            return;
-        }
-        setLoading(true);
-        try {
-            setLine((await props.model.commandLine(props.process.id)) ?? null);
-        } catch {
-            setLine(null);
-        } finally {
-            setLoading(false);
-        }
-    };
-    const unmeasured = () => props.process.cpu == null && props.process.mem == null;
     return (
         <tr
             class={clsx(
@@ -271,22 +253,7 @@ function ProcessRow(props: {
                     <Show when={props.taskLabel}>
                         {(label) => <span class="tower-badge tower-badge--task">{label()}</span>}
                     </Show>
-                    <Show when={!unmeasured()}>
-                        <IconButton
-                            icon={loading() ? "spinner" : "terminal"}
-                            label={line() !== undefined ? "Hide command line" : "Show command line"}
-                            density="compact"
-                            class="tower-cmdline-toggle"
-                            disabled={loading()}
-                            onClick={() => void toggleLine()}
-                        />
-                    </Show>
                 </div>
-                <Show when={line() !== undefined}>
-                    <div class="tower-cmdline">
-                        {line() ?? "Not available (it has exited, or the system won't say)."}
-                    </div>
-                </Show>
             </td>
             <td class="tower-num">{props.cpu(props.process.cpu)}</td>
             <td class="tower-num">{formatMem(props.process.mem)}</td>

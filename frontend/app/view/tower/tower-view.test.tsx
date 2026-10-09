@@ -6,12 +6,10 @@ import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sample = vi.fn();
-const commandLine = vi.fn();
 const reveal = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         TowerSampleCommand: (...args: unknown[]) => sample(...args),
-        TowerCommandLineCommand: (...args: unknown[]) => commandLine(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -129,29 +127,24 @@ describe("Tower", () => {
         expect(within(screen.getByTestId("tower-task-block-a")).getByText("200%")).toBeInTheDocument();
     });
 
-    it("expands a task into its processes and fetches a command line on demand", async () => {
-        commandLine.mockResolvedValue({ command_line: "node build.js --watch" });
+    it("expands a task into its processes", async () => {
         renderTower();
         const agent = await screen.findByTestId("tower-task-block-a");
         expect(screen.queryByText("node.exe")).toBeNull();
         fireEvent.click(within(agent).getByRole("button", { name: "Show processes" }));
         const node = screen.getByText("node.exe").closest("tr")!;
-        fireEvent.click(within(node).getByRole("button", { name: "Show command line" }));
-        expect(await within(node).findByText("node build.js --watch")).toBeInTheDocument();
-        expect(commandLine).toHaveBeenCalledWith(expect.anything(), { id: "11:1" });
+        // 1.5 cores of 4.
+        expect(within(node).getByText("38%")).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /command line/i })).toBeNull();
     });
 
-    it("keeps a fetched command line, and the row, across a refresh", async () => {
+    it("keeps each row, and updates it, across a refresh", async () => {
         vi.useFakeTimers();
-        commandLine.mockResolvedValue({ command_line: "node build.js --watch" });
         renderTower();
         await vi.advanceTimersByTimeAsync(0);
         const agent = screen.getByTestId("tower-task-block-a");
         fireEvent.click(within(agent).getByRole("button", { name: "Show processes" }));
         const node = screen.getByText("node.exe").closest("tr")!;
-        fireEvent.click(within(node).getByRole("button", { name: "Show command line" }));
-        await vi.advanceTimersByTimeAsync(0);
-        expect(within(node).getByText("node build.js --watch")).toBeInTheDocument();
         // The next poll brings new numbers in new objects.
         sample.mockImplementation(() => {
             const next = snapshot();
@@ -160,11 +153,9 @@ describe("Tower", () => {
         });
         await vi.advanceTimersByTimeAsync(2000);
         expect(sample).toHaveBeenCalledTimes(2);
-        // Same row element, updated, with its command line still shown.
+        // Same row element, updated in place (not rebuilt every refresh).
         expect(screen.getByText("node.exe").closest("tr")).toBe(node);
-        expect(within(node).getByText("node build.js --watch")).toBeInTheDocument();
         expect(within(node).getByText("25%")).toBeInTheDocument();
-        expect(commandLine).toHaveBeenCalledTimes(1);
     });
 
     it("reveals an agent's pane, and offers no pane for AgentMux itself", async () => {

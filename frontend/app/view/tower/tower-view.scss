@@ -163,27 +163,13 @@
     white-space: nowrap;
 }
 
-// Row actions appear on hover or focus, so the table reads as numbers.
-.tower-reveal,
-.tower-cmdline-toggle {
+// The reveal action appears on hover or focus, so the table reads as numbers.
+.tower-reveal {
     opacity: 0;
 }
 
 tr:hover .tower-reveal,
-tr:hover .tower-cmdline-toggle,
 .tower-reveal:focus-within,
-.tower-cmdline-toggle:focus-within,
-.tower-reveal:focus-visible,
-.tower-cmdline-toggle:focus-visible {
+.tower-reveal:focus-visible {
     opacity: 1;
-}
-
-.tower-cmdline {
-    margin: 2px 0 4px;
-    font-family: var(--font-mono);
-    font-size: 0.9em;
-    color: var(--secondary-text-color);
-    white-space: pre-wrap;
-    word-break: break-all;
-    user-select: text;
 }

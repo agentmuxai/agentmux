@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Tower, the read-only task manager pane (`backend::tower_sampler`;
-//! SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md): `tower.sample` and
-//! `tower.command-line`.
+//! SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md): `tower.sample`.
 //!
 //! They are the window's, not an agent API: a connection registered as an
 //! agent (`bus:register`) is refused.
@@ -28,17 +27,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             .map_err(|e| format!("tower.sample: {e}"))?
         }
     });
-    engine.register_typed(COMMAND_TOWER_COMMAND_LINE, |req: TowerCommandLineReq, ctx| async move {
-        not_an_agent_api(&ctx)?;
-        let key = crate::backend::tower_sampler::parse_proc_id(&req.id).ok_or_else(|| format!("tower.command-line: bad id {:?}", req.id))?;
-        // Only the process the pane showed: a newer one that reused the PID is
-        // a different process (checked before and after the read).
-        tokio::task::spawn_blocking(move || TowerCommandLineResult {
-            command_line: agentmux_procstats::command_line_of(key),
-        })
-        .await
-        .map_err(|e| format!("tower.command-line: {e}"))
-    });
+
 }
 
 /// Refuse a connection registered as an agent: these RPCs aren't offered to
@@ -121,21 +110,7 @@ mod tests {
     async fn a_registered_agent_is_refused() {
         let (_, err) = call(COMMAND_TOWER_SAMPLE, json!({}), "AgentX").await;
         assert!(err.contains("FORBIDDEN"), "{err}");
-        let (_, err) = call(COMMAND_TOWER_COMMAND_LINE, json!({ "id": "1:1" }), "AgentX").await;
-        assert!(err.contains("FORBIDDEN"), "{err}");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn a_command_line_only_for_the_process_the_pane_showed() {
-        let me = agentmux_procstats::snapshot().unwrap().into_iter().find(|p| p.pid == std::process::id()).unwrap();
-        let (data, err) = call(COMMAND_TOWER_COMMAND_LINE, json!({ "id": format!("{}:{}", me.pid, me.start_key) }), "").await;
-        assert_eq!(err, "");
-        assert!(data["command_line"].as_str().is_some_and(|s| !s.is_empty()), "{data}");
-        // Same PID, another start: a different (newer) process.
-        let (data, err) = call(COMMAND_TOWER_COMMAND_LINE, json!({ "id": format!("{}:{}", me.pid, me.start_key + 1) }), "").await;
-        assert_eq!(err, "");
-        assert!(data.get("command_line").is_none(), "{data}");
-        let (_, err) = call(COMMAND_TOWER_COMMAND_LINE, json!({ "id": "nope" }), "").await;
-        assert!(err.contains("bad id"), "{err}");
-    }
+
 }

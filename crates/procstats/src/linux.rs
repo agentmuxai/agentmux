@@ -28,6 +28,11 @@ pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
         }
         let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok();
         let mem = status.as_deref().map(parse_status).unwrap_or_default();
+        // A PID reused between the two reads would mix two processes in one
+        // row: drop it (the next snapshot has the new process).
+        if start_key(pid) != Some(s.start_ticks) {
+            continue;
+        }
         out.push(ProcInfo {
             pid,
             ppid: Some(s.ppid).filter(|&p| p != 0),

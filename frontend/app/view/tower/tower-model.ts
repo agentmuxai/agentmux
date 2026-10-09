@@ -86,11 +86,6 @@ export class TowerViewModel {
     /** The task a host-list row belongs to, by id. */
     taskLabel = (taskId: string): string | undefined => this.snapshot()?.tasks.find((t) => t.id === taskId)?.label;
 
-    async commandLine(processId: string): Promise<string | undefined> {
-        const r = await RpcApi.TowerCommandLineCommand(TabRpcClient, { id: processId });
-        return r.command_line;
-    }
-
     dispose(): void {
         this.stop();
     }

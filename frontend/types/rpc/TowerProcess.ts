@@ -9,7 +9,7 @@ import type { TowerProcessRole } from "./TowerProcessRole";
  */
 export type TowerProcess = { 
 /**
- * `pid:start`, unique across PID reuse; what `tower.command-line` takes.
+ * `pid:start`, unique across PID reuse.
  */
 id: string, pid: number, ppid?: number, name: string, started_at_ms?: number, cpu?: number, 
 /**

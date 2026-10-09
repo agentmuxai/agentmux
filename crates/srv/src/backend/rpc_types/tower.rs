@@ -39,7 +39,7 @@ pub enum TowerProcessRole {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TowerProcess {
-    /// `pid:start`, unique across PID reuse; what `tower.command-line` takes.
+    /// `pid:start`, unique across PID reuse.
     pub id: String,
     pub pid: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -147,21 +147,4 @@ pub struct TowerSampleReq {
     #[serde(default)]
     #[ts(optional)]
     pub host: Option<bool>,
-}
-
-/// `tower.command-line`'s request: a `TowerProcess::id`.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct TowerCommandLineReq {
-    pub id: String,
-}
-
-/// `tower.command-line`. Absent when the process has exited (or a new one has
-/// its PID) or the OS won't say.
-#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
-#[ts(export, export_to = "../../../frontend/types/rpc/")]
-pub struct TowerCommandLineResult {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub command_line: Option<String>,
 }

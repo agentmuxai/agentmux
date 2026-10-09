@@ -202,14 +202,14 @@ memory. It sets each row's `role` instead: `main` (the CLI or shell),
   reports both per block, querying the trackers outside its lock.
 - **`backend/tower_sampler.rs`**: the grouping (§5) as a pure function, the
   rates, sticky membership and the 900 ms shared sample.
-- **RPCs** (`server/app_api/tower_pane.rs`): `tower.sample { host? }` returns
-  a `TowerSnapshot`; `tower.command-line { id }` returns one process's command
-  line, only if that exact (pid, start) is still running. Windows reads it
-  with `NtQueryInformationProcess(ProcessCommandLineInformation)`, which needs
-  only `PROCESS_QUERY_LIMITED_INFORMATION`. They are the window's, not an
-  agent API: a connection registered as an agent (`RpcContext.agent_id`) is
-  refused. Tower reads nothing the signed-in user's own processes can't
-  already read (§3).
+- **RPC** (`server/app_api/tower_pane.rs`): `tower.sample { host? }` returns
+  a `TowerSnapshot`: names, CPU and memory, which any process of the
+  signed-in user can already list (§3). It is the window's, not an agent API:
+  a connection registered as an agent (`RpcContext.agent_id`) is refused.
+- **Not in this version: command lines.** They routinely hold tokens, so
+  Tower shows none. `agentmux_procstats::command_line_of` (which checks the
+  process's identity before and after the read, so a reused PID never hands
+  back another process's line) is there for a follow-up that shows them.
 - **Request-driven, not an event.** An earlier draft published a `taskstats`
   event on the background lane. Having the pane ask instead means nothing is
   sampled while no Tower is open, without any subscription bookkeeping, and
@@ -226,7 +226,7 @@ memory. It sets each row's `role` instead: `main` (the CLI or shell),
   `SegmentedControl`, `Button`, `IconButton`, `FilterInput`).
 - Tasks view: one row per task (name, kind badge, CPU, Memory, process
   count), sortable by any column, expandable to its processes; a button
-  reveals the pane. Each process row fetches its command line on demand.
+  reveals the pane.
 - Host view: every process with its task named, a filter (name, PID or task),
   the first 400 rows of the sorted, filtered list, and the count of processes
   the OS wouldn't measure.
@@ -259,8 +259,7 @@ top. No elevation, so coverage differs by OS:
 Cost and cadence: this is a machine-wide read each tick (hundreds of
 processes), so the Host view samples **only while it is the visible tab of a
 visible Tower pane**, at 2 s. On Windows it is one syscall per tick; on
-Linux and macOS a few small reads per process. Command lines are fetched only
-when asked for, one row at a time, never every tick.
+Linux and macOS a few small reads per process.
 
 ## 8. Remote hosts
 

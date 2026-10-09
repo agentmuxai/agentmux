@@ -249,11 +249,6 @@ fn proc_id(p: &ProcInfo) -> String {
     format!("{}:{}", p.pid, p.start_key)
 }
 
-/// Parse a `TowerProcess::id`.
-pub fn parse_proc_id(id: &str) -> Option<ProcKey> {
-    let (pid, start) = id.split_once(':')?;
-    Some(ProcKey { pid: pid.parse().ok()?, start_key: start.parse().ok()? })
-}
 
 struct State {
     procs: RateMeter<ProcKey>,
@@ -629,13 +624,6 @@ mod tests {
         let snap = vec![p(1, 0, "init"), p(50, 1, "bash"), p(110, 50, "agentmux-srv"), p(111, 110, "agentmux-srv")];
         let g = group(&snap, &Inputs { own_pid: 110, ..Default::default() }, &HashMap::new());
         assert_eq!(pids_of(&snap, &g.agentmux), vec![110, 111]);
-    }
-
-    #[test]
-    fn process_ids_round_trip() {
-        assert_eq!(parse_proc_id("42:133456789012345678"), Some(ProcKey { pid: 42, start_key: 133_456_789_012_345_678 }));
-        assert_eq!(parse_proc_id("42"), None);
-        assert_eq!(parse_proc_id("x:1"), None);
     }
 
     fn label(id: &str) -> Option<BlockLabel> {
