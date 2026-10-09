@@ -206,9 +206,12 @@ pub fn build_app_state(
         // `seed + 1`; on a fresh DB seed=0, first saga gets id 1.
         saga_id_alloc: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(stores.saga_id_seed)),
         saga_log: stores.saga_log,
-        auth_session_manager: std::sync::Arc::new(
-            crate::identity::auth_session::AuthSessionManager::new(),
-        ),
+        auth_session_manager: {
+            let mgr = std::sync::Arc::new(crate::identity::auth_session::AuthSessionManager::new());
+            // Ends timed-out logins and drops finished ones, polled or not.
+            mgr.spawn_sweeper();
+            mgr
+        },
         install_sessions: crate::server::install_handlers::InstallSessionRegistry::new(),
         container_manager: {
             // Self-healing: unlike a plain `Option<ContainerManager>` fixed at

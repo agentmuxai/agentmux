@@ -248,6 +248,12 @@ pub(crate) fn spawn_auth_cli(
                         // persistence and the session still succeeds.
                         // Read the email BEFORE finish_success consumes the
                         // session — see AuthSessionManager::captured_email.
+                        // Ended meanwhile (replaced, cancelled, timed out): a newer sign-in
+                        // may own the directory, so this login is not saved.
+                        if mgr_stdout.ended(&sid_stdout) {
+                            tracing::info!(session_id = %sid_stdout, "auth.spawn: session ended before its login was saved; not saving it");
+                            return;
+                        }
                         let login_email = mgr_stdout.captured_email(&sid_stdout);
                         let (bundle_id, account_id) = persist_oauth_success(
                             &mstore_stdout,
@@ -317,6 +323,12 @@ pub(crate) fn spawn_auth_cli(
                     {
                         // Read the email BEFORE finish_success consumes the session
                         // — see AuthSessionManager::captured_email.
+                        // Ended meanwhile (replaced, cancelled, timed out): a newer sign-in
+                        // may own the directory, so this login is not saved.
+                        if mgr_for_task.ended(&session_id_for_task) {
+                            tracing::info!(session_id = %session_id_for_task, "auth.spawn: session ended before its login was saved; not saving it");
+                            return;
+                        }
                         let login_email = mgr_for_task.captured_email(&session_id_for_task);
                         let (bundle_id, account_id) = persist_oauth_success(
                             &mstore_for_task,
@@ -602,6 +614,12 @@ fn spawn_auth_cli_pty(
                                 if confirm_authenticated(&cli, &args, &env).await {
                                     // Read the email BEFORE finish_success consumes the session
                                     // — see AuthSessionManager::captured_email.
+                                    // Ended meanwhile (replaced, cancelled, timed out): a newer sign-in
+                                    // may own the directory, so this login is not saved.
+                                    if mgr2.ended(&sid2) {
+                                        tracing::info!(session_id = %sid2, "auth.spawn: session ended before its login was saved; not saving it");
+                                        return;
+                                    }
                                     let login_email = mgr2.captured_email(&sid2);
                                     let (bundle_id, account_id) = persist_oauth_success(
                                         &mstore2,
@@ -682,6 +700,12 @@ fn spawn_auth_cli_pty(
                     {
                         // Read the email BEFORE finish_success consumes the session
                         // — see AuthSessionManager::captured_email.
+                        // Ended meanwhile (replaced, cancelled, timed out): a newer sign-in
+                        // may own the directory, so this login is not saved.
+                        if mgr_for_task.ended(&session_id_for_task) {
+                            tracing::info!(session_id = %session_id_for_task, "auth.spawn: session ended before its login was saved; not saving it");
+                            return;
+                        }
                         let login_email = mgr_for_task.captured_email(&session_id_for_task);
                         let (bundle_id, account_id) = persist_oauth_success(
                             &mstore_for_task,

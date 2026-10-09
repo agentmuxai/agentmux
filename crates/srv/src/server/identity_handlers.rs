@@ -237,7 +237,8 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     );
                     (String::new(), dir)
                 };
-                let r = mgr.start_session(req.provider_id.clone(), req.into_bundle_id.clone());
+                // One live login per account directory (`start_session`).
+                let r = mgr.start_session(req.provider_id.clone(), bundle_dir.clone());
                 spawn_auth_cli(
                     mgr,
                     mstore,

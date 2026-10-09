@@ -27,9 +27,17 @@ use serde::{Deserialize, Serialize};
 use super::auth_patterns::{match_line, AuthPatternMatch};
 
 /// Wall-clock cap on a single auth session. Past this, the session
-/// transitions to `Failed { reason: "timeout" }` and the spawned
-/// CLI (if any) is killed by the handler that owns the join handle.
+/// transitions to `Failed` and its CLI is killed, whether or not anyone is
+/// polling it (`sweep`).
 const SESSION_TIMEOUT_SECS: u64 = 600;
+
+/// How long a finished session stays pollable before `sweep` drops it. The
+/// UI stops polling once it sees the terminal state, so this only has to
+/// outlast one poll interval; it's generous.
+const FINISHED_RETENTION_SECS: u64 = 300;
+
+/// How often the sweeper runs (`spawn_sweeper`).
+const SWEEP_INTERVAL_SECS: u64 = 30;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(
@@ -85,6 +93,12 @@ struct Session {
     captured_device_code: Option<(String, String)>,
     captured_email: Option<String>,
     started_at: Instant,
+    /// When the session reached a terminal state; `sweep` drops it
+    /// `FINISHED_RETENTION_SECS` later.
+    finished_at: Option<Instant>,
+    /// The account directory this login writes to. Only one live login per
+    /// directory: starting another cancels this one (`start_session`).
+    exclusive_key: Option<String>,
     /// All stdout/stderr lines we've seen, in order. Used for the
     /// diagnostic "show me what the CLI said" panel and the
     /// integration tests.
@@ -92,7 +106,7 @@ struct Session {
 }
 
 impl Session {
-    fn new(provider_id: String) -> Self {
+    fn new(provider_id: String, exclusive_key: Option<String>) -> Self {
         Self {
             provider_id,
             status: AuthSessionStatus::Pending,
@@ -100,8 +114,20 @@ impl Session {
             captured_device_code: None,
             captured_email: None,
             started_at: Instant::now(),
+            finished_at: None,
+            exclusive_key,
             transcript: Vec::new(),
         }
+    }
+
+    /// Move to a terminal state, unless already in one. True if it moved.
+    fn finish(&mut self, status: AuthSessionStatus) -> bool {
+        if self.status.is_terminal() {
+            return false;
+        }
+        self.status = status;
+        self.finished_at = Some(Instant::now());
+        true
     }
 
     fn timed_out(&self) -> bool {
@@ -161,17 +187,39 @@ impl AuthSessionManager {
     /// Allocate a new session id and store the initial Pending state.
     /// The caller (handler) is responsible for spawning the CLI and
     /// feeding stdout lines into `record_line`.
-    pub fn start_session(
-        &self,
-        provider_id: String,
-        _into_bundle_id: Option<String>,
-    ) -> StartSessionResult {
+    ///
+    /// `exclusive_key` is the account directory the login writes to. A live
+    /// session for the same directory is cancelled first: two CLIs logging
+    /// in to one directory at once race on its credential files (the
+    /// desktop host's single login slot has the same rule).
+    pub fn start_session(&self, provider_id: String, exclusive_key: Option<String>) -> StartSessionResult {
         let session_id = format!("auth-{}", uuid::Uuid::new_v4());
-        let session = Session::new(provider_id);
-        self.sessions
-            .lock()
-            .unwrap()
-            .insert(session_id.clone(), session);
+        // Replacing the live session and inserting this one happen under one
+        // lock, so two concurrent starts for the same directory can't both
+        // find nothing to replace. The replaced CLIs are stopped after it.
+        let superseded: Vec<String> = {
+            let mut sessions = self.sessions.lock().unwrap();
+            // Every session for the directory: one already finished (say a
+            // success line was seen) can still have its CLI running.
+            let superseded: Vec<String> = match exclusive_key.as_deref() {
+                Some(key) => sessions
+                    .iter_mut()
+                    .filter(|(_, s)| s.exclusive_key.as_deref() == Some(key))
+                    .map(|(id, s)| {
+                        s.finish(AuthSessionStatus::Failed {
+                            error: "replaced by a newer sign-in for the same account".to_string(),
+                        });
+                        id.clone()
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            sessions.insert(session_id.clone(), Session::new(provider_id, exclusive_key));
+            superseded
+        };
+        for id in &superseded {
+            self.stop_process(id);
+        }
         StartSessionResult {
             session_id,
             auth_url: None,
@@ -247,15 +295,12 @@ impl AuthSessionManager {
         let Some(session) = sessions.get_mut(session_id) else {
             return false;
         };
-        if session.status.is_terminal() {
-            return false;
-        }
-        session.status = AuthSessionStatus::Success {
+        let email = session.captured_email.clone();
+        session.finish(AuthSessionStatus::Success {
             bundle_id,
-            email: session.captured_email.clone(),
+            email,
             account_id,
-        };
-        true
+        })
     }
 
     pub fn finish_failure(&self, session_id: &str, error: String) -> bool {
@@ -263,30 +308,78 @@ impl AuthSessionManager {
         let Some(session) = sessions.get_mut(session_id) else {
             return false;
         };
-        if session.status.is_terminal() {
-            return false;
-        }
-        session.status = AuthSessionStatus::Failed { error };
-        true
+        session.finish(AuthSessionStatus::Failed { error })
     }
 
-    /// Poll a session's current status. Also sweeps timed-out
-    /// sessions: if the session has been Pending past
-    /// SESSION_TIMEOUT_SECS, transition to Failed and return that.
+    /// Poll a session's current status. A session past
+    /// SESSION_TIMEOUT_SECS is ended first (Failed, CLI killed).
     pub fn poll_session(&self, session_id: &str) -> Option<PollSessionResult> {
-        let mut sessions = self.sessions.lock().unwrap();
-        let session = sessions.get_mut(session_id)?;
-        if !session.status.is_terminal() && session.timed_out() {
-            session.status = AuthSessionStatus::Failed {
-                error: format!(
-                    "auth session timed out after {SESSION_TIMEOUT_SECS}s"
-                ),
-            };
+        let timed_out = {
+            let sessions = self.sessions.lock().unwrap();
+            let session = sessions.get(session_id)?;
+            !session.status.is_terminal() && session.timed_out()
+        };
+        if timed_out {
+            self.end_session(session_id, timeout_error());
         }
+        let sessions = self.sessions.lock().unwrap();
+        let session = sessions.get(session_id)?;
         Some(PollSessionResult {
             provider_id: session.provider_id.clone(),
             status: session.status.clone(),
         })
+    }
+
+    /// End sessions past their timeout (Failed, CLI killed) and drop
+    /// finished ones nobody has polled for FINISHED_RETENTION_SECS. Runs
+    /// every SWEEP_INTERVAL_SECS (`spawn_sweeper`), so a login whose UI went
+    /// away doesn't leave its CLI running or its session behind.
+    pub fn sweep(&self) {
+        let (expired, stale): (Vec<String>, Vec<String>) = {
+            let sessions = self.sessions.lock().unwrap();
+            let expired = sessions
+                .iter()
+                .filter(|(_, s)| !s.status.is_terminal() && s.timed_out())
+                .map(|(id, _)| id.clone())
+                .collect();
+            let stale = sessions
+                .iter()
+                .filter(|(_, s)| {
+                    s.finished_at
+                        .is_some_and(|t| t.elapsed() > Duration::from_secs(FINISHED_RETENTION_SECS))
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            (expired, stale)
+        };
+        for id in &expired {
+            tracing::info!(session_id = %id, "auth session timed out: ending it");
+            self.end_session(id, timeout_error());
+        }
+        if !stale.is_empty() {
+            // A finished session's CLI can still be running (a success line
+            // seen, no exit yet): stop it before its session, and with it the
+            // directory key a later sign-in would find it by, goes.
+            for id in &stale {
+                self.stop_process(id);
+            }
+            let mut sessions = self.sessions.lock().unwrap();
+            for id in &stale {
+                sessions.remove(id);
+            }
+        }
+    }
+
+    /// Run `sweep` every SWEEP_INTERVAL_SECS for as long as srv runs.
+    pub fn spawn_sweeper(self: &Arc<Self>) {
+        let mgr = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
+            loop {
+                tick.tick().await;
+                mgr.sweep();
+            }
+        });
     }
 
     /// Cancel a session: transition state to Failed + abort the
@@ -295,8 +388,23 @@ impl AuthSessionManager {
     /// unknown / already-terminal session — the process refs are
     /// torn down either way so a re-fired cancel is a no-op).
     pub fn cancel_session(&self, session_id: &str) -> bool {
-        let transitioned =
-            self.finish_failure(session_id, "cancelled by user".to_string());
+        self.end_session(session_id, "cancelled by user".to_string())
+    }
+
+    /// Fail a session with `error` and stop its CLI: abort the drain task
+    /// (the pipe path's child goes with it, `kill_on_drop`), drop its stdin,
+    /// and kill a PTY child by PID. True if the state changed; the process
+    /// refs go either way, so ending a session twice is harmless.
+    fn end_session(&self, session_id: &str, error: String) -> bool {
+        let transitioned = self.finish_failure(session_id, error);
+        self.stop_process(session_id);
+        transitioned
+    }
+
+    /// Stop a session's CLI and drop its process refs: abort the drain task
+    /// (the pipe path's child goes with it, `kill_on_drop`), drop its stdin,
+    /// and kill a PTY child by PID.
+    fn stop_process(&self, session_id: &str) {
         let mut refs = self.process_refs.lock().unwrap();
         if let Some(handle) = refs.drain_tasks.remove(session_id) {
             handle.abort();
@@ -307,20 +415,39 @@ impl AuthSessionManager {
         // need this — its tokio Child uses kill_on_drop.
         if let Some(pid) = refs.pty_pids.remove(session_id) {
             if let Err(e) = kill_pid(pid) {
-                tracing::warn!(pid, session_id, error = %e, "cancel_session: kill_pid failed");
+                tracing::warn!(pid, session_id, error = %e, "end_session: kill_pid failed");
             } else {
-                tracing::info!(pid, session_id, "cancel_session: PTY child killed");
+                tracing::info!(pid, session_id, "end_session: PTY child killed");
             }
         }
-        transitioned
+    }
+
+    /// Has this session ended (or gone)? A login confirmed after its session
+    /// was replaced, cancelled or timed out must not be saved: a newer
+    /// sign-in owns the directory now.
+    pub fn ended(&self, session_id: &str) -> bool {
+        self.is_terminal(session_id)
+    }
+
+    fn is_terminal(&self, session_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .is_none_or(|s| s.status.is_terminal())
     }
 
     /// Register the PID of a PTY-backed auth subprocess so
     /// `cancel_session` can terminate it. Called by `auth.start`
     /// after spawning a PTY login (in addition to `attach_process`).
     pub fn attach_pty_pid(&self, session_id: &str, pid: u32) {
-        let mut refs = self.process_refs.lock().unwrap();
-        refs.pty_pids.insert(session_id.to_string(), pid);
+        self.process_refs.lock().unwrap().pty_pids.insert(session_id.to_string(), pid);
+        // Registered first, checked second: a session ended (replaced,
+        // cancelled, timed out) before this, whose end found nothing to stop,
+        // has its CLI stopped here; one ended after finds it registered.
+        if self.is_terminal(session_id) {
+            self.stop_process(session_id);
+        }
     }
 
     /// Register the drain task + stdin sender for a session. Called
@@ -331,9 +458,15 @@ impl AuthSessionManager {
         drain_task: tokio::task::JoinHandle<()>,
         stdin_sender: tokio::sync::mpsc::Sender<String>,
     ) {
-        let mut refs = self.process_refs.lock().unwrap();
-        refs.drain_tasks.insert(session_id.to_string(), drain_task);
-        refs.stdin_senders.insert(session_id.to_string(), stdin_sender);
+        {
+            let mut refs = self.process_refs.lock().unwrap();
+            refs.drain_tasks.insert(session_id.to_string(), drain_task);
+            refs.stdin_senders.insert(session_id.to_string(), stdin_sender);
+        }
+        // As in `attach_pty_pid`: a session that already ended stops now.
+        if self.is_terminal(session_id) {
+            self.stop_process(session_id);
+        }
     }
 
     /// Forward a pasted callback URL to the spawned CLI's stdin.
@@ -399,6 +532,18 @@ impl AuthSessionManager {
             s.started_at = Instant::now() - Duration::from_secs(SESSION_TIMEOUT_SECS + 1);
         }
     }
+
+    /// Test helper: make a finished session look FINISHED_RETENTION_SECS old.
+    #[cfg(test)]
+    fn force_finished_long_ago(&self, session_id: &str) {
+        if let Some(s) = self.sessions.lock().unwrap().get_mut(session_id) {
+            s.finished_at = Some(Instant::now() - Duration::from_secs(FINISHED_RETENTION_SECS + 1));
+        }
+    }
+}
+
+fn timeout_error() -> String {
+    format!("auth session timed out after {SESSION_TIMEOUT_SECS}s")
 }
 
 /// Best-effort kill of a child process by PID — `SIGTERM` on Unix,
@@ -641,5 +786,108 @@ mod tests {
         assert_eq!(t[0], "Starting auth flow...");
         assert!(t[1].contains("anthropic.com/oauth"));
         assert_eq!(t[2], "Waiting for callback...");
+    }
+
+    #[tokio::test]
+    async fn sweep_ends_a_timed_out_session_nobody_polls_and_drops_its_stdin() {
+        let m = mgr();
+        let r = m.start_session("claude".to_string(), None);
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        m.attach_process(&r.session_id, tokio::spawn(async {}), tx);
+        m.force_age(&r.session_id);
+
+        m.sweep();
+
+        let status = m.sessions.lock().unwrap().get(&r.session_id).unwrap().status.clone();
+        assert!(matches!(status, AuthSessionStatus::Failed { ref error } if error.contains("timed out")), "{status:?}");
+        assert!(!m.send_to_stdin(&r.session_id, "code".to_string()).await, "stdin should be gone");
+    }
+
+    #[test]
+    fn sweep_drops_a_session_finished_long_ago_and_keeps_a_recent_one() {
+        let m = mgr();
+        let old = m.start_session("claude".to_string(), None);
+        let recent = m.start_session("claude".to_string(), None);
+        m.finish_failure(&old.session_id, "x".to_string());
+        m.finish_failure(&recent.session_id, "x".to_string());
+        m.force_finished_long_ago(&old.session_id);
+
+        m.sweep();
+
+        assert!(m.poll_session(&old.session_id).is_none());
+        assert!(m.poll_session(&recent.session_id).is_some());
+    }
+
+    #[test]
+    fn a_new_login_for_the_same_account_dir_replaces_the_live_one() {
+        let m = mgr();
+        let dir = Some("/home/u/.agentmux/accounts/claude-1".to_string());
+        let first = m.start_session("claude".to_string(), dir.clone());
+        let other = m.start_session("claude".to_string(), Some("/elsewhere".to_string()));
+        let second = m.start_session("claude".to_string(), dir);
+
+        let first_status = m.poll_session(&first.session_id).unwrap().status;
+        assert!(
+            matches!(first_status, AuthSessionStatus::Failed { ref error } if error.contains("replaced")),
+            "{first_status:?}"
+        );
+        assert_eq!(m.poll_session(&second.session_id).unwrap().status, AuthSessionStatus::Pending);
+        assert_eq!(m.poll_session(&other.session_id).unwrap().status, AuthSessionStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn a_cli_attached_after_its_session_was_replaced_is_stopped_at_once() {
+        let m = mgr();
+        let dir = Some("/home/u/.agentmux/accounts/claude-1".to_string());
+        let older = m.start_session("claude".to_string(), dir.clone());
+        // The newer start replaces the older session before its CLI exists.
+        let _newer = m.start_session("claude".to_string(), dir);
+        // The older request's CLI arrives afterwards.
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        m.attach_process(&older.session_id, tokio::spawn(std::future::pending::<()>()), tx);
+
+        assert!(!m.send_to_stdin(&older.session_id, "code".to_string()).await, "the replaced CLI keeps no stdin");
+        assert!(m.process_refs.lock().unwrap().drain_tasks.get(&older.session_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_new_login_stops_the_cli_of_a_finished_session_for_the_same_dir() {
+        let m = mgr();
+        let dir = Some("/home/u/.agentmux/accounts/claude-1".to_string());
+        let done = m.start_session("claude".to_string(), dir.clone());
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        m.attach_process(&done.session_id, tokio::spawn(std::future::pending::<()>()), tx);
+        // Success was recorded, but its CLI hasn't exited yet.
+        m.finish_success(&done.session_id, String::new(), Some("acct".to_string()));
+
+        let _newer = m.start_session("claude".to_string(), dir);
+
+        assert!(m.process_refs.lock().unwrap().drain_tasks.get(&done.session_id).is_none(), "its CLI was stopped");
+        assert!(matches!(m.poll_session(&done.session_id).unwrap().status, AuthSessionStatus::Success { .. }), "a finished session keeps its result");
+    }
+
+    #[tokio::test]
+    async fn sweep_stops_a_still_running_cli_before_dropping_its_finished_session() {
+        let m = mgr();
+        let r = m.start_session("claude".to_string(), Some("/d".to_string()));
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        m.attach_process(&r.session_id, tokio::spawn(std::future::pending::<()>()), tx);
+        m.finish_success(&r.session_id, String::new(), None);
+        m.force_finished_long_ago(&r.session_id);
+
+        m.sweep();
+
+        assert!(m.poll_session(&r.session_id).is_none());
+        assert!(m.process_refs.lock().unwrap().drain_tasks.get(&r.session_id).is_none(), "its CLI was stopped");
+    }
+
+    #[test]
+    fn ended_is_true_once_replaced_and_for_an_unknown_session() {
+        let m = mgr();
+        let first = m.start_session("claude".to_string(), Some("/d".to_string()));
+        assert!(!m.ended(&first.session_id));
+        let _second = m.start_session("claude".to_string(), Some("/d".to_string()));
+        assert!(m.ended(&first.session_id));
+        assert!(m.ended("auth-nope"));
     }
 }
