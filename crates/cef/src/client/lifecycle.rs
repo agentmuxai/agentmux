@@ -72,7 +72,7 @@ pub(crate) fn is_last_window_close(browser_list_empty: bool, is_browser_pane: bo
 /// that closes as soon as it opens (a sign-in that calls `window.close()`)
 /// can't be reported closed before it is reported opened, which would leave
 /// srv a record of a window that no longer exists.
-fn report_popup_window(state: &std::sync::Arc<crate::state::AppState>, event: &str, popup: &str, opener: &str, url: &str) {
+pub(super) fn report_popup_window(state: &std::sync::Arc<crate::state::AppState>, event: &str, popup: &str, opener: &str, url: &str) {
     let report = PopupReport {
         web_endpoint: state.backend_endpoints.lock().web_endpoint.clone(),
         auth_key: state.auth_key.lock().clone(),

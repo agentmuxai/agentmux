@@ -1096,6 +1096,8 @@ fn popup_window_target(state: &AppState, id: &str, agent_id: &str) -> Result<Str
         ));
     }
     not_waiting_on_user(&w.opener)?;
+    // The opener may itself be a popup pane: the whole chain above it counts.
+    opener_allows(state, Some(&opener), agent_id, id)?;
     Ok(id.to_string())
 }
 
@@ -1388,7 +1390,8 @@ pub(crate) async fn handle_host_browser_popup_window(
                 // Not from a browser pane srv knows: nobody drives it.
                 _ => return (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
             };
-            let owner = owning_agent(&block, &opener);
+            let owner = owning_agent(&block, &opener)
+                .filter(|agent| opener_allows(&state, Some(&block), agent, &opener).is_ok());
             tracing::info!(popup = %id, opener = %opener, url = %url, owner = ?owner, "[browser-popup] popup window opened");
             popup::window_opened(&id, &opener, &url, owner);
             Some(opener)
@@ -1412,7 +1415,9 @@ pub(crate) async fn handle_host_browser_popup_window(
 /// not keep listing them.
 pub(crate) fn reset_popup_windows(state: &AppState) {
     use crate::server::browser_popup as popup;
-    popup::clear_windows();
+    // The windows opened from this srv's panes (in a test, other srvs share
+    // the record).
+    popup::clear_windows(|opener| matches!(state.mstore.get::<crate::backend::obj::Block>(opener), Ok(Some(_))));
     let blocks = match state.mstore.get_all::<crate::backend::obj::Block>() {
         Ok(b) => b,
         Err(e) => {

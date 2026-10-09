@@ -94,8 +94,10 @@ function (`crates/cef/src/client/popup_route.rs`) with the table above as its te
   `on_after_created` takes the entry, tags and registers the browser as today, records
   `popup -> opener` in host state, and reports it: `POST /api/v1/host/browser_popup_window
   {event: "opened", popup, opener, url}` (host token, background thread).
-- **Navigated** (N2): the same route with `event: "navigated"` keeps the address current; srv
-  accepts it today, the host doesn't send it yet.
+- **Navigated:** every main-frame load of a popup window sends `event: "navigated"` with its
+  address, so the opener's strip shows where the window is now, not where it opened. All
+  reports go through one worker, in order, so a popup that closes as it opens can't be reported
+  closed before opened.
 - **Closed** (`window.close()`, the person, or its pane closing, whose force-close of its popups
   goes through the same path): `event: "closed"`.
 - **Popups of popups** count against the root pane: the opener of a popup's popup is the popup's
@@ -213,5 +215,5 @@ the rule moves to `agentmux-common`.
 |---|---|
 | **P1** (#4478) | Popup panes, inherited ownership, snapshot listing. Merge as is. |
 | **N1** | The disposition split; native admission in the host (rule in `agentmux-common`, the owned-pane push, loopback rule); bare-popup registration and close; resolver Path 0; srv popup records and the `pane` popup branch; banners on the opener; the popup-windows strip. |
-| **N2** | Live addresses (`browser_popup_navigated`); the popup window's title prefixed with its origin; `allowed_origins` for popups. |
+| **N2** | The popup window's title prefixed with its origin; `allowed_origins` for popups. |
 | **N3** | A `popup` condition for `BrowserWaitFor`; a setting to send all new windows to the system browser. |

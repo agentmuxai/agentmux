@@ -181,10 +181,10 @@ pub(crate) fn window_closed(id: &str) -> Option<String> {
         .map(|w| w.opener)
 }
 
-/// Forget every popup window (the host registered anew; see
-/// `ui_handlers::reset_popup_windows`).
-pub(crate) fn clear_windows() {
-    windows().lock().unwrap_or_else(|p| p.into_inner()).1.clear();
+/// Forget the popup windows whose opener `ours` recognises (the host
+/// registered anew; see `ui_handlers::reset_popup_windows`).
+pub(crate) fn clear_windows(ours: impl Fn(&str) -> bool) {
+    windows().lock().unwrap_or_else(|p| p.into_inner()).1.retain(|_, w| !ours(&w.opener));
 }
 
 pub(crate) fn window(id: &str) -> Option<PopupWindow> {
