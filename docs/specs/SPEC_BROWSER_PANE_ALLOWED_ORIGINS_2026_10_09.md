@@ -1,6 +1,6 @@
 # SPEC: An agent's browser pane can be limited to the sites it was opened for
 
-**Status:** active — implemented.
+**Status:** implemented — PR #4544: `OpenBrowser({allowed_origins})`, the host stopping navigations and popups off the list, and the Allow / Block banner.
 **Author:** AgentX@narko, 2026-10-09, at the operator's request
 **Builds on:** `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §8.1 (the allowlist, left for B3b),
 `SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md` §8.6 (it covers popups too).
