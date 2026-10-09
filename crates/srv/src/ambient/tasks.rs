@@ -13,7 +13,8 @@
 use std::sync::Arc;
 
 use super::call::{self, CliTarget, Reply};
-use super::{digest, limits, prompt, purpose, validate, AmbientCallKey};
+use super::reply::judge_line;
+use super::{digest, limits, prompt, purpose, validate};
 use crate::agents::TokenCounts;
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::store::Store;
@@ -62,9 +63,9 @@ pub async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<Str
 /// `term:ambient_summary` itself. Goes through the same Ambient Model Call gateway
 /// (admission, cancellation-of-superseded, token accounting) under the distinct
 /// `purpose::ACTIVITY_SUMMARY_PUSHED` purpose, so it never contends with the
-/// pane's own title request. The prompt is the title prompt
-/// (`build_session_title_from_activity_prompt`), not a "what is happening now"
-/// summary: the result is shown as the session's title.
+/// pane's own title request. The prompt is the pane's own title prompt
+/// (`build_session_title_prompt`), given the activity instead of a message, not a
+/// "what is happening now" summary: the result is shown as the session's title.
 ///
 /// `generation` only needs to strictly increase across successive calls for
 /// the *same* `block_id` — the sweep loop's tick counter is sufficient; it
@@ -83,7 +84,7 @@ pub(crate) async fn generate_recovered_title(
     let word_target = word_target.max(3).min(20);
 
     // No concurrency permit here: the sweep in `activity_watcher` bounds itself.
-    let slot = call::admit(AmbientCallKey::new(block_id, purpose::ACTIVITY_SUMMARY_PUSHED), generation, None).await?;
+    let slot = call::admit(&purpose::ACTIVITY_SUMMARY_PUSHED, block_id, generation, None).await?;
 
     let block: Block = mstore.get(block_id).ok().flatten()?;
     let Some(digest) = digest::read_recent_activity_digest(filestore, block_id) else {
@@ -92,11 +93,9 @@ pub(crate) async fn generate_recovered_title(
     };
     let target = CliTarget::from_meta(&block.meta)?;
 
-    let prompt = prompt::build_session_title_from_activity_prompt(word_target, &digest);
-    finish(
-        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::title_limits(word_target)))
-            .await,
-    )
+    let prompt = prompt::build_session_title_prompt("", None, Some(&digest), word_target);
+    let limits = validate::title_limits(word_target);
+    finish(slot.run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &limits))).await)
 }
 
 /// Generate (and persist) a short activity summary for a definition whose
@@ -146,12 +145,7 @@ pub(crate) async fn generate_definition_activity_summary(
 ) -> Option<Generated> {
     // Background-call semaphore, not `pull_call_semaphore()` — see
     // `limits::definition_summary_semaphore`'s own doc comment.
-    let slot = call::admit(
-        AmbientCallKey::new(definition_id.to_string(), purpose::DEFINITION_SUMMARY),
-        1,
-        Some(limits::definition_summary_semaphore()),
-    )
-    .await?;
+    let slot = call::admit(&purpose::DEFINITION_SUMMARY, definition_id, 1, Some(limits::definition_summary_semaphore())).await?;
 
     let digest = digest::read_recent_activity_digest(filestore, block_id)?;
 
@@ -164,10 +158,8 @@ pub(crate) async fn generate_definition_activity_summary(
     };
 
     let prompt = prompt::build_definition_summary_prompt(&digest);
-    let generated = finish(
-        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::PREVIEW))
-            .await,
-    )?;
+    let generated =
+        finish(slot.run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &validate::PREVIEW))).await)?;
     let Some(summary) = generated.text.clone() else {
         return Some(generated);
     };
@@ -242,7 +234,7 @@ pub(crate) async fn generate_subagent_name(
     let generated = generate_name_from_task_prompt(
         mstore,
         &info,
-        AmbientCallKey::new(agent_id.to_string(), purpose::SUBAGENT_NAME),
+        (&purpose::SUBAGENT_NAME, agent_id),
         semaphore,
         prompt::build_subagent_name_prompt,
     )
@@ -288,7 +280,7 @@ pub(crate) async fn generate_dispatch_name(
     let generated = generate_name_from_task_prompt(
         mstore,
         &info,
-        AmbientCallKey::new(dispatch_id.to_string(), purpose::DISPATCH_NAME),
+        (&purpose::DISPATCH_NAME, dispatch_id),
         semaphore,
         prompt::build_dispatch_name_prompt,
     )
@@ -299,26 +291,24 @@ pub(crate) async fn generate_dispatch_name(
     Some(generated)
 }
 
-/// Admit under `key`, read `info`'s own task prompt off its JSONL, borrow its
-/// parent block's CLI, and run `build_prompt`'s prompt through the name validator.
+/// Admit `purpose` for `entity`, read `info`'s own task prompt off its JSONL,
+/// borrow its parent block's CLI, and run `build_prompt`'s prompt through the
+/// name check.
 async fn generate_name_from_task_prompt(
     mstore: &Store,
     info: &crate::backend::subagent_watcher::SubAgent,
-    key: AmbientCallKey,
+    (purpose, entity): (&'static purpose::Purpose, &str),
     semaphore: &'static tokio::sync::Semaphore,
     build_prompt: fn(&str) -> String,
 ) -> Option<Generated> {
-    let slot = call::admit(key, 1, Some(semaphore)).await?;
+    let slot = call::admit(purpose, entity, 1, Some(semaphore)).await?;
 
     let task_prompt = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path)?;
     let block: Block = mstore.get(&info.parent_block_id).ok().flatten()?;
     let target = CliTarget::from_meta(&block.meta)?;
 
     let prompt = build_prompt(&task_prompt);
-    finish(
-        slot.run(&target, &prompt, |t| validate::accept_line(t, &validate::NAME))
-            .await,
-    )
+    finish(slot.run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &validate::NAME))).await)
 }
 
 /// Generate a short user-facing line narrating an autonomous action.
@@ -346,17 +336,13 @@ pub(crate) async fn generate_ambient_narration(
     // several precisely because it expects them. Keying on the block alone let
     // the second silently cancel the first, whose Haiku call then returned
     // "cancelled" and was swallowed. (reagent P1 on #3169.)
-    let slot = call::admit(
-        AmbientCallKey::new(format!("{block_id}:{event_id}"), purpose::NARRATION),
-        generation,
-        Some(limits::narration_semaphore()),
-    )
-    .await?;
+    let slot = call::admit(&purpose::NARRATION, format!("{block_id}:{event_id}"), generation, Some(limits::narration_semaphore()))
+        .await?;
 
     let block: Block = mstore.get(block_id).ok().flatten()?;
     let target = CliTarget::from_meta(&block.meta)?;
     let (text, _tokens) = slot
-        .run(&target, &prompt, |t| validate::accept_line(t, &validate::NARRATION))
+        .run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &validate::NARRATION)))
         .await
         .into_option()?;
     Some(text)
@@ -388,10 +374,10 @@ mod narration_key_tests {
         // in-flight call for a KEY, so keying narration on the block alone made
         // a second backgrounded command in the same turn silently kill the
         // first one's narration. Distinct event ids must be distinct keys.
-        use crate::ambient::{gateway, Admission};
+        use crate::ambient::{gateway, Admission, AmbientCallKey};
 
-        let first = AmbientCallKey::new("block-x:toolu_1", purpose::NARRATION);
-        let second = AmbientCallKey::new("block-x:toolu_2", purpose::NARRATION);
+        let first = AmbientCallKey::new("block-x:toolu_1", purpose::NARRATION.tag);
+        let second = AmbientCallKey::new("block-x:toolu_2", purpose::NARRATION.tag);
         assert_ne!(first, second, "distinct events must not share a gateway key");
 
         let g1 = match gateway().admit(first, 1) {

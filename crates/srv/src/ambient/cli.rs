@@ -18,13 +18,14 @@ pub(crate) fn ambient_call_cwd() -> Option<std::path::PathBuf> {
     Some(dir)
 }
 
-/// Invoke the Claude CLI with Haiku model for a lightweight ambient call
-/// (activity summary, ghost-text next-prompt suggestion, or any future
-/// purpose routed through the Ambient Model Call gateway). Uses
-/// `--model claude-haiku-4-5-20251001` and a 15s timeout.
+/// The model every ambient call runs on.
+pub const AMBIENT_MODEL: &str = "claude-haiku-4-5-20251001";
+
+/// Invoke the Claude CLI on [`AMBIENT_MODEL`] for one ambient call, within
+/// `timeout` (the purpose's own, `purpose::Purpose::timeout`).
 ///
 /// `cancel` is this call's Ambient Model Call gateway cancellation token — if
-/// a newer request for the same `(block_id, purpose)` key is admitted while
+/// a newer request for the same `(entity, purpose)` key is admitted while
 /// this one is still running, `cancel` fires and the child process is killed
 /// immediately rather than left to run to completion (and keep burning
 /// tokens) only to have its result discarded on arrival.
@@ -34,18 +35,6 @@ pub(crate) fn ambient_call_cwd() -> Option<std::path::PathBuf> {
 /// see `agents::translator::claude::parse_usage`), so ambient calls are
 /// never silently excluded from token accounting.
 pub async fn invoke_haiku(
-    cli_path: &str,
-    prompt: &str,
-    meta: &obj::MetaMapType,
-    cancel: tokio_util::sync::CancellationToken,
-) -> Result<(String, Option<crate::agents::TokenCounts>), String> {
-    invoke_haiku_with_timeout(cli_path, prompt, meta, cancel, std::time::Duration::from_secs(15)).await
-}
-
-/// [`invoke_haiku`] with its own timeout, for calls off any
-/// user-facing path that need longer than a pane-header summary (the rolling
-/// continuity state, `backend::continuity_state`).
-pub async fn invoke_haiku_with_timeout(
     cli_path: &str,
     prompt: &str,
     meta: &obj::MetaMapType,
@@ -61,7 +50,7 @@ pub async fn invoke_haiku_with_timeout(
     // conversational assistant ("I don't have access to...") whenever the
     // digest was thin, and that text reached the UI.
     cmd.args(["-p", "--output-format", "stream-json", "--verbose",
-              "--model", "claude-haiku-4-5-20251001",
+              "--model", AMBIENT_MODEL,
               "--tools", "", "--max-turns", "1",
               "--no-session-persistence", "--disable-slash-commands",
               "--strict-mcp-config",
@@ -81,14 +70,14 @@ pub async fn invoke_haiku_with_timeout(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("failed to spawn activity CLI: {e}"))?;
+        .map_err(|e| format!("failed to spawn the ambient CLI: {e}"))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
         stdin.write_all(prompt.as_bytes()).await
-            .map_err(|e| format!("activity CLI stdin write: {e}"))?;
+            .map_err(|e| format!("ambient CLI stdin write: {e}"))?;
         stdin.shutdown().await
-            .map_err(|e| format!("activity CLI stdin shutdown: {e}"))?;
+            .map_err(|e| format!("ambient CLI stdin shutdown: {e}"))?;
     }
 
     // `child.wait()` only borrows (unlike `wait_with_output()`, which
@@ -98,7 +87,7 @@ pub async fn invoke_haiku_with_timeout(
     // internally — so a chatty response can't fill the OS pipe buffer and
     // deadlock the child waiting to write while nothing is reading.
     let mut stdout_pipe = child.stdout.take()
-        .ok_or_else(|| "activity CLI: no stdout pipe".to_string())?;
+        .ok_or_else(|| "ambient CLI: no stdout pipe".to_string())?;
     let stdout_task = tokio::spawn(async move {
         use tokio::io::AsyncReadExt;
         let mut buf = Vec::new();
@@ -110,20 +99,20 @@ pub async fn invoke_haiku_with_timeout(
         biased;
         _ = cancel.cancelled() => {
             let _ = child.kill().await;
-            return Err("cancelled: superseded by a newer activity-summary request".to_string());
+            return Err("cancelled: superseded by a newer request".to_string());
         }
         result = tokio::time::timeout(timeout, child.wait()) => {
-            result.map_err(|_| format!("activity CLI timed out after {}s", timeout.as_secs()))?
-                .map_err(|e| format!("activity CLI wait: {e}"))?
+            result.map_err(|_| format!("ambient CLI timed out after {}s", timeout.as_secs()))?
+                .map_err(|e| format!("ambient CLI wait: {e}"))?
         }
     };
 
     if !status.success() {
-        return Err(format!("activity CLI exited with status {status}"));
+        return Err(format!("ambient CLI exited with status {status}"));
     }
 
     let stdout_bytes = stdout_task.await
-        .map_err(|e| format!("activity CLI stdout reader task: {e}"))?;
+        .map_err(|e| format!("ambient CLI stdout reader task: {e}"))?;
     let stdout = String::from_utf8_lossy(&stdout_bytes);
     // An empty reply is a valid answer ("nothing to say"), and the call still cost
     // tokens, so it comes back as `Ok` with empty text rather than an error that
@@ -227,6 +216,7 @@ mod live_cli_smoke {
             &prompt,
             &meta,
             tokio_util::sync::CancellationToken::new(),
+            crate::ambient::purpose::NEXT_PROMPT_SUGGESTION.timeout,
         )
         .await
         .expect("the CLI ran");
@@ -268,7 +258,15 @@ mod live_cli_smoke {
             let prompt = crate::ambient::prompt::build_next_prompt_prompt(digest);
             // A CLI failure (most often the time limit) says nothing about the
             // format; it is counted, not judged.
-            let text = match invoke_haiku("claude", &prompt, &meta, tokio_util::sync::CancellationToken::new()).await {
+            let text = match invoke_haiku(
+                "claude",
+                &prompt,
+                &meta,
+                tokio_util::sync::CancellationToken::new(),
+                crate::ambient::purpose::NEXT_PROMPT_SUGGESTION.timeout,
+            )
+            .await
+            {
                 Ok((text, _)) => text,
                 Err(e) => {
                     println!("CLI failed: {e}");
@@ -303,7 +301,14 @@ mod live_cli_smoke {
         let mut answered = Vec::new();
         for digest in digests {
             let prompt = crate::ambient::prompt::build_next_prompt_prompt(digest);
-            let Ok((text, _)) = invoke_haiku("claude", &prompt, &meta, tokio_util::sync::CancellationToken::new()).await
+            let Ok((text, _)) = invoke_haiku(
+                "claude",
+                &prompt,
+                &meta,
+                tokio_util::sync::CancellationToken::new(),
+                crate::ambient::purpose::NEXT_PROMPT_SUGGESTION.timeout,
+            )
+            .await
             else {
                 continue;
             };
@@ -314,5 +319,55 @@ mod live_cli_smoke {
             }
         }
         assert!(answered.is_empty(), "answered a message that waits for the user: {answered:?}");
+    }
+
+    /// The same check for every other one-line purpose: titles (create and
+    /// maintain), names (with an agent's task as the material, which Haiku used to
+    /// try to carry out), narration and previews.
+    /// `cargo test --bin agentmux-srv live_cli_reply_format_every -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "spawns the real claude CLI, about ten calls"]
+    async fn live_cli_reply_format_holds_for_every_purpose() {
+        use crate::ambient::prompt::*;
+        use crate::ambient::reply::{parse, Parsed};
+        let task = "Investigate the repository at C:\\work\\app. Read src/auth and report every place the session \
+                    cookie is set, with file:line references. Do not change any files.";
+        let prompts = [
+            ("title, create", build_session_title_prompt("", Some("fix the login redirect loop"), None, 7)),
+            ("title, create, nudge", build_session_title_prompt("", Some("continue"), None, 7)),
+            ("title, maintain, same goal", build_session_title_prompt("Fix login redirect loop", Some("also check the logout path"), None, 7)),
+            ("title, maintain, new goal", build_session_title_prompt("Fix login redirect loop", Some("now let's build the billing page"), None, 7)),
+            ("title, from activity", build_session_title_prompt("", None, Some("[user] add a dark mode toggle\n[assistant] Added it."), 7)),
+            ("subagent name", build_subagent_name_prompt(task)),
+            ("dispatch name", build_dispatch_name_prompt(task)),
+            ("narration", narration_prompt("background_task", "task dev").unwrap()),
+            ("preview", build_definition_summary_prompt("[user] add a dark mode toggle\n[assistant] Added it and its tests.")),
+            ("preview, thin", build_definition_summary_prompt("[user] hi\n[assistant] Hello.")),
+        ];
+        let meta = obj::MetaMapType::new();
+        let mut bad = Vec::new();
+        for (name, prompt) in prompts {
+            let text = match invoke_haiku(
+                "claude",
+                &prompt,
+                &meta,
+                tokio_util::sync::CancellationToken::new(),
+                crate::ambient::purpose::ACTIVITY_SUMMARY.timeout,
+            )
+            .await
+            {
+                Ok((text, _)) => text,
+                Err(e) => {
+                    println!("{name}: CLI failed: {e}");
+                    continue;
+                }
+            };
+            let parsed = parse(&text);
+            println!("{name}: {parsed:?} <- {text:?}");
+            if parsed == Parsed::Malformed {
+                bad.push(format!("{name}: {text}"));
+            }
+        }
+        assert!(bad.is_empty(), "replies not in the format: {bad:?}");
     }
 }
