@@ -5,7 +5,7 @@
 // Uses the canonical `element/modal` primitive; the palette's specific
 // chrome (search row + scroll list) lives in the panel body.
 
-import { commandRegistry, type CommandEntry } from "@/app/store/command-registry";
+import { commandRegistry, isCommandAvailable, type CommandEntry } from "@/app/store/command-registry";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { disableGlobalKeybindings, enableGlobalKeybindings } from "@/app/store/keymodel";
 import { Modal } from "@/element/modal";
@@ -34,7 +34,7 @@ const CommandPaletteModal = (props: ModalCloseProps): JSX.Element => {
 
     const filtered = createMemo(() => {
         const q = query().trim();
-        const all = sortCommands(commandRegistry.all().filter((c) => !c.hidden));
+        const all = sortCommands(commandRegistry.all().filter((c) => !c.hidden && isCommandAvailable(c)));
         if (!q) return all; // browsing, unfiltered: keep category+label order
         // Ranked while actively searching: the exact command first, then
         // commands containing what was typed (category+label order among

@@ -4,6 +4,7 @@
 // MuxObjectStore — migrated to SolidJS signals.
 
 import { muxEventSubscribe } from "@/app/store/mps";
+import { authHeaders } from "./auth-headers";
 import { WpsEvent } from "@/app/store/mps-events";
 import { getWebServerEndpoint, isWebServerEndpointSet } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
@@ -11,7 +12,6 @@ import { retryTransient } from "@/util/transient-network";
 import { type SignalAtom, fireAndForget } from "@/util/util";
 import { batch, createSignal, getOwner, onCleanup } from "solid-js";
 import { ObjectService } from "./services";
-import { getApi } from "./app-api";
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -133,11 +133,7 @@ function callBackendService(service: string, method: string, args: any[], noUICo
 
     // Audit C3: the `?authkey=` query-string fallback was removed on
     // every HTTP route. Use the X-AuthKey header instead.
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (globalThis.window != null) {
-        const authKey = getApi()?.getAuthKey?.();
-        if (authKey) headers["X-AuthKey"] = authKey;
-    }
+    const headers = authHeaders({ "Content-Type": "application/json" });
 
     const url = getWebServerEndpoint() + "/agentmux/service?" + usp.toString();
     const fetchPromise = fetch(url, {

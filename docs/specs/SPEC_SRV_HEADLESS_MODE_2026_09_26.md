@@ -1,7 +1,7 @@
 # SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host
 
 **Date:** 2026-09-26
-**Status:** active — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) shipped in PR #3893; slice 2 (§3.4: container image) in PR #3898; slice 4 (§3.5: frontend serving + allowed origins) in PR #3900. Slice 3 (§3.6: secrets without a keychain) is in review in PR #3915.
+**Status:** implemented — slice 1 (§4: `--headless`, env preparation, lock, auth-key file, fixed loopback ports) in PR #3893; slice 2 (§3.4: container image) in PR #3898; slice 3 (§3.6: secrets without a keychain) in PR #3915; slice 4 (§3.5: frontend serving + allowed origins) in PR #3900.
 **Author:** Maricon
 
 ---
@@ -110,7 +110,8 @@ For a browser client that reaches srv through a reverse proxy on one public orig
 - **`--allowed-origin <origin>`** (repeatable): the proxy's public origin, e.g. `https://app.example.com`. It is accepted beside loopback by CORS and by the `/ws` Origin check (`is_allowed_origin`).
   - Written the way browsers send `Origin`: http or https, host, optional port; no path, user or query. Lowercased, a trailing `/` dropped, and the scheme's default port removed, so `https://App.example.com:443/` matches `https://app.example.com`.
   - Exact match only: no wildcards, no subdomains, never `null`.
-- **Serving the frontend is not enough on its own** for a browser client to work: the UI still gets its endpoints and key through the desktop host today. Bootstrapping from srv and a pluggable host are separate work.
+- **Serving the frontend is not enough on its own** for a browser client to work: the UI still gets its endpoints and key through the desktop host today. A pluggable host is `SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md`; srv's machine facts arrive with `srvinfo` (`SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md`).
+- **The key can stay with the proxy.** srv reads `X-AuthKey` before the `?authkey=` fallback on every route, `/ws` included, so a proxy that sets the header on every request (including the WebSocket upgrade) authenticates the browser's traffic. The UI sends `X-AuthKey` only when its host gave it a key (`frontend/app/store/auth-headers.ts`, the one place requests get the header), and opens `/ws` without `?authkey=` when it has none.
 - **Live check** (headless, `--frontend-dir` with a fixture, `--allowed-origin https://App.Example.test/`):
   - `GET /` gives the UI; `/assets/app.js` gives 200; `/health` gives the health JSON;
   - `/agentmux/discovery` gives 401 without the key and 200 with it;

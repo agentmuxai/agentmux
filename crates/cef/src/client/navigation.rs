@@ -670,6 +670,26 @@ impl AgentMuxHandler {
         // Inject the IPC port into the page after it finishes loading.
         // Only inject into the main frame (not iframes).
         let Some(frame) = frame else { return };
+        // A popup window a pane's page opened has no address bar: its
+        // opener's strip shows where it is, so every main-frame load is
+        // reported (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §4).
+        if frame.is_main() == 1 && self.is_browser_pane && !self.state.popup_openers.lock().is_empty() {
+            if let Some(b) = browser.as_deref() {
+                let id = b.identifier();
+                let label = self
+                    .state
+                    .host_state
+                    .lock()
+                    .browsers
+                    .iter()
+                    .find(|(_, h)| h.browser.identifier() == id)
+                    .map(|(label, _)| label.clone());
+                if let Some(label) = label.filter(|l| self.state.popup_openers.lock().contains_key(l)) {
+                    let url = cef::CefString::from(&cef::ImplFrame::url(&*frame)).to_string();
+                    super::lifecycle::report_popup_window(&self.state, "navigated", &label, "", &url);
+                }
+            }
+        }
 
         if frame.is_main() != 1 {
             return;

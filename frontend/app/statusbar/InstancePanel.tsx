@@ -17,6 +17,7 @@
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
 import { MaintenanceSection } from "./MaintenanceSection";
+import { hostHas } from "@/app/host/host-caps";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
@@ -281,55 +282,58 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
         persistWindowId: string | null;
         currentOpacity: () => number;
     }): JSX.Element => (
-        <span
-            class="instance-panel-opacity"
-            onClick={(e) => e.stopPropagation()}
-            onDblClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => e.stopPropagation()}
-        >
-            <input
-                type="range"
-                class="instance-panel-opacity-slider"
-                min={0.35}
-                max={1.0}
-                step={0.05}
-                value={p.currentOpacity()}
-                title="Opacity"
-                aria-label="Opacity"
-                onInput={(e) => {
-                    const val = parseFloat(e.currentTarget.value);
-                    dispatchWindowOpacity({
-                        type: "SetWindowOpacity",
-                        label: p.label,
-                        opacity: val,
-                        source: "user",
-                    });
-                }}
-                onChange={(e) => {
-                    if (!p.persistWindowId) return; // floater: session-only
-                    const raw = parseFloat(e.currentTarget.value);
-                    const val = Math.round(raw * 100) / 100;
-                    // Set window:transparent alongside window:opacity so
-                    // AppSettingsUpdater applies it correctly on restore.
-                    const fullyOpaque = val >= 1.0;
-                    ObjectService.UpdateObjectMeta(
-                        makeORef("window", p.persistWindowId),
-                        {
-                            "window:opacity": fullyOpaque ? null : val,
-                            "window:transparent": fullyOpaque ? false : true,
-                        } as MetaType,
-                    ).catch((err) =>
-                        console.error("[InstancePanel] opacity persist failed:", err),
-                    );
-                }}
-            />
-            <span class="instance-panel-opacity-value">
-                {/* Live store value tracks the drag tick-by-tick; falls back
-                    to the row's resolved opacity when the store has no entry
-                    yet this session. */}
-                {Math.round((liveWindowOpacity(p.label) ?? p.currentOpacity()) * 100)}%
+        // Only a host that can make its windows see-through has opacity to set.
+        <Show when={hostHas("windowTransparency")}>
+            <span
+                class="instance-panel-opacity"
+                onClick={(e) => e.stopPropagation()}
+                onDblClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+            >
+                <input
+                    type="range"
+                    class="instance-panel-opacity-slider"
+                    min={0.35}
+                    max={1.0}
+                    step={0.05}
+                    value={p.currentOpacity()}
+                    title="Opacity"
+                    aria-label="Opacity"
+                    onInput={(e) => {
+                        const val = parseFloat(e.currentTarget.value);
+                        dispatchWindowOpacity({
+                            type: "SetWindowOpacity",
+                            label: p.label,
+                            opacity: val,
+                            source: "user",
+                        });
+                    }}
+                    onChange={(e) => {
+                        if (!p.persistWindowId) return; // floater: session-only
+                        const raw = parseFloat(e.currentTarget.value);
+                        const val = Math.round(raw * 100) / 100;
+                        // Set window:transparent alongside window:opacity so
+                        // AppSettingsUpdater applies it correctly on restore.
+                        const fullyOpaque = val >= 1.0;
+                        ObjectService.UpdateObjectMeta(
+                            makeORef("window", p.persistWindowId),
+                            {
+                                "window:opacity": fullyOpaque ? null : val,
+                                "window:transparent": fullyOpaque ? false : true,
+                            } as MetaType,
+                        ).catch((err) =>
+                            console.error("[InstancePanel] opacity persist failed:", err),
+                        );
+                    }}
+                />
+                <span class="instance-panel-opacity-value">
+                    {/* Live store value tracks the drag tick-by-tick; falls back
+                        to the row's resolved opacity when the store has no entry
+                        yet this session. */}
+                    {Math.round((liveWindowOpacity(p.label) ?? p.currentOpacity()) * 100)}%
+                </span>
             </span>
-        </span>
+        </Show>
     );
 
     // Panel-unmount cleanup:
@@ -631,13 +635,15 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             </div>
             <div class="instance-panel-divider" />
             <div class="instance-panel-footer">
-                <Button
-                    tone="accent"
-                    class="instance-panel-btn instance-panel-btn-primary"
-                    onClick={handleOpenNewWindow}
-                >
-                    + Open another window
-                </Button>
+                <Show when={hostHas("multiWindow")}>
+                    <Button
+                        tone="accent"
+                        class="instance-panel-btn instance-panel-btn-primary"
+                        onClick={handleOpenNewWindow}
+                    >
+                        + Open another window
+                    </Button>
+                </Show>
                 <Button
                     class="instance-panel-btn"
                     onClick={props.onClose}

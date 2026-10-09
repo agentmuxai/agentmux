@@ -12,6 +12,9 @@ import type * as rxjs from "rxjs";
 import type { Accessor, JSX } from "solid-js";
 
 declare global {
+    /** This build's version (package.json), set by vite.config.ts `define`. */
+    const __AGENTMUX_VERSION__: string;
+
     // All atoms are now SolidJS Accessors (call as function to read reactive value).
     // For writable atoms use SignalAtom (also callable, plus ._set()).
     type GlobalAtomsType = {
@@ -160,6 +163,10 @@ declare global {
         setRects(windowLabel: string, rects: ({ blockId: string } & HostRect)[]): Promise<void>;
         close(blockId: string, windowLabel: string): Promise<void>;
         navigate(blockId: string, url: string): Promise<void>;
+        /** Bring a popup window a pane's page opened (`popup-…`) to the front. */
+        showPopup(popupId: string): Promise<void>;
+        /** Close a popup window a pane's page opened. */
+        closePopup(popupId: string): Promise<void>;
         goBack(blockId: string): Promise<void>;
         goForward(blockId: string): Promise<void>;
         reload(blockId: string): Promise<void>;
@@ -280,6 +287,8 @@ declare global {
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         getAuthKey(): string;
+        /** Reload this window's page, keeping what the host needs to reconnect it. */
+        reloadWindow(): void;
         getIsDev(): boolean;
         getCursorPoint: () => { x: number; y: number };
         getPlatform: () => NodeJS.Platform;
@@ -359,7 +368,6 @@ declare global {
         createTab: () => void;
         closeTab: (workspaceId: string, tabId: string) => void;
         setWindowInitStatus: (status: "ready" | "wave-ready" | "revealed" | "snapshot-shown") => void;
-        onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => void;
         sendLog: (log: string) => void;
         sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void;
         onQuicklook: (filePath: string) => void;

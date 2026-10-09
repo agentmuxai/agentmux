@@ -1,6 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { UnseenTurnsDot } from "./UnseenTurnsDot";
 import { blockViewToIcon, blockViewToName, ConnectionButton, getBlockHeaderIcon, Input } from "@/app/block/blockutil";
 import { paneTabCapability, paneTabLabelFor } from "@/app/block/pane-tab-registry";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
@@ -787,6 +788,7 @@ function BlockFrame_Header(
                     </Show>
                 </div>
             </Show>
+            <UnseenTurnsDot blockId={props.blockId()} />
             <Show when={manageConnection()}>
                 <ConnectionButton
                     ref={props.connBtnRef}

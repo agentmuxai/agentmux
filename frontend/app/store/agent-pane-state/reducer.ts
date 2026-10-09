@@ -48,6 +48,8 @@ import {
     workingFromPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
+import type { SessionStats, TurnTokens } from "@/app/view/agent/types";
+import type { TurnCarry } from "./types";
 import {
     implausibleReason,
     learnedWindowsAfter,
@@ -60,6 +62,10 @@ import {
     type ContextReading,
 } from "./context-reading";
 import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
+import { isNewerLedger } from "./turn-ledger";
+import { IDLE_ACTIVITY, type ActivityState, type ModelActivityPhase } from "./types";
+import { toolActivity } from "../../view/agent/status/tool-labels";
+import { planFromTodoWrite } from "../../view/agent/status/plan";
 
 /** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
 function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {
@@ -597,6 +603,7 @@ export function update(
                     ...state,
                     currentTool: null,
                     currentToolArg: null,
+                    activity: settledActivity(state.activity),
                     // turnTokens stay. srv sends this push as soon as it reads
                     // the CLI's `result` line, before it forwards that line, so
                     // the stream is usually still delivering this turn: its
@@ -855,9 +862,11 @@ export function update(
                     ...state,
                     sessionStats: merged,
                     sessionTotals: accumulateStats(state.sessionTotals, merged),
+                    turnCarry: carryPass(state.turnCarry, state.turnLedger?.turnId, merged),
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
+                    activity: settledActivity(state.activity),
                     turnPhase: {
                         kind: "Done",
                         outcome,
@@ -898,6 +907,7 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
+                    activity: IDLE_ACTIVITY,
                     context: null,
                     contextSeedable: false,
                     // TurnReset is a wholesale clear → Idle. The
@@ -912,6 +922,11 @@ export function update(
                 },
                 events: [{ type: "turn-reset" }],
             };
+
+        case "TurnObserved": {
+            if (!isNewerLedger(command.ledger, state.turnLedger)) return { state, events: [] };
+            return { state: { ...state, turnLedger: command.ledger }, events: [] };
+        }
 
         case "TurnStartFailed":
             // Deliberately touches ONLY turnPhase (+ compacting, see below)
@@ -938,7 +953,12 @@ export function update(
 
         case "ToolStart": {
             const nextState = bumpEvent(
-                { ...state, currentTool: command.name, currentToolArg: command.arg ?? null },
+                {
+                    ...state,
+                    currentTool: command.name,
+                    currentToolArg: command.arg ?? null,
+                    activity: activityWithTool(state.activity, command, nowMs),
+                },
                 nowMs,
                 /* toolsDelta */ +1,
             );
@@ -950,7 +970,7 @@ export function update(
 
         case "ToolEnd": {
             const nextState = bumpEvent(
-                { ...state, currentTool: null, currentToolArg: null },
+                { ...state, currentTool: null, currentToolArg: null, activity: activityWithoutTool(state.activity, command.id) },
                 nowMs,
                 /* toolsDelta */ -1,
             );
@@ -974,6 +994,7 @@ export function update(
                 streamedChars: 0,
                 requesting: false,
                 shownOutput: prevTokens?.shownOutput,
+                ...ledgerStamp(state),
             });
             // The window: reported by Claude Code for this model, a larger one
             // proven by an accepted prompt, else the model-name table
@@ -988,7 +1009,13 @@ export function update(
             // something to show, or nothing at all, before — not on every
             // call of a turn that keeps reporting the same impossibility.
             const withLive = withReading(
-                { ...state, turnTokens: next, lastContextModel: model, contextSeedable: false },
+                {
+                    ...state,
+                    turnTokens: next,
+                    lastContextModel: model,
+                    contextSeedable: false,
+                    activity: { ...withPhase(withWaitRecorded(state.activity, nowMs), "responding", nowMs), thinkingHeadline: undefined },
+                },
                 reading,
                 prevReading == null || plausibleReading(prevReading) != null,
             );
@@ -1072,17 +1099,41 @@ export function update(
         // the call still streaming, and the ↑/↓ phase. Not liveness events:
         // the same lines already reach the reducer as StreamFlushObserved.
         // Before the turn's first call there is nothing to count yet.
+        case "ToolProgress": {
+            const i = state.activity.tools.findIndex((t) => t.id === command.id);
+            if (i < 0 || state.activity.tools[i].progress === command.text) return { state, events: [] };
+            const tools = state.activity.tools.map((t, j) => (j === i ? { ...t, progress: command.text } : t));
+            return { state: { ...state, activity: { ...state.activity, tools } }, events: [] };
+        }
+
+        case "ToolOutput": {
+            const i = state.activity.tools.findIndex((t) => t.id === command.id);
+            if (i < 0) return { state, events: [] };
+            const tools = state.activity.tools.map((t, j) => (j === i ? { ...t, outputAt: command.at } : t));
+            return { state: { ...state, activity: { ...state.activity, tools } }, events: [] };
+        }
+
+        case "ThinkingHeadline": {
+            if (state.activity.thinkingHeadline === command.text) return { state, events: [] };
+            return { state: { ...state, activity: { ...state.activity, thinkingHeadline: command.text } }, events: [] };
+        }
+
         case "OutputStreamed": {
             const t = state.turnTokens;
             if (!t || command.chars <= 0) return { state, events: [] };
             const next = withShownOutput({ ...t, streamedChars: (t.streamedChars ?? 0) + command.chars, requesting: false });
-            return { state: { ...state, turnTokens: next }, events: [] };
+            const phase: ModelActivityPhase | null =
+                command.kind === "thinking" ? "thinking" : command.kind === "text" ? "writing" : command.kind === "tool_input" ? "composing" : null;
+            const activity = phase ? withPhase(state.activity, phase, nowMs) : state.activity;
+            return { state: { ...state, turnTokens: next, activity }, events: [] };
         }
 
         case "RequestStarted": {
             const t = state.turnTokens;
-            if (!t || t.requesting) return { state, events: [] };
-            return { state: { ...state, turnTokens: { ...t, requesting: true } }, events: [] };
+            if (!t) return { state, events: [] };
+            const activity = withPhase(state.activity, "requesting", nowMs);
+            if (t.requesting) return activity === state.activity ? { state, events: [] } : { state: { ...state, activity }, events: [] };
+            return { state: { ...state, turnTokens: { ...t, requesting: true }, activity }, events: [] };
         }
 
         case "RequestStop": {
@@ -1777,6 +1828,84 @@ export function update(
             };
         }
     }
+}
+
+/** Add a finished pass's figures to its turn's carry (a new turn starts a new one). */
+function carryPass(carry: TurnCarry | null, turnId: number | undefined, stats: SessionStats | null): TurnCarry | null {
+    if (turnId == null || !stats) return carry;
+    const base = carry?.turnId === turnId ? carry : { turnId, passes: 0, outputTokens: 0, costUsd: 0, steps: 0 };
+    return {
+        turnId,
+        passes: base.passes + 1,
+        outputTokens: base.outputTokens + (stats.output_tokens ?? 0),
+        costUsd: base.costUsd + (stats.cost_usd ?? 0),
+        steps: base.steps + (stats.num_turns ?? 0),
+    };
+}
+
+/** How many of a pane's recent waits for the model it keeps. */
+const WAIT_SAMPLES = 20;
+
+/** A request was waiting and the model's answer begins: keep how long it took. */
+function withWaitRecorded(a: ActivityState, nowMs: number): ActivityState {
+    if (a.phase !== "requesting") return a;
+    return { ...a, waits: [...(a.waits ?? []), nowMs - a.phaseSince].slice(-WAIT_SAMPLES) };
+}
+
+/** The model's phase moves on; `phaseSince` changes only with it. */
+function withPhase(a: ActivityState, phase: ModelActivityPhase, nowMs: number): ActivityState {
+    return a.phase === phase ? a : { ...a, phase, phaseSince: nowMs };
+}
+
+/**
+ * A tool call starts: it joins the running list; a todo list sets the plan.
+ * One call is reported more than once with the same id (the CLI's streaming
+ * placeholder with empty input, then the full call; ACP's updates): that is
+ * an update of the entry already there, keeping its start, parent, progress
+ * and output time, never a second call (#4510).
+ */
+function activityWithTool(
+    a: ActivityState,
+    c: { name: string; id?: string; params?: Record<string, unknown>; parentId?: string },
+    nowMs: number,
+): ActivityState {
+    const activity = toolActivity(c.name, c.params);
+    const i = c.id != null ? a.tools.findIndex((t) => t.id === c.id) : -1;
+    const tools =
+        i >= 0
+            ? a.tools.map((t, j) => (j === i ? { ...t, activity, ...(c.parentId ? { parentId: c.parentId } : {}) } : t))
+            : [...a.tools, { id: c.id ?? null, activity, startedAt: nowMs, ...(c.parentId ? { parentId: c.parentId } : {}) }];
+    // Only a call that carries its list sets the plan: the empty placeholder
+    // must not wipe the plan already there.
+    if (c.name === "TodoWrite" && Array.isArray(c.params?.todos)) {
+        return { ...a, tools, plan: planFromTodoWrite(c.params), planAt: nowMs };
+    }
+    return { ...a, tools };
+}
+
+/** A tool call ends: by id when known, else the oldest. */
+function activityWithoutTool(a: ActivityState, id: string | undefined): ActivityState {
+    if (a.tools.length === 0) return a;
+    const i = id != null ? a.tools.findIndex((t) => t.id === id) : 0;
+    if (i < 0) return a;
+    return { ...a, tools: a.tools.filter((_, j) => j !== i) };
+}
+
+/** The pass is over: nothing runs; the plan stays for the turn's next pass. */
+function settledActivity(a: ActivityState): ActivityState {
+    return a.phase == null && a.tools.length === 0 ? a : { ...a, phase: null, phaseSince: 0, tools: [] };
+}
+
+/**
+ * The turn and pass a call's tokens belong to, from the pane's ledger, so the
+ * live counter never adds a pass srv has already counted (turn-ledger.ts
+ * `turnLiveOutput`). srv reports a pass before it forwards any of its lines,
+ * so a call always belongs to the ledger's latest pass: the running one, or,
+ * for a line that arrives late, the one that just ended.
+ */
+function ledgerStamp(state: AgentPaneState): Pick<TurnTokens, "ledgerTurnId" | "ledgerPass"> {
+    const l = state.turnLedger;
+    return l ? { ledgerTurnId: l.turnId, ledgerPass: l.passes } : {};
 }
 
 /**

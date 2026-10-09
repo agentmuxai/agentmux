@@ -70,6 +70,51 @@ export function sortProcesses(processes: TowerProcess[], sort: Sort): TowerProce
     return [...processes].sort(compareWith(sort, value, (p) => p.name));
 }
 
+/** The processes of one app (one executable name), as Task Manager groups
+ *  them: their combined CPU and memory, and the task they belong to when
+ *  they all belong to the same one. */
+export interface ProcessGroup {
+    /** The name, lowercased: what the processes are grouped by. */
+    key: string;
+    name: string;
+    processes: TowerProcess[];
+    cpu?: number;
+    mem?: number;
+    task?: string;
+}
+
+/** Group processes by executable name (`chrome.exe` ×24 → one group). */
+export function groupProcesses(processes: TowerProcess[]): ProcessGroup[] {
+    const byName = new Map<string, TowerProcess[]>();
+    for (const p of processes) {
+        const key = (p.name || `pid ${p.pid}`).toLowerCase();
+        const list = byName.get(key);
+        if (list) list.push(p);
+        else byName.set(key, [p]);
+    }
+    const sum = (xs: (number | undefined)[]) => {
+        const known = xs.filter((x): x is number => x != null);
+        return known.length ? known.reduce((a, b) => a + b, 0) : undefined;
+    };
+    return [...byName].map(([key, list]) => {
+        const tasks = new Set(list.map((p) => p.task));
+        return {
+            key,
+            name: list[0].name || `PID ${list[0].pid}`,
+            processes: list,
+            cpu: sum(list.map((p) => p.cpu)),
+            mem: sum(list.map((p) => p.mem)),
+            task: tasks.size === 1 ? list[0].task : undefined,
+        };
+    });
+}
+
+/** Groups sorted like processes; the count column sorts by group size. */
+export function sortGroups(groups: ProcessGroup[], sort: Sort): ProcessGroup[] {
+    const value = (g: ProcessGroup) => (sort.key === "cpu" ? g.cpu : sort.key === "mem" ? g.mem : g.processes.length);
+    return [...groups].sort(compareWith(sort, value, (g) => g.name));
+}
+
 /** Every word of `query` appears in the name, the PID or the task's label. */
 export function filterProcesses(
     processes: TowerProcess[],

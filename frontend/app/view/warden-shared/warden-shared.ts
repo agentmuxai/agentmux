@@ -5,19 +5,8 @@
 // LAN, Audit, Supervisor) — split out of the original monolithic
 // warden.tsx rather than duplicated per-manager.
 
-import { getApi } from "@/store/global";
-
 /** Poll interval every Warden section's own refresh loop uses. */
 export const WARDEN_REFRESH_MS = 5_000;
-
-export function authedHeaders(): Record<string, string> {
-    const headers: Record<string, string> = {};
-    if (globalThis.window != null) {
-        const authKey = getApi()?.getAuthKey?.();
-        if (authKey) headers["X-AuthKey"] = authKey;
-    }
-    return headers;
-}
 
 /** `ts` is a unix-millis timestamp from the Rust backend. */
 export function ageMs(ts: number, now: number): number {

@@ -172,6 +172,7 @@ async fn a_message_deferred_during_the_shutdown_interrupt_is_not_written_into_th
         &c.health_monitor,
         "blk-late",
         generation,
+        None,
     )
     .expect("same generation");
     let mut orphaned = 0;

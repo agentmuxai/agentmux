@@ -10,6 +10,7 @@
 
 import { onCleanup, onMount } from "solid-js";
 import { fireAndForget } from "@/util/util";
+import { hostHas } from "@/app/host/host-caps";
 import { isWindows } from "@/util/platformutil";
 import { monitorForElements, dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { clearCrossTabDrop, getLayoutModelForTabById } from "@/layout/index";
@@ -172,6 +173,7 @@ export function useTabDragAndDrop(
                     stripRect: tabBarScrollRef()?.getBoundingClientRect() ?? null,
                     tabCount: tabIds().length,
                     draggedTabId,
+                    canTearOff: hostHas("tearOff"),
                 });
 
                 // Escape was pressed at some point during this drag (see

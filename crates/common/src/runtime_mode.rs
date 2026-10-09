@@ -374,6 +374,23 @@ fn is_portable_marker_present(exe_dir: &Path) -> bool {
     false
 }
 
+/// The ephemeral build label of a local portable, from the marker
+/// `scripts/package-portable.sh` writes into `runtime/`:
+/// `AgentMux portable build <label>`, e.g.
+/// `0.59.16+g2a5424fe2.20261008T234046.81801`. Read at runtime, not baked,
+/// because it changes every build and a binary that wasn't rebuilt would
+/// carry a stale one. `exe_dir` is the running binary's directory: the
+/// marker sits next to the host and srv (both in `runtime/`), or one level
+/// up for older portables. `None` for released, installed and dev builds.
+pub fn portable_build_label(exe_dir: &Path) -> Option<String> {
+    let candidates = [Some(exe_dir.join("agentmux-portable.marker")), exe_dir.parent().map(|p| p.join("agentmux-portable.marker"))];
+    candidates.into_iter().flatten().find_map(|path| {
+        let contents = std::fs::read_to_string(path).ok()?;
+        let label = contents.trim().strip_prefix("AgentMux portable build ")?.trim();
+        (!label.is_empty()).then(|| label.to_string())
+    })
+}
+
 /// True when `exe_dir` is one of our known dev-build output dirs.
 /// Walks parents to handle nested cases (CEF subprocesses run from
 /// `runtime/` even in dev).
@@ -700,6 +717,23 @@ mod tests {
         // fall through to Installed (NOT to Dev with a git-detected
         // branch). The env var is the source-of-truth at step 4.
         assert_eq!(mode, RuntimeMode::Installed);
+    }
+
+    #[test]
+    fn a_portable_build_label_is_read_next_to_the_binary_or_one_level_up() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let runtime = tmp.path().join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        assert_eq!(portable_build_label(&runtime), None, "no marker: not a local portable");
+
+        std::fs::write(tmp.path().join("agentmux-portable.marker"), "AgentMux portable build 0.59.1+gabc.old\n").unwrap();
+        assert_eq!(portable_build_label(&runtime).as_deref(), Some("0.59.1+gabc.old"), "an older portable's root marker");
+
+        std::fs::write(runtime.join("agentmux-portable.marker"), "AgentMux portable build 0.59.16+g2a5424fe2.20261008T234046.81801\r\n").unwrap();
+        assert_eq!(portable_build_label(&runtime).as_deref(), Some("0.59.16+g2a5424fe2.20261008T234046.81801"), "next to the binary wins");
+
+        std::fs::write(runtime.join("agentmux-portable.marker"), "something else\n").unwrap();
+        assert_eq!(portable_build_label(&runtime).as_deref(), Some("0.59.1+gabc.old"), "an unreadable marker is skipped");
     }
 
     #[test]

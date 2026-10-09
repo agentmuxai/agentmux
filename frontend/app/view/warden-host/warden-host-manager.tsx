@@ -11,8 +11,9 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
+import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { authedHeaders, ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-host-manager.scss";
@@ -31,7 +32,7 @@ const ACTIVE_THRESHOLD_MS = 30_000;
 async function fetchHostAgents(): Promise<HostAgent[]> {
     const resp = await fetch(
         getWebServerEndpoint() + "/agentmux/reactive/agents",
-        { headers: authedHeaders() },
+        { headers: authHeaders() },
     );
     if (!resp.ok) {
         throw new Error(`warden: GET /agentmux/reactive/agents → ${resp.status}`);
@@ -58,7 +59,7 @@ async function deregisterAgent(agentId: string, blockId: string): Promise<void> 
         getWebServerEndpoint() + "/agentmux/reactive/unregister",
         {
             method: "POST",
-            headers: { ...authedHeaders(), "Content-Type": "application/json" },
+            headers: { ...authHeaders(), "Content-Type": "application/json" },
             body: JSON.stringify({ agent_id: agentId, block_id: blockId }),
         },
     );

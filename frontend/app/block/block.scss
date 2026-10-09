@@ -468,3 +468,20 @@
 // position/opacity/fade rules is gone with it. The in-flow-vs-overlay
 // distinction it drew survives there as `.is-in-flow`.
 // SPEC_PANE_LOADING_CONSOLIDATION_2026_09_20.md phase 3.
+
+// A dot while turns you didn't start finished in this pane unseen
+// (UnseenTurnsDot, store/turn-awareness.ts). Looking at the pane clears it.
+// SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §5.3.
+.block-frame-unseen-turns {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin: 0 var(--space-1);
+    border-radius: 50%;
+    background: var(--accent-color);
+}
+
+// The same mark on an agent's Swarm row, sized to the row's label.
+.swarm-agent-row .block-frame-unseen-turns {
+    align-self: center;
+}

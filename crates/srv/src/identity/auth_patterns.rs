@@ -31,6 +31,26 @@ pub enum AuthPatternMatch {
 /// captured output. Returns the FIRST match found — patterns are
 /// listed by descending specificity in `patterns_for(provider_id)`.
 pub fn match_line(provider_id: &str, line: &str) -> Option<AuthPatternMatch> {
+    // Terminal codes (colours, OSC-8 hyperlinks) come out first.
+    let t = agentmux_common::login_pty::strip_terminal_codes(line);
+    let from_text = match_clean_line(provider_id, &t.text);
+    // A device code, a success or a failure is only in the visible text:
+    // it wins (Copilot prints "visit <link> and enter code ABCD-1234").
+    if from_text.as_ref().is_some_and(|m| !matches!(m, AuthPatternMatch::OAuthUrl(_))) {
+        return from_text;
+    }
+    // For a URL, a link's target beats the visible text, which a PTY can wrap.
+    t.link_uris
+        .iter()
+        .find_map(|uri| match match_clean_line(provider_id, uri) {
+            Some(url @ AuthPatternMatch::OAuthUrl(_)) => Some(url),
+            _ => None,
+        })
+        .or(from_text)
+}
+
+/// [`match_line`] on a line with no terminal codes in it.
+fn match_clean_line(provider_id: &str, line: &str) -> Option<AuthPatternMatch> {
     for matcher in patterns_for(provider_id) {
         if let Some(m) = matcher(line) {
             return Some(m);
@@ -90,9 +110,14 @@ fn patterns_for(provider_id: &str) -> &'static [LineMatcher] {
 fn match_claude_url(line: &str) -> Option<AuthPatternMatch> {
     // Claude Code emits something like:
     //   "Open this URL in your browser to authorize:"
-    //   "https://console.anthropic.com/oauth/authorize?response_type=..."
+    //   "https://claude.com/cai/oauth/authorize?code=true&client_id=..."
+    // (earlier versions: "https://console.anthropic.com/oauth/authorize?...").
     if let Some(url) = extract_first_https_url(line) {
-        if url.contains("anthropic.com/oauth") || url.contains("console.anthropic.com") {
+        if url.contains("claude.com/cai/oauth")
+            || url.contains("claude.ai/oauth")
+            || url.contains("anthropic.com/oauth")
+            || url.contains("console.anthropic.com")
+        {
             return Some(AuthPatternMatch::OAuthUrl(url));
         }
     }
@@ -440,5 +465,39 @@ mod tests {
         assert_eq!(extract_device_code("code: ABCD_1234"), None);
         // Lowercase — GitHub uses uppercase only.
         assert_eq!(extract_device_code("code: abcd-1234"), None);
+    }
+
+    const CLAUDE_AUTHORIZE: &str =
+        "https://claude.com/cai/oauth/authorize?code=true&client_id=abc-123&code_challenge=xyz&state=st-789";
+
+    #[test]
+    fn claude_matches_its_current_authorize_url() {
+        let line = format!("If the browser didn't open, visit: {CLAUDE_AUTHORIZE}");
+        assert_eq!(match_line("claude", &line), Some(AuthPatternMatch::OAuthUrl(CLAUDE_AUTHORIZE.to_string())));
+    }
+
+    #[test]
+    fn a_url_inside_colour_codes_is_matched_without_them() {
+        let line = format!("\x1b[1;34m{CLAUDE_AUTHORIZE}\x1b[0m");
+        assert_eq!(match_line("claude", &line), Some(AuthPatternMatch::OAuthUrl(CLAUDE_AUTHORIZE.to_string())));
+    }
+
+    #[test]
+    fn an_osc8_link_target_wins_over_wrapped_visible_text() {
+        // The visible text was cut short by a wrap; the link target is whole.
+        let line = format!("\x1b]8;;{CLAUDE_AUTHORIZE}\x07https://claude.com/cai/oauth/auth\x1b]8;;\x07");
+        assert_eq!(match_line("claude", &line), Some(AuthPatternMatch::OAuthUrl(CLAUDE_AUTHORIZE.to_string())));
+    }
+
+    #[test]
+    fn a_device_code_in_the_visible_text_wins_over_a_link_target() {
+        let line = "Please visit ]8;;https://github.com/login/devicehttps://github.com/login/device]8;; and enter code ABCD-1234";
+        assert!(matches!(match_line("copilot", line), Some(AuthPatternMatch::DeviceCode { ref code, .. }) if code == "ABCD-1234"), "{:?}", match_line("copilot", line));
+    }
+
+    #[test]
+    fn a_non_ascii_email_on_a_coloured_success_line_survives() {
+        let line = "[32mSuccessfully logged in as josé@example.com[0m";
+        assert_eq!(match_line("claude", line), Some(AuthPatternMatch::LoginSuccess { email: Some("josé@example.com".to_string()) }));
     }
 }

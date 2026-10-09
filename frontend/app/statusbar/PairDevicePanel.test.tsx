@@ -15,6 +15,8 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { ViewerPairStartCommand: (...args: unknown[]) => pairStart(...args) },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
+const writeText = vi.fn();
+vi.mock("@/util/clipboard", () => ({ writeText: (...args: unknown[]) => writeText(...args) }));
 const [paired, setPaired] = createSignal<{ deviceId: string; deviceName: string } | null>(null);
 vi.mock("@/store/global", () => ({ viewerPairedAtom: () => paired() }));
 const toCanvas = vi.fn();
@@ -58,6 +60,25 @@ describe("PairDevicePanel", () => {
         expect(String(toCanvas.mock.calls[0][1])).not.toContain("agentmux://connect");
         expect(screen.getByTestId("pair-countdown").textContent).toMatch(/for [12]:\d\d/);
         expect(screen.getByRole("button", { name: "New code" })).toBeInTheDocument();
+    });
+
+    it("copies the pairing link, for another AgentMux computer's Tower", async () => {
+        writeText.mockResolvedValue(undefined);
+        pairStart.mockResolvedValue({ url: URL_, expires_ms: Date.now() + 120_000 });
+        render(() => <PairDevicePanel lanDiscoveryEnabled={() => true} />);
+        fireEvent.click(screen.getByRole("button", { name: "Pair a device" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Copy link" }));
+        expect(writeText).toHaveBeenCalledWith(URL_);
+        expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    });
+
+    it("says so when the link couldn't be copied", async () => {
+        writeText.mockRejectedValue(new Error("denied"));
+        pairStart.mockResolvedValue({ url: URL_, expires_ms: Date.now() + 120_000 });
+        render(() => <PairDevicePanel lanDiscoveryEnabled={() => true} />);
+        fireEvent.click(screen.getByRole("button", { name: "Pair a device" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Copy link" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't copy the link");
     });
 
     it("New code asks for another", async () => {

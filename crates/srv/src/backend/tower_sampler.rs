@@ -245,6 +245,61 @@ fn group(snap: &[ProcInfo], inputs: &Inputs, sticky: &HashMap<ProcKey, String>) 
     Grouping { tasks: groups, agentmux }
 }
 
+/// Rows a snapshot sent to another machine carries per list (busiest,
+/// largest), as a remote frame does (`agentmux_remote::procs`).
+pub const SHARED_TOP: usize = 100;
+
+/// Make a snapshot fit to send to a paired device: drop the tasks `hidden`
+/// names (an agent hidden from paired devices) and their processes, keep the
+/// host rows matching every word of `filter`, then only the `top` busiest
+/// and `top` largest of those. Totals keep counting every process.
+pub fn share(snap: &mut TowerSnapshot, top: usize, filter: &str, hidden: &dyn Fn(&str) -> bool) {
+    snap.remote = true;
+    // Asked once per task (`hidden` reads the store), then used for every row.
+    let hidden: HashSet<String> = snap
+        .tasks
+        .iter()
+        .filter(|t| t.kind != TowerTaskKind::Agentmux && hidden(&t.id))
+        .map(|t| t.id.clone())
+        .collect();
+    snap.tasks.retain(|t| !hidden.contains(&t.id));
+    // A task's own list is capped like the host's, so one process-heavy agent
+    // can't make every frame megabytes (its totals still count every process).
+    for t in &mut snap.tasks {
+        keep_top(&mut t.processes, top);
+    }
+    let Some(host) = snap.host.as_mut() else { return };
+    host.processes.retain(|p| p.task.as_ref().is_none_or(|t| !hidden.contains(t)));
+    // Name, PID and the task's label, as the pane's own filter matches.
+    let labels: HashMap<&str, String> = snap.tasks.iter().map(|t| (t.id.as_str(), t.label.to_lowercase())).collect();
+    let words: Vec<String> = filter.to_lowercase().split_whitespace().map(str::to_string).collect();
+    host.processes.retain(|p| {
+        let task = p.task.as_deref().and_then(|t| labels.get(t)).map_or("", String::as_str);
+        let hay = format!("{} {} {task}", p.name.to_lowercase(), p.pid);
+        words.iter().all(|w| hay.contains(w.as_str()))
+    });
+    host.matched = host.processes.len() as u32;
+    keep_top(&mut host.processes, top);
+}
+
+/// Keep the `top` busiest by CPU and the `top` largest by memory (their
+/// union, in their original order).
+fn keep_top(processes: &mut Vec<TowerProcess>, top: usize) {
+    if processes.len() <= top {
+        return;
+    }
+    let mut by_cpu: Vec<usize> = (0..processes.len()).collect();
+    by_cpu.sort_by(|&a, &b| processes[b].cpu.unwrap_or(-1.0).total_cmp(&processes[a].cpu.unwrap_or(-1.0)));
+    let mut by_mem: Vec<usize> = (0..processes.len()).collect();
+    by_mem.sort_by_key(|&i| std::cmp::Reverse(processes[i].mem.map_or(-1, |m| m as i128)));
+    let keep: HashSet<usize> = by_cpu.into_iter().take(top).chain(by_mem.into_iter().take(top)).collect();
+    let mut i = 0;
+    processes.retain(|_| {
+        i += 1;
+        keep.contains(&(i - 1))
+    });
+}
+
 fn proc_id(p: &ProcInfo) -> String {
     format!("{}:{}", p.pid, p.start_key)
 }
@@ -689,6 +744,40 @@ mod tests {
         // Idle afterwards: the row goes away again.
         let third = build(&mut st, &machine(), &inputs, t0 + Duration::from_secs(2), false, "h", &label);
         assert!(third.tasks.iter().all(|t| t.id != "agent-a"));
+    }
+
+    /// What a paired device gets: no hidden agent, no row of its processes,
+    /// the filter applied, only the busiest and largest.
+    #[test]
+    fn a_shared_snapshot_hides_hidden_agents_and_keeps_the_top() {
+        let mut st = state();
+        let inputs = Inputs {
+            blocks: vec![tracked("agent-a", &[200, 201, 202, 203], &[200]), tracked("agent-b", &[300, 301], &[300])],
+            roots: vec![],
+            own_pid: 110,
+        };
+        let mut snap = build(&mut st, &machine(), &inputs, Instant::now(), true, "h", &label);
+        share(&mut snap, 2, "", &|id| id == "agent-b");
+        assert!(snap.remote);
+        assert!(snap.tasks.iter().all(|t| t.id != "agent-b"));
+        let host = snap.host.as_ref().unwrap();
+        assert!(host.processes.iter().all(|p| p.task.as_deref() != Some("agent-b")));
+        assert!(host.processes.len() <= 4, "two lists of two");
+        assert_eq!(host.total, machine().len() as u32, "totals still count everything");
+        let a = snap.tasks.iter().find(|t| t.id == "agent-a").unwrap();
+        assert!(a.processes.len() <= 4, "a task's own list is capped too");
+        assert_eq!(a.mem, 4000, "but its totals count every process");
+
+        let mut snap = build(&mut st, &machine(), &inputs, Instant::now(), true, "h", &label);
+        share(&mut snap, 100, "node", &|_| false);
+        assert_eq!(snap.host.as_ref().unwrap().matched, 1);
+        assert_eq!(snap.host.unwrap().processes[0].name, "node.exe");
+
+        // By the task's label, as the pane's filter matches.
+        let mut snap = build(&mut st, &machine(), &inputs, Instant::now(), true, "h", &label);
+        share(&mut snap, 100, "agent-b", &|_| false);
+        let names: Vec<String> = snap.host.unwrap().processes.into_iter().map(|p| p.name).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
     }
 
     #[test]
