@@ -81,7 +81,7 @@ The browser exposes `event` + `first-input` entry types via `PerformanceObserver
 
 #### A4. Chromium tracing via CDP — heavyweight on-demand
 
-The host already has CDP access to every CEF browser ([`agentmux-cef/src/browser_api/`](../../agentmux-cef/src/browser_api/)). Add an endpoint pair to start/stop a [Chromium trace](https://www.chromium.org/developers/how-tos/trace-event-profiling-tool/) and write a `.json.gz` to disk:
+The host already has CDP access to every CEF browser ([`crates/cef/src/browser_api/`](../../crates/cef/src/browser_api/)). Add an endpoint pair to start/stop a [Chromium trace](https://www.chromium.org/developers/how-tos/trace-event-profiling-tool/) and write a `.json.gz` to disk:
 
 ```
 POST /agentmux/perf/trace_start { window_label?, categories: ["devtools.timeline","blink","cc","gpu","v8.execute"] }
