@@ -262,14 +262,15 @@ pub fn exit_message(dest: &str, code: u32) -> Option<String> {
 /// (`/Users/<name>/.agentmux/channels/stable/config`), and a Unix socket path
 /// has to fit in `sun_path`, 104 bytes on macOS and 108 on Linux. Under it,
 /// ssh failed with "too long for Unix domain socket" right after logging in,
-/// on every macOS install. So: a short base (`$XDG_RUNTIME_DIR` on Linux,
-/// else `/tmp/agentmux-<uid>`) and one short subdirectory per channel.
+/// on every macOS install. So: the launcher's short runtime dir
+/// (`$XDG_RUNTIME_DIR/agentmux`, else `/tmp/agentmux-<uid>`, as
+/// `launcher::ipc::ipc_socket_dir_path`) and one `ssh-<hash>` per channel.
 #[cfg(unix)]
 pub fn control_dir(config_home: &Path) -> Option<PathBuf> {
     let base = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
-        .filter(|d| cfg!(target_os = "linux") && d.is_absolute())
-        .map(|d| d.join("agentmux-ssh"))
+        .filter(|d| d.is_absolute())
+        .map(|d| d.join("agentmux"))
         .unwrap_or_else(|| PathBuf::from(format!("/tmp/agentmux-{}", unsafe { libc::getuid() })));
     control_dir_in(&base, config_home)
 }
@@ -279,13 +280,13 @@ pub fn control_dir(_config_home: &Path) -> Option<PathBuf> {
     None
 }
 
-/// [`control_dir`] under `base`: `base/<8 hex of config_home>`, each level
-/// owner-only. A test can pass its own `base`.
+/// [`control_dir`] under `base`: `base/ssh-<8 hex of config_home>`, each
+/// level owner-only. A test can pass its own `base`.
 #[cfg(unix)]
 fn control_dir_in(base: &Path, config_home: &Path) -> Option<PathBuf> {
     use sha2::{Digest, Sha256};
     let channel = hex::encode(&Sha256::digest(config_home.as_os_str().as_encoded_bytes())[..4]);
-    let dir = base.join(channel);
+    let dir = base.join(format!("ssh-{channel}"));
     private_dir(base)?;
     private_dir(&dir)?;
     socket_fits(&dir).then_some(dir)
@@ -427,6 +428,8 @@ mod tests {
         let dir = control_dir(&deep).expect("a control dir");
         let max = if cfg!(target_os = "linux") { 108 } else { 104 };
         assert!(bind_path_len(&dir) < max, "{} bytes: {}", bind_path_len(&dir), dir.display());
+        // It's in the real runtime dir: don't leave one behind per run.
+        let _ = std::fs::remove_dir(&dir);
     }
 
     /// Under `/tmp`: macOS's own temp dir (`/var/folders/…`) is itself too
