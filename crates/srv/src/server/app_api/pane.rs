@@ -12,8 +12,11 @@ fn register_pane_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |data, _ctx| {
             let state = state.clone();
             Box::pin(async move {
-                let cmd: CommandPaneOpenData = serde_json::from_value(data)
+                let mut cmd: CommandPaneOpenData = serde_json::from_value(data)
                     .map_err(|e| format!("pane.open: {e}"))?;
+                if let Some(meta) = cmd.meta.as_mut() {
+                    crate::server::browser_owner::strip_srv_only_keys(meta);
+                }
                 let result = open_pane(&state, cmd).await?;
                 Ok(Some(serde_json::to_value(&result).unwrap()))
             })

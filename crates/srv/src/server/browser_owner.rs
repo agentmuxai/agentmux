@@ -114,6 +114,27 @@ pub(crate) fn check(
     Ok(())
 }
 
+/// Meta keys only srv writes, from its own records: who drives a pane, the
+/// banner that asks the person something, and what opened a popup.
+fn srv_only_keys() -> [&'static str; 4] {
+    [
+        OWNER_META_KEY,
+        crate::server::browser_attention::ATTENTION_META_KEY,
+        crate::server::browser_popup::POPUP_OF_META_KEY,
+        crate::server::browser_popup::POPUP_FROM_META_KEY,
+    ]
+}
+
+/// Remove srv-only keys from the meta a client gives a NEW block
+/// (`pane.open` over RPC or HTTP, `object.CreateBlock`). Removed rather than
+/// refused, so duplicating a pane still works: the copy is an ordinary pane,
+/// without an owner, a banner, or a claim to be a popup. srv's own callers
+/// (`OpenBrowser`, the popup route) set these keys after this check, through
+/// `open_pane` directly. Returns the keys it removed.
+pub(crate) fn strip_srv_only_keys(meta: &mut MetaMapType) -> Vec<&'static str> {
+    srv_only_keys().into_iter().filter(|k| meta.remove(*k).is_some()).collect()
+}
+
 /// Guard for meta updates that come from a client (the `setmeta` WebSocket
 /// command and the `UpdateObjectMeta` service call), not from srv itself.
 /// `browser:owner_agent` is srv's to write: a client may only clear it, which
@@ -279,6 +300,21 @@ mod tests {
             assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, json!("x"))).is_err());
             assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, serde_json::Value::Null)).is_err());
         }
+    }
+
+    #[test]
+    fn a_new_block_from_a_client_starts_without_srv_only_keys() {
+        let mut m = MetaMapType::new();
+        m.insert("view".into(), json!("browser"));
+        m.insert("url".into(), json!("https://example.com"));
+        m.insert(OWNER_META_KEY.into(), json!("lark"));
+        m.insert(crate::server::browser_popup::POPUP_FROM_META_KEY.into(), json!("https://bank.example"));
+        m.insert(crate::server::browser_popup::POPUP_OF_META_KEY.into(), json!("some-pane"));
+        let mut removed = strip_srv_only_keys(&mut m);
+        removed.sort();
+        assert_eq!(removed, vec!["browser:owner_agent", "browser:popup_from", "browser:popup_of"]);
+        assert_eq!(m.len(), 2);
+        assert!(strip_srv_only_keys(&mut m).is_empty());
     }
 
     #[test]
