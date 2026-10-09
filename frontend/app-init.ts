@@ -477,32 +477,6 @@ async function initAppInner() {
     document.body.style.opacity = "0";
     document.body.classList.add("is-transparent");
 
-    // Check if we're in the host app (CEF) that owns the backend sidecar.
-    // Host apps query the backend for client/window/tab state.
-    // Non-host mode waits for an agentmux-init event from the host.
-    const hostApp = isHostApp();
-    getApi().sendLog(`Init Bare - Host app mode: ${hostApp}`);
-
-    if (!hostApp) {
-        // Non-host: wait for the host to emit agentmux-init with IDs.
-        //
-        // `onAgentMuxInit` invokes this fire-and-forget (`cef-api.ts` just
-        // calls `callback(payload)` — no await, no catch), so unlike the host
-        // paths there is no caller to receive a re-thrown fatal error. Without
-        // this handler it would surface only as an unhandled rejection, which
-        // the global forwarder logs but never turns into a startup card — and
-        // `initMuxWrap`'s `finally` would still reveal the body, reproducing
-        // the exact blank window this is meant to fix, just on a different
-        // path. reagentx P1 on PR #3486.
-        getApi().onAgentMuxInit((payload) => {
-            void initMuxWrap(payload).catch((error) => {
-                const described = describeError(error);
-                console.error("[onAgentMuxInit] Initialization failed:", described);
-                getApi().sendLog(`[onAgentMuxInit] ERROR: ${formatDescribedError(described)}`);
-                showStartupError(formatDescribedError(described));
-            });
-        });
-    }
     setKeyUtilPlatform(platform);
     loadFonts();
     // Per-pane zoom is handled via block metadata. Chrome zoom via CSS custom
@@ -528,82 +502,80 @@ async function initAppInner() {
     getApi().sendLog("Init Bare Done");
     getApi().setWindowInitStatus("ready");
 
-    // In host app mode, handle initialization in frontend
-    if (hostApp) {
-        getApi().sendLog("Starting host app initialization");
-        try {
-            // Pool-mode short-circuit. `?pool=1` means this renderer was
-            // pre-spawned by the host's window pool. Defer workspace init and
-            // wait for either `pool:promote` (tear-off, injects workspaceId) or
-            // `pool:new-window` (Cmd+N, no workspaceId → fresh workspace).
-            // initHostNewWindow branches on workspaceId presence automatically.
-            const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote } = await import("@/app/init/pool");
-            if (isPoolMode()) {
-                getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
-                const { initialView, initialMeta } = await awaitPoolPromote();
-                getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
-                // Pass the widget's view straight into CreateWindow's seed
-                // (rather than seeding the default 3-pane layout and then
-                // pane.open-ing a 4th pane alongside it) so "Open in New
-                // Window" on a widget opens with ONLY that widget.
-                await initHostNewWindow(initialView, initialMeta);
-            } else if (isPanePoolMode()) {
-                // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
-                // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.
-                getApi().sendLog("[initApp] pane-pool mode — deferring init until pool:pane-promote");
-                await awaitPanePoolPromote();
-                getApi().sendLog("[initApp] pool:pane-promote received — bootstrapping floating pane");
-                await initHostNewWindow();
-            } else {
-                // Check if this is a new window or the main window
-                benchMark("isMainWindow-start");
-                const isMain = await getApi().isMainWindow();
-                getApi().sendLog(`Window type: ${isMain ? "main" : "new window"}`);
+    // The UI asks srv for its client, window and tab, whichever host it runs in.
+    getApi().sendLog("Starting host app initialization");
+    try {
+        // Pool-mode short-circuit. `?pool=1` means this renderer was
+        // pre-spawned by the host's window pool. Defer workspace init and
+        // wait for either `pool:promote` (tear-off, injects workspaceId) or
+        // `pool:new-window` (Cmd+N, no workspaceId → fresh workspace).
+        // initHostNewWindow branches on workspaceId presence automatically.
+        const { isPoolMode, awaitPoolPromote, isPanePoolMode, awaitPanePoolPromote } = await import("@/app/init/pool");
+        if (isPoolMode()) {
+            getApi().sendLog("[initApp] pool mode — deferring init until pool:promote or pool:new-window");
+            const { initialView, initialMeta } = await awaitPoolPromote();
+            getApi().sendLog("[initApp] pool event received — bootstrapping workspace");
+            // Pass the widget's view straight into CreateWindow's seed
+            // (rather than seeding the default 3-pane layout and then
+            // pane.open-ing a 4th pane alongside it) so "Open in New
+            // Window" on a widget opens with ONLY that widget.
+            await initHostNewWindow(initialView, initialMeta);
+        } else if (isPanePoolMode()) {
+            // Pane pool: wait for pool:pane-promote which injects floatingPaneId+workspaceId
+            // into the URL, then initHostNewWindow reattaches and wave renders FloatingPaneWorkspace.
+            getApi().sendLog("[initApp] pane-pool mode — deferring init until pool:pane-promote");
+            await awaitPanePoolPromote();
+            getApi().sendLog("[initApp] pool:pane-promote received — bootstrapping floating pane");
+            await initHostNewWindow();
+        } else {
+            // Check if this is a new window or the main window
+            benchMark("isMainWindow-start");
+            const isMain = await getApi().isMainWindow();
+            getApi().sendLog(`Window type: ${isMain ? "main" : "new window"}`);
 
-                benchMark("isMainWindow-done");
-                if (isMain) {
-                    // Main window with freshly spawned backend: standard initialization
-                    await initHostMux();
-                } else {
-                    // New window: create new backend window objects
-                    const label = await getApi().getWindowLabel();
-                    getApi().sendLog(`Initializing as new window: ${label}`);
-                    const coldSearchParams = new URL(window.location.href).searchParams;
-                    const coldInitialView = coldSearchParams.get("initialView");
-                    // "credential-approval" is not a real pane view — it's
-                    // rendered by app.tsx as this window's ENTIRE content,
-                    // bypassing the normal Workspace/pane tree on purpose
-                    // (see CredentialApprovalWindow's own doc comment for
-                    // why: a pane opened via pane.open gets a
-                    // [data-blockid] wrapper, which would make its Approve
-                    // button reachable by any agent's UIQuery/UIClick).
-                    // Seeding it as a real pane here would defeat that, so
-                    // it's excluded from seedView and falls back to
-                    // initHostNewWindow's default 3-pane seed underneath
-                    // (irrelevant — app.tsx replaces this window's content
-                    // entirely for credential-approval).
-                    let coldMeta: Record<string, unknown> | undefined;
-                    // The memory-adoption approval window is the same kind.
-                    const approvalViews = ["credential-approval", "memory-adoption-approval", "ssh-approval"];
-                    const seedView =
-                        coldInitialView && !approvalViews.includes(coldInitialView) ? coldInitialView : undefined;
-                    if (seedView) {
-                        const coldMetaRaw = coldSearchParams.get("initialMeta");
-                        try { coldMeta = coldMetaRaw ? JSON.parse(coldMetaRaw) : undefined; } catch { /* ignore */ }
-                    }
-                    await initHostNewWindow(seedView, coldMeta);
+            benchMark("isMainWindow-done");
+            if (isMain) {
+                // Main window with freshly spawned backend: standard initialization
+                await initHostMux();
+            } else {
+                // New window: create new backend window objects
+                const label = await getApi().getWindowLabel();
+                getApi().sendLog(`Initializing as new window: ${label}`);
+                const coldSearchParams = new URL(window.location.href).searchParams;
+                const coldInitialView = coldSearchParams.get("initialView");
+                // "credential-approval" is not a real pane view — it's
+                // rendered by app.tsx as this window's ENTIRE content,
+                // bypassing the normal Workspace/pane tree on purpose
+                // (see CredentialApprovalWindow's own doc comment for
+                // why: a pane opened via pane.open gets a
+                // [data-blockid] wrapper, which would make its Approve
+                // button reachable by any agent's UIQuery/UIClick).
+                // Seeding it as a real pane here would defeat that, so
+                // it's excluded from seedView and falls back to
+                // initHostNewWindow's default 3-pane seed underneath
+                // (irrelevant — app.tsx replaces this window's content
+                // entirely for credential-approval).
+                let coldMeta: Record<string, unknown> | undefined;
+                // The memory-adoption approval window is the same kind.
+                const approvalViews = ["credential-approval", "memory-adoption-approval", "ssh-approval"];
+                const seedView =
+                    coldInitialView && !approvalViews.includes(coldInitialView) ? coldInitialView : undefined;
+                if (seedView) {
+                    const coldMetaRaw = coldSearchParams.get("initialMeta");
+                    try { coldMeta = coldMetaRaw ? JSON.parse(coldMetaRaw) : undefined; } catch { /* ignore */ }
                 }
+                await initHostNewWindow(seedView, coldMeta);
             }
-        } catch (error) {
-            // Already handled below us (initHostMux) — don't show a second card.
-            if (error instanceof StartupFailureHandled) throw error;
-            const described = describeError(error);
-            console.error("[initApp] Host initialization failed:", described);
-            getApi().sendLog(`Host init error: ${formatDescribedError(described)}`);
-            showStartupError(formatDescribedError(described));
-            // The card is up; tell bootstrap this was not a successful startup.
-            throw new StartupFailureHandled(formatDescribedError(described));
         }
+    } catch (error) {
+        // Already handled below us (initHostMux) — don't show a second card.
+        if (error instanceof StartupFailureHandled) throw error;
+        const described = describeError(error);
+        console.error("[initApp] Host initialization failed:", described);
+        getApi().sendLog(`Host init error: ${formatDescribedError(described)}`);
+        showStartupError(formatDescribedError(described));
+        // The card is up; tell bootstrap this was not a successful startup.
+        throw new StartupFailureHandled(formatDescribedError(described));
     }
 
     // Safety net: if body is still hidden after 30s, force it visible and
