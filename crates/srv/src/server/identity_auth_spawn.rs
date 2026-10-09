@@ -768,14 +768,20 @@ fn spawn_auth_cli_pty(
 /// all treated as "not authenticated" — the caller will then either
 /// keep waiting (drain task loop) or transition to Failed (exit
 /// fallback).
+/// How long a provider's auth-status check may take (`confirm_authenticated`).
+const AUTH_CHECK_TIMEOUT_SECS: u64 = 30;
+
 async fn confirm_authenticated(
     cli_path: &str,
     args: &[String],
     env: &std::collections::HashMap<String, String>,
 ) -> bool {
     use std::process::Stdio;
-    use tokio::process::Command;
-    let mut c = Command::new(cli_path);
+    // Through the shim parser (`make_cli_cmd`): a raw npm `.cmd` shim spawned
+    // with piped stdio can drop its arguments or never run the CLI, which
+    // would report a good login as failed. It also sets CREATE_NO_WINDOW, so
+    // the probe, polled during an auth flow, flashes no console.
+    let mut c = agentmux_common::make_cli_cmd(cli_path);
     // The third spawn of this same provider CLI in this file — the auth-check
     // poll driven from the OAuth drain loop. Same strict policy as the other
     // two. (ReAgent P0, round 4, on #3326.)
@@ -786,14 +792,9 @@ async fn confirm_authenticated(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    // CREATE_NO_WINDOW: this status probe is polled in a drain loop during an
-    // auth flow — without the flag each poll flashes a console. See cli.rs.
-    #[cfg(windows)]
-    {
-        c.no_window();
-    }
-    match c.status().await {
-        Ok(s) => s.success(),
-        Err(_) => false,
+    // A status check that hangs counts as not logged in (and is killed on drop).
+    match tokio::time::timeout(std::time::Duration::from_secs(AUTH_CHECK_TIMEOUT_SECS), c.status()).await {
+        Ok(Ok(s)) => s.success(),
+        _ => false,
     }
 }
