@@ -40,6 +40,7 @@ import { basicTermModels, termModels } from "./term-models";
 import { readZoom } from "@/app/store/zoom-factor";
 import { META_OSC_TITLE } from "@/app/store/meta-keys";
 
+import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
  *  term.tsx). */
 class TermViewModel {
