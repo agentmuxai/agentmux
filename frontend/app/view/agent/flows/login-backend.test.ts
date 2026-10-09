@@ -175,6 +175,7 @@ describe("srv login terminal (L3)", () => {
                 "cmd:env": { CLAUDE_CONFIG_DIR: "/accounts/a" },
                 "cmd:interactive": true,
                 "cmd:runonstart": true,
+                "cmd:closeonexit": true,
             }),
         });
     });

@@ -156,7 +156,11 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
                     "cmd:env": env,
                     "cmd:interactive": true,
                     "cmd:runonstart": true,
-                    "cmd:closeonexit": false,
+                    // Gone a few seconds after the CLI exits (time to read the
+                    // result), so a finished sign-in is never restored with the
+                    // tab and run again.
+                    "cmd:closeonexit": true,
+                    "cmd:closeonexitdelay": 5000,
                     "frame:title": "Sign in",
                 },
             });
