@@ -32,8 +32,12 @@ fn set_popup_window_title(browser: &mut Option<Browser>, title: &str) {
                 tracing::debug!("popup title: the popup's view has no window yet");
             }
         }
+        // Under ozone-x11 the handle is the X11 window. On native Wayland it
+        // isn't, and there is no protocol for setting another client's
+        // title: the popup keeps the page's own title there, and the opener's
+        // strip is what shows where it is (native-popups spec §8.4).
         #[cfg(target_os = "linux")]
-        {
+        if crate::app::SELECTED_OZONE_PLATFORM.get().map(String::as_str) != Some("wayland") {
             let xid = host.window_handle() as u32;
             if xid != 0 {
                 if let Err(e) = x11_set_toplevel_title(xid, title) {
@@ -93,36 +97,89 @@ unsafe fn macos_set_view_window_title(handle: *mut std::ffi::c_void, title: &str
 /// above `xid`: the first with `WM_STATE`, which the window manager sets on
 /// the windows it manages (not its own frame around them). `xid` itself if
 /// none has it.
+///
+/// This runs on the UI thread on every title and address change, so, as
+/// `ui_tasks::window`'s opacity setter does, one connection and its atoms are
+/// kept per thread, and each popup's top level is looked up once. The title
+/// writes go out without waiting for a reply: after the first call for a
+/// popup, a title change costs no round trip. On an error the connection is
+/// dropped and the next call makes a new one.
 #[cfg(target_os = "linux")]
 fn x11_set_toplevel_title(xid: u32, title: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use x11rb::connection::Connection;
-    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
+    use x11rb::protocol::xproto::{Atom, AtomEnum, ConnectionExt as _, PropMode};
+    use x11rb::rust_connection::RustConnection;
     use x11rb::wrapper::ConnectionExt as _;
 
-    let (conn, _screen) = x11rb::connect(None)?;
-    let wm_state = conn.intern_atom(false, b"WM_STATE")?.reply()?.atom;
-    let mut target = xid;
-    let mut win = xid;
-    for _ in 0..16 {
-        let state = conn.get_property(false, win, wm_state, AtomEnum::ANY, 0, 0)?.reply()?;
-        if state.type_ != x11rb::NONE {
-            target = win;
-            break;
-        }
-        let tree = conn.query_tree(win)?.reply()?;
-        if tree.parent == tree.root || tree.parent == x11rb::NONE {
-            break;
-        }
-        win = tree.parent;
+    struct X11 {
+        conn: RustConnection,
+        wm_state: Atom,
+        net_wm_name: Atom,
+        utf8: Atom,
+        /// Popup window → its client top level.
+        toplevels: HashMap<u32, u32>,
     }
-    let win = target;
-    let net_wm_name = conn.intern_atom(false, b"_NET_WM_NAME")?.reply()?.atom;
-    let utf8 = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
-    conn.change_property8(PropMode::REPLACE, win, net_wm_name, utf8, title.as_bytes())?.check()?;
-    conn.change_property8(PropMode::REPLACE, win, AtomEnum::WM_NAME, AtomEnum::STRING, title.as_bytes())?
-        .check()?;
-    conn.flush()?;
-    Ok(())
+    thread_local! {
+        static X11_TITLE: RefCell<Option<X11>> = const { RefCell::new(None) };
+    }
+
+    fn connect() -> Result<X11, Box<dyn std::error::Error>> {
+        let (conn, _screen) = x11rb::connect(None)?;
+        let atom = |name: &[u8]| -> Result<Atom, Box<dyn std::error::Error>> {
+            Ok(conn.intern_atom(false, name)?.reply()?.atom)
+        };
+        let (wm_state, net_wm_name, utf8) = (atom(b"WM_STATE")?, atom(b"_NET_WM_NAME")?, atom(b"UTF8_STRING")?);
+        Ok(X11 { conn, wm_state, net_wm_name, utf8, toplevels: HashMap::new() })
+    }
+
+    fn toplevel(x: &X11, xid: u32) -> Result<u32, Box<dyn std::error::Error>> {
+        let mut win = xid;
+        for _ in 0..16 {
+            let state = x.conn.get_property(false, win, x.wm_state, AtomEnum::ANY, 0, 0)?.reply()?;
+            if state.type_ != x11rb::NONE {
+                return Ok(win);
+            }
+            let tree = x.conn.query_tree(win)?.reply()?;
+            if tree.parent == tree.root || tree.parent == x11rb::NONE {
+                break;
+            }
+            win = tree.parent;
+        }
+        Ok(xid)
+    }
+
+    X11_TITLE.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(connect()?);
+        }
+        let x = slot.as_mut().expect("slot populated above");
+        let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+            let win = match x.toplevels.get(&xid) {
+                Some(w) => *w,
+                None => {
+                    let w = toplevel(x, xid)?;
+                    // Closed popups' entries aren't removed one by one; a
+                    // handful of popups never gets near this.
+                    if x.toplevels.len() >= 64 {
+                        x.toplevels.clear();
+                    }
+                    x.toplevels.insert(xid, w);
+                    w
+                }
+            };
+            x.conn.change_property8(PropMode::REPLACE, win, x.net_wm_name, x.utf8, title.as_bytes())?;
+            x.conn.change_property8(PropMode::REPLACE, win, AtomEnum::WM_NAME, AtomEnum::STRING, title.as_bytes())?;
+            x.conn.flush()?;
+            Ok(())
+        })();
+        if result.is_err() {
+            *slot = None;
+        }
+        result
+    })
 }
 
 /// Set `browser`'s window title: through CEF Views, and for Alloy-style

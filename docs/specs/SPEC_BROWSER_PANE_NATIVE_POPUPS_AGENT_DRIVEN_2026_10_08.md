@@ -158,7 +158,10 @@ A bare popup has no AgentMux header; what would appear there appears on the **op
    host, with `http://` kept for an insecure page, a non-default port, and an internationalised
    name in its ASCII form so look-alike letters can't pass for another site; a page with no host
    shows its scheme (`about:blank`, `data:`). This covers every native popup, AgentMux's own
-   sign-in popup included.
+   sign-in popup included. Under the Chrome runtime CEF owns a popup's window, so the title is
+   set on the native window: Win32 on Windows, the NSWindow on macOS, `_NET_WM_NAME` under
+   X11. On native Wayland there is no way to set it, and the popup keeps the page's title; the
+   opener's strip is the trusted address there.
 5. **Profile:** both kinds use the opener's request context
    (`SPEC_BROWSER_PANE_IDENTITIES` §G6 must hold for private-identity panes).
 6. **The pane's own allowlist** (`OpenBrowser({allowed_origins})`, 2026-10-07 spec §8) applies
