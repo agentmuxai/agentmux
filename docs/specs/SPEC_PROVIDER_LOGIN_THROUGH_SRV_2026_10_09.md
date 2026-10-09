@@ -1,7 +1,7 @@
 # SPEC: One provider-login implementation, in srv
 
 **Date:** 2026-10-09
-**Status:** active — L1 (srv's login PTY at the host's level: DSR answer, width, shim; URL matching without terminal codes) in #4523; L2 (session lifecycle: timeout kill, sweep, one login per account dir) in #4524; L4's seam (the flows go through one `LoginBackend`; srv's `auth.*` for a host with `hostLogin: false`) in #4529. L3, the desktop's switch to srv and L5 remain.
+**Status:** active — L1 (srv's login PTY at the host's level: DSR answer, width, shim; URL matching without terminal codes) in #4523; L2 (session lifecycle: timeout kill, sweep, one login per account dir) in #4524; L4's seam (the flows go through one `LoginBackend`; srv's `auth.*` for a host with `hostLogin: false`) in #4529; L3 (the terminal fallback as a srv pane, for a host with no login) in #4530. The desktop's switch to srv, and L5, remain.
 **Author:** Agent4
 **Builds on:** `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` (one login orchestration in the frontend), `SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` (srv's `auth.*`), `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` (the host's capture), `SPEC_SRV_HEADLESS_MODE_2026_09_26.md`.
 
@@ -42,7 +42,7 @@ From a side-by-side audit, highest risk first:
 |---|---|
 | **L1** | §3.1–3.2. The host's DSR responder, PTY width and URL extraction move to `agentmux_common::login_pty` (one copy, with their tests); srv's PTY spawn uses them and resolves the shim; srv's line matching runs on text with terminal codes removed, preferring OSC-8 link targets, and knows Claude's current URL |
 | **L2** | §3.3–3.4. srv kills a session's child on timeout and when it ends, reaps sessions nobody polls, prunes finished ones, and allows one live login per account directory |
-| **L3** | §3.5. The terminal fallback as a srv pane |
+| **L3** | §3.5. The terminal fallback as a srv pane. srv's `cmd` pane gets its `cmd:env`, and on Windows resolves an npm `.cmd` shim before spawning (the shim itself hangs under ConPTY) |
 | **L4** | §3.6, and the frontend: `runProviderLogin` and `AuthFlowController` drive srv's `auth.*` for every provider; the host only opens the URL |
 | **L5** | Delete the host's login commands (`run_cli_login`, `run_cli_login_pty`, `cancel_cli_login`, `get_cli_login_status`, `open_login_terminal`, `set_provider_auth`) and the frontend code that only served them |
 

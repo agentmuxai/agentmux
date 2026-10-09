@@ -293,7 +293,7 @@ mod spawn_site_coverage {
          "sanitized: Windows fallback shell, covered by the same single sanitize_pty_command"),
         ("src/backend/blockcontroller/shell/lifecycle.rs", "\"shell-under-test\"", 1,
          "not a spawn: global_cmd_env_tests builds a CommandBuilder only to read back the cmd:env applied to it; never spawned"),
-        ("src/backend/blockcontroller/shell/lifecycle.rs", "&cmd_str", 1,
+        ("src/backend/blockcontroller/shell/lifecycle.rs", "&program", 1,
          "sanitized: pane PTY, one choke-point sanitize_pty_command covers all four builders here"),
         ("src/backend/blockcontroller/shell/lifecycle.rs", "&shell_path", 1,
          "sanitized: the configured login shell, covered by the same sanitize_pty_command"),
