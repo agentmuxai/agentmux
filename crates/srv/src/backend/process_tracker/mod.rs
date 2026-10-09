@@ -189,6 +189,21 @@ pub trait TrackerHandle: Send + Sync {
         self.list_members().len()
     }
 
+    /// The tree's PIDs alone, plumbing included, without the per-process
+    /// enrichment `list_members` does: what Tower reads every refresh
+    /// (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md §5).
+    fn member_pids(&self) -> Vec<u32> {
+        self.list_members().into_iter().map(|p| p.pid).collect()
+    }
+
+    /// CPU time the whole tree has used, in nanoseconds, **including members
+    /// that have exited** (a Job Object's accounting, a cgroup's `cpu.stat`),
+    /// so a burst of short-lived build processes isn't lost between two
+    /// samples. `None` where the platform keeps no such account.
+    fn cpu_time_ns(&self) -> Option<u64> {
+        None
+    }
+
     /// Where a child about to be spawned joins the tree before it execs
     /// (Linux: the cgroup's `cgroup.procs`), so nothing it forks can slip
     /// out between spawn and [`assign_process`](Self::assign_process).

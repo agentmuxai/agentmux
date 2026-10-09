@@ -89,6 +89,18 @@
             }
         }
     },
+    "defwidget@tower": {
+        "display:order": 16,
+        "display:pinned": false,
+        "icon": "tower-observation",
+        "label": "Tower",
+        "description": "CPU and memory per pane and per process (read-only task manager)",
+        "blockdef": {
+            "meta": {
+                "view": "tower"
+            }
+        }
+    },
     "defwidget@drone": {
         "display:order": 12,
         "display:pinned": false,

@@ -135,6 +135,13 @@ export function registerDefaultCommands(): void {
         execute: () => createBlock({ meta: { view: "sysinfo" } }),
     });
     commandRegistry.register({
+        id: "open:tower",
+        label: "Open Tower (Task Manager)",
+        category: "Open",
+        icon: "tower-observation",
+        execute: () => createBlock({ meta: { view: "tower" } }),
+    });
+    commandRegistry.register({
         id: "open:help",
         label: "Open Help",
         category: "Open",

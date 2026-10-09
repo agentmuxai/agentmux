@@ -157,6 +157,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentmux-procstats"
+version = "0.59.16"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "agentmux-remote"
 version = "0.59.16"
 dependencies = [
@@ -169,6 +177,7 @@ name = "agentmux-srv"
 version = "0.59.16"
 dependencies = [
  "agentmux-common",
+ "agentmux-procstats",
  "agentmux-remote",
  "async-stream",
  "axum 0.7.9",

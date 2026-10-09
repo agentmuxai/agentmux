@@ -30,6 +30,7 @@ import { PresenceApi } from "./presence";
 import { ReactiveApi } from "./reactive";
 import { SessionApi } from "./session";
 import { SkillApi } from "./skill";
+import { TowerApi } from "./tower";
 import { VoiceApi } from "./voice";
 import { ViewerApi } from "./viewer";
 import { NotifyApi } from "./notify";
@@ -38,6 +39,7 @@ import { WorkspaceApi } from "./workspace";
 export type { OAuthFlowStatus } from "./types";
 export type { ViewerDeviceInfo, ViewerPairStartResult } from "./viewer";
 export type { PresenceState, PresenceStatusResult } from "./presence";
+export type { TowerProcess, TowerSnapshot, TowerTask } from "./tower";
 export type {
     CheckCliAuthResult,
     CommandCheckCliAuthData,
@@ -359,4 +361,5 @@ export const RpcApi = {
     ...AttachmentsApi,
     ...ViewerApi,
     ...PresenceApi,
+    ...TowerApi,
 };

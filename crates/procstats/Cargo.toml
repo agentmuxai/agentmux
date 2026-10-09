@@ -1,0 +1,25 @@
+[package]
+name = "agentmux-procstats"
+version.workspace = true
+edition = "2021"
+description = "Per-process CPU and memory, read without elevation, for AgentMux's Tower pane"
+license = "Apache-2.0"
+
+# Small and dependency-light on purpose: srv links it, and so does the static
+# remote helper (`crates/remote`) that samples an SSH host. std + libc on Unix,
+# windows-sys on Windows. SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md §6.1.
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Wdk_System_SystemInformation",
+    "Wdk_System_Threading",
+] }
+
+[target.'cfg(windows)'.dev-dependencies]
+# The tests cross-check the snapshot against the documented per-process APIs.
+windows-sys = { version = "0.59", features = ["Win32_System_ProcessStatus"] }

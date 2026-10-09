@@ -601,6 +601,7 @@ const MAX_TREE_DEPTH: usize = 32;
 /// Views that need no config to open, beyond their type.
 const PLAIN_VIEWS: &[&str] = &[
     "swarm", "settings", "help", "drone", "workflows", "warden", "toolchain", "launcher", "identity",
+    "tower",
 ];
 
 /// How to turn a file into panes.

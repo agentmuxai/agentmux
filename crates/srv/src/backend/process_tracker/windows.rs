@@ -30,9 +30,9 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicProcessIdList,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation, JobObjectBasicProcessIdList,
     JobObjectExtendedLimitInformation, QueryInformationJobObject,
-    SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JOBOBJECT_BASIC_PROCESS_ID_LIST,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_BREAKAWAY_OK,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PRIORITY_CLASS,
 };
@@ -203,6 +203,30 @@ impl TrackerHandle for JobObjectTracker {
                 exe: String::new(),
             })
             .collect()
+    }
+
+    fn member_pids(&self) -> Vec<u32> {
+        self.query_pids()
+    }
+
+    fn cpu_time_ns(&self) -> Option<u64> {
+        let inner = self.inner.lock().unwrap();
+        if inner.closed {
+            return None;
+        }
+        // SAFETY: a plain query into a zeroed struct of the size passed.
+        unsafe {
+            let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = zeroed();
+            let ok = QueryInformationJobObject(
+                inner.job,
+                JobObjectBasicAccountingInformation,
+                &mut info as *mut _ as *mut _,
+                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                std::ptr::null_mut(),
+            );
+            // 100 ns units, terminated members included.
+            (ok != 0).then(|| (info.TotalUserTime.max(0) as u64 + info.TotalKernelTime.max(0) as u64) * 100)
+        }
     }
 
     fn kill_tree(&self) {
