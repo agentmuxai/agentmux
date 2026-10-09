@@ -9,12 +9,11 @@ import { MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 afterEach(() => cleanup());
 
 describe("TerminalOutput", () => {
-    it("renders one AnsiLine row per line", () => {
+    it("renders one row per line", () => {
         const { container } = render(() => <TerminalOutput text={"a\nb\nc"} />);
         const root = container.querySelector(".agent-terminal-output")!;
         expect(root).not.toBeNull();
-        // AnsiLine emits a <div> per line (no marker under the cap).
-        expect(root.querySelectorAll(":scope > div:not(.agent-output-hidden-marker)").length).toBe(3);
+        expect(root.querySelectorAll(".agent-preview-line").length).toBe(3);
         expect(root.textContent).toContain("a");
         expect(root.textContent).toContain("c");
     });
@@ -32,8 +31,8 @@ describe("TerminalOutput", () => {
         const text = Array.from({ length: MAX_TOOL_OUTPUT_LINES + 5 }, (_, i) => `line${i}`).join("\n");
         const { container } = render(() => <TerminalOutput text={text} from="tail" />);
         const root = container.querySelector(".agent-terminal-output")!;
-        // Exactly MAX line rows (the hidden-marker div is excluded).
-        expect(root.querySelectorAll(":scope > div:not(.agent-output-hidden-marker)").length).toBe(MAX_TOOL_OUTPUT_LINES);
+        // Exactly MAX line rows.
+        expect(root.querySelectorAll(".agent-preview-line").length).toBe(MAX_TOOL_OUTPUT_LINES);
         const marker = container.querySelector(".agent-output-hidden-marker");
         expect(marker).not.toBeNull();
         expect(marker!.textContent).toContain("5");

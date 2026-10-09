@@ -30,6 +30,7 @@
  * lines differ from the file it replaced.
  */
 
+import { READ_LINE_NUMBER_RE } from "../preview-text/docs";
 import type { ToolNode } from "../types";
 import { toolNameOf } from "./tool-descriptors";
 
@@ -73,7 +74,7 @@ const toInt = (v: unknown): number | null => {
     return typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : null;
 };
 
-const NUMBERED_RE = /^\s*(\d+)\t/;
+const NUMBERED_RE = READ_LINE_NUMBER_RE;
 /** The note Claude Code appends to a token-capped read. */
 const PARTIAL_RE = /showing lines (\d+)-(\d+) of (\d+) total/;
 

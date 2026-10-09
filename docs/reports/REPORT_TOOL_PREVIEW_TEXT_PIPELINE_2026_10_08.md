@@ -1,6 +1,6 @@
 # Tool previews: why the formatting breaks, and one pipeline to fix it
 
-**Status:** active — Phase 0 items 1, 2 and 5 (bashwrap's echoed cursor report, the 200-column PTY, stale doc statuses) in #4508; items 3 and 4 moved into Phase 2 (§6). Phases 1–3 are in progress.
+**Status:** active — Phase 0 items 1, 2 and 5 (bashwrap's echoed cursor report, the 200-column PTY, stale doc statuses) in #4508; items 3 and 4 moved into Phase 2 (§6). Phases 1–3 (the pipeline, the renderer, the deletions, the layout test) built in the PR after #4508; §8 says what's where.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "the preview formatting sometimes doesn't process right. We had a couple work on it including simulating 2 space tabs that doesn't appear to work. Sometimes lines are wordwrapped for no reason … I worry the code is spaghetti and isn't cleanly processing display in a robust way … we want a clear preview parser that ensures previews are always clean."
 **Author:** Masty.
@@ -219,7 +219,7 @@ The horizontal scroll lives on the preview box, not an inner element, so its scr
 | prose (jekt body, web text, Agent reports in Markdown) | wrap |
 | JSON | scroll |
 
-A per-preview "wrap lines" toggle could flip it, with the choice stored per pane. This is the decision the 2026-09-02 analysis (§6.3) recommended and that didn't ship.
+A per-preview "wrap lines" toggle could flip it, with the choice stored per pane (not built). This is the decision the 2026-09-02 analysis (§6.3) recommended and that didn't ship.
 
 All `:global(...)` rules, the dead rules listed in §3.4, and the per-component `white-space` and break rules are removed in favour of this mixin.
 
@@ -256,7 +256,28 @@ Add one `PreviewLines.layout.test.tsx` that renders a fixture set at two widths 
 
 That test is the definition of "previews are always clean".
 
-## 8. Decisions
+## 8. As built (2026-10-09)
+
+Phases 1–3 are built in the PR after #4508. What's where:
+
+| Layer | Files |
+|---|---|
+| Text stage | `frontend/app/view/agent/preview-text/`: `types.ts` (PreviewDoc), `terminal.ts` (decoder), `tabs.ts`, `cap.ts`, `docs.ts` (builders per kind: `codeDoc`, `diffDocFromSides`, `diffDocFromUnified`, `outputDoc`, `commandDoc`, `chunksDoc`, `jsonDoc`, `proseDoc`), `highlight.ts` (one Shiki loader, tokens per line, a diff's sides tokenized apart) |
+| Renderer | `components/PreviewLines.tsx` (one block per line; gutter and marker in their own boxes) and `components/ChunkPreview.tsx` (streamed chunks, joined into lines) |
+| Stylesheet | `styles/_preview.scss` (scroll and wrap modes) |
+| Guard | `components/PreviewLines.layout.test.tsx` (real browser), via `components/layout-browser.ts`; `preview-text/preview-text.test.ts` (fixtures) |
+
+Migrated: Read and Write (`FilePreview`), Edit (`DiffViewer`), Bash (`BashOutputViewer`), every string result (`TerminalOutput`: Grep, Glob, MCP, Task, the default renderer), single-line results and expanded JSON (`CompactResult`), streamed output in the tool overlay, the persistent shell and the activity dock, jekt bodies and raw payloads, and context-delivery bodies.
+
+Deleted: the `:global(...)` rules and the other dead rules in §3.4, the per-preview `white-space` and break rules, `formatReadPreview` and the text gutter (`splitNumberedGutter`, `renderNumberedGutter`), DiffViewer's own Shiki copy and `innerHTML` swap, the per-chunk `<pre>`s and their `KIND_CLASS` maps.
+
+Not changed, on purpose:
+- **Markdown** (Agent reports, `.md` Reads and Writes, WebSearch summaries) still renders through the Markdown component; its code fences still use highlight.js. Markdown is prose with its own layout.
+- **HighlightedCode** stays for Hangar's file preview and the PowerShell command view, now on the shared Shiki loader and theme.
+- **The hover peek, message bodies, WebFetch and record tables** keep their own text handling; they aren't tool-preview boxes.
+- **The Shiki theme** is still `github-dark-high-contrast` whatever the app theme (§3.1); that's a separate change.
+
+## 9. Decisions
 
 The owner asked for the recommendations (2026-10-08: "do the fixes, use best recommendations"):
 

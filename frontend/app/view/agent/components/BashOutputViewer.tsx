@@ -5,14 +5,19 @@
  * BashOutputViewer — a finished Bash call's output and exit code. The command
  * itself is in the tool row and its hover, so it isn't printed again here
  * (REPORT_THEME_MENU_RUNTIME_PANEL_TOOL_PREVIEW_TWEAKS_2026_10_07.md §3).
+ *
+ * The output goes through the preview text stage (`preview-text/docs.ts`
+ * `commandDoc`): decoded as a terminal shows it, stdout then stderr in one
+ * preview, the latest 1000 lines kept. It renders exactly as the same output
+ * did while streaming.
  */
 
 import clsx from "clsx";
 import { Show, createMemo, type JSX } from "solid-js";
-import type { BashResult } from "../types";
-import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { commandDoc } from "../preview-text/docs";
 import { parseExitPrefix } from "../tool-meta/bash-exit";
+import type { BashResult } from "../types";
+import { PreviewLines } from "./PreviewLines";
 
 interface BashOutputViewerProps {
     result?: BashResult;
@@ -41,17 +46,13 @@ export const BashOutputViewer = (props: BashOutputViewerProps): JSX.Element => {
         // bashwrap injects, when the result lacks a native exitCode field.
         // Strip the prefix from stdout regardless — the user shouldn't
         // see the marker.
-        const { exit: parsedExit, body: rawBody } = parseExitPrefix(rawStdout);
+        const { exit: parsedExit, body } = parseExitPrefix(rawStdout);
         const exitCode = nativeExit ?? parsedExit;
-        // Cap each body to bound the conversation DOM (SPEC_TOOL_OUTPUT_CAP).
-        // Tail-keep — the latest output is what matters for a command.
-        const stdoutCap = capText(rawBody, MAX_TOOL_OUTPUT_LINES, "tail");
-        const stderrCap = capText(stderr, MAX_TOOL_OUTPUT_LINES, "tail");
+        const doc = commandDoc(body, stderr);
         return {
             exitCode,
-            stdoutCap,
-            stderrCap,
-            hasOutput: stdoutCap.text.length > 0 || stderrCap.text.length > 0,
+            doc,
+            hasOutput: doc.lines.length > 0,
             hasError: exitCode !== undefined && exitCode !== 0,
         };
     });
@@ -59,22 +60,7 @@ export const BashOutputViewer = (props: BashOutputViewerProps): JSX.Element => {
     return (
         <div class="agent-bash">
             <Show when={view().hasOutput} fallback={<div class="agent-bash-no-output">No output</div>}>
-                <Show when={view().stdoutCap.hiddenLines > 0}>
-                    <OutputHiddenMarker hidden={view().stdoutCap.hiddenLines} noun="line" from="tail" />
-                </Show>
-                <Show when={view().stdoutCap.text}>
-                    <pre class={clsx("agent-bash-output", { "has-error": view().hasError })}>
-                        {view().stdoutCap.text}
-                    </pre>
-                </Show>
-                <Show when={view().stderrCap.text}>
-                    <Show when={view().stderrCap.hiddenLines > 0}>
-                        <OutputHiddenMarker hidden={view().stderrCap.hiddenLines} noun="line" from="tail" />
-                    </Show>
-                    <pre class={clsx("agent-bash-output agent-bash-stderr", { "has-error": view().hasError })}>
-                        {view().stderrCap.text}
-                    </pre>
-                </Show>
+                <PreviewLines doc={view().doc} class={clsx("agent-bash-output", { "has-error": view().hasError })} />
             </Show>
             <Show when={view().exitCode !== undefined}>
                 <div

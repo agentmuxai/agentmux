@@ -77,7 +77,7 @@ describe("jekt message height", () => {
 
     it("the raw payload block takes the same cap", () => {
         const fromRaw = scss.slice(scss.indexOf(".agent-jekt-raw {"));
-        expect(ruleBody(fromRaw, /^ {16}pre\s*\{/m)).toMatch(PREVIEW_BOX);
+        expect(ruleBody(fromRaw, /^ {16}\.agent-jekt-raw-body\s*\{/m)).toMatch(PREVIEW_BOX);
     });
 
     // Reversed from #3861's native chaining: native chaining latches a wheel
@@ -88,6 +88,6 @@ describe("jekt message height", () => {
     it("the jekt body and raw payload contain their scroll (the JS hand-off moves the pane)", () => {
         expect(ruleBody(scss, /^ {12}\.agent-jekt-body\s*\{/m)).toMatch(PREVIEW_BOX);
         const fromRaw = scss.slice(scss.indexOf(".agent-jekt-raw {"));
-        expect(ruleBody(fromRaw, /^ {16}pre\s*\{/m)).toMatch(PREVIEW_BOX);
+        expect(ruleBody(fromRaw, /^ {16}\.agent-jekt-raw-body\s*\{/m)).toMatch(PREVIEW_BOX);
     });
 });

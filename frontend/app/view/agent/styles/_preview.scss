@@ -1,0 +1,101 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// The one stylesheet for every preview's text (components/PreviewLines.tsx;
+// docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md §5.3).
+//
+// Before this, each preview set its own white-space, break rule, tab size and
+// line height (about 30 rules, four wrap policies), so whether a line wrapped
+// depended on which tool produced it. Now there are two modes, chosen per kind
+// of content in PreviewLines.tsx:
+//
+//   scroll  code, diffs, command and tool output, JSON: lines never wrap; the
+//           preview's scroll box (.agent-tool-overlay-log) scrolls sideways.
+//   wrap    prose (jekt bodies): wraps at word boundaries, breaking a word only
+//           when it can't fit on a line by itself, with a hanging indent so a
+//           wrapped row reads as a continuation.
+//
+// Tabs are expanded in preview-text/ before they get here; `tab-size` only
+// guards a stray one.
+
+.agent-preview {
+    font-family: var(--font-mono);
+    font-size: 1em;
+    line-height: 1.45;
+    tab-size: 8;
+    color: var(--main-text-color);
+
+    .agent-preview-lines {
+        display: block;
+        // At least as wide as the box, and as wide as the longest line, so a
+        // diff line's background runs the full scroll width.
+        min-width: 100%;
+        width: max-content;
+    }
+
+    .agent-preview-line {
+        display: flex;
+        min-height: 1.45em;
+    }
+
+    .agent-preview-gutter {
+        flex: none;
+        width: var(--agent-preview-gutter, 0);
+        margin-right: 1ch;
+        text-align: right;
+        color: var(--secondary-text-color);
+        opacity: 0.7;
+        user-select: none;
+    }
+
+    .agent-preview-marker {
+        flex: none;
+        width: 1ch;
+        margin-right: 0.5ch;
+        opacity: 0.6;
+        user-select: none;
+    }
+
+    .agent-preview-text {
+        flex: 1 1 auto;
+        white-space: pre;
+    }
+
+    // Diffs
+    .agent-preview-line--add {
+        background: color-mix(in srgb, green 15%, transparent);
+    }
+    .agent-preview-line--del {
+        background: color-mix(in srgb, red 15%, transparent);
+    }
+    .agent-preview-line--hunk {
+        background: color-mix(in srgb, blue 10%, transparent);
+        color: var(--accent-color);
+        opacity: 0.85;
+    }
+
+    // Streams
+    .agent-preview-line--stderr {
+        color: var(--error-color);
+    }
+    .agent-preview-line--system {
+        color: var(--secondary-text-color);
+        font-style: italic;
+        opacity: 0.7;
+    }
+
+    &.agent-preview--wrap {
+        .agent-preview-lines {
+            width: auto;
+        }
+        .agent-preview-text {
+            min-width: 0;
+            white-space: pre-wrap;
+            overflow-wrap: break-word;
+            // Hanging indent: each line is its own block, so this pulls back
+            // only a line's first row and its wrapped rows sit 3ch in.
+            padding-left: 3ch;
+            text-indent: -3ch;
+        }
+    }
+}

@@ -17,7 +17,8 @@
 
 import clsx from "clsx";
 import { For, Show, type JSX } from "solid-js";
-import { LinkifiedText } from "@/app/element/linkified-text";
+import { proseDoc } from "../preview-text/docs";
+import { PreviewLines } from "./PreviewLines";
 import { formatCompactNumber } from "@/util/format-count";
 import { contextDeliveryTitle, isCompactionSummaryCard } from "../context-delivery";
 import type { ContextDeliveryNode, ContextItem } from "../types";
@@ -178,9 +179,9 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
                         {(item) => (
                             <div class="agent-context-delivery-item">
                                 <ItemHead item={item} globalSentTwice={globalSentTwice(props.node)} />
-                                <pre class="agent-context-delivery-body" ref={handoff}>
-                                    <LinkifiedText text={item.body ?? ""} />
-                                </pre>
+                                <div class="agent-context-delivery-body" ref={handoff}>
+                                    <PreviewLines doc={proseDoc(item.body ?? "")} linkify />
+                                </div>
                             </div>
                         )}
                     </For>

@@ -566,7 +566,9 @@ describe("DocumentRow — context delivery card (SPEC_CONTEXT_DELIVERY_2026_09_3
     it("shows each item's name and full text when pinned open", () => {
         const { container } = renderCard(true);
         expect(screen.getByText("Conversation summary (written by Claude Code)")).toBeInTheDocument();
-        expect(container.querySelector(".agent-context-delivery-body")?.textContent).toBe(BODY);
+        // One block per line (PreviewLines), so compare line by line.
+        const lines = [...container.querySelectorAll(".agent-context-delivery-body .agent-preview-line")].map((l) => l.textContent);
+        expect(lines.join("\n")).toBe(BODY);
     });
 
     it("pins on click", async () => {

@@ -89,7 +89,7 @@ function stubHeights(heightsFor: (el: HTMLElement) => Heights) {
 }
 
 /** True while the log shows the streaming chunk feed rather than a result view. */
-const showsChunkFeed = (el: HTMLElement): boolean => el.querySelector(".agent-tool-log-line") != null;
+const showsChunkFeed = (el: HTMLElement): boolean => el.querySelector(".agent-tool-log-feed") != null;
 
 /** One height while the chunk feed is shown, another for the result view. */
 function stubHeightsByBranch(chunkFeed: Heights, result: Heights) {
@@ -153,7 +153,7 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         // gate from the source.
         vi.useFakeTimers();
         stubHeights((el) => {
-            const lines = el.querySelectorAll(".agent-tool-log-line").length;
+            const lines = el.querySelectorAll(".agent-tool-log-feed .agent-preview-line").length;
             return { scroll: 40 * lines, offset: 50 * lines };
         });
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
@@ -424,7 +424,7 @@ describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-0
         };
         const { container } = render(() => <ToolOverlayLog node={node} />);
         expect(container.textContent).not.toContain("bashwrap");
-        expect(container.querySelectorAll(".agent-tool-log-line")).toHaveLength(0);
+        expect(container.querySelectorAll(".agent-tool-log-feed .agent-preview-line")).toHaveLength(0);
     });
 
     it("shows real output immediately alongside a leading system chunk, not just eventually", () => {
@@ -441,11 +441,11 @@ describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-0
         const { container } = render(() => <ToolOverlayLog node={node} />);
         expect(container.textContent).not.toContain("bashwrap");
         expect(container.textContent).toContain("real output line");
-        expect(container.querySelectorAll(".agent-tool-log-line")).toHaveLength(1);
+        expect(container.querySelectorAll(".agent-tool-log-feed .agent-preview-line")).toHaveLength(1);
     });
 
     // The test above only proves "bashwrap" text doesn't leak and zero
-    // `.agent-tool-log-line` rows render — true both before AND after this
+    // `.agent-tool-log-feed` lines render — true both before AND after this
     // fix, since the pre-fix bug rendered an EMPTY ChunkList (also zero
     // rows), not visible text. It doesn't distinguish "correctly blank" from
     // "wrongly blank instead of the Thinking placeholder" — this test does.
@@ -719,7 +719,7 @@ describe("ToolOverlayLog shows no Bash command", () => {
         const { container } = render(() => <ToolOverlayLog node={streamingNode} />);
         expect(container.querySelector(".agent-bash-cmd")).toBeNull();
         expect(container.textContent).not.toContain("sleep 1 && echo done");
-        expect(container.querySelector(".agent-tool-log-line")!.textContent).toBe("line 1");
+        expect(container.querySelector(".agent-tool-log-feed .agent-preview-line")!.textContent).toBe("line 1");
     });
 
     it("shows only the spinner while a running call has no visible output yet", () => {

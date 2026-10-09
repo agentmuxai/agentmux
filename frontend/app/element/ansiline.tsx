@@ -54,6 +54,8 @@ const ANSI_TAILWIND_MAP = {
     107: "bg-ansi-brightwhite",
 };
 
+export type AnsiState = InternalStateType;
+
 type InternalStateType = {
     modifiers: Set<string>;
     textColor: string | null;
@@ -61,19 +63,21 @@ type InternalStateType = {
     reverse: boolean;
 };
 
+export type AnsiSegment = SegmentType;
+
 type SegmentType = {
     text: string;
     classes: string;
 };
 
-const makeInitialState: () => InternalStateType = () => ({
+export const makeInitialState: () => InternalStateType = () => ({
     modifiers: new Set<string>(),
     textColor: null,
     bgColor: null,
     reverse: false,
 });
 
-const updateStateWithCodes = (state: InternalStateType, codes: number[]) => {
+export const updateStateWithCodes = (state: InternalStateType, codes: number[]) => {
     codes.forEach((code) => {
         if (code === 0) {
             // Reset state
@@ -102,7 +106,7 @@ const updateStateWithCodes = (state: InternalStateType, codes: number[]) => {
     return state;
 };
 
-const stateToClasses = (state: InternalStateType) => {
+export const stateToClasses = (state: InternalStateType) => {
     const classes: string[] = [];
     classes.push(...Array.from(state.modifiers));
 
