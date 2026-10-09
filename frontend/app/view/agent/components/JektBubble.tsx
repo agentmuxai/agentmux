@@ -19,7 +19,7 @@
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
  */
 
-import { Show, createEffect, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, untrack, type JSX } from "solid-js";
 import { outputDoc, proseDoc } from "../preview-text/docs";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
@@ -62,6 +62,9 @@ export function deliveredAt(node: Pick<JektMessageNode, "timestamp" | "heldForSe
 const handoff = previewBox();
 
 export const JektBubble = (props: JektBubbleProps): JSX.Element => {
+    // Built once per message, not on every read of the prop.
+    const bodyDoc = createMemo(() => proseDoc(props.node.message));
+    const rawDoc = createMemo(() => outputDoc(props.node.raw, { from: "head" }));
     // A jekt that arrives live is held open until it scrolls off, as a tool that
     // finishes on screen is. Keyed on the id: the streaming buffer can reuse this
     // row for another node. A sensitive jekt is open by default anyway.
@@ -110,7 +113,7 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                 <>
                     {/* Prose: wraps at words (PreviewLines, the preview text stage). */}
                     <div class="agent-jekt-body" ref={handoff}>
-                        <PreviewLines doc={proseDoc(props.node.message)} linkify />
+                        <PreviewLines doc={bodyDoc()} linkify />
                     </div>
                     <div class="agent-jekt-meta">
                         <span class="agent-jekt-meta-item">From: {props.node.from}</span>
@@ -131,7 +134,7 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                     <details class="agent-jekt-raw">
                         <summary>Raw payload</summary>
                         <div class="agent-jekt-raw-body" ref={handoff}>
-                            <PreviewLines doc={outputDoc(props.node.raw, { from: "head" })} />
+                            <PreviewLines doc={rawDoc()} />
                         </div>
                     </details>
                 </>

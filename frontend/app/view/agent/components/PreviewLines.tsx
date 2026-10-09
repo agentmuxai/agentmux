@@ -18,7 +18,7 @@
 
 import { LinkifiedText } from "@/app/element/linkified-text";
 import clsx from "clsx";
-import { createEffect, createSignal, For, Index, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Index, onCleanup, Show, type JSX } from "solid-js";
 import { highlightDoc, type CodeToken } from "../preview-text/highlight";
 import type { PreviewDoc, PreviewLine, PreviewMode } from "../preview-text/types";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
@@ -57,12 +57,13 @@ export function PreviewLines(props: PreviewLinesProps): JSX.Element {
     });
 
     const mode = () => props.mode ?? DEFAULT_MODE[props.doc.kind];
-    const gutterWidth = () => {
+    // Memos: read once per line below, and the gutter width walks every line.
+    const gutterWidth = createMemo(() => {
         let max = 0;
         for (const l of props.doc.lines) if (l.number != null) max = Math.max(max, String(l.number).length);
         return max;
-    };
-    const hasMarkers = () => props.doc.kind === "diff";
+    });
+    const hasMarkers = createMemo(() => props.doc.kind === "diff");
 
     return (
         <div

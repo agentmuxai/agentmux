@@ -39,10 +39,28 @@ export function ChunkPreview(props: ChunkPreviewProps): JSX.Element {
     // Both stateful (append-only identity tracking), so one each per mounted preview.
     const spinnerCollapse = createSpinnerCollapser<OutputChunk>();
     const window = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
+    // Chunks seen in the stream, added as they arrive (the stream only grows;
+    // a new stream starts over), so telling them apart from the collapser's
+    // own frames costs the new chunks, not the whole stream.
+    let fromStream = new WeakSet<OutputChunk>();
+    let seen = 0;
+    let first: OutputChunk | undefined;
     const doc = createMemo(() => {
-        const { display, spinnerSlot } = spinnerCollapse(dropBashwrapStartingChunk(props.chunks));
+        const raw = dropBashwrapStartingChunk(props.chunks);
+        if (raw[0] !== first || raw.length < seen) {
+            fromStream = new WeakSet();
+            seen = 0;
+            first = raw[0];
+        }
+        for (; seen < raw.length; seen++) fromStream.add(raw[seen]);
+        const { display, spinnerSlot } = spinnerCollapse(raw);
         const { chunks, hiddenLines } = window(display);
-        const doc = chunksDoc(spinnerSlot ? [...chunks, spinnerSlot] : chunks);
+        // The collapser hands back frozen frames and the live spinner trimmed,
+        // without their line break: each stands as a line of its own. Those
+        // are the chunks it made itself, not ones from the stream.
+        const wholeLines = new Set<OutputChunk>(chunks.filter((c) => !fromStream.has(c)));
+        if (spinnerSlot) wholeLines.add(spinnerSlot);
+        const doc = chunksDoc(spinnerSlot ? [...chunks, spinnerSlot] : chunks, { wholeLines });
         const hidden = hiddenLines + (doc.hidden?.count ?? 0);
         return hidden > 0 ? { ...doc, hidden: { count: hidden, from: "tail" as const } } : doc;
     });

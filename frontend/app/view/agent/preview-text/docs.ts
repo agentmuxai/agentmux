@@ -192,18 +192,25 @@ export interface OutputChunk {
  * stream of the chunk that started it. The finished result of the same output
  * then renders identically.
  */
-export function chunksDoc(chunks: readonly OutputChunk[], opts: { from?: "head" | "tail" } = {}): PreviewDoc {
+export function chunksDoc(
+    chunks: readonly OutputChunk[],
+    opts: { from?: "head" | "tail"; wholeLines?: ReadonlySet<OutputChunk> } = {}
+): PreviewDoc {
     const raw: { text: string; kind: string }[] = [];
     let open = false;
     for (const chunk of chunks) {
         if (chunk.content === "") continue; // nothing to add; would open an empty line
+        // A chunk that stands as whole lines (a collapsed spinner frame, which
+        // comes back trimmed): it starts on a line of its own and ends it.
+        const whole = opts.wholeLines?.has(chunk) ?? false;
+        if (whole) open = false;
         const parts = chunk.content.split("\n");
         parts.forEach((part, i) => {
             if (i === 0 && open) raw[raw.length - 1].text += part;
             else raw.push({ text: part, kind: chunk.kind });
         });
-        open = !chunk.content.endsWith("\n");
-        if (!open) raw.pop(); // the empty piece after a final newline
+        open = !whole && !chunk.content.endsWith("\n");
+        if (chunk.content.endsWith("\n")) raw.pop(); // the empty piece after a final newline
     }
     const lines: PreviewLine[] = raw.map(({ text, kind }) => {
         const line = decodeTerminal(capChars(text, "tail"), OUTPUT_TAB_WIDTH).at(-1) ?? { text: "" };

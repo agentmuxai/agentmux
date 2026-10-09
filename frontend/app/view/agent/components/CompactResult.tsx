@@ -11,14 +11,14 @@
  * conversation DOM once expanded.
  */
 
-import { For, createMemo, createSignal, Show, type JSX } from "solid-js";
+import { createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { jsonDoc, outputDoc } from "../preview-text/docs";
+import { compactSummaryFor, rendersFileList, textReadOrder } from "../tool-meta/tool-descriptors";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { PreviewLines } from "./PreviewLines";
 import { TerminalOutput } from "./TerminalOutput";
+import { MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { terminalText } from "./terminal-text";
-import { compactSummaryFor, rendersFileList, textReadOrder } from "../tool-meta/tool-descriptors";
 
 interface CompactResultProps {
     tool: string;
@@ -70,6 +70,7 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
     // result list (Grep / Glob) reads from its first line; other text (logs,
     // command output) from its latest. A long line scrolls sideways.
     const termText = () => terminalText(props.result);
+    const lineDoc = createMemo(() => outputDoc(termText()?.trim() ?? "", { from: "head" }));
     const readFrom = (): "head" | "tail" => textReadOrder(props.tool);
     return (
         <Show
@@ -78,7 +79,7 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
                 <div class="agent-tool-compact-result">
                     <Show
                         when={termText()!.trim().includes("\n")}
-                        fallback={<PreviewLines doc={outputDoc(termText()!.trim(), { from: "head" })} class="agent-tool-compact-line" />}
+                        fallback={<PreviewLines doc={lineDoc()} class="agent-tool-compact-line" />}
                     >
                         <TerminalOutput text={termText()!} from={readFrom()} />
                     </Show>
@@ -115,8 +116,8 @@ function StructuredResult(props: CompactResultProps): JSX.Element {
                 <span class="agent-tool-compact-text">{summary()}</span>
             </div>
             <Show when={expanded()}>
-                {rendersFileList(props.tool) && Array.isArray(props.result?.files)
-                    ? (() => {
+                {rendersFileList(props.tool) && Array.isArray(props.result?.files) ? (
+                    (() => {
                         const files: string[] = props.result.files;
                         const visible = files.slice(0, MAX_TOOL_OUTPUT_LINES);
                         const hidden = files.length - visible.length;
@@ -133,10 +134,9 @@ function StructuredResult(props: CompactResultProps): JSX.Element {
                             </>
                         );
                     })()
-                    : (
-                        <PreviewLines doc={json()} class="agent-tool-compact-json" />
-                    )
-                }
+                ) : (
+                    <PreviewLines doc={json()} class="agent-tool-compact-json" />
+                )}
             </Show>
         </div>
     );
