@@ -55,6 +55,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/back", post(routes::back))
         .route("/agentmux/browser/forward", post(routes::forward))
         .route("/agentmux/browser/reload", post(routes::reload))
+        .route("/agentmux/browser/owned_panes", post(routes::owned_panes))
 }
 
 /// Shared state for the browser API — primarily the resolver's

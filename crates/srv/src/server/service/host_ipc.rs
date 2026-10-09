@@ -182,5 +182,8 @@ async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType 
 
     *guard = Some(HostIpc { port, token });
     tracing::info!(port, "[host_ipc] registered CEF host CDP-automation credentials");
+    // A new (or restarted) host knows nothing of which panes agents own: send
+    // it the whole set (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
+    crate::server::browser_owner::changed().notify_one();
     WebReturnType::success_empty()
 }

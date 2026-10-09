@@ -817,6 +817,8 @@ declare global {
         action?: string;
         /** Approval: the form's values, secrets masked. */
         fields?: [string, string][];
+        /** When the request is about one of this pane's popup windows: its address. */
+        window?: string | null;
     };
 
     type MetaType = {
@@ -838,6 +840,10 @@ declare global {
          *  (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §3.4, §5). */
         "browser:popup_of"?: string | null;
         "browser:popup_from"?: string | null;
+        /** On an opener: its open popup windows (native windows its page
+         *  opened), shown with Show and Close. Written by srv only
+         *  (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §7). */
+        "browser:popup_windows"?: { id: string; url: string }[] | null;
         // Floating-pane window state (host-written; `pane:floating_*` family).
         "pane:floating_placement"?: "normal" | "maximized";
         "pane:floating_normal_rect"?: { left: number; top: number; right: number; bottom: number };

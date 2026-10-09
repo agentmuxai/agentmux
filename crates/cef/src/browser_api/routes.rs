@@ -886,6 +886,32 @@ pub async fn forward(
 /// (default false) maps to the CDP flag — true is the equivalent of Ctrl+F5
 /// (bypass the http cache). The pane's current URL is preserved, so no
 /// target-cache invalidation is needed.
+#[derive(serde::Deserialize)]
+pub struct OwnedPanesReq {
+    pub panes: Vec<String>,
+}
+
+/// `POST /agentmux/browser/owned_panes` — srv's whole set of agent-owned
+/// browser panes, replacing the host's copy. `on_before_popup` reads it to
+/// decide which of a pane's popups open in-app
+/// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
+pub async fn owned_panes(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<OwnedPanesReq>,
+) -> (StatusCode, Json<ApiResponse<AckData>>) {
+    if !authorized(&headers, &state.ipc_token) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiResponse::err("unauthorized: missing or invalid bearer token")),
+        );
+    }
+    let mut owned = state.owned_panes.lock();
+    owned.clear();
+    owned.extend(req.panes);
+    ok_body(ApiResponse::ok(AckData::new()))
+}
+
 pub async fn reload(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

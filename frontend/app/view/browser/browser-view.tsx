@@ -247,6 +247,9 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                                 {a().kind === "handoff" ? a().reason : a().what}
                             </span>
                         </div>
+                        <Show when={a().window}>
+                            <div class="browser-attention-target">In its popup window: {a().window}</div>
+                        </Show>
                         <Show when={a().kind === "approval" && (a().fields?.length ?? 0) > 0}>
                             <table class="browser-attention-fields">
                                 <tbody>
@@ -278,6 +281,34 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                         </div>
                     </div>
                 )}
+            </Show>
+            <Show when={model.popupWindowsAtom().length > 0}>
+                <div class="browser-popup-windows" role="list" aria-label="Popup windows">
+                    <For each={model.popupWindowsAtom()}>
+                        {(w) => (
+                            <div class="browser-popup-window" role="listitem">
+                                <i class="fa-solid fa-window-restore" aria-hidden="true" />
+                                <span class="browser-popup-window-url" title={w.url}>
+                                    Popup window: {w.url}
+                                </span>
+                                <Button
+                                    density="compact"
+                                    title="Bring this popup window to the front"
+                                    onClick={() => model.showPopup(w.id).catch(() => {})}
+                                >
+                                    Show
+                                </Button>
+                                <Button
+                                    density="compact"
+                                    title="Close this popup window"
+                                    onClick={() => model.closePopup(w.id).catch(() => {})}
+                                >
+                                    Close
+                                </Button>
+                            </div>
+                        )}
+                    </For>
+                </div>
             </Show>
             <Show when={model.popupFromAtom()}>
                 {(from) => (

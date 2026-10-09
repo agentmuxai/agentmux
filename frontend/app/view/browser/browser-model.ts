@@ -160,6 +160,9 @@ export class BrowserViewModel {
     /** The site of the page that opened this pane as a popup
      *  (`browser:popup_from`, written by srv; SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §5). */
     popupFromAtom: Accessor<string | undefined>;
+    /** The popup windows this pane's page has open (`browser:popup_windows`,
+     *  written by srv; SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §7). */
+    popupWindowsAtom: Accessor<{ id: string; url: string }[]>;
     /** The driving agent's pending request to the user (hand-off or approval). */
     attentionAtom: Accessor<BrowserAttention | undefined>;
 
@@ -379,6 +382,12 @@ export class BrowserViewModel {
             this.popupFromAtom = createMemo(() => {
                 const v = this.meta()?.["browser:popup_from"];
                 return typeof v === "string" && v.trim() ? v.trim() : undefined;
+            });
+            this.popupWindowsAtom = createMemo(() => {
+                const v = this.meta()?.["browser:popup_windows"];
+                return Array.isArray(v)
+                    ? v.filter((w) => typeof w?.id === "string" && typeof w?.url === "string")
+                    : [];
             });
             return dispose;
         });
@@ -765,6 +774,16 @@ export class BrowserViewModel {
         // Windows-level keyboard focus to the pane's HWND.
         getApi().browserPanes.focus(this.blockId).catch(() => {});
         return true;
+    }
+
+    /** Bring one of this pane's popup windows to the front. */
+    showPopup(popupId: string): Promise<void> {
+        return getApi().browserPanes.showPopup(popupId);
+    }
+
+    /** Close one of this pane's popup windows. */
+    closePopup(popupId: string): Promise<void> {
+        return getApi().browserPanes.closePopup(popupId);
     }
 
     /** The human answers the pane's banner (a hand-off or an approval). */

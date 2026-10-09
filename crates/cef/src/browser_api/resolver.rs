@@ -75,6 +75,16 @@ impl TargetCache {
         state: &Arc<AppState>,
         block_id: &str,
     ) -> Result<ResolvedTarget, ResolveError> {
+        // Path 0: a popup window a pane's page opened (`popup-<uuid>`) is
+        // its own browser, with its own page, like a pane
+        // (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §6).
+        if let Some(label) = state.live_popup_label(block_id) {
+            return Ok(ResolvedTarget {
+                label,
+                scope_to_block: false,
+            });
+        }
+
         // Path 1: a live browser pane is its own browser.
         if let Some(label) = state.live_browser_pane_label(block_id) {
             return Ok(ResolvedTarget {

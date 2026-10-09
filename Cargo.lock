@@ -97,6 +97,7 @@ dependencies = [
  "hmac",
  "junction",
  "libc",
+ "psl",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -104,6 +105,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "url",
  "windows-sys 0.59.0",
 ]
 
@@ -202,7 +204,6 @@ dependencies = [
  "parking_lot",
  "portable-pty",
  "proptest",
- "psl",
  "quick-xml 0.39.4",
  "rcgen",
  "reqwest",

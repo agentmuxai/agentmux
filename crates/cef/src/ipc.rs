@@ -680,6 +680,22 @@ async fn route_command(
             state.browser_panes.focus(block_id, state);
             Ok(serde_json::json!(true))
         }
+        // Show and Close on an opener's popup-windows strip
+        // (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §7). Only
+        // a live popup window's label does anything.
+        "browser_popup_show" | "browser_popup_close" => {
+            let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if state.live_popup_label(id).is_none() {
+                return Err(format!("{cmd}: no popup window {id:?}"));
+            }
+            tracing::info!("[ipc] {} id={}", cmd, id);
+            if cmd == "browser_popup_show" {
+                crate::ui_tasks::post_show_popup(state, id);
+            } else {
+                crate::ui_tasks::post_close_popup(state, id);
+            }
+            Ok(serde_json::json!(true))
+        }
         "browser_pane_auth_submit" => {
             // Renderer collected credentials from the modal. Resolve the
             // CEF AuthCallback parked under request_id and continue.
