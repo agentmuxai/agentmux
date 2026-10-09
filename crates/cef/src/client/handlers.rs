@@ -598,6 +598,11 @@ wrap_display_handler! {
             inner.on_title_change(browser, title);
         }
 
+        fn on_address_change(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, url: Option<&CefString>) {
+            let mut inner = self.inner.lock();
+            inner.on_address_change(browser, frame, url);
+        }
+
         fn on_favicon_urlchange(
             &self,
             browser: Option<&mut Browser>,
