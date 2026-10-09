@@ -397,6 +397,34 @@ describe("Tower", () => {
         expect(setMetaMock).not.toHaveBeenCalledWith({ "tower:connection": null });
     });
 
+    it("the Host view groups processes of one app, and can list them flat", async () => {
+        const many = snapshot(true);
+        many.host!.processes = [
+            { id: "20:1", pid: 20, name: "chrome.exe", cpu: 0.5, mem: GB },
+            { id: "21:1", pid: 21, name: "chrome.exe", cpu: 0.25, mem: GB },
+            { id: "4:1", pid: 4, name: "System", cpu: 0.01, mem: 1024 },
+        ];
+        sample.mockResolvedValue(many);
+        setMeta({ "tower:view": "host" });
+        renderTower();
+        const chrome = await screen.findByTestId("tower-app-chrome.exe");
+        expect(within(chrome).getByText("(2)")).toBeInTheDocument();
+        expect(within(chrome).getByText("2.0 GB")).toBeInTheDocument();
+        // 0.75 of a core on a 4-core machine.
+        expect(within(chrome).getByText("19%")).toBeInTheDocument();
+        expect(screen.getAllByText("chrome.exe")).toHaveLength(1);
+        fireEvent.click(within(chrome).getByRole("button", { name: "Show processes" }));
+        expect(screen.getAllByText("chrome.exe")).toHaveLength(3);
+        // A group of one is a plain row.
+        expect(screen.queryByTestId("tower-app-system")).toBeNull();
+        expect(screen.getByText("System")).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "Group by app" }));
+        expect(setMetaMock).toHaveBeenCalledWith({ "tower:group": "off" });
+        await waitFor(() => expect(screen.queryByTestId("tower-app-chrome.exe")).toBeNull());
+        expect(screen.getAllByText("chrome.exe")).toHaveLength(2);
+    });
+
     it("polls only while visible", async () => {
         vi.useFakeTimers();
         renderTower();
