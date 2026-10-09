@@ -35,7 +35,7 @@
 - **Caught as it arrives, not through a subscription.** srv sends `srvinfo` the moment the socket opens, which can be before the UI has subscribed to any event (`initGlobalEventSubs` runs after an HTTP call), and the event bus drops an event nobody subscribes to. So `initWshrpc`'s message handler passes every message to `noteSrvInfoMessage` before routing it.
 - `srvInfo()` holds the last report.
 - `UI_VERSION` is the UI's own version, stamped at build time from `package.json` (`vite.config.ts` `define: __AGENTMUX_VERSION__`).
-- `versionSkew()` is srv's version when it differs from `UI_VERSION`. The status bar then shows "Reload for <version>" (`VersionSkewStatus`); clicking reloads the window.
+- `versionSkew()` is srv's version when it differs from `UI_VERSION`. The status bar then shows "Reload for <version>" (`VersionSkewStatus`); clicking calls `AppApi.reloadWindow()`. The desktop host reloads through the URL that carries its IPC credentials (`reloadKeepingHostCredentials`, the same path the startup recovery uses), because a plain reload drops them and can strand the window.
 
 **Why compare app versions, not a protocol number.** A protocol number only helps if every breaking change remembers to bump it. The UI and srv are always built from the same tree, so equal versions are the real compatibility contract, and a reload is the fix for any difference.
 

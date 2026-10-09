@@ -5,6 +5,7 @@
 // (app/store/srv-info.ts): one of them was updated under the other, and a
 // reload brings the UI in line.
 
+import { getApi } from "@/app/store/app-api";
 import { UI_VERSION, versionSkew } from "@/app/store/srv-info";
 import { Show, type JSX } from "solid-js";
 
@@ -13,7 +14,7 @@ const VersionSkewStatus = (): JSX.Element => (
         {(srv) => (
             <div
                 class="status-bar-item clickable"
-                onClick={() => window.location.reload()}
+                onClick={() => getApi().reloadWindow()}
                 data-tip={`This window is version ${UI_VERSION}; the backend is ${srv()}. Click to reload.`}
                 aria-label={`Backend is version ${srv()}: reload`}
             >

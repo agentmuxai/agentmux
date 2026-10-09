@@ -287,6 +287,8 @@ declare global {
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         getAuthKey(): string;
+        /** Reload this window's page, keeping what the host needs to reconnect it. */
+        reloadWindow(): void;
         getIsDev(): boolean;
         getCursorPoint: () => { x: number; y: number };
         getPlatform: () => NodeJS.Platform;
