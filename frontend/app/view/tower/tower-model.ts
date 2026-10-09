@@ -50,6 +50,8 @@ export class TowerViewModel {
     sort: Accessor<Sort>;
     setSort: Setter<Sort>;
     expanded: Accessor<ReadonlySet<string>>;
+    /** The Host view groups processes by app, as Task Manager does. */
+    groupByApp: Accessor<boolean>;
     filter: Accessor<string>;
     setFilter: Setter<string>;
     viewName: Accessor<string>;
@@ -93,6 +95,7 @@ export class TowerViewModel {
         void this.refreshPeers();
         this.sharing = () => settingsAtom()?.["tower:sharewithpaired"] === true;
         this.cpuMode = createMemo<CpuMode>(() => (ctx.meta()?.["tower:cpu"] === "core" ? "core" : "machine"));
+        this.groupByApp = createMemo(() => ctx.meta()?.["tower:group"] !== "off");
         this.viewName = createMemo(() => {
             if (!this.remote()) return this.view() === "host" ? "Tower · Host" : "Tower";
             const peer = this.peers().find((p) => p.connection === this.connection());
@@ -184,6 +187,10 @@ export class TowerViewModel {
         void RpcApi.SetConfigCommand(TabRpcClient, {
             "tower:sharewithpaired": on ? true : null,
         } as unknown as SettingsType);
+    }
+
+    setGroupByApp(on: boolean): void {
+        this.setMeta({ "tower:group": on ? null : "off" });
     }
 
     setCpuMode(mode: CpuMode): void {

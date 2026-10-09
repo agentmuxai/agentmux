@@ -228,7 +228,10 @@ memory. It sets each row's `role` instead: `main` (the CLI or shell),
 - Tasks view: one row per task (name, kind badge, CPU, Memory, process
   count), sortable by any column, expandable to its processes; a button
   reveals the pane.
-- Host view: every process with its task named, a filter (name, PID or task),
+- Host view: processes grouped by app as Task Manager does (`chrome.exe (46)`
+  with the group's CPU and memory, opening to its processes; a group of one is
+  a plain row), with a **Group by app** toggle (`tower:group`) to list them
+  flat. Also: every process with its task named, a filter (name, PID or task),
   the first 400 rows of the sorted, filtered list, and the count of processes
   the OS wouldn't measure.
 - Reachable from the command palette ("Open Tower (Task Manager)"), the

@@ -28,8 +28,11 @@ import {
     filterProcesses,
     formatCpu,
     formatMem,
+    groupProcesses,
     nextSort,
     processDetail,
+    type ProcessGroup,
+    sortGroups,
     type SortKey,
     sortProcesses,
     sortTasks,
@@ -376,6 +379,9 @@ function ProcessRow(props: {
     process: TowerProcess;
     cpu: (f: number | undefined) => string;
     nested?: boolean;
+    /** A group of one in the grouped Host view: aligned with the group names,
+     *  and counted as 1 (its PID is in the hover details). */
+    single?: boolean;
     taskLabel?: string;
 }) {
     return (
@@ -383,6 +389,7 @@ function ProcessRow(props: {
             class={clsx(
                 "tower-process-row",
                 props.nested && "tower-process-row--nested",
+                props.single && "tower-process-row--single",
                 props.process.role && `tower-role--${props.process.role}`
             )}
             title={processDetail(props.process, props.model.snapshot()?.memory_metric ?? "")}
@@ -397,8 +404,57 @@ function ProcessRow(props: {
             </td>
             <td class="tower-num">{props.cpu(props.process.cpu)}</td>
             <td class="tower-num">{formatMem(props.process.mem)}</td>
-            <td class="tower-num tower-muted">{props.process.pid}</td>
+            <td class="tower-num tower-muted">{props.single ? 1 : props.process.pid}</td>
         </tr>
+    );
+}
+
+/** One app in the grouped Host view: a single process as its own row, or a
+ *  row with the app's count and totals that opens to its processes. */
+function GroupRows(props: { model: TowerViewModel; group: ProcessGroup; cpu: (f: number | undefined) => string }) {
+    const m = props.model;
+    const open = () => m.expanded().has(`app:${props.group.key}`);
+    const processes = createMemo(() => (open() ? sortProcesses(props.group.processes, m.sort()) : []));
+    const label = (task: string | undefined) => (task ? m.taskLabel(task) : undefined);
+    return (
+        <Show
+            when={props.group.processes.length > 1}
+            fallback={
+                <ProcessRow
+                    model={m}
+                    process={props.group.processes[0]}
+                    cpu={props.cpu}
+                    single
+                    taskLabel={label(props.group.processes[0].task)}
+                />
+            }
+        >
+            <tr class="tower-group-row" data-testid={`tower-app-${props.group.key}`}>
+                <td class="tower-name">
+                    <div class="tower-name-line">
+                        <IconButton
+                            icon={open() ? "chevron-down" : "chevron-right"}
+                            label={open() ? "Hide processes" : "Show processes"}
+                            density="compact"
+                            tooltip={false}
+                            aria-expanded={open()}
+                            onClick={() => m.toggleExpanded(`app:${props.group.key}`)}
+                        />
+                        <span class="tower-label">{props.group.name}</span>
+                        <span class="tower-muted">({props.group.processes.length})</span>
+                        <Show when={label(props.group.task)}>
+                            {(l) => <span class="tower-badge tower-badge--task">{l()}</span>}
+                        </Show>
+                    </div>
+                </td>
+                <td class="tower-num">{props.cpu(props.group.cpu)}</td>
+                <td class="tower-num">{formatMem(props.group.mem)}</td>
+                <td class="tower-num">{props.group.processes.length}</td>
+            </tr>
+            <For each={processes()}>
+                {(p) => <ProcessRow model={m} process={p} cpu={props.cpu} nested taskLabel={label(p.task)} />}
+            </For>
+        </Show>
     );
 }
 
@@ -411,6 +467,11 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
         const all = host()?.processes ?? [];
         return sortProcesses(filterProcesses(all, m.filter(), m.taskLabel), m.sort());
     });
+    // Grouped by app: rows keyed by the app's name, so a group stays the same
+    // row (and stays open) across refreshes.
+    const groups = createMemo(() => sortGroups(groupProcesses(rows()), m.sort()));
+    const groupByKey = createMemo(() => new Map(groups().map((g) => [g.key, g])));
+    const shown = () => (m.groupByApp() ? groups().length : rows().length);
     return (
         <>
             <div class="tower-summary">
@@ -429,38 +490,72 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
                     </span>
                 </Show>
             </div>
-            <FilterInput
-                value={m.filter()}
-                onInput={(q) => m.setFilter(q)}
-                placeholder="Filter by name, PID or task"
-                class="tower-filter"
-                testId="tower-filter"
-            />
+            <div class="tower-host-bar">
+                <FilterInput
+                    value={m.filter()}
+                    onInput={(q) => m.setFilter(q)}
+                    placeholder="Filter by name, PID or task"
+                    class="tower-filter"
+                    testId="tower-filter"
+                />
+                <Button
+                    density="compact"
+                    icon="layer-group"
+                    pressed={m.groupByApp()}
+                    onClick={() => m.setGroupByApp(!m.groupByApp())}
+                    title="Group processes of the same app, as Task Manager does"
+                >
+                    Group by app
+                </Button>
+            </div>
             <table class="tower-table" aria-label="Processes">
                 <thead>
                     <tr>
                         <SortHeader model={m} key="name" label="Process" />
                         <SortHeader model={m} key="cpu" label="CPU" numeric />
                         <SortHeader model={m} key="mem" label="Memory" numeric />
-                        <SortHeader model={m} key="count" label="PID" numeric />
+                        <SortHeader
+                            model={m}
+                            key="count"
+                            label={m.groupByApp() ? "Count" : "PID"}
+                            numeric
+                            title={m.groupByApp() ? "Processes in the app, or the PID of one" : undefined}
+                        />
                     </tr>
                 </thead>
                 <tbody>
-                    <For each={rows().slice(0, HOST_ROW_LIMIT)}>
-                        {(p) => (
-                            <ProcessRow
-                                model={m}
-                                process={p}
-                                cpu={props.cpu}
-                                taskLabel={p.task ? m.taskLabel(p.task) : undefined}
-                            />
-                        )}
-                    </For>
+                    <Show
+                        when={m.groupByApp()}
+                        fallback={
+                            <For each={rows().slice(0, HOST_ROW_LIMIT)}>
+                                {(p) => (
+                                    <ProcessRow
+                                        model={m}
+                                        process={p}
+                                        cpu={props.cpu}
+                                        taskLabel={p.task ? m.taskLabel(p.task) : undefined}
+                                    />
+                                )}
+                            </For>
+                        }
+                    >
+                        <For
+                            each={groups()
+                                .slice(0, HOST_ROW_LIMIT)
+                                .map((g) => g.key)}
+                        >
+                            {(key) => (
+                                <Show when={groupByKey().get(key)}>
+                                    {(group) => <GroupRows model={m} group={group()} cpu={props.cpu} />}
+                                </Show>
+                            )}
+                        </For>
+                    </Show>
                 </tbody>
             </table>
-            <Show when={rows().length > HOST_ROW_LIMIT}>
+            <Show when={shown() > HOST_ROW_LIMIT}>
                 <div class="tower-muted tower-more">
-                    {rows().length - HOST_ROW_LIMIT} more not shown: filter to narrow the list.
+                    {shown() - HOST_ROW_LIMIT} more not shown: filter to narrow the list.
                 </div>
             </Show>
         </>
