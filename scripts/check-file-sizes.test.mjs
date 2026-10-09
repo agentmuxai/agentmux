@@ -172,4 +172,21 @@ describe("lowered (--update)", () => {
         ]);
         expect([...lowered(sizes, new Map([["big.rs", 2000]]), 1500)]).toEqual([["big.rs", 2000]]);
     });
+
+    it("with a scope, moves only the files the branch changed", () => {
+        // A branch behind main: main raised lifecycle.rs to 1976, the branch
+        // still has 1975 on disk and changed only shrunk.ts.
+        const baseline = new Map([
+            ["lifecycle.rs", 1976],
+            ["shrunk.ts", 1800],
+        ]);
+        const sizes = new Map([
+            ["lifecycle.rs", 1975],
+            ["shrunk.ts", 1790],
+        ]);
+        expect([...lowered(sizes, baseline, 1500, new Set(["shrunk.ts"]))]).toEqual([
+            ["lifecycle.rs", 1976],
+            ["shrunk.ts", 1790],
+        ]);
+    });
 });
