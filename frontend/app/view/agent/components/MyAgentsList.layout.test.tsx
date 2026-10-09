@@ -16,14 +16,11 @@
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import * as sass from "sass";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { findBrowser, measureInBrowser } from "./layout-browser";
 import { MyAgentsList } from "./MyAgentsList";
 
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { ListRecentSessionsCommand: vi.fn() } }));
@@ -35,21 +32,6 @@ vi.mock("@/element/DualProviderLogo", () => ({
         <span class={props.class} style={{ display: "block", width: "40px", height: "40px" }} />
     ),
 }));
-
-function findBrowser(): string | null {
-    const candidates = [
-        process.env.AGENTMUX_TEST_BROWSER,
-        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
-        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
-        "/usr/bin/google-chrome",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    ];
-    return candidates.find((c): c is string => !!c && existsSync(c)) ?? null;
-}
 
 const BROWSER = findBrowser();
 
@@ -104,44 +86,15 @@ interface Tile {
     hitToggle: string;
 }
 
-function measureInBrowser(bodyHtml: string): Tile[] {
+function measureTiles(bodyHtml: string): Promise<Tile[]> {
     const css = sass.compile(join(__dirname, "..", "styles", "_recent-sessions.scss")).css;
-    const dir = mkdtempSync(join(tmpdir(), "agentmux-tile-layout-"));
-    try {
-        const file = join(dir, "fixture.html");
-        writeFileSync(
-            file,
-            `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}</style>` +
-                `<div class="agent-view" style="width:1000px;padding:16px"><div class="agent-picker">${bodyHtml}</div></div>` +
-                `<script>window.addEventListener("load",()=>{${MEASURE}})</script>`
-        );
-        const dom = execFileSync(
-            BROWSER!,
-            [
-                "--headless=new",
-                "--disable-gpu",
-                "--no-sandbox",
-                "--hide-scrollbars",
-                `--user-data-dir=${join(dir, "profile")}`,
-                "--window-size=1100,1200",
-                "--virtual-time-budget=3000",
-                "--dump-dom",
-                pathToFileURL(file).href,
-            ],
-            { encoding: "utf8", timeout: 60_000, maxBuffer: 16 * 1024 * 1024 }
-        );
-        const m = /<pre id="result">([\s\S]*?)<\/pre>/.exec(dom);
-        if (!m) throw new Error("the page produced no measurements:\n" + dom.slice(0, 2000));
-        return JSON.parse(
-            m[1]
-                .replace(/&quot;/g, '"')
-                .replace(/&amp;/g, "&")
-                .replace(/&lt;/g, "<")
-                .replace(/&gt;/g, ">")
-        );
-    } finally {
-        rmSync(dir, { recursive: true, force: true });
-    }
+    return measureInBrowser<Tile[]>(
+        BROWSER!,
+        `<!doctype html><meta charset="utf-8"><style>${TOKENS}\n${css}</style>` +
+            `<div class="agent-view" style="width:1000px;padding:16px"><div class="agent-picker">${bodyHtml}</div></div>` +
+            `<script>window.addEventListener("load",()=>{${MEASURE}})</script>`,
+        { width: 1100, height: 1200 }
+    );
 }
 
 /** Tiles whose heights differ: a three-line summary, none, one line, and a sandbox badge. */
@@ -206,7 +159,7 @@ describe.skipIf(!BROWSER)("My Agents tile layout (real browser)", () => {
         } as never);
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findAllByTestId("agent-my-agents-entry");
-        tiles = measureInBrowser(document.body.innerHTML);
+        tiles = await measureTiles(document.body.innerHTML);
     }, 90_000);
 
     afterEach(() => {});

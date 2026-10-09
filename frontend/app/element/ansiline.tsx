@@ -54,6 +54,8 @@ const ANSI_TAILWIND_MAP = {
     107: "bg-ansi-brightwhite",
 };
 
+export type AnsiState = InternalStateType;
+
 type InternalStateType = {
     modifiers: Set<string>;
     textColor: string | null;
@@ -61,32 +63,64 @@ type InternalStateType = {
     reverse: boolean;
 };
 
+export type AnsiSegment = SegmentType;
+
 type SegmentType = {
     text: string;
     classes: string;
 };
 
-const makeInitialState: () => InternalStateType = () => ({
+export const makeInitialState: () => InternalStateType = () => ({
     modifiers: new Set<string>(),
     textColor: null,
     bgColor: null,
     reverse: false,
 });
 
-const updateStateWithCodes = (state: InternalStateType, codes: number[]) => {
-    codes.forEach((code) => {
+export const updateStateWithCodes = (state: InternalStateType, codes: number[]) => {
+    for (let i = 0; i < codes.length; i++) {
+        const code = codes[i];
         if (code === 0) {
             // Reset state
             state.modifiers.clear();
             state.textColor = null;
             state.bgColor = null;
             state.reverse = false;
-            return;
+            continue;
+        }
+        // Extended colours (38/48;5;n and 38/48;2;r;g;b): no class for them, but
+        // their parameters must be skipped, not read as codes ("2" is faint).
+        if (code === 38 || code === 48) {
+            i += codes[i + 1] === 5 ? 2 : codes[i + 1] === 2 ? 4 : 0;
+            continue;
+        }
+        // Selective resets.
+        if (code === 22) {
+            state.modifiers.delete("font-bold");
+            state.modifiers.delete("opacity-75");
+            continue;
+        }
+        const off: Record<number, string> = { 23: "italic", 24: "underline", 28: "invisible", 29: "line-through" };
+        if (off[code]) {
+            state.modifiers.delete(off[code]);
+            continue;
+        }
+        if (code === 27) {
+            state.reverse = false;
+            continue;
+        }
+        if (code === 39) {
+            state.textColor = null;
+            continue;
+        }
+        if (code === 49) {
+            state.bgColor = null;
+            continue;
         }
         // Instead of swapping immediately, we set a flag
         if (code === 7) {
             state.reverse = true;
-            return;
+            continue;
         }
         const tailwindClass = (ANSI_TAILWIND_MAP as any)[code];
         if (tailwindClass && tailwindClass !== "reset") {
@@ -98,11 +132,11 @@ const updateStateWithCodes = (state: InternalStateType, codes: number[]) => {
                 state.modifiers.add(tailwindClass);
             }
         }
-    });
+    }
     return state;
 };
 
-const stateToClasses = (state: InternalStateType) => {
+export const stateToClasses = (state: InternalStateType) => {
     const classes: string[] = [];
     classes.push(...Array.from(state.modifiers));
 
@@ -149,11 +183,7 @@ const AnsiLine = ({ line }: { line: string }): JSX.Element => {
 
     return (
         <div>
-            <For each={segments}>
-                {(seg) => (
-                    <span class={seg.classes}>{seg.text}</span>
-                )}
-            </For>
+            <For each={segments}>{(seg) => <span class={seg.classes}>{seg.text}</span>}</For>
         </div>
     );
 };

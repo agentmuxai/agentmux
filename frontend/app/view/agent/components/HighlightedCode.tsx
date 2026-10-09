@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * HighlightedCode — async Shiki syntax highlighting for tool overlay content.
+ * HighlightedCode — async Shiki highlighting of a code string as one <pre>.
+ * Used outside the agent pane's tool previews (Hangar's file preview, the
+ * PowerShell command view); tool previews render through PreviewLines.
  *
  * Renders a plain <pre> immediately (no layout shift) then swaps in the
- * Shiki-generated HTML once the highlight resolves. Uses the same lazy-load
- * pattern and theme as DiffViewer.tsx so the Shiki chunk is only fetched once
- * across the whole app.
+ * Shiki-generated HTML once the highlight resolves. Shares the previews' Shiki
+ * loader and theme (preview-text/highlight.ts), so the chunk is fetched once.
  *
  * Features:
  *  - Module-level Map cache keyed on (lang, code): re-hovering the same tool
@@ -21,18 +22,7 @@
  */
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";
-
-const ShikiTheme = "github-dark-high-contrast";
-
-// Lazy-load shiki — the same module as DiffViewer, so the chunk is only
-// fetched once per app session.
-let shikiModule: typeof import("./shiki-highlighter") | null = null;
-const getShiki = async () => {
-    if (!shikiModule) {
-        shikiModule = await import("./shiki-highlighter");
-    }
-    return shikiModule;
-};
+import { loadShiki, SHIKI_THEME } from "../preview-text/highlight";
 
 // Size caps — skip highlighting for very large content to avoid blocking
 // the main thread.
@@ -91,9 +81,9 @@ export const HighlightedCode = (props: HighlightedCodeProps): JSX.Element => {
 
         void (async () => {
             try {
-                const { codeToHtml } = await getShiki();
+                const { codeToHtml } = await loadShiki();
                 if (cancelled || mySeq !== seq) return;
-                const full = await codeToHtml(code, { lang, theme: ShikiTheme });
+                const full = await codeToHtml(code, { lang, theme: SHIKI_THEME });
                 if (cancelled || mySeq !== seq) return;
                 // Shiki wraps output in <pre><code>...</code></pre>; we only
                 // want the inner HTML of the <pre> so our own <pre> wrapper

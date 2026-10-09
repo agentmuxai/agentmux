@@ -19,12 +19,13 @@
  * Spec: docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md §3.3.
  */
 
-import { LinkifiedText } from "@/app/element/linkified-text";
-import { Show, createEffect, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, untrack, type JSX } from "solid-js";
+import { proseDoc, rawDoc } from "../preview-text/docs";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
 import { arrivedLive } from "../virtualization/live-arrival";
 import { CollapsibleMessage } from "./CollapsibleMessage";
+import { PreviewLines } from "./PreviewLines";
 import { previewBox } from "./scroll-handoff";
 
 interface JektBubbleProps {
@@ -61,6 +62,10 @@ export function deliveredAt(node: Pick<JektMessageNode, "timestamp" | "heldForSe
 const handoff = previewBox();
 
 export const JektBubble = (props: JektBubbleProps): JSX.Element => {
+    // Built once per message, not on every read of the prop.
+    const bodyDoc = createMemo(() => proseDoc(props.node.message));
+    // Exactly as received: no terminal decoding, control characters visible.
+    const rawPayload = createMemo(() => rawDoc(props.node.raw));
     // A jekt that arrives live is held open until it scrolls off, as a tool that
     // finishes on screen is. Keyed on the id: the streaming buffer can reuse this
     // row for another node. A sensitive jekt is open by default anyway.
@@ -107,9 +112,10 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
             }
             body={
                 <>
-                    <pre class="agent-jekt-body" ref={handoff}>
-                        <LinkifiedText text={props.node.message} />
-                    </pre>
+                    {/* Prose: wraps at words (PreviewLines, the preview text stage). */}
+                    <div class="agent-jekt-body" ref={handoff}>
+                        <PreviewLines doc={bodyDoc()} linkify />
+                    </div>
                     <div class="agent-jekt-meta">
                         <span class="agent-jekt-meta-item">From: {props.node.from}</span>
                         <span class="agent-jekt-meta-item">To: {props.node.to}</span>
@@ -128,7 +134,9 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                     </div>
                     <details class="agent-jekt-raw">
                         <summary>Raw payload</summary>
-                        <pre ref={handoff}>{props.node.raw}</pre>
+                        <div class="agent-jekt-raw-body" ref={handoff}>
+                            <PreviewLines doc={rawPayload()} />
+                        </div>
                     </details>
                 </>
             }

@@ -13,8 +13,7 @@ import clsx from "clsx";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { formatElapsedClock } from "@/util/format-time";
-import { capChars, createChunkCapper, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
-import { OutputHiddenMarker } from "./OutputHiddenMarker";
+import { ChunkPreview } from "./ChunkPreview";
 import {
     createDispatchDetail,
     subagentDisplayLabel,
@@ -52,12 +51,6 @@ function memberSigil(status: ActiveSubagent["status"]): string {
         case "abandoned": return "■";
     }
 }
-
-const KIND_CLASS: Record<string, string> = {
-    stdout: "agent-tool-log-line--stdout",
-    stderr: "agent-tool-log-line--stderr",
-    system: "agent-tool-log-line--system",
-};
 
 interface ActivityRowProps {
     /** Reactive accessor — returns undefined if the activity just left. */
@@ -179,17 +172,14 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         return undefined;
     });
 
-    // Expanded shell/tool log — same cap + renderer as PersistentShellBlock.
-    // A promoted tool call's log is optional (only populated for tools that
-    // stream partials — see ToolNode.log's own doc comment), unlike a
-    // ShellNode's, which always has one.
-    const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
-    const capped = createMemo(() => {
+    // Expanded shell/tool log — the same streamed-output preview as
+    // PersistentShellBlock and a running tool (ChunkPreview.tsx). A promoted
+    // tool call's log is optional (only populated for tools that stream
+    // partials — see ToolNode.log's own doc comment), unlike a ShellNode's,
+    // which always has one.
+    const logChunks = createMemo((): ToolLogChunk[] => {
         const a = props.activity();
-        const chunks = a?.shell?.log.chunks ?? (a?.tool ? toolOutputChunks(a.tool) : undefined);
-        return chunks
-            ? chunkCap(chunks as ToolLogChunk[])
-            : { chunks: [] as ToolLogChunk[], hiddenLines: 0 };
+        return (a?.shell?.log.chunks ?? (a?.tool ? toolOutputChunks(a.tool) : undefined) ?? []) as ToolLogChunk[];
     });
 
     // Expanded subagent transcript — created only while this row is actually
@@ -268,17 +258,8 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                             <Show when={fullCommand()}>
                                 <div class="agent-activity-command">{fullCommand()}</div>
                             </Show>
-                            <Show when={capped().hiddenLines > 0}>
-                                <OutputHiddenMarker hidden={capped().hiddenLines} noun="line" from="tail" />
-                            </Show>
-                            <For each={capped().chunks}>
-                                {(chunk) => (
-                                    <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                                        {capChars(chunk.content)}
-                                    </pre>
-                                )}
-                            </For>
-                            <Show when={capped().chunks.length === 0 && a().tool}>
+                            <ChunkPreview chunks={logChunks()} />
+                            <Show when={logChunks().length === 0 && a().tool}>
                                 <pre class="agent-tool-log-line">No output yet</pre>
                             </Show>
                             <Show when={a().shell?.log.open ?? a().tool?.log?.open ?? false}>

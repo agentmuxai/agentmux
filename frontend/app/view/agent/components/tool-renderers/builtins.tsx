@@ -14,19 +14,19 @@ import { Markdown } from "@/app/element/markdown";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Show, type JSX } from "solid-js";
+import { codeDoc, markdownBodyText } from "../../preview-text/docs";
+import type { PreviewDoc } from "../../preview-text/types";
 import type { ResultFileFacts } from "../../providers/claude-translator";
+import { fileRangeOf, formatFileRangeLong } from "../../tool-meta/file-range";
 import type { ToolNode } from "../../types";
 import { BashOutputViewer } from "../BashOutputViewer";
 import { CompactResult } from "../CompactResult";
 import { DiffViewer } from "../DiffViewer";
-import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "../dedent";
-import { detectLanguage } from "../detectLanguage";
-import { HighlightedCode } from "../HighlightedCode";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
+import { PreviewLines, TruncatedMarker } from "../PreviewLines";
 import { ResultImages, resultImagesOf } from "../ResultImages";
-import { capText, MAX_TOOL_OUTPUT_LINES, type CappedText } from "../output-cap";
+import { capText, MAX_TOOL_OUTPUT_LINES } from "../output-cap";
 import { terminalText } from "../terminal-text";
-import { fileRangeOf, formatFileRangeLong } from "../../tool-meta/file-range";
 import { anyTool, byKind, type ToolRendererEntry } from "./registry";
 
 // Per-tool result renderers, registered through BUILTIN_RENDERERS so the open-ended tool universe can be routed by name/shape rather than
@@ -57,38 +57,26 @@ const isMarkdownPath = (path: string): boolean => path.endsWith(".md") || path.e
 /**
  * The file-preview pipeline Read and Write share
  * (SPEC_AGENT_PANE_PREVIEW_CLEANUPS_2026_09_26.md §4): a markdown file renders
- * as markdown, anything else as highlighted code, then the hidden-lines
- * marker for a head-capped file. Each caller formats the text its own way
- * (see renderRead / renderWrite for why they differ); `classPrefix` keeps
- * each tool's class names.
+ * as markdown, anything else as code through the preview text stage
+ * (`preview-text/docs.ts` `codeDoc`: gutter as line numbers, tabs expanded,
+ * dedented and narrowed, highlighted per line), with the hidden-lines marker
+ * for a head-capped file. `classPrefix` keeps each tool's class names.
  */
 function FilePreview(props: {
     path: string;
-    /** The head-capped raw text (language sniffing reads its first line). */
-    capped: CappedText;
-    /** What the highlighted-code view shows. */
-    code: string;
+    /** The code view. */
+    doc: PreviewDoc;
     /** What the markdown view shows. */
     markdown: string;
     classPrefix: "agent-tool-read" | "agent-tool-write";
 }): JSX.Element {
     return (
-        <>
-            <Show
-                when={isMarkdownPath(props.path)}
-                fallback={
-                    <HighlightedCode
-                        code={props.code}
-                        // Language detection reads the RAW (non-dedented) first
-                        // line — shebang/content sniffing should see the file
-                        // as-is; only the displayed text is dedented.
-                        lang={detectLanguage(props.path, props.capped.text.split("\n")[0])}
-                        class={`${props.classPrefix}-content`}
-                    />
-                }
-            >
-                <div class={`${props.classPrefix}-content ${props.classPrefix}-md`}>
-                    {/* scrollable={false}, same as MarkdownBlock: this
+        <Show
+            when={isMarkdownPath(props.path)}
+            fallback={<PreviewLines doc={props.doc} class={`${props.classPrefix}-content`} />}
+        >
+            <div class={`${props.classPrefix}-content ${props.classPrefix}-md`}>
+                {/* scrollable={false}, same as MarkdownBlock: this
                         preview lives inside the virtualized document,
                         which owns the scroll. `scrollable` defaults to
                         true, and each mount then constructs an
@@ -96,13 +84,15 @@ function FilePreview(props: {
                         scrollLeft probes that each force a layout of the
                         whole pane. Measured at 46% of `flushPendingNodes`
                         under load (ANALYSIS_AGENT_PANE_FLUSH_REMOUNT_CHURN_2026_09_23.md §2). */}
-                    <Markdown text={props.markdown} scrollable={false} />
-                </div>
+                <Markdown text={props.markdown} scrollable={false} />
+            </div>
+            <Show when={props.doc.hidden}>
+                <OutputHiddenMarker hidden={props.doc.hidden!.count} noun="line" from="head" />
             </Show>
-            <Show when={props.capped.hiddenLines > 0}>
-                <OutputHiddenMarker hidden={props.capped.hiddenLines} noun="line" from="head" />
+            <Show when={props.doc.truncated}>
+                <TruncatedMarker kept={props.doc.truncated!} />
             </Show>
-        </>
+        </Show>
     );
 }
 
@@ -136,7 +126,10 @@ export function readFactsLine(node: ToolNode): string | null {
         const pages = (node.params as { pages?: unknown } | undefined)?.pages;
         if (typeof pages === "string" && pages.trim() !== "") parts.push(`pages ${pages.trim()}`);
     } else if (images.length > 0 || file?.kind === "image") {
-        const type = images[0]?.mediaType.replace(/^image\//i, "").replace(/\+xml$/i, "").toUpperCase();
+        const type = images[0]?.mediaType
+            .replace(/^image\//i, "")
+            .replace(/\+xml$/i, "")
+            .toUpperCase();
         parts.push(type ? `${type} image` : "image");
         if (file?.width && file?.height) parts.push(`${file.width} × ${file.height}`);
     } else {
@@ -155,19 +148,11 @@ function renderRead(node: ToolNode): JSX.Element {
     // An image, PDF or unchanged-file Read has a note for the model as its
     // text, not the file: the facts line replaces it.
     const content = facts ? undefined : raw ? withoutTrailingNotes(raw) : raw;
-    // Head-cap file content (read top-down) so a huge Read can't bloat
-    // the conversation DOM; HighlightedCode stays simple (it injects
-    // innerHTML, so capping here is cleaner than inside it).
-    const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    // Dedent (common to every VISIBLE line — computed after capping so a
-    // deeper hidden tail can't reduce the dedent of what's actually shown,
-    // SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.1), narrow the remaining
-    // relative indentation to 2 columns per level, and re-emit Claude Code's
-    // "<N>\t" line-number gutter right-aligned at a fixed width. That last
-    // part removes the tab, and with it the sideways step the code column
-    // took at every digit-count boundary (9→10, 999→1000) — see dedent.ts's
-    // module header and docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
-    const preview = capped ? formatReadPreview(capped.text) : null;
+    // Head-capped (a file is read top-down), the gutter taken off as line
+    // numbers, tabs expanded from the code's own start, then dedented over
+    // the VISIBLE lines only (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.1)
+    // and narrowed: preview-text/docs.ts codeDoc.
+    const doc = content ? codeDoc(content, { path: filePath, gutter: true }) : null;
     const range = fileRangeOf(node);
     return (
         <div class="agent-tool-read">
@@ -204,7 +189,7 @@ function renderRead(node: ToolNode): JSX.Element {
                 <ResultImages images={images} path={filePath || undefined} width={file?.width} height={file?.height} />
             </Show>
             <Show
-                when={capped}
+                when={doc}
                 fallback={
                     <Show when={node.result && !facts}>
                         <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
@@ -217,9 +202,8 @@ function renderRead(node: ToolNode): JSX.Element {
                     SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2.1). */}
                 <FilePreview
                     path={filePath}
-                    capped={capped!}
-                    code={preview!.withGutter}
-                    markdown={preview!.body}
+                    doc={doc!}
+                    markdown={markdownBodyText(content!, { gutter: true })}
                     classPrefix="agent-tool-read"
                 />
             </Show>
@@ -237,7 +221,7 @@ function renderWrite(node: ToolNode): JSX.Element {
     const filePath = (node.params as any).file_path ?? "";
     const content: string | undefined = (node.params as any).content;
     const bytes: number | undefined = (node.result as any)?.bytesWritten;
-    const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    const doc = content ? codeDoc(content, { path: filePath }) : null;
     const range = fileRangeOf(node);
     return (
         <div class="agent-tool-write">
@@ -250,26 +234,20 @@ function renderWrite(node: ToolNode): JSX.Element {
                     <span class="agent-tool-write-bytes">{formatBytes(bytes!)}</span>
                 </Show>
             </div>
-            <Show when={capped} fallback={<div class="agent-tool-write-info">No content written.</div>}>
+            <Show when={doc} fallback={<div class="agent-tool-write-info">No content written.</div>}>
                 <FilePreview
                     path={filePath}
-                    capped={capped!}
-                    // Plain dedent + narrow, NOT the Read-specific gutter-aware
-                    // variant (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) —
-                    // Write content has no CLI-added "<N>\t" line-number prefix,
-                    // so formatReadPreview's numbered heuristic would misfire on
-                    // a genuine tab-delimited file (TSV/BED/GTF) whose every
-                    // non-blank line happens to start with digits+tab, silently
-                    // dropping that real leading column. Its dedent half is a
-                    // no-op for the common already-flush case (a whole file
-                    // starts at column 0), which is why the narrowing half is
-                    // the part that fires on a Write.
-                    code={formatCodePreview(capped!.text)}
+                    // No gutter: Write content has no CLI-added line numbers,
+                    // and the Read heuristic would misfire on a genuine
+                    // tab-delimited file whose every line starts with digits
+                    // and a tab, dropping that real column
+                    // (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3).
+                    doc={doc!}
                     // Markdown is indentation-sensitive — four leading spaces
                     // are a code block, and rescaling them to two turns it into
                     // prose. Dedent only for that path (codex P2 on PR #2958);
-                    // `formatMarkdownPreview` documents why.
-                    markdown={formatMarkdownPreview(capped!.text)}
+                    // `formatMarkdownPreview` (dedent.ts) documents why.
+                    markdown={markdownBodyText(content!, { gutter: false })}
                     classPrefix="agent-tool-write"
                 />
             </Show>
@@ -337,7 +315,8 @@ export function renderWorkflow(node: ToolNode): JSX.Element {
     // The row header shows the title, or the description when there's no
     // title; repeat the description here only when the header shows the title.
     const params = node.params as any;
-    const extraDesc = params.title && params.description && params.description !== params.title ? params.description : null;
+    const extraDesc =
+        params.title && params.description && params.description !== params.title ? params.description : null;
     return (
         <div class="agent-tool-workflow">
             <Show when={extraDesc}>
@@ -354,13 +333,18 @@ export function renderCompactDefault(node: ToolNode): JSX.Element {
     // An image a tool returned (an MCP screenshot) shows as the image, with
     // the result's text below it.
     const images = resultImagesOf(node.result);
-    if (images.length === 0) return <CompactResult tool={node.tool} params={node.params as Record<string, unknown>} result={node.result} />;
+    if (images.length === 0)
+        return <CompactResult tool={node.tool} params={node.params as Record<string, unknown>} result={node.result} />;
     const text = (node.result as { content?: unknown }).content;
     return (
         <div class="agent-tool-media-result">
             <ResultImages images={images} />
             <Show when={typeof text === "string" && text.trim() !== ""}>
-                <CompactResult tool={node.tool} params={node.params as Record<string, unknown>} result={{ content: text }} />
+                <CompactResult
+                    tool={node.tool}
+                    params={node.params as Record<string, unknown>}
+                    result={{ content: text }}
+                />
             </Show>
         </div>
     );

@@ -15,13 +15,14 @@
  * props — see CollapsibleMessage.
  */
 
-import clsx from "clsx";
-import { For, Show, type JSX } from "solid-js";
-import { LinkifiedText } from "@/app/element/linkified-text";
 import { formatCompactNumber } from "@/util/format-count";
+import clsx from "clsx";
+import { For, Show, createMemo, type JSX } from "solid-js";
 import { contextDeliveryTitle, isCompactionSummaryCard } from "../context-delivery";
+import { proseDoc } from "../preview-text/docs";
 import type { ContextDeliveryNode, ContextItem } from "../types";
 import { CollapsibleMessage } from "./CollapsibleMessage";
+import { PreviewLines } from "./PreviewLines";
 import { previewBox } from "./scroll-handoff";
 
 interface ContextDeliveryCardProps {
@@ -98,7 +99,10 @@ const ItemHead = (props: { item: ContextItem; globalSentTwice: boolean }): JSX.E
         </Show>
         <Show when={props.item.contains?.includes("global_memory")}>
             <span
-                class={clsx("agent-context-delivery-item-chip", props.globalSentTwice && "agent-context-delivery-item-dup")}
+                class={clsx(
+                    "agent-context-delivery-item-chip",
+                    props.globalSentTwice && "agent-context-delivery-item-dup"
+                )}
                 title={
                     props.globalSentTwice
                         ? "This file also carries the Global Memory, so a new session gets it twice"
@@ -143,7 +147,9 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
             {/* Memory deliveries list every item without opening the card. */}
             <Show when={!summaryCard()}>
                 <div class="agent-context-delivery-rows">
-                    <For each={props.node.items}>{(item) => <ItemHead item={item} globalSentTwice={globalSentTwice(props.node)} />}</For>
+                    <For each={props.node.items}>
+                        {(item) => <ItemHead item={item} globalSentTwice={globalSentTwice(props.node)} />}
+                    </For>
                 </div>
             </Show>
             <Show when={bigMemory()}>
@@ -175,14 +181,18 @@ export const ContextDeliveryCard = (props: ContextDeliveryCardProps): JSX.Elemen
                 summary={summary()}
                 body={
                     <For each={bodies()}>
-                        {(item) => (
-                            <div class="agent-context-delivery-item">
-                                <ItemHead item={item} globalSentTwice={globalSentTwice(props.node)} />
-                                <pre class="agent-context-delivery-body" ref={handoff}>
-                                    <LinkifiedText text={item.body ?? ""} />
-                                </pre>
-                            </div>
-                        )}
+                        {(item) => {
+                            // Built once per item, not on every read of the prop.
+                            const doc = createMemo(() => proseDoc(item.body ?? ""));
+                            return (
+                                <div class="agent-context-delivery-item">
+                                    <ItemHead item={item} globalSentTwice={globalSentTwice(props.node)} />
+                                    <div class="agent-context-delivery-body" ref={handoff}>
+                                        <PreviewLines doc={doc()} linkify />
+                                    </div>
+                                </div>
+                            );
+                        }}
                     </For>
                 }
             />

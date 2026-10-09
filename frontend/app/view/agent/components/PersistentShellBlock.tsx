@@ -12,19 +12,17 @@
  */
 
 import clsx from "clsx";
-import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
+import { Show, createMemo, createSignal, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
-import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStartingChunk, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
-import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { LinkifiedText } from "@/app/element/linkified-text";
+import { ChunkPreview } from "./ChunkPreview";
 import { PeekOverlay } from "./PeekOverlay";
 import { PeekMetaRow } from "./PeekMetaRow";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import type { ShellNode, ToolLogChunk } from "../types";
+import type { ShellNode } from "../types";
 import { rowDisclosure } from "../virtualization/disclosure";
 
 interface PersistentShellBlockProps {
@@ -33,11 +31,6 @@ interface PersistentShellBlockProps {
     onTogglePin: () => void;
 }
 
-const KIND_CLASS: Record<string, string> = {
-    stdout: "agent-tool-log-line--stdout",
-    stderr: "agent-tool-log-line--stderr",
-    system: "agent-tool-log-line--system",
-};
 
 export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Element => {
     const tick = useTick(1000);
@@ -103,30 +96,6 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
         }
     };
 
-    // Collapse redraws first, over the raw append-only chunk stream, THEN cap
-    // the (already deduplicated) result to the line budget — not the other
-    // way around. Capping the raw stream first would let spinner/progress
-    // noise (which is exactly what tends to dominate a long-running
-    // command's raw chunk count) evict real content from the budget before
-    // collapseSpinnerChunks ever got a chance to fold it down to one line.
-    // It also matters for perf: capChunksByLines' windowed output slides its
-    // start reference on every new chunk once a stream is sustained over
-    // budget, which would defeat createSpinnerCollapser's append-only
-    // identity tracking if fed the capped (rather than raw) chunks — reagent
-    // P1, PR #2330 (the O(n·L²) full-window redraw rescan on every streamed
-    // chunk this replaces).
-    const spinnerCollapse = createSpinnerCollapser<ToolLogChunk>();
-    const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
-    const cappedView = createMemo(() => {
-        // dropBashwrapStartingChunk BEFORE collapse/cap — see output-cap.ts's doc
-        // comment (also applies to ToolOverlayLog.tsx's identical pipeline).
-        const raw = dropBashwrapStartingChunk(props.node.log.chunks as ToolLogChunk[]);
-        const { display: collapsed, spinnerSlot } = spinnerCollapse(raw);
-        const { chunks: display, hiddenLines } = chunkCap(collapsed);
-        return { display, spinnerSlot, hiddenLines };
-    });
-    const visibleChunks = () => cappedView().display;
-    const hiddenCount = () => cappedView().hiddenLines;
 
     return (
         <div
@@ -181,21 +150,9 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                         </Show>
                     </div>
                     <div class="agent-tool-overlay-log">
-                        <Show when={hiddenCount() > 0}>
-                            <OutputHiddenMarker hidden={hiddenCount()} noun="line" from="tail" />
-                        </Show>
-                        <For each={visibleChunks()}>
-                            {(chunk) => (
-                                <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                                    <LinkifiedText text={capChars(chunk.content)} />
-                                </pre>
-                            )}
-                        </For>
-                        <Show when={cappedView().spinnerSlot !== null}>
-                            <pre class={`agent-tool-log-line ${KIND_CLASS[cappedView().spinnerSlot?.kind ?? ""] ?? ""}`}>
-                                {cappedView().spinnerSlot?.content}
-                            </pre>
-                        </Show>
+                        {/* Joined into lines, collapsed and capped the way every
+                            streamed log is (ChunkPreview.tsx). */}
+                        <ChunkPreview chunks={props.node.log.chunks} linkify />
                         <Show when={props.node.log.open}>
                             <div class="agent-shell-streaming-indicator" />
                         </Show>

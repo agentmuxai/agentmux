@@ -232,16 +232,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         user-select: none;
     }
 
-    .agent-raw-output {
-        margin: 0;
-        padding: 1px 0;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        font-size: var(--font-agent-size);
-        line-height: 1.3;
-        color: var(--main-text-color);
-    }
-
     // === Markdown Block ===
     .agent-markdown-block {
         padding: 1px var(--space-1);
@@ -610,36 +600,9 @@ $transcript-preview-max-height: calc(50vh / 3);
             overflow: hidden;
             font-family: var(--font-mono);
             font-size: var(--text-sm);
-            // Overrides the global `tab-size: 4` from reset.scss (inherited
-            // by every preview here — Read/Write/Edit/Diff, Shiki and plain-
-            // fallback paths alike — since nothing in between re-declares
-            // it). A literal tab left over after dedent.ts strips the
-            // COMMON leading-indent prefix (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md)
-            // is RELATIVE indentation the source file actually uses — at
-            // the global 4-wide (or the browser's 8-wide UA default,
-            // wherever nothing overrides it) a tab-indented preview reads
-            // noticeably wider than the same file's space-indented sibling.
-            // Scoped to this shared tool-preview ancestor only, not
-            // reset.scss itself — the Editor pane's CodeMirror instance
-            // intentionally keeps the global default (its own tabSize facet
-            // already agrees with reset.scss's 4; changing that is a
-            // separate concern).
-            //
-            // 2 is now the SAME number as `PREVIEW_INDENT_UNIT` in dedent.ts,
-            // which rescales space indentation to 2 columns per level. That
-            // pairing is the point: this rule alone only ever moved
-            // tab-indented previews (measured: 0 of 127 indented lines in a
-            // real Read of this repo used tabs), so a space-indented file
-            // stayed at full width no matter what value went here. Keep the
-            // two in step — if one changes, the other must.
-            //
-            // This value used to fight the Read line-number gutter, whose
-            // `<N>\t` tab landed on a tab stop that depended on the number's
-            // digit count (col 2 for lines 1-9, col 4 for 10+), stepping the
-            // code's left edge sideways partway down every preview. dedent.ts
-            // now re-emits that gutter right-aligned with no tab at all, so
-            // the conflict is gone and this only governs real indentation.
-            // docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
+            // Tool previews expand their tabs in preview-text/ (code 2 columns,
+            // output 8). This covers what doesn't go through it, such as a
+            // Markdown code fence in an Agent report.
             tab-size: 2;
             // Quick smooth transition on all collapse-related properties.
             // Per 2026-05-26 user request — the prior instant-snap (no
@@ -873,16 +836,11 @@ $transcript-preview-max-height: calc(50vh / 3);
 
     // === Diff Viewer ===
     // === Shared Shiki highlighted-code base ===
-    // Shiki emits <pre><code> with <span class="line"> per line.
-    // We wrap in our own <pre class="agent-highlighted-code"> and inject innerHTML.
+    // HighlightedCode's <pre> (the PowerShell command view; tool previews
+    // render through PreviewLines). Shiki's inner HTML is injected as is, so
+    // its `.line` spans stay inline, separated by its own "\n" text nodes.
     .agent-highlighted-code {
         font-family: var(--font-mono);
-        // 1em (relative), not a fixed 12px: the overlay-log's preview-zoom
-        // (`font-size: <scale>%`) sets the em base, so the code body scales with
-        // Ctrl+scroll over the preview. An absolute px here silently ignored the
-        // cascade — the preview zoom only moved the file-path header (which
-        // inherits the %) and left the code fixed. Base is the panel's 12px, so
-        // 1em == 12px at 1× zoom.
         font-size: 1em;
         line-height: 1.5;
         margin: 0;
@@ -891,14 +849,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         color: var(--main-text-color);
         white-space: pre;
 
-        // Shiki wraps each line in <span class="line"> — give lines display:block
-        // so backgrounds and padding work correctly.
-        :global(.line) {
-            display: block;
-            padding: 0 var(--space-1-5);
-            min-height: 1.5em;
-        }
-
         // Shiki adds background-color on the <pre> via inline style — remove it
         // so our themed background (from the parent container) wins.
         &[style*="background"] {
@@ -906,6 +856,10 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
     }
 
+    // An Edit's diff: the file-path header, then the lines (PreviewLines,
+    // styles/_preview.scss, which also draws the +/- line backgrounds). The
+    // overlay log is the scroll box, so the header and the lines scroll
+    // together and the scrollbar is always in view.
     .agent-diff {
         // Transparent so the parent .agent-tool-panel's shade shows
         // through — see the comment there.
@@ -913,84 +867,14 @@ $transcript-preview-max-height: calc(50vh / 3);
         border: none;
         border-left: 2px solid var(--border-color);
         border-radius: 0;
-        overflow-x: auto;
         font-size: var(--text-sm);
-        // Declared explicitly because the two render paths use DIFFERENT
-        // elements: the plain fallback is `<pre class="agent-diff">` (UA
-        // `white-space: pre`), the Shiki path is `<div class="agent-diff
-        // agent-diff--highlighted">` (UA `normal`). Without this, the file-path
-        // header — a direct child on both paths — scrolled before Shiki
-        // resolved and wrapped after, flipping layout mid-render. It also made
-        // any future direct text child silently wrap on one path only.
-        // DiffViewer.tsx's `pre.agent-diff` fallback vs its
-        // `div.agent-diff--highlighted` Shiki path.
-        white-space: pre;
 
         .agent-diff-header {
             background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
             padding: 3px var(--space-1-5);
             font-weight: bold;
             border-bottom: 1px solid var(--border-color);
-        }
-
-        // Plain-render diff classes (used before Shiki resolves and as fallback)
-        .agent-diff-add {
-            background: color-mix(in srgb, green 15%, transparent);
-            color: var(--success-color);
-        }
-
-        .agent-diff-del {
-            background: color-mix(in srgb, red 15%, transparent);
-            color: var(--error-color);
-        }
-
-        .agent-diff-hunk {
-            background: color-mix(in srgb, blue 10%, transparent);
-            color: var(--accent-color);
-        }
-
-        .agent-diff-ctx {
-            color: var(--secondary-text-color);
-        }
-
-        // Highlighted variant wrapper: header stays as a div, Shiki content
-        // goes into a separate <pre> so innerHTML doesn't destroy the header.
-        .agent-diff-highlighted-body {
-            margin: 0;
-            padding: 0;
-            background: transparent;
-            border: none;
-            overflow-x: auto;
-        }
-
-        // Highlighted variant: Shiki emits <span class="line agent-diff-add">
-        // so the same colour rules above apply automatically. We additionally
-        // strip the Shiki-generated span colour on add/del lines so our
-        // contrasting palette (not Shiki's) wins for the diff chrome.
-        &.agent-diff--highlighted {
-            :global(.line.agent-diff-add) {
-                background: color-mix(in srgb, green 15%, transparent);
-                // Shiki token colours are preserved; only the line bg is forced.
-            }
-            :global(.line.agent-diff-del) {
-                background: color-mix(in srgb, red 15%, transparent);
-            }
-            :global(.line.agent-diff-hunk) {
-                background: color-mix(in srgb, blue 10%, transparent);
-                color: var(--accent-color);
-            }
-            :global(.line.agent-diff-ctx) {
-                // default Shiki token colours — no override needed
-            }
-            :global(.agent-diff-marker) {
-                opacity: 0.6;
-                user-select: none;
-                margin-right: var(--space-0-5);
-            }
-            :global(.agent-diff-hunk-text) {
-                color: var(--accent-color);
-                opacity: 0.8;
-            }
+            white-space: pre;
         }
     }
 
@@ -1009,7 +893,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         border: none;
         border-left: 2px solid var(--border-color);
         border-radius: 0;
-        overflow-x: auto;
 
         .agent-bash-cmd {
             background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
@@ -1048,11 +931,6 @@ $transcript-preview-max-height: calc(50vh / 3);
                 // never-overflow guarantee while preferring normal break
                 // opportunities first.
                 overflow-wrap: anywhere;
-
-                :global(.line) {
-                    display: inline;
-                    padding: 0;
-                }
             }
         }
 
@@ -1071,10 +949,6 @@ $transcript-preview-max-height: calc(50vh / 3);
 
             &.has-error {
                 border-left: 2px solid var(--error-color);
-            }
-
-            &.agent-bash-stderr {
-                color: var(--error-color);
             }
         }
 
@@ -1236,7 +1110,6 @@ $transcript-preview-max-height: calc(50vh / 3);
                 padding: var(--space-1) var(--space-1-5);
                 border-radius: 0;
                 margin: 0 0 var(--space-1) 0;
-                white-space: pre-wrap;
                 // Only the body is capped, so the metadata line (sender /
                 // trust / MSGID) below it stays in view.
                 @include transcript-preview-box;
@@ -1260,9 +1133,7 @@ $transcript-preview-max-height: calc(50vh / 3);
                     user-select: none;
                 }
 
-                pre {
-                    white-space: pre-wrap;
-                    word-break: break-all;
+                .agent-jekt-raw-body {
                     background: color-mix(in srgb, var(--main-text-color) 5%, transparent);
                     padding: var(--space-1) var(--space-1-5);
                     margin: var(--space-1) 0 0 0;
@@ -1400,8 +1271,6 @@ $transcript-preview-max-height: calc(50vh / 3);
             padding: var(--space-1) var(--space-1-5);
             margin: 0 0 var(--space-1) 0;
             font-size: var(--text-xs);
-            line-height: 1.35;
-            white-space: pre-wrap;
             @include transcript-preview-box;
         }
     }
@@ -1411,7 +1280,8 @@ $transcript-preview-max-height: calc(50vh / 3);
     .agent-context-delivery-body,
     .agent-jekt-body,
     .agent-user-message-content pre,
-    .agent-tool-log-line {
+    .agent-tool-log-line,
+    .agent-preview {
         a.linkified-url {
             color: var(--link-color, #60a5fa);
             text-decoration: underline;
@@ -1816,36 +1686,6 @@ $transcript-preview-max-height: calc(50vh / 3);
         }
     }
 
-    // === Search Tools (Grep/Glob) ===
-    .agent-tool-search {
-
-        .agent-tool-search-results {
-            // Transparent so the parent .agent-tool-panel's shade shows
-            // through — see the comment there.
-            background: transparent;
-            border: 1px solid var(--border-color);
-            padding: var(--space-1) var(--space-1-5);
-            border-radius: 0;
-            margin: 0;
-            font-size: var(--text-xs);
-        }
-    }
-
-    // === Generic Tool ===
-    // No max-height/overflow on any of these — see .agent-bash-output
-    // above; the overlay-log is the single scroll container.
-    .agent-tool-generic,
-    .agent-tool-task-info {
-        // Transparent so the parent .agent-tool-panel's shade shows
-        // through — see the comment there.
-        background: transparent;
-        border: 1px solid var(--border-color);
-        padding: var(--space-1) var(--space-1-5);
-        border-radius: 0;
-        margin: 0;
-        font-size: var(--text-xs);
-    }
-
     // === Compact Result ===
     .agent-tool-compact-result {
         font-size: var(--text-xs);
@@ -1878,14 +1718,10 @@ $transcript-preview-max-height: calc(50vh / 3);
             text-overflow: ellipsis;
         }
 
-        // A one-line text result, shown whole (CompactResult). Wraps rather
-        // than ellipsizing: there's no toggle to reveal a clipped tail.
+        // A one-line text result, shown whole (CompactResult); a long one
+        // scrolls with the preview like any other output (_preview.scss).
         .agent-tool-compact-line {
-            color: var(--main-text-color);
             opacity: 0.85;
-            line-height: 1.4;
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
         }
 
         .agent-tool-compact-json {
@@ -1898,14 +1734,6 @@ $transcript-preview-max-height: calc(50vh / 3);
             border-radius: 0;
             margin: var(--space-1) 0 0 0;
             font-size: var(--text-xs);
-            white-space: pre-wrap;
-            overflow-wrap: anywhere;
-            // Hanging indent — see .agent-terminal-output > div for the
-            // rationale. JSON.stringify(_, 2) output is deeply indented and
-            // gets no dedent, so wrapped continuations restarting at column 0
-            // is exactly the readability problem this fixes.
-            padding-left: calc(var(--space-1-5) + 3ch);
-            text-indent: -3ch;
         }
     }
 }
@@ -2381,28 +2209,7 @@ $transcript-preview-max-height: calc(50vh / 3);
     border-radius: 0;
     padding: var(--space-1) var(--space-1-5);
     margin: var(--space-1) 0 0 0;
-    font-family: var(--font-mono);
     font-size: var(--text-xs);
-    line-height: 1.45;
-
-    // AnsiLine renders one <div> per line — preserve runs of spaces and wrap
-    // long lines instead of forcing a horizontal scrollbar. min-height keeps a
-    // blank line (empty <div>) occupying a row instead of collapsing to zero.
-    > div {
-        min-height: 1.45em;
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        // Hanging indent: a wrapped continuation restarts at column 0 without
-        // this, which is indistinguishable from a genuine new line and throws
-        // away whatever indentation the line had. Command output is one of the
-        // surfaces that gets NO dedent (it can carry meaningful alignment —
-        // SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2), so it is also the most
-        // deeply-indented thing in the panel and the worst place to lose the
-        // distinction. 3ch reads as clearly-not-an-indent-level next to the
-        // 2-column unit dedent.ts normalises real indentation to.
-        padding-left: 3ch;
-        text-indent: -3ch;
-    }
 }
 
 // Inline API error node (P1.3 — agent_error DocumentNode)

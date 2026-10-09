@@ -65,7 +65,9 @@ describe("CompactResult — no chevron for a text body", () => {
     });
 
     it("shows a one-line text body as plain text, without a toggle", () => {
-        const { container } = render(() => <CompactResult tool="Other" params={{}} result={{ content: "Todos updated" }} />);
+        const { container } = render(() => (
+            <CompactResult tool="Other" params={{}} result={{ content: "Todos updated" }} />
+        ));
         expect(container.querySelector(".agent-tool-compact-chevron")).toBeNull();
         expect(container.querySelector(".agent-terminal-output")).toBeNull();
         expect(container.textContent).toBe("Todos updated");
@@ -76,6 +78,19 @@ describe("CompactResult — no chevron for a text body", () => {
         const { container } = render(() => <CompactResult tool="Other" params={{}} result={{ content: huge }} />);
         const shown = container.querySelector(".agent-tool-compact-line")!.textContent!;
         expect(shown.length).toBeLessThan(MAX_TOOL_OUTPUT_CHARS + 200);
+    });
+
+    it("one huge line keeps the end its tool reads from: the latest for a log, the first for a search", () => {
+        const huge = "a".repeat(10) + "x".repeat(MAX_TOOL_OUTPUT_CHARS) + "z".repeat(10);
+        const log = render(() => <CompactResult tool="Other" params={{}} result={{ content: huge }} />).container;
+        expect(log.querySelector(".agent-tool-compact-line .agent-preview-text")!.textContent!.endsWith("zzzz")).toBe(
+            true
+        );
+        expect(log.querySelector(".agent-preview-truncated")!.textContent).toContain("earlier text cut");
+        const search = render(() => <CompactResult tool="Grep" params={{}} result={{ content: huge }} />).container;
+        expect(
+            search.querySelector(".agent-tool-compact-line .agent-preview-text")!.textContent!.startsWith("aaaa")
+        ).toBe(true);
     });
 
     it("keeps the chevron for a structured result", () => {

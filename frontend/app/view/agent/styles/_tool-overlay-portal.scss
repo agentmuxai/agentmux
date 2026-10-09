@@ -53,46 +53,16 @@
     // SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md.
     padding: var(--space-1-5) var(--space-1) var(--space-1-5) var(--space-2);
 
+    // A placeholder row in a log ("No output yet", a subagent's event line).
+    // Streamed output itself renders through ChunkPreview / PreviewLines
+    // (_preview.scss), the same as a finished result.
     .agent-tool-log-line {
         margin: 0;
         padding: 0;
         font-family: var(--font-mono);
-        font-size: var(--text-sm);
-        line-height: 1.4;
-        // Stays `pre`, deliberately — must match the viewer the completed tool
-        // actually renders through.
-        //
-        // An earlier revision of this PR switched these streaming chunks to
-        // `pre-wrap` to match `.agent-terminal-output > div`, on the theory that
-        // a Bash block reflowed when it finished. That was the wrong viewer:
-        // `renderBash` routes a completed Bash result to `BashOutputViewer`,
-        // which renders `<pre class="agent-bash-output">` — UA `white-space:
-        // pre`, no wrap. Bash was already consistent; the change *created* the
-        // reflow it claimed to remove, in the opposite direction (codex P2 on
-        // PR #2958).
-        //
-        // `.agent-terminal-output` is the CompactResult/string-body path, a
-        // different set of tools. Any genuine streaming-vs-final mismatch there
-        // is its own question and is not addressed here.
+        font-size: 1em;
+        line-height: 1.45;
         white-space: pre;
-        overflow-wrap: normal;
-
-        &--stdout {
-            color: var(--term-foreground, #d3d7cf);
-        }
-        &--stderr {
-            color: var(--error-color, #ff6b6b);
-            opacity: 0.85;
-        }
-        &--diff {
-            color: var(--accent-color);
-            opacity: 0.9;
-        }
-        &--system {
-            color: var(--secondary-text-color);
-            font-style: italic;
-            opacity: 0.7;
-        }
     }
 }
 

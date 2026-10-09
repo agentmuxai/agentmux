@@ -27,12 +27,13 @@ describe("BashOutputViewer", () => {
         expect(container.querySelector(".agent-bash-exit")!.textContent).toBe("Exit code: 0");
     });
 
-    it("strips the bashwrap prefix and shows stderr separately", () => {
+    it("strips the bashwrap prefix and shows stderr after stdout, marked", () => {
         const { container } = render(() => (
             <BashOutputViewer result={{ stdout: "<exited 2 in 0.10s>\nout", stderr: "err", exitCode: undefined as any }} />
         ));
-        expect(container.querySelector(".agent-bash-output")!.textContent).toBe("out");
-        expect(container.querySelector(".agent-bash-stderr")!.textContent).toBe("err");
+        const lines = [...container.querySelectorAll(".agent-bash-output .agent-preview-line")];
+        expect(lines.map((l) => l.textContent)).toEqual(["out", "err"]);
+        expect(lines.map((l) => l.classList.contains("agent-preview-line--stderr"))).toEqual([false, true]);
         expect(container.querySelector(".agent-bash-exit.exit-error")).not.toBeNull();
     });
 
@@ -40,6 +41,13 @@ describe("BashOutputViewer", () => {
         const { container } = render(() => <BashOutputViewer result={{ stdout: "built ok", stderr: "", exitCode: 0 } as any} />);
         expect(container.querySelector(".agent-bash-cmd")).toBeNull();
         expect(container.querySelector(".agent-bash-output")!.textContent).toBe("built ok");
+    });
+
+    it("drops the cursor report bashwrap's PTY echoed into results recorded before #4508", () => {
+        const { container } = render(() => (
+            <BashOutputViewer result={{ stdout: "<exited 0 in 0.02s>\n^[[1;1Rhello", stderr: "" } as BashResult} />
+        ));
+        expect(container.querySelector(".agent-bash-output")!.textContent).toBe("hello");
     });
 
     it("says No output when the call printed nothing", () => {

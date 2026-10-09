@@ -104,6 +104,6 @@ describe("PersistentShellBlock — hides bashwrap's internal starting-chunk (202
         ));
         expect(container.textContent).not.toContain("bashwrap");
         expect(container.textContent).toContain("server listening on :3000");
-        expect(container.querySelectorAll(".agent-tool-log-line")).toHaveLength(1);
+        expect(container.querySelectorAll(".agent-preview-line")).toHaveLength(1);
     });
 });

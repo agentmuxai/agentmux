@@ -15,13 +15,13 @@
  * ANSI parsing lands in Phase γ (perf + worker offload) per the spec.
  */
 
-import { For, Match, Show, Switch, createComputed, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Match, Show, Switch, createComputed, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { beginHeightContinuity, cancelHeightContinuity } from "../resize-contract";
-import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStartingChunk } from "./output-cap";
+import { ChunkPreview } from "./ChunkPreview";
+import { dropBashwrapStartingChunk } from "./output-cap";
 import { startsAtTop } from "../tool-meta/tool-descriptors";
 import { previewBox } from "./scroll-handoff";
 import { renderCompactDefault } from "./tool-renderers/builtins";
@@ -49,13 +49,6 @@ const USER_INPUT_WINDOW_MS = 250;
  *  non-100% zoom. */
 const REATTACH_PX = 24;
 const SCROLL_KEYS = new Set(["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "]);
-
-const KIND_CLASS: Record<string, string> = {
-    stdout: "agent-tool-log-line--stdout",
-    stderr: "agent-tool-log-line--stderr",
-    system: "agent-tool-log-line--system",
-    "diff-hunk": "agent-tool-log-line--diff",
-};
 
 export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     let scrollRef: HTMLDivElement | undefined;
@@ -470,48 +463,10 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
 
 type LogChunk = { kind: string; content: string; timestamp: number };
 
-interface ChunkListProps {
-    chunks: ReadonlyArray<LogChunk>;
-}
-function ChunkList(props: ChunkListProps): JSX.Element {
-    // Collapse first (raw, incremental — see PersistentShellBlock.tsx for
-    // why this order matters both for correctness under a long stream and
-    // for createSpinnerCollapser's append-only identity tracking), then cap
-    // the deduplicated result to the line budget.
-    const spinnerCollapse = createSpinnerCollapser<LogChunk>();
-    const cap = createChunkCapper();
-
-    const view = createMemo(() => {
-        // dropBashwrapStartingChunk BEFORE collapse/cap, not after: filtering
-        // downstream would still burn one line of the cap budget per system
-        // chunk while hiding the rendered row, silently evicting real
-        // output. See output-cap.ts's doc comment for why this is also safe
-        // to call fresh every render despite the stateful collapse/cap
-        // functions' append-only identity tracking.
-        const { display: collapsed, spinnerSlot } = spinnerCollapse(dropBashwrapStartingChunk(props.chunks));
-        const { chunks: display, hiddenLines } = cap(collapsed);
-        return { display, spinnerSlot, hiddenLines };
-    });
-
-    return (
-        <>
-            <Show when={view().hiddenLines > 0}>
-                <OutputHiddenMarker hidden={view().hiddenLines} noun="line" from="tail" />
-            </Show>
-            <For each={view().display}>
-                {(chunk) => (
-                    <pre class={`agent-tool-log-line ${KIND_CLASS[chunk.kind] ?? ""}`}>
-                        {capChars(chunk.content)}
-                    </pre>
-                )}
-            </For>
-            <Show when={view().spinnerSlot !== null}>
-                <pre class={`agent-tool-log-line ${KIND_CLASS[view().spinnerSlot?.kind ?? ""] ?? ""}`}>
-                    {view().spinnerSlot?.content}
-                </pre>
-            </Show>
-        </>
-    );
+/** A running tool's streamed output: joined into lines and drawn exactly as
+ *  its finished output will be (ChunkPreview.tsx). */
+function ChunkList(props: { chunks: ReadonlyArray<LogChunk> }): JSX.Element {
+    return <ChunkPreview chunks={props.chunks} class="agent-tool-log-feed" />;
 }
 
 ToolOverlayLog.displayName = "ToolOverlayLog";
