@@ -10,6 +10,25 @@
 # A hung test is reported after 60 s, and killed after 5 minutes.
 slow-timeout = { period = "60s", terminate-after = 5 }
 
+# Process isolation covers state inside a process. Tests that share state
+# outside it, and were kept apart by an in-process lock or by running
+# serially, run one at a time in a group of their own.
+[test-groups]
+# The OS's free ports: these bind and release ports to learn which are free,
+# and a parallel test can take one meanwhile (PORT_TESTS in lan_ports.rs).
+lan-ports = { max-threads = 1 }
+# systemd and the cgroup tree: each test process starts a transient scope,
+# and under parallel load the reaping a test waits for outlasts its wait.
+cgroups = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(agentmux-srv) & test(/^backend::lan_ports::/)'
+test-group = 'lan-ports'
+
+[[profile.default.overrides]]
+filter = 'package(agentmux-srv) & test(/^backend::process_tracker::cgroup_linux::/)'
+test-group = 'cgroups'
+
 # The PR lane (`cargo nextest run --profile ci`).
 [profile.ci]
 # One retry: a test that then passes is reported FLAKY in the summary instead
