@@ -31,19 +31,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_TOWER_COMMAND_LINE, |req: TowerCommandLineReq, ctx| async move {
         not_an_agent_api(&ctx)?;
         let key = crate::backend::tower_sampler::parse_proc_id(&req.id).ok_or_else(|| format!("tower.command-line: bad id {:?}", req.id))?;
-        tokio::task::spawn_blocking(move || {
-            // Only the process the pane showed: a newer one that reused the
-            // PID is a different process.
-            let alive = agentmux_procstats::snapshot()
-                .map_err(|e| format!("tower.command-line: {e}"))?
-                .iter()
-                .any(|p| p.key() == key);
-            Ok(TowerCommandLineResult {
-                command_line: if alive { agentmux_procstats::command_line(key.pid) } else { None },
-            })
+        // Only the process the pane showed: a newer one that reused the PID is
+        // a different process (checked before and after the read).
+        tokio::task::spawn_blocking(move || TowerCommandLineResult {
+            command_line: agentmux_procstats::command_line_of(key),
         })
         .await
-        .map_err(|e| format!("tower.command-line: {e}"))?
+        .map_err(|e| format!("tower.command-line: {e}"))
     });
 }
 

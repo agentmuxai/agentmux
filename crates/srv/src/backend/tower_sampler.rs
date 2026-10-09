@@ -256,8 +256,21 @@ struct State {
     procs: RateMeter<ProcKey>,
     tasks: RateMeter<String>,
     sticky: HashMap<ProcKey, String>,
-    last_sample: Option<Instant>,
-    cached: Option<(Instant, TowerSnapshot)>,
+    /// The last measurement: what a request within [`REUSE_WITHIN`] renders
+    /// from, so it neither costs a second read nor shrinks the CPU window to
+    /// milliseconds (one coarse clock tick over that would read as a spike).
+    last: Option<Sampled>,
+}
+
+/// One measurement: the process table, every process's CPU rate, the grouping
+/// and each task's CPU account rate. [`render`] turns it into an answer.
+struct Sampled {
+    at: Instant,
+    ts_ms: u64,
+    procs: Vec<ProcInfo>,
+    rates: Vec<Option<f64>>,
+    grouping: Grouping,
+    account_rates: HashMap<String, Option<f64>>,
 }
 
 /// The process-wide sampler. Its state is the previous sample (for CPU
@@ -279,8 +292,7 @@ impl Tower {
                 procs: RateMeter::new(),
                 tasks: RateMeter::new(),
                 sticky: HashMap::new(),
-                last_sample: None,
-                cached: None,
+                last: None,
             }),
         }
     }
@@ -299,36 +311,39 @@ impl Tower {
         inputs: impl FnOnce() -> Inputs,
         labels: impl Fn(&str) -> Option<BlockLabel>,
     ) -> std::io::Result<TowerSnapshot> {
+        self.sample_from(agentmux_procstats::snapshot, want_host, hostname, inputs, labels)
+    }
+
+    /// [`sample`](Self::sample) with the process table read by `snapshot`.
+    fn sample_from(
+        &self,
+        snapshot: impl FnOnce() -> std::io::Result<Vec<ProcInfo>>,
+        want_host: bool,
+        hostname: &str,
+        inputs: impl FnOnce() -> Inputs,
+        labels: impl Fn(&str) -> Option<BlockLabel>,
+    ) -> std::io::Result<TowerSnapshot> {
         let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((at, snap)) = &st.cached {
-            if at.elapsed() < REUSE_WITHIN && (snap.host.is_some() || !want_host) {
-                return Ok(snap.clone());
+        let fresh = st.last.as_ref().is_some_and(|l| l.at.elapsed() < REUSE_WITHIN);
+        if !fresh {
+            let procs = snapshot()?;
+            let now = Instant::now();
+            if st.last.as_ref().is_some_and(|l| now.duration_since(l.at) > STALE_AFTER) {
+                st.procs = RateMeter::new();
+                st.tasks = RateMeter::new();
             }
+            let sampled = advance(&mut st, procs, &inputs(), now);
+            st.last = Some(sampled);
         }
-        let procs = agentmux_procstats::snapshot()?;
-        let now = Instant::now();
-        if st.last_sample.is_some_and(|t| now.duration_since(t) > STALE_AFTER) {
-            st.procs = RateMeter::new();
-            st.tasks = RateMeter::new();
-        }
-        st.last_sample = Some(now);
-        let snapshot = build(&mut st, &procs, &inputs(), now, want_host, hostname, &labels);
-        st.cached = Some((now, snapshot.clone()));
-        Ok(snapshot)
+        let last = st.last.as_ref().expect("measured above");
+        Ok(render(last, want_host, hostname, &labels))
     }
 }
 
-fn build(
-    st: &mut State,
-    procs: &[ProcInfo],
-    inputs: &Inputs,
-    now: Instant,
-    want_host: bool,
-    hostname: &str,
-    labels: &dyn Fn(&str) -> Option<BlockLabel>,
-) -> TowerSnapshot {
-    let grouping = group(procs, inputs, &st.sticky);
-
+/// Measure: group the table, take every process's and task account's rate
+/// since the previous measurement, and remember sticky membership.
+fn advance(st: &mut State, procs: Vec<ProcInfo>, inputs: &Inputs, now: Instant) -> Sampled {
+    let grouping = group(&procs, inputs, &st.sticky);
     // Every process's rate, every round, so the Host view has rates the
     // moment it is opened.
     let rates: Vec<Option<f64>> = procs
@@ -336,7 +351,37 @@ fn build(
         .map(|p| p.cpu_ns.and_then(|ns| st.procs.sample(p.key(), ns, now)))
         .collect();
     st.procs.finish();
+    let mut account_rates = HashMap::new();
+    let mut sticky = HashMap::new();
+    for g in &grouping.tasks {
+        if let Some(ns) = g.cpu_time_ns {
+            account_rates.insert(g.id.clone(), st.tasks.sample(g.id.clone(), ns, now));
+        }
+        for &(i, _) in &g.members {
+            sticky.insert(procs[i].key(), g.id.clone());
+        }
+    }
+    st.tasks.finish();
+    st.sticky = sticky;
+    Sampled {
+        at: now,
+        ts_ms: agentmux_common::time::now_ms() as u64,
+        procs,
+        rates,
+        grouping,
+        account_rates,
+    }
+}
 
+/// A sum of rates, or `None` when none of them is known yet (a first
+/// sample), never a made-up 0.
+fn sum_known(rates: impl Iterator<Item = Option<f64>>) -> Option<f64> {
+    rates.flatten().fold(None, |acc, r| Some(acc.unwrap_or(0.0) + r))
+}
+
+/// The answer from a measurement. Pure apart from `labels`.
+fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) -> Option<BlockLabel>) -> TowerSnapshot {
+    let (procs, rates, grouping) = (&s.procs, &s.rates, &s.grouping);
     let row = |i: usize, role: Option<TowerProcessRole>, task: Option<String>| {
         let p = &procs[i];
         TowerProcess {
@@ -353,19 +398,15 @@ fn build(
             task,
         }
     };
-    let sum_rates = |members: &mut dyn Iterator<Item = usize>| -> Option<f64> {
-        members.filter_map(|i| rates[i]).fold(None, |acc, r| Some(acc.unwrap_or(0.0) + r))
-    };
 
     let mut tasks = Vec::new();
-    let mut sticky = HashMap::new();
     for g in &grouping.tasks {
         let Some(label) = labels(&g.id) else { continue };
-        let account = g.cpu_time_ns.and_then(|ns| st.tasks.sample(g.id.clone(), ns, now));
-        let cpu = if g.cpu_time_ns.is_some() { account } else { sum_rates(&mut g.members.iter().map(|m| m.0)) };
-        for &(i, _) in &g.members {
-            sticky.insert(procs[i].key(), g.id.clone());
-        }
+        let cpu = if g.cpu_time_ns.is_some() {
+            s.account_rates.get(&g.id).copied().flatten()
+        } else {
+            sum_known(g.members.iter().map(|m| rates[m.0]))
+        };
         tasks.push(TowerTask {
             id: g.id.clone(),
             kind: if label.agent { TowerTaskKind::Agent } else { TowerTaskKind::Terminal },
@@ -377,8 +418,6 @@ fn build(
             processes: g.members.iter().map(|&(i, role)| row(i, Some(role), None)).collect(),
         });
     }
-    st.tasks.finish();
-    st.sticky = sticky;
 
     if !grouping.agentmux.is_empty() {
         tasks.push(TowerTask {
@@ -386,7 +425,7 @@ fn build(
             kind: TowerTaskKind::Agentmux,
             label: "AgentMux".to_string(),
             tracking: tracking_label(TrackingConfidence::None).to_string(),
-            cpu: sum_rates(&mut grouping.agentmux.iter().copied()),
+            cpu: sum_known(grouping.agentmux.iter().map(|&i| rates[i])),
             cpu_account: false,
             mem: grouping.agentmux.iter().filter_map(|&i| procs[i].mem_private).sum(),
             processes: grouping
@@ -410,13 +449,13 @@ fn build(
         TowerHost {
             processes: (0..procs.len()).map(|i| row(i, None, owner.get(&i).cloned())).collect(),
             unmeasured: procs.iter().filter(|p| !p.measured()).count() as u32,
-            cpu: rates.iter().flatten().sum(),
+            cpu: sum_known(rates.iter().copied()),
             mem: procs.iter().filter_map(|p| p.mem_private).sum(),
         }
     });
 
     TowerSnapshot {
-        ts_ms: agentmux_common::time::now_ms() as u64,
+        ts_ms: s.ts_ms,
         hostname: hostname.to_string(),
         os: std::env::consts::OS.to_string(),
         cpu_count: agentmux_procstats::cpu_count() as u32,
@@ -430,6 +469,23 @@ fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn build(
+        st: &mut State,
+        procs: &[ProcInfo],
+        inputs: &Inputs,
+        now: Instant,
+        want_host: bool,
+        hostname: &str,
+        labels: &dyn Fn(&str) -> Option<BlockLabel>,
+    ) -> TowerSnapshot {
+        let sampled = advance(st, procs.to_vec(), inputs, now);
+        render(&sampled, want_host, hostname, labels)
+    }
+
+    fn state() -> State {
+        State { procs: RateMeter::new(), tasks: RateMeter::new(), sticky: HashMap::new(), last: None }
+    }
 
     fn p(pid: u32, ppid: u32, name: &str) -> ProcInfo {
         ProcInfo {
@@ -581,13 +637,7 @@ mod tests {
 
     #[test]
     fn rates_come_from_the_job_account_and_the_process_deltas() {
-        let mut st = State {
-            procs: RateMeter::new(),
-            tasks: RateMeter::new(),
-            sticky: HashMap::new(),
-            last_sample: None,
-            cached: None,
-        };
+        let mut st = state();
         let t0 = Instant::now();
         let mut snap = machine();
         let mut inputs = Inputs {
@@ -597,6 +647,7 @@ mod tests {
         };
         let first = build(&mut st, &snap, &inputs, t0, true, "host", &label);
         assert!(first.tasks.iter().all(|t| t.cpu.is_none()), "no rates on the first sample");
+        assert_eq!(first.host.as_ref().unwrap().cpu, None, "nor a made-up 0% for the machine");
 
         // One second later: node used 0.5 s; vim 0.25 s; the agent's job
         // account grew by 2 s (a build that already exited used most of it).
@@ -615,7 +666,7 @@ mod tests {
 
         let host = second.host.unwrap();
         assert_eq!(host.processes.len(), snap.len());
-        assert!((host.cpu - 0.75).abs() < 1e-9);
+        assert!((host.cpu.unwrap() - 0.75).abs() < 1e-9);
         let node = host.processes.iter().find(|x| x.pid == 203).unwrap();
         assert_eq!(node.task.as_deref(), Some("agent-a"));
         assert!(host.processes.iter().find(|x| x.pid == 900).unwrap().task.is_none());
@@ -624,17 +675,30 @@ mod tests {
 
     #[test]
     fn a_block_without_a_label_is_left_out() {
-        let mut st = State {
-            procs: RateMeter::new(),
-            tasks: RateMeter::new(),
-            sticky: HashMap::new(),
-            last_sample: None,
-            cached: None,
-        };
+        let mut st = state();
         let inputs = Inputs { blocks: vec![tracked("gone", &[200], &[200])], roots: vec![], own_pid: 110 };
         let s = build(&mut st, &machine(), &inputs, Instant::now(), false, "h", &|_| None);
         assert!(s.tasks.iter().all(|t| t.id != "gone"));
         assert!(s.host.is_none());
+    }
+
+    /// Opening the Host view right after a Tasks sample renders the same
+    /// measurement: no second read, so no CPU window of a few milliseconds.
+    #[test]
+    fn host_rows_added_within_the_reuse_window_come_from_the_same_measurement() {
+        let tower = Tower::new();
+        let reads = std::cell::Cell::new(0);
+        let table = || {
+            reads.set(reads.get() + 1);
+            Ok(machine())
+        };
+        let inputs = || Inputs { own_pid: 110, ..Default::default() };
+        let tasks_only = tower.sample_from(table, false, "h", inputs, label).unwrap();
+        assert!(tasks_only.host.is_none());
+        let with_host = tower.sample_from(table, true, "h", inputs, label).unwrap();
+        assert_eq!(reads.get(), 1, "one read for both");
+        assert_eq!(with_host.ts_ms, tasks_only.ts_ms);
+        assert_eq!(with_host.host.unwrap().processes.len(), machine().len());
     }
 
     /// The real sampler on this machine finds this test process as part of

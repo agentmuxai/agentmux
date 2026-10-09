@@ -46,6 +46,9 @@ mod os {
     pub fn command_line(_pid: u32) -> Option<String> {
         None
     }
+    pub fn start_key(_pid: u32) -> Option<u64> {
+        None
+    }
     pub fn cpu_count() -> usize {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1)
     }
@@ -130,6 +133,17 @@ pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
 /// won't say.
 pub fn command_line(pid: u32) -> Option<String> {
     os::command_line(pid)
+}
+
+/// The command line of exactly the process `key` names: `None` if it has
+/// exited or a newer process has its PID, checked both before and after the
+/// read, so a PID reused in between never hands back the successor's line.
+pub fn command_line_of(key: ProcKey) -> Option<String> {
+    if os::start_key(key.pid)? != key.start_key {
+        return None;
+    }
+    let line = os::command_line(key.pid)?;
+    (os::start_key(key.pid)? == key.start_key).then_some(line)
 }
 
 /// Logical CPUs on the whole machine — what "percent of the machine" divides
@@ -307,6 +321,14 @@ mod tests {
         let stem = exe.file_stem().unwrap().to_string_lossy().to_string();
         assert!(line.contains(&stem), "{line:?} lacks {stem:?}");
         assert_eq!(command_line(u32::MAX - 7), None);
+    }
+
+    #[test]
+    fn a_command_line_only_for_the_exact_process() {
+        let me = snapshot().unwrap().into_iter().find(|p| p.pid == std::process::id()).unwrap();
+        assert!(command_line_of(me.key()).is_some(), "{me:?}");
+        let newer = ProcKey { pid: me.pid, start_key: me.start_key.wrapping_add(1) };
+        assert_eq!(command_line_of(newer), None, "same PID, another process");
     }
 
     #[test]

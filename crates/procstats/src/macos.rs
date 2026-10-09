@@ -194,6 +194,15 @@ pub(crate) fn parse_procargs2(buf: &[u8]) -> Option<String> {
     Some(args.join(" ")).filter(|s| !s.is_empty())
 }
 
+/// The identity [`snapshot`] reports as `start_key` (the kernel's unique id,
+/// else the start time), read for one process.
+pub fn start_key(pid: u32) -> Option<u64> {
+    if let Some(u) = pidinfo::<ProcUniqIdentifierInfo>(pid, PROC_PIDUNIQIDENTIFIERINFO) {
+        return Some(u.p_uniqueid);
+    }
+    pidinfo::<libc::proc_bsdinfo>(pid, libc::PROC_PIDTBSDINFO).map(|b| b.pbi_start_tvsec * 1000 + b.pbi_start_tvusec / 1000)
+}
+
 pub fn cpu_count() -> usize {
     let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
     if n > 0 { n as usize } else { 1 }

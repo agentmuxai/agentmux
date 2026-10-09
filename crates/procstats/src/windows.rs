@@ -194,6 +194,23 @@ pub fn command_line(pid: u32) -> Option<String> {
     }
 }
 
+/// The creation time [`snapshot`] reports as `start_key`, read for one
+/// process.
+pub fn start_key(pid: u32) -> Option<u64> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetProcessTimes;
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return None;
+        }
+        let (mut create, mut exit, mut kernel, mut user): (FILETIME, FILETIME, FILETIME, FILETIME) = std::mem::zeroed();
+        let ok = GetProcessTimes(h, &mut create, &mut exit, &mut kernel, &mut user) != 0;
+        CloseHandle(h);
+        ok.then(|| ((create.dwHighDateTime as u64) << 32) | create.dwLowDateTime as u64)
+    }
+}
+
 pub fn cpu_count() -> usize {
     unsafe { GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) as usize }
 }

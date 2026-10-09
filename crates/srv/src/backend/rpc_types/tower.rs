@@ -107,8 +107,11 @@ pub struct TowerHost {
     /// Processes the OS listed without CPU or memory: other users' on macOS,
     /// which only root may measure.
     pub unmeasured: u32,
-    /// All processes' CPU, fraction of one core.
-    pub cpu: f64,
+    /// All processes' CPU, fraction of one core. Absent until there is a
+    /// previous sample to measure against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cpu: Option<f64>,
     /// All processes' private memory, bytes.
     #[ts(type = "number")]
     pub mem: u64,

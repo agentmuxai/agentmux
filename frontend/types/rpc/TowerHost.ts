@@ -11,9 +11,10 @@ export type TowerHost = { processes: Array<TowerProcess>,
  */
 unmeasured: number, 
 /**
- * All processes' CPU, fraction of one core.
+ * All processes' CPU, fraction of one core. Absent until there is a
+ * previous sample to measure against.
  */
-cpu: number, 
+cpu?: number, 
 /**
  * All processes' private memory, bytes.
  */

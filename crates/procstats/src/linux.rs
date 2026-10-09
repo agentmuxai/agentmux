@@ -48,6 +48,12 @@ pub fn command_line(pid: u32) -> Option<String> {
     Some(join_nul_separated(&raw)).filter(|s| !s.is_empty())
 }
 
+/// The start time [`snapshot`] reports as `start_key`, read for one process.
+pub fn start_key(pid: u32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_stat(&stat).map(|s| s.start_ticks)
+}
+
 pub fn cpu_count() -> usize {
     let n = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
     if n > 0 { n as usize } else { 1 }
