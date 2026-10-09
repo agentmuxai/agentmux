@@ -252,20 +252,19 @@ pub(crate) async fn handle_host_browser_navigation(
         };
         if answer != browser_attention::Answer::Yes {
             tracing::info!(pane = %pane, origin = %origin, answer = ?answer, "[browser-allowlist] not allowed");
-            return;
+        } else if let Some((list, members)) = browser_allowlist::allow(&pane, &origin) {
+            // (None: taken over or closed meanwhile, no list left to add to.)
+            tracing::info!(pane = %pane, origin = %origin, "[browser-allowlist] allowed by the user");
+            browser_allowlist::publish(&st, &members, Some(&list));
+            crate::server::browser_host_sync::push(&st).await;
+            if kind == "navigate" {
+                replay_navigation(&st, &target, &url).await;
+            }
         }
-        // Taken over or closed meanwhile: no list left to add to.
-        let Some((list, members)) = browser_allowlist::allow(&pane, &origin) else {
-            return;
-        };
-        tracing::info!(pane = %pane, origin = %origin, "[browser-allowlist] allowed by the user");
-        browser_allowlist::publish(&st, &members, Some(&list));
-        crate::server::browser_host_sync::push(&st).await;
-        if kind == "navigate" {
-            replay_navigation(&st, &target, &url).await;
-        }
-        // The pane stays locked until the load is on its way.
+        // The pane stays locked until the load is on its way. Then the host
+        // hears the question is over, and reports this pane's attempts again.
         drop(waiting);
+        crate::server::browser_host_sync::push(&st).await;
     });
     answered(true, "")
 }

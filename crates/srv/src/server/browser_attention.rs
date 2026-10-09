@@ -89,6 +89,17 @@ pub(crate) fn waiting_on_user(block_id: &str) -> Option<Kind> {
         .map(|p| p.kind)
 }
 
+/// The panes with a request of `kind` up.
+pub(crate) fn asking(kind: Kind) -> Vec<String> {
+    pending()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .values()
+        .filter(|p| p.kind == kind)
+        .map(|p| p.block_id.clone())
+        .collect()
+}
+
 /// Resolve request `id` on `block_id` with the human's answer. Called only
 /// by the host-authenticated route.
 pub(crate) fn resolve(id: &str, block_id: &str, answer: Answer) -> Result<(), String> {

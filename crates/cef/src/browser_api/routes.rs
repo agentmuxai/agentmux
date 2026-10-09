@@ -888,6 +888,9 @@ pub struct OwnedPanesReq {
     /// Each limited pane's site list (allowed-origins spec §6).
     #[serde(default)]
     pub allowed: std::collections::HashMap<String, Vec<String>>,
+    /// The panes srv is asking the person about a navigation.
+    #[serde(default)]
+    pub asking: Vec<String>,
 }
 
 /// `POST /agentmux/browser/owned_panes` — srv's whole set of agent-owned
@@ -911,6 +914,8 @@ pub async fn owned_panes(
         owned.extend(req.panes);
     }
     *state.site_limits.lists.lock() = req.allowed;
+    // A pane whose question is over reports its attempts again.
+    state.site_limits.reports.lock().retain(|p| req.asking.contains(p));
     ok_body(ApiResponse::ok(AckData::new()))
 }
 

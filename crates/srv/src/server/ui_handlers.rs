@@ -796,8 +796,8 @@ pub(crate) async fn handle_ui_browser_open(
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
     };
-    crate::server::browser_owner::record(&result.block_id, &req.auth.agent_id);
     crate::server::browser_allowlist::limit_new_pane(&state, &result.block_id, allowed).await;
+    crate::server::browser_owner::record(&result.block_id, &req.auth.agent_id);
     tracing::info!(
         agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url,
         "[ui-automation] browser open (agent-owned)"

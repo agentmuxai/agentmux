@@ -105,8 +105,13 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
         let pane = pane.clone();
         let state = state.clone();
         move || {
-            if let Err(e) = crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body) {
-                tracing::warn!(pane = %pane, error = %e, "couldn't tell srv about a navigation off the allowed sites");
+            // While srv asks, the marker stays: the page's further attempts
+            // are cancelled without another report, until a push from srv
+            // shows the question is over (browser_api::routes::owned_panes).
+            match crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body) {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(e) => tracing::warn!(pane = %pane, error = %e, "couldn't tell srv about a navigation off the allowed sites"),
             }
             state.site_limits.reports.lock().remove(&pane);
         }
