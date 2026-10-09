@@ -124,6 +124,10 @@ impl SubagentWatcher {
     /// `false` if the subagent isn't tracked (e.g. it aged out between the
     /// RPC firing and resolving) — the caller should treat that as a no-op,
     /// not an error.
+    ///
+    /// A name already set is kept: the parent's description can land in a late
+    /// sidecar while this call runs, and it is the better name. Nothing is
+    /// broadcast then.
     pub fn set_display_name(&self, agent_id: &str, display_name: &str) -> bool {
         // Captured alongside the mutation itself (not re-looked-up after
         // unlocking) — this is the exact moment a NAME-based grouping key is
@@ -136,13 +140,16 @@ impl SubagentWatcher {
             let mut found = false;
             for session in sessions.values_mut() {
                 if let Some(state) = session.subagents.get_mut(agent_id) {
+                    found = true;
+                    if state.info.display_name.is_some() {
+                        break;
+                    }
                     state.info.display_name = Some(display_name.to_string());
                     found_context = Some((
                         state.info.parent_block_id.clone(),
                         state.info.session_id.clone(),
                         state.info.dispatch_id.clone(),
                     ));
-                    found = true;
                     break;
                 }
             }
@@ -161,7 +168,7 @@ impl SubagentWatcher {
             );
         }
 
-        if found {
+        if found_context.is_some() {
             self.broadcast_subagent_named(agent_id, display_name);
         }
         found

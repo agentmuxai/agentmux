@@ -125,6 +125,24 @@ fn set_display_name_updates_info_and_reports_found() {
     assert_eq!(info.display_name.as_deref(), Some("Refactor shell module"));
 }
 
+/// A generated name that lands after the parent's description named the
+/// subagent (a late sidecar) does not replace it.
+#[test]
+fn a_generated_name_never_replaces_one_already_set() {
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.display_name = Some("Audit the session cookie".to_string());
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+    assert!(watcher.set_display_name("sub-a", "Find cookie setters"));
+    let info = watcher.get_info("sub-a").expect("sub-a should be found");
+    assert_eq!(info.display_name.as_deref(), Some("Audit the session cookie"));
+}
+
 #[test]
 fn set_display_name_on_unknown_agent_is_noop_and_reports_not_found() {
     let watcher = fixture_watcher();
