@@ -191,3 +191,24 @@ describe("isNewerLedger", () => {
         expect(s.turnLedger?.active).toBe(true);
     });
 });
+
+describe("reducer: the pane's own carry of each pass's figures", () => {
+    const end = (s: ReturnType<typeof initialState>, output: number) =>
+        update(s, { type: "TurnEnd", stats: { output_tokens: output, cost_usd: 0.1, num_turns: 2 } }).state;
+
+    it("sums the passes of the turn srv reported, and starts over for the next turn", () => {
+        let s = initialState("a");
+        s = update(s, { type: "TurnObserved", ledger: ledger({ turnId: 10, seq: 1 }) }).state;
+        s = end(s, 100);
+        s = end(s, 50);
+        expect(s.turnCarry).toMatchObject({ turnId: 10, passes: 2, outputTokens: 150, steps: 4 });
+        expect(s.turnCarry?.costUsd).toBeCloseTo(0.2);
+        s = update(s, { type: "TurnObserved", ledger: ledger({ turnId: 11, seq: 2 }) }).state;
+        s = end(s, 7);
+        expect(s.turnCarry).toMatchObject({ turnId: 11, passes: 1, outputTokens: 7 });
+    });
+
+    it("carries nothing without a ledger", () => {
+        expect(end(initialState("a"), 100).turnCarry).toBeNull();
+    });
+});

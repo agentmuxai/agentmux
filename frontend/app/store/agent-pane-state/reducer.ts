@@ -48,7 +48,8 @@ import {
     workingFromPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
-import type { TurnTokens } from "@/app/view/agent/types";
+import type { SessionStats, TurnTokens } from "@/app/view/agent/types";
+import type { TurnCarry } from "./types";
 import {
     implausibleReason,
     learnedWindowsAfter,
@@ -857,6 +858,7 @@ export function update(
                     ...state,
                     sessionStats: merged,
                     sessionTotals: accumulateStats(state.sessionTotals, merged),
+                    turnCarry: carryPass(state.turnCarry, state.turnLedger?.turnId, merged),
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
@@ -1794,6 +1796,19 @@ export function update(
  * so a call always belongs to the ledger's latest pass: the running one, or,
  * for a line that arrives late, the one that just ended.
  */
+/** Add a finished pass's figures to its turn's carry (a new turn starts a new one). */
+function carryPass(carry: TurnCarry | null, turnId: number | undefined, stats: SessionStats | null): TurnCarry | null {
+    if (turnId == null || !stats) return carry;
+    const base = carry?.turnId === turnId ? carry : { turnId, passes: 0, outputTokens: 0, costUsd: 0, steps: 0 };
+    return {
+        turnId,
+        passes: base.passes + 1,
+        outputTokens: base.outputTokens + (stats.output_tokens ?? 0),
+        costUsd: base.costUsd + (stats.cost_usd ?? 0),
+        steps: base.steps + (stats.num_turns ?? 0),
+    };
+}
+
 function ledgerStamp(state: AgentPaneState): Pick<TurnTokens, "ledgerTurnId" | "ledgerPass"> {
     const l = state.turnLedger;
     return l ? { ledgerTurnId: l.turnId, ledgerPass: l.passes } : {};

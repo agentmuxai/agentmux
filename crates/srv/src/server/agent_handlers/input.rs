@@ -764,11 +764,16 @@ pub async fn run_agent_turn_joining(
 
     let ctrl = blockcontroller::get_controller(&block_id)
         .ok_or_else(|| format!("no controller for block {}", block_id))?;
-    // A message the pane held during a turn joins that turn, whichever
-    // controller carries it (turn-model spec §4.3, J3).
-    if let (Some(turn_id), Some(tracker)) = (joins_turn, ctrl.turn_tracker()) {
-        tracker.hint_join(turn_id);
-    }
+    // A message the pane held during a turn joins that turn (turn-model spec
+    // §4.3, J3). The persistent controller carries it on the input itself;
+    // the others start passes with no labelled input, so their tracker is told
+    // just before the dispatch, never earlier: a failure in the preparation
+    // must not leave the hint armed for a later message (#4492).
+    let arm_join_hint = || {
+        if let (Some(turn_id), Some(tracker)) = (joins_turn, ctrl.turn_tracker()) {
+            tracker.hint_join(turn_id);
+        }
+    };
 
     // Re-read the spawn config from block metadata
     let block: Block = mstore
@@ -996,6 +1001,7 @@ pub async fn run_agent_turn_joining(
         ctrl.as_any()
             .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
     {
+        arm_join_hint();
         app_server_ctrl.send_message(message)?;
     }
     // Try persistent controller first, fall back to subprocess
@@ -1213,6 +1219,7 @@ pub async fn run_agent_turn_joining(
                 },
                 instance_id,
             };
+            arm_join_hint();
             subprocess_ctrl.spawn_turn(config)?;
         }
     } else if let Some(acp_ctrl) =
@@ -1223,6 +1230,7 @@ pub async fn run_agent_turn_joining(
         // If the agent's process exited or crashed, this starts it again from
         // the pane's meta; the message waits for the new session.
         acp_ctrl.ensure_started(block.meta.clone())?;
+        arm_join_hint();
         acp_ctrl.send_message(message, message_id.as_deref())?;
     } else {
         return Err(

@@ -857,6 +857,20 @@ describe("AgentWorkingRow across a turn's passes", () => {
         expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.410  ·  9 steps  ·  2 passes");
     });
 
+    it("reports the turn from the pane's own carry when srv counted no passes (ACP, App Server, subprocess)", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 40, num_turns: 1, cost_usd: 0.01 }}
+                turnLedger={ledger({ startedAtMs: end - 30_000, active: false, passes: 2, lastPassEndedAtMs: end, endedAtMs: end, end: "completed" })}
+                turnCarry={{ turnId: 7, passes: 2, outputTokens: 640, costUsd: 0.09, steps: 5 }}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  30s  ·  640 tokens");
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.090  ·  5 steps  ·  2 passes");
+    });
+
     it("calls result.num_turns steps, which is what it counts", () => {
         const { container } = render(() => (
             <AgentWorkingRow loading={false} sessionStats={{ duration_ms: 42_000, num_turns: 3, cost_usd: 0.2 }} />

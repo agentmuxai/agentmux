@@ -253,6 +253,15 @@ export type TurnPhase =
           reason: DisconnectReason;
       };
 
+/** See `AgentPaneState.turnCarry`. */
+export interface TurnCarry {
+    turnId: number;
+    passes: number;
+    outputTokens: number;
+    costUsd: number;
+    steps: number;
+}
+
 /**
  * The reducer's state. Each field maps 1:1 to a Solid signal that the
  * agent pane projects from. The reducer enforces invariants ACROSS
@@ -299,6 +308,13 @@ export interface AgentPaneState {
      * from it; `turnPhase` and `turnTokens` stay per pass.
      */
     turnLedger: TurnLedger | null;
+    /**
+     * Each pass's own figures (its `TurnEnd` stats), summed over the turn srv
+     * reported it in. For providers whose passes srv doesn't count (ACP, App
+     * Server, one-shot subprocess: no `result` usage reaches the ledger), the
+     * Worked line reports the turn from this.
+     */
+    turnCarry: TurnCarry | null;
     /**
      * True for the duration of a turn started specifically to send a
      * manual "/compact" (the composer's "Compact now" button, or a user
@@ -497,6 +513,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentToolArg: null,
     turnTokens: null,
     turnLedger: null,
+    turnCarry: null,
     pendingCompactTurn: false,
     context: null,
     contextSeedable: true,

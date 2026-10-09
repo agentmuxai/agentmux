@@ -361,6 +361,11 @@ pub struct TurnActivityTracker {
     block_id: String,
     inner: Mutex<TurnActivityTrackerInner>,
     publisher: Mutex<Option<TurnLedgerPublisher>>,
+    /// Taken before `inner` is released and held through the publish, so
+    /// ledgers go out in `seq` order. The broker keeps the last one for
+    /// replay, so an older one published last would be what a new subscriber
+    /// gets (#4492). Lock order: `inner` → `publish_order`.
+    publish_order: Mutex<()>,
     clock: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
@@ -395,6 +400,7 @@ impl TurnActivityTracker {
                 ledger_seq: 0,
             }),
             publisher: Mutex::new(None),
+            publish_order: Mutex::new(()),
             clock,
         }
     }
@@ -403,6 +409,21 @@ impl TurnActivityTracker {
     /// controller that owns this tracker, when it has a broker.
     pub fn set_ledger_publisher(&self, publisher: TurnLedgerPublisher) {
         *self.publisher.lock().unwrap() = Some(publisher);
+    }
+
+    /// Release `inner` and publish the ledger if it changed, in `seq` order.
+    fn publish_in_order(
+        &self,
+        inner: std::sync::MutexGuard<'_, TurnActivityTrackerInner>,
+        before: Option<TurnLedger>,
+        after: Option<TurnLedger>,
+    ) {
+        if before == after {
+            return;
+        }
+        let _order = self.publish_order.lock().unwrap();
+        drop(inner);
+        self.publish_if_changed(before, after);
     }
 
     /// Send the ledger to the publisher, if it changed. Called after the
@@ -434,8 +455,7 @@ impl TurnActivityTracker {
             inner.begin_pass(PassStart::Queued, now);
         }
         let after = inner.stamp(&before);
-        drop(inner);
-        self.publish_if_changed(before, after);
+        self.publish_in_order(inner, before, after);
         tracing::info!(block_id = %self.block_id, active, "[health] turn_active flip");
     }
 
@@ -488,8 +508,7 @@ impl TurnActivityTracker {
             }
         }
         let after = inner.stamp(&before);
-        drop(inner);
-        self.publish_if_changed(before, after);
+        self.publish_in_order(inner, before, after);
         tracing::info!(
             block_id = %self.block_id,
             active = true,
@@ -536,8 +555,7 @@ impl TurnActivityTracker {
         }));
         inner.begin_pass(PassStart::CliWake, now);
         let after = inner.stamp(&before);
-        drop(inner);
-        self.publish_if_changed(before, after);
+        self.publish_in_order(inner, before, after);
         tracing::info!(block_id = %self.block_id, active = true, "[health] turn_active flip (CLI started a pass)");
         true
     }
@@ -559,8 +577,7 @@ impl TurnActivityTracker {
             inner.end_pass(now, ended);
         }
         let after = inner.stamp(&before);
-        drop(inner);
-        self.publish_if_changed(before, after);
+        self.publish_in_order(inner, before, after);
         tracing::info!(block_id = %self.block_id, active = false, "[health] turn_active flip");
     }
 
@@ -573,8 +590,7 @@ impl TurnActivityTracker {
             l.add_stats(stats);
         }
         let after = inner.stamp(&before);
-        drop(inner);
-        self.publish_if_changed(before, after);
+        self.publish_in_order(inner, before, after);
     }
 
     /// A message the pane held while turn `turn_id` ran is about to be sent
@@ -616,8 +632,7 @@ impl TurnActivityTracker {
             l.end = Some(TurnEnd::Exited);
         }
         let after = inner.stamp(&before);
-        drop(inner);
-        self.publish_if_changed(before, after);
+        self.publish_in_order(inner, before, after);
         tracing::info!(block_id = %self.block_id, exit_code, "[health] turn_active flip (process exited)");
     }
 
@@ -663,8 +678,7 @@ impl TurnActivityTracker {
             inner.begin_pass(PassStart::Queued, now);
         }
         let after = inner.stamp(&before);
-        drop(inner);
-        self.publish_if_changed(before, after);
+        self.publish_in_order(inner, before, after);
         tracing::info!(block_id = %self.block_id, active = true, was_active, "[health] turn_active flip (queued delivery)");
         was_active
     }

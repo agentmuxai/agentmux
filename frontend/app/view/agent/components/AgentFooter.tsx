@@ -15,7 +15,7 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
-import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
+import type { CompactionState, ResumeRetryState, TurnCarry } from "@/app/store/agent-pane-state/types";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
@@ -112,6 +112,9 @@ interface AgentWorkingRowProps {
      *  ends, the Worked line reports it. Absent (older srv): per pass, as before.
      *  SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4. */
     turnLedger?: TurnLedger | null;
+    /** Each pass's figures summed over the turn, for providers srv doesn't
+     *  count (`AgentPaneState.turnCarry`). */
+    turnCarry?: TurnCarry | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
     waitingReason?: "rate_limited" | null;
     /** Milliseconds until next retry (from provider Retry-After). Shown when waitingReason is set. */
@@ -334,6 +337,16 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         return endedAt != null ? { l, durationMs: endedAt - l.startedAtMs } : null;
     });
 
+    // The whole turn's figures: srv's, when it counted the passes; else the
+    // pane's own sum of each pass's stats, for the same turn.
+    const turnFigures = createMemo((): { outputTokens: number; costUsd: number; steps: number } | null => {
+        const turn = endedTurn();
+        if (!turn) return null;
+        if (turn.l.countedPasses > 0) return turn.l;
+        const carry = props.turnCarry;
+        return carry && carry.turnId === turn.l.turnId && carry.passes > 1 ? carry : null;
+    });
+
     const workedSummary = createMemo((): string | null => {
         const stats = props.sessionStats;
         if (!stats) return null;
@@ -343,7 +356,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         if (durationMs != null) parts.push(fmtWorkedDuration(durationMs));
         // The turn's output: the results' exact figures (summed over its
         // calls and passes), where the live row showed it growing.
-        const output = turn && turn.l.countedPasses > 0 ? turn.l.outputTokens : stats.output_tokens;
+        const figures = turnFigures();
+        const output = figures ? figures.outputTokens : stats.output_tokens;
         if (output != null) parts.push(fmtOutputTokens(output));
         return parts.join("  ·  ");
     });
@@ -352,7 +366,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         const stats = props.sessionStats;
         if (!stats) return null;
         const turn = endedTurn();
-        const counted = turn && turn.l.countedPasses > 0 ? turn.l : null;
+        const counted = turnFigures();
         const parts: string[] = [];
         const cost = counted ? counted.costUsd : stats.cost_usd;
         if (cost != null) parts.push(`$${cost.toFixed(3)}`);

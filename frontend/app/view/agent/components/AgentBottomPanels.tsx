@@ -235,6 +235,7 @@ export const AgentBottomPanels = (props: {
                     activitySummary={readSwarmSummary(props.block()?.meta)}
                     turnTokens={props.paneModel.state.turnTokens}
                     turnLedger={props.paneModel.state.turnLedger}
+                    turnCarry={props.paneModel.state.turnCarry}
                     sessionStats={props.paneModel.state.sessionStats}
                     launchPhase={props.status.launchPhase()}
                     onCancelLogin={props.status.cancelLogin}
