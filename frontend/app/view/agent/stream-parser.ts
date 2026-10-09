@@ -253,9 +253,8 @@ export class ClaudeCodeStreamParser {
     // until some future real user_message eventually appears — dropping
     // genuine conversation history, not just failing to hide something.
     // clearHiddenReinjectionState() below is the one sanctioned way to
-    // clear it from outside this class, called from parseHistoryLines.ts
-    // at the same point the existing lastContext reset already
-    // happens.
+    // clear it from outside this class: frame-intercepts.ts calls it at
+    // every session boundary, for the live stream and replay alike.
     clearHiddenReinjectionState(): void {
         this.hidingUntilNextUserMessage = false;
         this.fallbackCardShown = false;

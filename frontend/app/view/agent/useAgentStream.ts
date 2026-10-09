@@ -609,8 +609,9 @@ export function useAgentStream({
             detectTaskWake,
         };
         const frameSink: FrameSink = {
-            node: (node) => {
+            node: (node, update) => {
                 if (hasNodeId(node.id)) {
+                    if (!update) return;
                     queue.pushUpdatedNode(node);
                 } else {
                     addNodeId(node.id);

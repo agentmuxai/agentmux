@@ -35,8 +35,10 @@ export interface FrameInterceptState {
 
 /** What a path does with what the intercepts found. */
 export interface FrameSink {
-    /** Add a node, or update the one already there with its id. */
-    node(node: DocumentNode): void;
+    /** Add a node. `update`: a later frame with its id carries newer state (a
+     *  CLI install's progress), so it replaces the node already there; else a
+     *  node already there (a frame seen again after a resubscribe) is kept. */
+    node(node: DocumentNode, update: boolean): void;
     /** Place the jekts the parser released, before the next node. */
     placeReleased(): void;
     /** A compaction boundary; `data` is null when its metadata didn't parse. */
@@ -64,7 +66,7 @@ export function interceptFrame(raw: Record<string, unknown>, st: FrameInterceptS
 
     // Observe only: the frame keeps flowing.
     const wake = st.detectTaskWake(raw, at);
-    if (wake) sink.node(wake);
+    if (wake) sink.node(wake, false);
 
     if (raw.type === "system" && raw.subtype === "compact_boundary") {
         // Closed even when the metadata doesn't parse: it is still a real
@@ -91,7 +93,7 @@ export function interceptFrame(raw: Record<string, unknown>, st: FrameInterceptS
     const summary = st.compactionSummaries.take(raw, at ?? 0);
     if (summary) {
         closeBlock();
-        sink.node(summary);
+        sink.node(summary, false);
         return true;
     }
 
@@ -100,7 +102,7 @@ export function interceptFrame(raw: Record<string, unknown>, st: FrameInterceptS
     const cliNode = parseCliNoticeFrame(raw, at ?? 0);
     if (cliNode) {
         closeBlock();
-        sink.node(cliNode);
+        sink.node(cliNode, true);
         return true;
     }
 

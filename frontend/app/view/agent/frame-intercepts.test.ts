@@ -11,7 +11,7 @@ import { createTaskWakeDetector } from "./task-wake";
 function recording() {
     const calls: string[] = [];
     const sink: FrameSink = {
-        node: (n) => calls.push(`node:${n.type}`),
+        node: (n, update) => calls.push(`node:${n.type}${update ? ":update" : ""}`),
         placeReleased: () => calls.push("placeReleased"),
         compactBoundary: (data) => calls.push(`compactBoundary:${data ? "parsed" : "null"}`),
         sessionOutcome: (data) => calls.push(`sessionOutcome:${data?.outcome ?? "null"}`),
