@@ -25,13 +25,16 @@
  * first tick and reap the in-flight login CLI before the user finishes.
  */
 
-import { getApi } from "@/app/store/global";
 import { openOAuthBrowserPane } from "./open-oauth-pane";
+import { loginBackend } from "./login-backend";
 import type { ProviderDefinition } from "../providers";
 import type { LogFn } from "../types";
 
 export interface ForceLoginParams {
-    provider: Pick<ProviderDefinition, "authLoginCommand" | "requiresLoginTty" | "authConfigDirEnvVar">;
+    provider: Pick<
+        ProviderDefinition,
+        "id" | "authLoginCommand" | "authCheckCommand" | "requiresLoginTty" | "authConfigDirEnvVar"
+    >;
     /** Resolved CLI path (from block meta `cmd`, set at launch). */
     cliPath: string;
     /** Auth env (e.g. CLAUDE_CONFIG_DIR) — from block meta `cmd:env`. */
@@ -61,13 +64,15 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
     const { provider, cliPath, authEnv, setAuthUrl, log, isCancelled } = p;
     log("auth", "re-login: forcing a fresh OAuth (bypassing the auth-status check)…");
 
-    const url = await getApi().runCliLogin(
+    const url = await loginBackend().start({
+        providerId: provider.id,
         cliPath,
-        provider.authLoginCommand,
+        loginArgs: provider.authLoginCommand,
+        checkArgs: provider.authCheckCommand,
         authEnv,
-        provider.requiresLoginTty ?? false,
-        provider.authConfigDirEnvVar,
-    );
+        requiresTty: provider.requiresLoginTty ?? false,
+        authConfigDirEnvVar: provider.authConfigDirEnvVar,
+    });
 
     if (url) {
         if (isCancelled?.()) {

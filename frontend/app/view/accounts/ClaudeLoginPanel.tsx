@@ -18,7 +18,7 @@
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";
-import { getApi } from "@/app/store/global";
+import { loginBackend } from "@/app/view/agent/flows/login-backend";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { translateError } from "@/app/errors/translate";
@@ -101,7 +101,7 @@ export function ClaudeLoginPanel(props: {
     onCleanup(() => {
         cancelled = true;
         if (inFlight()) {
-            getApi().cancelCliLogin().catch(() => {});
+            loginBackend().cancel().catch(() => {});
         }
     });
 
@@ -292,7 +292,7 @@ export function ClaudeLoginPanel(props: {
             // stuck on its starting phase forever with no error shown and
             // no Retry button (same class of bug as PreLaunchAuthPanel's
             // identical gap, reagent P2 on PR #2410).
-            getApi().cancelCliLogin().catch(() => {});
+            loginBackend().cancel().catch(() => {});
             const t = translateError(e);
             setError(`${t.title}: ${t.message}${t.retry ? ` — ${t.retry}` : ""}`);
         } finally {
@@ -302,7 +302,7 @@ export function ClaudeLoginPanel(props: {
 
     const onCancel = () => {
         cancelled = true;
-        getApi().cancelCliLogin().catch(() => {});
+        loginBackend().cancel().catch(() => {});
         props.onClose();
     };
 

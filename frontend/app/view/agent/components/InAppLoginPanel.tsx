@@ -17,6 +17,7 @@
  */
 
 import { Button } from "@/element/button";
+import { loginBackend } from "../flows/login-backend";
 import { getApi } from "@/app/store/global";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createSignal, Show, type JSX } from "solid-js";
@@ -63,7 +64,7 @@ export const InAppLoginPanel = (p: InAppLoginPanelProps): JSX.Element => {
             // session's completion poll (inside runProviderLogin) then
             // observes the CLI finishing. SECURITY: the code is single-use
             // and PKCE-bound to the spawned process (spec §5) — never logged.
-            await getApi().setProviderAuth(p.providerId, code);
+            await loginBackend().submitCode(p.providerId, code);
             setPasteResult("Code accepted — signing you in…");
             setPasteCode("");
         } catch (err) {
