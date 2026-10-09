@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, and phase 2a (the trigger on the row and the Worked line, §5.4) follows it; see §4.7 for how the build differs from the design below. Phase 2b (attention, §5.5) follows phase 2a; phases 3–4 are proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492 and phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503; phase 2b (attention, §5.5) follows them. See §4.7 for how the build differs from the design below. Phases 3–4 are proposed.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
