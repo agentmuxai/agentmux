@@ -293,11 +293,6 @@ declare global {
         getCursorPoint: () => { x: number; y: number };
         getPlatform: () => NodeJS.Platform;
         getEnv: (varName: string) => string;
-        getUserName: () => string;
-        getHostName: () => string;
-        getDataDir: () => string;
-        getConfigDir: () => string;
-        getUserHomeDir: () => string;
         getAboutModalDetails: () => AboutModalDetails;
         getBackendInfo: () => Promise<{
             pid?: number;
@@ -309,7 +304,6 @@ declare global {
         restartBackend: () => Promise<void>;
         /** The performance health signals active right now (`health-signal` payloads). */
         getHealthSignals: () => Promise<HealthPayload[]>;
-        getDocsiteUrl: () => string;
         getZoomFactor: () => number;
         showContextMenu: (
             workspaceId: string,

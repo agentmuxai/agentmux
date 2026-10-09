@@ -21,9 +21,9 @@ vi.mock("@/app/util/menu-position", () => ({
     })),
 }));
 vi.mock("@/store/global", () => ({
+    getHostName: () => "narko",
     getApi: () => ({
         getAuthKey: () => "k",
-        getHostName: () => "narko",
         // The real CEF mapping, over the IPC mock below.
         openDataDirInFileManager: () => invokeCommandMock("open_in_file_manager", { target: "data" }),
         getHostInfo: () => invokeCommandMock("get_host_info", {}),
