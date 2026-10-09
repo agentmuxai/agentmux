@@ -140,7 +140,10 @@ fn group(snap: &[ProcInfo], inputs: &Inputs, sticky: &HashMap<ProcKey, String>) 
             .filter_map(|pid| by_pid.get(pid).copied())
             .filter(|i| !claimed.contains_key(i))
             .collect();
-        if members.is_empty() {
+        // A tree whose processes all came and went between two samples still
+        // has its CPU account: keep it, so that work is counted. It is shown
+        // only while that account moved (`render`).
+        if members.is_empty() && b.cpu_time_ns.is_none() {
             continue;
         }
         let tracked: Vec<TrackedProcess> = members
@@ -401,12 +404,16 @@ fn render(s: &Sampled, want_host: bool, hostname: &str, labels: &dyn Fn(&str) ->
 
     let mut tasks = Vec::new();
     for g in &grouping.tasks {
-        let Some(label) = labels(&g.id) else { continue };
         let cpu = if g.cpu_time_ns.is_some() {
             s.account_rates.get(&g.id).copied().flatten()
         } else {
             sum_known(g.members.iter().map(|m| rates[m.0]))
         };
+        // Nothing running and nothing used since the last sample: no row.
+        if g.members.is_empty() && cpu.unwrap_or(0.0) <= 0.0 {
+            continue;
+        }
+        let Some(label) = labels(&g.id) else { continue };
         tasks.push(TowerTask {
             id: g.id.clone(),
             kind: if label.agent { TowerTaskKind::Agent } else { TowerTaskKind::Terminal },
@@ -671,6 +678,26 @@ mod tests {
         assert_eq!(node.task.as_deref(), Some("agent-a"));
         assert!(host.processes.iter().find(|x| x.pid == 900).unwrap().task.is_none());
         assert_eq!(node.id, "203:2030");
+    }
+
+    /// A build that started and finished between two samples: the tree has
+    /// no live process, but its Job account grew, and that CPU is reported.
+    #[test]
+    fn a_tree_whose_processes_all_exited_still_reports_their_cpu() {
+        let mut st = state();
+        let t0 = Instant::now();
+        let mut inputs = Inputs { blocks: vec![tracked("agent-a", &[], &[200])], roots: vec![], own_pid: 110 };
+        inputs.blocks[0].cpu_time_ns = Some(1_000_000_000);
+        let first = build(&mut st, &machine(), &inputs, t0, false, "h", &label);
+        assert!(first.tasks.iter().all(|t| t.id != "agent-a"), "nothing measured yet, nothing running: no row");
+        inputs.blocks[0].cpu_time_ns = Some(3_000_000_000);
+        let second = build(&mut st, &machine(), &inputs, t0 + Duration::from_secs(1), false, "h", &label);
+        let a = second.tasks.iter().find(|t| t.id == "agent-a").expect("its CPU is reported");
+        assert!((a.cpu.unwrap() - 2.0).abs() < 1e-9);
+        assert!(a.processes.is_empty());
+        // Idle afterwards: the row goes away again.
+        let third = build(&mut st, &machine(), &inputs, t0 + Duration::from_secs(2), false, "h", &label);
+        assert!(third.tasks.iter().all(|t| t.id != "agent-a"));
     }
 
     #[test]

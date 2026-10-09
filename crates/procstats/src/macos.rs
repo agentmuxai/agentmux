@@ -128,9 +128,12 @@ fn exe_name(pid: u32, comm: &[c_char]) -> String {
 pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
     let mut out = Vec::with_capacity(512);
     for pid in all_pids()? {
+        // The kernel's unique id, read before and after the rest: a PID reused
+        // in between would mix two processes in one row, so that row is
+        // dropped (the next snapshot has the new process).
+        let unique = pidinfo::<ProcUniqIdentifierInfo>(pid, PROC_PIDUNIQIDENTIFIERINFO).map(|u| u.p_uniqueid);
         // Gone already: skip it.
         let Some(short) = pidinfo::<ProcBsdShortInfo>(pid, PROC_PIDT_SHORTBSDINFO) else { continue };
-        let unique = pidinfo::<ProcUniqIdentifierInfo>(pid, PROC_PIDUNIQIDENTIFIERINFO).map(|u| u.p_uniqueid);
 
         let mut usage: libc::rusage_info_v2 = unsafe { zeroed() };
         let measured = unsafe {
@@ -142,12 +145,17 @@ pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
         } else {
             None
         };
+        let name = exe_name(pid, &short.pbsi_comm);
+        let unique_after = pidinfo::<ProcUniqIdentifierInfo>(pid, PROC_PIDUNIQIDENTIFIERINFO).map(|u| u.p_uniqueid);
+        if unique_after != unique {
+            continue;
+        }
         out.push(ProcInfo {
             pid,
             ppid: Some(short.pbsi_ppid).filter(|&p| p != 0),
             start_key: unique.or(started_at_ms).unwrap_or(0),
             started_at_ms,
-            name: exe_name(pid, &short.pbsi_comm),
+            name,
             cpu_ns: measured.then(|| ticks_to_ns(usage.ri_user_time) + ticks_to_ns(usage.ri_system_time)),
             mem_private: measured.then_some(usage.ri_phys_footprint),
             mem_resident: measured.then_some(usage.ri_resident_size),
