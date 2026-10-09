@@ -31,6 +31,18 @@ pub enum AuthPatternMatch {
 /// captured output. Returns the FIRST match found — patterns are
 /// listed by descending specificity in `patterns_for(provider_id)`.
 pub fn match_line(provider_id: &str, line: &str) -> Option<AuthPatternMatch> {
+    // Terminal codes (colours, OSC-8 hyperlinks) come out first. A link's
+    // target is tried before the visible text, which a PTY can wrap.
+    let t = agentmux_common::login_pty::strip_terminal_codes(line);
+    t.link_uris
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once(t.text.as_str()))
+        .find_map(|candidate| match_clean_line(provider_id, candidate))
+}
+
+/// [`match_line`] on a line with no terminal codes in it.
+fn match_clean_line(provider_id: &str, line: &str) -> Option<AuthPatternMatch> {
     for matcher in patterns_for(provider_id) {
         if let Some(m) = matcher(line) {
             return Some(m);
@@ -90,9 +102,14 @@ fn patterns_for(provider_id: &str) -> &'static [LineMatcher] {
 fn match_claude_url(line: &str) -> Option<AuthPatternMatch> {
     // Claude Code emits something like:
     //   "Open this URL in your browser to authorize:"
-    //   "https://console.anthropic.com/oauth/authorize?response_type=..."
+    //   "https://claude.com/cai/oauth/authorize?code=true&client_id=..."
+    // (earlier versions: "https://console.anthropic.com/oauth/authorize?...").
     if let Some(url) = extract_first_https_url(line) {
-        if url.contains("anthropic.com/oauth") || url.contains("console.anthropic.com") {
+        if url.contains("claude.com/cai/oauth")
+            || url.contains("claude.ai/oauth")
+            || url.contains("anthropic.com/oauth")
+            || url.contains("console.anthropic.com")
+        {
             return Some(AuthPatternMatch::OAuthUrl(url));
         }
     }
@@ -440,5 +457,27 @@ mod tests {
         assert_eq!(extract_device_code("code: ABCD_1234"), None);
         // Lowercase — GitHub uses uppercase only.
         assert_eq!(extract_device_code("code: abcd-1234"), None);
+    }
+
+    const CLAUDE_AUTHORIZE: &str =
+        "https://claude.com/cai/oauth/authorize?code=true&client_id=abc-123&code_challenge=xyz&state=st-789";
+
+    #[test]
+    fn claude_matches_its_current_authorize_url() {
+        let line = format!("If the browser didn't open, visit: {CLAUDE_AUTHORIZE}");
+        assert_eq!(match_line("claude", &line), Some(AuthPatternMatch::OAuthUrl(CLAUDE_AUTHORIZE.to_string())));
+    }
+
+    #[test]
+    fn a_url_inside_colour_codes_is_matched_without_them() {
+        let line = format!("\x1b[1;34m{CLAUDE_AUTHORIZE}\x1b[0m");
+        assert_eq!(match_line("claude", &line), Some(AuthPatternMatch::OAuthUrl(CLAUDE_AUTHORIZE.to_string())));
+    }
+
+    #[test]
+    fn an_osc8_link_target_wins_over_wrapped_visible_text() {
+        // The visible text was cut short by a wrap; the link target is whole.
+        let line = format!("\x1b]8;;{CLAUDE_AUTHORIZE}\x07https://claude.com/cai/oauth/auth\x1b]8;;\x07");
+        assert_eq!(match_line("claude", &line), Some(AuthPatternMatch::OAuthUrl(CLAUDE_AUTHORIZE.to_string())));
     }
 }
