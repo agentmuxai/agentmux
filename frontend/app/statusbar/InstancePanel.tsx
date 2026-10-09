@@ -17,6 +17,7 @@
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
 import { MaintenanceSection } from "./MaintenanceSection";
+import { hostHas } from "@/app/host/host-caps";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
 import { AnchoredPopover, type PopoverAnchor } from "@/app/element/anchored-popover";
@@ -631,13 +632,15 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
             </div>
             <div class="instance-panel-divider" />
             <div class="instance-panel-footer">
-                <Button
-                    tone="accent"
-                    class="instance-panel-btn instance-panel-btn-primary"
-                    onClick={handleOpenNewWindow}
-                >
-                    + Open another window
-                </Button>
+                <Show when={hostHas("multiWindow")}>
+                    <Button
+                        tone="accent"
+                        class="instance-panel-btn instance-panel-btn-primary"
+                        onClick={handleOpenNewWindow}
+                    >
+                        + Open another window
+                    </Button>
+                </Show>
                 <Button
                     class="instance-panel-btn"
                     onClick={props.onClose}

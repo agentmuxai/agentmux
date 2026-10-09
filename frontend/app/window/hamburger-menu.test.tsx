@@ -43,7 +43,8 @@ const h = vi.hoisted(() => {
         settingsAtom: () => settings.read(),
     };
     const settings = { read: (): Record<string, unknown> => ({}) };
-    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, menu: { items: [] as MenuItem[] } };
+    const caps = { multiWindow: true };
+    return { createTab, openNewWindow, openModal, CommandPaletteModal, store, settings, caps, menu: { items: [] as MenuItem[] } };
 });
 
 // keymodel.ts imports the store as "@/app/store/global", the menu as "@/store/global".
@@ -58,6 +59,7 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } })
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
+vi.mock("@/app/host/host-caps", () => ({ hostHas: (cap: string) => cap === "multiWindow" && h.caps.multiWindow }));
 vi.mock("@/app/store/zoom", () => ({ zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ focusedNode: () => null }),
@@ -217,6 +219,39 @@ describe.each(["darwin", "win32", "linux"] as Platform[])("hamburger menu shortc
     it("shows a shortcut on exactly the items that have one", () => {
         const shown = h.menu.items.filter((item) => item.shortcut);
         expect(shown.map((item) => item.label)).toEqual(["New Tab", "New Window", "Settings", "Command Palette"]);
+    });
+});
+
+// SPEC_HOST_API_SEAM_2026_09_26.md: on a host without multiWindow there is no
+// "New Window" item, and its key isn't taken, so it reaches the terminal.
+describe("on a host without multiWindow", () => {
+    beforeEach(() => {
+        h.caps.multiWindow = false;
+        setKeyUtilPlatform("win32");
+        setPlatform("win32");
+        keyCommands.clear();
+        registerGlobalKeys();
+        h.menu.items = [];
+        render(() => <HamburgerMenu />);
+        vi.clearAllMocks();
+    });
+
+    afterEach(() => {
+        cleanup();
+        h.caps.multiWindow = true;
+        setKeyUtilPlatform("darwin");
+        setPlatform("darwin");
+    });
+
+    it("leaves New Window out of the menu", () => {
+        const labels = h.menu.items.map((i) => i.label);
+        expect(labels).not.toContain("New Window");
+        expect(labels).toContain("New Tab");
+    });
+
+    it("declines Ctrl+Shift+N without opening a window", () => {
+        expect(pressKeys({ key: "N", code: "KeyN", ctrlKey: true, shiftKey: true })).toBe(false);
+        expect(h.openNewWindow).not.toHaveBeenCalled();
     });
 });
 

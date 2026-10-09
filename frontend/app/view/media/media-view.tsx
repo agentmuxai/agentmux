@@ -11,6 +11,7 @@
 // Spec: docs/specs/SPEC_MEDIA_PANE_2026_07_26.md; one of these per document
 // tab, docs/specs/SPEC_DOCUMENT_TABS_2026_10_02.md §6.3.
 
+import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
 import {
     AUDIO_EXTENSIONS,
@@ -131,7 +132,10 @@ export function MediaView(props: {
         showPath(path);
     };
 
+    // Without native dialogs there's nothing to click: a file arrives by path or drop.
+    const canPick = hostHas("nativeDialogs");
     const pickFile = async () => {
+        if (!canPick) return;
         const path = await getApi()?.showOpenFileDialog?.();
         if (!path) return; // user cancelled
         openPath(path);
@@ -280,7 +284,9 @@ export function MediaView(props: {
                 <Show when={errorMsg()}>
                     <div style={emptyStateStyle} onClick={() => void pickFile()}>
                         <div>{errorMsg()}</div>
-                        <div style={explainerStyle}>Click anywhere to pick a different file.</div>
+                        <Show when={canPick}>
+                            <div style={explainerStyle}>Click anywhere to pick a different file.</div>
+                        </Show>
                     </div>
                 </Show>
                 <Show when={!errorMsg() && displayPath() && !objectUrl()}>
@@ -318,7 +324,7 @@ export function MediaView(props: {
                 </Show>
                 <Show when={!errorMsg() && kind() === "none" && !displayPath()}>
                     <div style={emptyStateStyle} onClick={() => void pickFile()}>
-                        <div style={{ "font-size": "1.05em" }}>Click to load media</div>
+                        <div style={{ "font-size": "1.05em" }}>{canPick ? "Click to load media" : "No media loaded"}</div>
                         <div style={explainerStyle}>
                             {supportedTypesText} If you pick a file from a folder your agent is
                             actively generating into, this pane updates automatically as new
@@ -326,7 +332,7 @@ export function MediaView(props: {
                         </div>
                     </div>
                 </Show>
-                <Show when={!errorMsg() && displayPath()}>
+                <Show when={canPick && !errorMsg() && displayPath()}>
                     <button
                         title="Pick a different file"
                         onClick={() => void pickFile()}
