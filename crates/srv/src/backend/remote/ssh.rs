@@ -152,7 +152,17 @@ pub fn launch(
     // A dead link ends ssh within about 45 s instead of the TCP timeout (§7.5).
     opt("ServerAliveInterval=15".into());
     opt("ServerAliveCountMax=3".into());
-    opt("SetEnv=TERM_PROGRAM=agentmux".into());
+    // Which AgentMux this is (`pane_env::build_info`) rides along with
+    // TERM_PROGRAM. sshd passes a SetEnv name on only where its AcceptEnv
+    // lists it (`AcceptEnv AGENTMUX_*`), and drops it quietly otherwise. Not
+    // prefixed to the remote command instead: durable panes send their own
+    // control commands through here, to hosts that may not run a POSIX shell.
+    let build_info = crate::backend::pane_env::build_info();
+    let set_env = std::iter::once("TERM_PROGRAM=agentmux".to_string())
+        .chain(build_info.iter().map(|(k, v)| format!("{k}={v}")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    opt(format!("SetEnv={set_env}"));
     if let Some(dir) = control_dir {
         opt("ControlMaster=auto".into());
         opt(format!("ControlPath={}", dir.join("%C").display()));
@@ -384,11 +394,28 @@ mod tests {
                 "-o",
                 "ServerAliveCountMax=3",
                 "-o",
-                "SetEnv=TERM_PROGRAM=agentmux",
+                build_set_env().as_str(),
                 "--",
                 "asaf@area54"
             ]
         );
+    }
+
+    fn build_set_env() -> String {
+        let mut s = "SetEnv=TERM_PROGRAM=agentmux".to_string();
+        for (k, v) in crate::backend::pane_env::build_info() {
+            s.push_str(&format!(" {k}={v}"));
+        }
+        s
+    }
+
+    #[test]
+    fn the_build_rides_along_without_touching_the_remote_command() {
+        let args = launch(&dest("area54", None), "claude", &[], "", None);
+        let set_env = args.iter().find(|a| a.starts_with("SetEnv=")).unwrap();
+        assert!(set_env.starts_with("SetEnv=TERM_PROGRAM=agentmux "));
+        assert!(set_env.contains(&format!("AGENTMUX_VERSION={}", env!("CARGO_PKG_VERSION"))));
+        assert_eq!(args.last().unwrap(), "claude", "durable panes' control commands go through here unchanged");
     }
 
     #[test]

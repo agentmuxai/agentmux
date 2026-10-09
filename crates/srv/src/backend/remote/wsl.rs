@@ -24,6 +24,8 @@ pub const FORWARDED_ENV: &[&str] = &[
     "AGENTMUX_BLOCKID",
     "AGENTMUX_TABID",
     "AGENTMUX_VERSION",
+    "AGENTMUX_BUILD",
+    "AGENTMUX_INSTANCE_CHANNEL",
 ];
 
 /// The `wsl.exe` arguments for a pane: an interactive login shell, or the
