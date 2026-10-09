@@ -882,10 +882,6 @@ pub async fn forward(
     }
 }
 
-/// `POST /agentmux/browser/reload` — reload the current page. `ignore_cache`
-/// (default false) maps to the CDP flag — true is the equivalent of Ctrl+F5
-/// (bypass the http cache). The pane's current URL is preserved, so no
-/// target-cache invalidation is needed.
 #[derive(serde::Deserialize)]
 pub struct OwnedPanesReq {
     pub panes: Vec<String>,
@@ -912,6 +908,10 @@ pub async fn owned_panes(
     ok_body(ApiResponse::ok(AckData::new()))
 }
 
+/// `POST /agentmux/browser/reload` — reload the current page. `ignore_cache`
+/// (default false) maps to the CDP flag — true is the equivalent of Ctrl+F5
+/// (bypass the http cache). The pane's current URL is preserved, so no
+/// target-cache invalidation is needed.
 pub async fn reload(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,

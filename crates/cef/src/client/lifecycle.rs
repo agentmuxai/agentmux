@@ -66,22 +66,50 @@ pub(crate) fn is_last_window_close(browser_list_empty: bool, is_browser_pane: bo
     browser_list_empty && !is_browser_pane && draining
 }
 
-/// Tell srv about a popup window (`opened`, `closed`), from its own thread:
-/// callers are CEF lifecycle callbacks on the UI thread.
+/// Tell srv about a popup window (`opened`, `closed`). Callers are CEF
+/// lifecycle callbacks on the UI thread, so the request is made elsewhere:
+/// by one worker that sends reports in the order they were made, so a popup
+/// that closes as soon as it opens (a sign-in that calls `window.close()`)
+/// can't be reported closed before it is reported opened, which would leave
+/// srv a record of a window that no longer exists.
 fn report_popup_window(state: &std::sync::Arc<crate::state::AppState>, event: &str, popup: &str, opener: &str, url: &str) {
-    let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
-    let auth_key = state.auth_key.lock().clone();
-    let ipc_token = state.ipc_token.clone();
-    let body = serde_json::json!({ "event": event, "popup": popup, "opener": opener, "url": url });
-    let popup = popup.to_string();
-    let spawned = std::thread::Builder::new().name("browser-popup-window".into()).spawn(move || {
-        if let Err(e) = crate::client::backend_browser_popup_window(&web_endpoint, &auth_key, &ipc_token, &body) {
-            tracing::warn!(popup = %popup, error = %e, "couldn't report a popup window to srv");
-        }
-    });
-    if let Err(e) = spawned {
-        tracing::warn!(error = %e, "couldn't start the browser-popup-window thread");
+    let report = PopupReport {
+        web_endpoint: state.backend_endpoints.lock().web_endpoint.clone(),
+        auth_key: state.auth_key.lock().clone(),
+        ipc_token: state.ipc_token.clone(),
+        popup: popup.to_string(),
+        body: serde_json::json!({ "event": event, "popup": popup, "opener": opener, "url": url }),
+    };
+    if popup_reports().send(report).is_err() {
+        tracing::warn!(popup = %popup, "the popup-window report worker is gone; srv won't hear of this popup");
     }
+}
+
+struct PopupReport {
+    web_endpoint: String,
+    auth_key: String,
+    ipc_token: String,
+    popup: String,
+    body: serde_json::Value,
+}
+
+/// The queue to the popup-window report worker, started on first use.
+fn popup_reports() -> &'static std::sync::mpsc::Sender<PopupReport> {
+    static TX: std::sync::OnceLock<std::sync::mpsc::Sender<PopupReport>> = std::sync::OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<PopupReport>();
+        let spawned = std::thread::Builder::new().name("browser-popup-window".into()).spawn(move || {
+            for r in rx {
+                if let Err(e) = crate::client::backend_browser_popup_window(&r.web_endpoint, &r.auth_key, &r.ipc_token, &r.body) {
+                    tracing::warn!(popup = %r.popup, error = %e, "couldn't report a popup window to srv");
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "couldn't start the browser-popup-window worker");
+        }
+        tx
+    })
 }
 
 /// What a page asked for, from CEF's disposition
@@ -1289,6 +1317,7 @@ impl AgentMuxHandler {
             // The pane is gone — no popup can still be pending on its handler.
             // Clears any leaked increment (reagent P2 round 5 counter-leak).
             self.pending_popups = 0;
+            self.pending_popup_openers.clear();
         }
 
         // Unregister browser from the reducer's `browsers` map and get its
