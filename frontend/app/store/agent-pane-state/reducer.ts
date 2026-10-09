@@ -1857,17 +1857,29 @@ function withPhase(a: ActivityState, phase: ModelActivityPhase, nowMs: number): 
     return a.phase === phase ? a : { ...a, phase, phaseSince: nowMs };
 }
 
-/** A tool call starts: it joins the running list; a todo list sets the plan. */
+/**
+ * A tool call starts: it joins the running list; a todo list sets the plan.
+ * One call is reported more than once with the same id (the CLI's streaming
+ * placeholder with empty input, then the full call; ACP's updates): that is
+ * an update of the entry already there, keeping its start, parent, progress
+ * and output time, never a second call (#4510).
+ */
 function activityWithTool(
     a: ActivityState,
     c: { name: string; id?: string; params?: Record<string, unknown>; parentId?: string },
     nowMs: number,
 ): ActivityState {
-    const tools = [
-        ...a.tools,
-        { id: c.id ?? null, activity: toolActivity(c.name, c.params), startedAt: nowMs, ...(c.parentId ? { parentId: c.parentId } : {}) },
-    ];
-    if (c.name === "TodoWrite") return { ...a, tools, plan: planFromTodoWrite(c.params), planAt: nowMs };
+    const activity = toolActivity(c.name, c.params);
+    const i = c.id != null ? a.tools.findIndex((t) => t.id === c.id) : -1;
+    const tools =
+        i >= 0
+            ? a.tools.map((t, j) => (j === i ? { ...t, activity, ...(c.parentId ? { parentId: c.parentId } : {}) } : t))
+            : [...a.tools, { id: c.id ?? null, activity, startedAt: nowMs, ...(c.parentId ? { parentId: c.parentId } : {}) }];
+    // Only a call that carries its list sets the plan: the empty placeholder
+    // must not wipe the plan already there.
+    if (c.name === "TodoWrite" && Array.isArray(c.params?.todos)) {
+        return { ...a, tools, plan: planFromTodoWrite(c.params), planAt: nowMs };
+    }
     return { ...a, tools };
 }
 

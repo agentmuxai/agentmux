@@ -94,3 +94,25 @@ describe("activity: this pane's waits for the model", () => {
         expect(s.activity.waits).toEqual([3_500]);
     });
 });
+
+describe("activity: one call reported twice (#4510)", () => {
+    it("the placeholder and the full call are one entry, keeping its start; its end clears it", () => {
+        let s = inCall();
+        s = at(s, { type: "ToolStart", name: "Bash", id: "t1", params: {} }, 2_000); // streaming placeholder
+        s = at(s, { type: "ToolProgress", id: "t1", text: "3/9" }, 2_100);
+        s = at(s, { type: "ToolStart", name: "Bash", id: "t1", params: { description: "Run the tests" } }, 2_500); // the full call
+        expect(s.activity.tools).toHaveLength(1);
+        expect(s.activity.tools[0]).toMatchObject({ activity: { label: "Running the tests" }, startedAt: 2_000, progress: "3/9" });
+        s = at(s, { type: "ToolEnd", id: "t1" }, 9_000);
+        expect(s.activity.tools).toEqual([]);
+    });
+
+    it("a todo list's empty placeholder doesn't wipe the plan", () => {
+        let s = inCall();
+        const todos = [{ content: "Do it", activeForm: "Doing it", status: "in_progress" }];
+        s = at(s, { type: "ToolStart", name: "TodoWrite", id: "p1", params: { todos } }, 2_000);
+        s = at(s, { type: "ToolEnd", id: "p1" }, 2_100);
+        s = at(s, { type: "ToolStart", name: "TodoWrite", id: "p2", params: {} }, 3_000); // the next one's placeholder
+        expect(s.activity).toMatchObject({ plan: { activeForm: "Doing it" }, planAt: 2_000 });
+    });
+});
