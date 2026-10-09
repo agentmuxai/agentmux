@@ -106,18 +106,6 @@ pub struct TerminalLine {
 ///     the URL twice (doubled) whenever OSC-8 IS present, so the OSC sequence
 ///     is discarded but any URI it carried is kept in `link_uris`.
 pub fn strip_terminal_codes(line: &str) -> TerminalLine {
-    //   * CSI  — `ESC [ … <final 0x40..=0x7e>` (colors, cursor moves)
-    //   * OSC  — `ESC ] … (BEL | ST)` — the Claude CLI can, in principle,
-    //     emit an OSC-8 hyperlink here (embeds the URL in the sequence
-    //     params AND repeats it as visible link text), though a live
-    //     capture under the fixed PTY (see cols comment in run_cli_login)
-    //     only ever showed an OSC-0 window-title sequence, no OSC-8 — so
-    //     this is defense-in-depth, not the thing that actually fixed
-    //     #2429's client_id truncation (the PTY width did). A naive pass
-    //     that only knew CSI left the raw `]8;;https://…<BEL>` in place and
-    //     captured the URL twice (doubled) whenever OSC-8 IS present, so we
-    //     still discard the OSC sequence but stash any URI it carried as a
-    //     fallback.
     let mut clean = String::with_capacity(line.len());
     let mut osc_uris: Vec<String> = Vec::new();
     let bytes = line.as_bytes();

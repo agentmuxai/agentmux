@@ -9,8 +9,8 @@
 // cluster is a self-contained subsystem with its own state fields
 // (`AppState::cli_login_*`) and its own dedicated test modules.
 
-#[cfg(windows)]
 use agentmux_common::login_pty::{extract_auth_url, DsrRespondingReader, DSR_CURSOR_POSITION_REPLY, LOGIN_PTY_COLS};
+#[cfg(windows)]
 use agentmux_common::win32::NoWindow;
 use std::sync::Arc;
 
