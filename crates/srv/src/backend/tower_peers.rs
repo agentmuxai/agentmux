@@ -142,7 +142,7 @@ pub fn parse_link(link: &str) -> Result<Link, String> {
 pub trait Tokens: Send + Sync {
     fn put(&self, key: &str, token: &str) -> Result<(), String>;
     fn get(&self, key: &str) -> Result<String, String>;
-    fn delete(&self, key: &str);
+    fn delete(&self, key: &str) -> Result<(), String>;
 }
 
 struct SecretStore;
@@ -154,8 +154,8 @@ impl Tokens for SecretStore {
     fn get(&self, key: &str) -> Result<String, String> {
         crate::identity::secret_store::get(key).map(|t| t.as_str().to_string())
     }
-    fn delete(&self, key: &str) {
-        let _ = crate::identity::secret_store::delete(key);
+    fn delete(&self, key: &str) -> Result<(), String> {
+        crate::identity::secret_store::delete(key)
     }
 }
 
@@ -219,13 +219,29 @@ impl Peers {
     /// Forget a peer here (its token too). The other computer still lists
     /// this device until its user revokes it.
     pub fn forget(&self, id: &str) -> Result<(), String> {
+        let Some(peer) = self.get(id) else { return Ok(()) };
+        // The token first, with no lock held: a keychain delete may wait on
+        // the OS asking the user, and must not stall every listing meanwhile.
+        // If it fails the entry stays, so Forget can be tried again rather
+        // than leaving a token nothing points to.
+        self.tokens
+            .delete(&peer.secret_key())
+            .map_err(|e| format!("Couldn't remove the pairing with {} from the keychain: {e}", peer.hostname))?;
         let _g = self.lock.lock().unwrap();
         let mut all = self.load();
-        let Some(peer) = all.iter().find(|p| p.id == id).cloned() else { return Ok(()) };
         all.retain(|p| p.id != id);
-        self.save(&all)?;
-        self.tokens.delete(&peer.secret_key());
-        Ok(())
+        self.save(&all)
+    }
+
+    /// Record that a peer now answers at `host:port`, if it is still kept (it
+    /// may have been forgotten while the request that found it was in
+    /// flight: then nothing is written).
+    fn moved_to(&self, id: &str, host: &str, port: u16) {
+        let _g = self.lock.lock().unwrap();
+        let mut all = self.load();
+        let Some(peer) = all.iter_mut().find(|p| p.id == id) else { return };
+        (peer.host, peer.port) = (host.to_string(), port);
+        let _ = self.save(&all);
     }
 }
 
@@ -279,7 +295,9 @@ pub async fn pair(peers: &'static Peers, link: &str, device_name: &str) -> Resul
     tokio::task::spawn_blocking(move || {
         peers.tokens.put(&peer.secret_key(), &token)?;
         if let Err(e) = peers.put(peer.clone()) {
-            peers.tokens.delete(&peer.secret_key());
+            if let Err(d) = peers.tokens.delete(&peer.secret_key()) {
+                tracing::warn!(error = %d, "tower: could not remove a token after a failed pairing");
+            }
             return Err(e);
         }
         Ok(())
@@ -355,8 +373,9 @@ pub async fn sample(peers: &'static Peers, id: &str, filter: &str, moved: Vec<St
         match resp.status() {
             s if s.is_success() => {
                 if host != peer.host || port != peer.port {
-                    (peer.host, peer.port) = (host, port);
-                    let _ = peers.put(peer.clone());
+                    (peer.host, peer.port) = (host.clone(), port);
+                    let id = peer.id.clone();
+                    let _ = tokio::task::spawn_blocking(move || peers.moved_to(&id, &host, port)).await;
                 }
                 let mut snap: TowerSnapshot = resp.json().await.map_err(|e| format!("{} answered oddly: {e}", peer.hostname))?;
                 snap.remote = true;
@@ -406,8 +425,9 @@ mod tests {
         fn get(&self, key: &str) -> Result<String, String> {
             self.0.lock().unwrap().get(key).cloned().ok_or_else(|| "no token".into())
         }
-        fn delete(&self, key: &str) {
+        fn delete(&self, key: &str) -> Result<(), String> {
             self.0.lock().unwrap().remove(key);
+            Ok(())
         }
     }
 
@@ -448,6 +468,10 @@ mod tests {
         let on_disk = std::fs::read_to_string(dir.path().join(FILE)).unwrap();
         assert!(!on_disk.contains("amxv_"), "no token on disk");
         peers.forget("p1").unwrap();
+        assert!(peers.list().is_empty());
+        // A request that found it at a new address after it was forgotten
+        // doesn't bring it back.
+        peers.moved_to("p1", "198.51.100.30", 47901);
         assert!(peers.list().is_empty());
     }
 
