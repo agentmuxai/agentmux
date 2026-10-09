@@ -42,7 +42,7 @@ From a side-by-side audit, highest risk first:
 |---|---|
 | **L1** | §3.1–3.2. The host's DSR responder, PTY width and URL extraction move to `agentmux_common::login_pty` (one copy, with their tests); srv's PTY spawn uses them and resolves the shim; srv's line matching runs on text with terminal codes removed, preferring OSC-8 link targets, and knows Claude's current URL |
 | **L2** | §3.3–3.4. srv kills a session's child on timeout and when it ends, reaps sessions nobody polls, prunes finished ones, and allows one live login per account directory |
-| **L3** | §3.5. The terminal fallback as a srv pane |
+| **L3** | §3.5. The terminal fallback as a srv pane. Before the desktop uses it on Windows: srv's `cmd` pane spawns `cmd` directly, and an npm `.cmd` shim hangs under ConPTY, so that spawn needs `resolve_cli_spawn_target` (or the flow passes the resolved target) |
 | **L4** | §3.6, and the frontend: `runProviderLogin` and `AuthFlowController` drive srv's `auth.*` for every provider; the host only opens the URL |
 | **L5** | Delete the host's login commands (`run_cli_login`, `run_cli_login_pty`, `cancel_cli_login`, `get_cli_login_status`, `open_login_terminal`, `set_provider_auth`) and the frontend code that only served them |
 

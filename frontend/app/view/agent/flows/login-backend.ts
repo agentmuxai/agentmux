@@ -8,7 +8,7 @@
 // flows (run-provider-login.ts and its callers) only talk to this.
 // docs/specs/SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md, phase L4.
 
-import { getApi } from "@/app/store/global";
+import { createBlock, getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { sleep } from "@/util/util";
@@ -144,9 +144,22 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
             attempt += 1;
             await stopSession();
         },
-        async openTerminal() {
-            // A terminal pane running the login is phase L3 of the spec.
-            throw new Error("a login terminal isn't available here yet");
+        async openTerminal(cliPath, loginArgs, env) {
+            // An ordinary terminal pane that srv runs the login in (phase L3);
+            // the flow then asks the CLI, through srv, whether it's signed in.
+            await createBlock({
+                meta: {
+                    view: "term",
+                    controller: "cmd",
+                    cmd: cliPath,
+                    "cmd:args": loginArgs,
+                    "cmd:env": env,
+                    "cmd:interactive": true,
+                    "cmd:runonstart": true,
+                    "cmd:closeonexit": false,
+                    "frame:title": "Sign in",
+                },
+            });
         },
     };
 }

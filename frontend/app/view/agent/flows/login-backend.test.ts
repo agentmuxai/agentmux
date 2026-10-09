@@ -7,6 +7,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const createBlock = vi.hoisted(() => vi.fn(async () => "block-1"));
+vi.mock("@/app/store/global", async (importOriginal) => ({
+    ...(await importOriginal<typeof import("@/app/store/global")>()),
+    createBlock,
+}));
+
 import { __test, loginBackend, type LoginStart } from "./login-backend";
 
 const START: LoginStart = {
@@ -153,6 +159,24 @@ describe("srv login backend", () => {
         await backend.cancel();
         expect(rpc.AuthCancelCommand).toHaveBeenCalledTimes(1);
         expect(await backend.status()).toMatchObject({ active: false });
+    });
+});
+
+describe("srv login terminal (L3)", () => {
+    it("opens a terminal pane that srv runs the login in, with the account's environment", async () => {
+        const { backend } = fakeRpc();
+        await backend.openTerminal("/bin/claude", ["auth", "login"], { CLAUDE_CONFIG_DIR: "/accounts/a" });
+        expect(createBlock).toHaveBeenCalledWith({
+            meta: expect.objectContaining({
+                view: "term",
+                controller: "cmd",
+                cmd: "/bin/claude",
+                "cmd:args": ["auth", "login"],
+                "cmd:env": { CLAUDE_CONFIG_DIR: "/accounts/a" },
+                "cmd:interactive": true,
+                "cmd:runonstart": true,
+            }),
+        });
     });
 });
 
