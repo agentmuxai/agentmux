@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { onSrvInfo, srvInfo, UI_VERSION, versionSkew } from "./srv-info";
+import { noteSrvInfoMessage, onSrvInfo, srvInfo, UI_VERSION, versionSkew } from "./srv-info";
 
 describe("srvinfo", () => {
     it("knows its own version from the build", () => {
@@ -32,5 +32,18 @@ describe("srvinfo", () => {
         onSrvInfo({ platform: "darwin" });
         onSrvInfo(null);
         expect(srvInfo()?.version).toBe(UI_VERSION);
+    });
+});
+
+describe("noteSrvInfoMessage", () => {
+    it("records srvinfo straight off the socket, and ignores other messages", () => {
+        onSrvInfo({ version: UI_VERSION });
+        noteSrvInfoMessage({ command: "eventrecv", data: { event: "config", data: { version: "1.0.0" } } });
+        noteSrvInfoMessage({ command: "rpcresponse" });
+        noteSrvInfoMessage(null);
+        expect(srvInfo()?.version).toBe(UI_VERSION);
+
+        noteSrvInfoMessage({ command: "eventrecv", data: { event: "srvinfo", data: { version: "8.8.8", hostName: "h" } } });
+        expect(srvInfo()).toMatchObject({ version: "8.8.8", hostName: "h" });
     });
 });

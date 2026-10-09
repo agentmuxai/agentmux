@@ -32,6 +32,7 @@
 **Why an event and not an endpoint.** The UI already opens the WebSocket at startup, and reconnects after srv restarts. Riding on that connect costs no request, and a reconnect to a different srv (an update) refreshes the facts and the version check together.
 
 **The UI side** (`frontend/app/store/srv-info.ts`):
+- **Caught as it arrives, not through a subscription.** srv sends `srvinfo` the moment the socket opens, which can be before the UI has subscribed to any event (`initGlobalEventSubs` runs after an HTTP call), and the event bus drops an event nobody subscribes to. So `initWshrpc`'s message handler passes every message to `noteSrvInfoMessage` before routing it.
 - `srvInfo()` holds the last report.
 - `UI_VERSION` is the UI's own version, stamped at build time from `package.json` (`vite.config.ts` `define: __AGENTMUX_VERSION__`).
 - `versionSkew()` is srv's version when it differs from `UI_VERSION`. The status bar then shows "Reload for <version>" (`VersionSkewStatus`); clicking reloads the window.

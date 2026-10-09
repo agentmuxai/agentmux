@@ -29,7 +29,19 @@ export { srvInfo };
 /** This UI's own version, stamped at build time. */
 export const UI_VERSION: string = __AGENTMUX_VERSION__;
 
-/** Handler for the `srvinfo` event. Ignores a payload without a version. */
+/**
+ * Called with every message the WebSocket delivers (`initWshrpc`), before it is
+ * routed: records a `srvinfo` event. srv sends it as soon as the socket opens,
+ * which can be before anything subscribes to events, so it is caught here
+ * rather than through a subscription that could miss it.
+ */
+export function noteSrvInfoMessage(msg: { command?: string; data?: { event?: string; data?: unknown } } | null): void {
+    if (msg?.command === "eventrecv" && msg.data?.event === "srvinfo") {
+        onSrvInfo(msg.data.data as Partial<SrvInfo> | null);
+    }
+}
+
+/** Records a `srvinfo` payload. Ignores one without a version. */
 export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): void {
     if (typeof data?.version !== "string" || data.version === "") return;
     setSrvInfo({
