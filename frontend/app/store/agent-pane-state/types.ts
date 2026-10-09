@@ -27,6 +27,46 @@
 import type { PendingMessage } from "../../view/agent/state";
 import type { ContextReading, ContextSource, ContextWindowMap, ReportedContextWindows } from "./context-reading";
 import type { TurnLedger } from "./turn-ledger";
+import type { ToolActivity } from "../../view/agent/status/tool-labels";
+import type { PlanState } from "../../view/agent/status/plan";
+
+/** What the model is doing within a pass, by what its stream shows. */
+export type ModelActivityPhase = "requesting" | "responding" | "thinking" | "writing" | "composing";
+
+/**
+ * What the agent is doing right now, for the working row's live status
+ * (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.3). Only facts the
+ * stream reports; the presenter (view/agent/status/present-status.ts)
+ * decides what to say and when.
+ */
+export interface ActivityState {
+    /** The model's phase, and since when; null outside a pass. */
+    phase: ModelActivityPhase | null;
+    phaseSince: number;
+    /** Tool calls in flight, oldest first. A subagent's own calls carry
+     *  `parentId` (its Agent call's id); `progress` is what a known test
+     *  runner's output says so far. */
+    tools: Array<{
+        id: string | null;
+        activity: ToolActivity;
+        startedAt: number;
+        parentId?: string;
+        progress?: string;
+        /** When it last wrote output (live chunks; throttled). Absent: none yet. */
+        outputAt?: number;
+    }>;
+    /** What the model's current thinking block is about, from its own text. */
+    thinkingHeadline?: string;
+    /** This pane's recent waits for the model (request sent → its answer
+     *  began), newest last, at most WAIT_SAMPLES: what "slow" means here. */
+    waits?: number[];
+    /** The agent's plan from its latest todo list, and when it was set. Kept
+     *  across passes; the presenter reads it only when set this turn. */
+    plan: PlanState | null;
+    planAt: number;
+}
+
+export const IDLE_ACTIVITY: ActivityState = { phase: null, phaseSince: 0, tools: [], plan: null, planAt: 0 };
 import type {
     SessionStats,
     StreamingState,
@@ -308,6 +348,8 @@ export interface AgentPaneState {
      * from it; `turnPhase` and `turnTokens` stay per pass.
      */
     turnLedger: TurnLedger | null;
+    /** What the agent is doing right now (see `ActivityState`). */
+    activity: ActivityState;
     /**
      * Each pass's own figures (its `TurnEnd` stats), summed over the turn srv
      * reported it in. For providers whose passes srv doesn't count (ACP, App
@@ -514,6 +556,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     turnTokens: null,
     turnLedger: null,
     turnCarry: null,
+    activity: IDLE_ACTIVITY,
     pendingCompactTurn: false,
     context: null,
     contextSeedable: true,
@@ -782,8 +825,16 @@ export type AgentPaneCommand =
     | { type: "TurnStartFailed" }
 
     // ── Tool ───────────────────────────────────────────────────────
-    | { type: "ToolStart"; name: string; arg?: string }
-    | { type: "ToolEnd" }
+    /** `id`: the tool_use id, so its end removes exactly it; `params`: its
+     *  input, for the live status's words (status/tool-labels.ts). */
+    | { type: "ToolStart"; name: string; arg?: string; id?: string; params?: Record<string, unknown>; parentId?: string }
+    /** A running call's test progress, from its live output (status/test-progress.ts). */
+    | { type: "ToolProgress"; id: string; text: string }
+    /** A running call wrote output (at most every few seconds per call). */
+    | { type: "ToolOutput"; id: string; at: number }
+    /** The model's thinking block's gist (status/thinking-headline.ts). */
+    | { type: "ThinkingHeadline"; text: string }
+    | { type: "ToolEnd"; id?: string }
 
     // freshInput/cacheCreation/cacheRead: optional breakdown of `input` by
     // cache status (fresh + cacheCreation + cacheRead === input). See
@@ -798,7 +849,7 @@ export type AgentPaneCommand =
     | { type: "StreamSessionStarted" }
     /** Characters the main agent's latest call streamed (text, thinking, tool
      *  input) since the last one: its output estimate until `TokensOut`. */
-    | { type: "OutputStreamed"; chars: number }
+    | { type: "OutputStreamed"; chars: number; kind?: "text" | "thinking" | "tool_input" }
     /** The main agent's tool results went back: a request is in flight (↑)
      *  until the next call's `TokensIn`. */
     | { type: "RequestStarted" }
