@@ -158,4 +158,14 @@ export const WpsEvent = {
     SubagentUpdated: "subagent:updated",
     ToolChunk: "tool_chunk",
     ViewerPaired: "viewer:paired",
+    AgentShutdown: "agent:shutdown",
+    AgentShutdownPending: "agent:shutdown-pending",
+    AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",
+    AmbientSpent: "ambient:spent",
+    BlockReveal: "block:reveal",
+    MuxbusStatus: "muxbus:status",
+    NotificationActivate: "notification:activate",
+    NotificationState: "notification:state",
+    // Published by the frontend itself (singleton-modal.ts).
+    SingletonClaim: "singleton:claim",
 } as const;

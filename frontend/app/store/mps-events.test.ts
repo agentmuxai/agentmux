@@ -23,6 +23,9 @@ function walk(dir: string, keep: (file: string) => boolean, out: string[] = []):
 
 const names = new Set<string>(Object.values(WpsEvent));
 
+/** Events the frontend publishes itself, through srv's broker. */
+const PUBLISHED_BY_THE_FRONTEND = new Set<string>([WpsEvent.SingletonClaim]);
+
 describe("WpsEvent", () => {
     it("has every EVENT_* name mps.rs declares", () => {
         const rust = readFileSync(resolve(repoRoot, "crates/srv/src/backend/mps.rs"), "utf8");
@@ -35,13 +38,14 @@ describe("WpsEvent", () => {
         const backend = walk(resolve(repoRoot, "crates"), (f) => f.endsWith(".rs"))
             .map((f) => readFileSync(f, "utf8"))
             .join("\n");
-        expect([...names].filter((n) => !backend.includes(`"${n}"`))).toEqual([]);
+        expect([...names].filter((n) => !PUBLISHED_BY_THE_FRONTEND.has(n) && !backend.includes(`"${n}"`))).toEqual([]);
     });
 
-    it("is what every subscription names: no event name spelled by hand", () => {
-        const files = walk(resolve(repoRoot, "frontend/app"), (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f));
-        // A template string naming one object's event (`dronerun:${id}`) is fine.
-        const literal = /eventType:\s*(?:"([^"]+)"|'([^']+)'|`([^`$]+)`)/g;
+    it("is where every event name is spelled: no subscription or event constant elsewhere has its own", () => {
+        const files = walk(resolve(repoRoot, "frontend/app"), (f) => /\.tsx?$/.test(f) && !/\.test\.tsx?$/.test(f) && !f.endsWith("mps-events.ts"));
+        // As `eventType`, or as a constant named for an event. A template string
+        // naming one object's event (`dronerun:${id}`) is fine.
+        const literal = /(?:eventType:|const \w*EVENT\w*\s*=)\s*(?:"([^"]+)"|'([^']+)'|`([^`$]+)`)/g;
         const raw = files.flatMap((f) =>
             [...readFileSync(f, "utf8").matchAll(literal)].map((m) => `${f.slice(repoRoot.length + 1)}: ${m[1] ?? m[2] ?? m[3]}`)
         );

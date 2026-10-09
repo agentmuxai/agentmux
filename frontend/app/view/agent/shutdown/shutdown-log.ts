@@ -15,7 +15,8 @@ import { createStore, produce } from "solid-js/store";
 import { MOS } from "@/app/store/global";
 import { muxEventSubscribe } from "@/app/store/mps";
 
-export const EVENT_AGENT_SHUTDOWN = "agent:shutdown";
+import { WpsEvent } from "@/app/store/mps-events";
+export const EVENT_AGENT_SHUTDOWN = WpsEvent.AgentShutdown;
 
 /** One `agent:shutdown` line (§12.1). */
 export type ShutdownLine = { seq: number; step: string; text: string; error?: string };

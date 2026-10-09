@@ -14,7 +14,8 @@ import { windowId } from "@/app/store/window-identity";
 import { revealBlockLocally } from "@/app/util/reveal-block";
 import type { BlockRevealEvent } from "@/types/rpc/BlockRevealEvent";
 
-export const EVENT_BLOCK_REVEAL = "block:reveal";
+import { WpsEvent } from "@/app/store/mps-events";
+export const EVENT_BLOCK_REVEAL = WpsEvent.BlockReveal;
 
 /** Is this `block:reveal` for THIS window? srv always names one window. */
 export function shouldRevealHere(d: Partial<BlockRevealEvent> | undefined, myWindowId: string): boolean {

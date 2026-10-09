@@ -191,9 +191,6 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
     return [openDefinitions, refresh];
 }
 
-/** srv publishes this whenever an agent (or any) pane's controller registers or goes away. */
-const EVENT_TRACKED_BLOCKS_CHANGED = "processbroker:tracked-blocks-changed";
-
 /**
  * Like `useOpenDefinitionMap`, but instance-wide: an agent open in ANY tab of
  * ANY window — floating ones included — counts as open, via srv's
@@ -232,7 +229,7 @@ export function useInstanceOpenDefinitions(): [
         }
     };
     onMount(() => void fetchPanes());
-    const unsub = muxEventSubscribe({ eventType: EVENT_TRACKED_BLOCKS_CHANGED, handler: () => void fetchPanes() });
+    const unsub = muxEventSubscribe({ eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged, handler: () => void fetchPanes() });
     onCleanup(unsub);
     // Tear-off, redock and tab moves keep the pane's controller, so they emit
     // no tracked-blocks event; refetch when the user comes back to this
