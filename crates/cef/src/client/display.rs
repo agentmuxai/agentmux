@@ -15,6 +15,116 @@ fn popup_title(browser: &Browser, page_title: &str) -> Option<String> {
     agentmux_common::popup_rules::popup_window_title(&url, page_title)
 }
 
+/// Set a popup window's title. Under the Chrome runtime CEF owns a popup's
+/// window, so there is no Views window to set it on (lifecycle.rs `do_close`):
+/// on Windows `set_window_title`'s Win32 path reaches it; on macOS and Linux
+/// it is set here, on the top-level window that holds the popup's view.
+/// Only for popups: a pane's view lives inside the AgentMux window, whose
+/// title this would replace.
+fn set_popup_window_title(browser: &mut Option<Browser>, title: &str) {
+    set_window_title(browser, Some(title));
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    if let Some(host) = browser.as_ref().and_then(|b| b.host()) {
+        #[cfg(target_os = "macos")]
+        {
+            let nsview = host.window_handle() as *mut std::ffi::c_void;
+            if nsview.is_null() || !unsafe { macos_set_view_window_title(nsview, title) } {
+                tracing::debug!("popup title: the popup's view has no window yet");
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let xid = host.window_handle() as u32;
+            if xid != 0 {
+                if let Err(e) = x11_set_toplevel_title(xid, title) {
+                    tracing::debug!(error = %e, "popup title: couldn't set the X11 window title");
+                }
+            }
+        }
+    }
+}
+
+/// `[[nsview window] setTitle:title]`. CEF documents the handle as the
+/// top-level native window for a browser it hosts, so it may be the window
+/// itself: whichever it is, ask what it responds to before sending anything.
+/// False when there's no window to title.
+#[cfg(target_os = "macos")]
+unsafe fn macos_set_view_window_title(handle: *mut std::ffi::c_void, title: &str) -> bool {
+    use std::ffi::{c_char, c_void, CString};
+    type Id = *mut c_void;
+    type Sel = *const c_void;
+    extern "C" {
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn objc_msgSend();
+    }
+    let Ok(title) = CString::new(title.replace('\0', "")) else { return false };
+    let msg: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let responds: extern "C" fn(Id, Sel, Sel) -> bool = std::mem::transmute(objc_msgSend as *const c_void);
+    let responds_to_sel = sel_registerName(b"respondsToSelector:\0".as_ptr() as _);
+    let set_title_sel = sel_registerName(b"setTitle:\0".as_ptr() as _);
+    let window_sel = sel_registerName(b"window\0".as_ptr() as _);
+    let nswindow = if responds(handle, responds_to_sel, set_title_sel) {
+        handle
+    } else if responds(handle, responds_to_sel, window_sel) {
+        msg(handle, window_sel)
+    } else {
+        std::ptr::null_mut()
+    };
+    if nswindow.is_null() || !responds(nswindow, responds_to_sel, set_title_sel) {
+        return false;
+    }
+    let string_with: extern "C" fn(Id, Sel, *const c_char) -> Id =
+        std::mem::transmute(objc_msgSend as *const c_void);
+    let nsstring = string_with(
+        objc_getClass(b"NSString\0".as_ptr() as _),
+        sel_registerName(b"stringWithUTF8String:\0".as_ptr() as _),
+        title.as_ptr(),
+    );
+    if nsstring.is_null() {
+        return false;
+    }
+    let set_title: extern "C" fn(Id, Sel, Id) = std::mem::transmute(objc_msgSend as *const c_void);
+    set_title(nswindow, set_title_sel, nsstring);
+    true
+}
+
+/// Set `_NET_WM_NAME` (and `WM_NAME`) on the client top-level window at or
+/// above `xid`: the first with `WM_STATE`, which the window manager sets on
+/// the windows it manages (not its own frame around them). `xid` itself if
+/// none has it.
+#[cfg(target_os = "linux")]
+fn x11_set_toplevel_title(xid: u32, title: &str) -> Result<(), Box<dyn std::error::Error>> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{AtomEnum, ConnectionExt as _, PropMode};
+    use x11rb::wrapper::ConnectionExt as _;
+
+    let (conn, _screen) = x11rb::connect(None)?;
+    let wm_state = conn.intern_atom(false, b"WM_STATE")?.reply()?.atom;
+    let mut target = xid;
+    let mut win = xid;
+    for _ in 0..16 {
+        let state = conn.get_property(false, win, wm_state, AtomEnum::ANY, 0, 0)?.reply()?;
+        if state.type_ != x11rb::NONE {
+            target = win;
+            break;
+        }
+        let tree = conn.query_tree(win)?.reply()?;
+        if tree.parent == tree.root || tree.parent == x11rb::NONE {
+            break;
+        }
+        win = tree.parent;
+    }
+    let win = target;
+    let net_wm_name = conn.intern_atom(false, b"_NET_WM_NAME")?.reply()?.atom;
+    let utf8 = conn.intern_atom(false, b"UTF8_STRING")?.reply()?.atom;
+    conn.change_property8(PropMode::REPLACE, win, net_wm_name, utf8, title.as_bytes())?.check()?;
+    conn.change_property8(PropMode::REPLACE, win, AtomEnum::WM_NAME, AtomEnum::STRING, title.as_bytes())?
+        .check()?;
+    conn.flush()?;
+    Ok(())
+}
+
 /// Set `browser`'s window title: through CEF Views, and for Alloy-style
 /// native windows on Windows through Win32.
 fn set_window_title(browser: &mut Option<Browser>, title: Option<&str>) {
@@ -71,19 +181,19 @@ impl AgentMuxHandler {
         {
             display_title_str.push_str(" — Sandbox Disabled");
         }
-        let mut had_title = title.is_some();
+        let had_title = title.is_some();
 
         let mut browser = browser.cloned();
         // A popup window has no address bar, so its title leads with where it
         // is, which the page can't set (native-popups spec §8.4, N2).
-        if let Some(b) = browser.as_ref().filter(|b| self.popup_browser_ids.contains(&b.identifier())) {
+        let popup = browser.as_ref().filter(|b| self.popup_browser_ids.contains(&b.identifier())).and_then(|b| {
             self.popup_titles.insert(b.identifier(), title_str.clone());
-            if let Some(t) = popup_title(b, &title_str) {
-                display_title_str = t;
-                had_title = true;
-            }
+            popup_title(b, &title_str)
+        });
+        match popup {
+            Some(t) => set_popup_window_title(&mut browser, &t),
+            None => set_window_title(&mut browser, had_title.then_some(display_title_str.as_str())),
         }
-        set_window_title(&mut browser, had_title.then_some(display_title_str.as_str()));
 
         // Emit live title to frontend for browser panes.
         if self.is_browser_pane {
@@ -122,7 +232,7 @@ impl AgentMuxHandler {
         }
         let Some(page_title) = self.popup_titles.get(&b.identifier()) else { return };
         if let Some(t) = agentmux_common::popup_rules::popup_window_title(&url.to_string(), page_title) {
-            set_window_title(&mut Some(b.clone()), Some(&t));
+            set_popup_window_title(&mut Some(b.clone()), &t);
         }
     }
 
