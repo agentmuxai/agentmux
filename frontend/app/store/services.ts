@@ -7,6 +7,7 @@
 
 import * as MOS from "./mos";
 
+import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 // blockservice.BlockService (block)
 class BlockServiceType {
     GetControllerStatus(arg2: string): Promise<BlockControllerRuntimeStatus> {
