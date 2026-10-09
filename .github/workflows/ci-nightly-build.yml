@@ -58,8 +58,8 @@ jobs:
     # This was `!= 'windows-latest'`, i.e. ubuntu was advisory too — which
     # silently defeated the superset invariant this workflow exists to provide
     # (reagentx P1 on #3489). The `RPC bindings are current` step below is
-    # ubuntu-only on purpose (platform-independent output, and the script runs
-    # its own `cargo test`, not worth paying for three times), so under the old
+    # ubuntu-only on purpose (platform-independent output, so one leg is
+    # enough), so under the old
     # expression it ran on the one leg whose failures were swallowed: RPC
     # binding drift on `main` would have gone undetected exactly as it did
     # before this workflow was touched. A gate that cannot fail is not a gate.
@@ -208,16 +208,17 @@ jobs:
       # Superset invariant (protocol §3). Needs a Rust toolchain and a built
       # agentmux-srv, which this job already has, so it belongs here rather
       # than in the `gates` job. Ubuntu only: the generated output is
-      # platform-independent (.gitattributes normalizes to LF), and this
-      # script runs its own `cargo test -p agentmux-srv export_bindings`,
-      # which is not something to pay for three times across the matrix.
+      # platform-independent (.gitattributes normalizes to LF). The
+      # `cargo test --workspace` above already ran the export tests, so
+      # --check-only only checks the result instead of relinking srv's test
+      # binary for a second run.
       #
       # Ubuntu-only is only sound because the ubuntu leg BLOCKS — see the
       # `continue-on-error` note on this job. If that is ever loosened back to
       # advisory, this gate silently stops gating.
       - name: RPC bindings are current
         if: matrix.os == 'ubuntu-latest'
-        run: bash scripts/check-rpc-bindings.sh
+        run: bash scripts/check-rpc-bindings.sh --check-only
 
   frontend:
     name: vitest
