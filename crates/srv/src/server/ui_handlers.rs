@@ -1004,7 +1004,7 @@ fn opener_allows(
         return Err((
             StatusCode::FORBIDDEN,
             format!(
-                "the user took over pane {opener:?}, which opened popup {pane:?}; open a new pane                  with OpenBrowser if you still need a browser"
+                "the user took over pane {opener:?}, which opened popup {pane:?}; open a new pane with OpenBrowser if you still need a browser"
             ),
         ));
     }
