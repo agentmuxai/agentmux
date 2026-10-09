@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it, vi } from "vitest";
-import { baseName, copyFilesToDir, isFileDrag } from "./dnd";
+import { baseName, consumeDragPaths, copyFilesToDir, isFileDrag, peekDragPaths } from "./dnd";
+import { makeTestHostApi } from "@/app/host/test-host";
 import { installCefWireHost } from "../test/cef-wire-host";
 
 installCefWireHost();
@@ -80,5 +81,22 @@ describe("copyFilesToDir concurrency", () => {
         await copyFilesToDir(sources, "/dest", { concurrency: 3 });
 
         expect(maxConcurrentInFlight).toBe(3);
+    });
+});
+
+describe("on a host without nativeFileDrop", () => {
+    it("reads no dropped paths and doesn't ask the host", async () => {
+        const consume = vi.fn(() => Promise.resolve(["/x"]));
+        const peek = vi.fn(() => Promise.resolve(["/x"]));
+        const saved = window.api;
+        window.api = makeTestHostApi({ consumeDroppedFilePaths: consume, peekDroppedFilePaths: peek });
+        try {
+            expect(await consumeDragPaths()).toEqual([]);
+            expect(await peekDragPaths()).toEqual([]);
+            expect(consume).not.toHaveBeenCalled();
+            expect(peek).not.toHaveBeenCalled();
+        } finally {
+            window.api = saved;
+        }
     });
 });

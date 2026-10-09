@@ -10,14 +10,16 @@ import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
-    const cmd = (id: string, label: string, category: string, hidden?: boolean) => ({
+    const cmd = (id: string, label: string, category: string, hidden?: boolean, requires?: string) => ({
         id,
         label,
         category,
         hidden,
+        requires,
         execute: () => {},
     });
     return {
+        caps: { multiWindow: false } as Record<string, boolean>,
         commands: [
             cmd("tab:new", "New Tab", "Tab"),
             cmd("tab:close", "Close Tab", "Tab"),
@@ -25,11 +27,15 @@ const h = vi.hoisted(() => {
             cmd("window:close", "Close Window", "Window"),
             cmd("split:right", "Split Right", "Split"),
             cmd("app:identity", "Close Tab Hidden", "App", true),
+            cmd("window:new", "New Window", "Window", false, "multiWindow"),
         ],
     };
 });
 
-vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { all: () => h.commands } }));
+vi.mock("@/app/store/command-registry", () => ({
+    commandRegistry: { all: () => h.commands },
+    isCommandAvailable: (c: { requires?: string }) => c.requires == null || h.caps[c.requires] === true,
+}));
 vi.mock("@/app/store/keymodel", () => ({ disableGlobalKeybindings: () => {}, enableGlobalKeybindings: () => {} }));
 vi.mock("@/app/keybindings", () => ({ shortcutFor: () => "" }));
 vi.mock("@/app/platform/pane-overlay", () => ({ usePaneOverlay: () => {} }));
@@ -55,5 +61,16 @@ describe("CommandPaletteModal search", () => {
 
     it("still finds a command through a typo", () => {
         expect(typeQuery("Spilt Right")[0]).toBe("Split Right");
+    });
+
+    it("leaves out a command whose host capability is missing, and lists it when present", () => {
+        expect(typeQuery("New Window")).not.toContain("New Window");
+        cleanup();
+        h.caps.multiWindow = true;
+        try {
+            expect(typeQuery("New Window")).toContain("New Window");
+        } finally {
+            h.caps.multiWindow = false;
+        }
     });
 });
