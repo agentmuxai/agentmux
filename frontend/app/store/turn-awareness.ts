@@ -108,14 +108,23 @@ let installed = false;
  * the user is looking at that block right now.
  */
 export function installTurnAwareness(deps: {
+    /** For tests: when the service started (ledgers that ended before it are old news). */
+    now?: () => number;
     subscribe: (handler: (blockId: string, data: unknown) => void) => () => void;
     watching: (blockId: string) => boolean;
 }): () => void {
     if (installed) return () => {};
     installed = true;
+    // A scope-less subscription also gets the broker's persisted replay: on a
+    // reload or a new window, a turn that ended earlier (and was seen then)
+    // must not count again (#4511).
+    const startedAt = (deps.now ?? Date.now)();
     const unsub = deps.subscribe((blockId, data) => {
         const ledger = parseTurnLedger(data);
-        if (ledger) noteTurnLedger(blockId, ledger, deps.watching(blockId));
+        if (!ledger) return;
+        const endedAt = ledger.endedAtMs ?? ledger.lastPassEndedAtMs;
+        if (endedAt != null && endedAt < startedAt) return;
+        noteTurnLedger(blockId, ledger, deps.watching(blockId));
     });
     return () => {
         installed = false;

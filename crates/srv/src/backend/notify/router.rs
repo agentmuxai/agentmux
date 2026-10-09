@@ -73,6 +73,9 @@ enum Internal {
 pub struct LedgerEnd {
     pub block_id: String,
     pub turn_id: u64,
+    /// When it ended: a turn rejoined by a held message ends again later, and
+    /// that end is a new one (#4511).
+    pub ended_at_ms: u64,
     /// Started by something other than the user: another agent, a service, a
     /// schedule, a background task (spec §5.2).
     pub external: bool,
@@ -90,6 +93,7 @@ pub fn parse_ledger_end(d: &serde_json::Value) -> Option<LedgerEnd> {
     Some(LedgerEnd {
         block_id: d.get("block_id")?.as_str()?.to_string(),
         turn_id: d.get("turn_id")?.as_u64()?,
+        ended_at_ms: d.get("ended_at_ms").and_then(|v| v.as_u64()).unwrap_or(0),
         external: matches!(kind, Some("agent" | "service" | "schedule" | "task")),
         system: kind == Some("system"),
     })
@@ -253,8 +257,8 @@ pub struct Router {
     turn_active: Mutex<std::collections::HashMap<String, bool>>,
     /// block_id → when the user last stopped its turn (epoch ms).
     stopped_at: Mutex<std::collections::HashMap<String, i64>>,
-    /// (block_id, turn_id) of turns already notified as finished.
-    notified_turns: Mutex<std::collections::HashSet<(String, u64)>>,
+    /// (block_id, turn_id, ended_at_ms) of turn ends already notified.
+    notified_turns: Mutex<std::collections::HashSet<(String, u64, u64)>>,
 }
 
 type Registry = Mutex<std::collections::HashMap<usize, Arc<Router>>>;
@@ -393,12 +397,13 @@ fn spawn_internal(r: std::sync::Weak<Router>, mut rx: tokio::sync::mpsc::Unbound
                 Internal::TurnEnded(end) => {
                     {
                         let mut notified = r.notified_turns.lock().unwrap_or_else(|e| e.into_inner());
-                        // A turn's end can be published twice (its lapse, then
-                        // the lazy close): notify once. Bounded.
+                        // One end can be published twice (its lapse, then the
+                        // lazy close): notify once. A turn reopened by a held
+                        // message and ended again is a new end. Bounded.
                         if notified.len() > TURN_MAP_MAX {
                             notified.clear();
                         }
-                        if !notified.insert((end.block_id.clone(), end.turn_id)) {
+                        if !notified.insert((end.block_id.clone(), end.turn_id, end.ended_at_ms)) {
                             continue;
                         }
                     }
@@ -939,7 +944,7 @@ mod tests {
     // ---- the turn's end, from its ledger (turn-model spec §4.3, §5) ----
 
     fn ledger(end: Option<&str>, kind: &str) -> serde_json::Value {
-        let mut v = serde_json::json!({ "block_id": "b1", "turn_id": 42, "active": false, "trigger": { "kind": kind } });
+        let mut v = serde_json::json!({ "block_id": "b1", "turn_id": 42, "ended_at_ms": 7, "active": false, "trigger": { "kind": kind } });
         if let Some(e) = end {
             v["end"] = serde_json::json!(e);
         }
@@ -950,7 +955,7 @@ mod tests {
     fn only_a_completed_turn_is_an_end() {
         assert_eq!(
             parse_ledger_end(&ledger(Some("completed"), "user")),
-            Some(LedgerEnd { block_id: "b1".into(), turn_id: 42, external: false, system: false })
+            Some(LedgerEnd { block_id: "b1".into(), turn_id: 42, ended_at_ms: 7, external: false, system: false })
         );
         assert_eq!(parse_ledger_end(&ledger(None, "user")), None, "running or settling");
         assert_eq!(parse_ledger_end(&ledger(Some("exited"), "user")), None, "a crash reports itself");
@@ -969,6 +974,16 @@ mod tests {
         }
         let system = parse_ledger_end(&ledger(Some("completed"), "system")).unwrap();
         assert!(!notify_turn_end(&system, true), "AgentMux's own hidden turn, never");
+    }
+
+    #[test]
+    fn a_rejoined_turn_s_second_end_is_a_new_end() {
+        let first = parse_ledger_end(&ledger(Some("completed"), "user")).unwrap();
+        let mut again = ledger(Some("completed"), "user");
+        again["ended_at_ms"] = serde_json::json!(99);
+        let second = parse_ledger_end(&again).unwrap();
+        assert_eq!(first.turn_id, second.turn_id);
+        assert_ne!((first.turn_id, first.ended_at_ms), (second.turn_id, second.ended_at_ms), "a dedupe key that tells them apart");
     }
 
     #[test]

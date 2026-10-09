@@ -72,12 +72,15 @@ describe("turn awareness", () => {
                 return () => {};
             },
             watching: (b) => b === "focused",
+            now: () => 3,
         });
         const data = { turn_id: 9, started_at_ms: 1, active: false, end: "completed", ended_at_ms: 5, trigger: { kind: "schedule", from: "cron" } };
+        feed!("replayed", { ...data, turn_id: 8, ended_at_ms: 2 }); // ended before this window started: old news
         feed!("background", data);
         feed!("focused", { ...data, turn_id: 10 });
         expect(unseenTurnsFor("background")?.count).toBe(1);
         expect(unseenTurnsFor("focused")).toBeNull();
+        expect(unseenTurnsFor("replayed")).toBeNull();
         dispose();
     });
 });
