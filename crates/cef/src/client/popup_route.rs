@@ -50,7 +50,7 @@ pub(crate) struct Request<'a> {
     pub opener: Option<&'a str>,
     /// Does an agent own that pane (srv's set, as the host last heard it)?
     pub opener_owned: bool,
-    /// Popup windows that pane has open.
+    /// Popup windows that pane has open or being created.
     pub windows_open: usize,
     /// A known sign-in provider's authorization URL (`is_known_idp_host` and
     /// `is_oauth_authorization_url`): the native popup it always got.
@@ -69,8 +69,9 @@ pub(crate) fn route(r: &Request) -> Route {
     match r.asked {
         Asked::Other => return Route::LoadInFrame,
         // A sign-in provider's popup keeps the native window it has always
-        // had, whatever else holds.
-        Asked::Popup | Asked::Window if r.sign_in => return Route::NativeWindow,
+        // had, whatever else holds. Only a popup: a sign-in link opened as a
+        // new window (shift-click) asked for a full browsing context.
+        Asked::Popup if r.sign_in => return Route::NativeWindow,
         _ => {}
     }
     let loopback_ok = popup_rules::loopback_allowed(r.url, r.opener_url, r.own_origins);
@@ -168,6 +169,18 @@ mod tests {
         r.user_gesture = false;
         r.opener = None;
         assert_eq!(route(&r), Route::NativeWindow);
+    }
+
+    #[test]
+    fn a_sign_in_link_opened_as_a_window_follows_the_window_rules() {
+        // Shift-click on a sign-in link from the provider's own site: a pane.
+        let mut r = req(Asked::Window, "https://accounts.google.com/o/oauth2/v2/auth?client_id=x");
+        r.sign_in = true;
+        r.opener_url = "https://www.google.com/";
+        assert_eq!(route(&r), Route::Pane);
+        // From another site, a person's pane: the system browser, as any window.
+        r.opener_url = OPENER_URL;
+        assert_eq!(route(&r), Route::SystemBrowser);
     }
 
     #[test]

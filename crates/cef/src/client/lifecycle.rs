@@ -853,7 +853,16 @@ impl AgentMuxHandler {
                 let opener_owned = opener
                     .as_deref()
                     .is_some_and(|o| self.state.owned_panes.lock().contains(o));
-                let windows_open = opener.as_deref().map(|o| self.state.popup_windows_of(o)).unwrap_or(0);
+                // Popup windows the pane has open, plus those this handler
+                // let CEF create that haven't arrived in on_after_created yet:
+                // several window.open calls from one click all count.
+                let windows_open = opener
+                    .as_deref()
+                    .map(|o| {
+                        self.state.popup_windows_of(o)
+                            + self.pending_popup_openers.iter().filter(|(p, _)| p.as_deref() == Some(o)).count()
+                    })
+                    .unwrap_or(0);
                 let decided = route(&Request {
                     asked,
                     url: &url,
@@ -873,6 +882,14 @@ impl AgentMuxHandler {
                     opener = ?opener,
                     "browser-pane new window routed",
                 );
+                // Never more native popups in flight than the queue that tags
+                // them holds: past it, a popup would be created untagged and
+                // treated as an ordinary top-level window.
+                let decided = if decided == Route::NativeWindow && self.pending_popups >= POPUP_PENDING_CAP {
+                    Route::SystemBrowser
+                } else {
+                    decided
+                };
                 match decided {
                     Route::NativeWindow => {
                         if sign_in {
