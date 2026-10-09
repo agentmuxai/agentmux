@@ -214,7 +214,6 @@ dependencies = [
  "parking_lot",
  "portable-pty",
  "proptest",
- "psl",
  "quick-xml 0.39.4",
  "rcgen",
  "reqwest",
