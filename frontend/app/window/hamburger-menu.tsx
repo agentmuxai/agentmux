@@ -115,11 +115,15 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 icon: "palette",
                 subItems: themeSubItems,
             },
-            {
-                label: "Opacity",
-                icon: "circle-half-stroke",
-                subItems: opacitySubItems,
-            },
+            ...(hostHas("windowTransparency")
+                ? [
+                      {
+                          label: "Opacity",
+                          icon: "circle-half-stroke",
+                          subItems: opacitySubItems,
+                      },
+                  ]
+                : []),
             {
                 // SPEC_LAYOUT_FILES_2026_09_25.md §6.1 — placement per
                 // SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md §5.1.

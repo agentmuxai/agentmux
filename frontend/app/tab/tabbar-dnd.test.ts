@@ -390,7 +390,7 @@ describe("markTabMerged / wasTabRecentlyMerged", () => {
 describe("decideTabRelease", () => {
     const strip = { left: 0, right: 500, top: 0, bottom: 30 };
     const ip = { beforeTabId: "tab-a", afterTabId: "tab-b" };
-    const base = { escaped: false, ip, stripRect: strip, tabCount: 3, draggedTabId: "tab-c" };
+    const base = { escaped: false, ip, stripRect: strip, tabCount: 3, draggedTabId: "tab-c", canTearOff: true };
     const at = (clientX: number, clientY: number) => ({ clientX, clientY });
 
     test("a release inside the strip with an insertion point reorders", () => {
@@ -421,6 +421,11 @@ describe("decideTabRelease", () => {
     test("Escape aborts, wherever the release is", () => {
         expect(decideTabRelease({ ...base, escaped: true, input: at(200, 15) })).toBe("abort");
         expect(decideTabRelease({ ...base, escaped: true, input: at(200, 200) })).toBe("abort");
+    });
+
+    test("a host that can't tear off does nothing below the strip", () => {
+        expect(decideTabRelease({ ...base, canTearOff: false, input: at(200, 200) })).toBe("none");
+        expect(decideTabRelease({ ...base, canTearOff: false, input: at(200, 15) })).toBe("reorder");
     });
 
     test("with no strip rect nothing happens", () => {
