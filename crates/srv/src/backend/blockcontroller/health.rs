@@ -222,13 +222,15 @@ struct TurnActivityTrackerInner {
     /// Input was written while the current pass ran: the CLI may answer it
     /// in a pass of its own straight after this one (J2).
     input_during_pass: bool,
-    /// The CLI will start a pass by itself: it reported a finished background
-    /// task (J4), or input reached it during the last pass that it may answer
-    /// in a pass of its own (J2). Cleared when any pass starts.
+    /// The CLI reported a finished background task, so it will start a pass
+    /// by itself to tell the model (J4). Cleared when any pass starts.
     cli_wake_pending: bool,
-    /// What started the pass that just ended, kept when the CLI may continue
-    /// with input written during that pass: its continuation answers that
-    /// input, so it carries the same provenance (self-quit gate, §6.3).
+    /// Input reached the CLI during the pass that just ended, which it may
+    /// answer in a pass of its own straight after (J2). Good only while that
+    /// turn settles: a later pass the CLI starts is something else's.
+    continuation_expected: bool,
+    /// What started that pass: a continuation answers the same input, so it
+    /// carries the same provenance (self-quit gate, §6.3).
     continuation_provenance: Option<TurnProvenance>,
 }
 
@@ -251,6 +253,7 @@ impl TurnActivityTrackerInner {
     fn begin_pass(&mut self, start: PassStart, now: u64) {
         self.input_during_pass = false;
         self.cli_wake_pending = false;
+        self.continuation_expected = false;
         self.continuation_provenance = None;
         let origin = match start {
             PassStart::Input { origin, .. } => Some(origin),
@@ -306,9 +309,9 @@ impl TurnActivityTrackerInner {
     /// when one is expected, and is over otherwise.
     fn end_pass(&mut self, now: u64, provenance: Option<TurnProvenance>) {
         let expects_more = self.input_during_pass || self.cli_wake_pending;
+        self.continuation_expected = self.input_during_pass;
         self.continuation_provenance = self.input_during_pass.then_some(provenance).flatten();
         self.input_during_pass = false;
-        self.cli_wake_pending = expects_more;
         let Some(ledger) = self.ledger.as_mut().filter(|l| l.active) else { return };
         ledger.active = false;
         ledger.last_pass_ended_at_ms = Some(now);
@@ -354,6 +357,7 @@ impl TurnActivityTracker {
                 ledger: None,
                 input_during_pass: false,
                 cli_wake_pending: false,
+                continuation_expected: false,
                 continuation_provenance: None,
             }),
             publisher: Mutex::new(None),
@@ -477,16 +481,21 @@ impl TurnActivityTracker {
     pub fn mark_turn_active_from_cli(&self) -> bool {
         let now = (self.clock)();
         let mut inner = self.inner.lock().unwrap();
-        if inner.active_turn || !inner.cli_wake_pending {
+        // A continuation only while its turn still settles: after that, the
+        // input it would have answered is long dealt with (#4492).
+        let continuing = inner.continuation_expected && inner.ledger.as_ref().is_some_and(|l| l.settling_at(now));
+        if inner.active_turn || !(inner.cli_wake_pending || continuing) {
             return false;
         }
         let before = inner.ledger.clone();
         inner.active_turn = true;
         inner.exit_code = None;
-        // Answering input from the last pass: that pass's provenance (taint
-        // and all). Otherwise a task woke it: automated, never the user, so the
-        // self-quit gate refuses in it, as for any automated turn.
-        inner.provenance = Some(inner.continuation_provenance.take().unwrap_or(TurnProvenance {
+        // Answering input from the last pass: that pass's provenance (taint and
+        // all). A task woke it, alone or as well: automated, never the user, so
+        // the self-quit gate refuses in it, as for any automated turn.
+        let continued = continuing && !inner.cli_wake_pending;
+        let carried = inner.continuation_provenance.take().filter(|_| continued);
+        inner.provenance = Some(carried.unwrap_or(TurnProvenance {
             origin: TurnOrigin::Automated,
             tainted: false,
             user_text: None,
@@ -551,6 +560,7 @@ impl TurnActivityTracker {
         inner.next_turn = None;
         inner.input_during_pass = false;
         inner.cli_wake_pending = false;
+        inner.continuation_expected = false;
         inner.continuation_provenance = None;
         if let Some(l) = inner.ledger.as_mut().filter(|l| l.ended_at_ms.is_none()) {
             if l.active {
@@ -997,8 +1007,8 @@ mod tests {
         assert!(v.get("ended_at_ms").is_none(), "absent, not null");
     }
 
-    /// muxreview P2 on #4492: a pass's figures belong to its own turn, even
-    /// when input that opens a new turn arrives right after its `result`.
+    /// A pass's figures belong to its own turn, even when input that opens a
+    /// new turn arrives right after its `result` (#4492).
     #[test]
     fn a_pass_s_figures_stay_with_its_turn_when_a_new_turn_follows_at_once() {
         let (t, _, seen) = ledger_tracker();
@@ -1012,5 +1022,48 @@ mod tests {
         let ended = seen.lock().unwrap().iter().rev().find(|l| l.turn_id == first).cloned().unwrap();
         assert_eq!((ended.counted_passes, ended.output_tokens, ended.steps), (1, 300, 2));
         assert_eq!(ended.end, Some(TurnEnd::Completed));
+    }
+
+    /// Input answered inside its own pass leaves no continuation behind: a
+    /// task that wakes the CLI minutes later is an automated pass, never the
+    /// user's (#4492).
+    #[test]
+    fn a_late_task_wake_up_never_inherits_an_old_user_pass_s_provenance() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("finish then quit")));
+        t.mark_turn_active_from(Some(user("and this too"))); // answered inside the pass
+        t.set_active_turn(false);
+        advance(&clock, 5 * 60_000);
+        t.note_cli_task_notification();
+        assert!(t.mark_turn_active_from_cli());
+        let p = t.provenance().unwrap();
+        assert_eq!((p.origin, p.user_text), (TurnOrigin::Automated, None));
+        assert_eq!(t.ledger().unwrap().origin, Some(TurnOrigin::Automated));
+    }
+
+    /// Nor does a stale continuation alone explain a later init.
+    #[test]
+    fn an_expired_continuation_does_not_explain_an_init() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        t.mark_turn_active_from(Some(jekt()));
+        t.set_active_turn(false);
+        advance(&clock, TURN_SETTLE_MS + 1);
+        assert!(!t.mark_turn_active_from_cli(), "no notification, settle window over");
+        assert!(!t.is_active_turn());
+    }
+
+    /// A pass the CLI starts for both a task and input from the last pass is
+    /// the automated one.
+    #[test]
+    fn a_continuation_that_a_task_also_woke_is_automated() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        t.mark_turn_active_from(Some(user("more")));
+        t.note_cli_task_notification();
+        t.set_active_turn(false);
+        advance(&clock, 20);
+        assert!(t.mark_turn_active_from_cli());
+        assert_eq!(t.provenance().unwrap().origin, TurnOrigin::Automated);
     }
 }

@@ -360,8 +360,7 @@ impl PersistentSubprocessController {
     ///
     /// `stats`: the `result` frame's figures. They go to the turn the pass
     /// belonged to in the same step that idles it, so input arriving right
-    /// after (which may open a new turn) can never take them (muxreview P2 on
-    /// #4492).
+    /// after (which may open a new turn) can never take them (#4492).
     pub(super) fn turn_boundary_locked(
         inner: &mut PersistentInner,
         health: &TurnActivityTracker,

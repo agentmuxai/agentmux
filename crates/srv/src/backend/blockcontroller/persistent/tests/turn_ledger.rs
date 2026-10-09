@@ -182,3 +182,67 @@ async fn an_init_at_spawn_is_not_a_pass() {
     let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(5)).await;
     let _ = std::fs::remove_file(stub);
 }
+
+/// The same against the real Claude Code CLI, on Haiku, in a temp directory:
+/// a background task that finishes after the turn ended wakes the CLI, and
+/// that pass is reported busy and is a turn of its own. Costs a few cents of
+/// Haiku, so it runs only when asked:
+/// `AGENTMUX_LIVE_CLAUDE=1 cargo test -p agentmux-srv --bins live_claude -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore = "runs the real Claude Code CLI; set AGENTMUX_LIVE_CLAUDE=1"]
+async fn live_claude_background_task_wake_up() {
+    if std::env::var("AGENTMUX_LIVE_CLAUDE").as_deref() != Ok("1") {
+        eprintln!("live_claude: AGENTMUX_LIVE_CLAUDE is not 1 — skipping");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("agentmux-live-claude-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let c = Arc::new(PersistentSubprocessController::new(
+        "tab".to_string(),
+        "blk-live-claude".to_string(),
+        Some(Arc::new(mps::Broker::new())),
+        None,
+        None,
+        Some(Arc::new(crate::backend::storage::filestore::FileStore::open_in_memory().unwrap())),
+    ));
+    c.set_self_ref();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let s = Arc::clone(&seen);
+    c.health_monitor.set_ledger_publisher(Arc::new(move |l: &TurnLedger| s.lock().unwrap().push(l.clone())));
+    let config = PersistentSpawnConfig {
+        cli_command: "claude".to_string(),
+        cli_args: ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--model", "haiku", "--allowedTools", "Bash"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        working_dir: dir.to_string_lossy().to_string(),
+        env_vars: HashMap::new(),
+        session_id_field: "session_id".to_string(),
+        resume_flag: "--resume".to_string(),
+        session_id: String::new(),
+        message_id: None,
+    };
+    let prompt = "Use the Bash tool with run_in_background=true to run: sleep 8; echo finished-bg. Then reply with just the word started and end your turn. When the background task completes later, reply with just the word done.";
+    let input = crate::backend::blockcontroller::health::TurnInput { origin: TurnOrigin::User, text: prompt.to_string(), joins_turn: None };
+    c.send_message_with_images_from(user_line(prompt), Vec::new(), config, Some(input)).unwrap();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+    while ended_turns(&seen).len() < 2 && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    for l in seen.lock().unwrap().iter() {
+        eprintln!(
+            "ledger turn={} origin={:?} passes={} active={} counted={} out={} steps={} end={:?}",
+            l.turn_id, l.origin, l.passes, l.active, l.counted_passes, l.output_tokens, l.steps, l.end
+        );
+    }
+    let turns = ended_turns(&seen);
+    assert_eq!(turns.len(), 2, "the user's turn, then the CLI's own for the task");
+    assert_eq!(turns[0].origin, Some(TurnOrigin::User));
+    assert_eq!(turns[1].origin, Some(TurnOrigin::Automated));
+    assert!(seen.lock().unwrap().iter().any(|l| l.turn_id == turns[1].turn_id && l.active), "reported busy");
+    assert!(turns.iter().all(|t| t.counted_passes == 1 && t.output_tokens > 0));
+
+    let _ = c.shutdown(std::time::Instant::now() + std::time::Duration::from_secs(5)).await;
+    let _ = std::fs::remove_dir_all(dir);
+}
