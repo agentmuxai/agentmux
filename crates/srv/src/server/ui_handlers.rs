@@ -1188,6 +1188,12 @@ pub(crate) async fn handle_ui_browser_handoff(
     if reason.is_empty() {
         return err_response(StatusCode::BAD_REQUEST, "say what the user should do (`reason`)".to_string());
     }
+    // Only the host relays the user's Done or Cancel (`/api/v1/host/browser_attention`).
+    // With none connected nobody can answer: refuse now rather than hold the
+    // agent's tools on this pane until the timeout.
+    if let Err(e) = crate::server::app_api::connections::host_to_ask_user(&state).await {
+        return err_response(StatusCode::SERVICE_UNAVAILABLE, e);
+    }
     let minutes = req.timeout_minutes.unwrap_or(15).clamp(1, 60);
     tracing::info!(agent_id = %req.auth.agent_id, block_id = %block_id, "[ui-automation] browser hand-off");
     let answer = match crate::server::browser_attention::ask(

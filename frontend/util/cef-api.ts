@@ -19,6 +19,7 @@ import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/subm
 import { benchMark } from "@/util/startup-bench";
 import { cefApprovals, cefBrowserPanes, cefHostMisc, cefReclaimWindowFocus, cefWindows } from "@/app/host/cef-host-commands";
 import { CEF_HOST_CAPS } from "@/app/host/host-caps";
+import { reloadKeepingHostCredentials } from "@/app/init/error-display";
 import { isTransientNetworkError, retryTransient } from "@/util/transient-network";
 
 // Cache for "synchronous" values that are fetched once at startup.
@@ -509,6 +510,8 @@ export function buildCefApi(): AppApi {
 
         // --- Synchronous getters (return cached values) ---
         getAuthKey: () => cachedValues!.authKey,
+        // A plain reload drops the IPC creds cef-init.ts strips from the URL.
+        reloadWindow: reloadKeepingHostCredentials,
         getIsDev: () => cachedValues!.isDev,
         getPlatform: () => cachedValues!.platform as NodeJS.Platform,
         getUserName: () => cachedValues!.userName,

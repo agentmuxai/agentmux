@@ -59,7 +59,9 @@ vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { SetConfigCommand: vi.fn() } })
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/command-registry", () => ({ commandRegistry: { run: vi.fn(() => false) } }));
 vi.mock("@/app/hook/useVoiceInput", () => ({ getVoiceSession: vi.fn() }));
-vi.mock("@/app/host/host-caps", () => ({ hostHas: (cap: string) => cap === "multiWindow" && h.caps.multiWindow }));
+vi.mock("@/app/host/host-caps", () => ({
+    hostHas: (cap: string) => (cap === "multiWindow" ? h.caps.multiWindow : cap === "windowTransparency"),
+}));
 vi.mock("@/app/store/zoom", () => ({ zoomIn: vi.fn(), zoomOut: vi.fn(), zoomReset: vi.fn() }));
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ focusedNode: () => null }),

@@ -20,6 +20,7 @@ mod registry;
 mod sagas;
 mod server;
 mod srv_ipc;
+mod srv_info;
 mod state;
 mod drone;
 mod messaging;
@@ -53,6 +54,9 @@ async fn main() {
     if bootstrap::maybe_run_crash_monitor() {
         return;
     }
+
+    // Before anything changes the environment (srv_info.rs).
+    srv_info::capture_home_dir();
 
     // 0. Headless (no launcher/host): prepare the env the launcher would have
     //    provided, and don't tie srv's life to a parent or stdin. Otherwise start
