@@ -23,6 +23,9 @@
 //!
 //! Cost controls:
 //!   - only agents whose controller is running (`STATUS_RUNNING`) and that have no usable title;
+//!   - only agents whose `output` is in a shape the digest can read
+//!     (`digest::reads_output_format`); another provider's file holds no
+//!     conversation it can find;
 //!   - only when the block's `output` has grown since the last completed attempt;
 //!   - at most [`MAX_ATTEMPTS`] completed attempts per block while the title stays
 //!     empty, counted again from zero once a title exists, so an agent whose
@@ -39,6 +42,7 @@ use std::time::Duration;
 
 use tokio::time::interval;
 
+use crate::ambient::digest;
 use crate::ambient::validate::is_usable_title;
 use crate::backend::blockcontroller::core::broadcast_block_update;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
@@ -138,6 +142,9 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
             if has_title {
                 // A title exists: the budget starts over if it is ever lost.
                 attempts.lock().unwrap().remove(&block_id);
+                continue;
+            }
+            if !digest::reads_output_format(&obj::meta_get_string(&block.meta, "agentOutputFormat", "")) {
                 continue;
             }
             let Ok(Some(output)) = filestore.stat(&block_id, "output") else {

@@ -71,6 +71,13 @@ pub struct CommandNextPromptSuggestionData {
     /// doc comment for the wall-clock-vs-remount rationale (identical here).
     #[ts(type = "number")]
     pub generation: u64,
+    /// The pane's recent conversation, oldest first, one entry per message,
+    /// tool call or error (`[user] …`, `[assistant] …`, `[tool] Name`,
+    /// `[error] …`), built from the document the pane has already translated
+    /// for its provider. Without it the server reads the block's output file,
+    /// which it can only parse for Claude-shaped streams.
+    #[ts(optional)]
+    pub activity: Option<Vec<String>>,
 }
 
 /// Response from session:next_prompt_suggestion. The FRONTEND writes

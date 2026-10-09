@@ -145,6 +145,14 @@ export function hasPendingStreamFlush(paneId: string): boolean {
     return pending.has(paneId);
 }
 
+/** True if any flush queue of block `blockId` has a request waiting. A queue
+ *  registers as `<blockId>#<n>` (stream-flush-queue.ts). */
+export function hasPendingStreamFlushForBlock(blockId: string): boolean {
+    const prefix = `${blockId}#`;
+    for (const id of pending.keys()) if (id.startsWith(prefix)) return true;
+    return false;
+}
+
 /** Tests only: forget all state, including input history and listeners' effect. */
 export function __resetStreamSchedulerForTests(): void {
     pending.clear();

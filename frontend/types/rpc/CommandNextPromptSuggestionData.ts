@@ -11,4 +11,12 @@ export type CommandNextPromptSuggestionData = { block_id: string,
  * Caller's generation for this block — see CommandActivitySummaryData's
  * doc comment for the wall-clock-vs-remount rationale (identical here).
  */
-generation: number, };
+generation: number, 
+/**
+ * The pane's recent conversation, oldest first, one entry per message,
+ * tool call or error (`[user] …`, `[assistant] …`, `[tool] Name`,
+ * `[error] …`), built from the document the pane has already translated
+ * for its provider. Without it the server reads the block's output file,
+ * which it can only parse for Claude-shaped streams.
+ */
+activity?: Array<string>, };

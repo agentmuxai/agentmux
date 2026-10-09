@@ -19,6 +19,7 @@
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { DocumentNode } from "../types";
 
 const hub = vi.hoisted(() => ({
     nextPromptSuggestion: vi.fn(),
@@ -49,7 +50,7 @@ afterEach(() => {
     vi.clearAllMocks();
 });
 
-function setup(isComposerEmpty: () => boolean = () => true) {
+function setup(isComposerEmpty: () => boolean = () => true, document?: () => DocumentNode[]) {
     let setPhase!: (p: TurnPhase) => void;
     let bumpTurnEnded!: () => void;
     let dispose: () => void = () => {};
@@ -64,6 +65,7 @@ function setup(isComposerEmpty: () => boolean = () => true) {
             turnPhase: phase,
             turnJustEndedAtom: turnEnded,
             isComposerEmpty,
+            document,
         });
     });
     return { setPhase, bumpTurnEnded, dispose };
@@ -93,6 +95,7 @@ describe("useNextPromptSuggestion — hidden-turn suppression (reagentx P0, PR #
 
         setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "ordinary message", hidden: false });
         await Promise.resolve();
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 2 });
         bumpTurnEnded();
         await Promise.resolve();
         await Promise.resolve();
@@ -117,6 +120,7 @@ describe("useNextPromptSuggestion — hidden-turn suppression (reagentx P0, PR #
 
         setPhase({ kind: "Submitting", submittedAt: 2, pendingContent: "a real message", hidden: false });
         await Promise.resolve();
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 3 });
         bumpTurnEnded();
         await Promise.resolve();
         await Promise.resolve();
@@ -166,7 +170,7 @@ describe("useNextPromptSuggestion — no call when there's nothing to suggest", 
         let resolve!: (v: unknown) => void;
         hub.nextPromptSuggestion.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
         const { setPhase, bumpTurnEnded, dispose } = setup();
-        await endTurn(setPhase, bumpTurnEnded);
+        await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome: "completed", finishedAt: 2 });
         expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
         setPhase({ kind: "Done", outcome: "stopped", finishedAt: 3 });
         resolve({ suggestion: "next thing", tokens: null });
@@ -177,10 +181,35 @@ describe("useNextPromptSuggestion — no call when there's nothing to suggest", 
         dispose();
     });
 
+    it("waits for the turn's end to reach the pane before taking its activity (#4506)", async () => {
+        const { setPhase, bumpTurnEnded, dispose } = setup();
+        // The backend's edge arrives while the reply is still streaming in.
+        await endTurn(setPhase, bumpTurnEnded, { kind: "Streaming", bufferSize: 0, toolsActive: 0, lastEventMs: 0 });
+        expect(hub.nextPromptSuggestion).not.toHaveBeenCalled();
+        setPhase({ kind: "Done", outcome: "completed", finishedAt: 2 });
+        await new Promise((r) => setTimeout(r, 120));
+        expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
     it("calls after a completed turn", async () => {
         const { setPhase, bumpTurnEnded, dispose } = setup();
         await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome: "completed", finishedAt: 2 });
         expect(hub.nextPromptSuggestion).toHaveBeenCalledTimes(1);
+        dispose();
+    });
+
+    it("sends the pane's recent activity with the request", async () => {
+        const nodes = [
+            { type: "user_message", id: "u", message: "fix it" },
+            { type: "markdown", id: "m", content: "Fixed." },
+        ] as unknown as DocumentNode[];
+        const { setPhase, bumpTurnEnded, dispose } = setup(undefined, () => nodes);
+        await endTurn(setPhase, bumpTurnEnded, { kind: "Done", outcome: "completed", finishedAt: 2 });
+        expect(hub.nextPromptSuggestion.mock.calls[0][1]).toMatchObject({
+            block_id: BLOCK_ID,
+            activity: ["[user] fix it", "[assistant] Fixed."],
+        });
         dispose();
     });
 

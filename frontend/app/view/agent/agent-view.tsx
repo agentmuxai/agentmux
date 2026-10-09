@@ -776,16 +776,16 @@ export const AgentPresentationView = ({
         getRootWidth: () => rootRef?.offsetWidth,
     });
 
-    // Ghost-text next-prompt suggestion (composer). Populated by AgentFooter
-    // via its isComposerEmptyRef prop below. Defaults to "empty" if the
-    // footer hasn't mounted yet — matches the common case (no suggestion
-    // exists yet either, since one only appears after a completed turn).
+    // Ghost-text next-prompt suggestion (composer). AgentFooter fills in
+    // composerIsEmptyFn below; until it mounts the composer counts as empty,
+    // and no suggestion exists yet anyway (one only follows a completed turn).
     let composerIsEmptyFn: (() => boolean) | null = null;
     useNextPromptSuggestion({
         blockId: model.blockId,
         turnPhase: (() => paneModel.state.turnPhase),
         turnJustEndedAtom,
         isComposerEmpty: () => composerIsEmptyFn?.() ?? true,
+        document: paneModel.document,
     });
 
     // Subscribe to subprocess output and parse into DocumentNodes.

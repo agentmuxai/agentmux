@@ -325,6 +325,8 @@ Build the digest from `agents::translator` `AgentEvent`s instead of raw Claude f
 
 The hidden-reinjection filter stays. It is about AgentMux's own message, not the provider's format.
 
+**What was built instead (PR 5).** The srv translators turned out not to fit: they translate replies only (Codex's serves `/btw`), and `AgentEvent` carries no user message, so a digest built from them could not say what was asked. The pane already holds every provider's conversation, translated, in its document, with hidden reinjection turns left out. So the pane sends it: `frontend/app/view/agent/ambient-activity.ts` renders the document in the digest's entry form, `session:next_prompt_suggestion` takes it as an optional `activity` field, and `digest::activity_from_entries` applies the same caps, the same turn-ending gate and the same hidden-turn refusal as the file reader. Without the field (an older pane) the server still reads the file. The title already arrives with the user's own message, so it needed nothing. The background title sweep has no pane to ask, so it now skips any block whose `agentOutputFormat` the file reader can't parse (`digest::reads_output_format`) rather than reading 96 KB of it to find nothing.
+
 ### 6.6 Subagent and dispatch names
 
 - **Use the parent's `Agent` `description`** as the subagent name, and the first member's description for a workflow dispatch, when present. Correlation by `tool_use_id` already exists.
