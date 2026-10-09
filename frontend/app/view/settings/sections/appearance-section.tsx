@@ -197,7 +197,7 @@ export function AppearanceSection(): JSX.Element {
                     <NumberControl
                         class="setting-number"
                         min={0} max={20} step={1} parse="int"
-                        value={(s()["window:tilegapsize"] as number) ?? 4}
+                        value={(s()["window:tilegapsize"] as number) ?? 3}
                         onChange={(v) => set("window:tilegapsize", v)}
                     />
                 }

@@ -143,7 +143,7 @@ export function TerminalSection(): JSX.Element {
                     <NumberControl
                         class="setting-number"
                         min={8} max={32} step={1} parse="int"
-                        value={(s()["term:fontsize"] as number) ?? 14}
+                        value={(s()["term:fontsize"] as number) ?? 15}
                         onChange={(v) => set("term:fontsize", v)}
                     />
                 }
