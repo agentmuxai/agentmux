@@ -164,6 +164,11 @@ impl Slot {
         self.cancel.clone()
     }
 
+    /// Whether a newer request for the same key has been admitted since this one.
+    pub fn is_superseded(&self) -> bool {
+        self.cancel.is_cancelled()
+    }
+
     /// Give the call up without running it, recording why (for example
     /// `EmptyDigest`), instead of the `NotRun` a plain drop records.
     pub fn abandon(mut self, outcome: Outcome) {
@@ -176,6 +181,13 @@ impl Slot {
     /// the `ANSWER:`/`SKIP` format). Never fails: a CLI error, a cancellation, a
     /// skip and a refused reply all come back as a `Reply` with empty text.
     pub async fn run(mut self, target: &CliTarget, prompt: &str, judge: impl Fn(&str) -> Verdict) -> Reply {
+        self.run_held(target, prompt, judge).await
+    }
+
+    /// [`Slot::run`], keeping the slot, and with it the gateway's hold on this
+    /// call's generation, for a caller that acts on the reply and must not if a
+    /// newer request arrived meanwhile ([`Slot::is_superseded`]).
+    pub async fn run_held(&mut self, target: &CliTarget, prompt: &str, judge: impl Fn(&str) -> Verdict) -> Reply {
         let started = std::time::Instant::now();
         let result = super::cli::invoke_haiku(
             &target.cli_path,
@@ -272,6 +284,8 @@ mod tests {
         let cancelled = first.cancellation();
         let _second = admit_with_limit(&NEWER, "call-newer", 2, None, None).await.unwrap();
         assert!(cancelled.is_cancelled());
+        // A slot still held (`run_held`) can tell, and so not act on its reply.
+        assert!(first.is_superseded());
     }
 
     #[tokio::test]

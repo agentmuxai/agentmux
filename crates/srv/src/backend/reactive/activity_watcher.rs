@@ -175,7 +175,7 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                     return;
                 };
                 // The pane's own request can win the race; it is the better source.
-                match store_title(&mstore, &block_id, &title, Replace::IfEmpty) {
+                match store_title(&mstore, &block_id, &title, Replace::IfEmpty, || true) {
                     Ok(true) => {
                         tracing::info!(block_id = %block_id, attempt, title = %title, "ambient: recovered a missing session title");
                         broadcast_block_update(&mstore, &event_bus, &block_id);

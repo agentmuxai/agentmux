@@ -32,13 +32,24 @@ pub enum Replace {
 }
 
 /// Store `title` as the block's session title if `replace` allows it. A value
-/// that is not a usable title is never stored. `Ok(true)` when written.
-pub fn store_title(store: &Store, block_id: &str, title: &str, replace: Replace) -> Result<bool, String> {
+/// that is not a usable title is never stored. `still_current` is asked inside
+/// the transaction: a request superseded by a newer one must not store its
+/// title after the newer one did. `Ok(true)` when written.
+pub fn store_title(
+    store: &Store,
+    block_id: &str,
+    title: &str,
+    replace: Replace,
+    still_current: impl Fn() -> bool,
+) -> Result<bool, String> {
     if !is_usable_title(title) {
         return Ok(false);
     }
     store
         .with_tx(|tx| {
+            if !still_current() {
+                return Ok(false);
+            }
             let mut block = tx.must_get::<Block>(block_id)?;
             let current = obj::meta_get_string(&block.meta, META_TITLE, "");
             if is_usable_title(&current) {
@@ -141,7 +152,7 @@ mod tests {
         for replace in [Replace::IfEmpty, Replace::IfNews] {
             for before in [&[][..], &[(META_TITLE, "(none yet)")][..]] {
                 let store = store_with_block(before);
-                assert_eq!(store_title(&store, "b1", "Fix the login race", replace), Ok(true));
+                assert_eq!(store_title(&store, "b1", "Fix the login race", replace, || true), Ok(true));
                 assert_eq!(title_of(&store), "Fix the login race");
             }
         }
@@ -150,30 +161,37 @@ mod tests {
     #[test]
     fn recovery_never_replaces_a_title() {
         let store = store_with_block(&[(META_TITLE, "Set up CI for the docs site")]);
-        assert_eq!(store_title(&store, "b1", "Something else entirely", Replace::IfEmpty), Ok(false));
+        assert_eq!(store_title(&store, "b1", "Something else entirely", Replace::IfEmpty, || true), Ok(false));
         assert_eq!(title_of(&store), "Set up CI for the docs site");
     }
 
     #[test]
     fn the_pane_replaces_a_title_only_with_news() {
         let store = store_with_block(&[(META_TITLE, "Fix the login race")]);
-        assert_eq!(store_title(&store, "b1", "Fix login race condition", Replace::IfNews), Ok(false));
+        assert_eq!(store_title(&store, "b1", "Fix login race condition", Replace::IfNews, || true), Ok(false));
         assert_eq!(title_of(&store), "Fix the login race");
-        assert_eq!(store_title(&store, "b1", "Set up CI for the docs site", Replace::IfNews), Ok(true));
+        assert_eq!(store_title(&store, "b1", "Set up CI for the docs site", Replace::IfNews, || true), Ok(true));
+        assert_eq!(title_of(&store), "Set up CI for the docs site");
+    }
+
+    #[test]
+    fn a_superseded_request_stores_nothing() {
+        let store = store_with_block(&[(META_TITLE, "Set up CI for the docs site")]);
+        assert_eq!(store_title(&store, "b1", "Fix the login race", Replace::IfNews, || false), Ok(false));
         assert_eq!(title_of(&store), "Set up CI for the docs site");
     }
 
     #[test]
     fn a_placeholder_is_never_stored() {
         let store = store_with_block(&[]);
-        assert_eq!(store_title(&store, "b1", "(none yet)", Replace::IfNews), Ok(false));
+        assert_eq!(store_title(&store, "b1", "(none yet)", Replace::IfNews, || true), Ok(false));
         assert_eq!(title_of(&store), "");
     }
 
     #[test]
     fn other_meta_survives_the_write() {
         let store = store_with_block(&[("agentName", "AgentX")]);
-        store_title(&store, "b1", "Fix the login race", Replace::IfEmpty).unwrap();
+        store_title(&store, "b1", "Fix the login race", Replace::IfEmpty, || true).unwrap();
         let meta = store.must_get::<Block>("b1").unwrap().meta;
         assert_eq!(obj::meta_get_string(&meta, "agentName", ""), "AgentX");
     }

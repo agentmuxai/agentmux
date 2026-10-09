@@ -327,7 +327,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // against cancellation so a request superseded while queued for
                 // a permit never spawns the CLI at all. See
                 // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
-                let Some(slot) = ambient::call::admit(
+                let Some(mut slot) = ambient::call::admit(
                     &ambient::purpose::ACTIVITY_SUMMARY,
                     cmd.block_id.clone(),
                     cmd.generation,
@@ -393,7 +393,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 );
                 let limits = ambient::validate::title_limits(word_target);
                 let reply = slot
-                    .run(&target, &prompt, |raw| {
+                    .run_held(&target, &prompt, |raw| {
                         ambient::reply::judge_line(raw, |t| ambient::validate::accept_line(t, &limits))
                     })
                     .await;
@@ -401,11 +401,13 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // Stored here, not by the pane: one writer with the recovery sweep,
                 // in one transaction, so a rewording never replaces the title and
                 // neither writer overwrites what the other stored while its call ran
-                // (`ambient::title`). A call superseded by a newer message was
-                // cancelled by the gateway and has no text.
+                // (`ambient::title`). The slot is held until the write, so a newer
+                // message's request, admitted while this one ran, supersedes it and
+                // this older title is not stored after the newer one.
                 let mut stored = false;
                 if !reply.text.is_empty() {
-                    match ambient::title::store_title(&mstore, &cmd.block_id, &reply.text, ambient::title::Replace::IfNews) {
+                    let still_current = || !slot.is_superseded();
+                    match ambient::title::store_title(&mstore, &cmd.block_id, &reply.text, ambient::title::Replace::IfNews, still_current) {
                         Ok(true) => {
                             stored = true;
                             crate::backend::blockcontroller::core::broadcast_block_update(&mstore, &event_bus, &cmd.block_id);
