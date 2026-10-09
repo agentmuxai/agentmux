@@ -39,7 +39,7 @@ jobs:
     env:
       # The ECR registry is derived at run time (and masked) rather than written
       # here: this repo and its Actions logs are public.
-      ECR_REPO_NAME: reagent-reviewer-image
+      ECR_REPO_NAME: muxreview-reviewer-image
       GHCR_IMAGE: ghcr.io/agentmuxai/reagent-reviewer
     steps:
       - name: The package must be private
