@@ -225,7 +225,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/blockcontroller/persistent/tests/eager_resume.rs", "\"kill\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
-    ("crates/srv/src/backend/blockcontroller/shell/lifecycle.rs", "&cmd_str", 1,
+    ("crates/srv/src/backend/blockcontroller/shell/lifecycle.rs", "&program", 1,
      "pty: portable-pty CommandBuilder, runs on a ConPTY pseudoconsole"),
     ("crates/srv/src/backend/blockcontroller/shell/lifecycle.rs", "\"cmd.exe\"", 1,
      "pty: portable-pty CommandBuilder, runs on a ConPTY pseudoconsole"),

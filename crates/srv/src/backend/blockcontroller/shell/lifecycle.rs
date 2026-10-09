@@ -398,7 +398,13 @@ impl ShellController {
     ) -> CommandBuilder {
         let mut c = if !cmd_args.is_empty() || interactive {
             // Spawned directly (no shell wrapper), so args pass through intact.
-            let mut c = CommandBuilder::new(cmd_str);
+            // An npm `.cmd` shim on Windows is resolved to what it runs: the
+            // shim itself hangs under ConPTY (`resolve_cli_spawn_target`). One
+            // that can't be parsed is spawned as it is, as before.
+            let (program, prefix) = agentmux_common::resolve_cli_spawn_target(cmd_str)
+                .unwrap_or_else(|| (cmd_str.to_string(), Vec::new()));
+            let mut c = CommandBuilder::new(&program);
+            c.args(&prefix);
             c.args(cmd_args);
             c
         } else if cfg!(windows) {
@@ -2161,6 +2167,40 @@ mod global_cmd_env_tests {
         assert_eq!(var(&direct, "CLAUDE_CONFIG_DIR").as_deref(), Some("/accounts/a"));
         let wrapped = ctrl.command_process("claude auth login", &[], false, &meta);
         assert_eq!(var(&wrapped, "CLAUDE_CONFIG_DIR").as_deref(), Some("/accounts/a"));
+    }
+
+    /// On Windows a direct-spawn pane runs what an npm `.cmd` shim points
+    /// at, not the shim (which hangs under ConPTY), with the pane's args after.
+    #[cfg(windows)]
+    #[test]
+    fn a_command_pane_runs_what_an_npm_shim_points_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let shim = bin.join("openclaw.cmd");
+        std::fs::write(
+            &shim,
+            concat!(
+                "@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+",
+                r#""%_prog%"  "%dp0%\..\openclaw\cli.js" %*"#,
+                "
+"
+            ),
+        )
+        .unwrap();
+        let args = vec!["login".to_string()];
+        let c = controller(None).command_process(&shim.to_string_lossy(), &args, true, &MetaMapType::new());
+        let argv: Vec<String> = c.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(argv[0], "node");
+        assert!(argv[1].ends_with("cli.js"), "the shim's script, got {argv:?}");
+        assert_eq!(argv[2], "login");
     }
 
     #[test]
