@@ -1,0 +1,98 @@
+# Weekly web-link report: plan step 20 of the CI test-speed and DRY
+# follow-ups plan (PR #4534).
+#
+# lychee over the web URLs in docs/ and in code comments, limited to
+# github.com and our own pages (scripts/collect-web-links.mjs decides which
+# URLs; .github/lychee.toml decides how they are fetched). The result goes to
+# the standing docs-stale issue (docs-stale-sweep.yml) as a comment, only
+# when the failures change.
+#
+# NOT A GATE, on purpose: a gate on outside URLs would make CI depend on
+# other people's servers. lychee runs with `fail: false`, the job is
+# continue-on-error, nothing else needs this workflow, and a failed link only
+# ever shows up in the report.
+name: Weekly web-link report
+
+on:
+  schedule:
+    - cron: '0 8 * * 1' # Mondays 08:00 UTC, after the 06:30 docs stale-sweep
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: weekly-web-links
+  cancel-in-progress: true
+
+jobs:
+  lychee:
+    name: lychee (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Collect the links
+        run: node scripts/collect-web-links.mjs web-links
+
+      # A unique key saves a fresh cache every run; restore-keys loads the
+      # newest. lychee.toml keeps only successes, for 2 days, so this spares
+      # a same-day re-run, never a weekly one.
+      - uses: actions/cache@v4
+        with:
+          path: .lycheecache
+          key: lychee-${{ github.run_id }}
+          restore-keys: lychee-
+
+      - name: lychee
+        id: lychee
+        # Step-level, not just the job's: a failure while the action downloads
+        # or installs lychee (before its own `fail: false` applies) must still
+        # leave the report steps below to say so.
+        continue-on-error: true
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: --config .github/lychee.toml 'web-links/**/*.txt'
+          fail: false
+          failIfEmpty: false
+          format: markdown
+          output: lychee/out.md
+          jobSummary: true
+          # Plain `* [404] <url>` lines, which weekly-web-link-report.sh
+          # fingerprints, rather than task-list checkboxes.
+          checkbox: false
+          # The default, written out: lychee uses it for github.com URLs,
+          # which raises the rate limit.
+          token: ${{ github.token }}
+
+      - name: Build the report
+        if: ${{ !cancelled() }}
+        env:
+          LYCHEE_EXIT: ${{ steps.lychee.outputs.exit_code }}
+        run: bash scripts/weekly-web-link-report.sh lychee/out.md "$LYCHEE_EXIT" web-links web-link-report
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: web-link-report
+          path: |
+            web-link-report/
+            lychee/out.md
+          retention-days: 30
+
+      - name: Post to the docs-stale issue
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          bash scripts/docs-stale-issue-comment.sh weekly-web-links
+          web-link-report/report.md web-link-report/fingerprint.txt

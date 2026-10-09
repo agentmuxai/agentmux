@@ -1,0 +1,24 @@
+# lychee settings for the weekly web-link report (.github/workflows/weekly-web-links.yml).
+# Which URLs get checked is decided by scripts/collect-web-links.mjs (github.com
+# and our own pages, from docs/ and code comments); this file only says how.
+
+no_progress = true
+
+# Be gentle with github.com: it rate-limits unauthenticated HTML fetches, and
+# about 500 of the URLs are there. The workflow passes GITHUB_TOKEN, which
+# lychee uses for github.com repository URLs.
+max_concurrency = 8
+host_concurrency = 4
+host_request_interval = "250ms"
+max_retries = 2
+retry_wait_time = 5
+timeout = 20
+
+# 429 means "slow down", not "broken": a rate-limited link is not reported.
+accept = ["200..=299", "429"]
+
+# Reuse only successes, and only briefly: the cache spares a same-day re-run
+# the full fetch, while a link that fails is always checked again.
+cache = true
+max_cache_age = "2d"
+cache_exclude_status = "400.."
