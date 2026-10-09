@@ -254,21 +254,65 @@ pub fn exit_message(dest: &str, code: u32) -> Option<String> {
 }
 
 /// Where `ControlMaster` sockets go (macOS and Linux; Windows' OpenSSH has no
-/// connection sharing): a private directory under AgentMux's config, created
-/// owner-only, since anyone who can open a socket there can use the
-/// connection. `None` if it cannot be made so.
+/// connection sharing): a private, owner-only directory, since anyone who can
+/// open a socket there can use the connection. `None` (no sharing; ssh still
+/// connects) if it can't be made so, or a socket in it would be too long.
+///
+/// Not under `config_home`: a channel's config dir is deep
+/// (`/Users/<name>/.agentmux/channels/stable/config`), and a Unix socket path
+/// has to fit in `sun_path`, 104 bytes on macOS and 108 on Linux. Under it,
+/// ssh failed with "too long for Unix domain socket" right after logging in,
+/// on every macOS install. So: the launcher's short runtime dir
+/// (`$XDG_RUNTIME_DIR/agentmux`, else `/tmp/agentmux-<uid>`, as
+/// `launcher::ipc::ipc_socket_dir_path`) and one `ssh-<hash>` per channel.
+#[cfg(unix)]
 pub fn control_dir(config_home: &Path) -> Option<PathBuf> {
-    if cfg!(windows) {
-        return None;
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|d| d.is_absolute())
+        .map(|d| d.join("agentmux"))
+        .unwrap_or_else(|| PathBuf::from(format!("/tmp/agentmux-{}", unsafe { libc::getuid() })));
+    control_dir_in(&base, config_home)
+}
+
+#[cfg(not(unix))]
+pub fn control_dir(_config_home: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// [`control_dir`] under `base`: `base/ssh-<8 hex of config_home>`, each
+/// level owner-only. A test can pass its own `base`.
+#[cfg(unix)]
+fn control_dir_in(base: &Path, config_home: &Path) -> Option<PathBuf> {
+    use sha2::{Digest, Sha256};
+    let channel = hex::encode(&Sha256::digest(config_home.as_os_str().as_encoded_bytes())[..4]);
+    let dir = base.join(format!("ssh-{channel}"));
+    private_dir(base)?;
+    private_dir(&dir)?;
+    socket_fits(&dir).then_some(dir)
+}
+
+/// Make `dir` (mode `0700`), or accept it if it already exists as a real
+/// directory owned by this user that no one else can enter. `/tmp` is shared:
+/// someone else could have made the directory, or a symlink in its place.
+#[cfg(unix)]
+fn private_dir(dir: &Path) -> Option<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(_) => return None,
     }
-    let dir = config_home.join("ssh");
-    std::fs::create_dir_all(&dir).ok()?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).ok()?;
-    }
-    Some(dir)
+    let meta = std::fs::symlink_metadata(dir).ok()?;
+    let ours = meta.file_type().is_dir() && meta.uid() == unsafe { libc::getuid() };
+    (ours && meta.permissions().mode() & 0o077 == 0).then_some(())
+}
+
+/// Whether ssh can bind a socket in `dir`: the longest path it binds is
+/// `dir/<40-hex %C>.<16 random>`, and it has to fit in `sun_path` with its NUL.
+fn socket_fits(dir: &Path) -> bool {
+    let sun_path = if cfg!(target_os = "linux") { 108 } else { 104 };
+    dir.as_os_str().len() + 1 + 40 + 17 < sun_path
 }
 
 #[cfg(test)]
@@ -364,6 +408,78 @@ mod tests {
         assert_eq!(args[at("-p") + 1], "2222");
         assert!(at("-p") < at("--") && at("--") + 1 == at("area54"));
         assert_eq!(args.last().unwrap(), "area54");
+    }
+
+    /// The longest socket path ssh binds in `dir`: `/`, the 40-hex `%C`, and
+    /// while binding `.` plus 16 random characters. It must stay under the
+    /// OS's `sun_path` (104 bytes on macOS, 108 on Linux, NUL included).
+    fn bind_path_len(dir: &Path) -> usize {
+        dir.as_os_str().len() + 1 + 40 + 17
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_deep_config_dir_still_gets_a_socket_path_ssh_can_bind() {
+        // A channel's config dir is deep: the stable one on macOS is
+        // `/Users/<name>/.agentmux/channels/stable/config`, and every socket
+        // under it was too long, so ssh failed right after logging in.
+        let tmp = tempfile::tempdir().unwrap();
+        let deep = tmp.path().join("users-name/.agentmux/channels/local-main-b28b7a-51e8e6a3/config");
+        let dir = control_dir(&deep).expect("a control dir");
+        let max = if cfg!(target_os = "linux") { 108 } else { 104 };
+        assert!(bind_path_len(&dir) < max, "{} bytes: {}", bind_path_len(&dir), dir.display());
+        // It's in the real runtime dir: don't leave one behind per run.
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// Under `/tmp`: macOS's own temp dir (`/var/folders/…`) is itself too
+    /// long for a socket, so a dir there is refused for its length alone.
+    #[cfg(unix)]
+    fn short_tempdir() -> tempfile::TempDir {
+        tempfile::Builder::new().prefix("am").tempdir_in("/tmp").unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn each_channel_gets_its_own_owner_only_dir() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = short_tempdir();
+        let base = tmp.path().join("b");
+        let (stable, local) = (Path::new("/u/.agentmux/channels/stable/config"), Path::new("/u/.agentmux/channels/local-x/config"));
+        let a = control_dir_in(&base, stable).unwrap();
+        assert_eq!(control_dir_in(&base, stable), Some(a.clone()));
+        assert_ne!(control_dir_in(&base, local), Some(a.clone()));
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!((mode(&base), mode(&a)), (0o700, 0o700));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_base_others_can_enter_or_a_symlink_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = short_tempdir();
+        let config = Path::new("/u/config");
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(control_dir_in(&open, config), None);
+        let real = tmp.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(control_dir_in(&link, config), None);
+    }
+
+    #[test]
+    fn a_socket_fits_only_below_sun_path() {
+        let sun_path = if cfg!(target_os = "linux") { 108 } else { 104 };
+        let dir = |len: usize| PathBuf::from(format!("/{}", "d".repeat(len - 1)));
+        let longest = sun_path - 1 - (1 + 40 + 17);
+        assert!(socket_fits(&dir(longest)));
+        assert!(!socket_fits(&dir(longest + 1)));
+        // The stable channel's old dir on macOS, for an 8-letter user name.
+        assert!(!socket_fits(Path::new("/Users/asafebgi/.agentmux/channels/stable/config/ssh")) || cfg!(target_os = "linux"));
     }
 
     #[test]
