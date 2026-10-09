@@ -217,6 +217,10 @@ impl SubagentWatcher {
         self.naming_triggered.lock().unwrap().contains(dispatch_id)
     }
 
+    /// How long a solo subagent's eager name waits for a late `.meta.json`, whose
+    /// description makes the model call unnecessary.
+    pub(super) const SIDECAR_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
     /// Fire the one eager Haiku-naming call for a dispatch's first-observed
     /// live spawn (issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19).
     /// Caller (`process_jsonl_change`) has already atomically claimed
@@ -242,6 +246,9 @@ impl SubagentWatcher {
                     crate::ambient::limits::pull_call_semaphore(),
                 ).await;
             } else {
+                // The transcript is often seen before its sidecar, whose
+                // description names the subagent for free; give it time to land.
+                tokio::time::sleep(Self::SIDECAR_GRACE).await;
                 crate::ambient::tasks::generate_subagent_name(
                     &watcher.mstore,
                     &watcher,
