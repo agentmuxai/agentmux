@@ -2,56 +2,30 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Application bootstrap — entry point loaded by index.html.
-// Initializes logging, detects the host runtime, sets up the API bridge,
+// Runs the build's host module (`@host-module`, app/host/host-module.ts: the
+// desktop host unless the build chose another), sets up the API bridge,
 // then launches the main application (app-init.ts).
 
-import { initLogPipe } from "./log/log-pipe";
-import { initErrorForwarder } from "./log/error-forwarder";
-import { setupCefApi } from "./cef-init";
+import { hostModule } from "@host-module";
 import { initApp } from "./app-init";
 import { tryAutoRecover, clearStartupReloadCount, StartupFailureHandled } from "./app/init/error-display";
 import { benchMark } from "@/util/startup-bench";
 import { initPerf } from "@/perf";
-import { invokeCommand } from "@/app/platform/ipc";
 
-// Pipe all console.log/warn/error to the Rust host log file.
-// Must run before any other code so early messages are captured.
-initLogPipe();
+// The host's early hooks (the desktop host pipes logs and uncaught errors to
+// its log file). Must run before any other code so early messages are captured.
+hostModule.early();
 
-// ── First-paint signal (Linux startup white-flash fix) ──────────────────────
-// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md.
-//
-// Tell the host the moment the browser has actually composited a frame — not
-// "main-frame load complete" (CEF's `on_load_end`, which can fire before
-// anything has visually painted and is what the host used to gate the native
-// window's show() on). Double rAF is the standard proxy for "a frame was
-// presented": the first callback runs before this frame is drawn, the second
-// only after it has been.
-//
-// Fired directly via invokeCommand() rather than getApi() — getApi() isn't
-// installed until setupCefApi()'s full IPC batch resolves, which can take
-// seconds on a slow start (see the spec's profiling numbers) and would be far
-// too late to gate the window's first show(). invokeCommand() only needs
-// `window.__AGENTMUX_IPC_PORT__`/`__AGENTMUX_IPC_TOKEN__`, which on a normal
-// (non-reload) launch are already present from the boot URL's query params —
-// no wait required. Harmless no-op outside CEF (invokeCommand rejects; caught
-// and ignored) and on platforms that don't gate on this signal (Windows/macOS
-// currently just log it).
+// Tell the host when a frame has been painted. Double rAF is the standard
+// proxy for "a frame was presented": the first callback runs before this frame
+// is drawn, the second only after it has been.
 requestAnimationFrame(() => {
     requestAnimationFrame(() => {
         benchMark("frontend-painted");
         const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
-        invokeCommand("report_first_paint", { label }).catch(() => {});
+        hostModule.firstPaint(label);
     });
 });
-
-// Capture uncaught errors + unhandled promise rejections and forward
-// them via the same fe_log_structured IPC channel as the console pipe.
-// SolidJS reconciler DOM exceptions (e.g. replaceChild NotFoundError)
-// surface only as window "error" events and would otherwise leave no
-// trace in the host log. Retro 2026-05-23 (agent-pane cascade →
-// replaceChild quick-win).
-initErrorForwarder();
 
 // Phase 0 perf instrumentation: Long Tasks observer + INP/event
 // observer. Must run before any user-interactive code so we never
@@ -159,7 +133,7 @@ async function bootstrap() {
         // Initialize the host API bridge
         log("INFO", "Initializing API...");
         benchMark("setupCefApi-start");
-        await setupCefApi();
+        await hostModule.setup();
         benchMark("setupCefApi-done");
         log("INFO", "API initialized, window.api available:", !!window.api);
 
@@ -220,10 +194,10 @@ async function bootstrap() {
     }
 }
 
-// Uncaught error / unhandled promise rejection forwarding is handled
-// by initErrorForwarder() at the top of this file. That path captures
-// stack / name / source and ships via the same fe_log_structured IPC
-// channel as the console pipe, so DOM exceptions from the SolidJS
-// reconciler land in the host log.
+// Uncaught error / unhandled promise rejection forwarding is the host
+// module's job (`hostModule.early()` at the top of this file). The desktop
+// host's captures stack / name / source and ships via the same
+// fe_log_structured IPC channel as the console pipe, so DOM exceptions from
+// the SolidJS reconciler land in the host log.
 
 bootstrap();

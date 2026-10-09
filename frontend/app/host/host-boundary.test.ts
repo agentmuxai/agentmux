@@ -32,9 +32,10 @@ const SEAM = [
     "cef-init.ts",
     "types/custom.d.ts",
     "util/cef-api.ts",
-    // The CEF entry. bootstrap.ts is index.html's module; it installs the log
-    // pipe and error forwarder before window.api exists, then sets it up.
-    "bootstrap.ts",
+    // The CEF host's startup hooks (the default `@host-module`): the log pipe
+    // and error forwarder before window.api exists, then setting it up.
+    // bootstrap.ts itself is host-independent.
+    "cef-host-module.ts",
     "log/error-forwarder.ts",
     "log/log-pipe.ts",
     // Boot-error recovery: runs when window.api failed, so it cannot use it.
