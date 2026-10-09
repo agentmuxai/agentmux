@@ -415,8 +415,10 @@ impl TurnActivityTrackerInner {
             };
             if joins {
                 ledger.passes += 1;
-                // A CLI continuation or a queue drain brings no new input.
-                if matches!(start, PassStart::Input { .. }) {
+                // New input joined: a message, or a finished task the CLI woke
+                // for (#4503). A plain continuation or a queue drain brings none.
+                let task_wake = matches!(start, PassStart::CliWake) && trigger.is_some();
+                if matches!(start, PassStart::Input { .. }) || task_wake {
                     ledger.inputs += 1;
                     ledger.absorb(trigger);
                 }
@@ -1481,5 +1483,32 @@ mod tests {
         let v = serde_json::to_value(t.ledger().unwrap()).unwrap();
         assert_eq!(v["trigger"], serde_json::json!({"kind": "agent", "from": "agentx"}));
         assert!(v.get("absorbed").is_none(), "empty: absent");
+    }
+
+    /// A task the CLI wakes for inside a turn is listed as what joined it (#4503).
+    #[test]
+    fn a_task_wake_that_joins_a_turn_is_recorded() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        t.note_cli_task_notification(Some("Background command \"npm test\" completed (exit code 0)"));
+        t.end_pass(None);
+        advance(&clock, 20);
+        assert!(t.mark_turn_active_from_cli());
+        let l = t.ledger().unwrap();
+        assert_eq!((l.passes, l.inputs), (2, 1));
+        assert_eq!(l.trigger, Some(trig(TriggerKind::User, None)), "the turn is still the user's");
+        assert_eq!(l.absorbed.first().map(|t| t.kind), Some(TriggerKind::Task));
+    }
+
+    /// A plain continuation (input answered in its own pass) adds no input.
+    #[test]
+    fn a_plain_continuation_adds_no_input() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        t.mark_turn_active_from(Some(user("more")));
+        t.end_pass(None);
+        advance(&clock, 20);
+        assert!(t.mark_turn_active_from_cli());
+        assert_eq!(t.ledger().unwrap().inputs, 1, "only the mid-pass message");
     }
 }

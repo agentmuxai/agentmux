@@ -308,6 +308,8 @@ Two guards keep the trigger honest:
 - **Worked verb:** `Worked on AgentX's jekt`, `Worked on github-consumer's notice`, `Worked on a scheduled run` or `Worked on a finished task`. A user turn keeps plain `Worked`.
 - **Secondary:** what joined the turn, by kind, for example `+1 jekt  ·  +2 your messages`, with `+N more` past the listed ones.
 
+**Transcript.** A task wake-up leaves no message of its own, so `task-wake.ts` finds it in the stream: a main-agent `task_notification`, then a `system/init` with no input written in between. It adds an ambient line, `Woke up: <the notification's summary>`. The live stream and history replay both feed it, and the node id is the task's own, so the line survives a remount or reopen and is never duplicated. A task that wakes the CLI *inside* a turn is also listed in `absorbed` ("+1 task").
+
 **Still to come (phase 2b):** the transcript trigger header, unread dots, the per-kind notification policy, and the return digest.
 
 ---
