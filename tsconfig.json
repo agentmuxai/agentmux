@@ -26,6 +26,7 @@
             "@/element/*": ["frontend/app/element/*"],
             "@/shadcn/*": ["frontend/app/shadcn/*"],
             "@/perf": ["frontend/perf/index.ts"],
+            "@host-module": ["frontend/cef-host-module.ts"],
             "@/perf/*": ["frontend/perf/*"]
         },
         "lib": ["dom", "dom.iterable", "es6"],
