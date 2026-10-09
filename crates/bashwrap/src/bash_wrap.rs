@@ -10,8 +10,8 @@
 //!   (`run_via_pty`), with a pipe-stdio fallback (`run_via_pipes`)
 //!   if PTY allocation fails. The PTY path keeps glibc's stdout
 //!   line-buffered so partial chunks reach the overlay in real time;
-//!   bash's startup DSR (`\x1b[6n`) is satisfied by pre-loading the
-//!   master writer with `\x1b[1;1R`; the writer is held alive until
+//!   ConPTY's startup DSR (`\x1b[6n`, Windows only) is satisfied by
+//!   pre-loading the master writer with `\x1b[1;1R`; the writer is held alive until
 //!   after child.wait() (dropping it earlier sends CTRL_C_EVENT on
 //!   Windows — ConPTY CONIN lifetime invariant, same as pair.master).
 //!   The command is wrapped in a brace group redirected from /dev/null
@@ -285,6 +285,13 @@ const MODEL_BLOB_TAIL_BYTES: usize = 50_000;
 /// newline-free output (minified JSON, CR-only progress bars) still
 /// stream live instead of accumulating in memory unbounded.
 const FLUSH_BYTES: usize = 4096;
+
+/// Size of the PTY commands run in. Wider than the classic 80 so that
+/// width-aware programs (tables, `--help`, `ls` columns) don't fold their
+/// output with hard line breaks; previews scroll long lines instead. Bash
+/// derives `COLUMNS` / `LINES` from it.
+const PTY_COLS: u16 = 200;
+const PTY_ROWS: u16 = 50;
 
 /// Flush pending bytes after this much idle time even if no newline /
 /// size threshold has been hit — keeps slow-trickle output visible
@@ -970,15 +977,26 @@ where
 /// startup tears down the pseudoconsole anchor and produces
 /// `STATUS_DLL_INIT_FAILED` (the β.A wedge). See retro §4.2.
 ///
-/// HEADLESS PTY contract (cross-platform): bash queries the PTY at
+/// HEADLESS PTY contract (Windows): ConPTY queries the terminal at
 /// startup with `\x1b[6n` (DSR — request cursor position) and blocks
-/// on stdin waiting for a `\x1b[r;cR` response. A headless PTY (no
-/// real terminal behind it) never answers — bash never proceeds —
-/// `child.wait()` therefore never returns. Our PTY reader detects DSR
-/// queries and writes a synthetic `\x1b[1;1R` response back via the
-/// master writer. This is what xterm.js does for VS Code's agent-
-/// mode terminal; here we do the minimum subset for non-interactive
-/// `bash -c`. Verified via agentmux-pty-repro V2 before this landed.
+/// waiting for a `\x1b[r;cR` response. A headless PTY (no real terminal
+/// behind it) never answers — the child never proceeds — so
+/// `child.wait()` would never return. We write a synthetic `\x1b[1;1R`
+/// response via the master writer, and the reader strips the query from
+/// the output. This is what xterm.js does for VS Code's agent-mode
+/// terminal; here we do the minimum subset for non-interactive `bash -c`.
+/// Verified via agentmux-pty-repro V2 before this landed.
+///
+/// Unix PTYs never ask (checked with `bash -c` 3.2 and 5.x on macOS: no
+/// `\x1b[6n` in the output, and the command exits without a reply). There
+/// the reply would only be echoed back by the line discipline as the
+/// printable text `^[[1;1R` at the start of every result, which no escape
+/// stripping can recognise, and left in the child's stdin. So it is sent on
+/// Windows only.
+///
+/// The PTY is [`PTY_COLS`] wide, not the classic 80: width-aware programs
+/// (tables, help text, column listings) fold their output at the terminal
+/// width with real line breaks, which no preview can undo.
 async fn run_proc(
     args: &Args,
     command: &str,
@@ -988,8 +1006,8 @@ async fn run_proc(
     let bash = locate_bash()?;
     let pty_system = native_pty_system();
     match pty_system.openpty(PtySize {
-        rows: 24,
-        cols: 80,
+        rows: PTY_ROWS,
+        cols: PTY_COLS,
         pixel_width: 0,
         pixel_height: 0,
     }) {
@@ -1136,20 +1154,23 @@ async fn run_via_pty(
 
     let reader = pair.master.try_clone_reader().context("PTY try_clone_reader")?;
 
-    // Write the DSR response into the master writer, then hold the
-    // writer alive until after child.wait(). On Windows, closing the
+    // Write the DSR response into the master writer (Windows), then hold
+    // the writer alive until after child.wait(). On Windows, closing the
     // CONIN pipe write-end while the pseudoconsole is still attached
     // sends CTRL_C_EVENT to the child (exit 130 / SIGINT). This is
     // the same ConPTY-lifetime invariant as pair.master itself — both
     // must outlive child.wait(). After the DSR response we never write
     // again; the handle is kept open only to hold CONIN alive.
-    let writer = {
+    #[allow(unused_mut)]
+    let mut writer = pair.master.take_writer().context("PTY take_writer")?;
+    // ConPTY only: a Unix PTY never asks, and would echo this back into the
+    // output as `^[[1;1R` (see run_proc's doc comment).
+    #[cfg(windows)]
+    {
         use std::io::Write as _;
-        let mut w = pair.master.take_writer().context("PTY take_writer")?;
-        let _ = w.write_all(b"\x1b[1;1R");
-        let _ = w.flush();
-        w
-    };
+        let _ = writer.write_all(b"\x1b[1;1R");
+        let _ = writer.flush();
+    }
 
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
     let tx_reader = tx.clone();

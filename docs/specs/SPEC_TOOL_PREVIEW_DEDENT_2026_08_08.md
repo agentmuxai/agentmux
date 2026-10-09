@@ -36,6 +36,14 @@ ancestor of every Read/Write/Edit/Diff preview path (Shiki and plain-
 fallback alike) — rather than the global `reset.scss` rule, so the Editor
 pane keeps its own 4-wide default unaffected.
 
+**Correction (2026-10-08):** that rule did not make previews consistent. It
+reaches only `.agent-tool-block .agent-tool-panel` (not jekts, the persistent
+shell or the activity dock), the space narrowing in `dedent.ts` returns early
+on any tab, and tab stops count the line-number gutter, so the first indent
+level of a tab-indented Read is half as wide as the rest (measured). #2958
+also found it stepped the gutter. See
+`docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md` §3.2.
+
 ---
 
 ## 1. Report
