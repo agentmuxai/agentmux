@@ -103,7 +103,13 @@ title: srv knows the opener's URL, not its title, and a title is the page's to c
   opener. The host asks from its own thread and opens the system browser on a refusal or an
   error, so a slow or absent srv only ever means today's behavior.
 - Every `Browser*` and `UI*` tool takes the popup's id as `pane`, subject to the same owner check
-  as any owned pane. `BrowserHandoff`, Take over and Pause work on it, and a handoff on the
+  as any owned pane, **and driven as part of its opener**: while the opener exists, the agent
+  must still own it (Take over on the opener ends the agent's hold on its popups too), and a
+  hand-off or approval waiting on the opener pauses its popups. A popup whose opener closed stands
+  on its own.
+- **Races:** the cap is checked and a slot reserved under one lock, and given back if the pane
+  doesn't open, so popups reported at once can't overshoot it; the opener's owner is checked again
+  once the popup pane is open, so a Take over during the opening leaves the popup unowned. `BrowserHandoff`, Take over and Pause work on it, and a handoff on the
   opener pauses its popups.
 - Unchanged: an agent never types into a `[secret]` field; a sign-in in a popup is a hand-off
   like any other.

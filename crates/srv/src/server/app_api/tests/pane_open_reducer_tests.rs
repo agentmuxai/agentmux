@@ -1444,6 +1444,31 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     assert_eq!(listed[0]["pane"], p1.as_str());
     assert_eq!(listed[0]["yours"], true);
 
+    // While the opener waits on the person (a hand-off), its popup is paused too.
+    let waiting = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": agents, "reason": "Sign in" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    let mut banner_id = String::new();
+    for _ in 0..100 {
+        let b = state.mstore.must_get::<crate::backend::obj::Block>(&agents).unwrap();
+        if let Some(id) = b.meta.get("browser:attention").and_then(|v| v.get("id")).and_then(|v| v.as_str()) {
+            banner_id = id.to_string();
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(!banner_id.is_empty(), "the hand-off banner never showed");
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p1 }))).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let answer = serde_json::json!({ "block_id": agents, "id": banner_id, "decision": "cancel" });
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    waiting.await.unwrap();
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p1 }))).await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY);
+
     // A script with no click opens nothing new.
     let no_click = popup(&agents, "https://console.example.com/", "https://signin.example.com/", false);
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", no_click, &host).await;
@@ -1462,6 +1487,16 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     assert!(block.meta.get("browser:owner_agent").is_none_or(|v| v.is_null()));
     let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p2 }))).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // Take over on the opener ends the agent's hold on the popup it opened.
+    let oref = format!("block:{agents}");
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&oref, &clear).unwrap();
+    crate::server::service::update_object_meta(&state.mstore, &oref, &clear).unwrap();
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p1 }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap_or("").contains("took over"), "{body}");
 
     // A popup reported for a pane that isn't a browser pane is refused.
     let not_browser = popup(&own, "https://x.example.com/", "https://x.example.com/a", true);

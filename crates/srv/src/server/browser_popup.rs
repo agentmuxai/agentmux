@@ -117,34 +117,98 @@ pub(crate) fn origin_of(url: &str) -> String {
         .unwrap_or_default()
 }
 
-fn popups() -> &'static Mutex<HashMap<String, Vec<String>>> {
-    static POPUPS: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+#[derive(Default)]
+struct Popups {
+    /// opener → its popup panes, oldest first.
+    open: HashMap<String, Vec<String>>,
+    /// opener → popups admitted but still being opened (`Reservation`).
+    pending: HashMap<String, usize>,
+}
+
+fn popups() -> &'static Mutex<Popups> {
+    static POPUPS: OnceLock<Mutex<Popups>> = OnceLock::new();
     POPUPS.get_or_init(Default::default)
 }
 
-/// Remember that `opener` opened `popup`.
+fn lock() -> std::sync::MutexGuard<'static, Popups> {
+    popups().lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Drop `opener`'s closed popups (`exists` says whether a block is still
+/// there) and return the open ones.
+fn prune(p: &mut Popups, opener: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
+    let Some(list) = p.open.get_mut(opener) else {
+        return Vec::new();
+    };
+    list.retain(|id| exists(id));
+    let out = list.clone();
+    if list.is_empty() {
+        p.open.remove(opener);
+    }
+    out
+}
+
+/// A slot for a popup pane being opened, held from the moment it is admitted
+/// until it is open (`commit`) or not (dropped). Counting the slot during the
+/// wait is what keeps two popups admitted at once from both fitting under the
+/// cap.
+pub(crate) struct Reservation {
+    opener: String,
+    held: bool,
+}
+
+impl Reservation {
+    /// The popup pane opened: it counts as open from now on.
+    pub(crate) fn commit(mut self, popup: &str) {
+        let mut p = lock();
+        release(&mut p, &self.opener);
+        p.open.entry(self.opener.clone()).or_default().push(popup.to_string());
+        self.held = false;
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        if self.held {
+            release(&mut lock(), &self.opener);
+        }
+    }
+}
+
+fn release(p: &mut Popups, opener: &str) {
+    if let Some(n) = p.pending.get_mut(opener) {
+        *n = n.saturating_sub(1);
+        if *n == 0 {
+            p.pending.remove(opener);
+        }
+    }
+}
+
+/// Admit one more popup pane for `opener` if `admit` agrees, given how many
+/// it has open or being opened, and hold its slot. The count and the slot are
+/// taken under one lock.
+pub(crate) fn reserve<E>(
+    opener: &str,
+    exists: impl Fn(&str) -> bool,
+    admit: impl FnOnce(usize) -> Result<(), E>,
+) -> Result<Reservation, E> {
+    let mut p = lock();
+    let taken = prune(&mut p, opener, exists).len() + p.pending.get(opener).copied().unwrap_or(0);
+    admit(taken)?;
+    *p.pending.entry(opener.to_string()).or_default() += 1;
+    Ok(Reservation { opener: opener.to_string(), held: true })
+}
+
+/// Remember that `opener` opened `popup` (outside `reserve`; used by tests).
+#[cfg(test)]
 pub(crate) fn remember(opener: &str, popup: &str) {
-    popups()
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .entry(opener.to_string())
-        .or_default()
-        .push(popup.to_string());
+    lock().open.entry(opener.to_string()).or_default().push(popup.to_string());
 }
 
 /// The popups `opener` has open, oldest first. `exists` says whether a block
 /// is still there; closed ones are dropped from the record as they're found.
 pub(crate) fn open_popups(opener: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
-    let mut map = popups().lock().unwrap_or_else(|p| p.into_inner());
-    let Some(list) = map.get_mut(opener) else {
-        return Vec::new();
-    };
-    list.retain(|p| exists(p));
-    let out = list.clone();
-    if list.is_empty() {
-        map.remove(opener);
-    }
-    out
+    prune(&mut lock(), opener, exists)
 }
 
 #[cfg(test)]
@@ -218,6 +282,27 @@ mod tests {
         assert_eq!(origin_of("https://console.example.com/home?x=1"), "https://console.example.com");
         assert_eq!(origin_of("http://localhost:3000/a"), "http://localhost:3000");
         assert_eq!(origin_of("file:///c:/x"), "");
+    }
+
+    #[test]
+    fn a_held_slot_counts_against_the_cap_until_it_opens_or_is_dropped() {
+        let opener = "test-reserve-opener";
+        let cap = |taken: usize| if taken < 2 { Ok(()) } else { Err(taken) };
+        // Two admitted at once: both slots count, so a third doesn't fit,
+        // although nothing is open yet.
+        let a = reserve(opener, |_| true, cap).unwrap();
+        let b = reserve(opener, |_| true, cap).unwrap();
+        assert_eq!(reserve(opener, |_| true, cap).err(), Some(2));
+        // One opens, the other fails: the failed one's slot comes back.
+        a.commit("test-reserve-p1");
+        drop(b);
+        assert_eq!(open_popups(opener, |_| true), vec!["test-reserve-p1"]);
+        let c = reserve(opener, |_| true, cap).unwrap();
+        assert_eq!(reserve(opener, |_| true, cap).err(), Some(2));
+        drop(c);
+        // A closed popup frees its slot too.
+        assert!(reserve(opener, |id| id != "test-reserve-p1", cap).is_ok());
+        assert!(open_popups(opener, |_| true).is_empty());
     }
 
     #[test]
