@@ -227,12 +227,16 @@ pub(crate) async fn generate_subagent_name(
 
     // Interactive for a live subagent or a row the user opened, background for
     // the backlog pass over historical ones — see each call site.
+    // Checked again once admitted: the parent's description may have named it
+    // while this call waited.
+    let still_unnamed = || subagent_watcher.get_info(agent_id).is_some_and(|i| i.display_name.is_none());
     let generated = generate_name_from_task_prompt(
         mstore,
         &info,
         (&purpose::SUBAGENT_NAME, agent_id),
         class,
         prompt::build_subagent_name_prompt,
+        still_unnamed,
     )
     .await?;
     if let Some(name) = &generated.text {
@@ -278,6 +282,7 @@ pub(crate) async fn generate_dispatch_name(
         (&purpose::DISPATCH_NAME, dispatch_id),
         class,
         prompt::build_dispatch_name_prompt,
+        || true,
     )
     .await?;
     if let Some(name) = &generated.text {
@@ -295,8 +300,13 @@ async fn generate_name_from_task_prompt(
     (purpose, entity): (&'static purpose::Purpose, &str),
     class: Class,
     build_prompt: fn(&str) -> String,
+    still_needed: impl Fn() -> bool,
 ) -> Option<Generated> {
     let slot = call::admit_as(purpose, entity, 1, class).await?;
+    if !still_needed() {
+        slot.abandon(super::outcome::Outcome::Gated);
+        return None;
+    }
 
     let task_prompt = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path)?;
     let block: Block = mstore.get(&info.parent_block_id).ok().flatten()?;

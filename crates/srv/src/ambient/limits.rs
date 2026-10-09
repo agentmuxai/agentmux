@@ -12,6 +12,8 @@
 //! continuity summary), each justified alone, none bounding the total.
 //! docs/reports/REPORT_AMBIENT_FRAMEWORK_REASSESSMENT_2026_10_08.md section 6.4.
 
+use std::time::Duration;
+
 use tokio::sync::Semaphore;
 
 /// Which queue an ambient call waits in.
@@ -33,7 +35,22 @@ pub const INTERACTIVE_CAP: usize = 2;
 /// behind two of them.
 pub const BACKGROUND_CAP: usize = 3;
 
+/// The longest an interactive call waits for a permit before giving up. With
+/// the 30 s interactive time limit (`purpose`), a call ends within 40 s, inside
+/// the pane's 45 s RPC timeout (`ambient-rpc.ts`), so a reply is never paid for
+/// after the pane has stopped waiting for it.
+pub const INTERACTIVE_MAX_QUEUE_WAIT: Duration = Duration::from_secs(10);
+
 impl Class {
+    /// How long a call of this class may wait for a permit; `None` for no limit
+    /// (nobody is waiting on background work).
+    pub fn max_queue_wait(self) -> Option<Duration> {
+        match self {
+            Class::Interactive => Some(INTERACTIVE_MAX_QUEUE_WAIT),
+            Class::Background => None,
+        }
+    }
+
     /// The class's process-wide semaphore.
     pub fn semaphore(self) -> &'static Semaphore {
         static INTERACTIVE: std::sync::OnceLock<Semaphore> = std::sync::OnceLock::new();
