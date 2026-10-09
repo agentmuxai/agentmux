@@ -20,6 +20,7 @@ import { UserInputModal } from "@/app/modals/userinputmodal";
 import * as MOS from "./mos";
 import { getFileSubject, muxEventSubscribe } from "./mps";
 import { getApi } from "./app-api";
+import { onSrvInfo } from "./srv-info";
 import {
     fullConfigAtom,
     setFullConfigAtom,
@@ -276,6 +277,10 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
                 const fullConfig = (event.data as WatcherUpdate).fullconfig;
                 setFullConfigAtom(fullConfig);
             },
+        },
+        {
+            eventType: WpsEvent.SrvInfo,
+            handler: (event) => onSrvInfo(event.data),
         },
         {
             eventType: WpsEvent.UserInput,

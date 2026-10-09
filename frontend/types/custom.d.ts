@@ -12,6 +12,9 @@ import type * as rxjs from "rxjs";
 import type { Accessor, JSX } from "solid-js";
 
 declare global {
+    /** This build's version (package.json), set by vite.config.ts `define`. */
+    const __AGENTMUX_VERSION__: string;
+
     // All atoms are now SolidJS Accessors (call as function to read reactive value).
     // For writable atoms use SignalAtom (also callable, plus ._set()).
     type GlobalAtomsType = {

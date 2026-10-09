@@ -128,8 +128,14 @@ function stripKatexLegacyFonts(): Plugin {
     };
 }
 
+// The UI's own version, compared with the backend's on every connect (app/store/srv-version.ts).
+const APP_VERSION: string = JSON.parse(fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8")).version;
+
 export default defineConfig({
     root: ".",
+    define: {
+        __AGENTMUX_VERSION__: JSON.stringify(APP_VERSION),
+    },
     optimizeDeps: {
         // The Shiki grammars are loaded lazily, one `import("shiki/langs/x.mjs")` per
         // language. Left to discovery, the dev server finds each one when a code block

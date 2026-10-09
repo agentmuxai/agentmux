@@ -35,6 +35,9 @@ export const WpsEvent = {
     MuxObjBatchedUpdates: "waveobj:batchedupdates",
     InstallProgress: "install_progress",
     Config: "config",
+    // Sent once per WebSocket connect, after config: `{ version }` of the srv
+    // reached (crates/srv/src/server/websocket.rs `srv_info_event`).
+    SrvInfo: "srvinfo",
     UserInput: "userinput",
     AgentMessageAccepted: "agent-message-accepted",
     // Image attachment processing, scoped `block:<id>` of the pane that
