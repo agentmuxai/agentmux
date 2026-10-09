@@ -13,19 +13,15 @@
  * (docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md §3.3, §5.2).
  *
  * The order matters (#2330): drop bashwrap's starting notice, collapse
- * spinner redraws over the raw append-only stream, THEN window to the line
- * budget (createChunkCapper), and only then join — so a long stream costs the
- * last 1000 lines' worth of work per update, not the whole stream's.
+ * spinner redraws over the raw append-only stream, THEN window it
+ * (createChunkWindow: in joined lines, counting only new chunks), and only
+ * then join — so a long stream costs the window's work per update, not the
+ * whole stream's.
  */
 
 import { createMemo, type JSX } from "solid-js";
-import { chunksDoc, type OutputChunk } from "../preview-text/docs";
-import {
-    createChunkCapper,
-    createSpinnerCollapser,
-    dropBashwrapStartingChunk,
-    MAX_TOOL_OUTPUT_LINES,
-} from "./output-cap";
+import { chunksDoc, createChunkWindow, type OutputChunk } from "../preview-text/docs";
+import { createSpinnerCollapser, dropBashwrapStartingChunk, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { PreviewLines } from "./PreviewLines";
 
 interface ChunkPreviewProps {
@@ -36,9 +32,9 @@ interface ChunkPreviewProps {
 }
 
 export function ChunkPreview(props: ChunkPreviewProps): JSX.Element {
-    // Both stateful (append-only identity tracking), so one each per mounted preview.
+    // Stateful (append-only identity tracking), so one each per mounted preview.
     const spinnerCollapse = createSpinnerCollapser<OutputChunk>();
-    const window = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
+    const window = createChunkWindow(MAX_TOOL_OUTPUT_LINES);
     // Chunks seen in the stream, added as they arrive (the stream only grows;
     // a new stream starts over), so telling them apart from the collapser's
     // own frames costs the new chunks, not the whole stream.
@@ -54,15 +50,15 @@ export function ChunkPreview(props: ChunkPreviewProps): JSX.Element {
         }
         for (; seen < raw.length; seen++) fromStream.add(raw[seen]);
         const { display, spinnerSlot } = spinnerCollapse(raw);
-        const { chunks, hiddenLines } = window(display);
-        // The collapser hands back frozen frames and the live spinner trimmed,
-        // without their line break: each stands as a line of its own. Those
-        // are the chunks it made itself, not ones from the stream.
-        const wholeLines = new Set<OutputChunk>(chunks.filter((c) => !fromStream.has(c)));
-        if (spinnerSlot) wholeLines.add(spinnerSlot);
-        const doc = chunksDoc(spinnerSlot ? [...chunks, spinnerSlot] : chunks, { wholeLines });
-        const hidden = hiddenLines + (doc.hidden?.count ?? 0);
-        return hidden > 0 ? { ...doc, hidden: { count: hidden, from: "tail" as const } } : doc;
+        // The collapser hands back frozen frames trimmed, without their line
+        // break: each stands as a line of its own. Those are the chunks it
+        // made itself, not ones from the stream. So is the live spinner.
+        const { chunks, total, whole } = window(display, (c) => !fromStream.has(c));
+        if (spinnerSlot) whole.add(spinnerSlot);
+        const doc = chunksDoc(spinnerSlot ? [...chunks, spinnerSlot] : chunks, { wholeLines: whole });
+        // Hidden lines in joined lines: the whole stream's, minus what shows.
+        const hidden = total + (spinnerSlot ? 1 : 0) - doc.lines.length;
+        return { ...doc, hidden: hidden > 0 ? { count: hidden, from: "tail" as const } : undefined };
     });
     return <PreviewLines doc={doc()} linkify={props.linkify} class={props.class} />;
 }

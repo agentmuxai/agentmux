@@ -11,7 +11,7 @@
 
 import { formatCodePreview, formatDiffSides, stripCommonIndent } from "../components/dedent";
 import { detectLanguage } from "../components/detectLanguage";
-import { capChars, capLines, capRawLines } from "./cap";
+import { capChars, capLines, capRawLines, MAX_TOOL_OUTPUT_CHARS, MAX_TOOL_OUTPUT_LINES } from "./cap";
 import { CODE_TAB_WIDTH, expandTabs, OUTPUT_TAB_WIDTH } from "./tabs";
 import { decodeTerminal } from "./terminal";
 import type { DiffMarker, PreviewDoc, PreviewLine } from "./types";
@@ -219,12 +219,100 @@ export function chunksDoc(
     return capLines({ kind: "output", lines }, opts.from ?? "tail");
 }
 
+const countNewlines = (s: string): number => {
+    let n = 0;
+    for (let i = s.indexOf("\n"); i !== -1; i = s.indexOf("\n", i + 1)) n++;
+    return n;
+};
+
+/**
+ * A window over a long, append-only chunk stream, in joined lines (what
+ * {@link chunksDoc} shows), so the work per update is the window's, not the
+ * whole stream's:
+ *
+ * - `total`: the stream's joined line count, kept up to date by counting only
+ *   the chunks added since the last call (a new stream, or one that shrank,
+ *   starts over), with the same joining rules as `chunksDoc`.
+ * - `chunks`: the tail of the stream holding at least `maxLines` line ends,
+ *   found by walking back from the end. Its first chunk can start mid-line;
+ *   `chunksDoc`'s own cap then drops that partial line. A first chunk too big
+ *   to process on every update is cut to its last lines (a copy).
+ * - `whole`: the window's chunks that stand as whole lines (by `isWhole`,
+ *   the copy included), for `chunksDoc`'s `wholeLines`.
+ */
+export function createChunkWindow(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
+    let total = 0;
+    let open = false;
+    let counted = 0;
+    let anchor: OutputChunk | undefined;
+    return function window(
+        stream: readonly OutputChunk[],
+        isWhole: (c: OutputChunk) => boolean
+    ): { chunks: OutputChunk[]; total: number; whole: Set<OutputChunk> } {
+        if (stream.length < counted || stream[0] !== anchor) {
+            total = 0;
+            open = false;
+            counted = 0;
+            anchor = stream[0];
+        }
+        for (; counted < stream.length; counted++) {
+            const c = stream[counted];
+            if (c.content === "") continue;
+            const whole = isWhole(c);
+            const ends = c.content.endsWith("\n");
+            const k = countNewlines(c.content);
+            total += (open && !whole ? k : k + 1) - (ends ? 1 : 0);
+            open = !whole && !ends;
+        }
+        let start = stream.length;
+        let lineEnds = 0;
+        let chars = 0;
+        while (start > 0 && lineEnds <= maxLines && chars <= MAX_TOOL_OUTPUT_CHARS) {
+            const c = stream[--start];
+            lineEnds += countNewlines(c.content) + (isWhole(c) ? 1 : 0);
+            chars += c.content.length;
+        }
+        const chunks = stream.slice(start);
+        const whole = new Set(chunks.filter(isWhole));
+        const first = chunks[0];
+        if (first && (first.content.length > MAX_TOOL_OUTPUT_CHARS || countNewlines(first.content) > maxLines + 1)) {
+            // Keep its last maxLines + 1 lines; the extra one may be partial.
+            let cut = first.content.length;
+            for (let n = 0; n <= maxLines + 1 && cut > 0; n++) cut = first.content.lastIndexOf("\n", cut - 1);
+            const copy = { ...first, content: capChars(first.content.slice(Math.max(0, cut + 1)), "tail") };
+            if (whole.delete(first)) whole.add(copy);
+            chunks[0] = copy;
+        }
+        return { chunks, total, whole };
+    };
+}
+
 // ── Structured data and prose ────────────────────────────────────────────
 
 /** A structured result, pretty-printed. */
 export function jsonDoc(value: unknown): PreviewDoc {
     const text = value === undefined ? "" : (JSON.stringify(value, null, 2) ?? String(value));
     return capLines({ kind: "json", lines: splitLines(capChars(text, "head")).map((t) => ({ text: t })) }, "head");
+}
+
+/** A control character as its Unicode control picture (␛ for ESC, ␍ for CR,
+ *  ␡ for DEL), so it shows instead of acting. */
+const controlPicture = (ch: string): string => {
+    const code = ch.charCodeAt(0);
+    return code === 0x7f ? "\u2421" : String.fromCharCode(0x2400 + code);
+};
+
+/**
+ * Text shown exactly as it was received (a jekt's raw payload): split into
+ * lines and nothing else. No terminal decoding, so a `\r` redraw, an erase
+ * code or a backspace can't hide anything; every control character but the
+ * tab shows as its control picture, and tabs are expanded.
+ */
+export function rawDoc(text: string): PreviewDoc {
+    const lines = capChars(text, "head")
+        .split("\n")
+        .map((l) => ({ text: expandTabs(l.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, controlPicture), OUTPUT_TAB_WIDTH) }));
+    return capLines({ kind: "output", lines }, "head");
 }
 
 /** Prose (a message body): tabs expanded, nothing else changed. */

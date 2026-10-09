@@ -12,11 +12,13 @@ import {
     chunksDoc,
     codeDoc,
     commandDoc,
+    createChunkWindow,
     diffDocFromSides,
     diffDocFromUnified,
     jsonDoc,
     outputDoc,
     proseDoc,
+    rawDoc,
     readBodyText,
     splitGutter,
 } from "./docs";
@@ -279,7 +281,12 @@ describe("output", () => {
     });
 
     it("an empty chunk adds nothing", () => {
-        expect(chunksDoc([{ kind: "stdout", content: "a\n" }, { kind: "stdout", content: "" }]).lines).toEqual([{ text: "a" }]);
+        expect(
+            chunksDoc([
+                { kind: "stdout", content: "a\n" },
+                { kind: "stdout", content: "" },
+            ]).lines
+        ).toEqual([{ text: "a" }]);
     });
 
     it("a streamed line keeps the stream of the chunk that started it", () => {
@@ -289,6 +296,48 @@ describe("output", () => {
                 { kind: "stdout", content: "ok" },
             ]).lines
         ).toEqual([{ text: "boom", stream: "stderr" }, { text: "ok" }]);
+    });
+});
+
+describe("createChunkWindow", () => {
+    const c = (content: string) => ({ kind: "stdout", content });
+    const notWhole = () => false;
+
+    it("counts joined lines incrementally, the same as counting from scratch", () => {
+        const stream = [c("a"), c("b\nc"), c("\n"), c("d\n"), c("e")];
+        const w = createChunkWindow(10);
+        expect(w(stream.slice(0, 2), notWhole).total).toBe(chunksDoc(stream.slice(0, 2)).lines.length);
+        expect(w(stream, notWhole).total).toBe(chunksDoc(stream).lines.length);
+        expect(createChunkWindow(10)(stream, notWhole).total).toBe(4);
+    });
+
+    it("starts over for a new stream", () => {
+        const w = createChunkWindow(10);
+        w([c("a\n"), c("b\n")], notWhole);
+        expect(w([c("x\n")], notWhole).total).toBe(1);
+    });
+
+    it("counts a whole-line chunk as its own line", () => {
+        const frame = c("50%");
+        expect(createChunkWindow(10)([c("building"), frame, c("done")], (x) => x === frame).total).toBe(3);
+    });
+
+    it("cuts an oversized first chunk to its last lines, keeping it whole if it was", () => {
+        const big = c(Array.from({ length: 50 }, (_, i) => `l${i}`).join("\n") + "\n");
+        const { chunks, whole } = createChunkWindow(5)([big], (x) => x === big);
+        expect(chunks[0]).not.toBe(big);
+        expect(chunks[0].content.split("\n").filter(Boolean)).toEqual(["l44", "l45", "l46", "l47", "l48", "l49"]);
+        expect(whole.has(chunks[0])).toBe(true);
+    });
+});
+
+describe("rawDoc", () => {
+    it("shows the text as received: control characters visible, nothing applied or dropped", () => {
+        const raw = `[JEKT:FROM=x]\nvisible\rhidden${ESC}[2K\b${ESC}]0;t\x07\ttab`;
+        expect(texts(rawDoc(raw).lines)).toEqual([
+            "[JEKT:FROM=x]",
+            "visible\u240dhidden\u241b[2K\u2408\u241b]0;t\u2407       tab",
+        ]);
     });
 });
 

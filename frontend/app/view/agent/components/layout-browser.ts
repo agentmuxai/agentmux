@@ -104,7 +104,9 @@ export function measureInBrowser<T>(
             }
         });
         child.on("error", (e) => finish(e));
-        child.on("exit", () => {
+        // `close`, not `exit`: exit can come before stdout is drained, and the
+        // result may be in the last of it.
+        child.on("close", () => {
             const m = RESULT_RE.exec(out);
             if (!m) finish(new Error("the page produced no measurements:\n" + out.slice(0, 2000)));
         });

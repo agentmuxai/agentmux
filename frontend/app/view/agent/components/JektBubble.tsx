@@ -20,7 +20,7 @@
  */
 
 import { Show, createEffect, createMemo, untrack, type JSX } from "solid-js";
-import { outputDoc, proseDoc } from "../preview-text/docs";
+import { proseDoc, rawDoc } from "../preview-text/docs";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
 import { arrivedLive } from "../virtualization/live-arrival";
@@ -64,7 +64,8 @@ const handoff = previewBox();
 export const JektBubble = (props: JektBubbleProps): JSX.Element => {
     // Built once per message, not on every read of the prop.
     const bodyDoc = createMemo(() => proseDoc(props.node.message));
-    const rawDoc = createMemo(() => outputDoc(props.node.raw, { from: "head" }));
+    // Exactly as received: no terminal decoding, control characters visible.
+    const rawPayload = createMemo(() => rawDoc(props.node.raw));
     // A jekt that arrives live is held open until it scrolls off, as a tool that
     // finishes on screen is. Keyed on the id: the streaming buffer can reuse this
     // row for another node. A sensitive jekt is open by default anyway.
@@ -134,7 +135,7 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                     <details class="agent-jekt-raw">
                         <summary>Raw payload</summary>
                         <div class="agent-jekt-raw-body" ref={handoff}>
-                            <PreviewLines doc={rawDoc()} />
+                            <PreviewLines doc={rawPayload()} />
                         </div>
                     </details>
                 </>

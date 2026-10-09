@@ -10,6 +10,7 @@
 import { cleanup, render } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChunkPreview } from "./ChunkPreview";
+import { MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 
 afterEach(() => cleanup());
 
@@ -53,5 +54,26 @@ describe("ChunkPreview", () => {
             <ChunkPreview chunks={[chunk("[bashwrap] starting: 5 chars", "system"), chunk("out\n")]} />
         ));
         expect(lines(container)).toEqual(["out"]);
+    });
+
+    it("keeps the latest lines of a long stream and counts the hidden ones in lines, not chunks", () => {
+        // 1500 lines, each streamed as two chunks: "line N" then "\n".
+        const chunks = Array.from({ length: 1500 }, (_, i) => [chunk(`line ${i}`), chunk("\n")]).flat();
+        const { container } = render(() => <ChunkPreview chunks={chunks} />);
+        const shown = lines(container);
+        expect(shown).toHaveLength(MAX_TOOL_OUTPUT_LINES);
+        expect(shown[0]).toBe("line 500");
+        expect(shown.at(-1)).toBe("line 1499");
+        expect(container.querySelector(".agent-output-hidden-marker")!.textContent).toContain("500");
+    });
+
+    it("doesn't split a line at the window's edge", () => {
+        // Every line arrives in three pieces, so the window's first chunk is mid-line.
+        const chunks = Array.from({ length: 1200 }, (_, i) => [chunk("a"), chunk(`b${i}`), chunk("c\n")]).flat();
+        const { container } = render(() => <ChunkPreview chunks={chunks} />);
+        const shown = lines(container);
+        expect(shown).toHaveLength(MAX_TOOL_OUTPUT_LINES);
+        expect(shown.every((l) => /^ab\d+c$/.test(l ?? ""))).toBe(true);
+        expect(container.querySelector(".agent-output-hidden-marker")!.textContent).toContain("200");
     });
 });
