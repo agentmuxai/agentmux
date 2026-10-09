@@ -15,13 +15,20 @@ use super::*;
 // then delegates to the shared `app_api::*_impl`.
 // ---------------------------------------------------------------------------
 
-/// Classify an app-API impl error string into an HTTP status. FORBIDDEN and
-/// argument/not-found errors are the caller's fault (4xx); the rest are 5xx.
+/// Classify an app-API or naming error string into an HTTP status. The
+/// service layer returns plain `String` errors, so this matches on text.
+/// FORBIDDEN is a 403. "not found" is a 404: a caller holding a stale or
+/// unknown id names a missing resource, not a malformed request
+/// (SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md §3.2). Argument errors are
+/// a 400. Everything unrecognized is a 500 (genuine service faults, e.g.
+/// SQLite write failures). The one classifier for the App API routes here
+/// and the naming routes in `http_naming.rs`.
 pub(super) fn app_api_error_status(e: &str) -> StatusCode {
     if e.starts_with("FORBIDDEN") {
         StatusCode::FORBIDDEN
-    } else if e.contains("not found")
-        || e.contains("provide ")
+    } else if e.contains("not found") {
+        StatusCode::NOT_FOUND
+    } else if e.contains("provide ")
         || e.contains("not a regular file")
         || e.contains("too large")
         || e.contains("invalid")
@@ -497,4 +504,22 @@ pub(super) async fn handle_agent_globalmemory_revert(
         &req.id,
         &req.version_id,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One classification for the App API and naming routes: a missing
+    /// resource is a 404 on both, where the App API used to answer 400.
+    #[test]
+    fn app_api_error_status_classifies_each_kind_once() {
+        assert_eq!(app_api_error_status("FORBIDDEN: not your memory"), StatusCode::FORBIDDEN);
+        assert_eq!(app_api_error_status("globalmemory.read: not found id=x"), StatusCode::NOT_FOUND);
+        assert_eq!(app_api_error_status("tab not found: tab-1"), StatusCode::NOT_FOUND);
+        for bad in ["provide id or name", "not a regular file", "file too large", "invalid filename"] {
+            assert_eq!(app_api_error_status(bad), StatusCode::BAD_REQUEST, "{bad}");
+        }
+        assert_eq!(app_api_error_status("database is locked"), StatusCode::INTERNAL_SERVER_ERROR);
+    }
 }
