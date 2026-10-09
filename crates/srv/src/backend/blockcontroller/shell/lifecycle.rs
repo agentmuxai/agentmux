@@ -384,6 +384,35 @@ impl ShellController {
     fn apply_cmd_env(&self, c: &mut CommandBuilder, block_meta: &MetaMapType) {
         cmd_env_overrides(&self.live_settings(), block_meta).apply_to(c);
     }
+
+    /// The process a `cmd` pane runs: `cmd` itself when it has `cmd:args` or
+    /// `cmd:interactive`, otherwise `cmd` through the platform shell. Either
+    /// way with the pane's `cmd:env`, as an interactive shell gets it: a pane
+    /// running a provider CLI's login needs the account's config directory.
+    fn command_process(
+        &self,
+        cmd_str: &str,
+        cmd_args: &[String],
+        interactive: bool,
+        block_meta: &MetaMapType,
+    ) -> CommandBuilder {
+        let mut c = if !cmd_args.is_empty() || interactive {
+            // Spawned directly (no shell wrapper), so args pass through intact.
+            let mut c = CommandBuilder::new(cmd_str);
+            c.args(cmd_args);
+            c
+        } else if cfg!(windows) {
+            let mut c = CommandBuilder::new("cmd.exe");
+            c.args(["/C", cmd_str]);
+            c
+        } else {
+            let mut c = CommandBuilder::new("/bin/sh");
+            c.args(["-c", cmd_str]);
+            c
+        };
+        self.apply_cmd_env(&mut c, block_meta);
+        c
+    }
 }
 
 impl Controller for ShellController {
@@ -718,24 +747,11 @@ impl Controller for ShellController {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
             tracing::info!(block_id = %self.block_id, cmd = %cmd_str, args = ?cmd_args, "direct spawn path");
-            let mut c = CommandBuilder::new(&cmd_str);
-            if !cmd_args.is_empty() {
-                let arg_refs: Vec<&str> = cmd_args.iter().map(|s| s.as_str()).collect();
-                c.args(arg_refs);
-            }
-            c
+            self.command_process(&cmd_str, &cmd_args, interactive, &block_meta)
         } else if !cmd_str.is_empty() {
             // "cmd" controller: run a specific command string via shell wrapper
             tracing::info!(block_id = %self.block_id, cmd = %cmd_str, "shell-wrapped spawn path");
-            if cfg!(windows) {
-                let mut c = CommandBuilder::new("cmd.exe");
-                c.args(["/C", &cmd_str]);
-                c
-            } else {
-                let mut c = CommandBuilder::new("/bin/sh");
-                c.args(["-c", &cmd_str]);
-                c
-            }
+            self.command_process(&cmd_str, &cmd_args, interactive, &block_meta)
         } else {
             // "shell" controller: interactive shell with AgentMux integration
             // On Windows: prefer pwsh (PowerShell 7), fall back to powershell.exe (5.x), then cmd.exe
@@ -2133,6 +2149,18 @@ mod global_cmd_env_tests {
 
     fn var(c: &CommandBuilder, key: &str) -> Option<String> {
         c.get_env(key).map(|v| v.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn a_command_pane_gets_its_cmd_env_direct_or_through_the_shell() {
+        // A login pane: the CLI run directly, with the account's config dir.
+        let ctrl = controller(None);
+        let meta = block_env(&[("CLAUDE_CONFIG_DIR", "/accounts/a")]);
+        let args = vec!["auth".to_string(), "login".to_string()];
+        let direct = ctrl.command_process("claude", &args, true, &meta);
+        assert_eq!(var(&direct, "CLAUDE_CONFIG_DIR").as_deref(), Some("/accounts/a"));
+        let wrapped = ctrl.command_process("claude auth login", &[], false, &meta);
+        assert_eq!(var(&wrapped, "CLAUDE_CONFIG_DIR").as_deref(), Some("/accounts/a"));
     }
 
     #[test]
