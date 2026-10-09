@@ -1312,12 +1312,12 @@ pub(crate) async fn handle_host_browser_popup(
     // the person took over belongs to nobody.
     let owner = owning_agent(&block, &opener)
         .filter(|agent| opener_allows(&state, Some(&block), agent, &opener).is_ok());
-    // The count and the slot are taken together: two popups reported at once
-    // can't both fit under the cap. The slot is given back if the pane
-    // doesn't open.
     if let Some(why) = crate::server::browser_allowlist::refuse_popup(&opener, &url) {
         return refused(why);
     }
+    // The count and the slot are taken together: two popups reported at once
+    // can't both fit under the cap. The slot is given back if the pane
+    // doesn't open.
     let root = chain_root(&state, &opener);
     let reservation = match popup::reserve(
         &opener,
