@@ -39,8 +39,9 @@
  * behavior). Sending the local counter as `generation` would mean a remount
  * right after a high-generation turn could send a *lower* number than the
  * gateway already has recorded for this block, getting rejected as
- * stale-on-arrival for up to 15s (until the still-in-flight prior call's
- * guard drops) even though it's a legitimately new request. `Date.now()` is
+ * stale-on-arrival until the still-in-flight prior call's guard drops (up to
+ * the purpose's time limit, `ambient::purpose`) even though it's a
+ * legitimately new request. `Date.now()` is
  * used for the wire `generation` instead — always increasing regardless of
  * remounts, since real time never goes backwards for this purpose.
  *
