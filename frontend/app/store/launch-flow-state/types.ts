@@ -24,8 +24,8 @@
  * established slice shape this file mirrors.
  */
 
-import type { AuthCommand, AuthEvent, AuthState } from "@/app/view/agent/auth/auth-state";
-import { initialState as initialAuthState } from "@/app/view/agent/auth/auth-state";
+import type { AuthCommand, AuthEvent, AuthState } from "@/app/store/launch-flow-state/auth-state";
+import { initialState as initialAuthState } from "@/app/store/launch-flow-state/auth-state";
 import type { Account } from "@/app/view/identity/identity-model";
 import type { Bundle } from "@/app/store/rpc-api";
 

@@ -61,7 +61,7 @@ import { createTestProgressTracker } from "./status/test-progress";
 import { createThinkingHeadlineTracker } from "./status/thinking-headline";
 import { compactionModelKey, parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
-import { sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
+import { sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "@/app/store/agent-document/session-outcome";
 import { workingFromPhase, type AgentPaneEvent, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";

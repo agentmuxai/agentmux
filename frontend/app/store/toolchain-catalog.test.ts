@@ -7,8 +7,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { getProviderList } from "./index";
-import { CORE_TOOLS, LOCAL_MODEL_TOOLS, rowIconClass } from "./toolchain-catalog";
+import { getProviderList } from "@/app/view/agent/providers/index";
+import { CORE_TOOLS, LOCAL_MODEL_TOOLS, rowIconClass } from "@/app/store/toolchain-catalog";
 
 describe("rowIconClass", () => {
     it("prefers the brand icon, rendered with the fa-brands prefix, when present", () => {

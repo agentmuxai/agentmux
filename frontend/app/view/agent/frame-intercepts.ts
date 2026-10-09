@@ -21,7 +21,7 @@ import { parseCliNoticeFrame } from "./cli-notice";
 import { parseCompactBoundaryFrame, type CompactBoundaryData } from "./compact-boundary";
 import type { CompactionSummaryTracker } from "./context-delivery";
 import { isMemoryInjectedFrame } from "./memory-injected";
-import { parseSessionOutcomeFrame, type SessionOutcomeData } from "./session-outcome";
+import { parseSessionOutcomeFrame, type SessionOutcomeData } from "@/app/store/agent-document/session-outcome";
 import type { ClaudeCodeStreamParser } from "./stream-parser";
 import type { TaskWakeDetector } from "./task-wake";
 import type { DocumentNode } from "./types";

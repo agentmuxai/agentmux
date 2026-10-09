@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { IDLE_ACTIVITY, type ActivityState } from "@/app/store/agent-pane-state/types";
 import { presentStatus, RANK, slowRequestMs, statusCandidates, TIMING, type StatusInput, type StatusMemory } from "./present-status";
-import { toolActivity } from "./tool-labels";
+import { toolActivity } from "@/app/store/agent-pane-state/tool-labels";
 
 const T0 = 1_000_000;
 const tool = (name: string, params: Record<string, unknown>, startedAt: number, id = name) => ({

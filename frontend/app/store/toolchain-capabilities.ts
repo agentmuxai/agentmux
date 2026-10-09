@@ -28,7 +28,7 @@
 import { createStore, reconcile } from "solid-js/store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { CORE_TOOLS, cliCommandForPlatform, currentPlatform } from "@/app/view/agent/providers/toolchain-catalog";
+import { CORE_TOOLS, cliCommandForPlatform, currentPlatform } from "@/app/store/toolchain-catalog";
 
 type CapabilityStatus = "unknown" | "checking" | "available" | "unavailable";
 

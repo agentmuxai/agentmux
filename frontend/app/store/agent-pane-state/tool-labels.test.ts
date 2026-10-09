@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { foldActivities, toolActivity } from "./tool-labels";
+import { foldActivities, toolActivity } from "@/app/store/agent-pane-state/tool-labels";
 
 describe("toolActivity", () => {
     it("uses the description the model wrote for a command, in progressive form", () => {

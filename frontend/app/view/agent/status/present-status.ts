@@ -27,8 +27,8 @@
 
 import type { ActivityState } from "@/app/store/agent-pane-state/types";
 import { formatElapsedCompact } from "@/util/format-time";
-import { planLine } from "./plan";
-import { foldActivities } from "./tool-labels";
+import { planLine } from "@/app/store/agent-pane-state/plan";
+import { foldActivities } from "@/app/store/agent-pane-state/tool-labels";
 
 export const RANK = { needsYou: 0, held: 1, anomaly: 2, leadIn: 3, now: 4, plan: 5, goal: 6, phrase: 7 } as const;
 
