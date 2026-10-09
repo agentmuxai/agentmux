@@ -55,8 +55,10 @@ name: CI (PR) — compile tests + run
 # permanently BLOCKED. "CI required" exists specifically so branch protection
 # never again needs to reference a matrix leg's expanded name directly.
 #
-# --test-threads=1 mirrors the nightly (process-shared in-memory FileStore + a
-# focus-flag global flake under parallel runs; serial is deterministic).
+# The Rust suite runs under cargo-nextest, one process per test, so tests that
+# share process-global state (the in-memory FileStore, env vars, static locks)
+# can't collide and the suite runs in parallel; `cargo test` needed
+# --test-threads=1 for that. Settings: .config/nextest.toml.
 
 on:
   pull_request:
@@ -342,9 +344,22 @@ jobs:
       # compiles identically on both and is meaningfully exercised on one. If
       # such regressions start reaching main, restore a TARGETED Windows
       # subset (the path-sensitive crates), not this full invocation.
-      - name: cargo test (CEF-free crates)
+      #
+      # cargo-nextest, not `cargo test`: one process per test, all cores, and
+      # a test that passes on its one retry shows as FLAKY in the summary
+      # instead of failing the PR (.config/nextest.toml). It replaced a serial
+      # `cargo test -- --test-threads=1` whose srv binary alone ran 174 s
+      # (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md step 4).
+      - name: Install cargo-nextest
         if: matrix.os != 'windows-latest'
-        run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats -- --test-threads=1
+        uses: taiki-e/install-action@nextest
+      - name: cargo nextest (CEF-free crates)
+        if: matrix.os != 'windows-latest'
+        run: cargo nextest run --profile ci -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
+      # nextest does not run doctests. Only these three have a library target.
+      - name: cargo test --doc (CEF-free crates)
+        if: matrix.os != 'windows-latest'
+        run: cargo test --doc -p agentmux-common -p agentmux-remote -p agentmux-procstats
 
       # frontend/types/rpc/*.ts is generated from the Rust request/response
       # types by ts-rs. This turns the audit's "keep in sync with the
@@ -352,7 +367,7 @@ jobs:
       # migrated to register_typed so far (the set grows as the migration
       # proceeds; the gate does not change with it).
       #
-      # Lives in THIS job, not the docs job: the `cargo test` above already
+      # Lives in THIS job, not the docs job: the test run above already
       # ran srv's export_bindings_* tests, which rewrote frontend/types/rpc, so
       # --check-only only asks git whether that changed anything. Letting the
       # script regenerate again ran `cargo test -p agentmux-srv`, which
@@ -363,7 +378,7 @@ jobs:
       # Ubuntu only. The output is platform-independent (.gitattributes
       # normalizes every text file to LF, so generated files cannot differ by
       # line ending between platforms), and --check-only needs the export tests
-      # to have just run, which only the ubuntu leg's `cargo test` does.
+      # to have just run, which only the ubuntu leg does.
       # See scripts/check-rpc-bindings.sh.
       - name: RPC bindings are current
         if: matrix.os == 'ubuntu-latest'

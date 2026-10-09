@@ -1,0 +1,22 @@
+# cargo-nextest settings (https://nexte.st).
+#
+# nextest runs every test in its own process. Tests that share process-global
+# state (the in-memory FileStore, env vars, static locks) therefore no longer
+# collide, which is what kept `cargo test` on `--test-threads=1`, and the
+# suite can use every core.
+# docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md step 4.
+
+[profile.default]
+# A hung test is reported after 60 s, and killed after 5 minutes.
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+# The PR lane (`cargo nextest run --profile ci`).
+[profile.ci]
+# One retry: a test that then passes is reported FLAKY in the summary instead
+# of failing the PR. That is a report, not a fix: every FLAKY gets an issue.
+retries = 1
+fail-fast = false
+failure-output = "immediate-final"
+
+[profile.ci.junit]
+path = "junit.xml"
