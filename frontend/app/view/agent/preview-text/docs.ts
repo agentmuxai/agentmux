@@ -18,6 +18,10 @@ import type { DiffMarker, PreviewDoc, PreviewLine } from "./types";
 
 const splitLines = (text: string): string[] => text.split("\n").map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
 
+/** Record that the character cap cut `text`, keeping the `from` end. */
+const withCut = <T extends PreviewDoc>(doc: T, text: string, from: "head" | "tail"): T =>
+    text.length > MAX_TOOL_OUTPUT_CHARS ? { ...doc, truncated: from } : doc;
+
 /** A final newline ends the last line; it doesn't start an empty one. */
 function withoutFinalEmptyLine<T extends { text: string }>(lines: T[]): T[] {
     return lines.length > 1 && lines[lines.length - 1].text === "" ? lines.slice(0, -1) : lines;
@@ -77,12 +81,16 @@ export function codeDoc(text: string, opts: { path: string; gutter?: boolean }):
     const lines: PreviewLine[] = formatted.map((t, i) =>
         split?.numbers[i] != null ? { text: t, number: split.numbers[i] } : { text: t }
     );
-    return {
-        kind: "code",
-        lang: detectLanguage(opts.path, code.find((l) => l.trim() !== "") ?? ""),
-        lines,
-        ...(capped.hidden > 0 ? { hidden: { count: capped.hidden, from: "head" as const } } : {}),
-    };
+    return withCut(
+        {
+            kind: "code",
+            lang: detectLanguage(opts.path, code.find((l) => l.trim() !== "") ?? ""),
+            lines,
+            ...(capped.hidden > 0 ? { hidden: { count: capped.hidden, from: "head" as const } } : {}),
+        },
+        text,
+        "head"
+    );
 }
 
 // ── Diffs (Edit) ─────────────────────────────────────────────────────────
@@ -153,7 +161,7 @@ export function diffDocFromUnified(diff: string, path: string): PreviewDoc {
             return { marker, text: expandTabs(body, CODE_TAB_WIDTH) };
         })
     );
-    return capLines({ kind: "diff", lang: detectLanguage(path), lines }, "head");
+    return withCut(capLines({ kind: "diff", lang: detectLanguage(path), lines }, "head"), diff, "head");
 }
 
 // ── Command and tool output ──────────────────────────────────────────────
@@ -166,7 +174,7 @@ export function diffDocFromUnified(diff: string, path: string): PreviewDoc {
 export function outputDoc(text: string, opts: { from: "head" | "tail"; stream?: "stderr" }): PreviewDoc {
     let lines = withoutFinalEmptyLine(decodeTerminal(capChars(text, opts.from), OUTPUT_TAB_WIDTH));
     if (opts.stream) lines = lines.map((l) => ({ ...l, stream: opts.stream }));
-    return capLines({ kind: "output", lines }, opts.from);
+    return withCut(capLines({ kind: "output", lines }, opts.from), text, opts.from);
 }
 
 /** A finished command: its output, then its error output, as one preview. */
@@ -178,7 +186,11 @@ export function commandDoc(stdout: string, stderr: string): PreviewDoc {
     const lines = [...withoutFinalEmptyLine(out), ...withoutFinalEmptyLine(err)].filter(
         (l, i, all) => all.length > 1 || l.text !== ""
     );
-    return capLines({ kind: "output", lines }, "tail");
+    return withCut(
+        capLines({ kind: "output", lines }, "tail"),
+        stdout.length > stderr.length ? stdout : stderr,
+        "tail"
+    );
 }
 
 /** A chunk of streamed output, as the reducer stores it. */
@@ -197,6 +209,7 @@ export function chunksDoc(
     chunks: readonly OutputChunk[],
     opts: { from?: "head" | "tail"; wholeLines?: ReadonlySet<OutputChunk> } = {}
 ): PreviewDoc {
+    let cut = false;
     const raw: { text: string; kind: string }[] = [];
     let open = false;
     for (const chunk of chunks) {
@@ -214,10 +227,12 @@ export function chunksDoc(
         if (chunk.content.endsWith("\n")) raw.pop(); // the empty piece after a final newline
     }
     const lines: PreviewLine[] = raw.map(({ text, kind }) => {
+        if (text.length > MAX_TOOL_OUTPUT_CHARS) cut = true;
         const line = decodeTerminal(capChars(text, "tail"), OUTPUT_TAB_WIDTH).at(-1) ?? { text: "" };
         return kind === "stderr" || kind === "system" ? { ...line, stream: kind } : line;
     });
-    return capLines({ kind: "output", lines }, opts.from ?? "tail");
+    const doc = capLines({ kind: "output" as const, lines }, opts.from ?? "tail");
+    return cut ? { ...doc, truncated: "tail" } : doc;
 }
 
 const countNewlines = (s: string): number => {
@@ -293,7 +308,11 @@ export function createChunkWindow(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
 /** A structured result, pretty-printed. */
 export function jsonDoc(value: unknown): PreviewDoc {
     const text = value === undefined ? "" : (JSON.stringify(value, null, 2) ?? String(value));
-    return capLines({ kind: "json", lines: splitLines(capChars(text, "head")).map((t) => ({ text: t })) }, "head");
+    return withCut(
+        capLines({ kind: "json", lines: splitLines(capChars(text, "head")).map((t) => ({ text: t })) }, "head"),
+        text,
+        "head"
+    );
 }
 
 /** A control character as its Unicode control picture (␛ for ESC, ␍ for CR,
@@ -313,16 +332,20 @@ export function rawDoc(text: string): PreviewDoc {
     const lines = capChars(text, "head")
         .split("\n")
         .map((l) => ({ text: expandTabs(l.replace(/[\x00-\x08\x0b-\x1f\x7f]/g, controlPicture), OUTPUT_TAB_WIDTH) }));
-    return capLines({ kind: "output", lines }, "head");
+    return withCut(capLines({ kind: "output", lines }, "head"), text, "head");
 }
 
 /** Prose (a message body): tabs expanded, nothing else changed. */
 export function proseDoc(text: string): PreviewDoc {
-    return capLines(
-        {
-            kind: "prose",
-            lines: splitLines(capChars(text, "head")).map((t) => ({ text: expandTabs(t, OUTPUT_TAB_WIDTH) })),
-        },
+    return withCut(
+        capLines(
+            {
+                kind: "prose",
+                lines: splitLines(capChars(text, "head")).map((t) => ({ text: expandTabs(t, OUTPUT_TAB_WIDTH) })),
+            },
+            "head"
+        ),
+        text,
         "head"
     );
 }

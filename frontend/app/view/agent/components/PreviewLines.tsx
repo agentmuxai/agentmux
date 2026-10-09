@@ -71,6 +71,11 @@ export function PreviewLines(props: PreviewLinesProps): JSX.Element {
             data-kind={props.doc.kind}
             style={gutterWidth() > 0 ? { "--agent-preview-gutter": `${gutterWidth()}ch` } : undefined}
         >
+            <Show when={props.doc.truncated === "tail"}>
+                <div class="agent-output-hidden-marker agent-preview-truncated">
+                    … earlier text cut: over a million characters
+                </div>
+            </Show>
             <Show when={props.doc.hidden?.from === "tail"}>
                 <OutputHiddenMarker hidden={props.doc.hidden!.count} noun="line" from="tail" />
             </Show>
@@ -103,6 +108,11 @@ export function PreviewLines(props: PreviewLinesProps): JSX.Element {
             </div>
             <Show when={props.doc.hidden?.from === "head"}>
                 <OutputHiddenMarker hidden={props.doc.hidden!.count} noun="line" from="head" />
+            </Show>
+            <Show when={props.doc.truncated === "head"}>
+                <div class="agent-output-hidden-marker agent-preview-truncated">
+                    … text cut here: over a million characters
+                </div>
             </Show>
         </div>
     );

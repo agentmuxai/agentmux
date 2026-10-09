@@ -353,6 +353,24 @@ describe("json and prose", () => {
     });
 });
 
+describe("the character cap", () => {
+    const huge = "x".repeat(1_000_100);
+
+    it("says when it cut text, and which end it kept", () => {
+        expect(outputDoc(huge, { from: "tail" }).truncated).toBe("tail");
+        expect(codeDoc(huge, { path: "a.min.js" }).truncated).toBe("head");
+        expect(jsonDoc({ blob: huge }).truncated).toBe("head");
+        expect(commandDoc(huge, "").truncated).toBe("tail");
+        expect(proseDoc(huge).truncated).toBe("head");
+        expect(rawDoc(huge).truncated).toBe("head");
+    });
+
+    it("says nothing when nothing was cut", () => {
+        expect(outputDoc("short", { from: "tail" }).truncated).toBeUndefined();
+        expect(codeDoc("short", { path: "a.ts" }).truncated).toBeUndefined();
+    });
+});
+
 describe("capLines", () => {
     it("leaves a short doc alone", () => {
         const doc = { kind: "output" as const, lines: [{ text: "a" }] };

@@ -46,6 +46,9 @@ export interface PreviewDoc {
     /** Shiki language id for code and diffs; absent or "text" for none. */
     lang?: string;
     lines: PreviewLine[];
+    /** Text cut by the character cap (one huge line, say): which end was
+     *  kept. Shown as a marker on the cut side. */
+    truncated?: "head" | "tail";
     /** Lines left out by the cap: from the end ("head" kept the start) or the start ("tail"). */
     hidden?: { count: number; from: "head" | "tail" };
 }
