@@ -1168,7 +1168,7 @@ impl PersistentSubprocessController {
         mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
-        let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
+        let health_monitor = Arc::new(TurnActivityTracker::for_block(block_id.clone(), broker.as_ref()));
         let mut this = Self {
             tab_id,
             block_id,
@@ -1621,6 +1621,10 @@ impl Controller for PersistentSubprocessController {
         // the agent pane's activity log. Mirror SubprocessController, which
         // already no-ops termsize. See AGENT_PANE_PTY_RESIZE_RACE_2026_06_16.md.
         Ok(())
+    }
+
+    fn turn_tracker(&self) -> Option<Arc<TurnActivityTracker>> {
+        Some(Arc::clone(&self.health_monitor))
     }
 
     fn controller_type(&self) -> &str {

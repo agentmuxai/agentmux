@@ -48,6 +48,8 @@ import {
     workingFromPhase,
 } from "./types";
 import type { DisconnectReason } from "./types";
+import type { SessionStats, TurnTokens } from "@/app/view/agent/types";
+import type { TurnCarry } from "./types";
 import {
     implausibleReason,
     learnedWindowsAfter,
@@ -60,6 +62,7 @@ import {
     type ContextReading,
 } from "./context-reading";
 import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
+import { isNewerLedger } from "./turn-ledger";
 
 /** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
 function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {
@@ -855,6 +858,7 @@ export function update(
                     ...state,
                     sessionStats: merged,
                     sessionTotals: accumulateStats(state.sessionTotals, merged),
+                    turnCarry: carryPass(state.turnCarry, state.turnLedger?.turnId, merged),
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
@@ -912,6 +916,11 @@ export function update(
                 },
                 events: [{ type: "turn-reset" }],
             };
+
+        case "TurnObserved": {
+            if (!isNewerLedger(command.ledger, state.turnLedger)) return { state, events: [] };
+            return { state: { ...state, turnLedger: command.ledger }, events: [] };
+        }
 
         case "TurnStartFailed":
             // Deliberately touches ONLY turnPhase (+ compacting, see below)
@@ -974,6 +983,7 @@ export function update(
                 streamedChars: 0,
                 requesting: false,
                 shownOutput: prevTokens?.shownOutput,
+                ...ledgerStamp(state),
             });
             // The window: reported by Claude Code for this model, a larger one
             // proven by an accepted prompt, else the model-name table
@@ -1777,6 +1787,31 @@ export function update(
             };
         }
     }
+}
+
+/** Add a finished pass's figures to its turn's carry (a new turn starts a new one). */
+function carryPass(carry: TurnCarry | null, turnId: number | undefined, stats: SessionStats | null): TurnCarry | null {
+    if (turnId == null || !stats) return carry;
+    const base = carry?.turnId === turnId ? carry : { turnId, passes: 0, outputTokens: 0, costUsd: 0, steps: 0 };
+    return {
+        turnId,
+        passes: base.passes + 1,
+        outputTokens: base.outputTokens + (stats.output_tokens ?? 0),
+        costUsd: base.costUsd + (stats.cost_usd ?? 0),
+        steps: base.steps + (stats.num_turns ?? 0),
+    };
+}
+
+/**
+ * The turn and pass a call's tokens belong to, from the pane's ledger, so the
+ * live counter never adds a pass srv has already counted (turn-ledger.ts
+ * `turnLiveOutput`). srv reports a pass before it forwards any of its lines,
+ * so a call always belongs to the ledger's latest pass: the running one, or,
+ * for a line that arrives late, the one that just ended.
+ */
+function ledgerStamp(state: AgentPaneState): Pick<TurnTokens, "ledgerTurnId" | "ledgerPass"> {
+    const l = state.turnLedger;
+    return l ? { ledgerTurnId: l.turnId, ledgerPass: l.passes } : {};
 }
 
 /**

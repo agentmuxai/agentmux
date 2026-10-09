@@ -353,6 +353,13 @@ pub trait Controller: Send + Sync {
         None
     }
 
+    /// This controller's turn tracker, for the turn ledger's bookkeeping from
+    /// outside the controller (a held message's join hint). `None` for
+    /// controllers that track no turns.
+    fn turn_tracker(&self) -> Option<std::sync::Arc<health::TurnActivityTracker>> {
+        None
+    }
+
     /// Refresh this block's own captured jekt/muxbus identity (see
     /// [`agent_id`](Controller::agent_id)'s doc comment). Called whenever
     /// `ReactiveHandler::register_agent`/`register_agent_with_nonce`

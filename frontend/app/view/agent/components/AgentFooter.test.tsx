@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
 import { recordCompactionSample } from "../compaction-estimate";
+import type { TurnLedger } from "@/app/store/agent-pane-state/turn-ledger";
 import { ObjectService } from "@/app/store/services";
 import type { AgentViewModel } from "../agent-model";
 import { requestComposerFocus } from "../composer-focus";
@@ -760,6 +761,122 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
 
         const left = container.querySelector(".agent-working-row-left") as HTMLElement;
         expect(left.className).toBe("agent-working-row-left");
+    });
+});
+
+/**
+ * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4: the row times and
+ * counts the turn the user sees, over its CLI passes, from srv's ledger.
+ */
+describe("AgentWorkingRow across a turn's passes", () => {
+    const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
+        turnId: 7,
+        seq: 1,
+        origin: "user",
+        startedAtMs: Date.now() - 125_000,
+        passes: 1,
+        active: true,
+        inputs: 0,
+        countedPasses: 0,
+        outputTokens: 0,
+        costUsd: 0,
+        steps: 0,
+        durationApiMs: 0,
+        lastPassEndedAtMs: null,
+        settleUntilMs: null,
+        endedAtMs: null,
+        end: null,
+        ...over,
+    });
+
+    it("runs the clock from the turn's start, not from this pass", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} turnLedger={ledger({ passes: 3 })} />);
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^2m \d+s$/);
+    });
+
+    it("adds the running pass's output to the passes srv has counted", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                turnLedger={ledger({ passes: 2, countedPasses: 1, outputTokens: 2_000 })}
+                turnTokens={{ input: 9_000, output: 300, ledgerTurnId: 7, ledgerPass: 2 }}
+            />
+        ));
+
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^↓ 2\.3k tokens {2}·  2m \d+s$/);
+    });
+
+    it("between two passes stays the live row, dimmed and with no arrow, not a Worked line", () => {
+        const now = Date.now();
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                activitySummary="Fix the login redirect loop"
+                // The pass that just ended: its own stats, which the old row showed as "Worked".
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1 }}
+                turnLedger={ledger({
+                    active: false,
+                    countedPasses: 1,
+                    outputTokens: 2_000,
+                    lastPassEndedAtMs: now,
+                    settleUntilMs: now + 2_000,
+                })}
+            />
+        ));
+
+        const row = container.querySelector(".agent-working-row--loading");
+        expect(row?.classList.contains("is-settling")).toBe(true);
+        expect(container.querySelector(".agent-working-row--worked")).toBeNull();
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^2\.0k tokens {2}·  2m \d+s$/);
+    });
+
+    it("reports the whole turn when it ends: wall time, every pass's output, cost, steps and passes", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1, cost_usd: 0.01 }}
+                turnLedger={ledger({
+                    startedAtMs: end - 192_000,
+                    active: false,
+                    passes: 2,
+                    countedPasses: 2,
+                    outputTokens: 4_200,
+                    costUsd: 0.41,
+                    steps: 9,
+                    lastPassEndedAtMs: end,
+                    endedAtMs: end,
+                    end: "completed",
+                })}
+            />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  3m 12s  ·  4.2k tokens");
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.410  ·  9 steps  ·  2 passes");
+    });
+
+    it("reports the turn from the pane's own carry when srv counted no passes (ACP, App Server, subprocess)", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 40, num_turns: 1, cost_usd: 0.01 }}
+                turnLedger={ledger({ startedAtMs: end - 30_000, active: false, passes: 2, lastPassEndedAtMs: end, endedAtMs: end, end: "completed" })}
+                turnCarry={{ turnId: 7, passes: 2, outputTokens: 640, costUsd: 0.09, steps: 5 }}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  30s  ·  640 tokens");
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.090  ·  5 steps  ·  2 passes");
+    });
+
+    it("calls result.num_turns steps, which is what it counts", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} sessionStats={{ duration_ms: 42_000, num_turns: 3, cost_usd: 0.2 }} />
+        ));
+
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.200  ·  3 steps");
     });
 });
 
