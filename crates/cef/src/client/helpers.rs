@@ -200,6 +200,19 @@ pub(crate) fn backend_browser_popup(
     Ok(parsed.get("data").cloned().unwrap_or(serde_json::Value::Null))
 }
 
+/// Report a popup window a browser pane's page opened (`opened`, `navigated`,
+/// `closed`), as the host
+/// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §4).
+/// Blocking: run it off the UI thread.
+pub(crate) fn backend_browser_popup_window(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_token: &str,
+    body: &serde_json::Value,
+) -> Result<(), String> {
+    post_as_host(web_endpoint, auth_key, ipc_token, "/api/v1/host/browser_popup_window", body).map(|_| ())
+}
+
 /// POST `body` to srv's `path` as the host: `X-Host-Token` carries this
 /// host's IPC token, which srv checks against the one we registered and
 /// agents never see. Returns the response body on a 200, else an error with

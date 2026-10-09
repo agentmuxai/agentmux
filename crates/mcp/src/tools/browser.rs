@@ -390,14 +390,16 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
     }
 }
 
-/// The snapshot's line about popups the page opened, which srv opened as
-/// panes beside it (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md §3.4).
-/// Empty when there are none. Each address is quoted: the page chose it.
+/// The snapshot's lines about new windows the page opened: popup windows
+/// (`kind: "window"`, a native window, id `popup-…`) and popup panes (a
+/// browser pane beside it). Empty when there are none. Each address is
+/// quoted: the page chose it (SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md
+/// §3.4, SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §5).
 fn popups_note(popups: Option<&Value>) -> String {
     let Some(list) = popups.and_then(|v| v.as_array()).filter(|l| !l.is_empty()) else {
         return String::new();
     };
-    let mut out = String::from("Popups this page opened, each a browser pane:\n");
+    let mut out = String::from("Popups this page opened (pass the id as `pane` to drive one):\n");
     for p in list {
         let pane = p.get("pane").and_then(|v| v.as_str()).unwrap_or("");
         let url = p.get("url").and_then(|v| v.as_str()).unwrap_or("");
@@ -406,7 +408,12 @@ fn popups_note(popups: Option<&Value>) -> String {
         } else {
             "not yours to drive: the user took it over"
         };
-        out.push_str(&format!("- pane {pane} at {url:?} ({how})\n"));
+        let what = if p.get("kind").and_then(|v| v.as_str()) == Some("window") {
+            "popup window"
+        } else {
+            "pane"
+        };
+        out.push_str(&format!("- {what} {pane} at {url:?} ({how})\n"));
     }
     out
 }
@@ -425,10 +432,12 @@ mod tests {
     #[test]
     fn each_popup_with_its_pane_and_whether_it_is_yours() {
         let note = popups_note(Some(&json!([
-            { "pane": "p1", "url": "https://signin.example.com/x", "yours": true },
+            { "pane": "p1", "url": "https://signin.example.com/x", "yours": true, "kind": "pane" },
             { "pane": "p2", "url": "https://example.com/\"quoted\"", "yours": false },
+            { "pane": "popup-9", "url": "https://pay.example.com/", "yours": true, "kind": "window" },
         ])));
         assert!(note.starts_with("Popups this page opened"));
+        assert!(note.contains("- popup window popup-9 at \"https://pay.example.com/\" (drive it with this pane id)"));
         assert!(note.contains("- pane p1 at \"https://signin.example.com/x\" (drive it with this pane id)"));
         assert!(note.contains("- pane p2 at \"https://example.com/\\\"quoted\\\"\" (not yours to drive"));
     }

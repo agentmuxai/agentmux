@@ -1545,3 +1545,159 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
     assert_eq!(body["data"]["admitted"], true, "{body}");
 }
+
+/// A popup window (a native window a pane's page opened) is driven by the
+/// agent that owns its opener, through the opener
+/// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §4–§7).
+#[tokio::test]
+async fn a_popup_window_is_driven_through_the_pane_that_opened_it() {
+    use axum::http::StatusCode;
+    let state = test_state();
+    let ws_id = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let tab_id = dispatch_apply(&state, Command::CreateTab { workspace_id: ws_id, name: "t".into() })
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+    let own = stand_in_pane(&state, &tab_id).await;
+    let (agent, auth) = signed_agent_on(&state, &own);
+    *state.host_ipc.lock().await = Some(crate::server::state::HostIpc { port: 1, token: "host-ipc-token".into() });
+    let app = crate::server::build_router(state.clone());
+    let host = [("X-Host-Token", "host-ipc-token")];
+
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/open", merged(&auth, serde_json::json!({ "url": "https://console.example.com/" }))).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let opener = body["data"]["pane"].as_str().unwrap().to_string();
+    // The agent's pane is in the set srv pushes to the host.
+    assert!(crate::server::browser_owner::owned_panes().contains(&opener));
+
+    let report = |event: &str, popup: &str, opener: &str, url: &str| {
+        serde_json::json!({ "event": event, "popup": popup, "opener": opener, "url": url })
+    };
+    let win = "popup-test-native-1";
+    let drive = |pane: &str| merged(&auth, serde_json::json!({ "pane": pane }));
+
+    // Only the host reports popup windows, by their popup id.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("opened", win, &opener, "https://pay.other.org/"), &[]).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("opened", "not-a-popup", &opener, "x"), &host).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("renamed", win, &opener, "x"), &host).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    // Not yet reported: unknown.
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", drive(win)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("opened", win, &opener, "https://pay.other.org/"), &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    // The owner drives it (and stops at the host, which isn't listening here).
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", drive(win)).await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY);
+    // Another agent may not.
+    let other_own = stand_in_pane(&state, &tab_id).await;
+    let (_, other) = signed_agent_on(&state, &other_own);
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&other, serde_json::json!({ "pane": win }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    // The opener's strip and snapshot listing show it.
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&opener).unwrap();
+    assert_eq!(
+        block.meta.get("browser:popup_windows").cloned(),
+        Some(serde_json::json!([{ "id": win, "url": "https://pay.other.org/" }]))
+    );
+    let listed = crate::server::ui_handlers::popup_listing(&state, &opener, &agent);
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["kind"], "window");
+    assert_eq!(listed[0]["yours"], true);
+    // Navigating updates the strip.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("navigated", win, "", "https://pay.other.org/confirm"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&opener).unwrap();
+    assert_eq!(block.meta["browser:popup_windows"][0]["url"], "https://pay.other.org/confirm");
+
+    // The routes that could submit a form without the approval banner are
+    // refused on a popup window, as on any driven pane.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": win, "script": "1" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap_or("").contains("popup window"), "{body}");
+    let (s, _) = post_json(&app, "/api/v1/ui/click", merged(&auth, serde_json::json!({ "pane": win, "selector": "button" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/dispatch_key", merged(&auth, serde_json::json!({ "pane": win, "key": "Enter" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // A hand-off on the window shows on the opener's banner, naming the
+    // window, and pauses both.
+    let waiting = {
+        let app = app.clone();
+        let body = merged(&auth, serde_json::json!({ "pane": win, "reason": "Confirm the payment" }));
+        tokio::spawn(async move { post_json(&app, "/api/v1/ui/browser/handoff", body).await })
+    };
+    let mut banner = serde_json::Value::Null;
+    for _ in 0..100 {
+        let b = state.mstore.must_get::<crate::backend::obj::Block>(&opener).unwrap();
+        if let Some(a) = b.meta.get("browser:attention").filter(|v| !v.is_null()) {
+            banner = a.clone();
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(banner["reason"], "Confirm the payment", "{banner}");
+    assert_eq!(banner["window"], "https://pay.other.org/confirm", "{banner}");
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", drive(win)).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let answer = serde_json::json!({ "block_id": opener, "id": banner["id"], "decision": "done" });
+    let (s, body) = post_json_headers(&app, "/api/v1/host/browser_attention", answer, &host).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (s, body) = waiting.await.unwrap();
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert_eq!(body["data"]["answer"], "done");
+
+    // Take over on the opener ends the agent's hold on its window.
+    let oref = format!("block:{opener}");
+    let mut clear = crate::backend::obj::MetaMapType::new();
+    clear.insert("browser:owner_agent".into(), serde_json::Value::Null);
+    crate::server::browser_owner::guard_client_meta_write(&oref, &clear).unwrap();
+    crate::server::service::update_object_meta(&state.mstore, &oref, &clear).unwrap();
+    assert!(!crate::server::browser_owner::owned_panes().contains(&opener));
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", drive(win)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap_or("").contains("took over"), "{body}");
+
+    // Closed: gone, and off the strip.
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("closed", win, "", ""), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", drive(win)).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&opener).unwrap();
+    assert!(block.meta.get("browser:popup_windows").is_none_or(|v| v.is_null()));
+
+    // A window from a pane nobody owns is listed but driven by nobody.
+    let mut cmd = editor_open_cmd(Some(tab_id.clone()), "/tmp/unused.txt", None, None);
+    cmd.view = "browser".into();
+    cmd.file = None;
+    cmd.url = Some("https://shop.example.net/".into());
+    let persons = open_pane(&state, cmd).await.unwrap().block_id;
+    let win2 = "popup-test-native-2";
+    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("opened", win2, &persons, "https://checkout.example.net/"), &host).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", drive(win2)).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
+    // When the host registers (either side restarted), every popup window
+    // record and every saved strip goes: those windows are gone or unknown.
+    assert!(state.mstore.must_get::<crate::backend::obj::Block>(&persons).unwrap().meta["browser:popup_windows"].is_array());
+    crate::server::ui_handlers::reset_popup_windows(&state);
+    assert!(crate::server::browser_popup::window(win2).is_none());
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&persons).unwrap();
+    assert!(block.meta.get("browser:popup_windows").is_none_or(|v| v.is_null()));
+}

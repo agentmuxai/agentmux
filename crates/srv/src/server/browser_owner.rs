@@ -39,14 +39,41 @@ pub(crate) fn record(block_id: &str, agent_id: &str) {
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .insert(block_id.to_string(), agent_id.to_string());
+    changed().notify_one();
 }
 
 /// Drop `block_id`'s owner: the pane was deleted or taken over.
 pub(crate) fn forget(block_id: &str) {
-    owners()
+    let removed = owners()
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .remove(block_id);
+        .remove(block_id)
+        .is_some();
+    if removed {
+        changed().notify_one();
+    }
+}
+
+/// Every pane an agent owns. The host keeps a copy, to decide inside
+/// `on_before_popup` which of a pane's popups open in-app
+/// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3); it is
+/// only a hint there, since who may drive what is always checked here.
+pub(crate) fn owned_panes() -> Vec<String> {
+    let mut v: Vec<String> = owners()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .keys()
+        .cloned()
+        .collect();
+    v.sort();
+    v
+}
+
+/// Woken whenever the set of owned panes changes, or the host needs the
+/// whole set again (it registered). See `ui_handlers::spawn_owned_panes_sync`.
+pub(crate) fn changed() -> &'static tokio::sync::Notify {
+    static CHANGED: OnceLock<tokio::sync::Notify> = OnceLock::new();
+    CHANGED.get_or_init(tokio::sync::Notify::new)
 }
 
 pub(crate) fn owner_of(block_id: &str) -> Option<String> {
@@ -116,12 +143,13 @@ pub(crate) fn check(
 
 /// Meta keys only srv writes, from its own records: who drives a pane, the
 /// banner that asks the person something, and what opened a popup.
-pub(crate) fn srv_only_keys() -> [&'static str; 4] {
+pub(crate) fn srv_only_keys() -> [&'static str; 5] {
     [
         OWNER_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
+        crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
     ]
 }
 
@@ -151,6 +179,7 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
+        crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
     ] {
         if meta.contains_key(key) {
             return Err(format!("{key} is written only by AgentMux itself"));
@@ -295,8 +324,8 @@ mod tests {
 
     #[test]
     fn a_client_cannot_write_the_popup_keys() {
-        use crate::server::browser_popup::{POPUP_FROM_META_KEY, POPUP_OF_META_KEY};
-        for key in [POPUP_OF_META_KEY, POPUP_FROM_META_KEY] {
+        use crate::server::browser_popup::{POPUP_FROM_META_KEY, POPUP_OF_META_KEY, POPUP_WINDOWS_META_KEY};
+        for key in [POPUP_OF_META_KEY, POPUP_FROM_META_KEY, POPUP_WINDOWS_META_KEY] {
             assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, json!("x"))).is_err());
             assert!(guard_client_meta_write("block:test-guard-popup", &meta(key, serde_json::Value::Null)).is_err());
         }
