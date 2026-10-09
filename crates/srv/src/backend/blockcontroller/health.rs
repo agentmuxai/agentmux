@@ -71,6 +71,10 @@ pub enum TurnEnd {
 pub struct TurnLedger {
     /// Unique per block: the start time in ms, bumped past the previous id.
     pub turn_id: u64,
+    /// Bumped on every change, under the tracker's lock. Publishes run after
+    /// the lock is released, so two can land out of order; the pane keeps the
+    /// highest `seq` (#4492).
+    pub seq: u64,
     /// What started the turn; `None` when its first pass was unlabelled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<TurnOrigin>,
@@ -235,9 +239,23 @@ struct TurnActivityTrackerInner {
     /// The turn a held message being sent now should join, and when srv was
     /// told: for controllers whose pass starts carry no input (`hint_join`).
     pending_join: Option<(u64, u64)>,
+    /// The last `TurnLedger::seq` stamped, across turns.
+    ledger_seq: u64,
 }
 
 impl TurnActivityTrackerInner {
+    /// The ledger to publish after a change: stamped with the next `seq` when
+    /// it differs from `before`.
+    fn stamp(&mut self, before: &Option<TurnLedger>) -> Option<TurnLedger> {
+        if self.ledger != *before {
+            self.ledger_seq += 1;
+            if let Some(l) = self.ledger.as_mut() {
+                l.seq = self.ledger_seq;
+            }
+        }
+        self.ledger.clone()
+    }
+
     /// idle→active with no label: take the queued hint, if any.
     fn start_unlabelled(&mut self) {
         self.provenance = self.next_turn.take();
@@ -246,6 +264,9 @@ impl TurnActivityTrackerInner {
     /// Mid-pass input: the turn will expect a next pass when this one ends.
     fn note_input_during_pass(&mut self) {
         self.input_during_pass = true;
+        // A join hint for a message that reached a running pass is spent: it
+        // must not make the next fresh message join this turn.
+        self.pending_join = None;
         if let Some(l) = self.ledger.as_mut().filter(|l| l.active) {
             l.inputs += 1;
         }
@@ -278,7 +299,7 @@ impl TurnActivityTrackerInner {
                 // new turn, even inside the settle window (D3); only the
                 // pane's flush of a message held during this turn joins it.
                 PassStart::Input { origin: TurnOrigin::User, joins_turn } => {
-                    joins_turn.or(hinted) == Some(ledger.turn_id) && (settling || recently_ended)
+                    joins_turn == Some(ledger.turn_id) && (settling || recently_ended)
                 }
                 PassStart::Queued if hinted == Some(ledger.turn_id) => settling || recently_ended,
                 PassStart::Input { .. } | PassStart::Queued | PassStart::CliWake => settling,
@@ -298,6 +319,7 @@ impl TurnActivityTrackerInner {
         let previous = self.ledger.as_ref().map_or(0, |l| l.turn_id);
         self.ledger = Some(TurnLedger {
             turn_id: now.max(previous + 1),
+            seq: 0,
             origin,
             started_at_ms: now,
             passes: 1,
@@ -370,6 +392,7 @@ impl TurnActivityTracker {
                 continuation_expected: false,
                 continuation_provenance: None,
                 pending_join: None,
+                ledger_seq: 0,
             }),
             publisher: Mutex::new(None),
             clock,
@@ -410,7 +433,7 @@ impl TurnActivityTracker {
             inner.start_unlabelled();
             inner.begin_pass(PassStart::Queued, now);
         }
-        let after = inner.ledger.clone();
+        let after = inner.stamp(&before);
         drop(inner);
         self.publish_if_changed(before, after);
         tracing::info!(block_id = %self.block_id, active, "[health] turn_active flip");
@@ -464,7 +487,7 @@ impl TurnActivityTracker {
                 inner.note_input_during_pass();
             }
         }
-        let after = inner.ledger.clone();
+        let after = inner.stamp(&before);
         drop(inner);
         self.publish_if_changed(before, after);
         tracing::info!(
@@ -512,7 +535,7 @@ impl TurnActivityTracker {
             user_text: None,
         }));
         inner.begin_pass(PassStart::CliWake, now);
-        let after = inner.ledger.clone();
+        let after = inner.stamp(&before);
         drop(inner);
         self.publish_if_changed(before, after);
         tracing::info!(block_id = %self.block_id, active = true, "[health] turn_active flip (CLI started a pass)");
@@ -535,7 +558,7 @@ impl TurnActivityTracker {
         if was_active {
             inner.end_pass(now, ended);
         }
-        let after = inner.ledger.clone();
+        let after = inner.stamp(&before);
         drop(inner);
         self.publish_if_changed(before, after);
         tracing::info!(block_id = %self.block_id, active = false, "[health] turn_active flip");
@@ -549,7 +572,7 @@ impl TurnActivityTracker {
         if let Some(l) = inner.ledger.as_mut() {
             l.add_stats(stats);
         }
-        let after = inner.ledger.clone();
+        let after = inner.stamp(&before);
         drop(inner);
         self.publish_if_changed(before, after);
     }
@@ -592,7 +615,7 @@ impl TurnActivityTracker {
             l.ended_at_ms = Some(now);
             l.end = Some(TurnEnd::Exited);
         }
-        let after = inner.ledger.clone();
+        let after = inner.stamp(&before);
         drop(inner);
         self.publish_if_changed(before, after);
         tracing::info!(block_id = %self.block_id, exit_code, "[health] turn_active flip (process exited)");
@@ -639,7 +662,7 @@ impl TurnActivityTracker {
             inner.start_unlabelled();
             inner.begin_pass(PassStart::Queued, now);
         }
-        let after = inner.ledger.clone();
+        let after = inner.stamp(&before);
         drop(inner);
         self.publish_if_changed(before, after);
         tracing::info!(block_id = %self.block_id, active = true, was_active, "[health] turn_active flip (queued delivery)");
@@ -1132,6 +1155,36 @@ mod tests {
         t.set_active_turn(false);
         advance(&clock, 10);
         t.hint_join(id + 999);
+        t.mark_turn_active_returning_was_active();
+        assert_ne!(t.ledger().unwrap().turn_id, id);
+    }
+
+    /// Every published ledger carries a higher `seq` than the one before it,
+    /// across turns, so the pane can drop one that lands late (#4492).
+    #[test]
+    fn every_published_ledger_has_a_higher_seq() {
+        let (t, clock, seen) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("a")));
+        t.mark_turn_active_from(Some(jekt()));
+        t.end_pass(Some(stats(10, 1)));
+        advance(&clock, TURN_SETTLE_MS + 1);
+        t.mark_turn_active_from(Some(user("b")));
+        let seqs: Vec<u64> = seen.lock().unwrap().iter().map(|l| l.seq).collect();
+        assert!(seqs.windows(2).all(|w| w[0] < w[1]), "{seqs:?}");
+        assert_eq!(seqs.first(), Some(&1));
+    }
+
+    /// A hint for a message that reached a running pass is spent there: the
+    /// next fresh message starts its own turn (#4492).
+    #[test]
+    fn a_hint_spent_on_a_running_pass_never_joins_a_later_fresh_message() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        let id = t.ledger().unwrap().turn_id;
+        t.hint_join(id);
+        t.mark_turn_active_from(Some(user("held, delivered mid-pass")));
+        t.end_pass(None);
+        advance(&clock, TURN_SETTLE_MS + 1);
         t.mark_turn_active_returning_was_active();
         assert_ne!(t.ledger().unwrap().turn_id, id);
     }

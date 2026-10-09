@@ -746,8 +746,8 @@ export type AgentPaneCommand =
      * pending or streaming.
      */
     | { type: "TurnReset" }
-    /** srv published the block's turn ledger (`agentturn`). An older turn's
-     *  ledger, replayed late, is ignored. */
+    /** srv published the block's turn ledger (`agentturn`). An older turn's,
+     *  or an older state of this one, landing late is ignored. */
     | { type: "TurnObserved"; ledger: TurnLedger }
     /**
      * Revert an OPTIMISTIC `TurnStart` when the turn never actually began —

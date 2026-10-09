@@ -9,6 +9,7 @@ import { update } from "./reducer";
 import { initialState } from "./types";
 import {
     HELD_FLUSH_JOIN_MS,
+    isNewerLedger,
     parseTurnLedger,
     turnEndedAt,
     turnLiveOutput,
@@ -20,6 +21,7 @@ import {
 
 const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
     turnId: 1_000,
+    seq: 1,
     origin: "user",
     startedAtMs: 1_000,
     passes: 1,
@@ -169,5 +171,23 @@ describe("turnToJoin", () => {
         expect(turnToJoin(ended, 5_000 + HELD_FLUSH_JOIN_MS)).toBe(1_000);
         expect(turnToJoin(ended, 5_001 + HELD_FLUSH_JOIN_MS)).toBeUndefined();
         expect(turnToJoin(null, 0)).toBeUndefined();
+    });
+});
+
+describe("isNewerLedger", () => {
+    it("takes a later turn, or a later state of the same turn, never an older one landing late", () => {
+        const cur = ledger({ turnId: 5, seq: 10 });
+        expect(isNewerLedger(ledger({ turnId: 5, seq: 11 }), cur)).toBe(true);
+        expect(isNewerLedger(ledger({ turnId: 5, seq: 9 }), cur)).toBe(false);
+        expect(isNewerLedger(ledger({ turnId: 6, seq: 2 }), cur)).toBe(true);
+        expect(isNewerLedger(ledger({ turnId: 4, seq: 99 }), cur)).toBe(false);
+        expect(isNewerLedger(cur, null)).toBe(true);
+    });
+
+    it("the reducer drops an older state of the same turn", () => {
+        let s = initialState("a");
+        s = update(s, { type: "TurnObserved", ledger: ledger({ seq: 5, active: true }) }).state;
+        s = update(s, { type: "TurnObserved", ledger: ledger({ seq: 4, active: false }) }).state;
+        expect(s.turnLedger?.active).toBe(true);
     });
 });

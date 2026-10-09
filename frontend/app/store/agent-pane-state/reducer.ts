@@ -61,6 +61,7 @@ import {
     type ContextReading,
 } from "./context-reading";
 import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
+import { isNewerLedger } from "./turn-ledger";
 
 /** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
 function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {
@@ -915,8 +916,7 @@ export function update(
             };
 
         case "TurnObserved": {
-            const current = state.turnLedger;
-            if (current != null && command.ledger.turnId < current.turnId) return { state, events: [] };
+            if (!isNewerLedger(command.ledger, state.turnLedger)) return { state, events: [] };
             return { state: { ...state, turnLedger: command.ledger }, events: [] };
         }
 

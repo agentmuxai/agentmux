@@ -771,6 +771,7 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
 describe("AgentWorkingRow across a turn's passes", () => {
     const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
         turnId: 7,
+        seq: 1,
         origin: "user",
         startedAtMs: Date.now() - 125_000,
         passes: 1,

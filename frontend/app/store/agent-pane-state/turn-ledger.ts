@@ -21,6 +21,8 @@ export type TurnLedgerOrigin = "user" | "automated" | "system";
 
 export interface TurnLedger {
     turnId: number;
+    /** srv bumps it on every change; within one turn, a lower one is older. */
+    seq: number;
     /** What started the turn; null when its first pass was unlabelled. */
     origin: TurnLedgerOrigin | null;
     startedAtMs: number;
@@ -59,6 +61,7 @@ export function parseTurnLedger(data: unknown): TurnLedger | null {
     const end = d.end === "completed" || d.end === "exited" ? d.end : null;
     return {
         turnId,
+        seq: num(d.seq) ?? 0,
         origin,
         startedAtMs,
         passes: num(d.passes) ?? 1,
@@ -74,6 +77,15 @@ export function parseTurnLedger(data: unknown): TurnLedger | null {
         endedAtMs: num(d.ended_at_ms),
         end,
     };
+}
+
+/** Whether `next` replaces `current`: a later turn, or a later state of the
+ *  same turn. srv publishes outside its lock, so an older state can land
+ *  after a newer one. */
+export function isNewerLedger(next: TurnLedger, current: TurnLedger | null | undefined): boolean {
+    if (!current) return true;
+    if (next.turnId !== current.turnId) return next.turnId > current.turnId;
+    return next.seq >= current.seq;
 }
 
 /** Between two passes of one turn, waiting for the next: no pass running, not
