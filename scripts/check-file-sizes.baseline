@@ -1,0 +1,57 @@
+# Source files over 1500 lines, and the most lines each may have
+# (scripts/check-file-sizes.mjs). A file here may only shrink: run
+# `node scripts/check-file-sizes.mjs --update` after shrinking one. Adding a
+# file or raising a number is a hand edit that the PR has to justify.
+3731 crates/bashwrap/src/bash_wrap.rs
+1975 crates/cef/src/client/lifecycle.rs
+1549 crates/cef/src/commands/cli_login.rs
+2219 crates/cef/src/commands/window_pool.rs
+1515 crates/cef/src/lib.rs
+1676 crates/cef/src/state/mod.rs
+2202 crates/cef/src/ui_tasks/window.rs
+2606 crates/common/src/data_paths.rs
+2268 crates/common/src/ipc.rs
+1842 crates/common/src/jekt_sign.rs
+1867 crates/launcher/src/saga/mod.rs
+3240 crates/srv/src/backend/agent_config.rs
+1677 crates/srv/src/backend/blockcontroller/acp.rs
+1543 crates/srv/src/backend/blockcontroller/app_server.rs
+2633 crates/srv/src/backend/blockcontroller/app_server_protocol.rs
+2030 crates/srv/src/backend/blockcontroller/durable_ssh.rs
+1674 crates/srv/src/backend/blockcontroller/health.rs
+1751 crates/srv/src/backend/blockcontroller/mod.rs
+1742 crates/srv/src/backend/blockcontroller/persistent/mod.rs
+3070 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
+2912 crates/srv/src/backend/bundle_import.rs
+2350 crates/srv/src/backend/container.rs
+1771 crates/srv/src/backend/fs_ops/host_jobs.rs
+2216 crates/srv/src/backend/history/index.rs
+1901 crates/srv/src/backend/history/mod.rs
+3272 crates/srv/src/backend/lan_discovery.rs
+1889 crates/srv/src/backend/providers.rs
+2442 crates/srv/src/backend/reactive/handler.rs
+3824 crates/srv/src/backend/storage/agents.rs
+3057 crates/srv/src/backend/storage/migrations.rs
+1799 crates/srv/src/backend/storage/muxbus.rs
+3385 crates/srv/src/identity/resolver/inject.rs
+1539 crates/srv/src/migrations/runner.rs
+2358 crates/srv/src/muxbus/cloud_subscriber.rs
+2426 crates/srv/src/persist_subscriber.rs
+3284 crates/srv/src/reducer/layout.rs
+1509 crates/srv/src/registry/migrate.rs
+2266 crates/srv/src/server/agent_handlers/input.rs
+1882 crates/srv/src/server/app_api/agent_open.rs
+1561 crates/srv/src/server/editor_handlers.rs
+2118 crates/srv/src/server/muxspect_handlers.rs
+1665 crates/srv/src/server/native_memory_handlers.rs
+2792 crates/srv/src/server/reactive.rs
+1622 crates/srv/src/server/ui_handlers.rs
+2297 crates/srv/src/server/websocket.rs
+2036 frontend/app/store/agent-pane-state/reducer.ts
+1505 frontend/app/view/agent/agent-view.tsx
+1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
+1502 frontend/app/view/agent/components/AgentFooter.tsx
+1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
+1550 frontend/app/view/editor/editor-model.ts
+1559 frontend/app/view/files/files-view.tsx
+2212 frontend/app/view/swarm/swarm-model.ts

@@ -520,6 +520,13 @@ jobs:
           UI_RATCHET_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: node scripts/check-ui-primitives.mjs
 
+      # Source files over 1,500 lines may only shrink, and no other file may
+      # cross that line. The sizes live in scripts/check-file-sizes.baseline,
+      # so raising one is a visible edit the PR has to explain
+      # (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md).
+      - name: File size ratchet
+        run: node scripts/check-file-sizes.mjs
+
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
       # a stack that still NAMES a ligature font resolves against a
