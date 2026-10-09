@@ -128,7 +128,7 @@ function stripKatexLegacyFonts(): Plugin {
     };
 }
 
-// The UI's own version, compared with the backend's on every connect (app/store/srv-version.ts).
+// The UI's own version, compared with the backend's on every connect (app/store/srv-info.ts).
 const APP_VERSION: string = JSON.parse(fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8")).version;
 
 export default defineConfig({
