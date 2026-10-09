@@ -171,7 +171,8 @@ impl Slot {
                     Verdict::Skip => (String::new(), Outcome::Skipped),
                     Verdict::Reject(reason) => (String::new(), Outcome::Rejected(reason)),
                 };
-                super::outcome::record_timed(self.purpose.tag, &self.entity_id, outcome, Some(&raw), Some(timing));
+                let logged = self.purpose.logs_reply.then_some(raw.as_str());
+                super::outcome::record_timed(self.purpose.tag, &self.entity_id, outcome, logged, Some(timing));
                 Reply { text, tokens, error: None }
             }
         }
@@ -187,7 +188,7 @@ mod tests {
     /// key or an outcome counter.
     macro_rules! test_purpose {
         ($name:ident, $tag:literal) => {
-            static $name: Purpose = Purpose { tag: $tag, timeout: Duration::from_secs(1) };
+            static $name: Purpose = Purpose { tag: $tag, timeout: Duration::from_secs(1), logs_reply: true };
         };
     }
     test_purpose!(OUTCOMES, "test_purpose_slot_outcomes");
