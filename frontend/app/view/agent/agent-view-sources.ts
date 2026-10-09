@@ -6,7 +6,7 @@
  * scan its source text: `agent-view-dispatch-via-pane-model.test.ts` (A9) and
  * `agent-pane-view.test.ts` (A6). Code moved out of `agent-view.tsx` into a
  * file NOT listed here is no longer scanned, so each extraction adds its new
- * files here in the same PR, and `agent-view-size.test.ts` checks every entry
+ * files here in the same PR, and `agent-view-sources.test.ts` checks every entry
  * exists.
  *
  * Paths are relative to this directory. The split plan is
@@ -35,15 +35,3 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "hooks/useContextReading.ts",
     "hooks/useTurnLedger.ts",
 ];
-
-/**
- * Line cap for `agent-view.tsx` itself (`agent-view-size.test.ts`). The file
- * grew from 1,959 lines (2026-07-31) to 3,001 after an earlier split, because
- * nothing stopped it. Lower this whenever an extraction shrinks the file;
- * raising it needs a reason in the PR.
- *
- * 1502 → 1505 (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md): the turn
- * ledger subscription. Its code is in hooks/useTurnLedger.ts; the view keeps
- * only the import and the call, next to the other per-block feeds.
- */
-export const AGENT_VIEW_MAX_LINES = 1505;
