@@ -1,7 +1,7 @@
 # SPEC: Build the frontend for a host other than the desktop app
 
 **Date:** 2026-10-09
-**Status:** implemented (this spec's PR)
+**Status:** implemented — #4518
 **Author:** Agent4
 **Builds on:** `SPEC_HOST_API_SEAM_2026_09_26.md` (the UI reaches its host only through `AppApi`, and asks `HostCaps` what it can do).
 
