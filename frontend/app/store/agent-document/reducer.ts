@@ -17,7 +17,7 @@ import type { DocumentNode, ShellNode, ToolLogChunk, ToolNode, ToolStreamingLog 
 import { isAcceptedBackgroundLaunch, isFinishedDockedTool } from "../../view/agent/activity/tool-adapter";
 import { planRollOff } from "../../view/agent/live-feed";
 import { planLogFree, planUnload, unloadResult } from "../../view/agent/tool-result-unload";
-import { lastFreshBoundaryIndex } from "../../view/agent/session-outcome";
+import { lastFreshBoundaryIndex } from "@/app/store/agent-document/session-outcome";
 import {
     AgentDocumentCommand,
     AgentDocumentState,

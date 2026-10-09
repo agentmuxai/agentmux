@@ -15,7 +15,8 @@
 import { muxEventSubscribe } from "./mps";
 import { recordTurn, type ServiceUsage } from "./token-usage";
 
-export const EVENT_AMBIENT_SPENT = "ambient:spent";
+import { WpsEvent } from "@/app/store/mps-events";
+export const EVENT_AMBIENT_SPENT = WpsEvent.AmbientSpent;
 
 let installed = false;
 

@@ -11,7 +11,7 @@
  * Open Pane calls createBlock({ meta: { view: widget.id } }).
  */
 
-import type { Platform } from "./toolchain-catalog";
+import type { Platform } from "@/app/store/toolchain-catalog";
 
 /** How the widget is installed onto the user's machine. */
 type InstallMethod =

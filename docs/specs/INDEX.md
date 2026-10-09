@@ -508,6 +508,7 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) | Architecture rethink: making ABF mandatory ("every agent must have an ABF") |
+| [`PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09`](PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md) | Plan — faster CI tests, and the open architecture / DRY follow-ups |
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
 | [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
@@ -645,7 +646,6 @@ partial list.
 | Spec | Title |
 |---|---|
 | [`ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19`](ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md) | Architecture: Armory/Stash Foundation Consolidation (North Star) |
-| [`PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09`](PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md) | Plan — faster CI tests, and the open architecture / DRY follow-ups |
 | [`PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17`](PLAN_MACOS_CLAUDE_KEYCHAIN_CREDENTIAL_ISOLATION_2026_08_17.md) | Plan — enforce the same per-agent Claude auth isolation on macOS that already holds on Windows |
 | [`PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07`](PLAN_TAB_TEAROFF_PHASE1_WIN32_2026-05-07.md) | Tab tear-off Phase 1 — Win32 native drag loop |
 | [`PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30`](PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md) | Proposal: A Composable Agent Model for the Armory |

@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { initialState, update, type AuthState } from "./auth-state";
+import { initialState, update, type AuthState } from "@/app/store/launch-flow-state/auth-state";
 
 const seed = (overrides: Partial<AuthState> = {}): AuthState => ({
     ...initialState(),

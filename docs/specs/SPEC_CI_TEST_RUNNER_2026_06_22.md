@@ -123,6 +123,10 @@ is handled minimally + tracked; the follow-up is a "test-health" pass that remov
 1. **Rust runs SERIALLY (`--test-threads=1`) for now.** `agentmux-cef`'s `allow_pane_focus_once_*`
    tests share a process-global `AtomicBool` and race under parallel runs. Serial is deterministic.
    *Follow-up: give those tests a `Mutex`/non-global → drop `--test-threads=1` (faster).*
+   **Update 2026-10-09:** the PR lane runs cargo-nextest instead, one process per test, so
+   process-global state can no longer collide and the serial flag is gone there
+   (`PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md` step 4). The nightly still runs
+   `cargo test` serially, for `agentmux-cef`'s focus-flag tests.
 2. **`agentmux-srv::backend::agent_session::write_then_read_roundtrip` is `#[ignore]`d.** A
    process-global read cache in `read_session_state` is keyed by definition-id, not by `FileStore`,
    so a sibling test pollutes it — fails even serially (ordering, not parallelism). *Follow-up: key

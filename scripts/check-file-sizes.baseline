@@ -18,8 +18,6 @@
 1543 crates/srv/src/backend/blockcontroller/app_server.rs
 2633 crates/srv/src/backend/blockcontroller/app_server_protocol.rs
 2030 crates/srv/src/backend/blockcontroller/durable_ssh.rs
-1674 crates/srv/src/backend/blockcontroller/health.rs
-1751 crates/srv/src/backend/blockcontroller/mod.rs
 1742 crates/srv/src/backend/blockcontroller/persistent/mod.rs
 3070 crates/srv/src/backend/blockcontroller/shell/lifecycle.rs
 2912 crates/srv/src/backend/bundle_import.rs
@@ -50,7 +48,6 @@
 2036 frontend/app/store/agent-pane-state/reducer.ts
 1505 frontend/app/view/agent/agent-view.tsx
 1564 frontend/app/view/agent/components/AgentComposerStrip.tsx
-1502 frontend/app/view/agent/components/AgentFooter.tsx
 1860 frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx
 1550 frontend/app/view/editor/editor-model.ts
 1559 frontend/app/view/files/files-view.tsx

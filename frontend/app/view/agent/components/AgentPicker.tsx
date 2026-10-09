@@ -67,6 +67,7 @@ import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
 import { readZoom } from "@/app/store/zoom-factor";
 
+import { WpsEvent } from "@/app/store/mps-events";
 /** This-machine-only preference — no cross-device sync, no existing
  *  localStorage precedent in this component tree to extend (a new small
  *  pattern, not a reuse). Wrapped defensively: localStorage can throw in
@@ -155,7 +156,7 @@ export function useAgentDefinitions(): [() => AgentDefinition[], () => boolean] 
         load();
 
         const unsub = muxEventSubscribe({
-            eventType: "agents:changed",
+            eventType: WpsEvent.AgentsChanged,
             handler: () => load(),
         });
 
@@ -181,7 +182,7 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
     const refresh = () => setOpenDefinitions(getOpenDefinitionMap());
     onMount(refresh);
     const unsubAgentsChanged = muxEventSubscribe({
-        eventType: "agents:changed",
+        eventType: WpsEvent.AgentsChanged,
         handler: refresh,
     });
     const unsubPaneLifecycle = subscribeToPaneLifecycle(refresh);
@@ -189,9 +190,6 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
     onCleanup(unsubPaneLifecycle);
     return [openDefinitions, refresh];
 }
-
-/** srv publishes this whenever an agent (or any) pane's controller registers or goes away. */
-const EVENT_TRACKED_BLOCKS_CHANGED = "processbroker:tracked-blocks-changed";
 
 /**
  * Like `useOpenDefinitionMap`, but instance-wide: an agent open in ANY tab of
@@ -231,7 +229,7 @@ export function useInstanceOpenDefinitions(): [
         }
     };
     onMount(() => void fetchPanes());
-    const unsub = muxEventSubscribe({ eventType: EVENT_TRACKED_BLOCKS_CHANGED, handler: () => void fetchPanes() });
+    const unsub = muxEventSubscribe({ eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged, handler: () => void fetchPanes() });
     onCleanup(unsub);
     // Tear-off, redock and tab moves keep the pane's controller, so they emit
     // no tracked-blocks event; refetch when the user comes back to this

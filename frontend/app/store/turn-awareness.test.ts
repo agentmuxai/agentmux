@@ -3,7 +3,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import type { TurnLedger, TurnTrigger } from "./agent-pane-state/turn-ledger";
-import { awaySummary, installTurnAwareness, markTurnsSeen, noteTurnLedger, resetTurnAwareness, unseenTurnsFor } from "./turn-awareness";
+import { awaySummary } from "@/app/view/agent/turn-trigger-text";
+import { installTurnAwareness, markTurnsSeen, noteTurnLedger, resetTurnAwareness, unseenTurnsFor } from "./turn-awareness";
 
 const ended = (turnId: number, trigger: TurnTrigger | null, end: "completed" | "exited" | null = "completed"): TurnLedger => ({
     turnId,
@@ -25,7 +26,7 @@ const ended = (turnId: number, trigger: TurnTrigger | null, end: "completed" | "
     endedAtMs: end ? 2_000 : null,
     end,
 });
-const jekt = (from: string): TurnTrigger => ({ kind: "agent", from });
+const jekt = (from: string): TurnTrigger => ({ kind: "agent", from, external: true });
 
 describe("turn awareness", () => {
     beforeEach(() => resetTurnAwareness());
@@ -37,8 +38,8 @@ describe("turn awareness", () => {
     });
 
     it("ignores your own turns, unfinished ones, crashes, and ones you watched", () => {
-        expect(noteTurnLedger("b1", ended(1, { kind: "user", from: null }), false)).toBe(false);
-        expect(noteTurnLedger("b1", ended(2, { kind: "broadcast", from: null }), false)).toBe(false);
+        expect(noteTurnLedger("b1", ended(1, { kind: "user", from: null, external: false }), false)).toBe(false);
+        expect(noteTurnLedger("b1", ended(2, { kind: "broadcast", from: null, external: false }), false)).toBe(false);
         expect(noteTurnLedger("b1", ended(3, jekt("A"), null), false)).toBe(false);
         expect(noteTurnLedger("b1", ended(4, jekt("A"), "exited"), false)).toBe(false);
         expect(noteTurnLedger("b1", ended(5, jekt("A")), true)).toBe(false);
@@ -57,8 +58,8 @@ describe("turn awareness", () => {
     it("summarises by kind, naming senders", () => {
         noteTurnLedger("b", ended(1, jekt("AgentX")), false);
         noteTurnLedger("b", ended(2, jekt("Korp")), false);
-        noteTurnLedger("b", ended(3, { kind: "task", from: 'Background command "npm test" completed' }), false);
-        noteTurnLedger("b", ended(4, { kind: "service", from: "github-consumer" }), false);
+        noteTurnLedger("b", ended(3, { kind: "task", from: 'Background command "npm test" completed', external: true }), false);
+        noteTurnLedger("b", ended(4, { kind: "service", from: "github-consumer", external: true }), false);
         expect(awaySummary(unseenTurnsFor("b")!)).toBe(
             "While you were away: 4 turns · 2 jekts (AgentX, Korp) · 1 finished task · 1 notice (github-consumer)",
         );
@@ -74,7 +75,7 @@ describe("turn awareness", () => {
             watching: (b) => b === "focused",
             now: () => 3,
         });
-        const data = { turn_id: 9, started_at_ms: 1, active: false, end: "completed", ended_at_ms: 5, trigger: { kind: "schedule", from: "cron" } };
+        const data = { turn_id: 9, started_at_ms: 1, active: false, end: "completed", ended_at_ms: 5, trigger: { kind: "schedule", from: "cron", external: true } };
         feed!("replayed", { ...data, turn_id: 8, ended_at_ms: 2 }); // ended before this window started: old news
         feed!("background", data);
         feed!("focused", { ...data, turn_id: 10 });

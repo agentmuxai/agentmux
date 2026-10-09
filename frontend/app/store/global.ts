@@ -304,7 +304,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             },
         },
         {
-            eventType: "laninstances",
+            eventType: WpsEvent.LanInstances,
             handler: (event) => {
                 const instances: LanInstance[] = event.data ?? [];
                 setLanInstancesAtom(instances);
@@ -318,14 +318,14 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             handler: (event) => acceptMuxbusDelivery(event.data),
         },
         {
-            eventType: "laninstances:error",
+            eventType: WpsEvent.LanInstancesError,
             handler: (event) => {
                 const errMsg = event.data?.error ?? "unknown error";
                 setLanDiscoveryErrorAtom(String(errMsg));
             },
         },
         {
-            eventType: "laninstances:firewall",
+            eventType: WpsEvent.LanInstancesFirewall,
             handler: (event) => {
                 const d = event.data as Partial<LanFirewall> | null | undefined;
                 const status = d?.status;
@@ -348,7 +348,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             },
         },
         {
-            eventType: "viewer:paired",
+            eventType: WpsEvent.ViewerPaired,
             handler: (event) => {
                 const d = event.data as { device_id?: string; device_name?: string } | null | undefined;
                 if (!d?.device_id) return;
@@ -365,7 +365,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             },
         },
         {
-            eventType: "laninstances:health",
+            eventType: WpsEvent.LanInstancesHealth,
             handler: (event) => {
                 const d = event.data as Partial<LanDiscoverability> | null | undefined;
                 const state = d?.state;
@@ -386,7 +386,7 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             // can't open OS windows, so the window's frontend calls the host
             // `open_floating_pane_window` command (same as a drag tear-off).
             // See docs/specs/SPEC_OPENEDITOR_FLOATING_AND_COLLAPSED_TREE_2026_06_16.md.
-            eventType: "openfloatingpane",
+            eventType: WpsEvent.OpenFloatingPane,
             scope: initOpts.windowId,
             handler: (event) => {
                 const data = event.data as { block_id?: string; workspace_id?: string };

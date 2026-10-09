@@ -27,8 +27,8 @@
 import type { PendingMessage } from "../../view/agent/state";
 import type { ContextReading, ContextSource, ContextWindowMap, ReportedContextWindows } from "./context-reading";
 import type { TurnLedger } from "./turn-ledger";
-import type { ToolActivity } from "../../view/agent/status/tool-labels";
-import type { PlanState } from "../../view/agent/status/plan";
+import type { ToolActivity } from "@/app/store/agent-pane-state/tool-labels";
+import type { PlanState } from "@/app/store/agent-pane-state/plan";
 
 /** What the model is doing within a pass, by what its stream shows. */
 export type ModelActivityPhase = "requesting" | "responding" | "thinking" | "writing" | "composing";
@@ -826,7 +826,7 @@ export type AgentPaneCommand =
 
     // ── Tool ───────────────────────────────────────────────────────
     /** `id`: the tool_use id, so its end removes exactly it; `params`: its
-     *  input, for the live status's words (status/tool-labels.ts). */
+     *  input, for the live status's words (tool-labels.ts). */
     | { type: "ToolStart"; name: string; arg?: string; id?: string; params?: Record<string, unknown>; parentId?: string }
     /** A running call's test progress, from its live output (status/test-progress.ts). */
     | { type: "ToolProgress"; id: string; text: string }

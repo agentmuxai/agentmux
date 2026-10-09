@@ -64,8 +64,8 @@ import {
 import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
 import { isNewerLedger } from "./turn-ledger";
 import { IDLE_ACTIVITY, type ActivityState, type ModelActivityPhase } from "./types";
-import { toolActivity } from "../../view/agent/status/tool-labels";
-import { planFromTodoWrite } from "../../view/agent/status/plan";
+import { toolActivity } from "@/app/store/agent-pane-state/tool-labels";
+import { planFromTodoWrite } from "@/app/store/agent-pane-state/plan";
 
 /** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
 function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {

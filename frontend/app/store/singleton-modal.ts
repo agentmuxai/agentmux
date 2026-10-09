@@ -67,8 +67,9 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { subscribeLauncherEvent } from "@/util/launcher-events";
 
+import { WpsEvent } from "@/app/store/mps-events";
 /** MPS event name carrying singleton claim/release broadcasts. */
-const EVENT_SINGLETON_CLAIM = "singleton:claim";
+const EVENT_SINGLETON_CLAIM = WpsEvent.SingletonClaim;
 
 /**
  * Kind of singleton modal. Open enum (string) so future singletons add a

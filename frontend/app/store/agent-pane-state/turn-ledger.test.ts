@@ -8,7 +8,6 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { initialState } from "./types";
 import {
-    HELD_FLUSH_JOIN_MS,
     isNewerLedger,
     parseTurnLedger,
     turnEndedAt,
@@ -23,7 +22,7 @@ const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
     turnId: 1_000,
     seq: 1,
     origin: "user",
-    trigger: { kind: "user", from: null },
+    trigger: { kind: "user", from: null, external: false },
     absorbed: [],
     startedAtMs: 1_000,
     passes: 1,
@@ -167,12 +166,10 @@ describe("reducer: TurnObserved and the pass stamp", () => {
 });
 
 describe("turnToJoin", () => {
-    it("is the open turn, or the one that only just ended", () => {
-        expect(turnToJoin(ledger(), 0)).toBe(1_000);
-        const ended = ledger({ active: false, lastPassEndedAtMs: 5_000, endedAtMs: 5_000, end: "completed" });
-        expect(turnToJoin(ended, 5_000 + HELD_FLUSH_JOIN_MS)).toBe(1_000);
-        expect(turnToJoin(ended, 5_001 + HELD_FLUSH_JOIN_MS)).toBeUndefined();
-        expect(turnToJoin(null, 0)).toBeUndefined();
+    it("asks to join the latest turn, open or ended: srv decides whether it still may", () => {
+        expect(turnToJoin(ledger())).toBe(1_000);
+        expect(turnToJoin(ledger({ active: false, lastPassEndedAtMs: 5_000, endedAtMs: 5_000, end: "completed" }))).toBe(1_000);
+        expect(turnToJoin(null)).toBeUndefined();
     });
 });
 

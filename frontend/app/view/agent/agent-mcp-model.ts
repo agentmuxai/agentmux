@@ -29,6 +29,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export class AgentMcpModel {
     readonly agentId: string;
 
@@ -60,7 +61,7 @@ export class AgentMcpModel {
         });
         void this.refresh();
         this.unsubChanged = muxEventSubscribe({
-            eventType: "mcp:changed",
+            eventType: WpsEvent.McpChanged,
             handler: () => void this.refresh(),
         });
     }

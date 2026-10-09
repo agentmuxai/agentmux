@@ -60,6 +60,7 @@ import type { LogFn } from "../types";
 import type { ResolveCliResult } from "@/app/store/rpc-api";
 import { markAgentOpen } from "../open-trace";
 
+import type { BlockControllerRuntimeStatus } from "@/types/rpc/BlockControllerRuntimeStatus";
 export interface LaunchFlowOptions {
     blockId: string;
     provider: ProviderDefinition | undefined;

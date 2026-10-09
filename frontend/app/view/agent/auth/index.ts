@@ -6,6 +6,6 @@ export type {
     AuthEvent,
     AuthState,
     SelectionOutcome,
-} from "./auth-state";
-export { initialState, update } from "./auth-state";
+} from "@/app/store/launch-flow-state/auth-state";
+export { initialState, update } from "@/app/store/launch-flow-state/auth-state";
 export { AuthFlowController } from "./auth-flow-controller";

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
+import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "@/app/store/agent-document/session-outcome";
 
 // Shared by useAgentStream.ts (live) and parseHistoryLines.ts (replay) —
 // mirrors compact-boundary.test.ts's shape for the same reason: SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.2.

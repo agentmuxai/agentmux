@@ -224,6 +224,9 @@ pub struct AgentMuxHandler {
     /// viewport change of some pages, i.e. every frame of a window drag; a
     /// report that repeats the same list for the same page isn't sent again.
     sent_favicons: HashMap<i32, (String, Vec<String>)>,
+    /// The page's own title for each popup window (by `Browser::identifier()`),
+    /// so its window title can be rebuilt when it navigates (display.rs).
+    popup_titles: HashMap<i32, String>,
 }
 
 impl AgentMuxHandler {
@@ -256,6 +259,7 @@ impl AgentMuxHandler {
             popup_browser_ids: std::collections::HashSet::new(),
             creation_label,
             sent_favicons: HashMap::new(),
+            popup_titles: HashMap::new(),
         }))
     }
 

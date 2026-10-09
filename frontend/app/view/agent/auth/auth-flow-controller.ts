@@ -29,7 +29,7 @@ import {
     type AuthSessionStatusWire,
     type AuthState,
     type SelectionOutcome,
-} from "./auth-state";
+} from "@/app/store/launch-flow-state/auth-state";
 
 /** Backend-facing RPC surface. Allowed to be injected so tests can
  *  swap in a stub. Production passes the `defaultAuthRpc` adapter.

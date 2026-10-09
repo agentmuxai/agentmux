@@ -24,6 +24,7 @@ import * as MOS from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 
+import { WpsEvent } from "@/app/store/mps-events";
 // Derived from the RPC signature rather than restated, so the two cannot drift.
 type ProcessListResult = Awaited<ReturnType<typeof RpcApi.AgentProcessListCommand>>;
 export type TrackedProcessInfo = ProcessListResult["processes"][number];
@@ -87,7 +88,7 @@ export function useTrackedProcesses(blockId: () => string | undefined): TrackedP
             setList((cur) => (cur.some((x) => x.pid === p.pid) ? cur : [...cur, p]));
 
         const unsubAdded = muxEventSubscribe({
-            eventType: "agent:process-added",
+            eventType: WpsEvent.AgentProcessAdded,
             scope: MOS.makeORef("block", id),
             handler: (event) => {
                 const p = (event.data as { process?: TrackedProcessInfo } | undefined)?.process;
@@ -97,7 +98,7 @@ export function useTrackedProcesses(blockId: () => string | undefined): TrackedP
             },
         });
         const unsubExited = muxEventSubscribe({
-            eventType: "agent:process-exited",
+            eventType: WpsEvent.AgentProcessExited,
             scope: MOS.makeORef("block", id),
             handler: (event) => {
                 const pid = (event.data as { pid?: number } | undefined)?.pid;

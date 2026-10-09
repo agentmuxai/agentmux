@@ -488,12 +488,12 @@ How it's fed:
 - A pass end (`TurnEnd`, the idle reconcile) clears the phase and tools and keeps the plan. `TurnReset` clears everything.
 
 **Words.**
-- `status/tool-labels.ts`:
+- `store/agent-pane-state/tool-labels.ts`:
   - Bash's `description`, put into progressive form ("Run the tests" becomes "Running the tests"). Otherwise just the program name, never the whole command.
   - A subagent's kind and description.
   - "Reading/Editing/Writing <base name>", "Searching for <pattern>", "Reading <host>" and "Using <mcp tool>".
   - Calls running at once fold: "Reading 3 files", or "3 tools running" for a mix, naming a subagent if one is among them.
-- `status/plan.ts`: "Writing the spec (3/7)", from the todo item's `activeForm`.
+- `store/agent-pane-state/plan.ts`: "Writing the spec (3/7)", from the todo item's `activeForm`.
 
 **Presenter.** `status/present-status.ts` implements §6.4's ranks and timing with the values in `TIMING`:
 - Promote thresholds: tools 1.5 s, composing 2 s, writing 3 s, thinking 4 s.

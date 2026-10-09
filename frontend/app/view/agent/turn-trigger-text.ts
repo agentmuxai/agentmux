@@ -11,13 +11,14 @@
  */
 
 import type { TriggerKind, TurnTrigger } from "@/app/store/agent-pane-state/turn-ledger";
+import type { UnseenTurns } from "@/app/store/turn-awareness";
 
 /** How long an external turn's lead-in shows before the row's usual text. */
 export const TRIGGER_LEAD_IN_MS = 3_000;
 
-/** Started by something other than the user. */
+/** Started by something other than the user (srv's call, on the trigger). */
 export function isExternalTrigger(t: TurnTrigger | null | undefined): t is TurnTrigger {
-    return !!t && t.kind !== "user" && t.kind !== "broadcast" && t.kind !== "system";
+    return !!t?.external;
 }
 
 /** The row's opening line for an external turn: "↳ jekt from AgentX". */
@@ -60,7 +61,7 @@ const NOUNS: Record<TriggerKind, [string, string]> = {
     agent: ["jekt", "jekts"],
     service: ["notice", "notices"],
     schedule: ["scheduled run", "scheduled runs"],
-    task: ["task", "tasks"],
+    task: ["finished task", "finished tasks"],
     system: ["", ""],
 };
 
@@ -77,4 +78,22 @@ export function absorbedSummary(absorbed: readonly TurnTrigger[], inputs: number
     const unlisted = inputs - absorbed.length;
     if (unlisted > 0) parts.push(`+${unlisted} more`);
     return parts.length ? parts.join("  ·  ") : null;
+}
+
+/**
+ * The return summary: "While you were away: 3 turns · 2 jekts (AgentX,
+ * Korp) · 1 finished task". Senders are named for jekts and notices, up to
+ * three.
+ */
+export function awaySummary(u: UnseenTurns): string {
+    const byKind = new Map<TriggerKind, TurnTrigger[]>();
+    for (const t of u.triggers) byKind.set(t.kind, [...(byKind.get(t.kind) ?? []), t]);
+    const parts = [...byKind].map(([kind, ts]) => {
+        const [one, many] = NOUNS[kind];
+        const who = kind === "agent" || kind === "service" ? [...new Set(ts.map((t) => t.from).filter((f): f is string => !!f))] : [];
+        const names = who.length ? ` (${who.slice(0, 3).join(", ")}${who.length > 3 ? ", …" : ""})` : "";
+        return `${ts.length} ${ts.length === 1 ? one : many}${names}`;
+    });
+    const head = `While you were away: ${u.count} ${u.count === 1 ? "turn" : "turns"}`;
+    return parts.length ? `${head} · ${parts.join(" · ")}` : head;
 }

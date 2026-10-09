@@ -21,7 +21,7 @@ import { AgentWorkingRow } from "./AgentFooter";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
 import { AgentSessionNotices } from "./AgentSessionNotices";
 import { compactionModelKey } from "../compaction-estimate";
-import { toolActivity } from "../status/tool-labels";
+import { toolActivity } from "@/app/store/agent-pane-state/tool-labels";
 import { ForkProviderFallbackBanner } from "./ForkProviderFallbackBanner";
 import { PaneRow } from "./PaneRow";
 import { TurnAwayDigest } from "./TurnAwayDigest";

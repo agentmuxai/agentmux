@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Show, type JSX } from "solid-js";
-import { awaySummary, unseenTurnsFor } from "@/app/store/turn-awareness";
+import { unseenTurnsFor } from "@/app/store/turn-awareness";
+import { awaySummary } from "@/app/view/agent/turn-trigger-text";
 
 /**
  * A dot in a pane's header while turns you didn't start have finished there

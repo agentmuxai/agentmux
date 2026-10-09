@@ -1059,7 +1059,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 const snap = paneSnapshot(opts.blockId);
                 const phase = snap?.turnPhase;
                 const stopped = phase?.kind === "Interrupting" || (phase?.kind === "Done" && phase.outcome !== "completed");
-                const joinsTurn = item.initiatedTurnOptimistically || stopped ? undefined : turnToJoin(snap?.turnLedger, Date.now());
+                const joinsTurn = item.initiatedTurnOptimistically || stopped ? undefined : turnToJoin(snap?.turnLedger);
                 await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ item.initiatedTurnOptimistically, /* authFailureToPreserve */ null, joinsTurn);
             }
         })().finally(() => {

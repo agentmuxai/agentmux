@@ -55,13 +55,13 @@ import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { noteTaskFrame } from "./activity/task-outcomes";
-import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 import { createTaskWakeDetector } from "./task-wake";
 import { createTestProgressTracker } from "./status/test-progress";
 import { createThinkingHeadlineTracker } from "./status/thinking-headline";
 import { compactionModelKey, parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
-import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
+import { sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "@/app/store/agent-document/session-outcome";
 import { workingFromPhase, type AgentPaneEvent, type CompactionState, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
@@ -69,8 +69,8 @@ import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-qu
 import { createHidingStreamFlushQueue } from "./hiding-stream-flush-queue";
 import { createMemoryReinjectionController } from "./memory-reinjection-controller";
 import { FALLBACK_CONTEXT_WINDOW } from "./memory-reinjection";
-import { buildMemoryInjectedNode, isMemoryInjectedFrame } from "./memory-injected";
-import { parseCliNoticeFrame } from "./cli-notice";
+import { buildMemoryInjectedNode } from "./memory-injected";
+import { interceptFrame, type FrameInterceptState, type FrameSink } from "./frame-intercepts";
 import { MemoryDeliveryApi } from "@/app/store/rpc-api/memory-delivery";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { fetchMemoryReinjectionEntries } from "./memory-reinjection-fetch";
@@ -597,6 +597,108 @@ export function useAgentStream({
             model.dispatchPane({ type: "TurnReset" });
         };
 
+        // The raw frames read before the translator (frame-intercepts.ts).
+        // Getters: a resubscribe replaces the parser and the tracker.
+        const interceptState: FrameInterceptState = {
+            get parser() {
+                return parser;
+            },
+            get compactionSummaries() {
+                return compactionSummaries;
+            },
+            detectTaskWake,
+        };
+        const frameSink: FrameSink = {
+            node: (node, update) => {
+                if (hasNodeId(node.id)) {
+                    if (!update) return;
+                    queue.pushUpdatedNode(node);
+                } else {
+                    addNodeId(node.id);
+                    queue.pushNewNode(node);
+                }
+                queue.scheduleFlush();
+            },
+            placeReleased: pushReleasedJekts,
+            compactBoundary: (compactBoundary, raw) => {
+                // Feeds only the compaction-time ESTIMATE (the working row's
+                // progress bar) with its own parser — it reads the frame's
+                // real stdout shape. See
+                // SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §3/§5.
+                recordCompactionSample(
+                    parseCompactionSample(
+                        raw,
+                        compactionModelKey(getObjectValue<Block>(makeORef("block", blockId))?.meta, lastSeenModelId)
+                    )
+                );
+                if (!compactBoundary) return;
+                const paneEvents = model.dispatchPane({
+                    type: "CompactionBoundary",
+                    trigger: compactBoundary.trigger,
+                    preTokens: compactBoundary.preTokens,
+                    postTokens: compactBoundary.postTokens,
+                    durationMs: compactBoundary.durationMs,
+                    at: Date.now(),
+                    frameTimestamp: compactBoundary.frameTimestamp,
+                    boundaryUuid: compactBoundary.uuid,
+                });
+                const card = pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
+                if (card) awaitingCompactionSize = card;
+                // Fire-and-forget: trigger() handles its own fetch/send
+                // failures and re-entrancy. See
+                // SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_2026_09_22.md §1.2/§3.3.
+                void memoryReinjectionController.trigger(compactBoundary.frameTimestamp, "compaction", compactBoundary.uuid);
+            },
+            sessionOutcome: (sessionOutcome) => {
+                // `resumed` is demoted out of the working transcript, as in
+                // replay (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_
+                // HISTORY_VIEW_2026_08_09.md §3.5). A `fresh` node ends the old
+                // session's in-progress rows inside the StreamFlush that lands
+                // it (reducer.ts); the rows themselves stay.
+                if (!sessionOutcome || sessionOutcome.outcome === "resumed") return;
+                const node: SessionOutcomeNode = {
+                    type: "session_outcome",
+                    id: sessionOutcomeNodeId(sessionOutcome),
+                    outcome: sessionOutcome.outcome,
+                    attemptedSid: sessionOutcome.attemptedSid,
+                    actualSid: sessionOutcome.actualSid,
+                    continued: sessionOutcome.continued,
+                    timestamp: sessionOutcomeLiveTimestamp(sessionOutcome.frameTimestamp),
+                };
+                if (hasNodeId(node.id)) return;
+                addNodeId(node.id);
+                queue.pushNewNode(node);
+                queue.scheduleFlush();
+                // A "fresh" outcome: the model has none of this identity's
+                // previous conversation, the loss compaction's reinjection
+                // exists for, so the identity goes back in front of it too
+                // (the controller defers while the turn that found the failed
+                // resume is still in flight). SPEC_HIDDEN_MEMORY_REINJECTION_
+                // AFTER_COMPACTION_2026_09_22.md §3.3a.
+                if (sessionOutcome.outcome === "fresh") {
+                    // The meter's reading measured the conversation that is now gone.
+                    model.dispatchPane({ type: "ContextInvalidated", reason: "fresh_session" });
+                    awaitingCompactionSize = null;
+                    void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
+                }
+            },
+            memoryInjected: (raw) => {
+                // A fallback re-delivery's own card arrives while its hidden
+                // turn is in flight; the controller shows the same card (same
+                // id) when the turn ends, so skip it here rather than mark the
+                // id seen behind the hiding queue.
+                if ((raw as { fallback?: unknown }).fallback === true && memoryReinjectionController.isHiding()) return;
+                parser.flushPending();
+                pushReleasedJekts();
+                const node = buildMemoryInjectedNode(raw, { contextWindow: currentContextWindow(), now: Date.now() });
+                if (node && !hasNodeId(node.id)) {
+                    addNodeId(node.id);
+                    queue.pushNewNode(node);
+                    queue.scheduleFlush();
+                }
+            },
+        };
+
         // Records the transcript cursor (below) has placed, parsed as live
         // input.
         const parseRecords = (text: string, from?: { stream: string; gen: string; line: number }) => {
@@ -685,197 +787,9 @@ export function useAgentStream({
                     const headline = readThinkingHeadline(rawEvent);
                     if (headline) model.dispatchPane({ type: "ThinkingHeadline", text: headline });
                 }
-                {
-                    const wake = detectTaskWake(rawEvent);
-                    if (wake && !hasNodeId(wake.id)) {
-                        addNodeId(wake.id);
-                        queue.pushNewNode(wake);
-                        queue.scheduleFlush();
-                    }
-                }
-                if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
-                    // Feeds only the compaction-time ESTIMATE (the working row's
-                    // progress bar) with its own parser — it reads the frame's
-                    // real stdout shape, and changes nothing below. See
-                    // SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §3/§5.
-                    recordCompactionSample(
-                        parseCompactionSample(
-                            rawEvent,
-                            compactionModelKey(getObjectValue<Block>(makeORef("block", blockId))?.meta, lastSeenModelId)
-                        )
-                    );
-                    // Compaction happens MID-turn — flushParserPending() is
-                    // only called at finalizeTurn (useTurnLifecycle.ts), so
-                    // without an explicit flush here the parser's
-                    // currentTextNode/currentThinkingNode accumulator never
-                    // sees this line and keeps accumulating text from AFTER
-                    // the compaction onto the SAME node id as text from
-                    // BEFORE it — silently merging content across the
-                    // boundary and rendering it before the compaction
-                    // marker, live, not just on history replay (same root
-                    // cause as the parseHistoryLines.ts fix). Flushed
-                    // unconditionally, even when the metadata below fails
-                    // to parse — it's still a real boundary in the
-                    // underlying conversation.
-                    parser.flushPending();
-                    pushReleasedJekts();
-                    const compactBoundary = parseCompactBoundaryFrame(rawEvent);
-                    if (compactBoundary) {
-                        compactionSummaries.noteBoundary(compactBoundary);
-                        const paneEvents = model.dispatchPane({
-                            type: "CompactionBoundary",
-                            trigger: compactBoundary.trigger,
-                            preTokens: compactBoundary.preTokens,
-                            postTokens: compactBoundary.postTokens,
-                            durationMs: compactBoundary.durationMs,
-                            at: Date.now(),
-                            frameTimestamp: compactBoundary.frameTimestamp,
-                            boundaryUuid: compactBoundary.uuid,
-                        });
-                        {
-                            const card = pushContextCompactedNodes(paneEvents, queue, hasNodeId, addNodeId);
-                            if (card) awaitingCompactionSize = card;
-                        }
-                        // Fire-and-forget: trigger() handles its own
-                        // fetch/send failures internally (never throws) and
-                        // its own re-entrancy guard, so nothing here needs
-                        // to await or catch. See
-                        // SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_COMPACTION_
-                        // 2026_09_22.md §1.2/§3.3.
-                        void memoryReinjectionController.trigger(
-                            compactBoundary.frameTimestamp,
-                            "compaction",
-                            compactBoundary.uuid,
-                        );
-                    }
-                    continue;
-                }
-
-                // AgentMux's own resume-outcome marker (not a provider frame —
-                // see docs/specs/SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md
-                // §2). Intercepted the same way as `compact_boundary` just
-                // above: no `StreamEvent` shape in the translator, shared
-                // parsing with `parseHistoryLines.ts` via `session-outcome.ts`
-                // so the two can't drift. No `dispatchPane` round-trip needed —
-                // unlike compaction, this has no live token-meter side effect,
-                // it's purely a transcript marker — so the node is pushed
-                // directly.
-                if (rawEvent.type === "system" && rawEvent.subtype === "agentmux_session_outcome") {
-                    parser.flushPending();
-                    pushReleasedJekts();
-                    const sessionOutcome = parseSessionOutcomeFrame(rawEvent);
-                    // `resumed` is demoted out of the working transcript —
-                    // same rule and rationale as parseHistoryLines.ts
-                    // (SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_
-                    // HISTORY_VIEW_2026_08_09.md §3.5). A `fresh` node that
-                    // does get pushed ends the old session's in-progress rows
-                    // inside the same StreamFlush that lands it (reducer.ts,
-                    // StreamFlush handler); the rows themselves stay.
-                    if (sessionOutcome && sessionOutcome.outcome !== "resumed") {
-                        const node: SessionOutcomeNode = {
-                            type: "session_outcome",
-                            id: sessionOutcomeNodeId(sessionOutcome),
-                            outcome: sessionOutcome.outcome,
-                            attemptedSid: sessionOutcome.attemptedSid,
-                            actualSid: sessionOutcome.actualSid,
-                            continued: sessionOutcome.continued,
-                            timestamp: sessionOutcomeLiveTimestamp(sessionOutcome.frameTimestamp),
-                        };
-                        if (!hasNodeId(node.id)) {
-                            addNodeId(node.id);
-                            queue.pushNewNode(node);
-                            queue.scheduleFlush();
-                            // A "fresh" outcome means AgentMux could not resume
-                            // this PERSISTENT identity's prior session — the
-                            // model has none of its previous conversation at
-                            // all, the same "just lost prior context"
-                            // situation compact_boundary's reinjection exists
-                            // for (arguably more total loss than compaction,
-                            // which at least leaves a summary). The identity
-                            // (Global/Personal memory) is unchanged by the
-                            // session swap, so it still needs to be back in
-                            // front of the model. Fire the same hidden-
-                            // reinjection turn here too — the controller's own
-                            // busy-pane defer (fix 1/2 above) handles this
-                            // landing while the triggering turn (the message
-                            // that discovered the resume failure) is itself
-                            // still in flight, which is the common case here.
-                            // See SPEC_HIDDEN_MEMORY_REINJECTION_AFTER_
-                            // COMPACTION_2026_09_22.md §3.3a, "fresh session"
-                            // addendum.
-                            if (sessionOutcome.outcome === "fresh") {
-                                // The meter's reading measured the conversation
-                                // that is now gone.
-                                model.dispatchPane({ type: "ContextInvalidated", reason: "fresh_session" });
-                                awaitingCompactionSize = null;
-                                void memoryReinjectionController.trigger(sessionOutcome.frameTimestamp, "fresh_session");
-                            }
-                        }
-                    }
-                    continue;
-                }
-
-                // Claude Code's compaction summary: a card, not a user message
-                // (context-delivery.ts, shared with parseHistoryLines.ts).
-                // SPEC_CONTEXT_DELIVERY_2026_09_30.md §3.3.
-                {
-                    const summaryNode = compactionSummaries.take(rawEvent, Date.now());
-                    if (summaryNode) {
-                        parser.flushPending();
-                        pushReleasedJekts();
-                        if (!hasNodeId(summaryNode.id)) {
-                            addNodeId(summaryNode.id);
-                            queue.pushNewNode(summaryNode);
-                            queue.scheduleFlush();
-                        }
-                        continue;
-                    }
-                }
-
-                // CLI install / version-change notices (cli-notice.ts,
-                // shared with parseHistoryLines.ts). An install's later frame
-                // carries the same id, so it updates the "installing" row.
-                {
-                    const cliNode = parseCliNoticeFrame(rawEvent, Date.now());
-                    if (cliNode) {
-                        parser.flushPending();
-                        pushReleasedJekts();
-                        if (hasNodeId(cliNode.id)) {
-                            queue.pushUpdatedNode(cliNode);
-                        } else {
-                            addNodeId(cliNode.id);
-                            queue.pushNewNode(cliNode);
-                        }
-                        queue.scheduleFlush();
-                        continue;
-                    }
-                }
-
-                // The notice for memory the `SessionStart` hook delivered
-                // (memory-injected.ts, shared with parseHistoryLines.ts). The
-                // model already has the content — this is only the label.
-                // SPEC_GLOBAL_MEMORY_DELIVERY_2026_09_27.md §7 P2.
-                if (isMemoryInjectedFrame(rawEvent)) {
-                    // A fallback re-delivery's own card arrives while its
-                    // hidden turn is in flight; the controller shows the same
-                    // card (same id) when the turn ends, so skip it here
-                    // rather than mark the id seen behind the hiding queue.
-                    if ((rawEvent as { fallback?: unknown }).fallback === true && memoryReinjectionController.isHiding()) {
-                        continue;
-                    }
-                    parser.flushPending();
-                    pushReleasedJekts();
-                    const node = buildMemoryInjectedNode(rawEvent, {
-                        contextWindow: currentContextWindow(),
-                        now: Date.now(),
-                    });
-                    if (node && !hasNodeId(node.id)) {
-                        addNodeId(node.id);
-                        queue.pushNewNode(node);
-                        queue.scheduleFlush();
-                    }
-                    continue;
-                }
+                // The intercepts history replay runs too, in the same order
+                // (frame-intercepts.ts); what they find goes to `frameSink`.
+                if (interceptFrame(rawEvent, interceptState, frameSink, Date.now())) continue;
 
                 // Extract live token counts from Anthropic stream events before
                 // the translator discards them. message_start carries input_tokens

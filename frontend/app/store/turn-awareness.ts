@@ -36,26 +36,23 @@ export function unseenTurnsFor(blockId: string): UnseenTurns | null {
     return unseen()[blockId] ?? null;
 }
 
-function isExternal(t: TurnTrigger | null): t is TurnTrigger {
-    return !!t && (t.kind === "agent" || t.kind === "service" || t.kind === "schedule" || t.kind === "task");
-}
-
 /**
  * A ledger arrived. Counts it when it reports an external turn over and the
  * user wasn't looking at its pane (`watching`: the window had focus with that
  * block focused). Returns whether it counted.
  */
 export function noteTurnLedger(blockId: string, ledger: TurnLedger, watching: boolean): boolean {
-    if (ledger.end !== "completed" || !isExternal(ledger.trigger) || watching) return false;
+    const trigger = ledger.trigger;
+    if (ledger.end !== "completed" || !trigger?.external || watching) return false;
     const key = `${blockId}:${ledger.turnId}`;
     if (counted.has(key)) return false;
     counted.add(key);
     if (counted.size > 5_000) counted.clear();
     const prev = unseen()[blockId];
-    const triggers = [...(prev?.triggers ?? []), ledger.trigger].slice(-KEEP_TRIGGERS);
+    const triggers = [...(prev?.triggers ?? []), trigger].slice(-KEEP_TRIGGERS);
     setUnseen({
         ...unseen(),
-        [blockId]: { count: (prev?.count ?? 0) + 1, triggers, lastEndedAt: ledger.endedAtMs ?? ledger.lastPassEndedAtMs ?? Date.now() },
+        [blockId]: { count: (prev?.count ?? 0) + 1, triggers, lastEndedAt: ledger.endedAtMs ?? Date.now() },
     });
     return true;
 }
@@ -74,31 +71,6 @@ export function markTurnsSeen(blockId: string): UnseenTurns | null {
 export function resetTurnAwareness(): void {
     setUnseen({});
     counted.clear();
-}
-
-const NOUN: Record<string, [string, string]> = {
-    agent: ["jekt", "jekts"],
-    service: ["notice", "notices"],
-    schedule: ["scheduled run", "scheduled runs"],
-    task: ["finished task", "finished tasks"],
-};
-
-/**
- * The return summary: "While you were away: 3 turns · 2 jekts (AgentX,
- * Korp) · 1 finished task". Senders are named for jekts and notices, up to
- * three.
- */
-export function awaySummary(u: UnseenTurns): string {
-    const byKind = new Map<string, TurnTrigger[]>();
-    for (const t of u.triggers) byKind.set(t.kind, [...(byKind.get(t.kind) ?? []), t]);
-    const parts = [...byKind].map(([kind, ts]) => {
-        const [one, many] = NOUN[kind] ?? ["turn", "turns"];
-        const who = kind === "agent" || kind === "service" ? [...new Set(ts.map((t) => t.from).filter((f): f is string => !!f))] : [];
-        const names = who.length ? ` (${who.slice(0, 3).join(", ")}${who.length > 3 ? ", …" : ""})` : "";
-        return `${ts.length} ${ts.length === 1 ? one : many}${names}`;
-    });
-    const head = `While you were away: ${u.count} ${u.count === 1 ? "turn" : "turns"}`;
-    return parts.length ? `${head} · ${parts.join(" · ")}` : head;
 }
 
 let installed = false;
@@ -122,8 +94,7 @@ export function installTurnAwareness(deps: {
     const unsub = deps.subscribe((blockId, data) => {
         const ledger = parseTurnLedger(data);
         if (!ledger) return;
-        const endedAt = ledger.endedAtMs ?? ledger.lastPassEndedAtMs;
-        if (endedAt != null && endedAt < startedAt) return;
+        if (ledger.endedAtMs != null && ledger.endedAtMs < startedAt) return;
         noteTurnLedger(blockId, ledger, deps.watching(blockId));
     });
     return () => {

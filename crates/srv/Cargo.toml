@@ -170,6 +170,9 @@ windows-sys = { version = "0.59", features = [
 winres = "0.1"
 
 [dev-dependencies]
+# A paused, auto-advancing clock for tests that only wait on tokio time
+# (`#[tokio::test(start_paused = true)]`). Dev-only: never in a release build.
+tokio = { version = "1", features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
 serde_json = "1"
 libc = "0.2"
