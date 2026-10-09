@@ -17,9 +17,9 @@
  * `turnJustEndedAtom` below, NOT on `TurnPhase.kind === "Done"` (mirrors
  * useAgentActivitySummary.ts's identical fix — see that module's doc
  * comment and docs/specs/REPORT_AMBIENT_SUMMARY_OVERTRIGGER_2026_07_20.md
- * for the full diagnosis of why `Done` over-triggers). Sends recent session
- * output to claude-haiku-4-5-20251001 and asks for a short, natural next
- * user message. The result is written to `term:next_prompt_suggestion`
+ * for the full diagnosis of why `Done` over-triggers). Sends the pane's recent
+ * conversation (`ambient-activity.ts`) to the ambient model and asks for a
+ * short next user message. The result is written to `term:next_prompt_suggestion`
  * block meta, which the composer reads as ghost text (dimmed, shown only
  * while the input is empty; Tab accepts it into the real input). Typing
  * over it, or accepting it and then deleting the text, does NOT dismiss it
@@ -97,12 +97,12 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
-import { recordTurn } from "@/app/store/token-usage";
 import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { hasPendingStreamFlushForBlock } from "../stream-scheduler";
 import { recentActivityEntries } from "../ambient-activity";
 import type { DocumentNode } from "../types";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import { META_SUGGESTION, META_SUGGESTION_GEN } from "@/app/store/meta-keys";
 
 export interface UseNextPromptSuggestionOptions {
     blockId: string;
@@ -129,8 +129,8 @@ let suggestionGenCounter = 0;
 function writeSuggestionMeta(blockId: string, suggestion: string | null): void {
     fireAndForget(() =>
         ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-            "term:next_prompt_suggestion": suggestion,
-            "term:next_prompt_suggestion_gen": ++suggestionGenCounter,
+            [META_SUGGESTION]: suggestion,
+            [META_SUGGESTION_GEN]: ++suggestionGenCounter,
         } as any)
     );
 }
@@ -191,23 +191,13 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
     // why the wire `generation` is Date.now() instead of this counter.
     let activeTurnId = 0;
     // Remembers whether the MOST RECENT Submitting was a hidden turn
-    // (memory-reinjection-controller.ts) — read by the turnJustEndedAtom
-    // effect below, which has no TurnPhase of its own to inspect (it's a
-    // bare edge-counter, per the module doc comment's own reasoning for why
-    // it exists instead of watching `Done` directly).
-    //
-    // This guard is NOT optional the way useAgentActivitySummary.ts's
-    // `phase.hidden` check alone would be here — reagentx P0 (second
-    // review round) on PR #3502: NextPromptSuggestionCommand's backend
-    // implementation (`read_recent_activity_digest`/`extract_digest_text`,
-    // crates/srv/src/server/app_api/session.rs) reads the raw FileStore
-    // OUTPUT TAIL directly — both the hidden turn's full composed
-    // <system-reminder> memory dump AND the model's real reply to it are
-    // sitting right there in it, with no concept of "hidden" on the
-    // backend side at all. Passing `hidden` through the RPC payload
-    // wouldn't help unless the backend read path also honored it (out of
-    // scope here) — the only fix available at this layer is to never issue
-    // the call in the first place for a hidden turn's own completion.
+    // (memory-reinjection-controller.ts), read by the turnJustEndedAtom effect
+    // below, which has no TurnPhase of its own to inspect. A hidden turn's end
+    // makes no call: there is no human turn to continue (#3502). Its content
+    // never reaches the activity this hook sends (the
+    // document leaves hidden turns out), and the server's fallback read of the
+    // output file refuses while a reinjection is in progress
+    // (`digest::is_hidden_reinjection_active`).
     let lastTurnWasHidden = false;
 
     createEffect(on(turnPhase, (phase) => {
@@ -240,9 +230,6 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
             { timeout: AMBIENT_PULL_TIMEOUT_MS },
         ).then((result) => {
             if (activeTurnId !== myTurnId) return; // superseded by a newer turn
-            if (result.tokens) {
-                recordTurn("ambient:next_prompt_suggestion", result.tokens);
-            }
             // Checked again: the turn's outcome may have settled while the call ran.
             if (result.suggestion && isComposerEmpty() && !turnWasCutShort(turnPhase())) {
                 writeSuggestionMeta(blockId, result.suggestion);

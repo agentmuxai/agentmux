@@ -684,7 +684,7 @@ impl Router {
         }
         // A stored value that is not a real title (a placeholder an older build
         // accepted, such as `(none yet)`) must not reach an OS notification either.
-        let stored_summary = meta("term:ambient_summary");
+        let stored_summary = meta(crate::ambient::title::META_TITLE);
         let stored_summary = if crate::ambient::validate::is_usable_title(&stored_summary) {
             stored_summary
         } else {

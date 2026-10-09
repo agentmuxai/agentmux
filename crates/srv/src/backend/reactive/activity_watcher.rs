@@ -43,6 +43,7 @@ use std::time::Duration;
 use tokio::time::interval;
 
 use crate::ambient::digest;
+use crate::ambient::title::{store_title, Replace, META_TITLE};
 use crate::ambient::validate::is_usable_title;
 use crate::backend::blockcontroller::core::broadcast_block_update;
 use crate::backend::blockcontroller::{get_block_controller_status, STATUS_RUNNING};
@@ -63,9 +64,6 @@ pub(crate) const MAX_ATTEMPTS: u32 = 3;
 /// Word budget for a recovered title: within the range the pane's own request
 /// uses (5 to 12, by pane width), so a recovered title looks like any other.
 const WORD_TARGET: u32 = 8;
-
-/// The block meta key the title lives in.
-pub(crate) const META_TITLE: &str = "term:ambient_summary";
 
 /// Per-block state the sweep keeps between ticks.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -89,23 +87,6 @@ pub(crate) fn skip_reason(has_title: bool, attempts: Attempts, output_size: i64)
         return Some("no new output");
     }
     None
-}
-
-/// Write `title` as the block's session title, unless a usable one appeared while
-/// the call ran (the pane's own request can win the race; it is the better
-/// source). Check and write happen in one transaction. `Ok(true)` when written.
-pub(crate) fn store_recovered_title(store: &Store, block_id: &str, title: &str) -> Result<bool, String> {
-    store
-        .with_tx(|tx| {
-            let mut block = tx.must_get::<Block>(block_id)?;
-            if is_usable_title(&obj::meta_get_string(&block.meta, META_TITLE, "")) {
-                return Ok(false);
-            }
-            block.meta.insert(META_TITLE.to_string(), serde_json::Value::String(title.to_string()));
-            tx.update(&mut block)?;
-            Ok(true)
-        })
-        .map_err(|e| e.to_string())
 }
 
 /// Run the recovery sweep. Never returns.
@@ -193,7 +174,8 @@ pub async fn run_agent_summary_loop(mstore: Arc<Store>, filestore: Arc<FileStore
                     );
                     return;
                 };
-                match store_recovered_title(&mstore, &block_id, &title) {
+                // The pane's own request can win the race; it is the better source.
+                match store_title(&mstore, &block_id, &title, Replace::IfEmpty, || true) {
                     Ok(true) => {
                         tracing::info!(block_id = %block_id, attempt, title = %title, "ambient: recovered a missing session title");
                         broadcast_block_update(&mstore, &event_bus, &block_id);
@@ -234,51 +216,5 @@ mod tests {
     fn attempts_are_bounded_while_the_title_stays_empty() {
         assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS - 1, 1), 2), None);
         assert_eq!(skip_reason(false, tried(MAX_ATTEMPTS, 1), 2), Some("attempts exhausted"));
-    }
-
-    fn store_with_block(meta: &[(&str, &str)]) -> Store {
-        let store = Store::open_in_memory().unwrap();
-        let mut block = Block {
-            oid: "b1".to_string(),
-            parentoref: String::new(),
-            version: 0,
-            runtimeopts: None,
-            stickers: None,
-            meta: obj::MetaMapType::new(),
-            subblockids: None,
-        };
-        for (k, v) in meta {
-            block.meta.insert(k.to_string(), serde_json::Value::String(v.to_string()));
-        }
-        store.insert(&mut block).unwrap();
-        store
-    }
-
-    fn title_of(store: &Store) -> String {
-        obj::meta_get_string(&store.must_get::<Block>("b1").unwrap().meta, META_TITLE, "")
-    }
-
-    #[test]
-    fn a_recovered_title_fills_an_empty_or_placeholder_title() {
-        for before in [&[][..], &[(META_TITLE, "(none yet)")][..]] {
-            let store = store_with_block(before);
-            assert_eq!(store_recovered_title(&store, "b1", "Fix the login race"), Ok(true));
-            assert_eq!(title_of(&store), "Fix the login race");
-        }
-    }
-
-    #[test]
-    fn a_title_that_appeared_while_recovery_ran_is_kept() {
-        let store = store_with_block(&[(META_TITLE, "Set up CI for the docs site")]);
-        assert_eq!(store_recovered_title(&store, "b1", "Something else"), Ok(false));
-        assert_eq!(title_of(&store), "Set up CI for the docs site");
-    }
-
-    #[test]
-    fn other_meta_survives_the_write() {
-        let store = store_with_block(&[("agentName", "AgentX")]);
-        store_recovered_title(&store, "b1", "Fix the login race").unwrap();
-        let meta = store.must_get::<Block>("b1").unwrap().meta;
-        assert_eq!(obj::meta_get_string(&meta, "agentName", ""), "AgentX");
     }
 }

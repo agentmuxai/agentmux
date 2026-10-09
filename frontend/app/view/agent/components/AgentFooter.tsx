@@ -41,6 +41,7 @@ import { isContainerPane, spliceComposerTokens } from "../hooks/useAgentDropAtta
 import { copyIntoWorkdir, type CopySource } from "@/app/drag/file-drop-actions";
 import type { AttachmentRef } from "@/types/rpc/AttachmentRef";
 import { shortcutFor } from "@/app/keybindings";
+import { META_SUGGESTION, META_SUGGESTION_GEN } from "@/app/store/meta-keys";
 
 function pickThinkingPhrase(_exclude?: string): string {
     return "Working";
@@ -810,8 +811,8 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // while its clear is still on its way.
     const visibleSuggestion = createMemo((): string | undefined => {
         const meta = props.viewModel?.blockAtom()?.meta;
-        const suggestion = meta?.["term:next_prompt_suggestion"] as string | undefined;
-        const suggestionGen = meta?.["term:next_prompt_suggestion_gen"] as number | undefined;
+        const suggestion = meta?.[META_SUGGESTION] as string | undefined;
+        const suggestionGen = meta?.[META_SUGGESTION_GEN] as number | undefined;
         return suggestion && suggestionGen !== suggestionGenMaskedAtSend() ? suggestion : undefined;
     });
     const placeholder = createMemo(() => {
@@ -1156,7 +1157,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
             // `placeholder` recompute — a plain variable write here would
             // silently do nothing.
             setSuggestionGenMaskedAtSend(
-                props.viewModel?.blockAtom()?.meta?.["term:next_prompt_suggestion_gen"] as number | undefined
+                props.viewModel?.blockAtom()?.meta?.[META_SUGGESTION_GEN] as number | undefined
             );
             writeComposerValue("");
             // A sent message supersedes any pending Esc-cleared snapshot —

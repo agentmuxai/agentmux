@@ -21,8 +21,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, type Acce
 import { useTick } from "@/app/hook/useTick";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { callBackendService } from "@/app/store/mos";
-import { recordTurn } from "@/app/store/token-usage";
+import { requestSubagentName } from "@/app/view/swarm/subagent-naming";
 import { ActivityRow } from "./ActivityRow";
 import { createPromotionClock } from "../activity/promotion-clock";
 import { applyRegistryOutcomes, backgroundTaskActivities } from "../activity/background-adapter";
@@ -217,9 +216,7 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
         if (!wasExpanded) {
             const a = activityById().get(id);
             if (a?.kind === "subagent" && a.subagent && !a.subagent.display_name) {
-                void callBackendService("subagent", "GenerateName", [id]).then((result: any) => {
-                    if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
-                });
+                requestSubagentName(id);
             }
             // Same, for every unnamed member of a workflow/name group. The
             // dock's roster (ActivityRow.tsx) renders all members flat, with
@@ -230,9 +227,7 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
             if (a?.kind === "subagent" && a.subagentGroup) {
                 for (const member of a.subagentGroup.members) {
                     if (member.display_name) continue;
-                    void callBackendService("subagent", "GenerateName", [member.agent_id]).then((result: any) => {
-                        if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
-                    });
+                    requestSubagentName(member.agent_id);
                 }
             }
         }

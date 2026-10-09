@@ -311,12 +311,14 @@ fn empty_summary_result() -> ActivitySummaryResult {
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
+    let event_bus = state.event_bus.clone();
 
     engine.register_typed(
         COMMAND_SESSION_ACTIVITY_SUMMARY,
         move |cmd: CommandActivitySummaryData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
+            let event_bus = event_bus.clone();
             async move {
                 // Admit through the Ambient Model Call gateway BEFORE doing any
                 // work: a stale (superseded) request does zero FileStore reads
@@ -325,7 +327,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // against cancellation, so a request superseded while queued for
                 // a permit never spawns the CLI at all. See
                 // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
-                let Some(slot) = ambient::call::admit(
+                let Some(mut slot) = ambient::call::admit(
                     &ambient::purpose::ACTIVITY_SUMMARY,
                     cmd.block_id.clone(),
                     cmd.generation,
@@ -364,7 +366,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 // accepted, such as `(none yet)`) counts as NO title: it is never fed
                 // back into the prompt, so it cannot sustain itself. The first draft
                 // fed it back as the "current title" and told the model to repeat it.
-                let stored_title = obj::meta_get_string(&block.meta, "term:ambient_summary", "");
+                let stored_title = obj::meta_get_string(&block.meta, ambient::title::META_TITLE, "");
                 let current_title = if ambient::validate::is_usable_title(&stored_title) {
                     stored_title
                 } else {
@@ -391,17 +393,30 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                 );
                 let limits = ambient::validate::title_limits(word_target);
                 let reply = slot
-                    .run(&target, &prompt, |raw| {
+                    .run_held(&target, &prompt, |raw| {
                         ambient::reply::judge_line(raw, |t| ambient::validate::accept_line(t, &limits))
                     })
                     .await;
 
-                // The frontend writes `term:ambient_summary` after receiving this
-                // response so it can discard results from turns that were
-                // superseded before they returned (belt-and-suspenders on top of
-                // the gateway's own cancellation). Empty text leaves the current
-                // title in place.
-                Ok(ActivitySummaryResult { summary: reply.text, tokens: reply.tokens })
+                // Stored here, not by the pane: one writer with the recovery sweep,
+                // in one transaction, so a rewording never replaces the title and
+                // neither writer overwrites what the other stored while its call ran
+                // (`ambient::title`). The slot is held until the write, so a newer
+                // message's request, admitted while this one ran, supersedes it and
+                // this older title is not stored after the newer one.
+                let mut stored = false;
+                if !reply.text.is_empty() {
+                    let still_current = || !slot.is_superseded();
+                    match ambient::title::store_title(&mstore, &cmd.block_id, &reply.text, ambient::title::Replace::IfNews, still_current) {
+                        Ok(true) => {
+                            stored = true;
+                            crate::backend::blockcontroller::core::broadcast_block_update(&mstore, &event_bus, &cmd.block_id);
+                        }
+                        Ok(false) => {}
+                        Err(e) => tracing::warn!(block_id = %cmd.block_id, error = %e, "session:activity_summary: could not store the title"),
+                    }
+                }
+                Ok(ActivitySummaryResult { summary: if stored { reply.text } else { String::new() }, tokens: reply.tokens })
             }
         },
     );

@@ -19,6 +19,7 @@ import { callBackendService } from "@/app/store/mos";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { createSignal, type Accessor } from "solid-js";
 import { mergeSubagentsPreservingIdentity, type ActiveSubagent } from "../../swarm/swarm-model";
+import { onSubagentNamed, withSubagentName } from "../../swarm/subagent-naming";
 import { createBackfillAwareTrigger, holdBackfillingRows } from "./backfill-tracker";
 import { createDebouncedRefresh } from "./debounced-refresh";
 
@@ -67,16 +68,7 @@ muxEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() })
 // `dispatch-source.ts`'s identical fix (reagent/codex, PR #2676) for the
 // sibling dispatch-card singleton, which this module predates.
 muxEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
-muxEventSubscribe({
-    eventType: "subagent:named",
-    handler: (event: MuxEvent) => {
-        const data = event?.data as { agentId?: string; displayName?: string } | undefined;
-        if (!data?.agentId || !data.displayName) return;
-        setAllSubagents((prev) =>
-            prev.map((s) => (s.agent_id === data.agentId ? { ...s, display_name: data.displayName! } : s))
-        );
-    },
-});
+onSubagentNamed((agentId, displayName) => setAllSubagents((prev) => withSubagentName(prev, agentId, displayName)));
 
 /** Every subagent currently known (active or recently completed), across the
  *  whole app. Callers filter by `parent_block_id` for their own pane. */
