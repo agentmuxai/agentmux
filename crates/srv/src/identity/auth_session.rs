@@ -199,15 +199,17 @@ impl AuthSessionManager {
         // find nothing to replace. The replaced CLIs are stopped after it.
         let superseded: Vec<String> = {
             let mut sessions = self.sessions.lock().unwrap();
+            // Every session for the directory: one already finished (say a
+            // success line was seen) can still have its CLI running.
             let superseded: Vec<String> = match exclusive_key.as_deref() {
                 Some(key) => sessions
                     .iter_mut()
                     .filter(|(_, s)| s.exclusive_key.as_deref() == Some(key))
-                    .filter_map(|(id, s)| {
+                    .map(|(id, s)| {
                         s.finish(AuthSessionStatus::Failed {
                             error: "replaced by a newer sign-in for the same account".to_string(),
-                        })
-                        .then(|| id.clone())
+                        });
+                        id.clone()
                     })
                     .collect(),
                 None => Vec::new(),
@@ -833,5 +835,21 @@ mod tests {
 
         assert!(!m.send_to_stdin(&older.session_id, "code".to_string()).await, "the replaced CLI keeps no stdin");
         assert!(m.process_refs.lock().unwrap().drain_tasks.get(&older.session_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn a_new_login_stops_the_cli_of_a_finished_session_for_the_same_dir() {
+        let m = mgr();
+        let dir = Some("/home/u/.agentmux/accounts/claude-1".to_string());
+        let done = m.start_session("claude".to_string(), dir.clone());
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        m.attach_process(&done.session_id, tokio::spawn(std::future::pending::<()>()), tx);
+        // Success was recorded, but its CLI hasn't exited yet.
+        m.finish_success(&done.session_id, String::new(), Some("acct".to_string()));
+
+        let _newer = m.start_session("claude".to_string(), dir);
+
+        assert!(m.process_refs.lock().unwrap().drain_tasks.get(&done.session_id).is_none(), "its CLI was stopped");
+        assert!(matches!(m.poll_session(&done.session_id).unwrap().status, AuthSessionStatus::Success { .. }), "a finished session keeps its result");
     }
 }
