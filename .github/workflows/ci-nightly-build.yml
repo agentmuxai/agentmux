@@ -58,8 +58,8 @@ jobs:
     # This was `!= 'windows-latest'`, i.e. ubuntu was advisory too — which
     # silently defeated the superset invariant this workflow exists to provide
     # (reagentx P1 on #3489). The `RPC bindings are current` step below is
-    # ubuntu-only on purpose (platform-independent output, and the script runs
-    # its own `cargo test`, not worth paying for three times), so under the old
+    # ubuntu-only on purpose (platform-independent output, so one leg is
+    # enough), so under the old
     # expression it ran on the one leg whose failures were swallowed: RPC
     # binding drift on `main` would have gone undetected exactly as it did
     # before this workflow was touched. A gate that cannot fail is not a gate.
