@@ -1,7 +1,7 @@
 # SPEC: Tower, a read-only task manager pane (CPU and memory per task)
 
 **Status:** active. The Tasks and Host views (§9 phases 1-3) are
-implemented (PR #4497); remote hosts (§8) are next. Name chosen by the
+implemented (#4498); remote hosts (§8) are next. Name chosen by the
 operator: **Tower**. Defaults taken as recommended (2026-10-08): CPU as a share
 of the whole machine with a per-core toggle; one AgentMux row that expands to
 its processes; one-time pairing for LAN viewing; internet hosts in a separate
