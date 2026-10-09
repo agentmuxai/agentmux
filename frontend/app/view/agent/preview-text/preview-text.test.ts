@@ -302,6 +302,15 @@ describe("output", () => {
         expect(chunksDoc(chunks).lines[1].spans).toEqual([{ text: "still red", classes: "text-ansi-red" }]);
     });
 
+    it("a chunk from another stream starts a new line instead of joining an open one", () => {
+        const chunks = [
+            { kind: "stdout", content: "out" },
+            { kind: "stderr", content: "err" },
+        ];
+        expect(chunksDoc(chunks).lines).toEqual(commandDoc("out", "err").lines);
+        expect(createChunkWindow(10)(chunks, () => false).total).toBe(2);
+    });
+
     it("a streamed line keeps the stream of the chunk that started it", () => {
         expect(
             chunksDoc([

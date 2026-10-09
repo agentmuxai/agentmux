@@ -70,8 +70,8 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
     // result list (Grep / Glob) reads from its first line; other text (logs,
     // command output) from its latest. A long line scrolls sideways.
     const termText = () => terminalText(props.result);
-    const lineDoc = createMemo(() => outputDoc(termText()?.trim() ?? "", { from: "head" }));
     const readFrom = (): "head" | "tail" => textReadOrder(props.tool);
+    const lineDoc = createMemo(() => outputDoc(termText()?.trim() ?? "", { from: readFrom() }));
     return (
         <Show
             when={termText() == null}

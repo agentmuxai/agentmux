@@ -11,7 +11,10 @@
 import { cleanup, fireEvent, render, waitFor } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ createBlock: vi.fn(async () => "new-block"), fsOpen: vi.fn<(client: unknown, req: { path: string }) => Promise<object>>(async () => ({})) }));
+const h = vi.hoisted(() => ({
+    createBlock: vi.fn(async () => "new-block"),
+    fsOpen: vi.fn<(client: unknown, req: { path: string }) => Promise<object>>(async () => ({})),
+}));
 vi.mock("@/app/store/block-layout-actions", () => ({ createBlock: h.createBlock }));
 vi.mock("@/app/store/rpc-api", () => ({ RpcApi: { FsOpenCommand: h.fsOpen } }));
 
@@ -110,7 +113,10 @@ describe("a Read of a PDF", () => {
     it("drops the document's base64", () => {
         const r = result();
         expect(JSON.stringify(r)).not.toContain("JVBERi0xLjQ=");
-        expect(r).toMatchObject({ content: "PDF file read: C:/docs/a.pdf (708.3KB)", file: { kind: "pdf", size: 725359 } });
+        expect(r).toMatchObject({
+            content: "PDF file read: C:/docs/a.pdf (708.3KB)",
+            file: { kind: "pdf", size: 725359 },
+        });
     });
 
     it("shows one line with the size and the pages asked for, with Open and Show in folder", () => {
@@ -131,10 +137,13 @@ describe("a Read of a PDF", () => {
 
 describe("a Read of a file unchanged since the last Read", () => {
     it("is one muted line, not the note highlighted as code", () => {
-        const r = translated("Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead.", {
-            type: "file_unchanged",
-            file: { filePath: "C:/a.ts" },
-        });
+        const r = translated(
+            "Wasted call — file unchanged since your last Read. Refer to that earlier tool_result instead.",
+            {
+                type: "file_unchanged",
+                file: { filePath: "C:/a.ts" },
+            }
+        );
         expect(r).toMatchObject({ file: { kind: "unchanged" } });
         const { container } = show(node({ params: { file_path: "C:/a.ts" }, result: r }));
         expect(container.querySelector(".agent-tool-read-facts")?.textContent).toBe("unchanged since the last Read");
@@ -153,7 +162,16 @@ describe("the CLI's notes on the end of a Read", () => {
         expect(code).not.toContain("system-reminder");
         expect(code).not.toContain("\t");
         // The range line still says the read was cut short.
-        expect(container.querySelector(".agent-tool-read-range")?.textContent).toBe("lines 1–2 of 9 · cut off at the token cap");
+        expect(container.querySelector(".agent-tool-read-range")?.textContent).toBe(
+            "lines 1–2 of 9 · cut off at the token cap"
+        );
+    });
+
+    it("a Markdown Read cut by the character cap says so", () => {
+        const text = `     1\t# Title\n     2\t${"x".repeat(1_000_100)}`;
+        const { container } = show(node({ params: { file_path: "C:/README.md" }, result: { content: text } }));
+        expect(container.querySelector(".agent-tool-read-md")).not.toBeNull();
+        expect(container.querySelector(".agent-preview-truncated")?.textContent).toContain("text cut here");
     });
 
     it("leaves a tag the file itself mentions", () => {
@@ -169,7 +187,9 @@ describe("an MCP tool's screenshot", () => {
             { type: "text", text: "captured window 3" },
         ]);
         expect(r).toEqual({ content: "captured window 3", images: [{ mediaType: "image/png", data: PNG }] });
-        const { container } = show(node({ tool: "Other", toolName: "mcp__agentmux__UIScreenshot", params: {}, result: r }));
+        const { container } = show(
+            node({ tool: "Other", toolName: "mcp__agentmux__UIScreenshot", params: {}, result: r })
+        );
         const img = container.querySelector<HTMLImageElement>("img.agent-tool-image")!;
         expect(img).not.toBeNull();
         expect(container.textContent).toContain("captured window 3");

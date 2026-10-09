@@ -217,7 +217,9 @@ export function chunksDoc(
         // A chunk that stands as whole lines (a collapsed spinner frame, which
         // comes back trimmed): it starts on a line of its own and ends it.
         const whole = opts.wholeLines?.has(chunk) ?? false;
-        if (whole) open = false;
+        // An open line continues only from the same stream: stdout "out" then
+        // stderr "err" are two lines, as in the finished output.
+        if (whole || (open && raw[raw.length - 1].kind !== chunk.kind)) open = false;
         const parts = chunk.content.split("\n");
         parts.forEach((part, i) => {
             if (i === 0 && open) raw[raw.length - 1].text += part;
@@ -266,6 +268,7 @@ const countNewlines = (s: string): number => {
 export function createChunkWindow(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
     let total = 0;
     let open = false;
+    let openKind = "";
     let counted = 0;
     let anchor: OutputChunk | undefined;
     return function window(
@@ -284,8 +287,10 @@ export function createChunkWindow(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
             const whole = isWhole(c);
             const ends = c.content.endsWith("\n");
             const k = countNewlines(c.content);
-            total += (open && !whole ? k : k + 1) - (ends ? 1 : 0);
+            const joins = open && !whole && c.kind === openKind; // as chunksDoc joins
+            total += (joins ? k : k + 1) - (ends ? 1 : 0);
             open = !whole && !ends;
+            openKind = c.kind;
         }
         let start = stream.length;
         let lineEnds = 0;

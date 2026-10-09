@@ -23,7 +23,7 @@ import { BashOutputViewer } from "../BashOutputViewer";
 import { CompactResult } from "../CompactResult";
 import { DiffViewer } from "../DiffViewer";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
-import { PreviewLines } from "../PreviewLines";
+import { PreviewLines, TruncatedMarker } from "../PreviewLines";
 import { ResultImages, resultImagesOf } from "../ResultImages";
 import { formatMarkdownPreview } from "../dedent";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "../output-cap";
@@ -89,6 +89,9 @@ function FilePreview(props: {
             </div>
             <Show when={props.doc.hidden}>
                 <OutputHiddenMarker hidden={props.doc.hidden!.count} noun="line" from="head" />
+            </Show>
+            <Show when={props.doc.truncated}>
+                <TruncatedMarker kept={props.doc.truncated!} />
             </Show>
         </Show>
     );

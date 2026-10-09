@@ -72,9 +72,7 @@ export function PreviewLines(props: PreviewLinesProps): JSX.Element {
             style={gutterWidth() > 0 ? { "--agent-preview-gutter": `${gutterWidth()}ch` } : undefined}
         >
             <Show when={props.doc.truncated === "tail"}>
-                <div class="agent-output-hidden-marker agent-preview-truncated">
-                    … earlier text cut: over a million characters
-                </div>
+                <TruncatedMarker kept="tail" />
             </Show>
             <Show when={props.doc.hidden?.from === "tail"}>
                 <OutputHiddenMarker hidden={props.doc.hidden!.count} noun="line" from="tail" />
@@ -110,10 +108,20 @@ export function PreviewLines(props: PreviewLinesProps): JSX.Element {
                 <OutputHiddenMarker hidden={props.doc.hidden!.count} noun="line" from="head" />
             </Show>
             <Show when={props.doc.truncated === "head"}>
-                <div class="agent-output-hidden-marker agent-preview-truncated">
-                    … text cut here: over a million characters
-                </div>
+                <TruncatedMarker kept="head" />
             </Show>
+        </div>
+    );
+}
+
+/** Where the character cap cut a preview's text: above the lines when the
+ *  latest text was kept, below them when the start was. */
+export function TruncatedMarker(props: { kept: "head" | "tail" }): JSX.Element {
+    return (
+        <div class="agent-output-hidden-marker agent-preview-truncated">
+            {props.kept === "tail"
+                ? "… earlier text cut: over a million characters"
+                : "… text cut here: over a million characters"}
         </div>
     );
 }
