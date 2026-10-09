@@ -152,7 +152,15 @@ pub fn launch(
     // A dead link ends ssh within about 45 s instead of the TCP timeout (§7.5).
     opt("ServerAliveInterval=15".into());
     opt("ServerAliveCountMax=3".into());
-    opt("SetEnv=TERM_PROGRAM=agentmux".into());
+    // Which AgentMux this is (`pane_env::build_info`) rides along with
+    // TERM_PROGRAM. sshd passes a SetEnv name on only if its AcceptEnv lists
+    // it, so a pane that runs a command also exports them itself, below.
+    let build_info = crate::backend::pane_env::build_info();
+    let set_env = std::iter::once("TERM_PROGRAM=agentmux".to_string())
+        .chain(build_info.iter().map(|(k, v)| format!("{k}={v}")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    opt(format!("SetEnv={set_env}"));
     if let Some(dir) = control_dir {
         opt("ControlMaster=auto".into());
         opt(format!("ControlPath={}", dir.join("%C").display()));
@@ -167,7 +175,8 @@ pub fn launch(
     args.push("--".into());
     args.push(dest.destination.clone());
     if let Some(remote) = remote_command(cmd, cmd_args, cwd) {
-        args.push(remote);
+        let exports: Vec<String> = build_info.iter().map(|(k, v)| format!("{k}={}", quote(v))).collect();
+        args.push(if exports.is_empty() { remote } else { format!("export {}; {remote}", exports.join(" ")) });
     }
     args
 }
@@ -340,11 +349,37 @@ mod tests {
                 "-o",
                 "ServerAliveCountMax=3",
                 "-o",
-                "SetEnv=TERM_PROGRAM=agentmux",
+                build_set_env().as_str(),
                 "--",
                 "asaf@area54"
             ]
         );
+    }
+
+    /// `remote` as `launch` sends it: behind the build's exports.
+    fn exported(remote: &str) -> String {
+        let exports: Vec<String> =
+            crate::backend::pane_env::build_info().iter().map(|(k, v)| format!("{k}={}", quote(v))).collect();
+        format!("export {}; {remote}", exports.join(" "))
+    }
+
+    fn build_set_env() -> String {
+        let mut s = "SetEnv=TERM_PROGRAM=agentmux".to_string();
+        for (k, v) in crate::backend::pane_env::build_info() {
+            s.push_str(&format!(" {k}={v}"));
+        }
+        s
+    }
+
+    #[test]
+    fn the_build_rides_along_and_a_command_exports_it_itself() {
+        let args = launch(&dest("area54", None), "claude", &[], "", None);
+        let set_env = args.iter().find(|a| a.starts_with("SetEnv=")).unwrap();
+        assert!(set_env.starts_with("SetEnv=TERM_PROGRAM=agentmux "));
+        assert!(set_env.contains(&format!("AGENTMUX_VERSION={}", env!("CARGO_PKG_VERSION"))));
+        let remote = args.last().unwrap();
+        assert!(remote.starts_with("export AGENTMUX_VERSION="), "{remote}");
+        assert!(remote.ends_with("; claude"), "{remote}");
     }
 
     #[test]
@@ -386,7 +421,7 @@ mod tests {
             Some(r"echo 'it'\''s $HOME'".into())
         );
         let args = launch(&dest("h", None), "uptime", &[], "/tmp", None);
-        assert_eq!(&args[args.len() - 3..], ["--", "h", "cd /tmp; uptime"]);
+        assert_eq!(&args[args.len() - 3..], ["--", "h", exported("cd /tmp; uptime").as_str()]);
     }
 
     #[test]
@@ -396,7 +431,7 @@ mod tests {
         assert!(!args.iter().any(|a| a == "-tt"));
         assert_eq!(
             &args[args.len() - 3..],
-            ["--", "area54", "cd ~/proj; make test"]
+            ["--", "area54", exported("cd ~/proj; make test").as_str()]
         );
     }
 
