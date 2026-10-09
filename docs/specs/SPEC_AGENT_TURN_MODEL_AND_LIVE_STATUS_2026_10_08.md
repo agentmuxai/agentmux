@@ -486,15 +486,7 @@ Rank 0 comes from `AgentBottomPanels`:
 
 The row's statuses are rank 1, and phase 2a's lead-in is rank 3. The presenter returns a `key`, and the row types a line out only when the key changes, so a running clock never re-types the line.
 
-**Not yet:**
-- §6.4's muted goal segment next to the primary line.
-- Quiet-tool detection.
-- The thinking headline.
-- Subagent step detail.
-- Test-runner progress.
-- Per-pane thresholds.
-
-These belong to phase 4. Live tuning of `TIMING` also waits for `muxlog` data.
+The muted goal, quiet-command detection, the thinking headline, subagent step detail and test progress came in phase 3b (§6.9).
 
 ### 6.9 As built (phase 3b: the richer sources)
 

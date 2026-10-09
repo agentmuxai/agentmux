@@ -7,7 +7,7 @@
  * runners only (cargo test, pytest, vitest, jest); anything else reads as no
  * progress, never a guess.
  *
- * docs/specs/SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §8 phase 4.
+ * docs/specs/SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.9.
  */
 
 /** Feed one output chunk; returns the progress line when it changed. */
