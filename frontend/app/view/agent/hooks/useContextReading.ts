@@ -68,7 +68,7 @@ export interface ContextMeterOptions {
  * The meter for one agent pane, wired to its pane model and block: the
  * reading, mirrored once the history restore completed, and a change of the
  * model setting dispatched as `ContextModelSwitched`. Kept here, not in
- * agent-view.tsx, which has a line budget (agent-view-size.test.ts).
+ * agent-view.tsx, which has a line budget (scripts/check-file-sizes.mjs).
  */
 export function useContextReading(
     blockId: string,

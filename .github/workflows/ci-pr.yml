@@ -213,11 +213,9 @@ jobs:
     # `~/.cargo/registry` (dependencies already downloaded from earlier work
     # in this same session) measured ~4 min. The first real CI run under
     # this job (2026-09-15, genuinely cold on both — no rust-cache hit at
-    # all) needed ~11 min for compile+test, then `check-rpc-bindings.sh`'s
-    # own separate `cargo test -p agentmux-srv export_bindings` invocation
-    # (a second relink of an already-large test binary) pushed it past 15
-    # min before finishing — that redundant-relink cost wasn't part of the
-    # local measurement above. 20 min leaves real headroom for a cold run
+    # all) needed ~11 min for compile+test, then the bindings step's own
+    # second `cargo test` (a relink of the srv test binary; gone since the
+    # step became --check-only) pushed it past 15 min before finishing. 20 min leaves real headroom for a cold run
     # while still bounding a genuine runner-pool hang (this incident's root
     # cause, separate from the CEF-scope issue this split fixes) to well
     # under GitHub's 360-minute default. Subsequent runs should be much
@@ -354,23 +352,22 @@ jobs:
       # migrated to register_typed so far (the set grows as the migration
       # proceeds; the gate does not change with it).
       #
-      # Lives in THIS job, not the docs job: it needs a Rust toolchain and a
-      # built agentmux-srv, both of which the steps above already provide, so
-      # regenerating costs almost nothing here.
+      # Lives in THIS job, not the docs job: the `cargo test` above already
+      # ran srv's export_bindings_* tests, which rewrote frontend/types/rpc, so
+      # --check-only only asks git whether that changed anything. Letting the
+      # script regenerate again ran `cargo test -p agentmux-srv`, which
+      # resolves features for a different package set and relinked the whole
+      # srv test binary: 3.4 min of a 10-12 min job
+      # (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md step 1).
       #
       # Ubuntu only. The output is platform-independent (.gitattributes
       # normalizes every text file to LF, so generated files cannot differ by
-      # line ending between platforms), so running it on both legs duplicated
-      # the work — and on Windows it was not almost-free: this script runs its
-      # OWN `cargo test -p agentmux-srv export_bindings`, a second relink of an
-      # already-large test binary, which this job's own timeout comment blames
-      # for pushing the first cold run past 15 minutes. Now that Windows no
-      # longer runs the suite, keeping this here would have reintroduced test
-      # execution on the leg we just removed it from.
+      # line ending between platforms), and --check-only needs the export tests
+      # to have just run, which only the ubuntu leg's `cargo test` does.
       # See scripts/check-rpc-bindings.sh.
       - name: RPC bindings are current
         if: matrix.os == 'ubuntu-latest'
-        run: bash scripts/check-rpc-bindings.sh
+        run: bash scripts/check-rpc-bindings.sh --check-only
 
       # Four checks the gate above CANNOT make: it verifies a generated file
       # exists per type and is current with the Rust, which a file can be while
@@ -519,6 +516,13 @@ jobs:
           # covers every commit pushed, not just the last one.
           UI_RATCHET_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: node scripts/check-ui-primitives.mjs
+
+      # Source files over 1,500 lines may only shrink, and no other file may
+      # cross that line. The sizes live in scripts/check-file-sizes.baseline,
+      # so raising one is a visible edit the PR has to explain
+      # (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md).
+      - name: File size ratchet
+        run: node scripts/check-file-sizes.mjs
 
       # Same posture as the two gates above: encodes a regression that already
       # happened (PR #3247). Deleting the bundled woff2 alone does not hold —
