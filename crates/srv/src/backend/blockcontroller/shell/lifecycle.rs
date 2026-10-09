@@ -389,20 +389,26 @@ impl ShellController {
     /// `cmd:interactive`, otherwise `cmd` through the platform shell. Either
     /// way with the pane's `cmd:env`, as an interactive shell gets it: a pane
     /// running a provider CLI's login needs the account's config directory.
+    ///
+    /// Spawned directly, an npm `.cmd` shim on Windows is resolved to what it
+    /// runs: the shim itself hangs under ConPTY (`resolve_cli_spawn_target`).
+    /// One that can't be read is refused, rather than started into a pane
+    /// that would never respond.
     fn command_process(
         &self,
         cmd_str: &str,
         cmd_args: &[String],
         interactive: bool,
         block_meta: &MetaMapType,
-    ) -> CommandBuilder {
+    ) -> Result<CommandBuilder, String> {
         let mut c = if !cmd_args.is_empty() || interactive {
             // Spawned directly (no shell wrapper), so args pass through intact.
-            // An npm `.cmd` shim on Windows is resolved to what it runs: the
-            // shim itself hangs under ConPTY (`resolve_cli_spawn_target`). One
-            // that can't be parsed is spawned as it is, as before.
-            let (program, prefix) = agentmux_common::resolve_cli_spawn_target(cmd_str)
-                .unwrap_or_else(|| (cmd_str.to_string(), Vec::new()));
+            let (program, prefix) = agentmux_common::resolve_cli_spawn_target(cmd_str).ok_or_else(|| {
+                format!(
+                    "can't run {cmd_str}: it's a command wrapper AgentMux can't read, and run as it is it would hang; \
+                     reinstall the tool, or run its own executable"
+                )
+            })?;
             let mut c = CommandBuilder::new(&program);
             c.args(&prefix);
             c.args(cmd_args);
@@ -417,7 +423,19 @@ impl ShellController {
             c
         };
         self.apply_cmd_env(&mut c, block_meta);
-        c
+        Ok(c)
+    }
+
+    /// Ends a start that was refused before anything ran: the pane is done,
+    /// with no exit code, and the controller can be started again.
+    fn refuse_start(&self, message: String) -> Result<(), String> {
+        let mut inner = self.inner.lock().unwrap();
+        Self::set_status(&mut inner, STATUS_DONE);
+        inner.proc_exit_code = -1;
+        inner.input_tx = None;
+        drop(inner);
+        self.unlock_run();
+        Err(message)
     }
 }
 
@@ -653,12 +671,7 @@ impl Controller for ShellController {
                     error = %e,
                     "admission gate: refusing interactive agent spawn under commit pressure"
                 );
-                let mut inner = self.inner.lock().unwrap();
-                Self::set_status(&mut inner, STATUS_DONE);
-                inner.proc_exit_code = -1;
-                inner.input_tx = None;
-                self.unlock_run();
-                return Err(format!(
+                return self.refuse_start(format!(
                     "memory full — not enough memory to start a new agent right now, free up memory and try again ({e})"
                 ));
             }
@@ -753,11 +766,17 @@ impl Controller for ShellController {
             // Direct spawn: cmd:args provided or cmd:interactive set.
             // Spawn the CLI directly (no sh -c wrapper) so args are passed correctly.
             tracing::info!(block_id = %self.block_id, cmd = %cmd_str, args = ?cmd_args, "direct spawn path");
-            self.command_process(&cmd_str, &cmd_args, interactive, &block_meta)
+            match self.command_process(&cmd_str, &cmd_args, interactive, &block_meta) {
+                Ok(c) => c,
+                Err(e) => return self.refuse_start(e),
+            }
         } else if !cmd_str.is_empty() {
             // "cmd" controller: run a specific command string via shell wrapper
             tracing::info!(block_id = %self.block_id, cmd = %cmd_str, "shell-wrapped spawn path");
-            self.command_process(&cmd_str, &cmd_args, interactive, &block_meta)
+            match self.command_process(&cmd_str, &cmd_args, interactive, &block_meta) {
+                Ok(c) => c,
+                Err(e) => return self.refuse_start(e),
+            }
         } else {
             // "shell" controller: interactive shell with AgentMux integration
             // On Windows: prefer pwsh (PowerShell 7), fall back to powershell.exe (5.x), then cmd.exe
@@ -2163,9 +2182,9 @@ mod global_cmd_env_tests {
         let ctrl = controller(None);
         let meta = block_env(&[("CLAUDE_CONFIG_DIR", "/accounts/a")]);
         let args = vec!["auth".to_string(), "login".to_string()];
-        let direct = ctrl.command_process("claude", &args, true, &meta);
+        let direct = ctrl.command_process("claude", &args, true, &meta).unwrap();
         assert_eq!(var(&direct, "CLAUDE_CONFIG_DIR").as_deref(), Some("/accounts/a"));
-        let wrapped = ctrl.command_process("claude auth login", &[], false, &meta);
+        let wrapped = ctrl.command_process("claude auth login", &[], false, &meta).unwrap();
         assert_eq!(var(&wrapped, "CLAUDE_CONFIG_DIR").as_deref(), Some("/accounts/a"));
     }
 
@@ -2196,11 +2215,26 @@ SETLOCAL
         )
         .unwrap();
         let args = vec!["login".to_string()];
-        let c = controller(None).command_process(&shim.to_string_lossy(), &args, true, &MetaMapType::new());
+        let c = controller(None).command_process(&shim.to_string_lossy(), &args, true, &MetaMapType::new()).unwrap();
         let argv: Vec<String> = c.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(argv[0], "node");
         assert!(argv[1].ends_with("cli.js"), "the shim's script, got {argv:?}");
         assert_eq!(argv[2], "login");
+    }
+
+    /// A wrapper that can't be read is refused rather than started into a
+    /// pane that would hang.
+    #[cfg(windows)]
+    #[test]
+    fn a_command_pane_refuses_a_wrapper_it_cannot_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let shim = dir.path().join("odd.cmd");
+        std::fs::write(&shim, "@echo off\r\nsomething-else %*\r\n").unwrap();
+        let err = controller(None)
+            .command_process(&shim.to_string_lossy(), &[], true, &MetaMapType::new())
+            .err()
+            .expect("an unreadable wrapper is refused");
+        assert!(err.contains("can't run"), "{err}");
     }
 
     #[test]
