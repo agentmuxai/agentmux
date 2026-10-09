@@ -1,7 +1,7 @@
 # Plan — faster CI tests, and the open architecture / DRY follow-ups
 
 **Date:** 2026-10-09
-**Status:** active — most steps merged, a few deferred with reasons (§5). Merged: step 1 (#4534), 2 (#4535), 3 (#4536), 4 (#4541), 5 (#4546), 8 (#4542), 9 (#4545), 10 (#4547 names, #4551 payloads), 12 (#4548), 13 (#4549), 14 (#4537), 15 (#4550), 17 in part (#4552, #4553), 20 (#4539). In review: 7 (#4543), 16 (#4540).
+**Status:** active — most steps merged, a few deferred with reasons (§5). Merged: step 1 (#4534), 2 (#4535), 3 (#4536), 4 (#4541), 5 (#4546), 8 (#4542), 9 (#4545), 10 (#4547 names, #4551 payloads), 12 (#4548), 13 (#4549), 14 (#4537), 15 (#4550), 17 in part (#4552, #4553), 20 (#4539). In review: 7 (#4543), 16 (#4540), 18 (#4556).
 **Author:** Agent5@narko
 **Builds on:**
 - [SPEC_CI_TEST_RUNNER_2026_06_22.md](SPEC_CI_TEST_RUNNER_2026_06_22.md) §6.4 (the serial-for-now decision this plan retires)
