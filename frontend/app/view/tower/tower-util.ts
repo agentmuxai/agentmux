@@ -33,6 +33,11 @@ export function formatCpu(fraction: number | undefined, cpuCount: number, mode: 
     return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
 
+/** "1 task", "3 tasks". */
+export function count(n: number, noun: string): string {
+    return `${n} ${noun}${n === 1 ? "" : noun.endsWith("s") ? "es" : "s"}`;
+}
+
 export function formatMem(bytes: number | undefined): string {
     return bytes == null ? "—" : formatBytes(bytes);
 }

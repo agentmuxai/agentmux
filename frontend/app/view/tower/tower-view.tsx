@@ -12,6 +12,7 @@ import clsx from "clsx";
 import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
 import type { TowerViewModel } from "./tower-model";
 import {
+    count,
     type CpuMode,
     filterProcesses,
     formatCpu,
@@ -138,8 +139,8 @@ function TasksTable(props: { model: TowerViewModel; cpu: (f: number | undefined)
     return (
         <>
             <div class="tower-summary">
-                {tasks().length} tasks · {totals().processes} processes · CPU {props.cpu(totals().cpu)} · Memory{" "}
-                {formatMem(totals().mem)}
+                {count(tasks().length, "task")} · {count(totals().processes, "process")} · CPU {props.cpu(totals().cpu)}{" "}
+                · Memory {formatMem(totals().mem)}
                 <span
                     class="tower-muted"
                     title={`Memory is each process's ${m.snapshot()?.memory_metric}: the part only it uses.`}
@@ -304,7 +305,7 @@ function HostTable(props: { model: TowerViewModel; cpu: (f: number | undefined) 
     return (
         <>
             <div class="tower-summary">
-                {host()?.processes.length ?? 0} processes · CPU {props.cpu(host()?.cpu)} · Memory{" "}
+                {count(host()?.processes.length ?? 0, "process")} · CPU {props.cpu(host()?.cpu)} · Memory{" "}
                 {formatMem(host()?.mem)}
                 <Show when={(host()?.unmeasured ?? 0) > 0}>
                     <span class="tower-muted">

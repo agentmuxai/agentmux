@@ -4,6 +4,7 @@
 import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
 import { describe, expect, it } from "vitest";
 import {
+    count,
     cpuPercent,
     filterProcesses,
     formatCpu,
@@ -50,6 +51,15 @@ describe("CPU", () => {
         expect(formatCpu(undefined, 8, "machine")).toBe("—");
         expect(formatMem(undefined)).toBe("—");
         expect(formatMem(1536 * 1024 * 1024)).toBe("1.5 GB");
+    });
+});
+
+describe("counts", () => {
+    it("are singular for one", () => {
+        expect(count(1, "task")).toBe("1 task");
+        expect(count(3, "task")).toBe("3 tasks");
+        expect(count(1, "process")).toBe("1 process");
+        expect(count(0, "process")).toBe("0 processes");
     });
 });
 
