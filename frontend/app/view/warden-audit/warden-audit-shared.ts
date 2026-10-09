@@ -6,10 +6,9 @@
 // Audit manager (shows everything) and the Supervisor manager (shows only
 // Supervisor-originated rows, filtered client-side on `outcome`).
 
+import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
 
-
-import { authHeaders } from "@/app/store/auth-headers";
 export const WARDEN_AUDIT_LIMIT = 50;
 
 export interface AuditEntry {

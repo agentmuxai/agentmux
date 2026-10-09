@@ -9,11 +9,11 @@
 // section (warden-audit-manager.tsx) instead of being bolted on here.
 
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { authHeaders } from "@/app/store/auth-headers";
 import { useTick } from "@/app/hook/useTick";
 
+import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import {ageMs, formatAge, WARDEN_REFRESH_MS} from "@/app/view/warden-shared/warden-shared";
+import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 import "./warden-host-manager.scss";

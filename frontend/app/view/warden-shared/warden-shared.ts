@@ -5,10 +5,8 @@
 // LAN, Audit, Supervisor) — split out of the original monolithic
 // warden.tsx rather than duplicated per-manager.
 
-
 /** Poll interval every Warden section's own refresh loop uses. */
 export const WARDEN_REFRESH_MS = 5_000;
-
 
 /** `ts` is a unix-millis timestamp from the Rust backend. */
 export function ageMs(ts: number, now: number): number {

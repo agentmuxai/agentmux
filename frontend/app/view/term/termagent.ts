@@ -11,7 +11,6 @@ import { fireAndForget } from "@/util/util";
 // Track registered agent IDs per block to detect changes
 export const registeredAgentsByBlock = new Map<string, string>();
 
-
 export async function registerAgent(agentId: string, blockId: string, tabId?: string): Promise<void> {
     try {
         const url = getWebServerEndpoint() + "/agentmux/reactive/register";
