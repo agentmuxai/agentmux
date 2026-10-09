@@ -208,16 +208,17 @@ jobs:
       # Superset invariant (protocol §3). Needs a Rust toolchain and a built
       # agentmux-srv, which this job already has, so it belongs here rather
       # than in the `gates` job. Ubuntu only: the generated output is
-      # platform-independent (.gitattributes normalizes to LF), and this
-      # script runs its own `cargo test -p agentmux-srv export_bindings`,
-      # which is not something to pay for three times across the matrix.
+      # platform-independent (.gitattributes normalizes to LF). The
+      # `cargo test --workspace` above already ran the export tests, so
+      # --check-only only checks the result instead of relinking srv's test
+      # binary for a second run.
       #
       # Ubuntu-only is only sound because the ubuntu leg BLOCKS — see the
       # `continue-on-error` note on this job. If that is ever loosened back to
       # advisory, this gate silently stops gating.
       - name: RPC bindings are current
         if: matrix.os == 'ubuntu-latest'
-        run: bash scripts/check-rpc-bindings.sh
+        run: bash scripts/check-rpc-bindings.sh --check-only
 
   frontend:
     name: vitest

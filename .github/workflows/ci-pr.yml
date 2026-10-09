@@ -354,9 +354,13 @@ jobs:
       # migrated to register_typed so far (the set grows as the migration
       # proceeds; the gate does not change with it).
       #
-      # Lives in THIS job, not the docs job: it needs a Rust toolchain and a
-      # built agentmux-srv, both of which the steps above already provide, so
-      # regenerating costs almost nothing here.
+      # Lives in THIS job, not the docs job: the `cargo test` above already
+      # ran srv's export_bindings_* tests, which rewrote frontend/types/rpc, so
+      # --check-only only asks git whether that changed anything. Letting the
+      # script regenerate again ran `cargo test -p agentmux-srv`, which
+      # resolves features for a different package set and relinked the whole
+      # srv test binary: 3.4 min of a 10-12 min job
+      # (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md step 1).
       #
       # Ubuntu only. The output is platform-independent (.gitattributes
       # normalizes every text file to LF, so generated files cannot differ by
@@ -370,7 +374,7 @@ jobs:
       # See scripts/check-rpc-bindings.sh.
       - name: RPC bindings are current
         if: matrix.os == 'ubuntu-latest'
-        run: bash scripts/check-rpc-bindings.sh
+        run: bash scripts/check-rpc-bindings.sh --check-only
 
       # Four checks the gate above CANNOT make: it verifies a generated file
       # exists per type and is current with the Rust, which a file can be while
