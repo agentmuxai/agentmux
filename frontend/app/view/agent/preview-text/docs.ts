@@ -226,9 +226,16 @@ export function chunksDoc(
         open = !whole && !chunk.content.endsWith("\n");
         if (chunk.content.endsWith("\n")) raw.pop(); // the empty piece after a final newline
     }
-    const lines: PreviewLine[] = raw.map(({ text, kind }) => {
+    // One decode over the joined lines, so colour carries from one line to the
+    // next as it does in the finished output. No joined line holds a "\n", so
+    // the decoded lines match `raw` one to one.
+    const capped = raw.map(({ text }) => {
         if (text.length > MAX_TOOL_OUTPUT_CHARS) cut = true;
-        const line = decodeTerminal(capChars(text, "tail"), OUTPUT_TAB_WIDTH).at(-1) ?? { text: "" };
+        return capChars(text, "tail");
+    });
+    const decoded = raw.length > 0 ? decodeTerminal(capped.join("\n"), OUTPUT_TAB_WIDTH) : [];
+    const lines: PreviewLine[] = decoded.map((line, i) => {
+        const kind = raw[i]?.kind;
         return kind === "stderr" || kind === "system" ? { ...line, stream: kind } : line;
     });
     const doc = capLines({ kind: "output" as const, lines }, opts.from ?? "tail");

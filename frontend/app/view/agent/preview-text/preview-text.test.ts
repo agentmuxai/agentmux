@@ -292,6 +292,16 @@ describe("output", () => {
         ).toEqual([{ text: "a" }]);
     });
 
+    it("streamed colour carries from one line to the next, as in the finished output", () => {
+        const chunks = [
+            { kind: "stdout", content: `${ESC}[31mred\n` },
+            { kind: "stdout", content: `still red${ESC}[0m\nplain\n` },
+        ];
+        const text = chunks.map((c) => c.content).join("");
+        expect(chunksDoc(chunks).lines).toEqual(outputDoc(text, { from: "tail" }).lines);
+        expect(chunksDoc(chunks).lines[1].spans).toEqual([{ text: "still red", classes: "text-ansi-red" }]);
+    });
+
     it("a streamed line keeps the stream of the chunk that started it", () => {
         expect(
             chunksDoc([
