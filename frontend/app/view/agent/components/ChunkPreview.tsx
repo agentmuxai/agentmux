@@ -12,11 +12,10 @@
  * `PreviewLines`, the same as the finished output
  * (docs/reports/REPORT_TOOL_PREVIEW_TEXT_PIPELINE_2026_10_08.md §3.3, §5.2).
  *
- * The order is the one PersistentShellBlock settled on (reagent P1, PR
- * #2330): drop bashwrap's starting notice, collapse spinner redraws over the
- * raw append-only stream, THEN window to the line budget (createChunkCapper),
- * and only then join — so a long stream costs the last 1000 lines' worth of
- * work per update, not the whole stream's.
+ * The order matters (#2330): drop bashwrap's starting notice, collapse
+ * spinner redraws over the raw append-only stream, THEN window to the line
+ * budget (createChunkCapper), and only then join — so a long stream costs the
+ * last 1000 lines' worth of work per update, not the whole stream's.
  */
 
 import { createMemo, type JSX } from "solid-js";
