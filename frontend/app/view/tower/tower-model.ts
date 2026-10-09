@@ -58,6 +58,8 @@ export class TowerViewModel {
     /** The machine `inFlight` asks (`""` for this computer). */
     private inFlightFor = "";
     private lastStart: [boolean, string, string] | undefined;
+    /** The machine that failed and waits for Retry. */
+    private stalledFor: string | null = null;
     private setStalled: Setter<boolean>;
     /** Another machine failed and polling stopped until `retry()`. */
     stalled: Accessor<boolean>;
@@ -110,6 +112,11 @@ export class TowerViewModel {
                 [() => ctx.visibility() === "active", this.effectiveView, this.connection, remoteFilter],
                 ([visible, view, connection, filter]) => {
                     this.stop();
+                    // A machine that failed stays stopped until Retry, whatever
+                    // else changes (visibility, filter): each try could reopen
+                    // ssh and ask about installing again.
+                    if (connection && this.stalledFor === connection) return;
+                    this.stalledFor = null;
                     if (visible) this.start(view === "host", connection, filter);
                 }
             )
@@ -149,6 +156,7 @@ export class TowerViewModel {
     retry(): void {
         const last = this.lastStart;
         if (!last) return;
+        this.stalledFor = null;
         this.stop();
         this.start(...last);
     }
@@ -205,8 +213,10 @@ export class TowerViewModel {
                 // Another machine that failed (unreachable, no helper for its
                 // platform, an install the user declined) is not asked again
                 // on its own: each try could open ssh and ask about installing.
-                if (connection) this.setStalled(true);
-                else again(RETRY_DELAY_MS);
+                if (connection) {
+                    this.stalledFor = connection;
+                    this.setStalled(true);
+                } else again(RETRY_DELAY_MS);
             }
         );
     }

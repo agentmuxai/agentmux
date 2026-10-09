@@ -268,6 +268,12 @@ describe("Tower", () => {
         expect(screen.getByRole("alert").textContent).toContain("armv7l");
         await vi.advanceTimersByTimeAsync(30_000);
         expect(sample).toHaveBeenCalledTimes(1);
+        // Hiding and showing the pane, or a new filter, doesn't try again.
+        setVisibility("dormant");
+        await vi.advanceTimersByTimeAsync(0);
+        setVisibility("active");
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(sample).toHaveBeenCalledTimes(1);
         fireEvent.click(screen.getByRole("button", { name: "Retry" }));
         await vi.advanceTimersByTimeAsync(0);
         expect(sample).toHaveBeenCalledTimes(2);

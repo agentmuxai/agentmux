@@ -26,10 +26,17 @@ use crate::fsproto::{ProcFrame, ProcRow};
 /// Most rows per list a request may ask for.
 pub const MAX_TOP: u32 = 500;
 
-/// One connection's sampler: the previous round's CPU times.
+/// A request this soon after the last measurement reuses it (with its own
+/// filter): two Tower panes on one host, whatever their filters, must not
+/// shrink each other's CPU window to milliseconds.
+pub const REUSE_WITHIN: std::time::Duration = std::time::Duration::from_millis(900);
+
+/// One connection's sampler: the previous round's CPU times, and the last
+/// measurement for requests that arrive within [`REUSE_WITHIN`] of it.
 #[derive(Default)]
 pub struct Sampler {
     rates: RateMeter<ProcKey>,
+    last: Option<(Instant, Vec<ProcInfo>, Vec<Option<f64>>)>,
 }
 
 impl Sampler {
@@ -40,12 +47,17 @@ impl Sampler {
     /// A frame of the host's processes now (module doc). A host whose
     /// process table can't be read answers with an empty frame.
     pub fn frame(&mut self, top: u32, filter: &str) -> ProcFrame {
-        let procs = agentmux_procstats::snapshot().unwrap_or_default();
-        let now = Instant::now();
-        let rates: Vec<Option<f64>> =
-            procs.iter().map(|p| p.cpu_ns.and_then(|ns| self.rates.sample(p.key(), ns, now))).collect();
-        self.rates.finish();
-        select(&procs, &rates, top, filter, agentmux_procstats::cpu_count() as u32)
+        let fresh = self.last.as_ref().is_some_and(|(at, _, _)| at.elapsed() < REUSE_WITHIN);
+        if !fresh {
+            let procs = agentmux_procstats::snapshot().unwrap_or_default();
+            let now = Instant::now();
+            let rates: Vec<Option<f64>> =
+                procs.iter().map(|p| p.cpu_ns.and_then(|ns| self.rates.sample(p.key(), ns, now))).collect();
+            self.rates.finish();
+            self.last = Some((now, procs, rates));
+        }
+        let (_, procs, rates) = self.last.as_ref().expect("measured above");
+        select(procs, rates, top, filter, agentmux_procstats::cpu_count() as u32)
     }
 }
 
@@ -166,15 +178,19 @@ mod tests {
         assert!(select(&procs, &rates, u32::MAX, "", 1).rows.len() <= 2 * MAX_TOP as usize);
     }
 
-    /// The real sampler: this test process is in its own host's frame, and a
-    /// second frame on the same sampler has rates.
+    /// The real sampler: this test process is in its own host's frame; a
+    /// request within the reuse window, whatever its filter, reuses the
+    /// measurement (no new round); a later one has rates.
     #[test]
     fn a_real_frame_and_its_rates() {
         let mut s = Sampler::new();
         let me = std::process::id();
         let first = s.frame(MAX_TOP, &me.to_string());
         assert!(first.rows.iter().any(|r| r.pid == me), "{first:?}");
-        std::thread::sleep(std::time::Duration::from_millis(50));
+        let other_filter = s.frame(MAX_TOP, "");
+        assert_eq!(other_filter.total, first.total, "the same measurement");
+        assert!(other_filter.rows.iter().all(|r| r.cpu_milli.is_none()), "still no previous round");
+        std::thread::sleep(REUSE_WITHIN + std::time::Duration::from_millis(50));
         let second = s.frame(MAX_TOP, &me.to_string());
         assert!(second.rows.iter().find(|r| r.pid == me).unwrap().cpu_milli.is_some());
         assert!(second.total > 1);
