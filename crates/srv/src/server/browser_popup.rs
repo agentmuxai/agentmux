@@ -232,8 +232,8 @@ mod tests {
     fn hosts_without_a_registrable_domain_match_only_themselves() {
         assert!(same_site("http://localhost:3000/a", "http://localhost:4000/b"));
         assert!(!same_site("http://localhost", "http://127.0.0.1"));
-        assert!(same_site("http://10.0.0.5/a", "http://10.0.0.5/b"));
-        assert!(!same_site("http://10.0.0.5", "http://10.0.0.6"));
+        assert!(same_site("http://192.0.2.5/a", "http://192.0.2.5/b"));
+        assert!(!same_site("http://192.0.2.5", "http://192.0.2.6"));
     }
 
     #[test]
