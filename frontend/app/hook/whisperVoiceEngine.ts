@@ -24,8 +24,8 @@
  */
 
 import { createSignalAtom } from "@/util/util";
+import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { getApi } from "@/app/store/app-api";
 import { getSettingsKeyAtom } from "@/app/store/global";
 import { computeRms } from "./audioLevel";
 import type { PaneVoiceHandle, VoiceSession } from "./useVoiceInput";
@@ -163,7 +163,7 @@ export function createWhisperVoiceSession(): VoiceSession {
             )}`;
             const resp = await fetch(url, {
                 method: "POST",
-                headers: { "X-AuthKey": getApi()?.getAuthKey?.() ?? "", "Content-Type": mime },
+                headers: authHeaders({ "Content-Type": mime }),
                 body: blob,
             });
             handle.setInterim("");

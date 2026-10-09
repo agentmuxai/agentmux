@@ -7,8 +7,9 @@
 // Supervisor-originated rows, filtered client-side on `outcome`).
 
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { authedHeaders } from "@/app/view/warden-shared/warden-shared";
 
+
+import { authHeaders } from "@/app/store/auth-headers";
 export const WARDEN_AUDIT_LIMIT = 50;
 
 export interface AuditEntry {
@@ -51,7 +52,7 @@ export interface AuditEntry {
 export async function fetchWardenAudit(): Promise<AuditEntry[]> {
     const resp = await fetch(
         getWebServerEndpoint() + `/agentmux/reactive/audit?limit=${WARDEN_AUDIT_LIMIT}`,
-        { headers: authedHeaders() },
+        { headers: authHeaders() },
     );
     if (!resp.ok) {
         throw new Error(`warden: GET /agentmux/reactive/audit → ${resp.status}`);
