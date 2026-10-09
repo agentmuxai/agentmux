@@ -299,6 +299,19 @@ describe("Tower", () => {
         );
     });
 
+    it("switching machines doesn't wait for another machine's slow request", async () => {
+        vi.useFakeTimers();
+        sample.mockImplementationOnce(() => new Promise(() => {}));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(1);
+        setMeta({});
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(2);
+        expect(sample).toHaveBeenLastCalledWith(expect.anything(), { host: false });
+    });
+
     it("polls only while visible", async () => {
         vi.useFakeTimers();
         renderTower();

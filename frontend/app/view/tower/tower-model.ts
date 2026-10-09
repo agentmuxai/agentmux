@@ -55,6 +55,8 @@ export class TowerViewModel {
     private generation = 0;
     /** The request in flight, settled or not: the next one waits for it. */
     private inFlight: Promise<void> = Promise.resolve();
+    /** The machine `inFlight` asks (`""` for this computer). */
+    private inFlightFor = "";
     private lastStart: [boolean, string, string] | undefined;
     private setStalled: Setter<boolean>;
     /** Another machine failed and polling stopped until `retry()`. */
@@ -158,7 +160,10 @@ export class TowerViewModel {
         // At most one request in flight: a new one (another filter, say)
         // waits for the last to answer. Another machine's helper measures CPU
         // since its previous request, so two back to back would read noise.
-        void this.inFlight.then(() => {
+        // Only the same machine waits: another one's request (perhaps ssh
+        // waiting on a password) mustn't hold up this one.
+        const wait = this.inFlightFor === connection ? this.inFlight : Promise.resolve();
+        void wait.then(() => {
             if (gen === this.generation) this.poll(gen, host, connection, filter);
         });
     }
@@ -177,6 +182,7 @@ export class TowerViewModel {
                   { timeout: REMOTE_TIMEOUT_MS }
               )
             : RpcApi.TowerSampleCommand(TabRpcClient, { host });
+        this.inFlightFor = connection;
         this.inFlight = request.then(
             () => undefined,
             () => undefined
