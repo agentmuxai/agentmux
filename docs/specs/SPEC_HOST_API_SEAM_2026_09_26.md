@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** implemented — all slices merged: PRs #3878 (1), #3879 (2), #3882 (3), #3886 (4), #3887 (5a), #3888 (5b). Every file outside the seam reaches the host through `AppApi`; the ratchet's PENDING list is empty. Slices 6 and 7 add guards for the capabilities nothing checked yet.
+**Status:** implemented — all slices merged: PRs #3878 (1), #3879 (2), #3882 (3), #3886 (4), #3887 (5a), #3888 (5b), #4516 (6), #4519 (7). Every file outside the seam reaches the host through `AppApi`; the ratchet's PENDING list is empty. Slices 6 and 7 guard the UI for the capabilities nothing checked.
 **Author:** Maricon
 
 ---
