@@ -81,10 +81,7 @@ impl PersistentSubprocessController {
     }
 
     /// Interval parameterized out of `spawn_status_heartbeat` so a test can
-    /// drive it with a short, real (not virtual-clock) interval instead of
-    /// waiting out `HEARTBEAT_SECS` — this crate doesn't enable tokio's
-    /// `test-util` feature (needed for `start_paused`/`time::advance`), and
-    /// adding it crate-wide for one test wasn't judged worth it.
+    /// drive it with a short interval instead of waiting out `HEARTBEAT_SECS`.
     pub(super) fn spawn_status_heartbeat_with_interval(&self, heartbeat_interval: tokio::time::Duration) {
         let inner = Arc::clone(&self.inner);
         let block_id = self.block_id.clone();
