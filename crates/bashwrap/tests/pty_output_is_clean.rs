@@ -25,20 +25,31 @@ async fn run(cmd: &str) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+/// The command's own lines: the output minus the exit prefix, the warning
+/// bashwrap prints when it runs without the app's streaming environment (as
+/// on CI), and blank lines.
+fn own_lines(out: &str) -> Vec<&str> {
+    out.lines()
+        .filter(|l| !l.starts_with("<exited ") && !l.starts_with("[bashwrap] ") && !l.trim().is_empty())
+        .collect()
+}
+
 /// The cursor-position reply ConPTY needs was written on every platform, and
 /// a Unix PTY echoed it back as `^[[1;1R` at the start of every result.
 #[tokio::test]
 async fn a_result_has_no_echoed_cursor_report() {
     let out = run("echo hello").await;
     assert!(!out.contains("1;1R"), "echoed cursor report in the output: {out:?}");
-    let body = out.split_once('\n').map(|(_, rest)| rest).unwrap_or(&out);
-    assert_eq!(body, "hello\n", "the command's own output, and nothing else, after the exit prefix");
+    assert_eq!(own_lines(&out), ["hello"], "{out:?}");
 }
 
 /// Programs that size their output to the terminal see 200 columns.
 #[tokio::test]
 async fn the_pty_is_wider_than_80_columns() {
     let out = run("python3 -c 'import shutil; print(shutil.get_terminal_size().columns)' 2>/dev/null || echo $COLUMNS").await;
-    let cols: u32 = out.lines().last().and_then(|l| l.trim().parse().ok()).unwrap_or_else(|| panic!("no column count in {out:?}"));
+    let cols: u32 = own_lines(&out)
+        .last()
+        .and_then(|l| l.trim().parse().ok())
+        .unwrap_or_else(|| panic!("no column count in {out:?}"));
     assert_eq!(cols, 200, "{out:?}");
 }
