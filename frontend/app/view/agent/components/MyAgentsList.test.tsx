@@ -456,7 +456,7 @@ describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_
 
     it('groups the legacy "standalone" agent_type with Host, not with unrecognized types (Codex P2 on PR #2789)', async () => {
         // "standalone" is the pre-container-feature default agent_type
-        // (default_agent_type() in backend/storage/agents.rs) — every
+        // (default_agent_type() in backend/storage/agents/mod.rs) — every
         // non-"container" value is treated as the host controller at
         // launch, so a "standalone" agent IS effectively a host agent.
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([

@@ -78,7 +78,7 @@ const FALLBACK_PROVIDER: &str = "claude";
 const FALLBACK_MODEL: &str = "anthropic";
 
 /// Same derivation `Store::bundle_provision_for_new_agent`
-/// (`backend/storage/agents.rs`) uses for brand-new agents — delegates to
+/// (`backend/storage/agents/definition.rs`) uses for brand-new agents — delegates to
 /// `Store::resolve_effective_vendor` so both paths agree on the
 /// `model_vendor_base_url` → `"custom"` rule (P2 fix, Codex review on PR
 /// #2587) rather than maintaining two copies of the same logic. Falls

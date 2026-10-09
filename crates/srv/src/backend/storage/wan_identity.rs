@@ -623,7 +623,7 @@ impl WanIdentityStore {
     }
 
     /// Delete the keys filed under each name (folded as the key tables fold).
-    /// The agent-delete purge (`storage/agents.rs`) passes exactly the names
+    /// The agent-delete purge (`storage/agents/name_keys.rs`) passes exactly the names
     /// it decided no other agent signs under, so a later agent that takes a
     /// name never inherits the dead agent's key. Returns rows removed.
     pub fn agent_keys_delete(&self, names: &[String]) -> Result<usize, StoreError> {
