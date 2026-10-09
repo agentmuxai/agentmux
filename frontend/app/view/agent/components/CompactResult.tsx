@@ -71,7 +71,6 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
     // command output) from its latest. A long line scrolls sideways.
     const termText = () => terminalText(props.result);
     const readFrom = (): "head" | "tail" => textReadOrder(props.tool);
-    const lineDoc = createMemo(() => outputDoc(termText()?.trim() ?? "", { from: readFrom() }));
     return (
         <Show
             when={termText() == null}
@@ -79,7 +78,7 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
                 <div class="agent-tool-compact-result">
                     <Show
                         when={termText()!.trim().includes("\n")}
-                        fallback={<PreviewLines doc={lineDoc()} class="agent-tool-compact-line" />}
+                        fallback={<OneLine text={termText()!} from={readFrom()} />}
                     >
                         <TerminalOutput text={termText()!} from={readFrom()} />
                     </Show>
@@ -90,6 +89,13 @@ export const CompactResult = (props: CompactResultProps): JSX.Element => {
         </Show>
     );
 };
+
+/** A one-line text result. Its own component, so the doc is only built on
+ *  this path; a multi-line body is decoded once, by TerminalOutput. */
+function OneLine(props: { text: string; from: "head" | "tail" }): JSX.Element {
+    const doc = createMemo(() => outputDoc(props.text.trim(), { from: props.from }));
+    return <PreviewLines doc={doc()} class="agent-tool-compact-line" />;
+}
 
 function StructuredResult(props: CompactResultProps): JSX.Element {
     const [expanded, setExpanded] = createSignal(rendersFileList(props.tool));
