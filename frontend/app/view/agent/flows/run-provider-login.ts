@@ -462,6 +462,9 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
 
     if (!p.skipTier1) {
         const tier1 = await forceProviderLogin({ ...p, authEnv: authEnvForTiers });
+        // Another surface's login holds the slot now: leave it alone (no
+        // cancel, no fallback), as the awaited path does when superseded.
+        if (tier1 === "superseded") return "inapp-timeout";
         if (tier1 === "opened") {
             if (!(p.awaitTier1Completion && minted)) {
                 // Default contract: return immediately; the caller shows the

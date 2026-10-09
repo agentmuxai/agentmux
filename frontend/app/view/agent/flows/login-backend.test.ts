@@ -85,7 +85,7 @@ describe("srv login backend", () => {
         const first = backend.start(START);
         await expect(backend.start(START)).resolves.toEqual({ url: "https://u" });
         releaseFirst();
-        await expect(first).resolves.toBeNull();
+        await expect(first).resolves.toEqual({ superseded: true });
         expect(rpc.AuthCancelCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "slow" });
         await backend.submitCode("claude", "abc");
         expect(rpc.AuthSubmitCallbackCommand).toHaveBeenCalledWith(expect.anything(), {
@@ -103,7 +103,7 @@ describe("srv login backend", () => {
         const started = backend.start(START);
         await backend.cancel();
         release();
-        await expect(started).resolves.toBeNull();
+        await expect(started).resolves.toEqual({ superseded: true });
         expect(rpc.AuthCancelCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "late" });
         expect(await backend.status()).toMatchObject({ active: false });
     });
@@ -119,7 +119,7 @@ describe("srv login backend", () => {
         rpc.AuthStartCommand.mockResolvedValueOnce({ sessionId: "s2", authUrl: "https://new" });
         await expect(backend.start(START)).resolves.toEqual({ url: "https://new" });
         releasePoll();
-        await expect(first).resolves.toBeNull();
+        await expect(first).resolves.toEqual({ superseded: true });
         await backend.submitCode("claude", "abc");
         expect(rpc.AuthSubmitCallbackCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "s2", callbackUrl: "abc" });
     });

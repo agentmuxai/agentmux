@@ -56,9 +56,11 @@ export interface ForceLoginParams {
  * scrapeable OAuth URL — nothing was opened, and the CALLER must surface a
  * user-visible error pointing at the reliable recovery paths (the silent
  * warn-only branch here is how "Login Again" became a dead button —
- * retro-agent-auth-relogin-noop-2026-07-01 §5.1).
+ * retro-agent-auth-relogin-noop-2026-07-01 §5.1). "superseded": a newer login
+ * (or a cancel) took the login slot while this one started; the slot isn't this
+ * caller's any more, so it must not cancel it or fall back.
  */
-export type ForceLoginOutcome = "opened" | "no-url";
+export type ForceLoginOutcome = "opened" | "no-url" | "superseded";
 
 export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLoginOutcome> {
     const { provider, cliPath, authEnv, setAuthUrl, log, isCancelled } = p;
@@ -73,7 +75,12 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
         requiresTty: provider.requiresLoginTty ?? false,
         authConfigDirEnvVar: provider.authConfigDirEnvVar,
     });
-    const url = started?.url ?? null;
+    if (started && "superseded" in started) {
+        log("auth", "a newer sign-in replaced this one");
+        return "superseded";
+    }
+    const signIn = started && "url" in started ? started : null;
+    const url = signIn?.url ?? null;
 
     if (url) {
         if (isCancelled?.()) {
@@ -90,8 +97,8 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
             log("auth", "login was cancelled before a browser could be opened", "warn");
             return "opened";
         }
-        if (started?.deviceCode) {
-            log("auth", `enter the code ${started.deviceCode} on the sign-in page`);
+        if (signIn?.deviceCode) {
+            log("auth", `enter the code ${signIn.deviceCode} on the sign-in page`);
         }
         setAuthUrl(url);
         const opened = await openOAuthBrowserPane(url);

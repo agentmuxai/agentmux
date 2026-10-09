@@ -40,10 +40,14 @@ export interface LoginUrl {
     deviceCode?: string;
 }
 
+/** A start that a newer start (or a cancel) overtook: the login slot is no longer this caller's. */
+export const SUPERSEDED = { superseded: true } as const;
+
 export interface LoginBackend {
-    /** Start a login; resolves with where to sign in, or null if nothing
-     *  appeared in the capture window. The login keeps running for `submitCode`. */
-    start(p: LoginStart): Promise<LoginUrl | null>;
+    /** Start a login; resolves with where to sign in, `SUPERSEDED` if a newer
+     *  start or a cancel overtook it, or null if nothing appeared in the
+     *  capture window. The login keeps running for `submitCode`. */
+    start(p: LoginStart): Promise<LoginUrl | typeof SUPERSEDED | null>;
     /** Deliver a pasted code (or callback URL) to the running login. */
     submitCode(providerId: string, code: string): Promise<void>;
     status(): Promise<LoginStatus>;
@@ -110,15 +114,15 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
                 authEnv: p.authEnv,
                 requiresTty: p.requiresTty,
             });
-            if (await overtaken(mine, id)) return null;
+            if (await overtaken(mine, id)) return SUPERSEDED;
             sessionId = id;
             if (authUrl) return { url: authUrl };
             const deadline = Date.now() + URL_CAPTURE_MS;
             while (Date.now() < deadline) {
                 await sleep(URL_POLL_MS);
-                if (await overtaken(mine, id)) return null;
+                if (await overtaken(mine, id)) return SUPERSEDED;
                 const s = await rpc.AuthPollCommand(client, { sessionId: id });
-                if (await overtaken(mine, id)) return null;
+                if (await overtaken(mine, id)) return SUPERSEDED;
                 if (s.status === "url-available") return { url: s.authUrl };
                 if (s.status === "code-emitted") return { url: s.verificationUrl, deviceCode: s.deviceCode };
                 if (s.status === "success" || s.status === "failed") return null;
