@@ -24,6 +24,20 @@ pub struct SiteLimits {
     pub reports: Mutex<std::collections::HashSet<String>>,
 }
 
+/// A pane's site list as its block carries it (`browser:allowed_origins`,
+/// which only srv writes), passed with `browser_pane_create` so the host has
+/// it before the pane's first load: srv's own push can come after it. Only
+/// fills a gap: a list srv already sent wins, and its next push replaces this.
+pub(crate) fn limit_before_create(limits: &SiteLimits, pane: &str, list: Option<&serde_json::Value>) {
+    let Some(entries) = list.and_then(|v| v.as_array()) else { return };
+    let entries: Vec<String> = entries.iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+    if let Ok(list) = agentmux_common::allowed_origins::parse_list(&entries) {
+        if !list.is_empty() {
+            limits.lists.lock().entry(pane.to_string()).or_insert(list);
+        }
+    }
+}
+
 impl AgentMuxHandler {
     /// The pane whose site list governs `browser`, and the id srv loads in on
     /// Allow: a pane is both; a popup window is governed by its opener and
@@ -119,5 +133,26 @@ fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, t
     if let Err(e) = spawned {
         tracing::warn!(error = %e, "couldn't start the browser-off-list thread");
         state.site_limits.reports.lock().remove(&pane);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_list_given_at_creation_fills_a_gap_and_never_replaces_srvs() {
+        let limits = SiteLimits::default();
+        limit_before_create(&limits, "p1", Some(&serde_json::json!(["example.com"])));
+        assert_eq!(limits.lists.lock().get("p1").unwrap(), &vec!["https://example.com".to_string()]);
+        // srv's list (here, after an Allow) is never replaced by it.
+        limits.lists.lock().insert("p2".into(), vec!["https://a.example".into(), "https://b.example".into()]);
+        limit_before_create(&limits, "p2", Some(&serde_json::json!(["a.example"])));
+        assert_eq!(limits.lists.lock().get("p2").unwrap().len(), 2);
+        // Nothing given, empty, or not a valid list: no entry.
+        for v in [None, Some(serde_json::json!([])), Some(serde_json::json!(["ftp://x"])), Some(serde_json::json!("x"))] {
+            limit_before_create(&limits, "p3", v.as_ref());
+        }
+        assert!(!limits.lists.lock().contains_key("p3"));
     }
 }

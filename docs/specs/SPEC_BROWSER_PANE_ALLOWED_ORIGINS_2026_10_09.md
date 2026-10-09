@@ -78,6 +78,9 @@ The list belongs to the agent's hold on the pane:
   pane mapped to its root. It pushes `{pane: list}` for every member to the host with the
   owned-pane set (`browser_host_sync`), and pushes at once, before the pane opens, when a
   popup pane joins a chain, so its first navigation is already checked.
+  The frontend also passes a pane's list (from its `browser:allowed_origins`) with
+  `browser_pane_create`, and the host takes it if srv's push hasn't arrived yet, so even a redirect
+  during the very first load is checked; srv's next push replaces it.
 - **Host:** `on_before_browse` runs synchronously and can't wait for an answer. For a main
   frame whose governing pane (the pane, or a popup window's opener) has a list and a target off
   it, it cancels the navigation and posts `/api/v1/host/browser_navigation` (host token) on a

@@ -47,7 +47,7 @@ globalThis.ResizeObserver ??= class {
 
 function Mount(props: { blockId: string }) {
     let ph: HTMLDivElement | undefined;
-    const model = { blockId: props.blockId, closed: false, urlAtom: () => "https://agentmux.ai/" } as any;
+    const model = { blockId: props.blockId, closed: false, urlAtom: () => "https://agentmux.ai/", allowedOriginsAtom: () => [] } as any;
     usePaneRectSync({ model, placeholderRef: () => ph, windowLabel: "main", diag: () => {} });
     return <div ref={ph} />;
 }

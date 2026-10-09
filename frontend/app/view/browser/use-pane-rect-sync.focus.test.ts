@@ -31,7 +31,7 @@ vi.stubGlobal(
 describe("usePaneRectSync — claim focus once the page is created", () => {
     it("claims focus for its block after browser_pane_create resolves", async () => {
         const giveFocus = vi.fn(() => true);
-        const model = { blockId: "b1", closed: false, giveFocus, urlAtom: () => "", onError: vi.fn(), onLoad: vi.fn() } as any;
+        const model = { blockId: "b1", closed: false, giveFocus, urlAtom: () => "", allowedOriginsAtom: () => [], onError: vi.fn(), onLoad: vi.fn() } as any;
         const placeholder = document.createElement("div");
         document.body.appendChild(placeholder);
 

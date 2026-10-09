@@ -161,7 +161,9 @@ declare global {
      * Events (`browser-pane-*`, `pane-media-*`) arrive through `AppApi.listen`.
      */
     type BrowserPaneHostApi = {
-        create(blockId: string, url: string, windowLabel: string, rect: HostRect): Promise<void>;
+        /** `allowedOrigins`: the pane's site list (`browser:allowed_origins`), so the
+         *  host has it before the first load (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6). */
+        create(blockId: string, url: string, windowLabel: string, rect: HostRect, allowedOrigins?: string[]): Promise<void>;
         resize(blockId: string, rect: HostRect): Promise<void>;
         /** Move several of this window's panes in one step; resolves once they have moved. */
         setRects(windowLabel: string, rects: ({ blockId: string } & HostRect)[]): Promise<void>;
