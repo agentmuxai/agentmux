@@ -47,7 +47,8 @@ export function machineOptions(current: string, remotes: RemoteRecord[]): Select
     for (const r of remotes) {
         if (r.kind !== "ssh" && r.kind !== "wsl") continue;
         const os = r.platform?.os;
-        const supported = r.kind === "wsl" || !os || os === "Linux" || os === "Darwin";
+        // The Remotes list reports `os` lowercased: `linux`, `macos`, else uname -s.
+        const supported = r.kind === "wsl" || !os || os === "linux" || os === "macos";
         options.push({
             value: r.name,
             label: supported ? r.name : `${r.name} (${os}: not supported)`,

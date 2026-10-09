@@ -15,9 +15,10 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...args: unknown[]) => reveal(...args) }));
 const remoteRecords = [
-    { name: "build-box", kind: "ssh", platform: { os: "Linux", arch: "x86_64" } },
+    { name: "build-box", kind: "ssh", platform: { os: "linux", arch: "x86_64" } },
+    { name: "mac-mini", kind: "ssh", platform: { os: "macos", arch: "arm64" } },
     { name: "wsl://Ubuntu", kind: "wsl", platform: null },
-    { name: "win-server", kind: "ssh", platform: { os: "Windows", arch: "x86_64" } },
+    { name: "win-server", kind: "ssh", platform: { os: "mingw64_nt-10.0", arch: "x86_64" } },
 ];
 vi.mock("@/app/store/remotes-store", () => ({ remotesList: () => () => remoteRecords }));
 
@@ -204,6 +205,7 @@ describe("Tower", () => {
         expect(options).toEqual([
             ["", false],
             ["build-box", false],
+            ["mac-mini", false],
             ["wsl://Ubuntu", false],
             ["win-server", true],
         ]);
