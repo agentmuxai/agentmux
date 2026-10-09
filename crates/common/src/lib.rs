@@ -14,6 +14,7 @@ pub mod ipc;
 pub mod jekt_sign;
 pub mod layout_types;
 pub mod log_retention;
+pub mod login_pty;
 pub mod pagefile;
 pub mod platform_name;
 pub mod popup_rules;

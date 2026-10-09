@@ -433,7 +433,8 @@ fn spawn_auth_cli_pty(
     let pty_system = native_pty_system();
     let pair = match pty_system.openpty(PtySize {
         rows: 24,
-        cols: 80,
+        // Wide enough that the CLI never wraps its OAuth URL (`LOGIN_PTY_COLS`).
+        cols: agentmux_common::login_pty::LOGIN_PTY_COLS,
         pixel_width: 0,
         pixel_height: 0,
     }) {
@@ -460,10 +461,28 @@ fn spawn_auth_cli_pty(
         }
     };
 
-    let mut cmd = CommandBuilder::new(&cli_path);
+    // On Windows, resolve past the npm `.cmd`/`.bat` shim: CommandBuilder on the
+    // raw shim path goes through `cmd.exe /c`, which hangs under a real ConPTY
+    // (the desktop host's login PTY found this first). `None` means the shim
+    // matched no known npm shape: fail rather than fall back to the same hang.
+    #[cfg(windows)]
+    let (spawn_program, spawn_prefix_args) = match agentmux_common::resolve_cli_spawn_target(&cli_path) {
+        Some(target) => target,
+        None => {
+            mgr.finish_failure(&session_id, format!("could not resolve .cmd/.bat shim for spawn: {cli_path}"));
+            mgr.detach_process(&session_id);
+            return;
+        }
+    };
+    #[cfg(not(windows))]
+    let (spawn_program, spawn_prefix_args) = (cli_path.clone(), Vec::<String>::new());
+    let mut cmd = CommandBuilder::new(&spawn_program);
     // Same as the non-PTY path above: CommandBuilder seeds from vars_os(), so
     // without this the provider CLI inherits the full instance identity.
     crate::backend::pane_env::sanitize_external_pty_command(&mut cmd);
+    for a in &spawn_prefix_args {
+        cmd.arg(a);
+    }
     for a in &auth_login_args {
         cmd.arg(a);
     }
@@ -502,7 +521,7 @@ fn spawn_auth_cli_pty(
         }
     };
     let writer = match pair.master.take_writer() {
-        Ok(w) => w,
+        Ok(w) => Arc::new(std::sync::Mutex::new(w)),
         Err(e) => {
             tracing::error!(session_id = %session_id, error = %e, "auth.spawn (PTY): take_writer failed");
             mgr.finish_failure(&session_id, format!("PTY writer: {e}"));
@@ -518,11 +537,23 @@ fn spawn_auth_cli_pty(
         // wrap each write in `block_in_place` so the blocking IO
         // doesn't starve the tokio reactor when the PTY input buffer
         // is full.
+        // Answers the cursor-position query (`ESC[6n`) Claude blocks on (issue
+        // #2429) through the same writer, from the drain's thread.
+        let dsr_writer = Arc::clone(&writer);
+        let answer_dsr = move || {
+            use std::io::Write;
+            if let Ok(mut w) = dsr_writer.lock() {
+                let _ = w.write_all(agentmux_common::login_pty::DSR_CURSOR_POSITION_REPLY);
+                let _ = w.flush();
+            }
+        };
         let stdin_writer_handle = tokio::spawn(async move {
-            let mut writer = writer;
             while let Some(line) = stdin_rx.recv().await {
                 let res = tokio::task::block_in_place(|| {
                     use std::io::Write;
+                    let Ok(mut writer) = writer.lock() else {
+                        return Err(std::io::Error::other("PTY writer lock poisoned"));
+                    };
                     writer
                         .write_all(line.as_bytes())
                         .and_then(|_| writer.write_all(b"\n"))
@@ -564,7 +595,9 @@ fn spawn_auth_cli_pty(
         let success_transitioned_drain = Arc::clone(&success_transitioned);
         let drain_handle = tokio::task::spawn_blocking(move || {
             use std::io::BufRead;
-            let mut reader = std::io::BufReader::new(reader);
+            let mut reader = std::io::BufReader::new(agentmux_common::login_pty::DsrRespondingReader::new(
+                reader, answer_dsr,
+            ));
             let mut line = String::new();
             // The detached confirm/persist task's JoinHandle, populated
             // when the drain matches LoginSuccess. Returned to outer so
@@ -754,6 +787,9 @@ fn spawn_auth_cli_pty(
     mgr.attach_process(&session_id, handle, stdin_tx);
 }
 
+/// How long a provider's auth-status check may take (`confirm_authenticated`).
+const AUTH_CHECK_TIMEOUT_SECS: u64 = 30;
+
 /// Run the provider's auth-check subcommand and return true if it
 /// exits 0. Failure modes (binary missing, network error, etc.) are
 /// all treated as "not authenticated" — the caller will then either
@@ -765,8 +801,11 @@ async fn confirm_authenticated(
     env: &std::collections::HashMap<String, String>,
 ) -> bool {
     use std::process::Stdio;
-    use tokio::process::Command;
-    let mut c = Command::new(cli_path);
+    // Through the shim parser (`make_cli_cmd`): a raw npm `.cmd` shim spawned
+    // with piped stdio can drop its arguments or never run the CLI, which
+    // would report a good login as failed. It also sets CREATE_NO_WINDOW, so
+    // the probe, polled during an auth flow, flashes no console.
+    let mut c = agentmux_common::make_cli_cmd(cli_path);
     // The third spawn of this same provider CLI in this file — the auth-check
     // poll driven from the OAuth drain loop. Same strict policy as the other
     // two. (ReAgent P0, round 4, on #3326.)
@@ -777,14 +816,9 @@ async fn confirm_authenticated(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    // CREATE_NO_WINDOW: this status probe is polled in a drain loop during an
-    // auth flow — without the flag each poll flashes a console. See cli.rs.
-    #[cfg(windows)]
-    {
-        c.no_window();
-    }
-    match c.status().await {
-        Ok(s) => s.success(),
-        Err(_) => false,
+    // A status check that hangs counts as not logged in (and is killed on drop).
+    match tokio::time::timeout(std::time::Duration::from_secs(AUTH_CHECK_TIMEOUT_SECS), c.status()).await {
+        Ok(Ok(s)) => s.success(),
+        _ => false,
     }
 }
