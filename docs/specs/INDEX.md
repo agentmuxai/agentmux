@@ -604,6 +604,7 @@ partial list.
 | [`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24`](SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md) | SPEC: Pane Tab contract v1 — one general interface for every pane tab (and future user-loaded widgets), starting with the Help "ghost" fix |
 | [`SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11`](SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11.md) | SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification |
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
+| [`SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09`](SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md) | SPEC: One provider-login implementation, in srv |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
 | [`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06`](SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md) | SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings |

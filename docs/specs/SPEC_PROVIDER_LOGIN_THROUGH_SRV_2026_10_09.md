@@ -1,7 +1,7 @@
 # SPEC: One provider-login implementation, in srv
 
 **Date:** 2026-10-09
-**Status:** proposed
+**Status:** active — L1 (srv's login PTY at the host's level: DSR answer, width, shim; URL matching without terminal codes) in #4523. L2–L5 remain.
 **Author:** Agent4
 **Builds on:** `PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` (one login orchestration in the frontend), `SPEC_PRE_LAUNCH_OAUTH_FLOW_2026_05_14.md` (srv's `auth.*`), `SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md` (the host's capture), `SPEC_SRV_HEADLESS_MODE_2026_09_26.md`.
 

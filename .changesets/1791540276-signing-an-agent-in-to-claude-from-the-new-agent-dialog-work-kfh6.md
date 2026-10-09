@@ -1,5 +1,4 @@
 ---
 type: patch
 ---
-
-Signing an agent in to Claude from the New Agent dialog works through the backend: the login terminal answers Claude's startup probe and is wide enough that the sign-in URL is captured whole.
+The backend's provider sign-in terminal now answers Claude's startup probe and keeps the sign-in URL whole, the groundwork for signing in to every provider through the backend.
