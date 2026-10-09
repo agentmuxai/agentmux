@@ -59,7 +59,10 @@ pub const PANE_ENV_KEEP: &[&str] = &[
     "AGENTMUX_BLOCKID",
     "AGENTMUX_TABID",
     // Prompt hook + `muxlog` banner (bash.sh/zsh.sh/fish.fish/pwsh.ps1).
+    // With the other two, which build a pane runs in ([`build_info`]).
     "AGENTMUX_VERSION",
+    "AGENTMUX_BUILD",
+    "AGENTMUX_INSTANCE_CHANNEL",
     "AGENTMUX_LOG_DIR",
     // Agent identity: the OSC-16162 prompt hook, external tooling that
     // selects credentials per agent, and bashwrap's per-instance cwd-state
@@ -123,6 +126,35 @@ pub fn sanitize_pty_command(c: &mut portable_pty::CommandBuilder) {
         c.env_remove(&key);
     }
     c.env(NESTING_SENTINEL_KEY, "1");
+    for (key, value) in build_info() {
+        c.env(key, value);
+    }
+}
+
+/// Which AgentMux a pane runs in, set on every process a pane starts so an
+/// agent can say so without reading it out of a log path:
+/// - `AGENTMUX_VERSION`: the release version (`0.59.16`). The shell helpers
+///   also use it to name log pointer files, so it stays the plain version.
+/// - `AGENTMUX_BUILD`: the exact build: a local portable's label
+///   (`0.59.16+g2a5424fe2.20261008T234046.81801`), else the version.
+/// - `AGENTMUX_INSTANCE_CHANNEL`: the channel this instance runs in (`stable`,
+///   or a local build's own channel). Information only: `AGENTMUX_CHANNEL`,
+///   which says where an instance keeps its data, never reaches a pane, and
+///   nothing reads this one to choose a data directory.
+pub fn build_info() -> &'static [(&'static str, String)] {
+    static INFO: std::sync::OnceLock<Vec<(&'static str, String)>> = std::sync::OnceLock::new();
+    INFO.get_or_init(|| {
+        let version = env!("CARGO_PKG_VERSION").to_string();
+        let build = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().and_then(agentmux_common::runtime_mode::portable_build_label))
+            .unwrap_or_else(|| version.clone());
+        let mut info = vec![("AGENTMUX_VERSION", version), ("AGENTMUX_BUILD", build)];
+        if let Some(channel) = std::env::var("AGENTMUX_CHANNEL").ok().filter(|c| !c.trim().is_empty()) {
+            info.push(("AGENTMUX_INSTANCE_CHANNEL", channel));
+        }
+        info
+    })
 }
 
 /// `sanitize_pty_command` for a `tokio::process::Command` — agent subprocesses,
@@ -136,6 +168,9 @@ pub fn sanitize_process_command(cmd: &mut tokio::process::Command) {
         cmd.env_remove(&key);
     }
     cmd.env(NESTING_SENTINEL_KEY, "1");
+    for (key, value) in build_info() {
+        cmd.env(key, value);
+    }
 }
 
 
@@ -586,6 +621,22 @@ mod tests {
         assert!(!stripped.iter().any(|k| k == NESTING_SENTINEL_KEY),
             "the sentinel carries no identity and must survive");
         std::env::remove_var("AGENTMUX_LOCAL_URL");
+    }
+
+    /// An agent asked "which AgentMux are you in?" reads it from its env.
+    #[test]
+    fn a_pane_is_told_which_build_it_runs_in() {
+        let mut cmd = tokio::process::Command::new("agent");
+        sanitize_process_command(&mut cmd);
+        let envs: std::collections::BTreeMap<String, String> = cmd
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        let version = env!("CARGO_PKG_VERSION");
+        assert_eq!(envs["AGENTMUX_VERSION"], version, "the plain version: log pointer files are named by it");
+        assert!(envs["AGENTMUX_BUILD"].starts_with(version));
+        assert!(!envs.contains_key("AGENTMUX_CHANNEL"), "the data channel itself still never reaches a pane");
     }
 
     #[test]
