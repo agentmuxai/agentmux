@@ -75,20 +75,30 @@ const URL_POLL_MS = 400;
 function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
     let sessionId: string | null = null;
     let generation = 0;
+    // Bumped by every start and cancel: a start whose number is no longer
+    // current was overtaken while it awaited srv, and gives its session up.
+    let attempt = 0;
 
-    const cancel = async () => {
+    const stopSession = async () => {
         const id = sessionId;
         sessionId = null;
         if (id) await rpc.AuthCancelCommand(client, { sessionId: id }).catch(() => {});
     };
+    const overtaken = async (mine: number, id: string) => {
+        if (attempt === mine) return false;
+        if (sessionId === id) sessionId = null;
+        await rpc.AuthCancelCommand(client, { sessionId: id }).catch(() => {});
+        return true;
+    };
 
     return {
         async start(p) {
-            // Claimed before any await: of two overlapping starts, the later
-            // one owns the slot, and the earlier one's session is cancelled
-            // once srv has started it.
-            const mine = ++generation;
-            await cancel();
+            // Claimed before any await: of two overlapping starts (or a start
+            // and a cancel), the later one wins, and the earlier start's
+            // session is cancelled as soon as srv answers.
+            const mine = ++attempt;
+            generation += 1;
+            await stopSession();
             // Not `directAccount`: the flow has already made the account's
             // directory (it's in authEnv) and saves the account itself, as it
             // does after a host login.
@@ -100,16 +110,15 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
                 authEnv: p.authEnv,
                 requiresTty: p.requiresTty,
             });
-            if (generation !== mine) {
-                await rpc.AuthCancelCommand(client, { sessionId: id }).catch(() => {});
-                return null;
-            }
+            if (await overtaken(mine, id)) return null;
             sessionId = id;
             if (authUrl) return { url: authUrl };
             const deadline = Date.now() + URL_CAPTURE_MS;
-            while (Date.now() < deadline && sessionId === id) {
+            while (Date.now() < deadline) {
                 await sleep(URL_POLL_MS);
+                if (await overtaken(mine, id)) return null;
                 const s = await rpc.AuthPollCommand(client, { sessionId: id });
+                if (await overtaken(mine, id)) return null;
                 if (s.status === "url-available") return { url: s.authUrl };
                 if (s.status === "code-emitted") return { url: s.verificationUrl, deviceCode: s.deviceCode };
                 if (s.status === "success" || s.status === "failed") return null;
@@ -127,7 +136,10 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
             const done = s.status === "success" || s.status === "failed";
             return { active: !done, credential_changed: s.status === "success", generation };
         },
-        cancel,
+        async cancel() {
+            attempt += 1;
+            await stopSession();
+        },
         async openTerminal() {
             // A terminal pane running the login is phase L3 of the spec.
             throw new Error("a login terminal isn't available here yet");

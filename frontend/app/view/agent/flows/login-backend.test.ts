@@ -94,6 +94,36 @@ describe("srv login backend", () => {
         });
     });
 
+    it("a cancel while srv is still starting the login gives that session up", async () => {
+        const { rpc, backend } = fakeRpc([], "https://u");
+        let release!: () => void;
+        rpc.AuthStartCommand.mockImplementationOnce(
+            () => new Promise((resolve) => (release = () => resolve({ sessionId: "late", authUrl: "https://late" }))),
+        );
+        const started = backend.start(START);
+        await backend.cancel();
+        release();
+        await expect(started).resolves.toBeNull();
+        expect(rpc.AuthCancelCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "late" });
+        expect(await backend.status()).toMatchObject({ active: false });
+    });
+
+    it("a URL from a poll that a newer start overtook isn't returned", async () => {
+        const { rpc, backend } = fakeRpc();
+        let releasePoll!: () => void;
+        rpc.AuthPollCommand.mockImplementationOnce(
+            () => new Promise((resolve) => (releasePoll = () => resolve({ status: "url-available", authUrl: "https://old" }))),
+        );
+        const first = backend.start(START);
+        await vi.advanceTimersByTimeAsync(500); // the first poll is now in flight
+        rpc.AuthStartCommand.mockResolvedValueOnce({ sessionId: "s2", authUrl: "https://new" });
+        await expect(backend.start(START)).resolves.toEqual({ url: "https://new" });
+        releasePoll();
+        await expect(first).resolves.toBeNull();
+        await backend.submitCode("claude", "abc");
+        expect(rpc.AuthSubmitCallbackCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "s2", callbackUrl: "abc" });
+    });
+
     it("delivers a pasted code to the running session", async () => {
         const { rpc, backend } = fakeRpc([], "https://u");
         await expect(backend.submitCode("claude", "abc")).rejects.toThrow(/no sign-in/);
