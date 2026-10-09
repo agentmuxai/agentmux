@@ -32,7 +32,7 @@ ISSUE_LABEL="${ISSUE_LABEL:-docs-stale-sweep}"
 # GitHub rejects comments over 65,536 characters.
 MAX_BYTES=60000
 
-fp=$(sha256sum "$fp_file" | cut -c1-16)
+fp=$(sha256sum < "$fp_file" | cut -c1-16)
 marker_prefix="<!-- docs-stale-report:${key} fp="
 
 issue=$(gh issue list --label "$ISSUE_LABEL" --state open --json number --jq '.[0].number // empty')

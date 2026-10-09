@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # nightly-doc-link-report.sh — the nightly's repo-wide doc-link report.
-# Plan step 3 of docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md.
+# Plan step 3 of the CI test-speed and DRY follow-ups plan (PR #4534).
 #
 #   scripts/nightly-doc-link-report.sh <out-dir>
 #

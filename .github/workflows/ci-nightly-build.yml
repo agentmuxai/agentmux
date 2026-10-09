@@ -299,7 +299,7 @@ jobs:
       - name: muxbus credential store gate
         run: bash scripts/check-muxbus-credential-store.sh
 
-  # Plan step 3 (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md):
+  # Plan step 3 of the CI test-speed and DRY follow-ups plan (PR #4534):
   # repo-wide broken doc links and comments naming a missing file, so a break
   # merged today is visible tomorrow. A REPORT, not a gate, for the reason in
   # the `gates` note above: the job is continue-on-error, the report script
