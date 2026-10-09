@@ -100,15 +100,19 @@ pub async fn admit(purpose: &'static Purpose, entity_id: impl Into<String>, gene
     admit_with_limit(purpose, entity_id, generation, Some(class.semaphore()), class.max_queue_wait()).await
 }
 
-/// [`admit`] in another class than the purpose's own: an interactive purpose run
-/// as background work, such as the backlog pass naming historical subagents.
+/// [`admit`] in a class the caller chooses, for the naming calls: interactive
+/// for a subagent that just started or a row the user opened, background for the
+/// backlog pass over historical ones. With no queue limit: a name arrives as a
+/// `subagent:named` event, not as an RPC reply someone stops waiting for, and an
+/// eager name is claimed once (`naming_triggered`), so one that gave up in the
+/// queue would never come.
 pub async fn admit_as(
     purpose: &'static Purpose,
     entity_id: impl Into<String>,
     generation: u64,
     class: Class,
 ) -> Option<Slot> {
-    admit_with_limit(purpose, entity_id, generation, Some(class.semaphore()), class.max_queue_wait()).await
+    admit_with_limit(purpose, entity_id, generation, Some(class.semaphore()), None).await
 }
 
 async fn admit_with_limit(
