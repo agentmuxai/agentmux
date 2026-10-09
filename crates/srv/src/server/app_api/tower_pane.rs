@@ -4,7 +4,7 @@
 //! Tower, the read-only task manager pane (`backend::tower_sampler`;
 //! SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md): `tower.sample`.
 //!
-//! `tower.sample` is the window's, not an agent API: a connection registered
+//! Tower's RPCs are the window's, not an agent API: a connection registered
 //! as an agent (`bus:register`) is refused.
 //!
 //! With a `connection` it samples another machine instead
@@ -58,8 +58,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
-/// Refuse a connection registered as an agent: `tower.sample` isn't offered to
-/// agents.
+/// `tower.peers`, `tower.pair` and `tower.forget`: the AgentMux computers this
+/// one is paired with (`backend::tower_peers`).
 fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     engine.register_typed(COMMAND_TOWER_PEERS, |_req: Option<NoArgsReq>, ctx| async move {
         not_an_agent_api(&ctx)?;
@@ -86,6 +86,8 @@ fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     });
 }
 
+/// Refuse a connection registered as an agent: Tower's RPCs aren't offered to
+/// agents.
 fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
     if ctx.agent_id.is_empty() {
         Ok(())
