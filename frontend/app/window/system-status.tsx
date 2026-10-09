@@ -12,6 +12,7 @@ import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
 import { For, Show, type JSX } from "solid-js";
 import { ActionWidgets } from "./action-widgets";
 import { WindowControlsRight } from "./window-controls.platform";
+import { hostHas } from "@/app/host/host-caps";
 import "./system-status.scss";
 
 
@@ -61,7 +62,10 @@ const SystemStatus = (): JSX.Element => {
     return (
         <div class="system-status" {...dragProps}>
             <ActionWidgets />
-            <WindowControlsRight />
+            {/* Caption buttons for the host's own window; a host without one (a browser tab) has none. */}
+            <Show when={hostHas("nativeWindowChrome")}>
+                <WindowControlsRight />
+            </Show>
         </div>
     );
 };
