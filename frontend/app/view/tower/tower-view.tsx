@@ -6,12 +6,21 @@
 // (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md). Read-only.
 
 import type { SelectOption } from "@/app/element/ui";
-import { Button, FilterInput, IconButton, SegmentedControl, Select, tabPanelId, Tabs } from "@/app/element/ui";
-import type { TowerProcess, TowerTask } from "@/app/store/rpc-api";
+import {
+    Button,
+    FilterInput,
+    IconButton,
+    SegmentedControl,
+    Select,
+    tabPanelId,
+    Tabs,
+    TextInput,
+} from "@/app/element/ui";
+import type { TowerPeerInfo, TowerProcess, TowerTask } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { revealBlock } from "@/app/util/reveal-block";
 import clsx from "clsx";
-import { createMemo, For, type JSX, Match, Show, Switch } from "solid-js";
+import { createMemo, createSignal, For, type JSX, Match, Show, Switch } from "solid-js";
 import type { TowerViewModel } from "./tower-model";
 import {
     count,
@@ -39,11 +48,16 @@ const KIND_LABELS: Record<TowerTask["kind"], string> = {
     agentmux: "app",
 };
 
-/** The machine picker: this computer, then every SSH host and WSL
- *  distribution AgentMux knows (the Remotes pane's list). The helper runs on
- *  Linux and macOS only, so other SSH hosts are listed but can't be picked. */
-export function machineOptions(current: string, remotes: RemoteRecord[]): SelectOption[] {
+/** The picker's choice that opens the pairing form rather than a machine. */
+export const PAIR_OPTION = "__pair__";
+
+/** The machine picker: this computer, the AgentMux computers it is paired
+ *  with, then every SSH host and WSL distribution AgentMux knows (the Remotes
+ *  pane's list), and a way to pair another. The helper runs on Linux and
+ *  macOS only, so other SSH hosts are listed but can't be picked. */
+export function machineOptions(current: string, remotes: RemoteRecord[], peers: TowerPeerInfo[] = []): SelectOption[] {
     const options: SelectOption[] = [{ value: "", label: "This computer" }];
+    for (const p of peers) options.push({ value: p.connection, label: `${p.hostname || p.address} (AgentMux)` });
     for (const r of remotes) {
         if (r.kind !== "ssh" && r.kind !== "wsl") continue;
         const os = r.platform?.os;
@@ -59,6 +73,7 @@ export function machineOptions(current: string, remotes: RemoteRecord[]): Select
         });
     }
     if (current && !options.some((o) => o.value === current)) options.push({ value: current, label: current });
+    options.push({ value: PAIR_OPTION, label: "Pair another AgentMux computer…" });
     return options;
 }
 
@@ -66,6 +81,8 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
     const m = props.model;
     const idPrefix = `tower-${m.blockId}`;
     const cpu = (fraction: number | undefined) => formatCpu(fraction, m.snapshot()?.cpu_count ?? 1, m.cpuMode());
+    const [pairing, setPairing] = createSignal(false);
+    const isPeer = () => m.connection().startsWith("peer:");
 
     return (
         <div class="tower-view" data-testid="tower-view">
@@ -74,13 +91,24 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                     density="compact"
                     ariaLabel="Machine"
                     class="tower-machine"
-                    value={m.connection()}
-                    onChange={(c) => m.setConnection(c)}
-                    options={machineOptions(m.connection(), m.remotes())}
+                    value={pairing() ? PAIR_OPTION : m.connection()}
+                    onChange={(c) => {
+                        setPairing(c === PAIR_OPTION);
+                        if (c !== PAIR_OPTION) m.setConnection(c);
+                    }}
+                    options={machineOptions(m.connection(), m.remotes(), m.peers())}
                 />
+                <Show when={isPeer() && !pairing()}>
+                    <IconButton
+                        icon="link-slash"
+                        label="Forget this computer"
+                        density="compact"
+                        onClick={() => void m.forget(m.connection())}
+                    />
+                </Show>
                 <Tabs<TowerViewKind>
                     items={
-                        m.remote()
+                        !m.hasTasks()
                             ? [{ id: "host", label: "Host", icon: "server", tooltip: "Every process on that machine" }]
                             : [
                                   {
@@ -123,6 +151,9 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                     onChange={(v) => m.setCpuMode(v)}
                 />
             </div>
+            <Show when={pairing()}>
+                <PairForm model={m} onDone={() => setPairing(false)} />
+            </Show>
             <Show when={m.error()}>
                 {(err) => (
                     <div class="tower-error" role="alert">
@@ -152,6 +183,62 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                     )}
                 </Show>
             </div>
+        </div>
+    );
+}
+
+/** Pair with another AgentMux computer: paste the link from its "Pair a
+ *  device" panel. Its user decides what it shares (Tower's settings there). */
+function PairForm(props: { model: TowerViewModel; onDone: () => void }) {
+    const [link, setLink] = createSignal("");
+    const [busy, setBusy] = createSignal(false);
+    const [error, setError] = createSignal<string | null>(null);
+    const submit = async () => {
+        setBusy(true);
+        setError(null);
+        try {
+            await props.model.pair(link());
+            props.onDone();
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <div class="tower-pair" data-testid="tower-pair">
+            <div class="tower-muted">
+                On the other computer, open <b>Pair a device</b> in the status bar, choose <b>Copy link</b>, and paste
+                it here. It works once, for two minutes. That computer shows its processes only if its user turns on
+                sharing in its Tower.
+            </div>
+            <div class="tower-pair-row">
+                <TextInput
+                    value={link()}
+                    onInput={(e) => setLink(e.currentTarget.value)}
+                    placeholder="agentmux://pair?…"
+                    aria-label="Pairing link"
+                    density="compact"
+                    class="tower-pair-input"
+                />
+                <Button
+                    tone="accent"
+                    density="compact"
+                    busy={busy()}
+                    disabled={!link().trim()}
+                    onClick={() => void submit()}
+                >
+                    Pair
+                </Button>
+                <Button density="compact" onClick={() => props.onDone()}>
+                    Cancel
+                </Button>
+            </div>
+            <Show when={error()}>
+                <div class="tower-error-inline" role="alert">
+                    {error()}
+                </div>
+            </Show>
         </div>
     );
 }
@@ -259,7 +346,7 @@ function TaskRows(props: { model: TowerViewModel; task: TowerTask; cpu: (f: numb
                         <span class={clsx("tower-badge", `tower-badge--${props.task.kind}`)}>
                             {KIND_LABELS[props.task.kind]}
                         </span>
-                        <Show when={props.task.kind !== "agentmux"}>
+                        <Show when={props.task.kind !== "agentmux" && !m.snapshot()?.remote}>
                             <IconButton
                                 icon="arrow-up-right-from-square"
                                 label="Show this pane"

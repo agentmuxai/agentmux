@@ -111,12 +111,12 @@ const LAN_AGENT_NAMES_MAX_NAME_LEN: usize = 256;
 pub(crate) const UDP_DISCOVERY_PORT: u16 = 47891;
 
 /// Wire-protocol `type` value a probe datagram must carry.
-const UDP_PROBE_TYPE: &str = "agentmux_discover";
+pub(crate) const UDP_PROBE_TYPE: &str = "agentmux_discover";
 /// Wire-protocol `type` value this responder replies with.
 const UDP_RESPONSE_TYPE: &str = "agentmux_discover_response";
 /// Wire-protocol version. Bump alongside the mobile client if the schema
 /// changes; `is_valid_probe` rejects anything else.
-const UDP_PROTOCOL_VERSION: u64 = 1;
+pub(crate) const UDP_PROTOCOL_VERSION: u64 = 1;
 /// How often an instance that could not bind `UDP_DISCOVERY_PORT` tries
 /// again, so another LAN-enabled channel on this host takes over the probe
 /// port when its holder stops (SPEC_LAN_FLEET_FEED_2026_10_03.md §3).

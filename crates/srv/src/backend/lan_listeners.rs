@@ -479,7 +479,7 @@ impl LanListenerSupervisor {
     /// HTTP/1.1 until `token` is cancelled, which also drops every open
     /// connection (and with it every open feed). Each request carries the
     /// peer's address as `ConnectInfo`, for the pairing rate limit.
-    fn serve_tls(
+    pub(crate) fn serve_tls(
         router: axum::Router,
         std_listener: std::net::TcpListener,
         acceptor: tokio_rustls::TlsAcceptor,
@@ -947,62 +947,10 @@ mod supervisor_tests {
         sup.apply(false);
     }
 
-    /// Accepts exactly one certificate, by its fingerprint, the way a paired
-    /// device does.
-    #[derive(Debug)]
-    struct Pinned(String);
-
-    impl rustls::client::danger::ServerCertVerifier for Pinned {
-        fn verify_server_cert(
-            &self,
-            end_entity: &rustls::pki_types::CertificateDer<'_>,
-            _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-            _server_name: &rustls::pki_types::ServerName<'_>,
-            _ocsp: &[u8],
-            _now: rustls::pki_types::UnixTime,
-        ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-            if crate::backend::viewer::cert::fingerprint(end_entity) == self.0 {
-                Ok(rustls::client::danger::ServerCertVerified::assertion())
-            } else {
-                Err(rustls::Error::General("certificate fingerprint mismatch".into()))
-            }
-        }
-        fn verify_tls12_signature(
-            &self,
-            message: &[u8],
-            cert: &rustls::pki_types::CertificateDer<'_>,
-            dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-            let algs = rustls::crypto::ring::default_provider().signature_verification_algorithms;
-            rustls::crypto::verify_tls12_signature(message, cert, dss, &algs)
-        }
-        fn verify_tls13_signature(
-            &self,
-            message: &[u8],
-            cert: &rustls::pki_types::CertificateDer<'_>,
-            dss: &rustls::DigitallySignedStruct,
-        ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-            let algs = rustls::crypto::ring::default_provider().signature_verification_algorithms;
-            rustls::crypto::verify_tls13_signature(message, cert, dss, &algs)
-        }
-        fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-            rustls::crypto::ring::default_provider().signature_verification_algorithms.supported_schemes()
-        }
-    }
-
+    /// The paired-device client (`viewer::client`): it accepts exactly one
+    /// certificate, by its fingerprint.
     fn pinned_client(fingerprint: &str) -> reqwest::Client {
-        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
-        let config = rustls::ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .unwrap()
-            .dangerous()
-            .with_custom_certificate_verifier(std::sync::Arc::new(Pinned(fingerprint.to_string())))
-            .with_no_client_auth();
-        reqwest::Client::builder()
-            .use_preconfigured_tls(config)
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .unwrap()
+        crate::backend::viewer::client::pinned_client(fingerprint, std::time::Duration::from_secs(5)).unwrap()
     }
 
     /// The viewer listener comes up with the LAN listeners, serves its router
