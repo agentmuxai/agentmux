@@ -37,6 +37,7 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show } from "solid
 import { AppBackground } from "./app-bg";
 import { appShellState } from "./app-shell-state";
 import { CrossWindowDragMonitor } from "./drag/CrossWindowDragMonitor.platform";
+import { hostHas } from "@/app/host/host-caps";
 import { CrossWindowDropOverlay } from "./drag/CrossWindowDropOverlay";
 import "./drag/drop-indicators.scss";
 import { CenteredDiv } from "./element/quickelems";
@@ -70,8 +71,10 @@ function AppSettingsUpdater() {
     const windowSettingsAtom = getSettingsPrefixAtom("window");
     createEffect(() => {
         const windowSettings = windowSettingsAtom();
+        // A host that can't make its window see-through keeps it opaque, whatever the settings say.
         const isTransparentOrBlur =
-            (windowSettings?.["window:transparent"] || windowSettings?.["window:blur"]) ?? false;
+            hostHas("windowTransparency") &&
+            ((windowSettings?.["window:transparent"] || windowSettings?.["window:blur"]) ?? false);
         const opacity = util.boundNumber(windowSettings?.["window:opacity"] ?? 0.8, 0, 1);
         const baseBgColor = windowSettings?.["window:bgcolor"];
         // `#main` may not exist on the first effect run: AppSettingsUpdater is
@@ -125,7 +128,7 @@ function AppSettingsUpdater() {
         // safely skip it when the API isn't ready.
         const isBlur = windowSettings?.["window:blur"] ?? false;
         try {
-            getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
+            if (hostHas("windowTransparency")) getApi().setWindowTransparency(isTransparentOrBlur, isBlur, opacity);
         } catch (e) {
             // Swallow — the CSS path above is what actually drives visual
             // transparency on Linux/Wayland under CEF. The IPC
@@ -465,8 +468,11 @@ const AppInner = () => {
                 >
                     <FloatingPaneWorkspace />
                 </Show>
-                <CrossWindowDragMonitor />
-                <CrossWindowDropOverlay />
+                {/* Dragging a pane or tab out of the window tears it off into a new one. */}
+                <Show when={hostHas("tearOff")}>
+                    <CrossWindowDragMonitor />
+                    <CrossWindowDropOverlay />
+                </Show>
                 <FlashError />
                 <Show when={isDev()}>
                     <NotificationBubbles />

@@ -9,7 +9,7 @@ import tailwindcss from "@tailwindcss/vite";
 import * as fs from "fs";
 import * as path from "path";
 import solid from "vite-plugin-solid";
-import { defineConfig, type Plugin } from "vite";
+import { defineConfig, searchForWorkspaceRoot, type Plugin } from "vite";
 import svgr from "vite-plugin-svgr";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { shikiPrebundleDeps } from "./scripts/shiki-prebundle.mjs";
@@ -131,11 +131,20 @@ function stripKatexLegacyFonts(): Plugin {
 // The UI's own version, compared with the backend's on every connect (app/store/srv-info.ts).
 const APP_VERSION: string = JSON.parse(fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8")).version;
 
+// The host this build is for (docs/specs/SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md).
+// Unset: the desktop host, `@host-module` → frontend/cef-host-module.ts (tsconfig.json).
+// AGENTMUX_HOST_MODULE: a module exporting `hostModule: HostModule` instead.
+// AGENTMUX_HOST_TSCONFIG: a tsconfig covering that module's files, so they can
+// import the UI's `@/` paths (it can extend this repo's tsconfig.json).
+const HOST_MODULE = process.env.AGENTMUX_HOST_MODULE ? path.resolve(process.env.AGENTMUX_HOST_MODULE) : null;
+const HOST_TSCONFIG = process.env.AGENTMUX_HOST_TSCONFIG ? path.resolve(process.env.AGENTMUX_HOST_TSCONFIG) : null;
+
 export default defineConfig({
     root: ".",
     define: {
         __AGENTMUX_VERSION__: JSON.stringify(APP_VERSION),
     },
+    resolve: HOST_MODULE ? { alias: { "@host-module": HOST_MODULE } } : {},
     optimizeDeps: {
         // The Shiki grammars are loaded lazily, one `import("shiki/langs/x.mjs")` per
         // language. Left to discovery, the dev server finds each one when a code block
@@ -205,6 +214,11 @@ export default defineConfig({
         // if the chosen port is taken (TOCTOU guard, see Taskfile).
         // Companion to RuntimeMode::Dev clone_id (PR #1053).
         port: Number(process.env.AGENTMUX_VITE_PORT) || 5173,
+        // The dev server serves files under this repo only; an external host
+        // module's directory has to be allowed too.
+        ...(HOST_MODULE
+            ? { fs: { allow: [searchForWorkspaceRoot(process.cwd()), path.dirname(HOST_MODULE)] } }
+            : {}),
         strictPort: true,
         open: false,
         watch: {
@@ -250,7 +264,7 @@ export default defineConfig({
     plugins: [
         requireMuxBusClientId(),
         platformResolve(),
-        tsconfigPaths(),
+        tsconfigPaths(HOST_TSCONFIG ? { projects: [path.resolve(__dirname, "tsconfig.json"), HOST_TSCONFIG] } : {}),
         svgr({
             svgrOptions: { exportType: "default", ref: true, svgo: false, titleProp: true },
             include: "**/*.svg",

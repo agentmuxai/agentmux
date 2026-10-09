@@ -4,6 +4,7 @@
 import { Select, TextInput } from "@/app/element/ui";
 import { For, Show, type JSX } from "solid-js";
 
+import { hostHas } from "@/app/host/host-caps";
 import { settingsAtom } from "@/app/store/global";
 import { THEME_OPTIONS } from "@/app/menu/base-menus";
 import type { SettingsIndexEntry } from "../settings-model";
@@ -148,43 +149,45 @@ export function AppearanceSection(): JSX.Element {
                     />
                 }
             />
-            <SettingRow
-                id={APPEARANCE_SETTINGS.transparency.id}
-                label={APPEARANCE_SETTINGS.transparency.label}
-                description={APPEARANCE_SETTINGS.transparency.description}
-                control={
-                    <ToggleControl
-                        checked={transparent()}
-                        onChange={(v) => set("window:transparent", v)}
-                    />
-                }
-            />
-            <Show when={transparent()}>
+            <Show when={hostHas("windowTransparency")}>
                 <SettingRow
-                    id={APPEARANCE_SETTINGS.opacity.id}
-                    indent
-                    label={APPEARANCE_SETTINGS.opacity.label}
-                    description={APPEARANCE_SETTINGS.opacity.description}
-                    control={
-                        <SliderControl
-                            min={0.35} max={1} step={0.05}
-                            value={(s()["window:opacity"] as number) ?? 1}
-                            onChange={(v) => set("window:opacity", v)}
-                        />
-                    }
-                />
-                <SettingRow
-                    id={APPEARANCE_SETTINGS.blur.id}
-                    indent
-                    label={APPEARANCE_SETTINGS.blur.label}
-                    description={APPEARANCE_SETTINGS.blur.description}
+                    id={APPEARANCE_SETTINGS.transparency.id}
+                    label={APPEARANCE_SETTINGS.transparency.label}
+                    description={APPEARANCE_SETTINGS.transparency.description}
                     control={
                         <ToggleControl
-                            checked={!!(s()["window:blur"] as boolean)}
-                            onChange={(v) => set("window:blur", v)}
+                            checked={transparent()}
+                            onChange={(v) => set("window:transparent", v)}
                         />
                     }
                 />
+                <Show when={transparent()}>
+                    <SettingRow
+                        id={APPEARANCE_SETTINGS.opacity.id}
+                        indent
+                        label={APPEARANCE_SETTINGS.opacity.label}
+                        description={APPEARANCE_SETTINGS.opacity.description}
+                        control={
+                            <SliderControl
+                                min={0.35} max={1} step={0.05}
+                                value={(s()["window:opacity"] as number) ?? 1}
+                                onChange={(v) => set("window:opacity", v)}
+                            />
+                        }
+                    />
+                    <SettingRow
+                        id={APPEARANCE_SETTINGS.blur.id}
+                        indent
+                        label={APPEARANCE_SETTINGS.blur.label}
+                        description={APPEARANCE_SETTINGS.blur.description}
+                        control={
+                            <ToggleControl
+                                checked={!!(s()["window:blur"] as boolean)}
+                                onChange={(v) => set("window:blur", v)}
+                            />
+                        }
+                    />
+                </Show>
             </Show>
             <SettingRow
                 id={APPEARANCE_SETTINGS.paneGap.id}
