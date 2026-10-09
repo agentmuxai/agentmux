@@ -258,9 +258,12 @@ pub fn share(snap: &mut TowerSnapshot, top: usize, filter: &str, hidden: &dyn Fn
     snap.tasks.retain(|t| t.kind == TowerTaskKind::Agentmux || !hidden(&t.id));
     let Some(host) = snap.host.as_mut() else { return };
     host.processes.retain(|p| p.task.as_deref().is_none_or(|t| !hidden(t)));
+    // Name, PID and the task's label, as the pane's own filter matches.
+    let labels: HashMap<&str, String> = snap.tasks.iter().map(|t| (t.id.as_str(), t.label.to_lowercase())).collect();
     let words: Vec<String> = filter.to_lowercase().split_whitespace().map(str::to_string).collect();
     host.processes.retain(|p| {
-        let hay = format!("{} {}", p.name.to_lowercase(), p.pid);
+        let task = p.task.as_deref().and_then(|t| labels.get(t)).map_or("", String::as_str);
+        let hay = format!("{} {} {task}", p.name.to_lowercase(), p.pid);
         words.iter().all(|w| hay.contains(w.as_str()))
     });
     host.matched = host.processes.len() as u32;
@@ -745,6 +748,12 @@ mod tests {
         share(&mut snap, 100, "node", &|_| false);
         assert_eq!(snap.host.as_ref().unwrap().matched, 1);
         assert_eq!(snap.host.unwrap().processes[0].name, "node.exe");
+
+        // By the task's label, as the pane's filter matches.
+        let mut snap = build(&mut st, &machine(), &inputs, Instant::now(), true, "h", &label);
+        share(&mut snap, 100, "agent-b", &|_| false);
+        let names: Vec<String> = snap.host.unwrap().processes.into_iter().map(|p| p.name).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
     }
 
     #[test]

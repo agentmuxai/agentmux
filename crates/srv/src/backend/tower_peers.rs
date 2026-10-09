@@ -202,7 +202,7 @@ struct PairReply {
 }
 
 /// Pair with the computer the link names, as `device_name` (this computer).
-pub async fn pair(peers: &Peers, link: &str, device_name: &str) -> Result<TowerPeerInfo, String> {
+pub async fn pair(peers: &'static Peers, link: &str, device_name: &str) -> Result<TowerPeerInfo, String> {
     let link = parse_link(link)?;
     let client = pinned_client(&link.fingerprint, TIMEOUT)?;
     let probe = Peer {
@@ -236,12 +236,21 @@ pub async fn pair(peers: &Peers, link: &str, device_name: &str) -> Result<TowerP
         device_id: reply.device_id,
         ..probe
     };
-    peers.tokens.put(&peer.secret_key(), &reply.token)?;
-    if let Err(e) = peers.put(peer.clone()) {
-        peers.tokens.delete(&peer.secret_key());
-        return Err(e);
-    }
-    Ok(peer.info())
+    // The keychain write may wait on the OS asking the user's consent, which
+    // can't be cancelled: never on an async worker.
+    let info = peer.info();
+    let token = reply.token;
+    tokio::task::spawn_blocking(move || {
+        peers.tokens.put(&peer.secret_key(), &token)?;
+        if let Err(e) = peers.put(peer.clone()) {
+            peers.tokens.delete(&peer.secret_key());
+            return Err(e);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(info)
 }
 
 fn unreachable(peer: &Peer, e: &reqwest::Error) -> String {
@@ -257,11 +266,13 @@ fn unreachable(peer: &Peer, e: &reqwest::Error) -> String {
 
 /// A paired computer's snapshot. `moved`: the addresses LAN discovery has for
 /// its hostname, tried in turn when the kept one doesn't answer.
-pub async fn sample(peers: &Peers, id: &str, filter: &str, moved: Vec<String>) -> Result<TowerSnapshot, String> {
+pub async fn sample(peers: &'static Peers, id: &str, filter: &str, moved: Vec<String>) -> Result<TowerSnapshot, String> {
     let mut peer = peers.get(id).ok_or("That computer is no longer paired.")?;
-    let token = peers
-        .tokens
-        .get(&peer.secret_key())
+    // A keychain read (bounded, but blocking): off the async workers.
+    let key = peer.secret_key();
+    let token = tokio::task::spawn_blocking(move || peers.tokens.get(&key))
+        .await
+        .map_err(|e| e.to_string())?
         .map_err(|e| format!("Couldn't read the pairing with {}: {e}", peer.hostname))?;
     let client = pinned_client(&peer.fingerprint, TIMEOUT)?;
     let mut hosts = vec![peer.host.clone()];
@@ -340,9 +351,11 @@ mod tests {
         }
     }
 
-    fn peers_in(dir: &std::path::Path) -> (Peers, std::sync::Arc<MemTokens>) {
+    /// Peers for one test, kept for the test binary's life (`pair` and
+    /// `sample` take `'static`, as the app's `Peers::global()` is).
+    fn peers_in(dir: &std::path::Path) -> (&'static Peers, std::sync::Arc<MemTokens>) {
         let tokens = std::sync::Arc::new(MemTokens::default());
-        (Peers::with_tokens(Some(dir.to_path_buf()), Box::new(tokens.clone())), tokens)
+        (Box::leak(Box::new(Peers::with_tokens(Some(dir.to_path_buf()), Box::new(tokens.clone())))), tokens)
     }
 
     #[test]
@@ -376,7 +389,7 @@ mod tests {
         let (peers, _) = peers_in(dir.path());
         // Nothing listens on this port; the error is about reaching it.
         let link = format!("agentmux://pair?v=1&host=127.0.0.1&port=9&fp={FP}&code=ABCDEFGHJK&hostname=studio");
-        let err = pair(&peers, &link, "me").await.unwrap_err();
+        let err = pair(peers, &link, "me").await.unwrap_err();
         assert!(err.contains("Can't reach studio"), "{err}");
         assert!(peers.list().is_empty(), "nothing kept");
     }
@@ -410,29 +423,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (peers, tokens) = peers_in(dir.path());
         // Another certificate's fingerprint: the handshake fails, no pairing.
-        let err = pair(&peers, &link(FP), "laptop (Tower)").await.unwrap_err();
+        let err = pair(peers, &link(FP), "laptop (Tower)").await.unwrap_err();
         assert!(err.contains("Can't reach studio"), "{err}");
         assert!(peers.list().is_empty());
 
-        let info = pair(&peers, &link(&tls.fingerprint), "laptop (Tower)").await.unwrap();
+        let info = pair(peers, &link(&tls.fingerprint), "laptop (Tower)").await.unwrap();
         let id = info.connection.strip_prefix(PEER_PREFIX).unwrap().to_string();
         assert_eq!(tokens.0.lock().unwrap().len(), 1, "the token went to the token store");
         assert!(!std::fs::read_to_string(dir.path().join(FILE)).unwrap().contains("amxv_"));
 
-        let err = sample(&peers, &id, "", vec![]).await.unwrap_err();
+        let err = sample(peers, &id, "", vec![]).await.unwrap_err();
         assert!(err.contains("doesn't share"), "{err}");
 
         let mut settings = state.config_watcher.get_settings();
         settings.extra.insert("tower:sharewithpaired".to_string(), serde_json::json!(true));
         state.config_watcher.update_settings(settings);
-        let snap = sample(&peers, &id, "", vec![]).await.unwrap();
+        let snap = sample(peers, &id, "", vec![]).await.unwrap();
         assert!(snap.remote);
         assert!(snap.host.unwrap().total > 0);
 
         // The other computer's user revokes this device.
         let device = peers.get(&id).unwrap().device_id;
         state.mstore.viewer_device_delete(&device).unwrap();
-        let err = sample(&peers, &id, "", vec![]).await.unwrap_err();
+        let err = sample(peers, &id, "", vec![]).await.unwrap_err();
         assert!(err.contains("no longer accepts"), "{err}");
         token.cancel();
     }
