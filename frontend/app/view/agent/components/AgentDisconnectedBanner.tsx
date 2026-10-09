@@ -13,7 +13,7 @@
  *
  * The pane is NOT in the "working" set while Disconnected
  * (`isWorking(state) === false` — verified by
- * `frontend/app/store/agent-pane-state/reducer.test.ts` PR F suite),
+ * `frontend/app/store/agent-pane-state/reducer.phases.test.ts` PR F suite),
  * so the working-spinner animation is already suppressed. The banner
  * is the only disconnect-aware UI surface PR F introduces; the rest
  * of the view ignores the phase except through the existing

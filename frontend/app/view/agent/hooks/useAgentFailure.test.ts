@@ -73,7 +73,7 @@ const hasRetryCountdown = (ui: UseAgentFailureResult) =>
 // this hook actually sends (FailureObserved / FailureCleared) against a
 // local signal — a faithful stand-in for the real reducer's `state.failure`
 // field for the purposes of this hook-level test (no TurnStart/turnPhase
-// involved here; that's covered by reducer.test.ts).
+// involved here; that's covered by agent-pane-state/reducer.panels.test.ts).
 const makeFakeModel = () => {
     const [failure, setFailure] = createSignal<PaneFailure | null>(null);
     const model = {
