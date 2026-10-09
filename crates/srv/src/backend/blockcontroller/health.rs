@@ -390,6 +390,9 @@ impl TurnActivityTrackerInner {
             PassStart::CliWake => self.pending_task_trigger.take().or(trigger),
             PassStart::Input { .. } => trigger,
         };
+        // A task that lost the race to this pass is not what a later pass
+        // answers: only the CLI's own wake for it may carry it (#4503).
+        self.pending_task_trigger = None;
         let origin = match start {
             PassStart::Input { origin, .. } => Some(origin),
             PassStart::CliWake => Some(TurnOrigin::Automated),
@@ -1510,5 +1513,21 @@ mod tests {
         advance(&clock, 20);
         assert!(t.mark_turn_active_from_cli());
         assert_eq!(t.ledger().unwrap().inputs, 1, "only the mid-pass message");
+    }
+
+    /// A task notification that loses the race to a user pass is not taken
+    /// for a later plain continuation (#4503).
+    #[test]
+    fn a_task_that_lost_the_race_is_not_credited_to_a_later_continuation() {
+        let (t, clock, _) = ledger_tracker();
+        t.note_cli_task_notification(Some("done")); // while idle
+        t.mark_turn_active_from(Some(user("go"))); // the user's pass wins
+        t.mark_turn_active_from(Some(user("more"))); // answered in its own pass
+        t.end_pass(None);
+        advance(&clock, 20);
+        assert!(t.mark_turn_active_from_cli()); // a plain continuation
+        let l = t.ledger().unwrap();
+        assert_eq!(l.inputs, 1, "only the mid-pass message");
+        assert!(l.absorbed.iter().all(|a| a.kind != TriggerKind::Task));
     }
 }
