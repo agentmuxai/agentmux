@@ -168,10 +168,16 @@ export class TowerViewModel {
         this.setConnection(peer.connection);
     }
 
+    /** Forget a paired computer; a failure (the keychain refused, say) shows
+     *  in the pane's error line, and the computer stays paired. */
     async forget(connection: string): Promise<void> {
-        const r = await RpcApi.TowerForgetCommand(TabRpcClient, { connection }, { timeout: 10000 });
-        this.setPeers(r.peers);
-        if (this.connection() === connection) this.setConnection("");
+        try {
+            const r = await RpcApi.TowerForgetCommand(TabRpcClient, { connection }, { timeout: 30000 });
+            this.setPeers(r.peers);
+            if (this.connection() === connection) this.setConnection("");
+        } catch (e) {
+            this.setError(e instanceof Error ? e.message : String(e));
+        }
     }
 
     setSharing(on: boolean): void {

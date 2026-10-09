@@ -75,6 +75,9 @@ pub fn pinned_client(fingerprint: &str, timeout: Duration) -> Result<reqwest::Cl
         .with_no_client_auth();
     reqwest::Client::builder()
         .use_preconfigured_tls(config)
+        // Only ever a LAN address: straight there, never through a configured
+        // proxy (which usually can't reach it).
+        .no_proxy()
         .timeout(timeout)
         .build()
         .map_err(|e| e.to_string())

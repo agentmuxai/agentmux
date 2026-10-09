@@ -388,6 +388,15 @@ describe("Tower", () => {
         await waitFor(() => expect(setMetaMock).toHaveBeenCalledWith({ "tower:connection": null }));
     });
 
+    it("says why a paired computer couldn't be forgotten", async () => {
+        forgetCmd.mockRejectedValue(new Error("Couldn't remove the pairing with studio from the keychain"));
+        setMeta({ "tower:connection": "peer:p1" });
+        renderTower();
+        fireEvent.click(await screen.findByRole("button", { name: "Forget this computer" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("from the keychain");
+        expect(setMetaMock).not.toHaveBeenCalledWith({ "tower:connection": null });
+    });
+
     it("polls only while visible", async () => {
         vi.useFakeTimers();
         renderTower();
