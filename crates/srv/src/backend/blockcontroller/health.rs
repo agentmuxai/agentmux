@@ -189,6 +189,7 @@ pub struct TurnLedger {
     /// The labelled inputs that arrived after the turn started, in order,
     /// up to [`ABSORBED_CAP`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<TurnTrigger>>")]
     pub absorbed: Vec<TurnTrigger>,
     #[ts(type = "number")]
     pub started_at_ms: u64,

@@ -32,7 +32,7 @@ trigger?: TurnTrigger,
  * The labelled inputs that arrived after the turn started, in order,
  * up to [`ABSORBED_CAP`].
  */
-absorbed: Array<TurnTrigger>, started_at_ms: number, 
+absorbed?: Array<TurnTrigger>, started_at_ms: number, 
 /**
  * CLI passes so far, the running one included.
  */
