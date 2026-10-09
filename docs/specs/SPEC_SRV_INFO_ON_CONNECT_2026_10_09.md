@@ -1,7 +1,7 @@
 # SPEC: srv describes itself on every connect (`srvinfo`)
 
 **Date:** 2026-10-09
-**Status:** active — slice 1 shipped in #4517 (srv sends `srvinfo`; the reload notice). Slice 2 remains (the UI reads srv's machine from it; six host commands deleted).
+**Status:** active — slice 1 (srv sends `srvinfo`; the reload notice) in #4517; slice 2 (the UI reads srv's machine from it; six host commands deleted) in #4525. Slice 3 (`srvPlatform()`) remains.
 **Author:** Agent4
 **Related:** `SPEC_HOST_API_SEAM_2026_09_26.md` (the frontend reaches its host only through `AppApi`), `SPEC_SRV_HEADLESS_MODE_2026_09_26.md` (srv without a desktop host).
 

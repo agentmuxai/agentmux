@@ -6,6 +6,7 @@
 // backward-compat (97 files import from that module).
 
 import { getApi } from "./app-api";
+import { srvInfo } from "./srv-info";
 
 let cachedIsDev: boolean = null;
 export function isDev() {
@@ -13,16 +14,14 @@ export function isDev() {
     return cachedIsDev;
 }
 
-let cachedUserName: string = null;
+/** The user srv runs as (`srvinfo`); "" until srv has said. Reactive. */
 export function getUserName(): string {
-    if (cachedUserName == null) cachedUserName = getApi().getUserName();
-    return cachedUserName;
+    return srvInfo()?.userName ?? "";
 }
 
-let cachedHostName: string = null;
+/** The machine srv runs on (`srvinfo`); "" until srv has said. Reactive. */
 export function getHostName(): string {
-    if (cachedHostName == null) cachedHostName = getApi().getHostName();
-    return cachedHostName;
+    return srvInfo()?.hostName ?? "";
 }
 
 export async function openLink(uri: string) {

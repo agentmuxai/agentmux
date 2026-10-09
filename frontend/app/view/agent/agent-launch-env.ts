@@ -8,7 +8,7 @@
  * No `this`/class coupling — standalone functions the model calls into.
  */
 
-import { getApi } from "@/app/store/global";
+import { srvInfo } from "@/app/store/srv-info";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
@@ -64,25 +64,27 @@ export async function ensureProviderAuthDir(providerId: string): Promise<string>
 }
 
 /**
- * Return the AgentMux user-home base directory as an absolute path.
- *
- * Routed by the CEF host so per-agent paths (e.g. the working dir)
- * land in the right place for the instance type:
+ * Return the AgentMux user-home base directory, as an absolute path on srv's
+ * machine: the paths built from it (an agent's working dir, `GH_CONFIG_DIR`,
+ * the widgets dir) are srv's. srv reports it on connect (`srvinfo`,
+ * docs/specs/SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md), so it lands in the right
+ * place for the instance type:
  *   - Portable: `<portable>/data`
  *   - Installed: `~/.agentmux`
  *   - `AGENTMUX_DATA_HOME` env override: wins over both.
  *
- * Falls back to `$HOME/.agentmux` only if the host IPC hasn't populated the
- * cached value yet (shouldn't happen in practice — `initCefApi` fetches it
- * before any agent launch).
+ * srv sends `srvinfo` on the WebSocket before it answers any RPC, the UI
+ * records it as it arrives (`noteSrvInfoMessage`), and startup waits for a
+ * WebSocket RPC reply (`GetFullConfigCommand`, app-init.ts `initMux`) before
+ * anything here runs, so the value is there. Throws rather than guess a path
+ * if it isn't.
  *
  * See `docs/specs/portable-agent-working-dirs.md`.
  */
 export function agentmuxHome(): string {
-    const fromHost = getApi().getUserHomeDir();
-    if (fromHost) return fromHost;
-    const home = getApi().getEnv("HOME") || getApi().getEnv("USERPROFILE") || "~";
-    return `${home}/.agentmux`;
+    const home = srvInfo()?.homeDir;
+    if (!home) throw new Error("agentmuxHome: srv hasn't reported its AgentMux home directory yet");
+    return home;
 }
 
 /**

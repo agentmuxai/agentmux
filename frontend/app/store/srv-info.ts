@@ -22,6 +22,33 @@ export interface SrvInfo {
 }
 
 const [srvInfo, setSrvInfo] = createSignal<SrvInfo | null>(null);
+const [srvSilent, setSrvSilent] = createSignal(false);
+
+/** What `versionSkew()` returns for a srv that never sent `srvinfo`. */
+export const OLDER_SRV = "an older version";
+
+// Per WebSocket connection: whether it has sent `srvinfo`, and whether it has
+// answered an RPC yet. A reconnect can reach a different srv (an update, a
+// restart through `changeEndpoint`), so each connection reports for itself.
+let connSentInfo = false;
+let connAnswered = false;
+
+/** Called as each WebSocket connection opens (`initWshrpc`). */
+export function noteSrvConnectionOpened(): void {
+    connSentInfo = false;
+    connAnswered = false;
+}
+
+/**
+ * srv sends `srvinfo` before it answers any RPC, so a connection whose first
+ * RPC reply came without one is to a srv from before `srvinfo` existed: a
+ * version mismatch the version can't name. What an earlier srv reported no
+ * longer holds, so it is dropped rather than shown or used for paths.
+ */
+function noteSrvInfoMissing(): void {
+    setSrvInfo(null);
+    setSrvSilent(true);
+}
 
 /** What srv last reported, or null before the first connect. */
 export { srvInfo };
@@ -35,15 +62,22 @@ export const UI_VERSION: string = __AGENTMUX_VERSION__;
  * which can be before anything subscribes to events, so it is caught here
  * rather than through a subscription that could miss it.
  */
-export function noteSrvInfoMessage(msg: { command?: string; data?: { event?: string; data?: unknown } } | null): void {
+export function noteSrvInfoMessage(
+    msg: { command?: string; resid?: string; data?: { event?: string; data?: unknown } } | null,
+): void {
     if (msg?.command === "eventrecv" && msg.data?.event === "srvinfo") {
-        onSrvInfo(msg.data.data as Partial<SrvInfo> | null);
+        // Only a report srv's info can be taken from counts as one.
+        if (onSrvInfo(msg.data.data as Partial<SrvInfo> | null)) connSentInfo = true;
+    } else if (msg?.resid && !connAnswered) {
+        connAnswered = true;
+        if (!connSentInfo) noteSrvInfoMissing();
     }
 }
 
-/** Records a `srvinfo` payload. Ignores one without a version. */
-export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): void {
-    if (typeof data?.version !== "string" || data.version === "") return;
+/** Records a `srvinfo` payload; false (and nothing recorded) for one without a version. */
+export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): boolean {
+    if (typeof data?.version !== "string" || data.version === "") return false;
+    setSrvSilent(false);
     setSrvInfo({
         version: data.version,
         platform: data.platform ?? "",
@@ -51,10 +85,13 @@ export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): void {
         hostName: data.hostName ?? "",
         homeDir: data.homeDir ?? null,
     });
+    return true;
 }
 
-/** srv's version when it differs from this UI's, otherwise null. */
+/** srv's version when it differs from this UI's (`OLDER_SRV` for one too old
+ *  to say), otherwise null. */
 export function versionSkew(): string | null {
     const v = srvInfo()?.version;
-    return v != null && v !== UI_VERSION ? v : null;
+    if (v == null) return srvSilent() ? OLDER_SRV : null;
+    return v !== UI_VERSION ? v : null;
 }

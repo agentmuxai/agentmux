@@ -21,12 +21,6 @@ let cachedValues: {
     authKey: string;
     isDev: boolean;
     platform: string;
-    userName: string;
-    hostName: string;
-    dataDir: string;
-    configDir: string;
-    userHomeDir: string;
-    docsiteUrl: string;
     zoomFactor: number;
     updaterStatus: UpdaterStatus;
     updaterVersion: string | null;
@@ -88,12 +82,6 @@ export async function initCefApi(): Promise<void> {
         authKey,
         isDev,
         platform,
-        userName,
-        hostName,
-        dataDir,
-        configDir,
-        userHomeDir,
-        docsiteUrl,
         zoomFactor,
         aboutDetails,
     ] = await Promise.all([
@@ -102,12 +90,6 @@ export async function initCefApi(): Promise<void> {
         retryTransient(() => invokeCommand<string>("get_auth_key")),
         retryTransient(() => invokeCommand<boolean>("get_is_dev")),
         retryTransient(() => invokeCommand<string>("get_platform")),
-        retryTransient(() => invokeCommand<string>("get_user_name")),
-        retryTransient(() => invokeCommand<string>("get_host_name")),
-        retryTransient(() => invokeCommand<string>("get_data_dir")),
-        retryTransient(() => invokeCommand<string>("get_config_dir")),
-        retryTransient(() => invokeCommand<string>("get_user_home_dir")),
-        retryTransient(() => invokeCommand<string>("get_docsite_url")),
         retryTransient(() => invokeCommand<number>("get_zoom_factor")),
         retryTransient(() => invokeCommand<AboutModalDetails>("get_about_modal_details")),
     ]);
@@ -117,12 +99,6 @@ export async function initCefApi(): Promise<void> {
         authKey,
         isDev,
         platform,
-        userName,
-        hostName,
-        dataDir,
-        configDir,
-        userHomeDir,
-        docsiteUrl,
         zoomFactor,
         aboutDetails,
         updaterStatus: "up-to-date" as UpdaterStatus,
@@ -159,12 +135,6 @@ export function buildCefApi(): AppApi {
         reloadWindow: reloadKeepingHostCredentials,
         getIsDev: () => cachedValues!.isDev,
         getPlatform: () => cachedValues!.platform as NodeJS.Platform,
-        getUserName: () => cachedValues!.userName,
-        getHostName: () => cachedValues!.hostName,
-        getDataDir: () => cachedValues!.dataDir,
-        getConfigDir: () => cachedValues!.configDir,
-        getUserHomeDir: () => cachedValues!.userHomeDir,
-        getDocsiteUrl: () => cachedValues!.docsiteUrl,
         getZoomFactor: () => cachedValues!.zoomFactor,
         getEnv: (_varName: string) => {
             return "";

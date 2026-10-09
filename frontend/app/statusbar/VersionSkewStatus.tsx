@@ -15,7 +15,7 @@ const VersionSkewStatus = (): JSX.Element => (
             <div
                 class="status-bar-item clickable"
                 onClick={() => getApi().reloadWindow()}
-                data-tip={`This window is version ${UI_VERSION}; the backend is ${srv()}. Click to reload.`}
+                data-tip={`This window is version ${UI_VERSION}; the backend is ${srv()}. Click to reload; if this stays, restart AgentMux.`}
                 aria-label={`Backend is version ${srv()}: reload`}
             >
                 <span class="status-icon" style={{ color: "var(--warning-color)" }}>

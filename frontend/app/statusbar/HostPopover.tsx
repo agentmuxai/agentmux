@@ -3,6 +3,7 @@
 
 import {
     getApi,
+    getHostName,
     lanDiscoverabilityAtom,
     lanFirewallAtom,
     lanInstancesAtom,
@@ -23,6 +24,11 @@ import { isLinux, isMacOS } from "@/util/platformutil";
 import { PairDevicePanel } from "./PairDevicePanel";
 
 import { Switch } from "@/app/element/ui";
+
+/** Whether the host's reported name is srv's machine (names compare case-insensitively). */
+export function sameMachine(hostName: string | undefined, srvHostName: string | undefined): boolean {
+    return !!hostName && !!srvHostName && hostName.toLowerCase() === srvHostName.toLowerCase();
+}
 
 type HostInfo = {
     hostname: string;
@@ -359,7 +365,6 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
 HostPopoverPanel.displayName = "HostPopoverPanel";
 
 const HostPopover = (): JSX.Element => {
-    const hostname = getApi().getHostName();
     const [popoverOpen, setPopoverOpen] = createSignal(false);
     const [hostInfo, setHostInfo] = createSignal<HostInfo | null>(null);
     let triggerRef: HTMLDivElement | undefined;
@@ -430,7 +435,10 @@ const HostPopover = (): JSX.Element => {
         }
         try {
             const info = (await getApi().getHostInfo()) as unknown as HostInfo;
-            setHostInfo(info);
+            // The chip names srv's machine. The host's own details (its OS, IP,
+            // PID, data folder) describe that machine only when the host runs
+            // on it; for a host elsewhere they'd silently describe another one.
+            setHostInfo(sameMachine(info?.hostname, getHostName()) ? info : null);
         } catch {
             // Fallback for a host build without get_host_info
             setHostInfo(null);
@@ -440,7 +448,7 @@ const HostPopover = (): JSX.Element => {
     };
 
     return (
-        <Show when={hostname && hostname !== "unknown"}>
+        <Show when={getHostName() && getHostName() !== "unknown"}>
             <div
                 ref={(el) => { triggerRef = el; }}
                 class="status-bar-item clickable"
@@ -449,7 +457,7 @@ const HostPopover = (): JSX.Element => {
                 onClick={handleClick}
             >
                 <span class="status-hostname">
-                    {hostname}
+                    {getHostName()}
                 </span>
                 {/* Three states, always one of them rendered — see
                     docs/retro/retro-lan-diamond-vanished-after-self-peer-fix-2026-09-06.md.
@@ -480,7 +488,7 @@ const HostPopover = (): JSX.Element => {
                 <HostPopoverPanel
                     anchor={triggerRef}
                     onClose={() => setPopoverOpen(false)}
-                    hostname={hostname}
+                    hostname={getHostName()}
                     hostInfo={hostInfo}
                     lanInstances={lanInstances}
                     lanCount={lanCount}

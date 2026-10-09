@@ -21,9 +21,9 @@ vi.mock("@/app/util/menu-position", () => ({
     })),
 }));
 vi.mock("@/store/global", () => ({
+    getHostName: () => "narko",
     getApi: () => ({
         getAuthKey: () => "k",
-        getHostName: () => "narko",
         // The real CEF mapping, over the IPC mock below.
         openDataDirInFileManager: () => invokeCommandMock("open_in_file_manager", { target: "data" }),
         getHostInfo: () => invokeCommandMock("get_host_info", {}),
@@ -412,5 +412,15 @@ describe("HostPopoverPanel — firewall warning", () => {
             lanFirewall: () => ({ status: "blocked", adapters: [], localRulesIgnored: false }),
         });
         expect(screen.queryByTestId("lan-firewall")).not.toBeInTheDocument();
+    });
+});
+
+describe("sameMachine", () => {
+    it("is true only for the same, non-empty name, in any case", async () => {
+        const { sameMachine } = await import("./HostPopover");
+        expect(sameMachine("Box", "box")).toBe(true);
+        expect(sameMachine("box", "other")).toBe(false);
+        expect(sameMachine("", "")).toBe(false);
+        expect(sameMachine(undefined, "box")).toBe(false);
     });
 });
