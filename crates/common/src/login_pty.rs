@@ -151,8 +151,12 @@ pub fn strip_terminal_codes(line: &str) -> TerminalLine {
             // Lone / unrecognised ESC: drop the ESC byte.
             i += 1;
         } else {
-            clean.push(bytes[i] as char);
-            i += 1;
+            // Copy the run up to the next ESC from the `&str` itself, so
+            // non-ASCII text (an email like josé@…) survives intact. ESC is
+            // ASCII, so both ends are char boundaries.
+            let end = bytes[i..].iter().position(|&b| b == 0x1b).map_or(bytes.len(), |p| i + p);
+            clean.push_str(&line[i..end]);
+            i = end;
         }
     }
     TerminalLine {
@@ -371,5 +375,23 @@ mod extract_url_claude_authorize_tests {
             "\u{1b}]8;;{AUTHORIZE_URL}\u{7}link text\u{1b}]8;;\u{7}If the browser didn't open, visit: {truncated_visible}"
         );
         assert_eq!(extract_url(&line), Some(AUTHORIZE_URL.to_string()));
+    }
+}
+
+#[cfg(test)]
+mod strip_terminal_codes_tests {
+    use super::strip_terminal_codes;
+
+    #[test]
+    fn keeps_non_ascii_text_intact() {
+        let t = strip_terminal_codes("[32mSuccessfully logged in as josé@example.com[0m");
+        assert_eq!(t.text, "Successfully logged in as josé@example.com");
+    }
+
+    #[test]
+    fn collects_osc8_targets_and_drops_the_sequence() {
+        let t = strip_terminal_codes("open ]8;;https://a.example/xhere]8;; now");
+        assert_eq!(t.text, "open here now");
+        assert_eq!(t.link_uris, vec!["https://a.example/x".to_string()]);
     }
 }

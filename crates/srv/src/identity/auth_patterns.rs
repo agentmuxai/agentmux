@@ -31,14 +31,22 @@ pub enum AuthPatternMatch {
 /// captured output. Returns the FIRST match found — patterns are
 /// listed by descending specificity in `patterns_for(provider_id)`.
 pub fn match_line(provider_id: &str, line: &str) -> Option<AuthPatternMatch> {
-    // Terminal codes (colours, OSC-8 hyperlinks) come out first. A link's
-    // target is tried before the visible text, which a PTY can wrap.
+    // Terminal codes (colours, OSC-8 hyperlinks) come out first.
     let t = agentmux_common::login_pty::strip_terminal_codes(line);
+    let from_text = match_clean_line(provider_id, &t.text);
+    // A device code, a success or a failure is only in the visible text:
+    // it wins (Copilot prints "visit <link> and enter code ABCD-1234").
+    if from_text.as_ref().is_some_and(|m| !matches!(m, AuthPatternMatch::OAuthUrl(_))) {
+        return from_text;
+    }
+    // For a URL, a link's target beats the visible text, which a PTY can wrap.
     t.link_uris
         .iter()
-        .map(String::as_str)
-        .chain(std::iter::once(t.text.as_str()))
-        .find_map(|candidate| match_clean_line(provider_id, candidate))
+        .find_map(|uri| match match_clean_line(provider_id, uri) {
+            Some(url @ AuthPatternMatch::OAuthUrl(_)) => Some(url),
+            _ => None,
+        })
+        .or(from_text)
 }
 
 /// [`match_line`] on a line with no terminal codes in it.
@@ -479,5 +487,17 @@ mod tests {
         // The visible text was cut short by a wrap; the link target is whole.
         let line = format!("\x1b]8;;{CLAUDE_AUTHORIZE}\x07https://claude.com/cai/oauth/auth\x1b]8;;\x07");
         assert_eq!(match_line("claude", &line), Some(AuthPatternMatch::OAuthUrl(CLAUDE_AUTHORIZE.to_string())));
+    }
+
+    #[test]
+    fn a_device_code_in_the_visible_text_wins_over_a_link_target() {
+        let line = "Please visit ]8;;https://github.com/login/devicehttps://github.com/login/device]8;; and enter code ABCD-1234";
+        assert!(matches!(match_line("copilot", line), Some(AuthPatternMatch::DeviceCode { ref code, .. }) if code == "ABCD-1234"), "{:?}", match_line("copilot", line));
+    }
+
+    #[test]
+    fn a_non_ascii_email_on_a_coloured_success_line_survives() {
+        let line = "[32mSuccessfully logged in as josé@example.com[0m";
+        assert_eq!(match_line("claude", line), Some(AuthPatternMatch::LoginSuccess { email: Some("josé@example.com".to_string()) }));
     }
 }
