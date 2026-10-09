@@ -1212,6 +1212,7 @@ declare global {
         "notify:os:when"?: "unfocused" | "always" | "never";
         "notify:os:inputwaiting"?: boolean;
         "notify:os:turncompleted"?: boolean;
+        "notify:os:turncompleted:external"?: boolean;
         "notify:os:turnerrored"?: boolean;
         "notify:os:agentcrashed"?: boolean;
         "notify:os:messageneedsreview"?: boolean;

@@ -24,6 +24,9 @@ import { compactionModelKey } from "../compaction-estimate";
 import { toolActivity } from "../status/tool-labels";
 import { ForkProviderFallbackBanner } from "./ForkProviderFallbackBanner";
 import { PaneRow } from "./PaneRow";
+import { TurnAwayDigest } from "./TurnAwayDigest";
+import { focusManager } from "@/app/store/focusManager";
+import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { PendingMessagesPanel } from "./PendingMessagesPanel";
 
 type DecisionProps = ComponentProps<typeof AgentDecisionPanel>;
@@ -228,6 +231,12 @@ export const AgentBottomPanels = (props: {
             next message is sent.
             See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2 and
             SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md. */}
+        {/* Turns you didn't start that finished while you were away. */}
+        <TurnAwayDigest
+            blockId={props.blockId}
+            looking={() => makeWindowFocusSignal()() && focusManager.blockFocusAtom() === props.blockId}
+            busy={props.workingRowLoading}
+        />
         <div class="agent-working-row-anchor">
             <Show when={props.workingRowVisible()}>
                 <AgentWorkingRow

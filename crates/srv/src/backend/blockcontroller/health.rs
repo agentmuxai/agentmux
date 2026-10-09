@@ -265,8 +265,14 @@ pub type TurnLedgerPublisher = Arc<dyn Fn(&TurnLedger) + Send + Sync>;
 
 /// A publisher that sends the ledger as the persisted `agentturn` event on
 /// `block:<id>`, so a pane mounting mid-turn gets it at once.
+///
+/// A settling ledger is also published again, closed, when its window lapses
+/// with nothing newer published in between (`closed_when_lapsed`). The
+/// tracker closes it only lazily, at the next pass, and a consumer like the
+/// notification router needs to hear that the turn is over.
 pub fn ledger_publisher(broker: Arc<crate::backend::mps::Broker>, block_id: String) -> TurnLedgerPublisher {
-    Arc::new(move |ledger: &TurnLedger| {
+    let latest_seq = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let publish = Arc::new(move |ledger: &TurnLedger| {
         let mut data = serde_json::to_value(ledger).unwrap_or_default();
         if let Some(obj) = data.as_object_mut() {
             obj.insert("block_id".into(), serde_json::Value::String(block_id.clone()));
@@ -278,7 +284,60 @@ pub fn ledger_publisher(broker: Arc<crate::backend::mps::Broker>, block_id: Stri
             persist: 1,
             data: Some(data),
         });
+    });
+    Arc::new(move |ledger: &TurnLedger| {
+        latest_seq.store(ledger.seq, std::sync::atomic::Ordering::SeqCst);
+        publish(ledger);
+        if let (Some(closed), Ok(handle)) = (closed_when_lapsed(ledger), tokio::runtime::Handle::try_current()) {
+            let wait = ledger.settle_until_ms.unwrap_or(0).saturating_sub(agentmux_common::time::now_ms_u64()) + 50;
+            let (latest_seq, publish) = (Arc::clone(&latest_seq), Arc::clone(&publish));
+            handle.spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                if latest_seq.load(std::sync::atomic::Ordering::SeqCst) == closed.seq {
+                    publish(&closed);
+                }
+            });
+        }
     })
+}
+
+/// The change from one published ledger to the next, in words, for the
+/// `[turn]` log: `None` when nothing worth a line changed (stats, `seq`).
+pub fn ledger_transition(before: Option<&TurnLedger>, after: Option<&TurnLedger>) -> Option<&'static str> {
+    let a = after?;
+    let Some(b) = before.filter(|b| b.turn_id == a.turn_id) else {
+        return Some("opened");
+    };
+    if a.passes > b.passes {
+        return Some("next pass joined the turn");
+    }
+    if a.inputs > b.inputs {
+        return Some("input joined the running pass");
+    }
+    if a.end.is_some() && b.end.is_none() {
+        return Some(match a.end {
+            Some(TurnEnd::Exited) => "ended: the process exited",
+            _ => "ended",
+        });
+    }
+    if a.settle_until_ms.is_some() && b.settle_until_ms.is_none() {
+        return Some("pass ended, settling for a next one");
+    }
+    None
+}
+
+/// A settling ledger as it reads once its window lapsed with no next pass:
+/// ended at its last pass. `None` for a ledger that isn't settling. Same `seq`:
+/// it is the same state, only now known to be over.
+pub fn closed_when_lapsed(ledger: &TurnLedger) -> Option<TurnLedger> {
+    if ledger.active || ledger.ended_at_ms.is_some() || ledger.settle_until_ms.is_none() {
+        return None;
+    }
+    let mut closed = ledger.clone();
+    closed.ended_at_ms = closed.last_pass_ended_at_ms;
+    closed.end = Some(TurnEnd::Completed);
+    closed.settle_until_ms = None;
+    Some(closed)
 }
 
 /// What started the current turn, and whether anything else got in.
@@ -536,7 +595,9 @@ impl TurnActivityTracker {
         *self.publisher.lock().unwrap() = Some(publisher);
     }
 
-    /// Release `inner` and publish the ledger if it changed, in `seq` order.
+    /// Release `inner` and publish the ledger if it changed, in `seq` order,
+    /// logging the change as a `[turn]` line (`muxlog`'s answer to "why did
+    /// my timer reset": turn-model spec §7).
     fn publish_in_order(
         &self,
         inner: std::sync::MutexGuard<'_, TurnActivityTrackerInner>,
@@ -548,6 +609,16 @@ impl TurnActivityTracker {
         }
         let _order = self.publish_order.lock().unwrap();
         drop(inner);
+        if let (Some(what), Some(l)) = (ledger_transition(before.as_ref(), after.as_ref()), after.as_ref()) {
+            tracing::info!(
+                block_id = %self.block_id,
+                turn_id = l.turn_id,
+                passes = l.passes,
+                inputs = l.inputs,
+                trigger = ?l.trigger.as_ref().map(|t| t.kind),
+                "[turn] {what}"
+            );
+        }
         self.publish_if_changed(before, after);
     }
 
@@ -1555,5 +1626,49 @@ mod tests {
         };
         inner.begin_pass(PassStart::CliWake, None, 1_000);
         assert_eq!(inner.ledger.unwrap().trigger, None);
+    }
+
+    /// A settling turn reads, once lapsed, as ended at its last pass.
+    #[test]
+    fn a_lapsed_settling_ledger_closes_at_its_last_pass() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        t.mark_turn_active_from(Some(jekt()));
+        advance(&clock, 500);
+        t.end_pass(None);
+        let settling = t.ledger().unwrap();
+        let closed = closed_when_lapsed(&settling).expect("settling");
+        assert_eq!(closed.ended_at_ms, settling.last_pass_ended_at_ms);
+        assert_eq!((closed.end, closed.settle_until_ms, closed.seq), (Some(TurnEnd::Completed), None, settling.seq));
+        assert_eq!(closed_when_lapsed(&closed), None, "already closed");
+        t.mark_turn_active_from(Some(user("next")));
+        assert_eq!(closed_when_lapsed(&t.ledger().unwrap()), None, "running");
+    }
+
+    /// Each kind of ledger change has its own `[turn]` line.
+    #[test]
+    fn ledger_changes_are_named_for_the_log() {
+        let (t, clock, seen) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        t.mark_turn_active_from(Some(jekt()));
+        t.end_pass(Some(stats(10, 1)));
+        advance(&clock, 20);
+        assert!(t.mark_turn_active_from_cli());
+        t.end_pass(None);
+        let seen = seen.lock().unwrap();
+        let named: Vec<_> = std::iter::once(ledger_transition(None, seen.first()))
+            .chain(seen.windows(2).map(|w| ledger_transition(Some(&w[0]), Some(&w[1]))))
+            .flatten()
+            .collect();
+        assert_eq!(
+            named,
+            vec![
+                "opened",
+                "input joined the running pass",
+                "pass ended, settling for a next one",
+                "next pass joined the turn",
+                "ended",
+            ]
+        );
     }
 }
