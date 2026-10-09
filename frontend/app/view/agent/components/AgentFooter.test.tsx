@@ -999,8 +999,18 @@ describe("AgentWorkingRow estimated compaction progress", () => {
     const bar = (c: HTMLElement) => c.querySelector<HTMLElement>(".agent-working-row-progress");
     const fill = (c: HTMLElement) => c.querySelector<HTMLElement>(".agent-working-row-progress-fill");
 
-    beforeEach(() => localStorage.clear());
-    afterEach(() => localStorage.clear());
+    // The bar width is elapsed / estimate: with a running clock, the few ms
+    // between `startedAgo` and the render made it 40.0033% instead of 40% on
+    // a slow CI runner. Only `Date` is pinned; the row's interval timers stay real.
+    beforeEach(() => {
+        localStorage.clear();
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-10-09T12:00:00Z"));
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+        localStorage.clear();
+    });
 
     it("shows only the elapsed counter, with no bar, when there is no history (R3)", () => {
         const { container } = render(() => (
