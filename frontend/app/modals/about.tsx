@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import logoUrl from "@/app/asset/logo.svg?url";
+import { hostHas } from "@/app/host/host-caps";
+import { Show } from "solid-js";
 import type { ModalCloseProps } from "@/app/store/modalmodel";
 import { Modal, ModalBody } from "@/element/modal";
 
@@ -10,7 +12,7 @@ import { getApi, isDev } from "../store/global";
 const AboutModal = ({ close }: ModalCloseProps) => {
     const currentDate = new Date();
     const details = getApi().getAboutModalDetails();
-    const updaterChannel = getApi().getUpdaterChannel();
+    const updaterChannel = hostHas("updater") ? getApi().getUpdaterChannel() : null;
 
     return (
         <Modal
@@ -34,8 +36,10 @@ const AboutModal = ({ close }: ModalCloseProps) => {
                     <div class="items-center gap-4 self-stretch w-full text-center">
                         Client Version {details.version} ({isDev() ? "dev-" : ""}
                         {details.gitHash})
-                        <br />
-                        Update Channel: {updaterChannel}
+                        <Show when={updaterChannel}>
+                            <br />
+                            Update Channel: {updaterChannel}
+                        </Show>
                     </div>
                     <div class="flex items-start gap-[10px] self-stretch w-full text-center">
                         <a

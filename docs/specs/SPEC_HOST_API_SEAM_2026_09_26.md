@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** implemented — all slices merged: PRs #3878 (1), #3879 (2), #3882 (3), #3886 (4), #3887 (5a), #3888 (5b). Every file outside the seam reaches the host through `AppApi`; the ratchet's PENDING list is empty.
+**Status:** implemented — all slices merged: PRs #3878 (1), #3879 (2), #3882 (3), #3886 (4), #3887 (5a), #3888 (5b). Every file outside the seam reaches the host through `AppApi`; the ratchet's PENDING list is empty. Slices 6 and 7 add guards for the capabilities nothing checked yet: 6 is implemented, 7 is in progress.
 **Author:** Maricon
 
 ---
@@ -78,7 +78,7 @@ For each direct call:
 1. Add an `AppApi` method named for what it does, not for the IPC command.
 2. Implement it in `buildCefApi()`.
 3. Call it through `getApi()`.
-4. If the UI around it only makes sense with a capability, guard it with `hostHas(...)`.
+4. If the UI around it only makes sense with a capability, guard it with `hostHas(...)`. A palette command does it by declaring `requires: "<cap>"`: it is then left out of the palette and `commandRegistry.run` declines it.
 5. Remove the file from PENDING when its last direct call is gone.
 
 ## 4. Why not a larger restructure
@@ -95,6 +95,8 @@ Moving the CEF implementation into `frontend/app/host/cef/`, or splitting the fr
 | **4** | Windows: `AppApi.windows` (drag, maximize, position and rect, cursor point, floating panes and their redock). Tear-off, tab-drag and window-resize events through `AppApi.listen`. Window drag installs only with `nativeWindowChrome`. `hostHas()` treats "no host yet" as no capabilities, as `detectHost()` did | 21 |
 | **5a** | Feature calls: `AppApi.approvals` (credential and memory-adoption decisions, adopt/release requests); `openExternalChecked`, clipboard, dropped-file paths and copy, the data folder, host info, taskbar attention, background audit; events through `listen`. New capability `nativeFileDrop` gates terminal and agent-pane file drops | 6 |
 | **5b** | Startup. `app-init.ts` and `app/init/pool.ts` run after `window.api` exists: their floating-redock target and pool-ready calls move onto `AppApi.windows`, and their events onto `listen`. `bootstrap.ts`, `log/log-pipe.ts`, `log/error-forwarder.ts` and `app/init/error-display.ts` are the CEF entry (goal 1) and join the seam | 0 |
+| **6** | Guards for `multiWindow`, `updater`, `nativeDialogs` and `nativeFileDrop`, which nothing checked. `CommandEntry.requires`. Without `multiWindow`: no New Window (menus, palette, Ctrl+Shift+N, the instance panel), no Open in New Window or Floating Pane, and layouts only add to this window. Without `updater`: the status is never read, so no update row or badge shows, and About has no channel. Without `nativeDialogs`: the Media pane doesn't offer to pick a file. Without `nativeFileDrop`: no dropped paths are read | 0 |
+| **7** | Guards for `tearOff` and `windowTransparency` | 0 |
 
 ## 6. Testing
 

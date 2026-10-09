@@ -31,8 +31,7 @@ import {
     subscribeToConnEvents,
     setWindowInstanceNumAtom,
     setReinitVersion,
-    setUpdaterStatusAtom,
-    setUpdaterVersionAtom,
+    syncUpdaterStatus,
     setFullConfigAtom,
 } from "@/app/store/global";
 import * as MOS from "@/app/store/mos";
@@ -728,8 +727,7 @@ async function reinitMux() {
     // the effect re-runs, document.title updates. No imperative write needed.
     getApi().setWindowInitStatus("wave-ready");
     setReinitVersion((v) => v + 1);
-    setUpdaterStatusAtom(getApi().getUpdaterStatus());
-    setUpdaterVersionAtom(getApi().getUpdaterVersion());
+    syncUpdaterStatus();
     setTimeout(() => {
         globalRefocus();
     }, 50);

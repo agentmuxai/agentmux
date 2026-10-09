@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getVoiceSession } from "@/app/hook/useVoiceInput";
+import { hostHas } from "@/app/host/host-caps";
 import { basicTermModels } from "@/app/view/term/term-models";
 import {
     atoms,
@@ -69,14 +70,14 @@ function registerGlobalKeys() {
     });
 
     // ── Tabs & windows ──
-    on(
-        "window:new",
-        run(() =>
-            getApi()
-                .openNewWindow()
-                .catch((e: unknown) => console.error("[keymodel] Failed to open new window:", e))
-        )
-    );
+    // Declined (false) on a host without multiWindow, so the key goes on to the terminal.
+    on("window:new", () => {
+        if (!hostHas("multiWindow")) return false;
+        getApi()
+            .openNewWindow()
+            .catch((e: unknown) => console.error("[keymodel] Failed to open new window:", e));
+        return true;
+    });
     on("tab:new", run(() => createTab()));
     on("tab:close", run(() => simpleCloseStaticTab()));
     on("tab:next", run(() => switchTab(1)));
