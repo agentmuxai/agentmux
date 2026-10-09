@@ -915,7 +915,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    // Paused clock: the handler's 10 s sleep and the 12 s wait below pass at
+    // once instead of in real time.
+    #[tokio::test(start_paused = true)]
     async fn test_cancel_request() {
         let (engine, mut output_rx) = WshRpcEngine::new();
 
