@@ -560,17 +560,25 @@ pub(crate) struct UserAnswer {
 /// window answered through srv's own services (both reachable with the auth
 /// key every agent has). With no host connected (headless) there is no one to
 /// ask: `Err`, so whatever needed the answer does not happen.
+/// The host that can put a question to the user and relay their answer. Only
+/// the host can: agents hold the key srv's own routes take (see `ask_user`).
+/// With none connected (headless) there is no one to ask, and whatever needs
+/// the answer must not happen, nor wait for one.
+pub(crate) async fn host_to_ask_user(state: &AppState) -> Result<crate::server::HostIpc, String> {
+    state
+        .host_ipc
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| "no AgentMux window is connected to ask the user in".to_string())
+}
+
 pub(crate) async fn ask_user(
     state: &AppState,
     agent_block_id: &str,
     question: serde_json::Value,
 ) -> Result<UserAnswer, String> {
-    let host = state
-        .host_ipc
-        .lock()
-        .await
-        .clone()
-        .ok_or_else(|| "no AgentMux window is connected to ask the user in".to_string())?;
+    let host = host_to_ask_user(state).await?;
     let mut body = question;
     body["block_id"] = serde_json::json!(agent_block_id);
     body["timeout_ms"] = serde_json::json!(DIALOG_TIMEOUT_MS);
