@@ -35,7 +35,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::rpc::engine::WshRpcEngine;
 
-use super::identity_auth_dirs::{compute_and_ensure_account_dir, compute_and_ensure_bundle_dir};
+use super::identity_auth_dirs::{caller_auth_dir, compute_and_ensure_account_dir, compute_and_ensure_bundle_dir};
 use super::identity_auth_spawn::spawn_auth_cli;
 use super::AppState;
 
@@ -237,8 +237,13 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                     );
                     (String::new(), dir)
                 };
-                // One live login per account directory (`start_session`).
-                let r = mgr.start_session(req.provider_id.clone(), bundle_dir.clone());
+                // One live login per account directory (`start_session`): srv's
+                // own, or the one the caller chose when it persists the
+                // account itself.
+                let exclusive_key = bundle_dir
+                    .clone()
+                    .or_else(|| caller_auth_dir(&req.provider_id, &auth_env));
+                let r = mgr.start_session(req.provider_id.clone(), exclusive_key);
                 spawn_auth_cli(
                     mgr,
                     mstore,

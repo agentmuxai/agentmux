@@ -34,10 +34,16 @@ export interface LoginStatus {
     generation: number;
 }
 
+/** Where the user signs in; a device-code login also has the code to enter there. */
+export interface LoginUrl {
+    url: string;
+    deviceCode?: string;
+}
+
 export interface LoginBackend {
-    /** Start a login; resolves with the URL to open, or null if none appeared
-     *  in the capture window. The login keeps running for `submitCode`. */
-    start(p: LoginStart): Promise<string | null>;
+    /** Start a login; resolves with where to sign in, or null if nothing
+     *  appeared in the capture window. The login keeps running for `submitCode`. */
+    start(p: LoginStart): Promise<LoginUrl | null>;
     /** Deliver a pasted code (or callback URL) to the running login. */
     submitCode(providerId: string, code: string): Promise<void>;
     status(): Promise<LoginStatus>;
@@ -49,7 +55,10 @@ export interface LoginBackend {
 
 /** The desktop host's commands. */
 const hostBackend: LoginBackend = {
-    start: (p) => getApi().runCliLogin(p.cliPath, p.loginArgs, p.authEnv, p.requiresTty, p.authConfigDirEnvVar),
+    start: async (p) => {
+        const url = await getApi().runCliLogin(p.cliPath, p.loginArgs, p.authEnv, p.requiresTty, p.authConfigDirEnvVar);
+        return url ? { url } : null;
+    },
     submitCode: (providerId, code) => getApi().setProviderAuth(providerId, code),
     status: () => getApi().getCliLoginStatus(),
     cancel: () => getApi().cancelCliLogin(),
@@ -75,8 +84,11 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
 
     return {
         async start(p) {
+            // Claimed before any await: of two overlapping starts, the later
+            // one owns the slot, and the earlier one's session is cancelled
+            // once srv has started it.
+            const mine = ++generation;
             await cancel();
-            generation += 1;
             // Not `directAccount`: the flow has already made the account's
             // directory (it's in authEnv) and saves the account itself, as it
             // does after a host login.
@@ -88,14 +100,18 @@ function makeSrvBackend(rpc = RpcApi, client = TabRpcClient): LoginBackend {
                 authEnv: p.authEnv,
                 requiresTty: p.requiresTty,
             });
+            if (generation !== mine) {
+                await rpc.AuthCancelCommand(client, { sessionId: id }).catch(() => {});
+                return null;
+            }
             sessionId = id;
-            if (authUrl) return authUrl;
+            if (authUrl) return { url: authUrl };
             const deadline = Date.now() + URL_CAPTURE_MS;
             while (Date.now() < deadline && sessionId === id) {
                 await sleep(URL_POLL_MS);
                 const s = await rpc.AuthPollCommand(client, { sessionId: id });
-                if (s.status === "url-available") return s.authUrl;
-                if (s.status === "code-emitted") return s.verificationUrl;
+                if (s.status === "url-available") return { url: s.authUrl };
+                if (s.status === "code-emitted") return { url: s.verificationUrl, deviceCode: s.deviceCode };
                 if (s.status === "success" || s.status === "failed") return null;
             }
             return null;

@@ -36,7 +36,7 @@ describe("srv login backend", () => {
 
     it("starts through auth.start with the flow's own account dir, and returns its URL", async () => {
         const { rpc, backend } = fakeRpc([], "https://auth.example/x");
-        await expect(backend.start(START)).resolves.toBe("https://auth.example/x");
+        await expect(backend.start(START)).resolves.toEqual({ url: "https://auth.example/x" });
         expect(rpc.AuthStartCommand).toHaveBeenCalledWith(expect.anything(), {
             providerId: "claude",
             cliPath: "/bin/claude",
@@ -48,10 +48,13 @@ describe("srv login backend", () => {
     });
 
     it("polls for a URL that appears later, a device code's included", async () => {
-        const { backend } = fakeRpc([{ status: "pending" }, { status: "code-emitted", verificationUrl: "https://dev/x" }]);
+        const { backend } = fakeRpc([
+            { status: "pending" },
+            { status: "code-emitted", verificationUrl: "https://dev/x", deviceCode: "ABCD-1234" },
+        ]);
         const url = backend.start(START);
         await vi.advanceTimersByTimeAsync(1_000);
-        await expect(url).resolves.toBe("https://dev/x");
+        await expect(url).resolves.toEqual({ url: "https://dev/x", deviceCode: "ABCD-1234" });
     });
 
     it("gives up with null when no URL appears in the capture window", async () => {
@@ -68,6 +71,27 @@ describe("srv login backend", () => {
         await backend.start(START);
         expect(rpc.AuthCancelCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "s1" });
         expect((await backend.status()).generation).toBe(first + 1);
+    });
+
+    it("of two overlapping starts, the later one owns the slot and the earlier one's session is cancelled", async () => {
+        const { rpc, backend } = fakeRpc([], "https://u");
+        let releaseFirst!: () => void;
+        rpc.AuthStartCommand.mockImplementationOnce(
+            () =>
+                new Promise((resolve) => {
+                    releaseFirst = () => resolve({ sessionId: "slow", authUrl: "https://slow" });
+                }),
+        );
+        const first = backend.start(START);
+        await expect(backend.start(START)).resolves.toEqual({ url: "https://u" });
+        releaseFirst();
+        await expect(first).resolves.toBeNull();
+        expect(rpc.AuthCancelCommand).toHaveBeenCalledWith(expect.anything(), { sessionId: "slow" });
+        await backend.submitCode("claude", "abc");
+        expect(rpc.AuthSubmitCallbackCommand).toHaveBeenCalledWith(expect.anything(), {
+            sessionId: "s1",
+            callbackUrl: "abc",
+        });
     });
 
     it("delivers a pasted code to the running session", async () => {

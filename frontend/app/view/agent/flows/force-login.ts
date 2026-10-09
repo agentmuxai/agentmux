@@ -64,7 +64,7 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
     const { provider, cliPath, authEnv, setAuthUrl, log, isCancelled } = p;
     log("auth", "re-login: forcing a fresh OAuth (bypassing the auth-status check)…");
 
-    const url = await loginBackend().start({
+    const started = await loginBackend().start({
         providerId: provider.id,
         cliPath,
         loginArgs: provider.authLoginCommand,
@@ -73,6 +73,7 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
         requiresTty: provider.requiresLoginTty ?? false,
         authConfigDirEnvVar: provider.authConfigDirEnvVar,
     });
+    const url = started?.url ?? null;
 
     if (url) {
         if (isCancelled?.()) {
@@ -88,6 +89,9 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
             // running anyway, which is wrong for an explicit cancel.
             log("auth", "login was cancelled before a browser could be opened", "warn");
             return "opened";
+        }
+        if (started?.deviceCode) {
+            log("auth", `enter the code ${started.deviceCode} on the sign-in page`);
         }
         setAuthUrl(url);
         const opened = await openOAuthBrowserPane(url);
