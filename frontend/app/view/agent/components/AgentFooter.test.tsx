@@ -859,6 +859,29 @@ describe("AgentWorkingRow across a turn's passes", () => {
         expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.410  ·  9 steps  ·  2 passes");
     });
 
+    it("shows no cost for a turn whose provider reports none (Codex), not $0.000", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1 }}
+                turnLedger={ledger({
+                    startedAtMs: end - 30_000,
+                    active: false,
+                    countedPasses: 1,
+                    outputTokens: 1_500,
+                    steps: 3,
+                    lastPassEndedAtMs: end,
+                    endedAtMs: end,
+                    end: "completed",
+                })}
+            />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  30s  ·  1.5k tokens");
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("3 steps");
+    });
+
     it("opens an external turn by naming what started it, then goes back to its usual text", () => {
         const { container } = render(() => (
             <AgentWorkingRow
