@@ -940,6 +940,51 @@ describe("AgentWorkingRow across a turn's passes", () => {
     });
 });
 
+/**
+ * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6: the left zone is the
+ * presenter's line (status/present-status.ts, tested there in depth).
+ */
+describe("AgentWorkingRow live status", () => {
+    const busy = (startedAt: number) => ({
+        phase: null,
+        phaseSince: 0,
+        tools: [{ id: "t1", activity: { family: "bash" as const, label: "Running the srv test suite" }, startedAt }],
+        plan: null,
+        planAt: 0,
+    });
+
+    it("names what is running once it has run a moment, over the goal", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 3_000)} />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Running the srv test suite");
+    });
+
+    it("keeps the goal while a call is too young to mention", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 200)} />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("a question or approval for the user outranks everything", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                stopping={false}
+                activity={busy(Date.now() - 3_000)}
+                needsYou="Waiting for your approval: Running git push"
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Waiting for your approval: Running git push");
+    });
+
+    it("a status like Stopping still outranks what is running", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} stopping={true} activity={busy(Date.now() - 3_000)} />);
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
+    });
+});
+
 // Tier 4 (SPEC_COMPACTION_ESTIMATED_PROGRESS_AND_STREAM_FRAMES_2026_10_01.md §5):
 // an ESTIMATED progress bar from earlier compactions' durations. Claude Code
 // reports no real progress, so it is labeled as an estimate and never "done".

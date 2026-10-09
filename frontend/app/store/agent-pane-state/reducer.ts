@@ -63,6 +63,9 @@ import {
 } from "./context-reading";
 import { outputSoFar, turnOutputTokens, withShownOutput } from "./turn-contribution";
 import { isNewerLedger } from "./turn-ledger";
+import { IDLE_ACTIVITY, type ActivityState, type ModelActivityPhase } from "./types";
+import { toolActivity } from "../../view/agent/status/tool-labels";
+import { planFromTodoWrite } from "../../view/agent/status/plan";
 
 /** The `context-reading-rejected` event for a reading `implausibleReason` refused. */
 function rejectedEvent(reading: ContextReading, reason: string): AgentPaneEvent {
@@ -600,6 +603,7 @@ export function update(
                     ...state,
                     currentTool: null,
                     currentToolArg: null,
+                    activity: settledActivity(state.activity),
                     // turnTokens stay. srv sends this push as soon as it reads
                     // the CLI's `result` line, before it forwards that line, so
                     // the stream is usually still delivering this turn: its
@@ -862,6 +866,7 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
+                    activity: settledActivity(state.activity),
                     turnPhase: {
                         kind: "Done",
                         outcome,
@@ -902,6 +907,7 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
+                    activity: IDLE_ACTIVITY,
                     context: null,
                     contextSeedable: false,
                     // TurnReset is a wholesale clear → Idle. The
@@ -947,7 +953,12 @@ export function update(
 
         case "ToolStart": {
             const nextState = bumpEvent(
-                { ...state, currentTool: command.name, currentToolArg: command.arg ?? null },
+                {
+                    ...state,
+                    currentTool: command.name,
+                    currentToolArg: command.arg ?? null,
+                    activity: activityWithTool(state.activity, command, nowMs),
+                },
                 nowMs,
                 /* toolsDelta */ +1,
             );
@@ -959,7 +970,7 @@ export function update(
 
         case "ToolEnd": {
             const nextState = bumpEvent(
-                { ...state, currentTool: null, currentToolArg: null },
+                { ...state, currentTool: null, currentToolArg: null, activity: activityWithoutTool(state.activity, command.id) },
                 nowMs,
                 /* toolsDelta */ -1,
             );
@@ -998,7 +1009,13 @@ export function update(
             // something to show, or nothing at all, before — not on every
             // call of a turn that keeps reporting the same impossibility.
             const withLive = withReading(
-                { ...state, turnTokens: next, lastContextModel: model, contextSeedable: false },
+                {
+                    ...state,
+                    turnTokens: next,
+                    lastContextModel: model,
+                    contextSeedable: false,
+                    activity: withPhase(state.activity, "responding", nowMs),
+                },
                 reading,
                 prevReading == null || plausibleReading(prevReading) != null,
             );
@@ -1086,13 +1103,18 @@ export function update(
             const t = state.turnTokens;
             if (!t || command.chars <= 0) return { state, events: [] };
             const next = withShownOutput({ ...t, streamedChars: (t.streamedChars ?? 0) + command.chars, requesting: false });
-            return { state: { ...state, turnTokens: next }, events: [] };
+            const phase: ModelActivityPhase | null =
+                command.kind === "thinking" ? "thinking" : command.kind === "text" ? "writing" : command.kind === "tool_input" ? "composing" : null;
+            const activity = phase ? withPhase(state.activity, phase, nowMs) : state.activity;
+            return { state: { ...state, turnTokens: next, activity }, events: [] };
         }
 
         case "RequestStarted": {
             const t = state.turnTokens;
-            if (!t || t.requesting) return { state, events: [] };
-            return { state: { ...state, turnTokens: { ...t, requesting: true } }, events: [] };
+            if (!t) return { state, events: [] };
+            const activity = withPhase(state.activity, "requesting", nowMs);
+            if (t.requesting) return activity === state.activity ? { state, events: [] } : { state: { ...state, activity }, events: [] };
+            return { state: { ...state, turnTokens: { ...t, requesting: true }, activity }, events: [] };
         }
 
         case "RequestStop": {
@@ -1800,6 +1822,35 @@ function carryPass(carry: TurnCarry | null, turnId: number | undefined, stats: S
         costUsd: base.costUsd + (stats.cost_usd ?? 0),
         steps: base.steps + (stats.num_turns ?? 0),
     };
+}
+
+/** The model's phase moves on; `phaseSince` changes only with it. */
+function withPhase(a: ActivityState, phase: ModelActivityPhase, nowMs: number): ActivityState {
+    return a.phase === phase ? a : { ...a, phase, phaseSince: nowMs };
+}
+
+/** A tool call starts: it joins the running list; a todo list sets the plan. */
+function activityWithTool(
+    a: ActivityState,
+    c: { name: string; id?: string; params?: Record<string, unknown> },
+    nowMs: number,
+): ActivityState {
+    const tools = [...a.tools, { id: c.id ?? null, activity: toolActivity(c.name, c.params), startedAt: nowMs }];
+    if (c.name === "TodoWrite") return { ...a, tools, plan: planFromTodoWrite(c.params), planAt: nowMs };
+    return { ...a, tools };
+}
+
+/** A tool call ends: by id when known, else the oldest. */
+function activityWithoutTool(a: ActivityState, id: string | undefined): ActivityState {
+    if (a.tools.length === 0) return a;
+    const i = id != null ? a.tools.findIndex((t) => t.id === id) : 0;
+    if (i < 0) return a;
+    return { ...a, tools: a.tools.filter((_, j) => j !== i) };
+}
+
+/** The pass is over: nothing runs; the plan stays for the turn's next pass. */
+function settledActivity(a: ActivityState): ActivityState {
+    return a.phase == null && a.tools.length === 0 ? a : { ...a, phase: null, phaseSince: 0, tools: [] };
 }
 
 /**

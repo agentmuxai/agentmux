@@ -1,0 +1,71 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.3: the reducer keeps
+// the facts the live status reads; the presenter decides what to say.
+
+import { describe, expect, it } from "vitest";
+import { update } from "./reducer";
+import { initialState, type AgentPaneState } from "./types";
+
+const at = (s: AgentPaneState, command: Parameters<typeof update>[1], ms: number) => update(s, command, ms).state;
+/** A pane in a turn whose first call has started (live tokens exist). */
+const inCall = () => at(initialState("a"), { type: "TokensIn", input: 1_000 }, 1_000);
+
+describe("activity: the model's phase", () => {
+    it("a call starts responding; its stream says thinking, writing or composing", () => {
+        let s = inCall();
+        expect(s.activity).toMatchObject({ phase: "responding", phaseSince: 1_000 });
+        s = at(s, { type: "OutputStreamed", chars: 40, kind: "thinking" }, 1_200);
+        expect(s.activity).toMatchObject({ phase: "thinking", phaseSince: 1_200 });
+        s = at(s, { type: "OutputStreamed", chars: 40, kind: "thinking" }, 1_900);
+        expect(s.activity.phaseSince).toBe(1_200); // the same phase keeps its start
+        s = at(s, { type: "OutputStreamed", chars: 10, kind: "tool_input" }, 2_500);
+        expect(s.activity.phase).toBe("composing");
+        s = at(s, { type: "OutputStreamed", chars: 10, kind: "text" }, 3_000);
+        expect(s.activity.phase).toBe("writing");
+    });
+
+    it("tool results going back: requesting, until the next call", () => {
+        let s = at(inCall(), { type: "RequestStarted" }, 5_000);
+        expect(s.activity).toMatchObject({ phase: "requesting", phaseSince: 5_000 });
+        s = at(s, { type: "TokensIn", input: 1_500 }, 9_000);
+        expect(s.activity).toMatchObject({ phase: "responding", phaseSince: 9_000 });
+    });
+});
+
+describe("activity: tools in flight", () => {
+    it("a call joins the list with its words, and its end removes exactly it", () => {
+        let s = inCall();
+        s = at(s, { type: "ToolStart", name: "Bash", id: "t1", params: { description: "Run the tests" } }, 2_000);
+        s = at(s, { type: "ToolStart", name: "Read", id: "t2", params: { file_path: "/x/a.ts" } }, 2_100);
+        expect(s.activity.tools.map((t) => [t.id, t.activity.label, t.startedAt])).toEqual([
+            ["t1", "Running the tests", 2_000],
+            ["t2", "Reading a.ts", 2_100],
+        ]);
+        s = at(s, { type: "ToolEnd", id: "t2" }, 2_500);
+        expect(s.activity.tools.map((t) => t.id)).toEqual(["t1"]);
+        s = at(s, { type: "ToolEnd" }, 2_600); // no id: the oldest
+        expect(s.activity.tools).toEqual([]);
+    });
+
+    it("a todo list sets the plan, which outlives the pass", () => {
+        let s = inCall();
+        const todos = [
+            { content: "Read the code", activeForm: "Reading the code", status: "completed" },
+            { content: "Write the spec", activeForm: "Writing the spec", status: "in_progress" },
+            { content: "Open the PR", activeForm: "Opening the PR", status: "pending" },
+        ];
+        s = at(s, { type: "ToolStart", name: "TodoWrite", id: "p", params: { todos } }, 3_000);
+        expect(s.activity.plan).toEqual({ activeForm: "Writing the spec", index: 2, total: 3 });
+        expect(s.activity.planAt).toBe(3_000);
+        s = at(s, { type: "TurnEnd", stats: null }, 4_000);
+        expect(s.activity).toMatchObject({ phase: null, tools: [], plan: { index: 2 } });
+    });
+
+    it("a reset clears it all", () => {
+        let s = at(inCall(), { type: "ToolStart", name: "Bash", id: "t", params: {} }, 2_000);
+        s = at(s, { type: "TurnReset" }, 3_000);
+        expect(s.activity).toMatchObject({ phase: null, tools: [], plan: null });
+    });
+});

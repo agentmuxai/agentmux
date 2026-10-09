@@ -42,7 +42,14 @@ import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
-import { mainAgentRequestStarted, mainAgentStreamedChars, mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import {
+    mainAgentRequestStarted,
+    mainAgentStreamedChars,
+    mainAgentStreamedKind,
+    mainAgentUsage,
+    readsMainAgentUsage,
+    type StreamedKind,
+} from "./main-agent-usage";
 import { createSessionStartDetector } from "./session-start";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
@@ -323,10 +330,13 @@ export function useAgentStream({
     // per delta. Flushed before any call boundary so a call's characters are
     // never credited to the next one.
     let pendingStreamedChars = 0;
+    // The batch's latest kind of output, for the live status's phase.
+    let pendingStreamedKind: StreamedKind | undefined;
     const flushStreamedChars = () => {
         if (pendingStreamedChars <= 0) return;
-        model.dispatchPane({ type: "OutputStreamed", chars: pendingStreamedChars });
+        model.dispatchPane({ type: "OutputStreamed", chars: pendingStreamedChars, kind: pendingStreamedKind });
         pendingStreamedChars = 0;
+        pendingStreamedKind = undefined;
     };
 
     const memoryReinjectionController = createMemoryReinjectionController({
@@ -848,6 +858,7 @@ export function useAgentStream({
                     const usage = readsUsage ? mainAgentUsage(rawEvent) : null;
                     if (readsUsage) {
                         pendingStreamedChars += mainAgentStreamedChars(rawEvent);
+                        pendingStreamedKind = mainAgentStreamedKind(rawEvent) ?? pendingStreamedKind;
                         if (mainAgentRequestStarted(rawEvent)) {
                             flushStreamedChars();
                             model.dispatchPane({ type: "RequestStarted" });
@@ -996,13 +1007,15 @@ export function useAgentStream({
                                 type: "ToolStart",
                                 name: event.tool,
                                 arg: toolActivityArg(event.tool, event.params),
+                                id: event.id,
+                                params: event.params,
                             });
                         } else {
                             model.dispatchPane({ type: "ToolEnd" });
                         }
                     } else if (event.type === "tool_result") {
                         noteToolResult(event.id, event.status);
-                        model.dispatchPane({ type: "ToolEnd" });
+                        model.dispatchPane({ type: "ToolEnd", id: event.id });
                     } else if (event.type === "tool_chunk") {
                         // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):
                         // route chunks through their own reducer command

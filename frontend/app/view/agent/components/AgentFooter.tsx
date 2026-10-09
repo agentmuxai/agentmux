@@ -5,7 +5,7 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
@@ -15,7 +15,8 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
-import type { CompactionState, ResumeRetryState, TurnCarry } from "@/app/store/agent-pane-state/types";
+import type { ActivityState, CompactionState, ResumeRetryState, TurnCarry } from "@/app/store/agent-pane-state/types";
+import { presentStatus, type StatusMemory } from "../status/present-status";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
@@ -116,6 +117,12 @@ interface AgentWorkingRowProps {
     /** Each pass's figures summed over the turn, for providers srv doesn't
      *  count (`AgentPaneState.turnCarry`). */
     turnCarry?: TurnCarry | null;
+    /** What the agent is doing right now (`AgentPaneState.activity`): the
+     *  live status's facts. SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6. */
+    activity?: ActivityState | null;
+    /** A question or approval waiting on the user, in words: it outranks
+     *  everything else the row could say. */
+    needsYou?: string | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
     waitingReason?: "rate_limited" | null;
     /** Milliseconds until next retry (from provider Retry-After). Shown when waitingReason is set. */
@@ -170,10 +177,9 @@ const CANCELLABLE_LAUNCH_PHASES = new Set([
     "waiting-for-login-completion",
 ]);
 
-/** The exact string the loading row's left zone shows right now — pulled out
- *  of the JSX ternary chain so both the type-out reveal effect and the
- *  render itself read the same computed value. */
-function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: number): string {
+/** The row's own statuses, which outrank anything else it would say except
+ *  a question or approval for the user (the presenter's rank 1). */
+function heldStatus(props: AgentWorkingRowProps, nowMs: number): string | null {
     if (props.reconnecting) return "Reconnecting…";
     if (props.compacting) return "Compacting…";
     if (props.stopping) return "Stopping…";
@@ -182,17 +188,14 @@ function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: num
             ? `Rate limited — retrying in ${Math.ceil(props.retryAfterMs / 1000)}s`
             : "Rate limited — retrying…";
     }
-    const phaseLabel = formatPhaseLabel(props.launchPhase, nowMs);
-    if (phaseLabel) return phaseLabel;
-    // A turn something other than the user started opens by saying so.
+    return formatPhaseLabel(props.launchPhase, nowMs) ?? null;
+}
+
+/** A turn something other than the user started opens by saying so. */
+function leadInText(props: AgentWorkingRowProps, nowMs: number): string | null {
     const l = props.turnLedger;
-    if (l && turnOpen(l, nowMs) && nowMs - l.startedAtMs < TRIGGER_LEAD_IN_MS) {
-        const lead = triggerLeadIn(l.trigger);
-        if (lead) return lead;
-    }
-    const summary = props.activitySummary?.trim();
-    if (summary) return summary;
-    return `${phrase}…`;
+    if (!l || !turnOpen(l, nowMs) || nowMs - l.startedAtMs >= TRIGGER_LEAD_IN_MS) return null;
+    return triggerLeadIn(l.trigger);
 }
 
 export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
@@ -223,8 +226,33 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     const live = createMemo(() => props.loading || settling());
     // tick() re-runs this memo every second so a phase's "up to Ys" countdown
     // (formatPhaseLabel) stays live — see useTick.ts's "always-on tick" pattern.
-    const leftText = createMemo(() => loadingLeftText(props, phrase(), (tick(), Date.now())));
-    const [revealed, setRevealed] = createSignal(leftText().length);
+    const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
+    // The live status (status/present-status.ts): what to say, and when, from
+    // what the agent is doing and what the row showed last.
+    let statusMemory: StatusMemory | null = null;
+    const status = createMemo(() => {
+        const now = (tick(), Date.now());
+        const l = props.turnLedger;
+        const r = presentStatus(
+            {
+                nowMs: now,
+                needsYou: props.needsYou ?? null,
+                held: heldStatus(props, now),
+                leadIn: leadInText(props, now),
+                activity: props.activity ?? null,
+                turnStartedAt: l && turnOpen(l, now) ? l.startedAtMs : untrack(loadStartMs),
+                goal: props.activitySummary?.trim() || null,
+                phrase: phrase(),
+            },
+            statusMemory,
+        );
+        statusMemory = r.memory;
+        return r.line;
+    });
+    const leftText = () => status().text;
+    // How much of the line is typed out; Infinity once it is all there, so a
+    // counter that grows inside the same line shows in full.
+    const [revealed, setRevealed] = createSignal(Number.POSITIVE_INFINITY);
     const REVEAL_CHAR_MS = 28;
 
     // The very first text after ENTERING the loading state renders in full
@@ -240,24 +268,32 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         if (!live()) revealInstantly = true;
     });
 
-    createEffect(() => {
-        const text = leftText();
-        if (reducedMotion() || !text || revealInstantly) {
-            revealInstantly = false;
-            setRevealed(text.length);
-            return;
-        }
-        setRevealed(0);
-        const id = setInterval(() => {
-            setRevealed((n) => {
-                const next = n + 1;
-                if (next >= text.length) clearInterval(id);
-                return next;
-            });
-        }, REVEAL_CHAR_MS);
-        onCleanup(() => clearInterval(id));
-    });
-    const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
+    // A new line types out; the same line with its counters moved (its key
+    // unchanged) just updates, so a running clock never re-types it.
+    createEffect(
+        on(
+            () => status().key,
+            () => {
+                const text = untrack(leftText);
+                if (untrack(reducedMotion) || !text || revealInstantly) {
+                    revealInstantly = false;
+                    setRevealed(Number.POSITIVE_INFINITY);
+                    return;
+                }
+                setRevealed(0);
+                const id = setInterval(() => {
+                    setRevealed((n) => {
+                        if (n + 1 >= untrack(leftText).length) {
+                            clearInterval(id);
+                            return Number.POSITIVE_INFINITY;
+                        }
+                        return n + 1;
+                    });
+                }, REVEAL_CHAR_MS);
+                onCleanup(() => clearInterval(id));
+            },
+        ),
+    );
     // From the turn's start while it is open, so the clock runs across its
     // passes and survives a remount; else from when this row went live.
     const elapsedMs = createMemo(() => {

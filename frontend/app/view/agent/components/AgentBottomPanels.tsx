@@ -21,6 +21,7 @@ import { AgentWorkingRow } from "./AgentFooter";
 import { AgentQuestionPanel } from "./AgentQuestionPanel";
 import { AgentSessionNotices } from "./AgentSessionNotices";
 import { compactionModelKey } from "../compaction-estimate";
+import { toolActivity } from "../status/tool-labels";
 import { ForkProviderFallbackBanner } from "./ForkProviderFallbackBanner";
 import { PaneRow } from "./PaneRow";
 import { PendingMessagesPanel } from "./PendingMessagesPanel";
@@ -236,6 +237,15 @@ export const AgentBottomPanels = (props: {
                     turnTokens={props.paneModel.state.turnTokens}
                     turnLedger={props.paneModel.state.turnLedger}
                     turnCarry={props.paneModel.state.turnCarry}
+                    activity={props.paneModel.state.activity}
+                    needsYou={(() => {
+                        const decision = props.pendingDecisions()[0];
+                        if (decision) {
+                            const what = toolActivity(decision.toolName ?? decision.tool, decision.params as Record<string, unknown>);
+                            return `Waiting for your approval: ${what.label}`;
+                        }
+                        return props.pendingQuestions().length > 0 ? "Waiting for your answer" : null;
+                    })()}
                     sessionStats={props.paneModel.state.sessionStats}
                     launchPhase={props.status.launchPhase()}
                     onCancelLogin={props.status.cancelLogin}

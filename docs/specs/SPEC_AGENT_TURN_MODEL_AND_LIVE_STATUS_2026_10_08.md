@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, and phase 2a (the trigger on the row and the Worked line, §5.4) follows it; see §4.7 for how the build differs from the design below. Phase 2b and phases 3–4 are proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) and phase 3a (the live status, §6.8) follow it; see §4.7 for how the build differs from the design below. Phase 2b, the rest of phase 3, and phase 4 are proposed.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -453,6 +453,48 @@ Turn ── Idle
 - **`useStatusLine`:** a small hook that ticks the presenter (it reuses `useTick`).
 - **`AgentWorkingRow`:** it renders `{text, detail, tone}` and keeps its reveal, dot, compaction bar and right zone. `loadingLeftText` is replaced by the presenter.
 - **Swarm and muxspect:** get the turn ledger free from the status publish. Swarm can show the external-trigger chip and the unread dot from it.
+
+### 6.8 As built (phase 3a: deterministic sources only)
+
+**Reducer.** `state.activity` (`ActivityState`) holds three things:
+- `phase` and `phaseSince`: one of requesting, responding, thinking, writing or composing.
+- `tools`: the calls in flight, by `tool_use` id, each with its words.
+- `plan`/`planAt`: the latest `TodoWrite`'s in-progress step.
+
+How it's fed:
+- `TokensIn` sets responding, and `RequestStarted` sets requesting (only once a call exists).
+- `OutputStreamed.kind` sets thinking, writing or composing. `useAgentStream` sends the batch's latest delta kind (`mainAgentStreamedKind`).
+- `ToolStart` and `ToolEnd` now carry the tool's `id`, and `ToolStart` its `params`.
+- A pass end (`TurnEnd`, the idle reconcile) clears the phase and tools and keeps the plan. `TurnReset` clears everything.
+
+**Words.**
+- `status/tool-labels.ts`:
+  - Bash's `description`, put into progressive form ("Run the tests" becomes "Running the tests"). Otherwise just the program name, never the whole command.
+  - A subagent's kind and description.
+  - "Reading/Editing/Writing <base name>", "Searching for <pattern>", "Reading <host>" and "Using <mcp tool>".
+  - Calls running at once fold: "Reading 3 files", or "3 tools running" for a mix, naming a subagent if one is among them.
+- `status/plan.ts`: "Writing the spec (3/7)", from the todo item's `activeForm`.
+
+**Presenter.** `status/present-status.ts` implements §6.4's ranks and timing with the values in `TIMING`:
+- Promote thresholds: tools 1.5 s, composing 2 s, writing 3 s, thinking 4 s.
+- Dwell: 1.2 s. Hold after a call ends: 2 s.
+- A slow request: 20 s. Elapsed time is added to a single call's line after 10 s.
+
+Rank 0 comes from `AgentBottomPanels`:
+- the first pending approval: "Waiting for your approval: <its tool's words>";
+- otherwise any pending question: "Waiting for your answer".
+
+The row's statuses are rank 1, and phase 2a's lead-in is rank 3. The presenter returns a `key`, and the row types a line out only when the key changes, so a running clock never re-types the line.
+
+**Not yet:**
+- §6.4's muted goal segment next to the primary line.
+- Quiet-tool detection.
+- The thinking headline.
+- Subagent step detail.
+- Test-runner progress.
+- Per-pane thresholds.
+
+These belong to phase 4. Live tuning of `TIMING` also waits for `muxlog` data.
 
 ---
 
