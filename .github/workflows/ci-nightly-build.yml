@@ -252,6 +252,8 @@ jobs:
   #     diff to attribute debt to they degrade into whole-repo assertions that
   #     fail forever on the ~165 pre-existing violations — which ci-pr.yml's
   #     own comment records as how three earlier attempts died.
+  #     check-doc-links.mjs does run here, repo-wide, but as a report that
+  #     cannot fail: see the `doc-link-report` job below.
   gates:
     name: PR-parity gates
     runs-on: ubuntu-latest
@@ -296,3 +298,45 @@ jobs:
         run: bash tools/lint/check-input-handler-layout-reads.sh
       - name: muxbus credential store gate
         run: bash scripts/check-muxbus-credential-store.sh
+
+  # Plan step 3 (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md):
+  # repo-wide broken doc links and comments naming a missing file, so a break
+  # merged today is visible tomorrow. A REPORT, not a gate, for the reason in
+  # the `gates` note above: the job is continue-on-error, the report script
+  # always exits 0, and posting is best-effort. The result goes to the
+  # standing docs-stale issue (docs-stale-sweep.yml) as a comment, from main
+  # only, and only when the findings changed since the last one.
+  doc-link-report:
+    name: Doc link report (non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Build the report
+        run: |
+          bash scripts/nightly-doc-link-report.sh doc-link-report
+          cat doc-link-report/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doc-link-report
+          path: doc-link-report/
+          retention-days: 30
+
+      - name: Post to the docs-stale issue
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >-
+          bash scripts/docs-stale-issue-comment.sh nightly-doc-links
+          doc-link-report/report.md doc-link-report/fingerprint.txt
