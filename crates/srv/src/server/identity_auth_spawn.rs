@@ -763,14 +763,14 @@ fn spawn_auth_cli_pty(
     mgr.attach_process(&session_id, handle, stdin_tx);
 }
 
+/// How long a provider's auth-status check may take (`confirm_authenticated`).
+const AUTH_CHECK_TIMEOUT_SECS: u64 = 30;
+
 /// Run the provider's auth-check subcommand and return true if it
 /// exits 0. Failure modes (binary missing, network error, etc.) are
 /// all treated as "not authenticated" — the caller will then either
 /// keep waiting (drain task loop) or transition to Failed (exit
 /// fallback).
-/// How long a provider's auth-status check may take (`confirm_authenticated`).
-const AUTH_CHECK_TIMEOUT_SECS: u64 = 30;
-
 async fn confirm_authenticated(
     cli_path: &str,
     args: &[String],
