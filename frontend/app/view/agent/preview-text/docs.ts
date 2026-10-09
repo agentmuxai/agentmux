@@ -28,7 +28,8 @@ function withoutFinalEmptyLine<T extends { text: string }>(lines: T[]): T[] {
 /** The start of a Claude Code Read line: its number (right-aligned or not),
  *  then a tab or `→`. Shared with tool-meta/file-range.ts. */
 export const READ_LINE_NUMBER_RE = /^\s*(\d+)(?:\t|→)/;
-const GUTTER_RE = new RegExp(READ_LINE_NUMBER_RE.source + "(.*)$");
+// [\s\S], not `.`: a line can hold a lone \r or U+2028, which `.` won't match.
+const GUTTER_RE = new RegExp(READ_LINE_NUMBER_RE.source + "([\\s\\S]*)$");
 
 /** Split a Read body into line numbers and code, when every line that has
  *  any text is numbered (an empty line may not be); null otherwise. */

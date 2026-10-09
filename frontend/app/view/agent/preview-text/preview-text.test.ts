@@ -96,6 +96,9 @@ describe("Read gutter", () => {
         expect(splitGutter(["9\tx", "10\ty"])).toEqual({ numbers: [9, 10], code: ["x", "y"] });
         expect(splitGutter(["  1→x", "  2→y"])).toEqual({ numbers: [1, 2], code: ["x", "y"] });
     });
+    it("splits a line holding a lone \\r or U+2028 too", () => {
+        expect(splitGutter(["  1\ta\rb", "  2\tc\u2028d"])).toEqual({ numbers: [1, 2], code: ["a\rb", "c\u2028d"] });
+    });
     it("declines a body that isn't numbered", () => {
         expect(splitGutter(["const a = 1;", "     2\tx"])).toBeNull();
         expect(splitGutter(["", ""])).toBeNull();
