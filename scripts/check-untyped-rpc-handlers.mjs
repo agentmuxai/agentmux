@@ -8,7 +8,7 @@
 // command's schema, and (for types that derive ts-rs) is what
 // check-rpc-bindings.sh keeps in sync with the frontend. `register_handler`
 // takes raw JSON. The 2026-09-30 large-file analysis counted 49 untyped
-// registrations; by 2026-10-09 there were 59
+// registrations; by 2026-10-09 there were 60
 // (docs/specs/PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md step 12).
 //
 // Fails when crates/srv registers more untyped handlers than MAX, outside
@@ -22,7 +22,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const MAX = 59;
+const MAX = 60;
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(ROOT, "crates/srv/src");
@@ -38,15 +38,33 @@ function* rustFiles(dir) {
     }
 }
 
+// The file with every inline `#[cfg(test)] mod x { … }` block blanked out,
+// found by brace matching. Line breaks are kept, so line numbers still match.
+function withoutTestMods(text) {
+    const head = /#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{/g;
+    let out = "";
+    let from = 0;
+    for (let m = head.exec(text); m; m = head.exec(text)) {
+        let depth = 0;
+        let i = m.index + m[0].length - 1;
+        for (; i < text.length; i++) {
+            if (text[i] === "{") depth++;
+            else if (text[i] === "}" && --depth === 0) break;
+        }
+        out += text.slice(from, m.index) + text.slice(m.index, i + 1).replace(/[^\n]/g, " ");
+        from = i + 1;
+        head.lastIndex = from;
+    }
+    return out + text.slice(from);
+}
+
 const found = [];
 for (const file of rustFiles(SRC)) {
-    const text = readFileSync(file, "utf8");
-    // An inline `#[cfg(test)] mod tests { … }` runs to the end of the file in
-    // this codebase; stop counting there.
-    const testStart = text.search(/#\[cfg\(test\)\]\s*mod \w+\s*\{/);
-    const body = testStart >= 0 ? text.slice(0, testStart) : text;
-    body.split("\n").forEach((line, i) => {
-        if (/\.register_handler\(/.test(line)) found.push(`${relative(ROOT, file).split(sep).join("/")}:${i + 1}`);
+    const lines = withoutTestMods(readFileSync(file, "utf8")).split("\n");
+    lines.forEach((line, i) => {
+        if (!line.trim().startsWith("//") && /\.register_handler\(/.test(line)) {
+            found.push(`${relative(ROOT, file).split(sep).join("/")}:${i + 1}`);
+        }
     });
 }
 
