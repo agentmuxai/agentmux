@@ -1789,13 +1789,6 @@ export function update(
     }
 }
 
-/**
- * The turn and pass a call's tokens belong to, from the pane's ledger, so the
- * live counter never adds a pass srv has already counted (turn-ledger.ts
- * `turnLiveOutput`). srv reports a pass before it forwards any of its lines,
- * so a call always belongs to the ledger's latest pass: the running one, or,
- * for a line that arrives late, the one that just ended.
- */
 /** Add a finished pass's figures to its turn's carry (a new turn starts a new one). */
 function carryPass(carry: TurnCarry | null, turnId: number | undefined, stats: SessionStats | null): TurnCarry | null {
     if (turnId == null || !stats) return carry;
@@ -1809,6 +1802,13 @@ function carryPass(carry: TurnCarry | null, turnId: number | undefined, stats: S
     };
 }
 
+/**
+ * The turn and pass a call's tokens belong to, from the pane's ledger, so the
+ * live counter never adds a pass srv has already counted (turn-ledger.ts
+ * `turnLiveOutput`). srv reports a pass before it forwards any of its lines,
+ * so a call always belongs to the ledger's latest pass: the running one, or,
+ * for a line that arrives late, the one that just ended.
+ */
 function ledgerStamp(state: AgentPaneState): Pick<TurnTokens, "ledgerTurnId" | "ledgerPass"> {
     const l = state.turnLedger;
     return l ? { ledgerTurnId: l.turnId, ledgerPass: l.passes } : {};
