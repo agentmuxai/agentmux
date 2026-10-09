@@ -868,10 +868,15 @@ pub(crate) async fn handle_ui_browser_snapshot(
 pub(crate) fn popup_listing(state: &AppState, opener: &str, agent_id: &str) -> Vec<serde_json::Value> {
     use crate::backend::obj::Block;
     let load = |id: &str| state.mstore.get::<Block>(id).ok().flatten();
-    crate::server::browser_popup::open_popups(opener, |id| load(id).is_some())
+    let root = chain_root(state, opener);
+    crate::server::browser_popup::open_popups(&root, |id| load(id).is_some())
         .into_iter()
         .filter_map(|pane| {
             let block = load(&pane)?;
+            // The chain's popups are recorded together; list this pane's own.
+            if popup_of(&block).as_deref() != Some(opener) {
+                return None;
+            }
             let url = block.meta.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let yours = owning_agent(&block, &pane).is_some_and(|a| a.eq_ignore_ascii_case(agent_id));
             Some(json!({ "pane": pane, "url": url, "yours": yours }))
@@ -983,25 +988,63 @@ fn opener_allows(
     agent_id: &str,
     pane: &str,
 ) -> Result<(), (StatusCode, String)> {
-    let Some(opener) = block
-        .and_then(|b| b.meta.get(crate::server::browser_popup::POPUP_OF_META_KEY))
+    // Every pane up the chain, not just the one that opened this popup: a
+    // popup opened by a popup is still driven as part of the pane the chain
+    // started in, so Take over or a hand-off anywhere above stops it.
+    let mut next = block.and_then(popup_of);
+    for _ in 0..POPUP_CHAIN_LIMIT {
+        let Some(opener) = next else {
+            return Ok(());
+        };
+        let Ok(Some(opener_block)) = state.mstore.get::<crate::backend::obj::Block>(&opener) else {
+            // The rest of the chain was closed: from here the popup stands on its own.
+            return Ok(());
+        };
+        if !owning_agent(&opener_block, &opener).is_some_and(|a| a.eq_ignore_ascii_case(agent_id)) {
+            return Err((
+                StatusCode::FORBIDDEN,
+                format!(
+                    "the user took over pane {opener:?}, which opened popup {pane:?} (directly or \
+                     through other popups); open a new pane with OpenBrowser if you still need a browser"
+                ),
+            ));
+        }
+        not_waiting_on_user(&opener)?;
+        next = popup_of(&opener_block);
+    }
+    Err((StatusCode::FORBIDDEN, format!("popup {pane:?} is too many popups deep to drive")))
+}
+
+/// How many openers up a popup's chain the checks follow. A chain this deep
+/// is a page opening popups from popups on purpose; driving stops there.
+const POPUP_CHAIN_LIMIT: usize = 8;
+
+/// The pane that opened `block` as a popup pane, if it is one.
+fn popup_of(block: &crate::backend::obj::Block) -> Option<String> {
+    block
+        .meta
+        .get(crate::server::browser_popup::POPUP_OF_META_KEY)
         .and_then(|v| v.as_str())
         .filter(|o| !o.is_empty())
-    else {
-        return Ok(());
-    };
-    let Ok(Some(opener_block)) = state.mstore.get::<crate::backend::obj::Block>(opener) else {
-        return Ok(());
-    };
-    if !owning_agent(&opener_block, opener).is_some_and(|a| a.eq_ignore_ascii_case(agent_id)) {
-        return Err((
-            StatusCode::FORBIDDEN,
-            format!(
-                "the user took over pane {opener:?}, which opened popup {pane:?}; open a new pane with OpenBrowser if you still need a browser"
-            ),
-        ));
+        .map(str::to_string)
+}
+
+/// The pane a chain of popups started in: `pane` itself unless it is a popup
+/// pane, else its opener's root, as far up as the panes still exist. Popups
+/// are counted against it, so a popup opening popups shares its root's cap
+/// rather than getting its own.
+fn chain_root(state: &AppState, pane: &str) -> String {
+    let mut root = pane.to_string();
+    for _ in 0..POPUP_CHAIN_LIMIT {
+        let Some(up) = state.mstore.get::<crate::backend::obj::Block>(&root).ok().flatten().as_ref().and_then(popup_of) else {
+            break;
+        };
+        if !matches!(state.mstore.get::<crate::backend::obj::Block>(&up), Ok(Some(_))) {
+            break;
+        }
+        root = up;
     }
-    not_waiting_on_user(opener)
+    root
 }
 
 /// Refuse a tool call on a pane that is waiting for the user: a hand-off
@@ -1158,12 +1201,17 @@ pub(crate) async fn handle_host_browser_popup(
     if block.meta.get("view").and_then(|v| v.as_str()) != Some("browser") {
         return refused("it was not opened by a browser pane");
     }
-    let owner = owning_agent(&block, &opener);
+    // The opener's owner, if the whole chain above it (when the opener is a
+    // popup pane itself) is still that agent's: a popup from a popup of a pane
+    // the person took over belongs to nobody.
+    let owner = owning_agent(&block, &opener)
+        .filter(|agent| opener_allows(&state, Some(&block), agent, &opener).is_ok());
     // The count and the slot are taken together: two popups reported at once
     // can't both fit under the cap. The slot is given back if the pane
     // doesn't open.
+    let root = chain_root(&state, &opener);
     let reservation = match popup::reserve(
-        &opener,
+        &root,
         |id| matches!(state.mstore.get::<crate::backend::obj::Block>(id), Ok(Some(_))),
         |taken| popup::decide(&url, &opener_url, user_gesture, owner.is_some(), taken),
     ) {

@@ -116,11 +116,13 @@ title: srv knows the opener's URL, not its title, and a title is the page's to c
 
 ## 4. Profile and session
 
-A popup uses the opener's request context. On Windows panes use the shared default context
-(`browser_pane/creation.rs`); on the Linux and macOS Views path the parent window's context
-(`creation_views.rs`). `SPEC_BROWSER_PANE_IDENTITIES` flags `creation_views.rs:126-130` as a
-place a popup might get a different one; P1 adds a test that a popup reads the opener's
-cookies on every platform, and fixes that spot if it does not.
+A popup pane is an ordinary browser pane, created like any other, so it uses the same request
+context as every pane: on Windows the shared default context (`browser_pane/creation.rs`), on the
+Linux and macOS Views path the parent window's (`creation_views.rs`). That a popup sees the
+opener's session was checked live on Windows (a `task dev` build: the popup page read a cookie
+the opener set). There is no automated cross-platform test of it; private-identity panes
+(`SPEC_BROWSER_PANE_IDENTITIES_2026_09_22.md`, not yet built) will need one, since a popup must
+then inherit the opener's identity rather than the default context.
 
 ## 5. Security
 
@@ -129,8 +131,9 @@ cookies on every platform, and fixes that spot if it does not.
 2. **The URL is always visible** in the popup's header, and the title says which pane opened it.
    A popup must not be able to hide its address.
 3. **Ownership is server-side**, written from the opener by srv, as in the 2026-10-07 spec.
-4. **A cap per pane** (8) and a cap per window, with an overflow popup going to the system
-   browser as today.
+4. **A cap per pane** (8), counting popups of popups against the pane the chain started in, so
+   a popup can't open its own allowance of more; an overflow popup goes to the system browser as
+   today. (Separate panes have separate caps: each is a page of its own, not one page flooding.)
 5. **No new route to the human's panes:** an agent still drives only what its identity owns, and
    a popup is owned only if its opener was.
 

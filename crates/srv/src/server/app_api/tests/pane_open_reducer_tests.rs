@@ -1488,6 +1488,14 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p2 }))).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
 
+    // A popup opened by that popup is the agent's too, while the chain is.
+    let from_popup = popup(&p1, "https://idp.other.org/login", "https://pay.third.org/", true);
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", from_popup, &host).await;
+    assert_eq!(body["data"]["admitted"], true, "{body}");
+    let p3 = body["data"]["pane"].as_str().unwrap().to_string();
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p3 }))).await;
+    assert_eq!(s, StatusCode::BAD_GATEWAY);
+
     // Take over on the opener ends the agent's hold on the popup it opened.
     let oref = format!("block:{agents}");
     let mut clear = crate::backend::obj::MetaMapType::new();
@@ -1497,18 +1505,41 @@ async fn a_popup_opens_as_a_pane_beside_its_opener_and_inherits_its_owner() {
     let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p1 }))).await;
     assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
     assert!(body["error"].as_str().unwrap_or("").contains("took over"), "{body}");
+    // And on the popup's own popup, two levels down.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/focus_info", merged(&auth, serde_json::json!({ "pane": p3 }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    // A new popup from that popup belongs to nobody: the chain is no longer the agent's.
+    let after_take_over = popup(&p1, "https://idp.other.org/login", "https://idp.other.org/next", true);
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", after_take_over, &host).await;
+    if body["data"]["admitted"] == true {
+        let p4 = body["data"]["pane"].as_str().unwrap().to_string();
+        let b4 = state.mstore.must_get::<crate::backend::obj::Block>(&p4).unwrap();
+        assert!(b4.meta.get("browser:owner_agent").is_none_or(|v| v.is_null()), "{body}");
+    }
 
     // A popup reported for a pane that isn't a browser pane is refused.
     let not_browser = popup(&own, "https://x.example.com/", "https://x.example.com/a", true);
     let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", not_browser, &host).await;
     assert_eq!(body["data"]["admitted"], false, "{body}");
 
-    // At most MAX_POPUPS_PER_PANE open at once per pane.
-    for _ in 1..crate::server::browser_popup::MAX_POPUPS_PER_PANE {
+    // At most MAX_POPUPS_PER_PANE open at once per chain: the popup's own
+    // popups (p3, and p4 if it opened) count against the pane they started in.
+    let mut admitted = 0;
+    loop {
         let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
-        assert_eq!(body["data"]["admitted"], true, "{body}");
+        if body["data"]["admitted"] != true {
+            break;
+        }
+        admitted += 1;
+        assert!(admitted <= crate::server::browser_popup::MAX_POPUPS_PER_PANE, "the cap never held");
     }
-    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", console("https://signin.example.com/"), &host).await;
+    let exists = |id: &str| matches!(state.mstore.get::<crate::backend::obj::Block>(id), Ok(Some(_)));
+    assert_eq!(
+        crate::server::browser_popup::open_popups(&agents, exists).len(),
+        crate::server::browser_popup::MAX_POPUPS_PER_PANE
+    );
+    // A popup can't get round it by opening its own.
+    let (_, body) = post_json_headers(&app, "/api/v1/host/browser_popup", popup(&p1, "https://idp.other.org/login", "https://idp.other.org/x", true), &host).await;
     assert_eq!(body["data"]["admitted"], false, "{body}");
     // Closing one makes room again.
     crate::backend::wcore::delete_block(&state.mstore, &tab_id, &p1).unwrap();
