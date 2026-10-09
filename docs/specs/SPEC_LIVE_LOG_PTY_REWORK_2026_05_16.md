@@ -401,7 +401,7 @@ Force PTY allocation to fail (set `portable_pty`'s test hook, or simulate by spa
 
 ### Code locations (current state, pre-rework)
 
-- Wrapper run loop: [`agentmux-bashwrap/src/bash_wrap.rs::run_proc`](../../agentmux-bashwrap/src/bash_wrap.rs) (lines ~397–500, current pipe + stdbuf form)
+- Wrapper run loop: [`crates/bashwrap/src/bash_wrap.rs::run_proc`](../../crates/bashwrap/src/bash_wrap.rs) (lines ~397–500, current pipe + stdbuf form)
 - WPS publish client: `agentmux-bashwrap/src/wps_client.rs` (unchanged by this rework)
 - Frontend tool_chunk handler: [`frontend/app/view/agent/useAgentStream.ts`](../../frontend/app/view/agent/useAgentStream.ts) (`blockChunkUnsub` block ~lines 109–170)
 - Reducer ToolChunkAppend: [`frontend/app/store/agent-document/reducer.ts`](../../frontend/app/store/agent-document/reducer.ts) (lines ~202–252)

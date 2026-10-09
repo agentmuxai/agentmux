@@ -230,7 +230,7 @@ Wire this behind `AGENTMUX_SHARED_STORE_READS=1` for canary testing.
 
 ## 7. References
 
-- [`agentmux-common/src/data_paths.rs`](../../../agentmux-common/src/data_paths.rs) — current layout
-- [`agentmux-srv/src/registry/migrate.rs`](../../../agentmux-srv/src/registry/migrate.rs) — model for §2.5
-- [`agentmux-srv/src/backend/storage/migrations.rs`](../../../agentmux-srv/src/backend/storage/migrations.rs) — schema this spec moves
+- [`crates/common/src/data_paths.rs`](../../../crates/common/src/data_paths.rs) — current layout
+- [`crates/srv/src/registry/migrate.rs`](../../../crates/srv/src/registry/migrate.rs) — model for §2.5
+- [`crates/srv/src/backend/storage/migrations.rs`](../../../crates/srv/src/backend/storage/migrations.rs) — schema this spec moves
 - SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md — the reducer slice this spec sits underneath
