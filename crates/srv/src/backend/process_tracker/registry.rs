@@ -197,6 +197,18 @@ pub fn track_spawned_agent(block_id: &str, pid: u32) {
     }
 }
 
+/// One block's tracked tree, as [`AgentProcessRegistry::members_by_block`]
+/// reports it.
+#[derive(Debug, Clone)]
+pub struct BlockMembers {
+    pub block_id: String,
+    pub pids: Vec<u32>,
+    /// The PIDs assigned as the block's own process (the agent CLI or shell).
+    pub roots: HashSet<u32>,
+    pub confidence: TrackingConfidence,
+    pub cpu_time_ns: Option<u64>,
+}
+
 pub struct AgentProcessRegistry {
     inner: Mutex<HashMap<String, RegistryEntry>>,
     broker: Option<Arc<mps::Broker>>,
@@ -337,6 +349,28 @@ impl AgentProcessRegistry {
             None => return Vec::new(),
         };
         agent_started(tracker.list_members(), &roots)
+    }
+
+    /// Every tracked block's members for Tower: PIDs (plumbing included), the
+    /// roots, the tracker's confidence and the tree's CPU account. The trackers
+    /// are queried outside the registry lock.
+    pub fn members_by_block(&self) -> Vec<BlockMembers> {
+        let entries: Vec<(String, Arc<dyn TrackerHandle>, HashSet<u32>)> = self
+            .inner
+            .lock()
+            .iter()
+            .map(|(id, e)| (id.clone(), e.tracker.clone(), e.roots.clone()))
+            .collect();
+        entries
+            .into_iter()
+            .map(|(block_id, tracker, roots)| BlockMembers {
+                pids: tracker.member_pids(),
+                cpu_time_ns: tracker.cpu_time_ns(),
+                confidence: tracker.confidence(),
+                block_id,
+                roots,
+            })
+            .collect()
     }
 
     /// Confidence of a block's tracker — drives the "tracking is
@@ -650,6 +684,26 @@ mod tests {
             .expect("the resumed child ran and exited")
             .unwrap();
         assert_eq!(status.code(), Some(7));
+    }
+
+    /// The job's CPU account grows while a member works and keeps that time
+    /// after the member exits, which a per-process sum would lose.
+    #[test]
+    #[cfg(windows)]
+    fn a_jobs_cpu_time_keeps_what_exited_members_used() {
+        let tracker = super::super::windows::JobObjectTracker::new("test-job-cpu").unwrap();
+        assert_eq!(tracker.cpu_time_ns(), Some(0), "an empty job has used nothing");
+        // A busy child: cmd counting to two million (a second or more of CPU),
+        // then exiting.
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "for /L %i in (1,1,2000000) do @rem"])
+            .spawn()
+            .expect("spawn cmd");
+        tracker.assign_process(child.id()).unwrap();
+        let _ = child.wait();
+        let used = tracker.cpu_time_ns().unwrap();
+        assert!(used >= 300_000_000, "the exited member's CPU time is kept: {used} ns");
+        assert!(tracker.member_pids().is_empty(), "nothing is left running");
     }
 
     /// After `kill_tree` the job stays usable: a respawned process is still

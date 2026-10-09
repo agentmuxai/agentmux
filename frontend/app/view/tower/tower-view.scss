@@ -1,0 +1,189 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Tower pane: a toolbar (view tabs, CPU convention), a summary line, and one
+// table. Controls are element/ui's; this file only lays them out.
+
+.tower-view {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    color: var(--main-text-color);
+    font-size: 13px;
+}
+
+.tower-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-2);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.tower-toolbar-spacer {
+    flex: 1 1 auto;
+}
+
+.tower-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-2) var(--space-3);
+}
+
+.tower-summary {
+    font-size: 0.92em;
+}
+
+.tower-muted {
+    color: var(--secondary-text-color);
+}
+
+.tower-error {
+    padding: var(--space-1) var(--space-3);
+    color: var(--error-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tower-empty {
+    padding: var(--space-3) 0;
+    color: var(--secondary-text-color);
+}
+
+.tower-filter {
+    max-width: 360px;
+}
+
+.tower-more {
+    font-size: 0.9em;
+}
+
+.tower-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+
+    th {
+        font-weight: 500;
+        text-align: left;
+        padding: 0;
+        border-bottom: 1px solid var(--border-color);
+        position: sticky;
+        top: 0;
+        background: var(--main-bg-color);
+        z-index: 1;
+
+        &:nth-child(2),
+        &:nth-child(3) {
+            width: 92px;
+        }
+
+        &:nth-child(4) {
+            width: 84px;
+        }
+    }
+
+    td {
+        padding: 2px var(--space-2);
+        vertical-align: top;
+        border-bottom: 1px solid color-mix(in srgb, var(--border-color) 50%, transparent);
+    }
+
+    tbody tr:hover {
+        background: var(--hover-bg-color);
+    }
+
+    .tower-num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    th.tower-num .tower-sort {
+        margin-left: auto;
+    }
+}
+
+.tower-sort {
+    width: 100%;
+    justify-content: flex-start;
+    border-color: transparent;
+}
+
+.tower-name-line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.tower-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.tower-task-row .tower-label {
+    font-weight: 500;
+}
+
+.tower-process-row--nested .tower-name {
+    padding-left: 30px;
+}
+
+.tower-role--support .tower-label {
+    color: var(--secondary-text-color);
+}
+
+.tower-badge {
+    flex-shrink: 0;
+    padding: 0 5px;
+    font-size: 0.8em;
+    line-height: 1.5;
+    border: 1px solid var(--border-color);
+    color: var(--secondary-text-color);
+}
+
+.tower-badge--agent {
+    border-color: color-mix(in srgb, var(--accent-color) 60%, transparent);
+    color: var(--accent-color);
+}
+
+.tower-badge--task {
+    max-width: 14em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+// Row actions appear on hover or focus, so the table reads as numbers.
+.tower-reveal,
+.tower-cmdline-toggle {
+    opacity: 0;
+}
+
+tr:hover .tower-reveal,
+tr:hover .tower-cmdline-toggle,
+.tower-reveal:focus-within,
+.tower-cmdline-toggle:focus-within,
+.tower-reveal:focus-visible,
+.tower-cmdline-toggle:focus-visible {
+    opacity: 1;
+}
+
+.tower-cmdline {
+    margin: 2px 0 4px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--secondary-text-color);
+    white-space: pre-wrap;
+    word-break: break-all;
+    user-select: text;
+}

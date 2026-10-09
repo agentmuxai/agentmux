@@ -34,6 +34,7 @@ mod remotes;
 mod session;
 mod skill;
 mod toolchain;
+mod tower;
 mod viewer;
 mod websocket;
 
@@ -60,6 +61,7 @@ pub use remotes::*;
 pub use session::*;
 pub use skill::*;
 pub use toolchain::*;
+pub use tower::*;
 pub use viewer::*;
 pub use websocket::*;
 

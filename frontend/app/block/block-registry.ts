@@ -24,6 +24,7 @@ import { settingsPaneTab } from "@/app/view/settings/settings";
 import { swarmPaneTab } from "@/app/view/swarm/swarm";
 import { sysinfoPaneTab } from "@/app/view/sysinfo/sysinfo";
 import { toolchainPaneTab } from "@/app/view/toolchain/toolchain";
+import { towerPaneTab } from "@/app/view/tower/tower";
 import { wardenPaneTab } from "@/app/view/warden/warden";
 import { helpPaneTab } from "@/view/helpview/helpview";
 import { terminalPaneTab } from "@/view/term/term";
@@ -55,6 +56,7 @@ const builtins = [
     dronePaneTab, // native — Phase 2c (keeps the "workflows" alias)
     wardenPaneTab, // native — Phase 2c
     toolchainPaneTab, // native — Phase 2c
+    towerPaneTab, // native: the read-only task manager
     connectorsPaneTab, // native (the Armory's Accounts and MCP servers, and Remotes)
     memoryPaneTab, // native (the rest of the Armory; was Knowledge)
     // Moves a saved Armory block (or "trust") onto one of the two above.

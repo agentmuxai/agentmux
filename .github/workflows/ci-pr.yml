@@ -325,7 +325,7 @@ jobs:
       # (missing fields); #1823 was a Windows `cfg` break in agentmux-cef
       # itself, which nightly (ci-nightly-build.yml) now owns catching.
       - name: cargo check --tests (CEF-free crates)
-        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote
+        run: cargo check --tests -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats
 
       # Catches stale-assertion breaks (e.g. #1876's pre-JEKT expectations)
       # in the same CEF-free scope.
@@ -346,7 +346,7 @@ jobs:
       # subset (the path-sensitive crates), not this full invocation.
       - name: cargo test (CEF-free crates)
         if: matrix.os != 'windows-latest'
-        run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -- --test-threads=1
+        run: cargo test -p agentmux-common -p agentmux-srv -p agentmux-launcher -p agentmux-bashwrap -p agentmux-mcp -p agentmux-remote -p agentmux-procstats -- --test-threads=1
 
       # frontend/types/rpc/*.ts is generated from the Rust request/response
       # types by ts-rs. This turns the audit's "keep in sync with the
