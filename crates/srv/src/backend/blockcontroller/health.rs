@@ -438,7 +438,11 @@ impl TurnActivityTrackerInner {
             turn_id: now.max(previous + 1),
             seq: 0,
             origin,
-            trigger: trigger.or_else(|| origin.map(|o| TurnTrigger::from_input(o, ""))),
+            // A pass the CLI started with no task to name has no trigger: never
+            // a sender made up from its origin (#4503).
+            trigger: trigger.or_else(|| {
+                (!matches!(start, PassStart::CliWake)).then_some(origin).flatten().map(|o| TurnTrigger::from_input(o, ""))
+            }),
             absorbed: Vec::new(),
             started_at_ms: now,
             passes: 1,
@@ -1529,5 +1533,27 @@ mod tests {
         let l = t.ledger().unwrap();
         assert_eq!(l.inputs, 1, "only the mid-pass message");
         assert!(l.absorbed.iter().all(|a| a.kind != TriggerKind::Task));
+    }
+
+    /// A CLI-started pass with no task notification gets no made-up sender.
+    #[test]
+    fn a_cli_pass_with_no_task_has_no_trigger() {
+        let mut inner = TurnActivityTrackerInner {
+            active_turn: true,
+            exit_code: None,
+            provenance: None,
+            next_turn: None,
+            ledger: None,
+            input_during_pass: false,
+            cli_wake_pending: false,
+            continuation_expected: false,
+            continuation_provenance: None,
+            pending_join: None,
+            ledger_seq: 0,
+            next_turn_trigger: None,
+            pending_task_trigger: None,
+        };
+        inner.begin_pass(PassStart::CliWake, None, 1_000);
+        assert_eq!(inner.ledger.unwrap().trigger, None);
     }
 }
