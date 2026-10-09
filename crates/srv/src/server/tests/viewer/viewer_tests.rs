@@ -748,3 +748,28 @@ async fn a_feed_follows_state_changes_and_says_when_the_state_is_gone() {
     let more = tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await;
     assert!(more.is_err(), "nothing more while there is no state");
 }
+
+/// Tower's route for a paired device: the token is needed, sharing is off
+/// until the user turns it on, and then it is this computer's snapshot.
+#[tokio::test(flavor = "multi_thread")]
+async fn procs_need_the_token_and_the_users_sharing() {
+    let state = test_state();
+    let app = viewer_router(&state);
+    let (_, token) = pair_device(&state, "studio (Tower)");
+    assert_eq!(send(&app, Method::GET, "/agentmux/viewer/procs", None).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(send(&app, Method::GET, "/agentmux/viewer/procs", bearer(&token)).await, StatusCode::FORBIDDEN, "off by default");
+
+    let mut settings = state.config_watcher.get_settings();
+    settings.extra.insert(SETTING_TOWER_SHARE.to_string(), serde_json::json!(true));
+    state.config_watcher.update_settings(settings);
+    let resp = app
+        .clone()
+        .oneshot(request(Method::GET, "/agentmux/viewer/procs?filter=", Some(("Authorization", &format!("Bearer {token}"))), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = json_of(resp).await;
+    assert_eq!(body["remote"], true);
+    assert!(body["host"]["total"].as_u64().unwrap() > 0, "{body}");
+    assert!(body["host"]["processes"].as_array().unwrap().len() <= 2 * crate::backend::tower_sampler::SHARED_TOP);
+}

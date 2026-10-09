@@ -10,6 +10,7 @@
  */
 
 import { contextCompactedNodeId, parseCompactBoundaryFrame } from "./compact-boundary";
+import { createTaskWakeDetector } from "./task-wake";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { createTranslator } from "./providers/translator-factory";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId } from "./session-outcome";
@@ -123,6 +124,9 @@ export class HistoryParser {
     /** Pairs each compact_boundary with Claude Code's summary frame after it.
      *  A field, not a local: the two can straddle a history page. */
     private readonly compactionSummaries = new CompactionSummaryTracker();
+    // A pass the CLI starts for a finished background task (task-wake.ts):
+    // the same detector the live stream uses, so live and replay agree.
+    private readonly detectTaskWake = createTaskWakeDetector();
     /** Ordered, deduped by id. Same-id events replace in place. */
     readonly nodes: DocumentNode[] = [];
     // Same-id events update IN PLACE rather than first-wins.
@@ -264,6 +268,10 @@ export class HistoryParser {
             // in the provider translator, so without this the replay pipeline
             // silently dropped every historical compact_boundary along with
             // its exact token/duration record (Codex P1, PR #2378 round 2).
+            {
+                const wake = this.detectTaskWake(rawEvent, stampFor(lineIdx));
+                if (wake) put(wake, indexById.get(wake.id));
+            }
             if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
                 // Bypassing parser.parseLine() below means the parser's
                 // currentTextNode/currentThinkingNode accumulator never sees

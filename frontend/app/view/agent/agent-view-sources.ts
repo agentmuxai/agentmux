@@ -33,6 +33,7 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
     "hooks/useTurnReconciliation.ts",
     "hooks/turn-confirmation.ts",
     "hooks/useContextReading.ts",
+    "hooks/useTurnLedger.ts",
 ];
 
 /**
@@ -40,5 +41,9 @@ export const AGENT_VIEW_SOURCES: readonly string[] = [
  * grew from 1,959 lines (2026-07-31) to 3,001 after an earlier split, because
  * nothing stopped it. Lower this whenever an extraction shrinks the file;
  * raising it needs a reason in the PR.
+ *
+ * 1502 → 1505 (SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md): the turn
+ * ledger subscription. Its code is in hooks/useTurnLedger.ts; the view keeps
+ * only the import and the call, next to the other per-block feeds.
  */
-export const AGENT_VIEW_MAX_LINES = 1502;
+export const AGENT_VIEW_MAX_LINES = 1505;

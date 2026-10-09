@@ -1,8 +1,8 @@
 # SPEC: Tower, a read-only task manager pane (CPU and memory per task)
 
 **Status:** active. The Tasks and Host views (§9 phases 1-3) are
-implemented (#4498); SSH and WSL remotes (§8.2) follow; LAN peers (§8.3)
-are next. Name chosen by the
+implemented (#4498); SSH and WSL remotes (§8.2) and LAN peers (§8.3)
+follow. Internet hosts (§8.4) are a separate spec. Name chosen by the
 operator: **Tower**. Defaults taken as recommended (2026-10-08): CPU as a share
 of the whole machine with a per-core toggle; one AgentMux row that expands to
 its processes; one-time pairing for LAN viewing; internet hosts in a separate
@@ -327,20 +327,31 @@ status (`server/reactive.rs`, `handle_reactive_agent_names`), and
 anything beyond that needs a stronger credential. Process lists are well past
 that line.
 
-The model to reuse is the mobile viewer's (`backend/viewer/`): a one-time
-pairing code shown on the target machine, a revocable per-device token, TLS
-with a pinned certificate, and per-subscriber byte limits that reset a slow
-reader (`viewer/feed.rs`). Tower adds:
+This computer pairs as a viewer device of the other one, exactly as a phone
+does (`backend/viewer/`): a one-time pairing code shown on the target, a
+revocable per-device token, TLS with a pinned certificate.
 
-- a viewer route on the target, e.g. `GET /agentmux/viewer/procs` (SSE,
-  frames per §8.1), gated by that token and by a per-machine "allow paired
-  devices to see processes" setting, off by default;
-- a desktop-side viewer client in srv, which doesn't exist yet: today only
-  mobile pairs as a viewer;
-- the target's own user sees which devices are watching and can revoke them.
-
-Remote AgentMux instances can show both views, since they have panes: the
-Tasks view is the most useful one for a fleet of agent machines.
+- **Pairing:** on the target, the status bar's **Pair a device** panel now
+  also offers **Copy link**: the same `agentmux://pair?…` link its QR holds
+  (address, viewer port, certificate fingerprint, one-time code). In Tower on
+  this computer, **Pair another AgentMux computer…** takes the pasted link
+  (`tower.pair`). `backend::tower_peers` redeems the code over TLS pinned to
+  the fingerprint (`viewer::client`, also used by the listener's own test).
+- **What is kept:** the peer's hostname, address, port and fingerprint in
+  `tower-peers.json` in the data directory; the token only in the secret
+  store (the OS keychain). **Forget** removes both here (`tower.forget`); the
+  target's user revokes this device in their paired-devices list.
+- **The target's side:** `GET /agentmux/viewer/procs?filter=` (viewer token),
+  answered only when its user turned on **Share this computer's processes
+  with paired devices** (Tower's settings menu; `tower:sharewithpaired`, off
+  by default), else 403. It returns the target's Tasks and the busiest and
+  largest of its processes (§8.1's caps, `tower_sampler::share`), names only.
+  An agent hidden from paired devices, and its processes, are left out.
+- **A moved peer:** the fingerprint, not the address, is what is trusted. When
+  the kept address doesn't answer, the address LAN discovery has for that
+  hostname is tried and kept if it answers.
+- Another AgentMux computer shows both views: its Tasks (agents by name) and
+  its Host processes.
 
 ### 8.4 Same-account hosts over the internet (third, separate spec)
 
@@ -370,7 +381,7 @@ is not proposed here.
    - **Follow-up:** point the `blockstats` badge at the same sampler, so badge
      and pane agree (today the badge shows working set / RSS, per core).
 4. **Done.** SSH and WSL remotes (§8.2).
-5. **LAN peers** (§8.3).
+5. **Done.** LAN peers (§8.3).
 6. **Later, separately specced:** WAN hosts (§8.4), actions (kill tree,
    already safe with Job Objects/`cgroup.kill`), per-task memory via an
    enabled cgroup memory controller on Linux (needs srv moved out of the

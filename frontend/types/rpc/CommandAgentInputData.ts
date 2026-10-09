@@ -43,4 +43,11 @@ delivery_id?: string,
  * message, and gives Claude the first ones inline.
  * SPEC_AGENT_PANE_IMAGE_ATTACHMENTS_2026_09_26.md §6.6.
  */
-attachments?: Array<AttachmentRef>, };
+attachments?: Array<AttachmentRef>, 
+/**
+ * The pane is sending a message it held while turn `joins_turn` (the
+ * `agentturn` event's `turn_id`) ran: it joins that turn instead of
+ * starting a new one. Set only for that flush, never for a fresh send.
+ * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.3 (J3).
+ */
+joins_turn?: number, };

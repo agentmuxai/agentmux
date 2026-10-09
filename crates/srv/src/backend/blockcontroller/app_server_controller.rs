@@ -66,6 +66,7 @@ impl AppServerController {
         mstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
+        let broker_for_turns = broker.clone();
         Self {
             tab_id,
             block_id: block_id.clone(),
@@ -81,7 +82,7 @@ impl AppServerController {
             event_bus,
             mstore,
             filestore,
-            health_monitor: Arc::new(TurnActivityTracker::new(block_id)),
+            health_monitor: Arc::new(TurnActivityTracker::for_block(block_id, broker_for_turns.as_ref())),
             self_ref: Mutex::new(None),
         }
     }
@@ -549,6 +550,10 @@ impl Controller for AppServerController {
             return self.send_message(message);
         }
         Ok(())
+    }
+
+    fn turn_tracker(&self) -> Option<Arc<TurnActivityTracker>> {
+        Some(Arc::clone(&self.health_monitor))
     }
 
     fn controller_type(&self) -> &str {
