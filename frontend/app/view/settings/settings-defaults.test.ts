@@ -115,10 +115,8 @@ function uiValues(): { values: Map<string, Found[]>; keys: Set<string> } {
         for (const m of text.matchAll(/(?:\bs\(\)|settingsAtom\(\)\?\.)\["([^"]+)"\]/g)) {
             const key = m[1];
             keys.add(key);
-            const before = text.slice(Math.max(0, m.index! - 4), m.index!);
-            const after = text.slice(m.index! + m[0].length, m.index! + m[0].length + 120);
             const at = `${rel}:${lineOf(text, m.index!)}`;
-            const token = fallbackToken(before, after);
+            const token = fallbackToken(text.slice(0, m.index!), text.slice(m.index! + m[0].length));
             if (token !== null) push(out, key, { value: tokenValue(rel, text, token), at });
         }
         const kindRow = /const kindRow = \([^)]*\bfallback = (true|false)\)/.exec(text);
@@ -165,7 +163,7 @@ function resolveConst(rel: string, text: string, name: string): unknown {
 // Each use gets fallbackToken, and a value variable also counts
 // `typeof v === "number" ? v : X` and `if (v == null …) return X`.
 
-const ATOM_READ = String.raw`(?:getSettingsKeyAtom|getOverrideConfigAtom)\((?:[^()"]*,\s*)?"([^"]+)"(?:\s+as\s+any)?\)`;
+const ATOM_READ = String.raw`(?:getSettingsKeyAtom|getOverrideConfigAtom)\((?:(?:[^()",]|\([^()]*\))*,\s*)?"([^"]+)"(?:\s+as\s+any)?\)`;
 const BRACKET_READ = String.raw`(?:\b\w*[sS]ettings\w*(?:\(\))?|\(\s*\w*[sS]ettings\w*\(\)\s+as\s+any\s*\))(?:\?\.)?\["([^"]+)"\]`;
 
 /** Defaults the frontend applies through a helper or a stylesheet: file, and a pattern capturing the value. */
@@ -212,6 +210,54 @@ const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
     ],
 };
 
+/**
+ * A read whose key is a variable: file, the read (or the use of its value),
+ * and the file and pattern listing the keys it can be.
+ */
+const COMPUTED_KEY_READS: [string, RegExp, [string, RegExp]][] = [
+    [
+        "frontend/app/notification/sound/sound-service.ts",
+        // The value, read into `perEvent`, then checked on the next line.
+        /(?<=const perEvent = getSettingsKeyAtom\(def\.settingKey\)\(\);\s*if \()perEvent/,
+        ["frontend/app/notification/sound/sounds.ts", /settingKey: "([^"]+)"/g],
+    ],
+    [
+        "frontend/app/block/blockframe.tsx",
+        /getSettingsKeyAtom\(setting as any\)\(\)/,
+        ["frontend/app/view/term/term.tsx", /statsBadgeSetting: "([^"]+)"/g],
+    ],
+];
+
+/**
+ * Where the block enclosing `from` ends: the `}` that closes it, or the end of
+ * the text. Strings and comments are skipped, so a brace inside them doesn't
+ * count. In TS a quote that doesn't close on its own line is JSX text (an
+ * apostrophe), not a string; in Rust a `'` that isn't a char literal is a lifetime.
+ */
+function blockEnd(text: string, from: number, lang: "ts" | "rs"): number {
+    let depth = 0;
+    for (let i = from; i < text.length; i++) {
+        const c = text[i];
+        if (c === "/" && text[i + 1] === "/") i = text.indexOf("\n", i) === -1 ? text.length : text.indexOf("\n", i);
+        else if (c === "/" && text[i + 1] === "*")
+            i = text.indexOf("*/", i + 2) === -1 ? text.length : text.indexOf("*/", i + 2) + 1;
+        else if (lang === "rs" && c === "r" && /^r#*"/.test(text.slice(i, i + 8)) && !/\w/.test(text[i - 1] ?? "")) {
+            const hashes = /^r(#*)"/.exec(text.slice(i, i + 8))![1];
+            const close = text.indexOf(`"${hashes}`, i + hashes.length + 2);
+            i = close === -1 ? text.length : close + hashes.length;
+        } else if (c === '"' || (c === "'" && lang === "ts")) {
+            let j = i + 1;
+            while (j < text.length && text[j] !== c && text[j] !== "\n") j += text[j] === "\\" ? 2 : 1;
+            if (text[j] === c || lang === "rs") i = j;
+        } else if (c === "'" && lang === "rs") {
+            const ch = /^'(?:\\.|[^\\'])'/.exec(text.slice(i, i + 4));
+            if (ch) i += ch[0].length - 1;
+        } else if (c === "{") depth++;
+        else if (c === "}" && --depth < 0) return i;
+    }
+    return text.length;
+}
+
 function frontendFiles(dir: string, out: string[] = []): string[] {
     for (const name of readdirSync(join(ROOT, dir))) {
         const rel = `${dir}/${name}`;
@@ -230,41 +276,60 @@ function appValues(): Map<string, Found[]> {
             if (token !== null && SCHEMA_KEYS.has(key))
                 push(out, key, { value: tokenValue(rel, text, token), at: `${rel}:${lineOf(text, index)}` });
         };
-        const at = (start: number, end: number) =>
-            fallbackToken(text.slice(Math.max(0, start - 4), start), text.slice(end, end + 120));
+        const at = (start: number, end: number) => fallbackToken(text.slice(0, start), text.slice(end));
         // Direct reads.
         for (const m of text.matchAll(new RegExp(String.raw`${ATOM_READ}\(\)`, "g")))
             add(m[1], at(m.index!, m.index! + m[0].length), m.index!);
         for (const m of text.matchAll(new RegExp(BRACKET_READ, "g")))
             add(m[1], at(m.index!, m.index! + m[0].length), m.index!);
-        // Through a variable, up to its next declaration.
-        const scope = (name: string, from: number) => {
-            const next = new RegExp(String.raw`\b(?:const|let)\s+${name}\b`, "g");
-            next.lastIndex = from;
-            const end = next.exec(text)?.index ?? text.length;
-            return { start: from, body: text.slice(from, Math.min(end, from + 1500)) };
-        };
-        for (const m of text.matchAll(new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*${ATOM_READ}\s*;`, "g"))) {
-            const { start, body } = scope(m[1], m.index! + m[0].length);
-            for (const use of body.matchAll(new RegExp(String.raw`(?<![\w.])${m[1]}\(\)`, "g")))
-                add(m[2], at(start + use.index!, start + use.index! + use[0].length), m.index!);
+        // Through a variable, anywhere in its scope: from its declaration to the
+        // end of the block that declares it (the end of the file at module level).
+        const scope = (from: number) => ({ start: from, body: text.slice(from, blockEnd(text, from, "ts")) });
+        // An atom, or an accessor `() => atom()`, called as `name()`.
+        const atoms: { name: string; key: string; index: number; end: number }[] = [];
+        for (const m of text.matchAll(
+            new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*(?:\(\)\s*=>\s*)?${ATOM_READ}(\(\))?\s*;`, "g")
+        )) {
+            // `x = getSettingsKeyAtom("k")()` is a value, handled below; `x = () => …()` is an accessor.
+            if (m[3] && !/=\s*\(\)\s*=>/.test(m[0])) continue;
+            atoms.push({ name: m[1], key: m[2], index: m.index!, end: m.index! + m[0].length });
+        }
+        for (let i = 0; i < atoms.length; i++) {
+            const { name, key, index, end } = atoms[i];
+            const { start, body } = scope(end);
+            for (const use of body.matchAll(new RegExp(String.raw`(?<![\w.])${name}\(\)`, "g")))
+                add(key, at(start + use.index!, start + use.index! + use[0].length), index);
+            for (const acc of body.matchAll(
+                new RegExp(String.raw`(?:const|let)\s+(\w+)\s*=\s*\(\)\s*=>\s*${name}\(\)\s*;`, "g")
+            ))
+                atoms.push({ name: acc[1], key, index, end: start + acc.index! + acc[0].length });
         }
         const valueDecl = String.raw`(?:const|let)\s+(\w+)(?::[^=]+)?\s*=\s*(?:untrack\(\(\)\s*=>\s*)?(?:${ATOM_READ}\(\)|(?:\w+\??\.)*${BRACKET_READ})\)?\s*;`;
         for (const m of text.matchAll(new RegExp(valueDecl, "g"))) {
             const [, name, atomKey, bracketKey] = m;
             const key = atomKey ?? bracketKey;
-            const { start, body } = scope(name, m.index! + m[0].length);
+            const { start, body } = scope(m.index! + m[0].length);
             for (const use of body.matchAll(new RegExp(String.raw`(?<![\w.])${name}\b(?!\s*[(:=])`, "g")))
                 add(key, at(start + use.index!, start + use.index! + use[0].length), m.index!);
             const typed = new RegExp(
-                String.raw`typeof ${name} === "\w+"[^?;]*\?\s*${name}\s*:\s*(${LITERAL}|${CONST})`
+                String.raw`typeof ${name} === "\w+"[^?;]*\?\s*${name}\s*:\s*(${LITERAL}|${CONST})`,
+                "g"
             );
-            const nullish = new RegExp(String.raw`if \(${name} == null[^)]*\)\s*return (${LITERAL}|${CONST})`);
-            for (const re of [typed, nullish]) {
-                const hit = re.exec(body);
-                if (hit) add(key, hit[1], m.index!);
-            }
+            const nullish = new RegExp(String.raw`if \(${name} == null[^)]*\)\s*return (${LITERAL}|${CONST})`, "g");
+            for (const re of [typed, nullish]) for (const hit of body.matchAll(re)) add(key, hit[1], m.index!);
         }
+    }
+    // Reads whose key is computed: every key the list names gets the read's fallback.
+    for (const [rel, read_, [listRel, listRe]] of COMPUTED_KEY_READS) {
+        const text = read(rel);
+        const m = read_.exec(text);
+        if (!m) throw new Error(`COMPUTED_KEY_READS: ${read_} no longer matches in ${rel}`);
+        const token = fallbackToken(text.slice(0, m.index), text.slice(m.index + m[0].length));
+        if (token === null) throw new Error(`COMPUTED_KEY_READS: no fallback after ${read_} in ${rel}`);
+        const keys = [...read(listRel).matchAll(listRe)].map((k) => k[1]);
+        if (!keys.length) throw new Error(`COMPUTED_KEY_READS: ${listRe} names no keys in ${listRel}`);
+        for (const key of keys)
+            push(out, key, { value: tokenValue(rel, text, token), at: `${rel}:${lineOf(text, m.index)}` });
     }
     for (const [key, [rel, re]] of Object.entries(FRONTEND_CONSTANTS)) {
         const text = read(rel);
@@ -340,10 +405,14 @@ function backendValues(): Map<string, Found[]> {
     const out = new Map<string, Found[]>();
     const files = BACKEND_DIRS.flatMap((dir) => rustFiles(dir));
     for (const rel of files) {
-        // Inline test modules hold fixtures, not defaults.
-        const full = read(rel);
-        const testMod = /#\[cfg\(test\)\]\s*mod\s+\w+\s*\{/.exec(full);
-        const text = testMod ? full.slice(0, testMod.index) : full;
+        // Inline test modules hold fixtures, not defaults: blank each one out
+        // (keeping its newlines, so line numbers still match), and keep any
+        // code after it.
+        let text = read(rel);
+        for (const m of [...text.matchAll(/#\[cfg\(test\)\]\s*mod\s+\w+\s*\{/g)].reverse()) {
+            const end = blockEnd(text, m.index! + m[0].length, "rs") + 1;
+            text = text.slice(0, m.index!) + text.slice(m.index!, end).replace(/[^\n]/g, " ") + text.slice(end);
+        }
         const add = (key: string, value: unknown, index: number) => {
             if (SCHEMA_KEYS.has(key)) push(out, key, { value, at: `${rel}:${lineOf(text, index)}` });
         };
