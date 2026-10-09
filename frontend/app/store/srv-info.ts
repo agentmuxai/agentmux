@@ -27,13 +27,27 @@ const [srvSilent, setSrvSilent] = createSignal(false);
 /** What `versionSkew()` returns for a srv that never sent `srvinfo`. */
 export const OLDER_SRV = "an older version";
 
+// Per WebSocket connection: whether it has sent `srvinfo`, and whether it has
+// answered an RPC yet. A reconnect can reach a different srv (an update, a
+// restart through `changeEndpoint`), so each connection reports for itself.
+let connSentInfo = false;
+let connAnswered = false;
+
+/** Called as each WebSocket connection opens (`initWshrpc`). */
+export function noteSrvConnectionOpened(): void {
+    connSentInfo = false;
+    connAnswered = false;
+}
+
 /**
- * Called once startup has had a WebSocket RPC reply. srv sends `srvinfo`
- * before it answers any RPC, so none by then means a srv from before
- * `srvinfo` existed: a version mismatch the version can't name.
+ * srv sends `srvinfo` before it answers any RPC, so a connection whose first
+ * RPC reply came without one is to a srv from before `srvinfo` existed: a
+ * version mismatch the version can't name. What an earlier srv reported no
+ * longer holds, so it is dropped rather than shown or used for paths.
  */
-export function noteSrvInfoDue(): void {
-    if (srvInfo() == null) setSrvSilent(true);
+function noteSrvInfoMissing(): void {
+    setSrvInfo(null);
+    setSrvSilent(true);
 }
 
 /** What srv last reported, or null before the first connect. */
@@ -48,9 +62,15 @@ export const UI_VERSION: string = __AGENTMUX_VERSION__;
  * which can be before anything subscribes to events, so it is caught here
  * rather than through a subscription that could miss it.
  */
-export function noteSrvInfoMessage(msg: { command?: string; data?: { event?: string; data?: unknown } } | null): void {
+export function noteSrvInfoMessage(
+    msg: { command?: string; resid?: string; data?: { event?: string; data?: unknown } } | null,
+): void {
     if (msg?.command === "eventrecv" && msg.data?.event === "srvinfo") {
+        connSentInfo = true;
         onSrvInfo(msg.data.data as Partial<SrvInfo> | null);
+    } else if (msg?.resid && !connAnswered) {
+        connAnswered = true;
+        if (!connSentInfo) noteSrvInfoMissing();
     }
 }
 

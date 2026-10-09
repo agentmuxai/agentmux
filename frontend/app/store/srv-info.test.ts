@@ -49,13 +49,45 @@ describe("noteSrvInfoMessage", () => {
 });
 
 describe("a srv too old to send srvinfo", () => {
-    it("counts as a mismatch once an RPC has answered without srvinfo", async () => {
+    const reply = { command: "rpcresponse", resid: "r1" };
+    const info = (version: string) => ({ command: "eventrecv", data: { event: "srvinfo", data: { version, hostName: "h" } } });
+
+    it("counts as a mismatch once a connection's first RPC reply came without srvinfo", async () => {
         vi.resetModules();
         const m = await import("./srv-info");
+        m.noteSrvConnectionOpened();
         expect(m.versionSkew()).toBeNull();
-        m.noteSrvInfoDue();
+        m.noteSrvInfoMessage(reply);
         expect(m.versionSkew()).toBe(m.OLDER_SRV);
         m.onSrvInfo({ version: m.UI_VERSION });
         expect(m.versionSkew()).toBeNull();
+    });
+
+    it("judges each connection by itself: a reconnect to an older srv drops the earlier srv's report", async () => {
+        vi.resetModules();
+        const m = await import("./srv-info");
+        m.noteSrvConnectionOpened();
+        m.noteSrvInfoMessage(info(m.UI_VERSION));
+        m.noteSrvInfoMessage(reply);
+        expect(m.srvInfo()?.hostName).toBe("h");
+        expect(m.versionSkew()).toBeNull();
+
+        m.noteSrvConnectionOpened();
+        m.noteSrvInfoMessage(reply);
+        expect(m.srvInfo()).toBeNull();
+        expect(m.versionSkew()).toBe(m.OLDER_SRV);
+    });
+
+    it("a reconnect to a srv that sends srvinfo keeps a report the whole time", async () => {
+        vi.resetModules();
+        const m = await import("./srv-info");
+        m.noteSrvConnectionOpened();
+        m.noteSrvInfoMessage(info(m.UI_VERSION));
+        m.noteSrvInfoMessage(reply);
+        m.noteSrvConnectionOpened();
+        expect(m.srvInfo()?.version).toBe(m.UI_VERSION);
+        m.noteSrvInfoMessage(info("9.9.9"));
+        m.noteSrvInfoMessage(reply);
+        expect(m.versionSkew()).toBe("9.9.9");
     });
 });
