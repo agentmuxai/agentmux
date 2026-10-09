@@ -1,5 +1,47 @@
 # AgentMux Version History
 
+## 0.59.17 — 2026-10-09
+
+- Session titles, subagent and workflow names, previews and narration now use the same strict reply format as the next-message suggestion, so the model's notes to itself and refusals can't reach a title or name; subagent names no longer come out as "I cannot access the repository…".
+- Browser panes: a popup a page opens from a click (a sign-in or confirmation window) now opens as a browser pane beside it, signed in like its opener, instead of in your system browser; an agent driving the pane can drive the popup too
+- Subagents in the Swarm and the activity dock are named as soon as they start, from the short description the agent gave them, with no extra model call. Workflow members, which have no description, are still named on demand.
+- AgentMux's own background model calls (titles, suggestions, names) get more time before giving up, so fewer are paid for and then thrown away, and the total number running at once is now capped.
+- Next-message suggestions now work in Codex, Gemini and other non-Claude agent panes: the pane sends its own conversation instead of the server reading a file it can only parse for Claude.
+- The status bar's token totals now include every call AgentMux makes on its own (recovered titles, workflow names, previews, narration and running summaries), and a subagent in the activity dock is labelled the same way as in the Swarm.
+- Remotes is now a section of Connectors, beside Accounts and MCP servers; a saved Remotes pane opens there. The agent pane's Mode / Model / Effort panel keeps its size when you change something in it.
+- A lapsed MuxBus sign-in is now visible: the status bar shows "MuxBus: sign in" (or "MuxBus reconnecting…" after two minutes), one OS notification says so, Settings › Paired devices has a MuxBus line with Sign in / Sign out, and agents get an [AgentMux] note when cloud messages pause and resume, including what expired meanwhile. Late deliveries are marked with when they were sent.
+- The agent pane's Working row now times and counts the whole turn instead of restarting at each internal CLI pass (a queued message, a jekt, a finished background task), and the Worked line reports that whole turn: its time, output, cost, steps and passes. An agent that Claude Code wakes for a finished background task now shows as busy.
+- CI: a release PR (only the version moving) skips the Rust, frontend, specs-index and srv image builds; the quick gates and release consistency still run
+- Settings > Devices has a new "Show MuxBus Cloud in the status bar" toggle. Turn it off to hide the cloud dot next to the host name and the cloud sign-in block in the host menu if you don't use MuxBus Cloud. It is on by default, and LAN is not affected.
+- An agent turn started by something other than you (another agent's jekt, a GitHub notice, a scheduled run, a finished background task) now says so: the Working row opens with what started it, and the Worked line names it and lists what joined the turn.
+- The agent pane's Working row now says what the agent is doing: the command it is running in the agent's own words, the files it reads or edits, a subagent's task, the step of its plan, a slow wait for the model, or that it needs your approval or answer. Quick calls never flash by, and the line changes only when there is something worth saying.
+- Agents can now tell which AgentMux they run in: every agent and shell gets AGENTMUX_VERSION, AGENTMUX_BUILD (a local build's exact label) and AGENTMUX_INSTANCE_CHANNEL, and the Environment note tells agents to read them.
+- New Tower pane: a read-only task manager showing CPU and memory for each pane and everything it started, for AgentMux itself, and for every process on this machine, with no administrator rights needed on Windows, macOS or Linux
+- Tower can show another machine's processes: pick an SSH host or a WSL distribution and see its busiest and largest processes, sampled there by AgentMux's helper. Names only, never command lines
+- Tower can show another AgentMux computer on your network: copy the pairing link from its Pair a device panel, paste it into Tower, and see its agents and processes if its user turns on sharing
+- Browser panes: a popup a page opens (a sign-in or payment window) is now a real popup window inside AgentMux that keeps working with the page that opened it, and an agent driving the pane can drive it too; a new-tab link opens a pane beside it
+- Tower's Host view groups processes of the same app, as Task Manager does (for example chrome.exe (46) with its combined CPU and memory), and a Group by app toggle lists them flat
+- Bash tool output no longer starts with a stray ^[[1;1R on macOS and Linux, and commands run in a 200-column terminal, so width-aware tools stop folding their output at 80 columns.
+- A turn you didn't start (another agent's message, a GitHub notice, a scheduled run, a finished background task) now finishes quietly: its pane gets a dot, and when you come back a line says what happened while you were away. A desktop notification for such turns is a new setting, off by default. "Agent finished" notifications now come once per turn instead of once per internal pass.
+- fix(remote): SSH connections on macOS no longer fail right after login with "too long for Unix domain socket"
+- The Working row's live status now shows what a subagent is doing inside its task, how far a test run has got ("Running the tests · 41/123"), what the model is thinking about in its own words, and the session's goal muted beside it.
+- Docs: move an internal report out of this repository
+- UI for multiple windows, the updater, native file pickers and dropped file paths now hides itself when the app's host can't provide it, instead of failing when used.
+- Tab and pane tear-off and window transparency settings now hide themselves when the app's host can't provide them.
+- The status bar now offers to reload when the window and the backend are different versions, for example after an update replaced one of them.
+- The frontend can be built for a host other than the desktop app: a build setting swaps in a different host module, with no change to the desktop build.
+- Requests to the backend get their auth header from one helper, which sends none when the app's host supplies no key, so a proxy in front of the backend can add it.
+- An agent's browser hand-off is refused right away when no AgentMux window is connected to answer it, instead of waiting until it times out.
+- The window now takes the user name, host name and AgentMux home folder from the backend it is connected to, and asks the desktop host for six fewer values at startup.
+- The frontend accepts backend endpoints given as full origins (https, wss), for a window served through a proxy; plain host:port endpoints work as before.
+- The backend's provider sign-in terminal now answers Claude's startup probe and keeps the sign-in URL whole, the groundwork for signing in to every provider through the backend.
+- A provider sign-in that times out or is abandoned no longer leaves its login process running, and starting a new sign-in for the same account replaces the one in progress.
+- Window startup no longer depends on running inside the desktop app: any host that sets up the app's interface starts it the same way.
+- The context menu's code is shared by every host the app can run in, rather than living in the desktop host's adapter; it looks and works the same.
+- The window's own minimize, maximize and close buttons only appear where the app runs in its own window.
+- Provider sign-in goes through one login backend, so a host without its own login (AgentMux Web) signs in through the server
+- A host without its own login can fall back to signing in a provider CLI in a terminal pane run by the server
+
 ## 0.59.16 — 2026-10-08
 
 - Screenshot tooling: capture every widget at three sizes from an isolated instance (capture.mjs --suite widgets --sizes), with a demo project so no shot shows the machine's own files
