@@ -357,6 +357,12 @@ impl AuthSessionManager {
             self.end_session(id, timeout_error());
         }
         if !stale.is_empty() {
+            // A finished session's CLI can still be running (a success line
+            // seen, no exit yet): stop it before its session, and with it the
+            // directory key a later sign-in would find it by, goes.
+            for id in &stale {
+                self.stop_process(id);
+            }
             let mut sessions = self.sessions.lock().unwrap();
             for id in &stale {
                 sessions.remove(id);
@@ -414,6 +420,13 @@ impl AuthSessionManager {
                 tracing::info!(pid, session_id, "end_session: PTY child killed");
             }
         }
+    }
+
+    /// Has this session ended (or gone)? A login confirmed after its session
+    /// was replaced, cancelled or timed out must not be saved: a newer
+    /// sign-in owns the directory now.
+    pub fn ended(&self, session_id: &str) -> bool {
+        self.is_terminal(session_id)
     }
 
     fn is_terminal(&self, session_id: &str) -> bool {
@@ -851,5 +864,30 @@ mod tests {
 
         assert!(m.process_refs.lock().unwrap().drain_tasks.get(&done.session_id).is_none(), "its CLI was stopped");
         assert!(matches!(m.poll_session(&done.session_id).unwrap().status, AuthSessionStatus::Success { .. }), "a finished session keeps its result");
+    }
+
+    #[tokio::test]
+    async fn sweep_stops_a_still_running_cli_before_dropping_its_finished_session() {
+        let m = mgr();
+        let r = m.start_session("claude".to_string(), Some("/d".to_string()));
+        let (tx, _rx) = tokio::sync::mpsc::channel::<String>(1);
+        m.attach_process(&r.session_id, tokio::spawn(std::future::pending::<()>()), tx);
+        m.finish_success(&r.session_id, String::new(), None);
+        m.force_finished_long_ago(&r.session_id);
+
+        m.sweep();
+
+        assert!(m.poll_session(&r.session_id).is_none());
+        assert!(m.process_refs.lock().unwrap().drain_tasks.get(&r.session_id).is_none(), "its CLI was stopped");
+    }
+
+    #[test]
+    fn ended_is_true_once_replaced_and_for_an_unknown_session() {
+        let m = mgr();
+        let first = m.start_session("claude".to_string(), Some("/d".to_string()));
+        assert!(!m.ended(&first.session_id));
+        let _second = m.start_session("claude".to_string(), Some("/d".to_string()));
+        assert!(m.ended(&first.session_id));
+        assert!(m.ended("auth-nope"));
     }
 }
