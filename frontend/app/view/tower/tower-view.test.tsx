@@ -7,11 +7,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sample = vi.fn();
 const reveal = vi.fn();
+const peersCmd = vi.fn();
+const pairCmd = vi.fn();
+const forgetCmd = vi.fn();
+const setConfig = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         TowerSampleCommand: (...args: unknown[]) => sample(...args),
+        TowerPeersCommand: (...args: unknown[]) => peersCmd(...args),
+        TowerPairCommand: (...args: unknown[]) => pairCmd(...args),
+        TowerForgetCommand: (...args: unknown[]) => forgetCmd(...args),
+        SetConfigCommand: (...args: unknown[]) => setConfig(...args),
     },
 }));
+vi.mock("@/store/global", () => ({ settingsAtom: () => ({}) }));
+const studio = { connection: "peer:p1", hostname: "studio", address: "198.51.100.20:47900", paired_ms: 1 };
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...args: unknown[]) => reveal(...args) }));
 const remoteRecords = [
@@ -107,6 +117,7 @@ function renderTower() {
 
 describe("Tower", () => {
     beforeEach(() => {
+        peersCmd.mockResolvedValue({ peers: [studio] });
         sample.mockImplementation((_client: unknown, req: { host: boolean }) => Promise.resolve(snapshot(req.host)));
     });
     afterEach(() => {
@@ -205,11 +216,13 @@ describe("Tower", () => {
         const options = Array.from(picker.options).map((o) => [o.value, o.disabled]);
         expect(options).toEqual([
             ["", false],
+            ["peer:p1", false],
             ["build-box", false],
             ["mac-mini", false],
             ["pi", true],
             ["wsl://Ubuntu", false],
             ["win-server", true],
+            ["__pair__", false],
         ]);
         fireEvent.change(picker, { target: { value: "build-box" } });
         expect(setMetaMock).toHaveBeenCalledWith({ "tower:connection": "build-box" });
@@ -316,6 +329,72 @@ describe("Tower", () => {
         await vi.advanceTimersByTimeAsync(0);
         expect(sample).toHaveBeenCalledTimes(2);
         expect(sample).toHaveBeenLastCalledWith(expect.anything(), { host: false });
+    });
+
+    it("pairs with another AgentMux computer from its link, and shows it", async () => {
+        pairCmd.mockResolvedValue({ ...studio, connection: "peer:p2", hostname: "laptop" });
+        renderTower();
+        await screen.findByTestId("tower-task-block-a");
+        fireEvent.change(screen.getByRole("combobox", { name: "Machine" }), { target: { value: "__pair__" } });
+        const form = screen.getByTestId("tower-pair");
+        const pair = within(form).getByRole("button", { name: "Pair" });
+        expect(pair).toBeDisabled();
+        fireEvent.input(within(form).getByLabelText("Pairing link"), {
+            target: { value: " agentmux://pair?v=1&code=X " },
+        });
+        fireEvent.click(pair);
+        await waitFor(() => expect(setMetaMock).toHaveBeenCalledWith({ "tower:connection": "peer:p2" }));
+        expect(pairCmd).toHaveBeenCalledWith(
+            expect.anything(),
+            { link: "agentmux://pair?v=1&code=X" },
+            expect.anything()
+        );
+        expect(screen.queryByTestId("tower-pair")).toBeNull();
+    });
+
+    it("says why pairing failed and keeps the form", async () => {
+        pairCmd.mockRejectedValue(new Error("The code was refused"));
+        renderTower();
+        await screen.findByTestId("tower-task-block-a");
+        fireEvent.change(screen.getByRole("combobox", { name: "Machine" }), { target: { value: "__pair__" } });
+        fireEvent.input(screen.getByLabelText("Pairing link"), { target: { value: "agentmux://pair?v=1" } });
+        fireEvent.click(screen.getByRole("button", { name: "Pair" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("The code was refused");
+        expect(screen.getByTestId("tower-pair")).toBeInTheDocument();
+    });
+
+    it("a paired AgentMux computer shows its tasks, but none of its panes can be revealed here", async () => {
+        sample.mockImplementation(() => Promise.resolve({ ...snapshot(true), remote: true, hostname: "studio" }));
+        setMeta({ "tower:connection": "peer:p1" });
+        renderTower();
+        const agent = await screen.findByTestId("tower-task-block-a");
+        expect(screen.getByRole("tab", { name: "Tasks" })).toBeInTheDocument();
+        expect(within(agent).queryByRole("button", { name: "Show this pane" })).toBeNull();
+        expect(sample).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ connection: "peer:p1", host: false }),
+            expect.anything()
+        );
+    });
+
+    it("forgets a paired computer and goes back to this one", async () => {
+        forgetCmd.mockResolvedValue({ peers: [] });
+        setMeta({ "tower:connection": "peer:p1" });
+        renderTower();
+        fireEvent.click(await screen.findByRole("button", { name: "Forget this computer" }));
+        await waitFor(() =>
+            expect(forgetCmd).toHaveBeenCalledWith(expect.anything(), { connection: "peer:p1" }, expect.anything())
+        );
+        await waitFor(() => expect(setMetaMock).toHaveBeenCalledWith({ "tower:connection": null }));
+    });
+
+    it("says why a paired computer couldn't be forgotten", async () => {
+        forgetCmd.mockRejectedValue(new Error("Couldn't remove the pairing with studio from the keychain"));
+        setMeta({ "tower:connection": "peer:p1" });
+        renderTower();
+        fireEvent.click(await screen.findByRole("button", { name: "Forget this computer" }));
+        expect(await screen.findByRole("alert")).toHaveTextContent("from the keychain");
+        expect(setMetaMock).not.toHaveBeenCalledWith({ "tower:connection": null });
     });
 
     it("polls only while visible", async () => {

@@ -799,6 +799,11 @@ export interface TurnTokens {
     /** The highest output total shown so far this turn: the counter never
      *  goes down, even when a call's exact count is under its estimate. */
     shownOutput?: number;
+    /** The turn (`agentturn` turn_id) and pass these tokens belong to,
+     *  stamped by `TokensIn` from the pane's ledger, so the live counter
+     *  never adds a pass srv has already counted (turn-ledger.ts). */
+    ledgerTurnId?: number;
+    ledgerPass?: number;
 }
 
 /**

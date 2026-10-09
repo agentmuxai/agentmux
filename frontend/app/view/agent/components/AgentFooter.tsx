@@ -5,7 +5,7 @@
  * AgentFooter - Minimal Claude Code-style input
  */
 
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
+import { Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { getVoiceSession, type PaneVoiceHandle } from "@/app/hook/useVoiceInput";
 import { markEnd, markStart } from "@/perf";
@@ -15,15 +15,23 @@ import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { MicButton } from "@/app/element/MicButton";
-import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
+import type { ActivityState, CompactionState, ResumeRetryState, TurnCarry } from "@/app/store/agent-pane-state/types";
+import { presentStatus, type StatusMemory } from "../status/present-status";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentViewModel } from "../agent-model";
 import { compactionProgress, estimateCompactionMs, readCompactionSamples, samplesForModel } from "../compaction-estimate";
 import { focusComposerWhenReady, takeComposerFocusRequest } from "../composer-focus";
 import type { SlashCommand } from "../commands/types";
-import { turnOutputTokens } from "@/app/store/agent-pane-state/turn-contribution";
+import {
+    turnEndedAt,
+    turnLiveOutput,
+    turnOpen,
+    turnSettling,
+    type TurnLedger,
+} from "@/app/store/agent-pane-state/turn-ledger";
 import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
+import { absorbedSummary, TRIGGER_LEAD_IN_MS, triggerLeadIn, workedVerb } from "../turn-trigger-text";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
 import { AttachmentTray } from "../attachments/AttachmentTray";
@@ -50,9 +58,17 @@ function fmtOutputTokens(output: number): string {
 }
 
 /** Live readout: "\u2193 2.4k tokens" while the model streams or its tools run,
- *  "\u2191 2.4k tokens" while a request is in flight. The number only grows. */
-function fmtTurnTokens(t: TurnTokens): string {
-    return `${t.requesting ? "\u2191" : "\u2193"} ${fmtOutputTokens(turnOutputTokens(t) ?? 0)}`;
+ *  "\u2191 2.4k tokens" while a request is in flight, no arrow between two
+ *  passes of a turn (nothing is moving). The number only grows. */
+function fmtTurnTokens(output: number, t: TurnTokens | null | undefined): string {
+    const arrow = t == null ? "" : t.requesting ? "\u2191 " : "\u2193 ";
+    return `${arrow}${fmtOutputTokens(output)}`;
+}
+
+/** "42s", "1m 4s". */
+function fmtWorkedDuration(ms: number): string {
+    const s = Math.round(ms / 1000);
+    return s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
 // \u2500\u2500 Composer draft persistence \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -88,10 +104,25 @@ interface AgentWorkingRowProps {
      *  until one exists. */
     activitySummary?: string | null;
     sessionStats?: SessionStats | null;
-    /** Live token counts for the turn in progress; the right zone shows its
-     *  output so far, with ↑/↓ for the request phase, next to the elapsed
-     *  time. */
+    /** Live token counts for the CLI pass in progress; the right zone shows
+     *  the turn's output so far, with ↑/↓ for the request phase, next to the
+     *  elapsed time. */
     turnTokens?: TurnTokens | null;
+    /** srv's turn ledger (`agentturn`): the turn as the user sees it, over
+     *  however many CLI passes. While it is open the row times and counts the
+     *  whole turn, and stays up (dimmed) between two of its passes; once it
+     *  ends, the Worked line reports it. Absent (older srv): per pass, as before.
+     *  SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4. */
+    turnLedger?: TurnLedger | null;
+    /** Each pass's figures summed over the turn, for providers srv doesn't
+     *  count (`AgentPaneState.turnCarry`). */
+    turnCarry?: TurnCarry | null;
+    /** What the agent is doing right now (`AgentPaneState.activity`): the
+     *  live status's facts. SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6. */
+    activity?: ActivityState | null;
+    /** A question or approval waiting on the user, in words: it outranks
+     *  everything else the row could say. */
+    needsYou?: string | null;
     /** Set when the provider is rate-limited; shows "Rate limited…" in place of thinking phrase. */
     waitingReason?: "rate_limited" | null;
     /** Milliseconds until next retry (from provider Retry-After). Shown when waitingReason is set. */
@@ -146,10 +177,9 @@ const CANCELLABLE_LAUNCH_PHASES = new Set([
     "waiting-for-login-completion",
 ]);
 
-/** The exact string the loading row's left zone shows right now — pulled out
- *  of the JSX ternary chain so both the type-out reveal effect and the
- *  render itself read the same computed value. */
-function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: number): string {
+/** The row's own statuses, which outrank anything else it would say except
+ *  a question or approval for the user (the presenter's rank 1). */
+function heldStatus(props: AgentWorkingRowProps, nowMs: number): string | null {
     if (props.reconnecting) return "Reconnecting…";
     if (props.compacting) return "Compacting…";
     if (props.stopping) return "Stopping…";
@@ -158,11 +188,14 @@ function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: num
             ? `Rate limited — retrying in ${Math.ceil(props.retryAfterMs / 1000)}s`
             : "Rate limited — retrying…";
     }
-    const phaseLabel = formatPhaseLabel(props.launchPhase, nowMs);
-    if (phaseLabel) return phaseLabel;
-    const summary = props.activitySummary?.trim();
-    if (summary) return summary;
-    return `${phrase}…`;
+    return formatPhaseLabel(props.launchPhase, nowMs) ?? null;
+}
+
+/** A turn something other than the user started opens by saying so. */
+function leadInText(props: AgentWorkingRowProps, nowMs: number): string | null {
+    const l = props.turnLedger;
+    if (!l || !turnOpen(l, nowMs) || nowMs - l.startedAtMs >= TRIGGER_LEAD_IN_MS) return null;
+    return triggerLeadIn(l.trigger);
 }
 
 export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
@@ -186,10 +219,40 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // "brief, non-moving" convention for one-shot reveals under reduced
     // motion).
     const reducedMotion = atoms.prefersReducedMotionAtom;
+    // Between two passes of one turn: no pass runs, the next is expected. The
+    // row keeps its live form (dimmed) rather than flash "Worked" and take it
+    // back a moment later. Display only: the composer's busy gate is not this.
+    const settling = createMemo(() => turnSettling(props.turnLedger, (tick(), Date.now())));
+    const live = createMemo(() => props.loading || settling());
     // tick() re-runs this memo every second so a phase's "up to Ys" countdown
     // (formatPhaseLabel) stays live — see useTick.ts's "always-on tick" pattern.
-    const leftText = createMemo(() => loadingLeftText(props, phrase(), (tick(), Date.now())));
-    const [revealed, setRevealed] = createSignal(leftText().length);
+    const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
+    // The live status (status/present-status.ts): what to say, and when, from
+    // what the agent is doing and what the row showed last.
+    let statusMemory: StatusMemory | null = null;
+    const status = createMemo(() => {
+        const now = (tick(), Date.now());
+        const l = props.turnLedger;
+        const r = presentStatus(
+            {
+                nowMs: now,
+                needsYou: props.needsYou ?? null,
+                held: heldStatus(props, now),
+                leadIn: leadInText(props, now),
+                activity: props.activity ?? null,
+                turnStartedAt: l && turnOpen(l, now) ? l.startedAtMs : untrack(loadStartMs),
+                goal: props.activitySummary?.trim() || null,
+                phrase: phrase(),
+            },
+            statusMemory,
+        );
+        statusMemory = r.memory;
+        return r.line;
+    });
+    const leftText = () => status().text;
+    // How much of the line is typed out; Infinity once it is all there, so a
+    // counter that grows inside the same line shows in full.
+    const [revealed, setRevealed] = createSignal(Number.POSITIVE_INFINITY);
     const REVEAL_CHAR_MS = 28;
 
     // The very first text after ENTERING the loading state renders in full
@@ -202,30 +265,54 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // only the loading edge below writes it, only the reveal effect reads it.
     let revealInstantly = true;
     createEffect(() => {
-        if (!props.loading) revealInstantly = true;
+        if (!live()) revealInstantly = true;
     });
 
-    createEffect(() => {
-        const text = leftText();
-        if (reducedMotion() || !text || revealInstantly) {
-            revealInstantly = false;
-            setRevealed(text.length);
-            return;
-        }
-        setRevealed(0);
-        const id = setInterval(() => {
-            setRevealed((n) => {
-                const next = n + 1;
-                if (next >= text.length) clearInterval(id);
-                return next;
-            });
-        }, REVEAL_CHAR_MS);
-        onCleanup(() => clearInterval(id));
-    });
-    const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
+    // A new line types out; the same line with its counters moved (its key
+    // unchanged) just updates, so a running clock never re-types it.
+    createEffect(
+        on(
+            () => status().key,
+            () => {
+                const text = untrack(leftText);
+                if (untrack(reducedMotion) || !text || revealInstantly) {
+                    revealInstantly = false;
+                    setRevealed(Number.POSITIVE_INFINITY);
+                    return;
+                }
+                setRevealed(0);
+                const id = setInterval(() => {
+                    setRevealed((n) => {
+                        if (n + 1 >= untrack(leftText).length) {
+                            clearInterval(id);
+                            return Number.POSITIVE_INFINITY;
+                        }
+                        return n + 1;
+                    });
+                }, REVEAL_CHAR_MS);
+                onCleanup(() => clearInterval(id));
+            },
+        ),
+    );
+    // From the turn's start while it is open, so the clock runs across its
+    // passes and survives a remount; else from when this row went live.
     const elapsedMs = createMemo(() => {
+        const now = (tick(), Date.now());
+        const l = props.turnLedger;
+        if (l && turnOpen(l, now)) return Math.max(0, now - l.startedAtMs);
         const s = loadStartMs();
-        return s != null ? (tick(), Date.now() - s) : 0;
+        return s != null ? now - s : 0;
+    });
+    // The turn's output so far, never shown going down within one turn (a
+    // pass's exact count can land under its streamed estimate).
+    let shownOutput: { turnId: number | null; output: number } = { turnId: null, output: 0 };
+    const liveOutput = createMemo((): number | undefined => {
+        const output = turnLiveOutput(props.turnLedger, props.turnTokens, (tick(), Date.now()));
+        if (output == null) return undefined;
+        const turnId = props.turnLedger?.turnId ?? null;
+        const floor = turnId != null && shownOutput.turnId === turnId ? shownOutput.output : 0;
+        shownOutput = { turnId, output: Math.max(floor, output) };
+        return shownOutput.output;
     });
 
     // Live elapsed time since compaction/reconnecting-retry started —
@@ -260,7 +347,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (!props.loading) return;
+        if (!live()) return;
         setPhrase(pickThinkingPhrase());
         const id = setInterval(() => {
             setPhrase((prev) => {
@@ -273,7 +360,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (props.loading) {
+        if (live()) {
             setLoadStartMs((prev) => prev ?? Date.now());
         } else {
             setLoadStartMs(null);
@@ -281,29 +368,58 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     createEffect(() => {
-        if (props.loading) setLastPhrase(phrase());
+        if (live()) setLastPhrase(phrase());
+    });
+
+    // The turn that just ended, when srv reported it: its figures cover every
+    // pass, where `sessionStats` is the last pass's alone.
+    const endedTurn = createMemo(() => {
+        const l = props.turnLedger;
+        if (!l) return null;
+        const endedAt = turnEndedAt(l, (tick(), Date.now()));
+        return endedAt != null ? { l, durationMs: endedAt - l.startedAtMs } : null;
+    });
+
+    // The whole turn's figures: srv's, when it counted the passes; else the
+    // pane's own sum of each pass's stats, for the same turn.
+    const turnFigures = createMemo((): { outputTokens: number; costUsd: number; steps: number } | null => {
+        const turn = endedTurn();
+        if (!turn) return null;
+        if (turn.l.countedPasses > 0) return turn.l;
+        const carry = props.turnCarry;
+        return carry && carry.turnId === turn.l.turnId && carry.passes > 1 ? carry : null;
     });
 
     const workedSummary = createMemo((): string | null => {
         const stats = props.sessionStats;
         if (!stats) return null;
-        const parts: string[] = ["✓ " + ingToEd(lastPhrase())];
-        if (stats.duration_ms != null) {
-            const s = Math.round(stats.duration_ms / 1000);
-            parts.push(s < 60 ? `${Math.max(1, s)}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
-        }
-        // The turn's output: the result's exact figure (summed over its calls),
-        // where the live row showed it growing.
-        if (stats.output_tokens != null) parts.push(fmtOutputTokens(stats.output_tokens));
+        const turn = endedTurn();
+        // Named for what started it when that wasn't the user.
+        const parts: string[] = ["✓ " + (turn ? workedVerb(turn.l.trigger) : ingToEd(lastPhrase()))];
+        const durationMs = turn?.durationMs ?? stats.duration_ms;
+        if (durationMs != null) parts.push(fmtWorkedDuration(durationMs));
+        // The turn's output: the results' exact figures (summed over its
+        // calls and passes), where the live row showed it growing.
+        const figures = turnFigures();
+        const output = figures ? figures.outputTokens : stats.output_tokens;
+        if (output != null) parts.push(fmtOutputTokens(output));
         return parts.join("  ·  ");
     });
 
     const workedSecondary = createMemo((): string | null => {
         const stats = props.sessionStats;
         if (!stats) return null;
+        const turn = endedTurn();
+        const counted = turnFigures();
         const parts: string[] = [];
-        if (stats.cost_usd != null) parts.push(`$${stats.cost_usd.toFixed(3)}`);
-        if (stats.num_turns) parts.push(`${stats.num_turns} ${stats.num_turns === 1 ? "turn" : "turns"}`);
+        const cost = counted ? counted.costUsd : stats.cost_usd;
+        if (cost != null) parts.push(`$${cost.toFixed(3)}`);
+        // Model calls, which is what `result.num_turns` counts: steps, not turns.
+        const steps = counted ? counted.steps : stats.num_turns;
+        if (steps) parts.push(`${steps} ${steps === 1 ? "step" : "steps"}`);
+        if (turn && turn.l.passes > 1) parts.push(`${turn.l.passes} passes`);
+        const joined = turn ? absorbedSummary(turn.l.absorbed, turn.l.inputs) : null;
+        if (joined) parts.push(joined);
         return parts.length ? parts.join("  ·  ") : null;
     });
 
@@ -322,7 +438,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 : `${elapsed} / ~${formatElapsedCompact(bar.estimateMs)}`;
         }
         const right: string[] = [];
-        if (props.turnTokens) right.push(fmtTurnTokens(props.turnTokens));
+        const output = liveOutput();
+        if (output != null) right.push(fmtTurnTokens(output, props.loading ? props.turnTokens : null));
         right.push(formatElapsedCompact(elapsedMs()));
         return right.join("  \u00b7  ");
     });
@@ -342,7 +459,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // reducer axis itself stays, for the watchdog/Swarm consumers).
     return (
         <Show
-            when={props.loading || !!props.compacting || !!props.reconnecting}
+            when={live() || !!props.compacting || !!props.reconnecting}
             fallback={
                 <Show when={workedSummary()}>
                     <span class="agent-working-row agent-working-row--worked">
@@ -356,10 +473,16 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                 </Show>
             }
         >
-            <span class="agent-working-row agent-working-row--loading">
+            <span
+                class="agent-working-row agent-working-row--loading"
+                classList={{ "is-settling": !props.loading && settling() }}
+            >
                 <span class="agent-spinner-dot" />
                 <span class="agent-working-row-left">
-                    {leftText().slice(0, revealed())}
+                    <span class="agent-working-row-primary">{leftText().slice(0, revealed())}</span>
+                    <Show when={revealed() === Number.POSITIVE_INFINITY && status().detail}>
+                        {(detail) => <span class="agent-working-row-detail">{` · ${detail()}`}</span>}
+                    </Show>
                 </span>
                 <span
                     class="agent-working-row-right"

@@ -535,6 +535,7 @@ partial list.
 | [`SPEC_AGENT_SELF_QUIT_2026_09_24`](SPEC_AGENT_SELF_QUIT_2026_09_24.md) | SPEC: Agent self-quit — `/quit` for the user, `QuitSelf` for the agent (on direct user instruction only) |
 | [`SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24`](SPEC_AGENT_SINGLE_LIVE_INSTANCE_2026_09_24.md) | SPEC: one live instance per agent — an agent identity is driven by at most one process, across host, LAN and WAN |
 | [`SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01`](SPEC_AGENT_TEARDOWN_SINGLE_PATH_2026_10_01.md) | SPEC: One teardown path for everything an agent owns |
+| [`SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08`](SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md) | SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening |
 | [`SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30`](SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md) | SPEC: Safe unrestricted screen capture for agents |
 | [`SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13`](SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md) | Spec: Modularize `frontend/app/view/agent/agent-view.tsx` |
 | [`SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04`](SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md) | Spec: unify the Working/Worked label with the long-running-process axis, and close the two live desync bugs |
@@ -544,6 +545,8 @@ partial list.
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27`](SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md) | Spec: Background tasks from the CLI's structured task feed, owned in Swarm |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
+| [`SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08`](SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md) | SPEC: A browser pane's new windows open the way the page asked, and the agent that owns the opener drives them |
+| [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |

@@ -349,6 +349,18 @@ pub struct AppState {
     /// its view, as an ordinary pane-hosting window. Removed on close.
     pub approval_windows: Mutex<std::collections::HashSet<String>>,
 
+    /// Browser-pane block ids an agent owns, as srv last sent them
+    /// (`/agentmux/browser/owned_panes`). Read synchronously in
+    /// `on_before_popup`, which can't ask srv: it only widens which of a
+    /// pane's popups open in-app. Who may drive a window is srv's decision
+    /// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
+    pub owned_panes: Mutex<std::collections::HashSet<String>>,
+
+    /// Popup window label (`popup-<uuid>`) → the browser-pane block id whose
+    /// page opened it. Written when the popup is created, removed when it
+    /// closes. A popup's own popups are recorded against the same root pane.
+    pub popup_openers: Mutex<std::collections::HashMap<String, String>>,
+
     /// Phase F.1 — host reducer state.
     ///
     /// Owns `pending_window_creations` (formerly a top-level
@@ -759,6 +771,8 @@ impl Default for AppState {
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             approval_windows: Mutex::new(std::collections::HashSet::new()),
+            owned_panes: Mutex::new(std::collections::HashSet::new()),
+            popup_openers: Mutex::new(std::collections::HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
             media_grants: Mutex::new(
                 crate::browser_panes::media_grants::MediaGrantStore::new(),
@@ -1142,6 +1156,25 @@ impl AppState {
     /// (focus/resize/navigate) — `None` indicates the pane is missing or
     /// in `Closing`, in which case the caller must short-circuit rather
     /// than touch the (possibly destroyed) HWND.
+    /// `id` if it names a live popup window (a `BrowserKind::Popup` browser
+    /// a pane's page opened), for the browser API's Path 0.
+    pub fn live_popup_label(&self, id: &str) -> Option<String> {
+        if !id.starts_with("popup-") || !self.popup_openers.lock().contains_key(id) {
+            return None;
+        }
+        self.host_state
+            .lock()
+            .browsers
+            .get(id)
+            .filter(|h| matches!(h.kind, BrowserKind::Popup))
+            .map(|_| id.to_string())
+    }
+
+    /// How many popup windows `opener` (a browser-pane block id) has open.
+    pub fn popup_windows_of(&self, opener: &str) -> usize {
+        self.popup_openers.lock().values().filter(|o| o.as_str() == opener).count()
+    }
+
     pub fn live_browser_pane_label(&self, block_id: &str) -> Option<String> {
         self.host_state
             .lock()

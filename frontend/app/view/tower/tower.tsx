@@ -20,6 +20,14 @@ export const towerPaneTab: PaneTabManifest = {
         return {
             component: () => <TowerView model={model} />,
             liveTitle: () => ({ text: model.viewName() }),
+            settingsMenu: () => [
+                {
+                    label: "Share this computer's processes with paired devices",
+                    type: "checkbox",
+                    checked: model.sharing(),
+                    click: () => model.setSharing(!model.sharing()),
+                },
+            ],
             dispose: () => model.dispose(),
         };
     },

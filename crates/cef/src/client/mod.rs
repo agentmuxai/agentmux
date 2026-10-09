@@ -54,6 +54,7 @@ pub(crate) mod app_navigation;
 mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;
+pub(crate) mod popup_route;
 // The one raw-TCP `/agentmux/service` transport `helpers.rs`'s backend_*
 // wrappers share — see service_call.rs's module doc.
 mod service_call;
@@ -76,7 +77,7 @@ pub(crate) use wndproc::install_main_window_floater_cascade_hook;
 // `commands/window_pool.rs::demote_srv_cleanup` replicates
 // `on_before_close`'s backend cleanup (which never fires for parked
 // pool-window browsers).
-pub(crate) use helpers::backend_browser_attention;
+pub(crate) use helpers::{backend_browser_attention, backend_browser_popup, backend_browser_popup_window};
 pub(crate) use helpers::backend_close_window;
 // SPEC_PILLAR1_STEP2 Slice A Phase 2 — durable opacity mirror write-through
 // / read-back, used by `commands/window/transparency.rs`.
@@ -199,6 +200,12 @@ pub struct AgentMuxHandler {
     /// `on_after_created` (the popup shares the spawning pane's handler)
     /// decrements this and tags its browser id.
     pending_popups: usize,
+    /// For each popup `on_before_popup` let CEF create, in order: the
+    /// browser-pane block whose page opened it (the root pane, for a popup's
+    /// own popup; `None` if unknown) and its URL. `on_after_created` takes
+    /// the front entry to register the popup window with srv
+    /// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §4).
+    pending_popup_openers: std::collections::VecDeque<(Option<String>, String)>,
     /// Browser identifiers of auth popups spawned from this pane. When such a
     /// browser tears down (`do_close`), its hosting top-level Views window is
     /// closed explicitly — otherwise the window lingers blank after the auth
@@ -242,6 +249,7 @@ impl AgentMuxHandler {
             unresponsive_reports: HashMap::new(),
             terminated_unresponsive: std::collections::HashSet::new(),
             pending_popups: 0,
+            pending_popup_openers: std::collections::VecDeque::new(),
             popup_browser_ids: std::collections::HashSet::new(),
             creation_label,
             sent_favicons: HashMap::new(),

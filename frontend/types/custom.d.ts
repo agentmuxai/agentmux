@@ -160,6 +160,10 @@ declare global {
         setRects(windowLabel: string, rects: ({ blockId: string } & HostRect)[]): Promise<void>;
         close(blockId: string, windowLabel: string): Promise<void>;
         navigate(blockId: string, url: string): Promise<void>;
+        /** Bring a popup window a pane's page opened (`popup-…`) to the front. */
+        showPopup(popupId: string): Promise<void>;
+        /** Close a popup window a pane's page opened. */
+        closePopup(popupId: string): Promise<void>;
         goBack(blockId: string): Promise<void>;
         goForward(blockId: string): Promise<void>;
         reload(blockId: string): Promise<void>;

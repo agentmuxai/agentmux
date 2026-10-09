@@ -84,7 +84,7 @@ mod attachments;
 pub(crate) mod connections;
 pub(crate) mod viewer;
 mod presence;
-mod tower_pane;
+pub(crate) mod tower_pane;
 
 /// Register all App API handlers on the RPC engine.
 pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {

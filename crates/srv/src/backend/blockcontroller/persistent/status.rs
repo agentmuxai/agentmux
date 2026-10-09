@@ -123,6 +123,14 @@ impl PersistentSubprocessController {
         });
     }
 
+    /// The CLI started a pass by itself and the tracker has marked it active
+    /// (`mark_turn_active_from_cli`): publish the flip and keep the status
+    /// heartbeat going for it, as for a pass srv started.
+    pub(super) fn cli_started_pass(&self) {
+        self.spawn_status_heartbeat();
+        self.publish_status();
+    }
+
     /// Marks a turn active (re-arming the status heartbeat only if it was
     /// previously idle) and publishes the resulting status flip. Shared by
     /// `send_message` and `retry_after_resume_failure` — both represent "a
