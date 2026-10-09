@@ -7,7 +7,7 @@ members = ["crates/srv", "crates/cef", "crates/launcher", "crates/common", "crat
 # RFC #857 Phase 1.
 [workspace.package]
 
-version = "0.59.16"
+version = "0.59.17"
 
 [profile.release]
 strip = true
