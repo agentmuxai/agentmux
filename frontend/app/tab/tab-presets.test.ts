@@ -18,8 +18,10 @@
  * current default happens not to hit it.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { applyTabPreset, type PresetNode } from "./tab-presets";
+import { applyTabPreset, DEFAULT_TAB_PRESET, type PresetNode } from "./tab-presets";
 
 let nextBlockId = 0;
 const createBlock = vi.fn(async (blockDef: any) => {
@@ -158,5 +160,74 @@ describe("applyTabPreset concurrent creation", () => {
         // memory is now the column's first child: it splits off agent, as swarm would have.
         expect(dispatched[1]).toMatchObject({ type: "splithorizontal", targetNodeId: "node-block-agent" });
         expect(dispatched[2]).toMatchObject({ type: "splitvertical", targetNodeId: "node-block-memory" });
+    });
+});
+
+// DEFAULT_TAB_PRESET mirrors srv's first-window layout, `default_three_pane_tree`
+// in crates/srv/src/backend/wcore/mod.rs, by hand (no shared code). This reads
+// that builder, so a change to one side without the other fails here. Only the
+// shape is compared: the preset can't express the Rust tree's 20/80 sizes.
+describe("DEFAULT_TAB_PRESET mirrors default_three_pane_tree", () => {
+    const repoRoot = resolve(__dirname, "../../..");
+    const wcore = readFileSync(resolve(repoRoot, "crates/srv/src/backend/wcore/mod.rs"), "utf8").replace(/\/\/.*$/gm, "");
+
+    /** `horizontal(agent,vertical(sysinfo,swarm))`: splits and leaf views, in order. */
+    function presetShape(node: PresetNode): string {
+        if ("widget" in node) return node.widget.replace(/^defwidget@/, "");
+        return `${node.split}(${node.children.map(presetShape).join(",")})`;
+    }
+
+    type RustNode = { dir?: string; leaf?: string; children: RustNode[] };
+
+    /** The same shape read from the Rust builder. A `LayoutNode` with children
+     *  is a split (Row lays them side by side, the preset's "horizontal");
+     *  a leaf is named by its `<view>_block_id` parameter. */
+    function rustShape(): string {
+        const fnStart = wcore.indexOf("pub(crate) fn default_three_pane_tree(");
+        expect(fnStart, "default_three_pane_tree in wcore/mod.rs").toBeGreaterThanOrEqual(0);
+        const fn = wcore.slice(fnStart);
+        const body = fn.slice(fn.indexOf("let rootnode = LayoutNode {"), fn.indexOf("let leaforder"));
+        const open: (RustNode | null)[] = [];
+        const innermost = (): RustNode | undefined => {
+            for (let i = open.length - 1; i >= 0; i--) if (open[i]) return open[i];
+            return undefined;
+        };
+        let root: RustNode | undefined;
+        for (const m of body.matchAll(/LayoutNode\s*\{|\{|\}|FlexDirection::(\w+)|block_id: (\w+)_block_id\b/g)) {
+            if (m[0].startsWith("LayoutNode")) {
+                const node: RustNode = { children: [] };
+                const parent = innermost();
+                if (parent) parent.children.push(node);
+                else root = node;
+                open.push(node);
+            } else if (m[0] === "{") open.push(null);
+            else if (m[0] === "}") open.pop();
+            else if (m[1]) innermost().dir ??= m[1];
+            else if (m[2]) innermost().leaf = m[2];
+        }
+        const shape = (n: RustNode): string =>
+            n.children.length === 0
+                ? (n.leaf ?? "?")
+                : `${n.dir === "Row" ? "horizontal" : "vertical"}(${n.children.map(shape).join(",")})`;
+        return root ? shape(root) : "";
+    }
+
+    it("has the same splits and panes, in the same order", () => {
+        expect(presetShape(DEFAULT_TAB_PRESET)).toBe(rustShape());
+    });
+
+    it("names panes by the view each one opens on both sides", () => {
+        // srv seeds `<name>_block` with view "<name>"; the preset's
+        // `defwidget@<name>` opens view "<name>" (crates/srv/src/config/widgets.json).
+        const seeded = new Map(
+            [...wcore.matchAll(/(\w+)_meta\.insert\("view"\.to_string\(\), serde_json::json!\("(\w+)"\)\)/g)].map((m) => [m[1], m[2]])
+        );
+        const widgetsJson = JSON.parse(readFileSync(resolve(repoRoot, "crates/srv/src/config/widgets.json"), "utf8"));
+        const leaves = presetShape(DEFAULT_TAB_PRESET).match(/\w+(?=[,)]|$)/g) ?? [];
+        expect(leaves.length).toBeGreaterThan(0);
+        for (const leaf of leaves) {
+            expect(seeded.get(leaf), `srv seeds ${leaf}`).toBe(leaf);
+            expect(widgetsJson[`defwidget@${leaf}`]?.blockdef?.meta?.view, `defwidget@${leaf}`).toBe(leaf);
+        }
     });
 });
