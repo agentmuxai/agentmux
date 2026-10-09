@@ -239,7 +239,12 @@ This settles three points:
 
 **Not in phase 1:**
 - The `+1 jekt` inputs breakdown, which needs §5.2's triggers.
-- A reader-level test of `stdout_reader`. The reader takes a real child stdout, so the tracker tests replay the recorded order instead. The live check in §7 still applies.
+
+**Tests against a real process:** `persistent/tests/turn_ledger.rs` runs the controller and its stdout reader on a node stub that replays the recorded line order. It covers three cases:
+- a background-task wake-up is a busy, automated turn of its own;
+- a jekt answered in its own pass joins the turn, giving two passes, both counted;
+- an `init` at spawn is not a pass.
+
 
 ---
 
