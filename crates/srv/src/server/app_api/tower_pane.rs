@@ -12,16 +12,31 @@
 
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
-use crate::backend::tower_remote;
+use crate::backend::{tower_peers, tower_remote};
 use crate::backend::tower_sampler::{BlockLabel, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    register_peers(engine, state);
     let (mstore, hostname, tracker) = (state.mstore.clone(), state.hostname.clone(), state.process_tracker.clone());
     let auth_key = state.auth_key.clone();
+    let lan = state.lan_discovery.clone();
     engine.register_typed(COMMAND_TOWER_SAMPLE, move |req: TowerSampleReq, ctx| {
         let (mstore, hostname, tracker, auth_key) = (mstore.clone(), hostname.clone(), tracker.clone(), auth_key.clone());
+        let lan = lan.clone();
         async move {
             not_an_agent_api(&ctx)?;
+            // A paired AgentMux computer: its viewer listener (`tower_peers`).
+            if let Some(id) = req.connection.as_deref().and_then(|c| c.strip_prefix(tower_peers::PEER_PREFIX)) {
+                let peers = tower_peers::Peers::global();
+                let hostname = peers.get(id).map(|p| p.hostname).unwrap_or_default();
+                let moved: Vec<String> = lan
+                    .get_instances()
+                    .into_iter()
+                    .filter(|i| !hostname.is_empty() && i.hostname.eq_ignore_ascii_case(&hostname))
+                    .map(|i| i.address)
+                    .collect();
+                return tower_peers::sample(peers, id, req.filter.as_deref().unwrap_or(""), moved).await;
+            }
             // Another machine: its helper samples it (`tower_remote`).
             if let Some(conn) = req.connection.as_deref().filter(|c| !tower_remote::is_local(c)) {
                 let block_id = req.block_id.clone().unwrap_or_default();
@@ -45,6 +60,32 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
 /// Refuse a connection registered as an agent: `tower.sample` isn't offered to
 /// agents.
+fn register_peers(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    engine.register_typed(COMMAND_TOWER_PEERS, |_req: Option<NoArgsReq>, ctx| async move {
+        not_an_agent_api(&ctx)?;
+        Ok(TowerPeersResult { peers: tower_peers::Peers::global().list() })
+    });
+    let hostname = state.hostname.clone();
+    engine.register_typed(COMMAND_TOWER_PAIR, move |req: TowerPairReq, ctx| {
+        let device_name = format!("{hostname} (Tower)");
+        async move {
+            not_an_agent_api(&ctx)?;
+            tower_peers::pair(tower_peers::Peers::global(), &req.link, &device_name).await
+        }
+    });
+    engine.register_typed(COMMAND_TOWER_FORGET, |req: TowerForgetReq, ctx| async move {
+        not_an_agent_api(&ctx)?;
+        let id = req.connection.strip_prefix(tower_peers::PEER_PREFIX).ok_or("not a paired computer")?;
+        tokio::task::spawn_blocking({
+            let id = id.to_string();
+            move || tower_peers::Peers::global().forget(&id)
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+        Ok(TowerPeersResult { peers: tower_peers::Peers::global().list() })
+    });
+}
+
 fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
     if ctx.agent_id.is_empty() {
         Ok(())
@@ -53,7 +94,7 @@ fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
     }
 }
 
-fn inputs(tracker: &AgentProcessRegistry) -> Inputs {
+pub(crate) fn inputs(tracker: &AgentProcessRegistry) -> Inputs {
     Inputs {
         blocks: tracker.members_by_block(),
         roots: blockcontroller::pidregistry::get_all(),
@@ -63,7 +104,7 @@ fn inputs(tracker: &AgentProcessRegistry) -> Inputs {
 
 /// A pane's name in Tower: the agent's name, else what the terminal runs.
 /// `None` for a block that no longer exists.
-fn block_label(mstore: &Store, block_id: &str) -> Option<BlockLabel> {
+pub(crate) fn block_label(mstore: &Store, block_id: &str) -> Option<BlockLabel> {
     let block = mstore.get::<Block>(block_id).ok().flatten()?;
     let meta = |key: &str| obj::meta_get_string(&block.meta, key, "");
     let agent_name = [meta("agentName"), meta("agentId")].into_iter().find(|s| !s.is_empty());

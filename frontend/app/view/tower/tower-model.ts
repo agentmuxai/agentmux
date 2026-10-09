@@ -8,9 +8,10 @@
 
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { remotesList } from "@/app/store/remotes-store";
-import { RpcApi, type TowerSnapshot } from "@/app/store/rpc-api";
+import { RpcApi, type TowerPeerInfo, type TowerSnapshot } from "@/app/store/rpc-api";
 import type { RemoteRecord } from "@/app/store/rpc-api/remotes";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { settingsAtom } from "@/store/global";
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup, type Setter } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import type { CpuMode, Sort, TowerView } from "./tower-util";
@@ -33,9 +34,16 @@ export class TowerViewModel {
     connection: Accessor<string>;
     /** Showing another machine: Host view only, no command lines. */
     remote: Accessor<boolean>;
-    /** The view shown: another machine has no tasks, only its processes. */
+    /** Whether the machine shown has tasks: this computer and a paired
+     *  AgentMux computer do; an SSH host or WSL distribution doesn't. */
+    hasTasks: Accessor<boolean>;
+    /** The view shown: a machine without tasks shows only its processes. */
     effectiveView: Accessor<TowerView>;
     remotes: Accessor<RemoteRecord[]>;
+    /** AgentMux computers this one is paired with (`peer:<id>`). */
+    peers: Accessor<TowerPeerInfo[]>;
+    /** Whether this computer lets its paired devices see its processes. */
+    sharing: Accessor<boolean>;
     cpuMode: Accessor<CpuMode>;
     snapshot: Accessor<TowerSnapshot | null>;
     error: Accessor<string | null>;
@@ -48,6 +56,7 @@ export class TowerViewModel {
     private setMeta: (patch: Record<string, unknown>) => void;
     private setSnapshot: (snap: TowerSnapshot | null) => void;
     private setError: Setter<string | null>;
+    private setPeers: Setter<TowerPeerInfo[]>;
     private setExpanded: Setter<ReadonlySet<string>>;
     private timer: ReturnType<typeof setTimeout> | undefined;
     /** Bumped on every start and stop, so a reply from an older poll loop
@@ -75,12 +84,20 @@ export class TowerViewModel {
             return typeof c === "string" && c !== "local" ? c : "";
         });
         this.remote = () => this.connection() !== "";
-        this.effectiveView = createMemo<TowerView>(() => (this.remote() ? "host" : this.view()));
+        // Another AgentMux computer has panes, so it has tasks too; an SSH host
+        // or WSL distribution has only processes.
+        this.hasTasks = () => !this.remote() || this.connection().startsWith("peer:");
+        this.effectiveView = createMemo<TowerView>(() => (this.hasTasks() ? this.view() : "host"));
         this.remotes = remotesList();
+        [this.peers, this.setPeers] = createSignal<TowerPeerInfo[]>([]);
+        void this.refreshPeers();
+        this.sharing = () => settingsAtom()?.["tower:sharewithpaired"] === true;
         this.cpuMode = createMemo<CpuMode>(() => (ctx.meta()?.["tower:cpu"] === "core" ? "core" : "machine"));
-        this.viewName = createMemo(() =>
-            this.remote() ? `Tower · ${this.connection()}` : this.view() === "host" ? "Tower · Host" : "Tower"
-        );
+        this.viewName = createMemo(() => {
+            if (!this.remote()) return this.view() === "host" ? "Tower · Host" : "Tower";
+            const peer = this.peers().find((p) => p.connection === this.connection());
+            return `Tower · ${peer?.hostname || this.connection()}`;
+        });
         // A store merged by `id`: a task or process still there keeps its
         // object across polls, so its row (an expanded command line, a text
         // selection) survives the refresh instead of being rebuilt.
@@ -135,6 +152,34 @@ export class TowerViewModel {
         this.setMeta({ "tower:connection": connection || null });
     }
 
+    async refreshPeers(): Promise<void> {
+        try {
+            this.setPeers((await RpcApi.TowerPeersCommand(TabRpcClient, { timeout: 5000 })).peers);
+        } catch {
+            // Keep the last list.
+        }
+    }
+
+    /** Pair with another AgentMux computer from its link and show it. Throws
+     *  the reason it couldn't. */
+    async pair(link: string): Promise<void> {
+        const peer = await RpcApi.TowerPairCommand(TabRpcClient, { link: link.trim() }, { timeout: 20000 });
+        await this.refreshPeers();
+        this.setConnection(peer.connection);
+    }
+
+    async forget(connection: string): Promise<void> {
+        const r = await RpcApi.TowerForgetCommand(TabRpcClient, { connection }, { timeout: 10000 });
+        this.setPeers(r.peers);
+        if (this.connection() === connection) this.setConnection("");
+    }
+
+    setSharing(on: boolean): void {
+        void RpcApi.SetConfigCommand(TabRpcClient, {
+            "tower:sharewithpaired": on ? true : null,
+        } as unknown as SettingsType);
+    }
+
     setCpuMode(mode: CpuMode): void {
         this.setMeta({ "tower:cpu": mode === "core" ? "core" : null });
     }
@@ -186,7 +231,7 @@ export class TowerViewModel {
         const request = connection
             ? RpcApi.TowerSampleCommand(
                   TabRpcClient,
-                  { host: true, connection, filter, block_id: this.blockId },
+                  { host: host || !connection.startsWith("peer:"), connection, filter, block_id: this.blockId },
                   { timeout: REMOTE_TIMEOUT_MS }
               )
             : RpcApi.TowerSampleCommand(TabRpcClient, { host });

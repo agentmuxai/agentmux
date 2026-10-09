@@ -19,6 +19,7 @@
 //!   appends (`feed`, the route in `server::http_viewer`).
 
 pub mod cert;
+pub mod client;
 pub mod feed;
 pub mod pairing;
 

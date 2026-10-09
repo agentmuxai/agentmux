@@ -60,6 +60,17 @@ describe("PairDevicePanel", () => {
         expect(screen.getByRole("button", { name: "New code" })).toBeInTheDocument();
     });
 
+    it("copies the pairing link, for another AgentMux computer's Tower", async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+        pairStart.mockResolvedValue({ url: URL_, expires_ms: Date.now() + 120_000 });
+        render(() => <PairDevicePanel lanDiscoveryEnabled={() => true} />);
+        fireEvent.click(screen.getByRole("button", { name: "Pair a device" }));
+        fireEvent.click(await screen.findByRole("button", { name: "Copy link" }));
+        expect(writeText).toHaveBeenCalledWith(URL_);
+        expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+    });
+
     it("New code asks for another", async () => {
         pairStart.mockResolvedValue({ url: URL_, expires_ms: Date.now() + 120_000 });
         render(() => <PairDevicePanel lanDiscoveryEnabled={() => true} />);

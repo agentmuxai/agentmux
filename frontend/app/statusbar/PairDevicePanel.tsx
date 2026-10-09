@@ -28,6 +28,9 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
     const [pairing, setPairing] = createSignal<Pairing | null>(null);
     const [error, setError] = createSignal<string | null>(null);
     const [busy, setBusy] = createSignal(false);
+    // "Copy link" said so; a new code needs copying again.
+    const [copied, setCopied] = createSignal(false);
+    createEffect(on(pairing, () => setCopied(false)));
     const [paired, setPaired] = createSignal<string | null>(null);
     const [now, setNow] = createSignal(Date.now());
     let canvas: HTMLCanvasElement | undefined;
@@ -106,12 +109,22 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
                     <Button density="compact" disabled={busy()} onClick={() => void start()}>
                         New code
                     </Button>
+                    <Button
+                        density="compact"
+                        disabled={!live()}
+                        onClick={() => {
+                            const p = pairing();
+                            if (p) void navigator.clipboard.writeText(p.url).then(() => setCopied(true));
+                        }}
+                    >
+                        {copied() ? "Copied" : "Copy link"}
+                    </Button>
                 </Show>
             </div>
             <Show when={!props.lanDiscoveryEnabled()}>
                 <div class="status-bar-pair-note">
-                    Turn on LAN discovery to pair a device: AgentMux Mobile connects to this computer over your
-                    local network.
+                    Turn on LAN discovery to pair a device: AgentMux Mobile connects to this computer over your local
+                    network.
                 </div>
             </Show>
             <Show when={error()}>
@@ -139,8 +152,9 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
                             Scan with AgentMux Mobile. Works once, for {left()}.
                         </div>
                         <div class="status-bar-qr-note">
-                            Pairing lets that device watch this computer's agents, read-only. Show this code only to
-                            your own devices.
+                            Pairing lets that device watch this computer's agents, read-only (and its processes, if you
+                            share them in Tower). Show this code only to your own devices. Another AgentMux computer
+                            pairs with the copied link, in its Tower.
                         </div>
                     </div>
                 </Show>
