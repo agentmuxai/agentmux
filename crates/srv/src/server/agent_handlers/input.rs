@@ -764,6 +764,11 @@ pub async fn run_agent_turn_joining(
 
     let ctrl = blockcontroller::get_controller(&block_id)
         .ok_or_else(|| format!("no controller for block {}", block_id))?;
+    // A message the pane held during a turn joins that turn, whichever
+    // controller carries it (turn-model spec §4.3, J3).
+    if let (Some(turn_id), Some(tracker)) = (joins_turn, ctrl.turn_tracker()) {
+        tracker.hint_join(turn_id);
+    }
 
     // Re-read the spawn config from block metadata
     let block: Block = mstore

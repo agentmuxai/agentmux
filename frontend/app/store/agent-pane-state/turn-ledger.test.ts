@@ -8,11 +8,13 @@ import { describe, expect, it } from "vitest";
 import { update } from "./reducer";
 import { initialState } from "./types";
 import {
+    HELD_FLUSH_JOIN_MS,
     parseTurnLedger,
     turnEndedAt,
     turnLiveOutput,
     turnOpen,
     turnSettling,
+    turnToJoin,
     type TurnLedger,
 } from "./turn-ledger";
 
@@ -157,5 +159,15 @@ describe("reducer: TurnObserved and the pass stamp", () => {
     it("leaves tokens unstamped when srv has reported no turn", () => {
         const s = update(initialState("a"), { type: "TokensIn", input: 900 }).state;
         expect(s.turnTokens?.ledgerTurnId).toBeUndefined();
+    });
+});
+
+describe("turnToJoin", () => {
+    it("is the open turn, or the one that only just ended", () => {
+        expect(turnToJoin(ledger(), 0)).toBe(1_000);
+        const ended = ledger({ active: false, lastPassEndedAtMs: 5_000, endedAtMs: 5_000, end: "completed" });
+        expect(turnToJoin(ended, 5_000 + HELD_FLUSH_JOIN_MS)).toBe(1_000);
+        expect(turnToJoin(ended, 5_001 + HELD_FLUSH_JOIN_MS)).toBeUndefined();
+        expect(turnToJoin(null, 0)).toBeUndefined();
     });
 });

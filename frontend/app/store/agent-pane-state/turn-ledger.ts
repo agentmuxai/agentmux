@@ -87,6 +87,20 @@ export function turnOpen(l: TurnLedger | null | undefined, nowMs: number): boole
     return !!l && (l.active || turnSettling(l, nowMs));
 }
 
+/** How long after a turn ended srv still lets a held message join it
+ *  (`HELD_FLUSH_JOIN_MS` in health.rs). */
+export const HELD_FLUSH_JOIN_MS = 10_000;
+
+/** The turn a held message being flushed now should join: the one still open,
+ *  or the one that only just ended. The message was held because a turn was
+ *  running, and the flush follows that turn's end at once. */
+export function turnToJoin(l: TurnLedger | null | undefined, nowMs: number): number | undefined {
+    if (!l) return undefined;
+    if (turnOpen(l, nowMs)) return l.turnId;
+    const endedAt = turnEndedAt(l, nowMs);
+    return endedAt != null && nowMs - endedAt <= HELD_FLUSH_JOIN_MS ? l.turnId : undefined;
+}
+
 /** When the turn ended: its end, or the last pass's end once the settle window lapsed. */
 export function turnEndedAt(l: TurnLedger, nowMs: number): number | null {
     if (l.endedAtMs != null) return l.endedAtMs;

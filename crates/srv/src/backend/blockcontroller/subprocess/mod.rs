@@ -419,6 +419,10 @@ impl Controller for SubprocessController {
         Ok(())
     }
 
+    fn turn_tracker(&self) -> Option<Arc<TurnActivityTracker>> {
+        Some(Arc::clone(&self.health_monitor))
+    }
+
     fn controller_type(&self) -> &str {
         BLOCK_CONTROLLER_SUBPROCESS
     }

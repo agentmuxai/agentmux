@@ -232,6 +232,9 @@ struct TurnActivityTrackerInner {
     /// What started that pass: a continuation answers the same input, so it
     /// carries the same provenance (self-quit gate, §6.3).
     continuation_provenance: Option<TurnProvenance>,
+    /// The turn a held message being sent now should join, and when srv was
+    /// told: for controllers whose pass starts carry no input (`hint_join`).
+    pending_join: Option<(u64, u64)>,
 }
 
 impl TurnActivityTrackerInner {
@@ -255,6 +258,13 @@ impl TurnActivityTrackerInner {
         self.cli_wake_pending = false;
         self.continuation_expected = false;
         self.continuation_provenance = None;
+        // A join hint is good once, and only briefly: it names a message being
+        // sent right now.
+        let hinted = self
+            .pending_join
+            .take()
+            .filter(|(_, at)| now.saturating_sub(*at) <= HELD_FLUSH_JOIN_MS)
+            .map(|(id, _)| id);
         let origin = match start {
             PassStart::Input { origin, .. } => Some(origin),
             PassStart::CliWake => Some(TurnOrigin::Automated),
@@ -262,15 +272,15 @@ impl TurnActivityTrackerInner {
         };
         if let Some(ledger) = self.ledger.as_mut() {
             let settling = ledger.settling_at(now);
+            let recently_ended = ledger.ended_at_ms.is_some_and(|e| now.saturating_sub(e) <= HELD_FLUSH_JOIN_MS);
             let joins = match start {
                 // A fresh message the user typed after the agent stopped is a
                 // new turn, even inside the settle window (D3); only the
                 // pane's flush of a message held during this turn joins it.
                 PassStart::Input { origin: TurnOrigin::User, joins_turn } => {
-                    joins_turn == Some(ledger.turn_id)
-                        && (settling
-                            || ledger.ended_at_ms.is_some_and(|e| now.saturating_sub(e) <= HELD_FLUSH_JOIN_MS))
+                    joins_turn.or(hinted) == Some(ledger.turn_id) && (settling || recently_ended)
                 }
+                PassStart::Queued if hinted == Some(ledger.turn_id) => settling || recently_ended,
                 PassStart::Input { .. } | PassStart::Queued | PassStart::CliWake => settling,
             };
             if joins {
@@ -359,6 +369,7 @@ impl TurnActivityTracker {
                 cli_wake_pending: false,
                 continuation_expected: false,
                 continuation_provenance: None,
+                pending_join: None,
             }),
             publisher: Mutex::new(None),
             clock,
@@ -543,6 +554,15 @@ impl TurnActivityTracker {
         self.publish_if_changed(before, after);
     }
 
+    /// A message the pane held while turn `turn_id` ran is about to be sent
+    /// through a controller whose pass start carries no input (ACP, App Server,
+    /// one-shot subprocess): the pass it starts joins that turn, as
+    /// `TurnInput::joins_turn` does for the persistent controller (§4.3, J3).
+    pub fn hint_join(&self, turn_id: u64) {
+        let now = (self.clock)();
+        self.inner.lock().unwrap().pending_join = Some((turn_id, now));
+    }
+
     /// The current turn ledger, if any turn has started.
     #[cfg(test)]
     pub fn ledger(&self) -> Option<TurnLedger> {
@@ -562,6 +582,7 @@ impl TurnActivityTracker {
         inner.cli_wake_pending = false;
         inner.continuation_expected = false;
         inner.continuation_provenance = None;
+        inner.pending_join = None;
         if let Some(l) = inner.ledger.as_mut().filter(|l| l.ended_at_ms.is_none()) {
             if l.active {
                 l.last_pass_ended_at_ms = Some(now);
@@ -1065,5 +1086,53 @@ mod tests {
         advance(&clock, 20);
         assert!(t.mark_turn_active_from_cli());
         assert_eq!(t.provenance().unwrap().origin, TurnOrigin::Automated);
+    }
+
+    /// ACP, App Server and one-shot subprocess passes start with no input:
+    /// the pane's held message joins its turn through the hint (#4492).
+    #[test]
+    fn a_held_message_joins_its_turn_through_a_controller_without_labelled_input() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_returning_was_active();
+        let id = t.ledger().unwrap().turn_id;
+        t.set_active_turn(false);
+        advance(&clock, 300);
+        t.hint_join(id);
+        t.mark_turn_active_returning_was_active(); // the controller's own mark
+        let l = t.ledger().unwrap();
+        assert_eq!((l.turn_id, l.passes), (id, 2));
+    }
+
+    #[test]
+    fn a_join_hint_is_good_once_and_only_briefly() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_returning_was_active();
+        let id = t.ledger().unwrap().turn_id;
+        t.set_active_turn(false);
+        t.hint_join(id);
+        advance(&clock, HELD_FLUSH_JOIN_MS + 1);
+        t.mark_turn_active_returning_was_active();
+        assert_ne!(t.ledger().unwrap().turn_id, id, "stale hint");
+
+        let id2 = t.ledger().unwrap().turn_id;
+        t.set_active_turn(false);
+        t.hint_join(id2);
+        t.mark_turn_active_returning_was_active(); // joins, using the hint up
+        t.set_active_turn(false);
+        advance(&clock, 10);
+        t.mark_turn_active_returning_was_active();
+        assert_ne!(t.ledger().unwrap().turn_id, id2, "the hint was used once");
+    }
+
+    #[test]
+    fn a_hint_for_another_turn_joins_nothing() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_returning_was_active();
+        let id = t.ledger().unwrap().turn_id;
+        t.set_active_turn(false);
+        advance(&clock, 10);
+        t.hint_join(id + 999);
+        t.mark_turn_active_returning_was_active();
+        assert_ne!(t.ledger().unwrap().turn_id, id);
     }
 }

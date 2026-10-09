@@ -552,6 +552,10 @@ impl Controller for AppServerController {
         Ok(())
     }
 
+    fn turn_tracker(&self) -> Option<Arc<TurnActivityTracker>> {
+        Some(Arc::clone(&self.health_monitor))
+    }
+
     fn controller_type(&self) -> &str {
         super::BLOCK_CONTROLLER_APP_SERVER
     }
