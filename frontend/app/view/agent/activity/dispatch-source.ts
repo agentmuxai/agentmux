@@ -24,6 +24,7 @@ import type { AgentDispatch } from "../../swarm/swarm-model";
 import { createBackfillAwareTrigger, holdBackfillingRows } from "./backfill-tracker";
 import { createDebouncedRefresh } from "./debounced-refresh";
 
+import { WpsEvent } from "@/app/store/mps-events";
 /** The backend's own quiet window (`refresh_dispatch_status`,
  *  `subagent_watcher/jsonl.rs`) — how long a dispatch must go without a new
  *  event before a counts-complete Running dispatch lazily flips to
@@ -104,11 +105,11 @@ const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh()
 // refresh itself stays immediate (undebounced) — see that module's
 // identical comment for why.
 void refresh();
-muxEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
-muxEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
-muxEventSubscribe({ eventType: "subagent:named", handler: () => trigger() });
-muxEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
-muxEventSubscribe({ eventType: "dispatch:updated", handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.SubagentSpawned, handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.SubagentCompleted, handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.SubagentNamed, handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.SubagentAbandoned, handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.DispatchUpdated, handler: () => trigger() });
 
 /** Every tracked dispatch (Solo or Workflow) currently known, across the
  *  whole app. Callers filter by `parent_block_id` for their own pane. */

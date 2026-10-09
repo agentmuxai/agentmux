@@ -44,6 +44,7 @@ import { MemoryDraftModel } from "@/app/view/memory-editor/memory-draft-model";
 import type { MemoryHistorySource } from "@/app/view/memory-editor/memory-history-model";
 import { sha256Hex } from "@/util/sha256";
 
+import { WpsEvent } from "@/app/store/mps-events";
 /** What the Global Memory full view is showing — one entry, a new-entry
  *  draft, the read-only CLAUDE.md, or the combined preview. `null` = the
  *  tile grid. */
@@ -256,7 +257,7 @@ export class GlobalBundleViewModel {
         void this.refresh();
         void this.fetchClaudeGlobalConfig();
         this.unsubChanged = muxEventSubscribe({
-            eventType: "memories:changed",
+            eventType: WpsEvent.MemoriesChanged,
             handler: () => void this.refresh(),
         });
     }

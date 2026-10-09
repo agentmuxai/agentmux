@@ -29,6 +29,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import type { Bundle, BundleUpsertInput, BundleValidationReport } from "@/app/store/rpc-api";
 
+import { WpsEvent } from "@/app/store/mps-events";
 /** What the form fields look like in flight. Maps 1:1 to the Memory
  *  shape but with everything optional + JSON-array fields exposed as
  *  parsed arrays for ergonomic editing. The shape is converted back to
@@ -215,7 +216,7 @@ export class BundleViewModel {
         // Kick off initial load. Errors land in errorAtom for UI surfacing.
         void this.refresh();
         this.unsubChanged = muxEventSubscribe({
-            eventType: "memories:changed",
+            eventType: WpsEvent.MemoriesChanged,
             handler: () => void this.refresh(),
         });
     }

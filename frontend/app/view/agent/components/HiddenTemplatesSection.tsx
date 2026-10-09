@@ -47,6 +47,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import { ProviderLogo } from "@/element/ProviderLogo";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export const HiddenTemplatesSection = (): JSX.Element => {
     const [hidden, setHidden] = createSignal<AgentDefinition[]>([]);
     const [expanded, setExpanded] = createSignal(false);
@@ -72,7 +73,7 @@ export const HiddenTemplatesSection = (): JSX.Element => {
     // so any state change reflects here without a manual refresh.
     void load();
     const unsub = muxEventSubscribe({
-        eventType: "agents:changed",
+        eventType: WpsEvent.AgentsChanged,
         handler: () => void load(),
     });
     onCleanup(() => {

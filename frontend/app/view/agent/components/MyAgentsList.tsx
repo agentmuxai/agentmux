@@ -70,6 +70,7 @@ import { RuntimeBadge } from "./RuntimeBadge";
 import type { OpenAgentLocation } from "../open-agent-panes";
 import { Button } from "@/app/element/ui";
 
+import { WpsEvent } from "@/app/store/mps-events";
 /** "type" sort groups Host before Sandbox (Container) before anything
  *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
  *  not alphabetical ("container" < "host" would put Sandbox first, which
@@ -449,7 +450,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // Refetch when a new agent definition is created (e.g. via agent.define)
     // so the stub instance appears immediately without needing a restart.
     const unsubAgents = muxEventSubscribe({
-        eventType: "agents:changed",
+        eventType: WpsEvent.AgentsChanged,
         handler: () => void refetch(),
     });
     onCleanup(unsubAgents);

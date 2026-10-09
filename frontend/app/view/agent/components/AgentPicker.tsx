@@ -67,6 +67,7 @@ import { mergeOpenDefinitions, openAgentLocations, type OpenAgentLocation } from
 import { beginAgentOpen, finishAgentOpen } from "../open-trace";
 import { readZoom } from "@/app/store/zoom-factor";
 
+import { WpsEvent } from "@/app/store/mps-events";
 /** This-machine-only preference — no cross-device sync, no existing
  *  localStorage precedent in this component tree to extend (a new small
  *  pattern, not a reuse). Wrapped defensively: localStorage can throw in
@@ -155,7 +156,7 @@ export function useAgentDefinitions(): [() => AgentDefinition[], () => boolean] 
         load();
 
         const unsub = muxEventSubscribe({
-            eventType: "agents:changed",
+            eventType: WpsEvent.AgentsChanged,
             handler: () => load(),
         });
 
@@ -181,7 +182,7 @@ export function useOpenDefinitionMap(): [() => Map<string, string>, () => void] 
     const refresh = () => setOpenDefinitions(getOpenDefinitionMap());
     onMount(refresh);
     const unsubAgentsChanged = muxEventSubscribe({
-        eventType: "agents:changed",
+        eventType: WpsEvent.AgentsChanged,
         handler: refresh,
     });
     const unsubPaneLifecycle = subscribeToPaneLifecycle(refresh);

@@ -20,6 +20,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export class BundleSkillModel {
     readonly bundleId: string;
 
@@ -52,7 +53,7 @@ export class BundleSkillModel {
         });
         void this.refresh();
         this.unsubChanged = muxEventSubscribe({
-            eventType: "skills:changed",
+            eventType: WpsEvent.SkillsChanged,
             handler: () => void this.refresh(),
         });
     }

@@ -23,6 +23,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export interface UseToolChunkStreamOptions {
     blockId: string;
     queue: StreamFlushQueue;
@@ -60,7 +61,7 @@ export function useToolChunkStream(opts: UseToolChunkStreamOptions): void {
     // race that the previous per-tool subscription model could not.
     // See `docs/specs/SPEC_STREAMING_BASH_RUNNER_2026_05_11.md` §6.
     const blockChunkUnsub = muxEventSubscribe({
-        eventType: "tool_chunk",
+        eventType: WpsEvent.ToolChunk,
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {
             const data = event?.data;

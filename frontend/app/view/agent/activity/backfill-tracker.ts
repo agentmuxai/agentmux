@@ -30,6 +30,7 @@
 
 import { muxEventSubscribe } from "@/app/store/mps";
 
+import { WpsEvent } from "@/app/store/mps-events";
 const backfillingBlocks = new Map<string, ReturnType<typeof setTimeout>>();
 const settleListeners = new Set<(blockId: string) => void>();
 
@@ -134,6 +135,6 @@ export function createBackfillAwareTrigger(scheduleDebouncedRefresh: () => void,
 // safely: `mps.ts`'s `dispatchToSubjects` fans one incoming message out to
 // every registered listener, filtering by each listener's own `scope`).
 muxEventSubscribe({
-    eventType: "subagent:backfill_status",
+    eventType: WpsEvent.SubagentBackfillStatus,
     handler: (event: { scopes?: string[]; data?: unknown }) => handleBackfillStatusEvent(event?.scopes, event?.data),
 });
