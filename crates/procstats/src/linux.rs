@@ -21,8 +21,9 @@ pub fn snapshot() -> std::io::Result<Vec<ProcInfo>> {
         // Gone between the listing and the read: skip it.
         let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else { continue };
         let Some(s) = parse_stat(&stat) else { continue };
-        // Kernel threads (children of kthreadd) have no user memory.
-        if pid == 2 || s.ppid == 2 {
+        // Kernel threads have no user memory. By their flag, not by PID: in a
+        // PID namespace (a container, WSL) PID 2 is an ordinary process.
+        if s.flags & PF_KTHREAD != 0 {
             continue;
         }
         let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok();
@@ -69,10 +70,15 @@ fn boot_time_ms() -> Option<u64> {
     })
 }
 
+/// `include/linux/sched.h`: the process is a kernel thread.
+const PF_KTHREAD: u64 = 0x0020_0000;
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Stat {
     pub comm: String,
     pub ppid: u32,
+    /// Field 9, the kernel's `PF_*` flags.
+    pub flags: u64,
     pub utime: u64,
     pub stime: u64,
     pub start_ticks: u64,
@@ -91,6 +97,7 @@ pub(crate) fn parse_stat(s: &str) -> Option<Stat> {
     Some(Stat {
         comm,
         ppid: field(4)? as u32,
+        flags: field(9)?,
         utime: field(14)?,
         stime: field(15)?,
         start_ticks: field(22)?,
@@ -149,8 +156,18 @@ mod tests {
         let line = "4242 (my (odd) proc) S 4200 4242 4200 0 -1 4194304 500 0 0 0 1234 567 0 0 20 0 3 0 98765 123456789 2048 18446744073709551615";
         assert_eq!(
             parse_stat(line),
-            Some(Stat { comm: "my (odd) proc".into(), ppid: 4200, utime: 1234, stime: 567, start_ticks: 98765 })
+            Some(Stat {
+                comm: "my (odd) proc".into(),
+                ppid: 4200,
+                flags: 4_194_304,
+                utime: 1234,
+                stime: 567,
+                start_ticks: 98765
+            })
         );
+        // kthreadd's own line: PF_KTHREAD (0x200000) is set in field 9.
+        let kthreadd = parse_stat("2 (kthreadd) S 0 0 0 0 -1 2129984 0 0 0 0 0 0 0 0 20 0 1 0 2 0 0").unwrap();
+        assert_ne!(kthreadd.flags & PF_KTHREAD, 0);
         assert_eq!(parse_stat("12 (truncated) S 1"), None);
     }
 

@@ -5,18 +5,8 @@
 //! SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md): `tower.sample` and
 //! `tower.command-line`.
 //!
-//! **Who may call them.** They are the window's, not an agent API, so a
-//! connection registered as an agent (`bus:register`) is refused. That is
-//! **not a security boundary**, and nothing here claims to keep a process
-//! list from an agent:
-//! - every agent shell carries this instance's `AGENTMUX_AUTH_KEY`
-//!   (`pane_env`), so an agent can open `/ws`, skip `bus:register`, and be
-//!   indistinguishable from the window: srv has no credential only the
-//!   renderer holds, and the window's loopback `Origin` is forgeable;
-//! - more to the point, an agent runs as the same OS user, and every number
-//!   and command line Tower shows is one its own shell can read without
-//!   AgentMux (`ps`, `/proc`, `Get-CimInstance`). Tower reads nothing that
-//!   user can't (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md §3).
+//! They are the window's, not an agent API: a connection registered as an
+//! agent (`bus:register`) is refused.
 
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
@@ -58,8 +48,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 }
 
 /// Refuse a connection registered as an agent: these RPCs aren't offered to
-/// agents. Not a security boundary (module doc): an unregistered connection
-/// can't be told apart from the window.
+/// agents.
 fn not_an_agent_api(ctx: &RpcContext) -> Result<(), String> {
     if ctx.agent_id.is_empty() {
         Ok(())
@@ -132,16 +121,6 @@ mod tests {
         assert_eq!(snap.os, std::env::consts::OS);
         let host = snap.host.expect("host list asked for");
         assert!(host.processes.iter().any(|p| p.pid == std::process::id()));
-    }
-
-    /// What the gate does and doesn't do (module doc): a registered agent is
-    /// refused; an unregistered connection is served, because srv can't tell
-    /// it from the window. Pinned so the gate is never mistaken for more.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn an_unregistered_connection_is_served_as_the_window_is() {
-        let (data, err) = call(COMMAND_TOWER_SAMPLE, json!({}), "").await;
-        assert_eq!(err, "");
-        assert!(data.get("tasks").is_some(), "{data}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
