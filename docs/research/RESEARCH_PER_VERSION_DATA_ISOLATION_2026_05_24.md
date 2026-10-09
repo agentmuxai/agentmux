@@ -221,7 +221,7 @@ Once that lands, Increment B unblocks a real channel rollout to Installed + (eve
 
 ## 9. References
 
-- [`docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](../specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) — current state + Phase 1 design
+- [`docs/specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md`](../specs/archive/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md) — current state + Phase 1 design
 - [`crates/common/src/data_paths.rs:81-117`](../../crates/common/src/data_paths.rs) — current resolution logic
 - Chrome user-data-dir docs: https://chromium.googlesource.com/chromium/src/+/HEAD/docs/user_data_dir.md
 - VS Code "Insiders import" issue thread: github.com/microsoft/vscode/issues/?q=is%3Aissue+insiders+import+settings
