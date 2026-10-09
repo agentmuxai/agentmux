@@ -45,9 +45,15 @@ pub fn is_local(conn: &str) -> bool {
 /// A sample of `conn`'s processes. `ask`: where ssh's prompts go (the pane
 /// that asked).
 pub async fn sample(conn: &str, filter: &str, ask: Option<AskIn<'_>>) -> Result<TowerSnapshot, String> {
-    let key = (conn.to_string(), filter.to_string());
-    if let Some(snap) = cached(&key) {
-        return Ok(snap);
+    // One slot per (machine, filter), held across the helper call: a second
+    // request arriving meanwhile waits for this frame and shares it instead of
+    // asking the helper again (whose CPU window would then be near zero).
+    let slot = slot((conn.to_string(), filter.to_string()));
+    let mut slot = slot.lock().await;
+    if let Some((at, snap)) = slot.as_ref() {
+        if at.elapsed() < REUSE_WITHIN {
+            return Ok(snap.clone());
+        }
     }
     let helper = match ConnTarget::parse(conn)? {
         ConnTarget::Ssh(_) => crate::backend::remote::files::connect(conn, ask).await.map_err(|e| e.message)?,
@@ -56,22 +62,28 @@ pub async fn sample(conn: &str, filter: &str, ask: Option<AskIn<'_>>) -> Result<
     };
     let frame = helper.procs(TOP, filter).await.map_err(|e| e.message)?;
     let snap = to_snapshot(conn, &helper.os, frame);
-    cache().lock().unwrap().insert(key, (Instant::now(), snap.clone()));
+    *slot = Some((Instant::now(), snap.clone()));
     Ok(snap)
 }
 
-type Cache = Mutex<HashMap<(String, String), (Instant, TowerSnapshot)>>;
+type Slot = Arc<tokio::sync::Mutex<Option<(Instant, TowerSnapshot)>>>;
 
-fn cache() -> &'static Cache {
-    static CACHE: OnceLock<Cache> = OnceLock::new();
-    CACHE.get_or_init(Default::default)
+/// The slot for `key`, made on first use. Slots whose frame has gone stale
+/// and that nobody holds are dropped as others are made, so the map stays
+/// as small as the set of machines being watched.
+fn slot(key: (String, String)) -> Slot {
+    static SLOTS: OnceLock<Mutex<HashMap<(String, String), Slot>>> = OnceLock::new();
+    let mut slots = SLOTS.get_or_init(Default::default).lock().unwrap();
+    slots.retain(|k, s| {
+        *k == key
+            || Arc::strong_count(s) > 1
+            || s.try_lock().map_or(true, |g| g.as_ref().is_some_and(|(at, _)| at.elapsed() < STALE_SLOT))
+    });
+    slots.entry(key).or_default().clone()
 }
 
-fn cached(key: &(String, String)) -> Option<TowerSnapshot> {
-    let mut c = cache().lock().unwrap();
-    c.retain(|_, (at, _)| at.elapsed() < REUSE_WITHIN);
-    c.get(key).map(|(_, s)| s.clone())
-}
+/// A slot unused this long is forgotten.
+const STALE_SLOT: Duration = Duration::from_secs(60);
 
 /// A helper's frame as the pane's snapshot: a Host view, no tasks (a remote
 /// machine has no AgentMux panes to group by).
@@ -275,5 +287,15 @@ mod tests {
         // A second ask within the window is the same frame.
         let again = sample("tower-test-host", &me, None).await.unwrap();
         assert_eq!(again.ts_ms, snap.ts_ms);
+    }
+
+    /// Two panes asking at the same moment share one frame: the second waits
+    /// for the first instead of asking the helper again.
+    #[tokio::test]
+    async fn concurrent_asks_share_one_frame() {
+        let home = tempfile::tempdir().unwrap();
+        crate::backend::remote::files::connect_in_process("tower-test-host-2", home.path().to_path_buf()).await;
+        let (a, b) = tokio::join!(sample("tower-test-host-2", "x", None), sample("tower-test-host-2", "x", None));
+        assert_eq!(a.unwrap().ts_ms, b.unwrap().ts_ms);
     }
 }

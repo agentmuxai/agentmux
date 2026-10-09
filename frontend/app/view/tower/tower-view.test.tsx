@@ -17,6 +17,7 @@ vi.mock("@/app/util/reveal-block", () => ({ revealBlock: (...args: unknown[]) =>
 const remoteRecords = [
     { name: "build-box", kind: "ssh", platform: { os: "linux", arch: "x86_64" } },
     { name: "mac-mini", kind: "ssh", platform: { os: "macos", arch: "arm64" } },
+    { name: "pi", kind: "ssh", platform: { os: "linux", arch: "armv7l" }, helper: { state: "unsupported" } },
     { name: "wsl://Ubuntu", kind: "wsl", platform: null },
     { name: "win-server", kind: "ssh", platform: { os: "mingw64_nt-10.0", arch: "x86_64" } },
 ];
@@ -206,6 +207,7 @@ describe("Tower", () => {
             ["", false],
             ["build-box", false],
             ["mac-mini", false],
+            ["pi", true],
             ["wsl://Ubuntu", false],
             ["win-server", true],
         ]);
