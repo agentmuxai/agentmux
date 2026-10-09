@@ -107,6 +107,17 @@ function buildCredentialedUrl(): string | null {
 }
 
 /**
+ * Reload this window so it reconnects: through the credentialed URL when the
+ * host has injected the IPC creds, a plain reload when it hasn't (genuinely
+ * down). The desktop host's `AppApi.reloadWindow`, and the auto-reconnect below.
+ */
+export function reloadKeepingHostCredentials(): void {
+    const credUrl = buildCredentialedUrl();
+    if (credUrl) location.assign(credUrl);
+    else location.reload();
+}
+
+/**
  * Escalation path: ask the live host to open a brand-new, freshly-bridged window
  * via the same `open_new_window` command the launcher forwards. Uses the
  * re-injected IPC creds directly (NOT `window.api`, which is what failed). The
@@ -205,11 +216,7 @@ export function tryAutoRecover(message: string): boolean {
         // racy on_load_end re-injection. Falls back to reload() only when the
         // host hasn't injected creds yet (genuinely down). Backoff grows per
         // attempt so a still-churning dev tree gets a moment to settle.
-        const credUrl = buildCredentialedUrl();
-        setTimeout(() => {
-            if (credUrl) location.assign(credUrl);
-            else location.reload();
-        }, 700 * attempt);
+        setTimeout(reloadKeepingHostCredentials, 700 * attempt);
         return true;
     }
     // Budget exhausted — STOP auto-reloading. Do NOT reset the counter: keeping

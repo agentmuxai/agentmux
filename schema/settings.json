@@ -353,6 +353,11 @@
           "default": true,
           "description": "Notify when an agent's turn completes."
         },
+        "notify:os:turncompleted:external": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also notify when a turn you didn't start finishes: one another agent's message, a service notice, a scheduled run or a finished background task started. Off: such a turn ends quietly unless it needs you."
+        },
         "notify:os:turnerrored": {
           "type": "boolean",
           "default": true,

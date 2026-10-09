@@ -9,8 +9,10 @@ import {
     filterProcesses,
     formatCpu,
     formatMem,
+    groupProcesses,
     nextSort,
     processDetail,
+    sortGroups,
     sortProcesses,
     sortTasks,
 } from "./tower-util";
@@ -119,5 +121,38 @@ describe("a process's details", () => {
         expect(text).toContain("Resident / working set: 4 KB");
         expect(text).toContain("MCP server");
         expect(text).not.toContain("administrator");
+    });
+});
+
+describe("grouping by app", () => {
+    const ps = [
+        proc(1, "chrome.exe", 0.5, 100, "t1"),
+        proc(2, "Chrome.exe", 0.25, 50, "t1"),
+        proc(3, "node.exe", undefined, 10),
+        proc(4, "node.exe", 0.1, undefined, "t2"),
+        proc(5, "System", 0.01, 1),
+    ];
+
+    it("groups by name, sums what is known, and names a shared task", () => {
+        const g = groupProcesses(ps);
+        const chrome = g.find((x) => x.key === "chrome.exe")!;
+        expect(chrome.processes.map((p) => p.pid)).toEqual([1, 2]);
+        expect(chrome.cpu).toBeCloseTo(0.75);
+        expect(chrome.mem).toBe(150);
+        expect(chrome.task).toBe("t1");
+        const node = g.find((x) => x.key === "node.exe")!;
+        expect(node.cpu).toBeCloseTo(0.1);
+        expect(node.mem).toBe(10);
+        expect(node.task).toBeUndefined();
+    });
+
+    it("sorts groups by their totals or their size", () => {
+        const g = groupProcesses(ps);
+        expect(sortGroups(g, { key: "cpu", desc: true }).map((x) => x.key)).toEqual([
+            "chrome.exe",
+            "node.exe",
+            "system",
+        ]);
+        expect(sortGroups(g, { key: "count", desc: true })[2].key).toBe("system");
     });
 });

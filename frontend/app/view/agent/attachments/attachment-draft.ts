@@ -21,7 +21,7 @@
  */
 
 import { createSignal, type Accessor } from "solid-js";
-import { getApi } from "@/app/store/app-api";
+import { authHeaders } from "@/app/store/auth-headers";
 import { MOS, pushNotification } from "@/app/store/global";
 import { WpsEvent } from "@/app/store/mps-events";
 import { muxEventSubscribe } from "@/app/store/mps";
@@ -86,7 +86,7 @@ export function pastedFileName(file: File, now = new Date()): string {
 export async function uploadFile(file: File, name: string): Promise<AttachmentInfo> {
     const res = await fetch(`${getWebServerEndpoint()}/api/v1/attachments/upload?name=${encodeURIComponent(name)}`, {
         method: "POST",
-        headers: { "X-AuthKey": getApi()?.getAuthKey?.() ?? "" },
+        headers: authHeaders(),
         body: file,
     });
     const body = await res.json().catch(() => null);
@@ -283,7 +283,7 @@ export class AttachmentDraft {
         };
         this.uploads.set(key, xhr);
         xhr.open("POST", `${getWebServerEndpoint()}/api/v1/attachments/upload?name=${encodeURIComponent(name)}`);
-        xhr.setRequestHeader("X-AuthKey", getApi()?.getAuthKey?.() ?? "");
+        for (const [k, v] of Object.entries(authHeaders())) xhr.setRequestHeader(k, v);
         xhr.upload.onprogress = (e) => {
             if (!e.lengthComputable) return;
             this.patch(key, { doneBytes: e.loaded, stage: e.loaded >= e.total ? "processing" : "uploading" });

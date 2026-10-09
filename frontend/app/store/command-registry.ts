@@ -15,6 +15,7 @@ import {
     setActiveTab,
 } from "@/app/store/global";
 import { splitBlockDefFor } from "@/app/block/split-block-def";
+import { hostHas } from "@/app/host/host-caps";
 import { WorkspaceService } from "@/app/store/services";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { fireAndForget } from "@/util/util";
@@ -37,8 +38,16 @@ export interface CommandEntry {
     keywords?: string;
     /** Left out of the palette; still runs by id (a menu, a keybinding). */
     hidden?: boolean;
+    /** A host capability the command needs. Without it the command is left
+     *  out of the palette and `run` declines it (docs/specs/SPEC_HOST_API_SEAM_2026_09_26.md). */
+    requires?: keyof HostCaps;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     execute: () => void | Promise<any>;
+}
+
+/** Can `entry` run on this host? */
+export function isCommandAvailable(entry: CommandEntry): boolean {
+    return entry.requires == null || hostHas(entry.requires);
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +71,7 @@ class CommandRegistry {
 
     run(id: string): boolean {
         const cmd = this.commands.get(id);
-        if (!cmd) return false;
+        if (!cmd || !isCommandAvailable(cmd)) return false;
         fireAndForget(async () => {
             await cmd.execute();
         });
@@ -220,6 +229,7 @@ export function registerDefaultCommands(): void {
         label: "New Window",
         category: "Window",
         icon: "clone",
+        requires: "multiWindow",
         execute: () => getApi().openNewWindow().catch(console.error),
     });
     commandRegistry.register({

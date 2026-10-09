@@ -5,8 +5,7 @@
 //! shell creation, `stream-local-file`, editor reads, attachment ingest by
 //! path. Its `docker exec` env therefore carries a token minted here instead,
 //! which srv accepts only on [`container_route_allowed`] and attributes to the
-//! agent it was minted for. See
-//! `docs/reports/REPORT_AGENT_FILE_ACCESS_2026_09_29.md`.
+//! agent it was minted for.
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -141,9 +140,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
     // The publish guard's hooks directory is a host path; the agent's other
     // GIT_CONFIG_* settings still apply inside the container.
     let env_vars = crate::backend::publish_guard::without_hooks_path(env_vars);
-    env_vars
+    let build_info = crate::backend::pane_env::build_info();
+    let is_build_info = |k: &str| build_info.iter().any(|(b, _)| *b == k);
+    let mut out: Vec<(String, String)> = env_vars
         .iter()
         .filter(|(k, _)| !crate::backend::container::CONTAINER_ENV_DENYLIST.contains(&k.as_str()))
+        .filter(|(k, _)| !is_build_info(k))
         .map(|(k, v)| {
             if k == "AGENTMUX_AUTH_KEY" {
                 (k.clone(), token_for_block(block_id, agent_token))
@@ -151,7 +153,12 @@ pub fn container_exec_env(block_id: &str, env_vars: &HashMap<String, String>) ->
                 (k.clone(), v.clone())
             }
         })
-        .collect()
+        .collect();
+    // Which AgentMux this is, as every host pane is told: a container exec
+    // doesn't go through `pane_env`'s sanitizers, and srv's values win over
+    // any the agent's own env carried.
+    out.extend(build_info.iter().map(|(k, v)| (k.to_string(), v.clone())));
+    out
 }
 
 #[cfg(test)]
@@ -253,5 +260,14 @@ mod tests {
         let env: HashMap<String, String> = [("FOO".to_string(), "bar".to_string())].into_iter().collect();
         let out = container_exec_env("cc-block-nokey", &env);
         assert!(out.iter().all(|(k, _)| k != "AGENTMUX_AUTH_KEY"));
+    }
+
+    #[test]
+    fn a_container_agent_is_told_which_build_it_runs_in() {
+        let env: HashMap<String, String> = [("AGENTMUX_VERSION".to_string(), "0.0.1-stale".to_string())].into_iter().collect();
+        let out = container_exec_env("cc-block-build", &env);
+        let versions: Vec<&str> = out.iter().filter(|(k, _)| k == "AGENTMUX_VERSION").map(|(_, v)| v.as_str()).collect();
+        assert_eq!(versions, [env!("CARGO_PKG_VERSION")], "srv's value, once, over the agent's own");
+        assert!(out.iter().any(|(k, _)| k == "AGENTMUX_BUILD"));
     }
 }

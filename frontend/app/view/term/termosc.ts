@@ -5,8 +5,9 @@
 // Extracted from termwrap.ts — pure functions, no TermWrap dependency.
 
 import { RpcApi } from "@/app/store/rpc-api";
+import { authHeaders } from "@/app/store/auth-headers";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { MOS, atoms, getApi } from "@/app/store/global";
+import { MOS, atoms } from "@/app/store/global";
 import * as services from "@/app/store/services";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fireAndForget } from "@/util/util";
@@ -288,9 +289,7 @@ export function handleOsc16162Command(data: string, blockId: string, loaded: boo
                     const url = getWebServerEndpoint() + "/agentmux/reactive/poller/config";
                     // X-AuthKey required after audit C1/C2 fix moved
                     // /agentmux/reactive/* under auth_middleware.
-                    const authKey = getApi()?.getAuthKey?.();
-                    const headers: Record<string, string> = { "Content-Type": "application/json" };
-                    if (authKey) headers["X-AuthKey"] = authKey;
+                    const headers = authHeaders({ "Content-Type": "application/json" });
                     const response = await fetch(url, {
                         method: "POST",
                         headers,

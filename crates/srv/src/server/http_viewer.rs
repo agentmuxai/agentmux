@@ -22,7 +22,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use axum::body::Bytes;
-use axum::extract::{ConnectInfo, Path};
+use axum::extract::{ConnectInfo, Path, Query};
 use futures_util::Stream;
 use serde::Deserialize;
 
@@ -56,6 +56,7 @@ pub fn build_viewer_router(state: AppState) -> Router {
         .route("/agentmux/viewer/hello", get(handle_viewer_hello))
         .route("/agentmux/viewer/agents", get(handle_viewer_agents))
         .route("/agentmux/viewer/agents/:name/feed", get(handle_viewer_feed))
+        .route("/agentmux/viewer/procs", get(handle_viewer_procs))
         .route_layer(middleware::from_fn_with_state(state.clone(), viewer_auth_middleware));
     Router::new()
         .route("/agentmux/viewer/pair", post(handle_viewer_pair))
@@ -247,6 +248,54 @@ async fn handle_viewer_agents(State(state): State<AppState>) -> Response {
         .collect();
     // Read after the states, so no `since_ms` is later than it.
     Json(json!({ "now_ms": agentmux_common::time::now_ms_u64(), "agents": list })).into_response()
+}
+
+/// Settings key: let paired devices see this computer's processes in their
+/// Tower (`GET /agentmux/viewer/procs`). Off unless set.
+pub(crate) const SETTING_TOWER_SHARE: &str = "tower:sharewithpaired";
+
+#[derive(Deserialize)]
+pub(crate) struct ProcsQuery {
+    #[serde(default)]
+    filter: String,
+}
+
+/// `GET /agentmux/viewer/procs?filter=`: this computer's Tower snapshot for a
+/// paired device (SPEC_TOWER_TASK_MANAGER_PANE_2026_10_08.md §8.3): its
+/// tasks and the busiest and largest of its processes, names only, never a
+/// command line. 403 unless the user turned sharing on; an agent hidden from
+/// paired devices, and its processes, are left out.
+async fn handle_viewer_procs(State(state): State<AppState>, Query(q): Query<ProcsQuery>) -> Response {
+    let sharing = state
+        .config_watcher
+        .get_settings()
+        .extra
+        .get(SETTING_TOWER_SHARE)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !sharing {
+        return (StatusCode::FORBIDDEN, Json(json!({ "error": "this computer doesn't share its processes" })))
+            .into_response();
+    }
+    let st = state.clone();
+    let snap = tokio::task::spawn_blocking(move || {
+        let mut snap = crate::backend::tower_sampler::Tower::global().sample(
+            true,
+            &st.hostname,
+            || crate::server::app_api::tower_pane::inputs(&st.process_tracker),
+            |id| crate::server::app_api::tower_pane::block_label(&st.mstore, id),
+        )?;
+        crate::backend::tower_sampler::share(&mut snap, crate::backend::tower_sampler::SHARED_TOP, &q.filter, &|id| {
+            agent_hidden(&st, id)
+        });
+        Ok::<_, std::io::Error>(snap)
+    })
+    .await;
+    match snap {
+        Ok(Ok(snap)) => Json(snap).into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
 }
 
 /// `GET /agentmux/viewer/agents/:name/feed`: the agent's transcript as

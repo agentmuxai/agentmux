@@ -619,7 +619,7 @@ pub fn on_loading_state_change_browser_pane(
 }
 
 /// The main frame's current URL, or empty when the browser has no main frame.
-fn main_frame_url(browser: &Browser) -> String {
+pub(crate) fn main_frame_url(browser: &Browser) -> String {
     browser
         .main_frame()
         .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())

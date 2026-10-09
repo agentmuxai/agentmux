@@ -12,6 +12,7 @@
  * docs/specs/SPEC_WIDGET_CONTEXT_MENU_OPEN_ACTIONS_PHASE_2_2026_09_16.md.
  */
 
+import { hostHas } from "@/app/host/host-caps";
 import { openViewInNewTab } from "@/app/tab/tab-presets";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/store/global";
@@ -23,7 +24,8 @@ export interface WidgetOpenAction {
 }
 
 /**
- * Returns the three "Open in ..." actions for the given leaf widget, or an
+ * Returns the three "Open in ..." actions for the given leaf widget (only
+ * "Open in New Tab" on a host without multiWindow), or an
  * empty array if `shortName` doesn't resolve to a widget with a view (e.g. a
  * parent/group widget — callers already special-case those before reaching
  * here, see action-widgets.tsx's `isParent` checks).
@@ -36,6 +38,12 @@ export function buildWidgetOpenActions(
     const blockMeta = widgetDef?.blockdef?.meta as Record<string, unknown> | undefined;
     const view = (blockMeta?.["view"] as string) ?? null;
     if (!view) return [];
+    const inNewTab: WidgetOpenAction = {
+        label: "Open in New Tab",
+        run: () => fireAndForget(async () => openViewInNewTab(view, blockMeta)),
+    };
+    // A new window and a floating pane are both native windows.
+    if (!hostHas("multiWindow")) return [inNewTab];
     return [
         {
             label: "Open in New Window",
@@ -48,9 +56,6 @@ export function buildWidgetOpenActions(
                     TabRpcClient.rpcCall("pane.open", { view, meta: blockMeta, floating: true }, {})
                 ),
         },
-        {
-            label: "Open in New Tab",
-            run: () => fireAndForget(async () => openViewInNewTab(view, blockMeta)),
-        },
+        inNewTab,
     ];
 }

@@ -8,6 +8,7 @@ import { getWSServerEndpoint } from "@/util/endpoints";
 import { addWSReconnectHandler, globalWS, initGlobalWS, WSControl } from "./ws";
 import { DefaultRouter, setDefaultRouter } from "./rpc-util-base";
 import { getApi } from "./global";
+import { noteSrvInfoMessage } from "./srv-info";
 
 let TabRpcClient: TabClient;
 
@@ -16,6 +17,7 @@ function initWshrpc(tabId: string): WSControl {
     setDefaultRouter(router);
     const handleFn = (event: WSEventType) => {
         if (event.data == null) return;
+        noteSrvInfoMessage(event.data);
         DefaultRouter.recvRpcMessage(event.data);
     };
 

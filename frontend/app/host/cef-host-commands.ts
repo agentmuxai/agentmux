@@ -39,6 +39,12 @@ export const cefBrowserPanes: BrowserPaneHostApi = {
     focus: async (blockId) => {
         await invokeCommand("browser_pane_focus", { block_id: blockId });
     },
+    async showPopup(popupId) {
+        await invokeCommand("browser_popup_show", { id: popupId });
+    },
+    async closePopup(popupId) {
+        await invokeCommand("browser_popup_close", { id: popupId });
+    },
     cut: async (blockId) => {
         await invokeCommand("browser_pane_cut", { block_id: blockId });
     },

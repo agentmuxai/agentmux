@@ -200,7 +200,7 @@ impl SubprocessController {
         registry: Option<Arc<crate::registry::Registry>>,
         boot_id: Arc<str>,
     ) -> Self {
-        let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
+        let health_monitor = Arc::new(TurnActivityTracker::for_block(block_id.clone(), broker.as_ref()));
         let lease_store = registry.and_then(|r| {
             crate::registry::LeaseStore::open(r.root())
                 .map(Arc::new)
@@ -417,6 +417,10 @@ impl Controller for SubprocessController {
         }
         // Term resize / other input types: accepted-no-op.
         Ok(())
+    }
+
+    fn turn_tracker(&self) -> Option<Arc<TurnActivityTracker>> {
+        Some(Arc::clone(&self.health_monitor))
     }
 
     fn controller_type(&self) -> &str {

@@ -21,6 +21,9 @@ export const WpsEvent = {
     // Where an agent process auto-compacts, as its CLI reports it. Mirrors
     // EVENT_AGENT_CONTEXT_USAGE in mps.rs.
     AgentContextUsage: "agentcontextusage",
+    // The agent's turn as the user sees it, over its CLI passes. Mirrors
+    // EVENT_AGENT_TURN in mps.rs; payload parsed by agent-pane-state/turn-ledger.ts.
+    AgentTurn: "agentturn",
     MuxObjUpdate: "waveobj:update",
     // One WS frame carrying an ARRAY of MuxObjUpdates from a single atomic
     // backend transition (e.g. CloseTab's [update workspace, delete tab]
@@ -32,6 +35,10 @@ export const WpsEvent = {
     MuxObjBatchedUpdates: "waveobj:batchedupdates",
     InstallProgress: "install_progress",
     Config: "config",
+    // Sent once per WebSocket connect, after config: the srv reached and its
+    // machine (crates/srv/src/srv_info.rs). Handled as it arrives, before any
+    // subscription exists (app/store/srv-info.ts noteSrvInfoMessage).
+    SrvInfo: "srvinfo",
     UserInput: "userinput",
     AgentMessageAccepted: "agent-message-accepted",
     // Image attachment processing, scoped `block:<id>` of the pane that

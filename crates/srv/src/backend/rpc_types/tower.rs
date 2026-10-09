@@ -156,7 +156,8 @@ pub struct TowerSampleReq {
     #[ts(optional)]
     pub host: Option<bool>,
     /// Another machine: an SSH connection or `wsl://<distro>`, as a pane's
-    /// `connection` meta names it. Absent or `local`: this computer.
+    /// `connection` meta names it, or a paired AgentMux computer
+    /// (`peer:<id>`). Absent or `local`: this computer.
     #[serde(default)]
     #[ts(optional)]
     pub connection: Option<String>,
@@ -168,4 +169,40 @@ pub struct TowerSampleReq {
     #[serde(default)]
     #[ts(optional)]
     pub block_id: Option<String>,
+}
+
+
+
+/// Another AgentMux computer this one is paired with (`tower.peers`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerPeerInfo {
+    /// What `TowerSampleReq::connection` takes: `peer:<id>`.
+    pub connection: String,
+    pub hostname: String,
+    /// Where it was last reached, `address:port`.
+    pub address: String,
+    #[ts(type = "number")]
+    pub paired_ms: i64,
+}
+
+/// `tower.peers`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerPeersResult {
+    pub peers: Vec<TowerPeerInfo>,
+}
+
+/// `tower.pair`: the other computer's pairing link.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerPairReq {
+    pub link: String,
+}
+
+/// `tower.forget`: a `TowerPeerInfo::connection`.
+#[derive(Debug, Clone, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export, export_to = "../../../frontend/types/rpc/")]
+pub struct TowerForgetReq {
+    pub connection: String,
 }

@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
@@ -519,6 +520,9 @@ export function AgentRow({
                         <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
                     </span>
                     <span class="swarm-agent-label">{node.agentName}</span>
+                    {/* Turns this agent didn't get from you that finished
+                        unseen: the same mark as its pane header (UnseenTurnsDot). */}
+                    <Show when={node.blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
                     <Show when={collapsed() && hasChildren()}>
                         <span class="swarm-agent-collapsed-count">{totalRows()}</span>
                     </Show>

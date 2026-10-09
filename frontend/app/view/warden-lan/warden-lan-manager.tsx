@@ -9,8 +9,9 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 
+import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { authedHeaders, ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
+import { ageMs, formatAge, WARDEN_REFRESH_MS } from "@/app/view/warden-shared/warden-shared";
 
 import "@/app/view/warden-shared/warden-manager-chrome.scss";
 
@@ -34,7 +35,7 @@ async function fetchLanPeers(): Promise<LanPeer[]> {
     // section's inline "GET /api/lan-instances → 401" error). Pre-existing,
     // out of scope for this rail restructure.
     const resp = await fetch(getWebServerEndpoint() + "/api/lan-instances", {
-        headers: authedHeaders(),
+        headers: authHeaders(),
     });
     if (!resp.ok) {
         throw new Error(`warden: GET /api/lan-instances → ${resp.status}`);

@@ -20,6 +20,7 @@ mod registry;
 mod sagas;
 mod server;
 mod srv_ipc;
+mod srv_info;
 mod state;
 mod drone;
 mod messaging;
@@ -53,6 +54,9 @@ async fn main() {
     if bootstrap::maybe_run_crash_monitor() {
         return;
     }
+
+    // Before anything changes the environment (srv_info.rs).
+    srv_info::capture_home_dir();
 
     // 0. Headless (no launcher/host): prepare the env the launcher would have
     //    provided, and don't tie srv's life to a parent or stdin. Otherwise start
@@ -239,6 +243,9 @@ async fn main() {
     let presence_id_store = Arc::clone(&state.id_store);
     let viewer = Arc::clone(&state.viewer);
     let viewer_router = server::build_viewer_router(state.clone());
+    // Keeps the host's copy of which panes agents own current (for its popup
+    // decisions; docs/specs/SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
+    server::ui_handlers::spawn_owned_panes_sync(state.clone());
     let routers = build_routers(state);
     let router = routers.full;
 

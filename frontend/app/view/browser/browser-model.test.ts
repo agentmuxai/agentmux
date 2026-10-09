@@ -420,6 +420,29 @@ describe("BrowserViewModel agent driver", () => {
         expect(vm.driverAgentAtom()).toBe("lark");
     });
 
+    it("reports the site a popup came from, and nothing for an ordinary pane", () => {
+        const popup = new BrowserViewModel({
+            ...fakeCtx(),
+            meta: () => ({ "browser:popup_from": "https://console.example.com" }),
+        });
+        expect(popup.popupFromAtom()).toBe("https://console.example.com");
+        expect(new BrowserViewModel(fakeCtx()).popupFromAtom()).toBeUndefined();
+    });
+
+    it("lists the popup windows srv recorded on the opener, ignoring malformed entries", () => {
+        const vm = new BrowserViewModel({
+            ...fakeCtx(),
+            meta: () => ({
+                "browser:popup_windows": [
+                    { id: "popup-1", url: "https://signin.example.com/" },
+                    { id: 7, url: "x" } as unknown as { id: string; url: string },
+                ],
+            }),
+        });
+        expect(vm.popupWindowsAtom()).toEqual([{ id: "popup-1", url: "https://signin.example.com/" }]);
+        expect(new BrowserViewModel(fakeCtx()).popupWindowsAtom()).toEqual([]);
+    });
+
     it("reports no driver for an ordinary pane or an empty key", () => {
         expect(new BrowserViewModel(fakeCtx()).driverAgentAtom()).toBeUndefined();
         const blank = new BrowserViewModel({ ...fakeCtx(), meta: () => ({ "browser:owner_agent": "  " }) });

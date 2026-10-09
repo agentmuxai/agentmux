@@ -42,13 +42,23 @@ import { noteToolCall, noteToolResult } from "@/app/store/touched-files";
 import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import { modelTurnCommand } from "./model-turn-signal";
-import { mainAgentRequestStarted, mainAgentStreamedChars, mainAgentUsage, readsMainAgentUsage } from "./main-agent-usage";
+import {
+    mainAgentRequestStarted,
+    mainAgentStreamedChars,
+    mainAgentStreamedKind,
+    mainAgentUsage,
+    readsMainAgentUsage,
+    type StreamedKind,
+} from "./main-agent-usage";
 import { createSessionStartDetector } from "./session-start";
 import type { PendingMessage } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { noteTaskFrame } from "./activity/task-outcomes";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
+import { createTaskWakeDetector } from "./task-wake";
+import { createTestProgressTracker } from "./status/test-progress";
+import { createThinkingHeadlineTracker } from "./status/thinking-headline";
 import { compactionModelKey, parseCompactionSample, recordCompactionSample } from "./compaction-estimate";
 import { CompactionSummaryTracker } from "./context-delivery";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
@@ -311,6 +321,11 @@ export function useAgentStream({
     let awaitingCompactionSize: ContextCompactedNode | null = null;
     // Fed every line in stream order: true for a new CLI session's `init`.
     const isNewSession = createSessionStartDetector();
+    // A pass the CLI starts for a finished background task (task-wake.ts):
+    // the same detector parseHistoryLines uses, so live and replay agree.
+    const detectTaskWake = createTaskWakeDetector();
+    // The live status's "Thinking: …" (status/thinking-headline.ts).
+    const readThinkingHeadline = createThinkingHeadlineTracker();
     // Only Claude Code's stream carries per-call usage in the shape the meter
     // reads (main-agent-usage.ts); other providers' panes show no reading.
     const readsUsage = readsMainAgentUsage(outputFormat);
@@ -319,10 +334,13 @@ export function useAgentStream({
     // per delta. Flushed before any call boundary so a call's characters are
     // never credited to the next one.
     let pendingStreamedChars = 0;
+    // The batch's latest kind of output, for the live status's phase.
+    let pendingStreamedKind: StreamedKind | undefined;
     const flushStreamedChars = () => {
         if (pendingStreamedChars <= 0) return;
-        model.dispatchPane({ type: "OutputStreamed", chars: pendingStreamedChars });
+        model.dispatchPane({ type: "OutputStreamed", chars: pendingStreamedChars, kind: pendingStreamedKind });
         pendingStreamedChars = 0;
+        pendingStreamedKind = undefined;
     };
 
     const memoryReinjectionController = createMemoryReinjectionController({
@@ -406,7 +424,32 @@ export function useAgentStream({
     // body scope (not inside onMount) so they tear down even if onMount
     // below early-returns (e.g. enabled:false). Both push into `queue`
     // rather than scheduling their own flush.
-    useToolChunkStream({ blockId, queue });
+    // A known test runner's progress, from a call's live output.
+    const testProgress = new Map<string, ReturnType<typeof createTestProgressTracker>>();
+    // When each call last reported output to the reducer: at most every
+    // OUTPUT_NOTE_MS, enough for "no output for 1m".
+    const outputNoted = new Map<string, number>();
+    const OUTPUT_NOTE_MS = 5_000;
+    useToolChunkStream({
+        blockId,
+        queue,
+        onOutput: (toolId, content) => {
+            const now = Date.now();
+            if (now - (outputNoted.get(toolId) ?? 0) >= OUTPUT_NOTE_MS) {
+                if (outputNoted.size > 64) outputNoted.clear();
+                outputNoted.set(toolId, now);
+                model.dispatchPane({ type: "ToolOutput", id: toolId, at: now });
+            }
+            let track = testProgress.get(toolId);
+            if (!track) {
+                if (testProgress.size > 64) testProgress.clear();
+                track = createTestProgressTracker();
+                testProgress.set(toolId, track);
+            }
+            const text = track(content);
+            if (text) model.dispatchPane({ type: "ToolProgress", id: toolId, text });
+        },
+    });
     useShellNodeStream({ blockId, queue });
     useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId, compacting });
     // dock:clear doesn't push into `queue` — it's a rare, out-of-band
@@ -638,6 +681,18 @@ export function useAgentStream({
                 // shared with `parseHistoryLines.ts`'s replay path via
                 // `compact-boundary.ts` (Codex P1, PR #2378 round 2) so the two
                 // can't drift on what counts as a valid frame.
+                {
+                    const headline = readThinkingHeadline(rawEvent);
+                    if (headline) model.dispatchPane({ type: "ThinkingHeadline", text: headline });
+                }
+                {
+                    const wake = detectTaskWake(rawEvent);
+                    if (wake && !hasNodeId(wake.id)) {
+                        addNodeId(wake.id);
+                        queue.pushNewNode(wake);
+                        queue.scheduleFlush();
+                    }
+                }
                 if (rawEvent.type === "system" && rawEvent.subtype === "compact_boundary") {
                     // Feeds only the compaction-time ESTIMATE (the working row's
                     // progress bar) with its own parser — it reads the frame's
@@ -836,6 +891,7 @@ export function useAgentStream({
                     const usage = readsUsage ? mainAgentUsage(rawEvent) : null;
                     if (readsUsage) {
                         pendingStreamedChars += mainAgentStreamedChars(rawEvent);
+                        pendingStreamedKind = mainAgentStreamedKind(rawEvent) ?? pendingStreamedKind;
                         if (mainAgentRequestStarted(rawEvent)) {
                             flushStreamedChars();
                             model.dispatchPane({ type: "RequestStarted" });
@@ -984,13 +1040,17 @@ export function useAgentStream({
                                 type: "ToolStart",
                                 name: event.tool,
                                 arg: toolActivityArg(event.tool, event.params),
+                                id: event.id,
+                                params: event.params,
+                                // A subagent's own call: shown under its Agent call.
+                                parentId: typeof rawEvent.parent_tool_use_id === "string" ? rawEvent.parent_tool_use_id : undefined,
                             });
                         } else {
                             model.dispatchPane({ type: "ToolEnd" });
                         }
                     } else if (event.type === "tool_result") {
                         noteToolResult(event.id, event.status);
-                        model.dispatchPane({ type: "ToolEnd" });
+                        model.dispatchPane({ type: "ToolEnd", id: event.id });
                     } else if (event.type === "tool_chunk") {
                         // Live-log streaming (SPEC_TOOL_BLOCK_LIVE_LOG_2026_05_11.md):
                         // route chunks through their own reducer command

@@ -10,7 +10,8 @@ export type TowerSampleReq = {
 host?: boolean, 
 /**
  * Another machine: an SSH connection or `wsl://<distro>`, as a pane's
- * `connection` meta names it. Absent or `local`: this computer.
+ * `connection` meta names it, or a paired AgentMux computer
+ * (`peer:<id>`). Absent or `local`: this computer.
  */
 connection?: string, 
 /**

@@ -161,6 +161,11 @@ pub struct Settings {
     pub quiet_until_ms: i64,
     /// `notify:os:summary` — show the agent's session summary line.
     pub show_summary: bool,
+    /// `notify:os:turncompleted:external` — also notify when a turn something
+    /// other than the user started finishes (a jekt, a service notice, a
+    /// schedule, a background task). Off: such a turn ends quietly unless it
+    /// needs the user (a question, a failure), which notifies as always.
+    pub external_turns: bool,
 }
 
 impl Default for Settings {
@@ -174,6 +179,7 @@ impl Default for Settings {
             pause_allow_attention: false,
             quiet_until_ms: 0,
             show_summary: true,
+            external_turns: false,
         }
     }
 }

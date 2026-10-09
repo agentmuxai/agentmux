@@ -9,6 +9,7 @@
 // only for a trusted file (saved by this install, in its layouts folder).
 
 import { ConfirmModal } from "@/app/element/confirm-modal";
+import { hostHas } from "@/app/host/host-caps";
 import type { LayoutPreviewResult } from "@/types/rpc/LayoutPreviewResult";
 import { createSignal, For, Show, type JSX } from "solid-js";
 
@@ -27,7 +28,9 @@ export interface LayoutPreviewModalProps {
 
 export function LayoutPreviewModal(props: LayoutPreviewModalProps): JSX.Element {
     const [runCommands, setRunCommands] = createSignal(props.preview.trusted);
-    const [newWindow, setNewWindow] = createSignal(true);
+    // Without multiWindow there's only "add to this window".
+    const canOpenWindow = hostHas("multiWindow");
+    const [newWindow, setNewWindow] = createSignal(canOpenWindow);
     const tabs = () => `${props.preview.tabs.length} ${props.preview.tabs.length === 1 ? "tab" : "tabs"}`;
     return (
         <ConfirmModal
@@ -46,7 +49,7 @@ export function LayoutPreviewModal(props: LayoutPreviewModalProps): JSX.Element 
             onCancel={props.close}
         >
             <div class="layout-preview" data-testid="layout-preview">
-                <section>
+                <section hidden={!canOpenWindow}>
                     <label>
                         <input
                             type="radio"

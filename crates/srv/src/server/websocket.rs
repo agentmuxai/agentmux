@@ -68,6 +68,19 @@ struct WSIncoming {
     priority: Option<String>,
 }
 
+/// The `srvinfo` event sent once on every WebSocket connect, right after
+/// `config`: srv's version, which the UI compares with its own, and the
+/// machine srv runs on (`crate::srv_info`).
+fn srv_info_event(info: serde_json::Value) -> serde_json::Value {
+    json!({
+        "eventtype": "rpc",
+        "data": {
+            "command": "eventrecv",
+            "data": { "event": "srvinfo", "data": info }
+        }
+    })
+}
+
 pub(super) async fn handle_ws(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
@@ -120,6 +133,14 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             }
         }
         tracing::info!("[ws-perf] send_initial_config: {:.2}ms", t.elapsed().as_secs_f64() * 1000.0);
+    }
+
+    // Tell the client which srv it reached: the version, so a UI from another
+    // version (an update replaced one side) can ask the user to reload, and
+    // the machine, whose names and paths the UI shows and builds.
+    let info = crate::srv_info::srv_info(&state.version, &state.hostname);
+    if let Ok(msg) = serde_json::to_string(&srv_info_event(info)) {
+        let _ = socket.send(Message::Text(msg.into())).await;
     }
 
     // Create RPC engine for this connection
@@ -2263,5 +2284,14 @@ mod tests {
         let drained = fair_drain_priority(first, &mut rx);
 
         assert_eq!(drained, vec![update1, update2, batch_delete], "object-model events must stay in pure arrival order, never reordered by round-robin");
+    }
+
+    #[test]
+    fn srv_info_event_carries_the_info_on_the_eventrecv_path() {
+        let ev = super::srv_info_event(serde_json::json!({ "version": "1.2.3" }));
+        assert_eq!(ev["eventtype"], "rpc");
+        assert_eq!(ev["data"]["command"], "eventrecv");
+        assert_eq!(ev["data"]["data"]["event"], "srvinfo");
+        assert_eq!(ev["data"]["data"]["data"]["version"], "1.2.3");
     }
 }

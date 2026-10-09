@@ -724,6 +724,39 @@ impl std::fmt::Display for TurnGate {
     }
 }
 
+/// A held message's join hint, armed for one dispatch. Dropped without
+/// `keep` (the dispatch failed), it is cleared, so no later message can take
+/// it (#4492).
+struct ArmedJoinHint(Option<std::sync::Arc<crate::backend::blockcontroller::health::TurnActivityTracker>>);
+
+impl ArmedJoinHint {
+    fn arm(
+        joins_turn: Option<u64>,
+        tracker: Option<std::sync::Arc<crate::backend::blockcontroller::health::TurnActivityTracker>>,
+    ) -> Self {
+        match (joins_turn, tracker) {
+            (Some(turn_id), Some(tracker)) => {
+                tracker.hint_join(turn_id);
+                Self(Some(tracker))
+            }
+            _ => Self(None),
+        }
+    }
+
+    /// The dispatch went through: the pass it starts takes the hint.
+    fn keep(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for ArmedJoinHint {
+    fn drop(&mut self) {
+        if let Some(tracker) = self.0.take() {
+            tracker.clear_join_hint();
+        }
+    }
+}
+
 pub async fn run_agent_turn(
     deps: &AgentTurnDeps,
     block_id: String,
@@ -732,6 +765,23 @@ pub async fn run_agent_turn(
     registration: TurnRegistration,
     origin: crate::backend::blockcontroller::health::TurnOrigin,
     attachments: Vec<AttachmentRef>,
+) -> Result<(), String> {
+    run_agent_turn_joining(deps, block_id, message, message_id, registration, origin, attachments, None).await
+}
+
+/// [`run_agent_turn`] for a message the pane held while turn `joins_turn`
+/// ran: if that turn is still settling (or only just ended), the message
+/// joins it rather than starting a new one (turn-model spec §4.3, J3).
+#[allow(clippy::too_many_arguments)]
+pub async fn run_agent_turn_joining(
+    deps: &AgentTurnDeps,
+    block_id: String,
+    message: String,
+    message_id: Option<String>,
+    registration: TurnRegistration,
+    origin: crate::backend::blockcontroller::health::TurnOrigin,
+    attachments: Vec<AttachmentRef>,
+    joins_turn: Option<u64>,
 ) -> Result<(), String> {
     let AgentTurnDeps {
         mstore,
@@ -747,6 +797,12 @@ pub async fn run_agent_turn(
 
     let ctrl = blockcontroller::get_controller(&block_id)
         .ok_or_else(|| format!("no controller for block {}", block_id))?;
+    // A message the pane held during a turn joins that turn (turn-model spec
+    // §4.3, J3). The persistent controller carries it on the input itself;
+    // the others start passes with no labelled input, so their tracker is told
+    // just before the dispatch, never earlier: a failure in the preparation
+    // must not leave the hint armed for a later message (#4492).
+    let arm_join_hint = || ArmedJoinHint::arm(joins_turn, ctrl.turn_tracker());
 
     // Re-read the spawn config from block metadata
     let block: Block = mstore
@@ -974,7 +1030,9 @@ pub async fn run_agent_turn(
         ctrl.as_any()
             .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
     {
+        let hint = arm_join_hint();
         app_server_ctrl.send_message(message)?;
+        hint.keep();
     }
     // Try persistent controller first, fall back to subprocess
     else if let Some(persistent_ctrl) =
@@ -1008,7 +1066,7 @@ pub async fn run_agent_turn(
             session_id: persisted_session_id,
             message_id: message_id.clone(),
         };
-        let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone() };
+        let input = crate::backend::blockcontroller::health::TurnInput { origin, text: message.clone(), joins_turn };
         if let Err(e) = persistent_ctrl.send_message_with_images_from(message, inline_images, config, Some(input)) {
             // A single-live-instance refusal from inside the controller (the
             // spawn-time claim losing to another instance, or the pre-turn
@@ -1170,7 +1228,9 @@ pub async fn run_agent_turn(
                 },
                 instance_id: instance_id.clone(),
             };
+            let hint = arm_join_hint();
             subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
+            hint.keep();
         } else {
             // Host agent: regular CLI subprocess (env set on child process, not in argv).
             let config = blockcontroller::subprocess::SubprocessSpawnConfig {
@@ -1191,7 +1251,9 @@ pub async fn run_agent_turn(
                 },
                 instance_id,
             };
+            let hint = arm_join_hint();
             subprocess_ctrl.spawn_turn(config)?;
+            hint.keep();
         }
     } else if let Some(acp_ctrl) =
         ctrl.as_any().downcast_ref::<blockcontroller::acp::AcpController>()
@@ -1201,7 +1263,9 @@ pub async fn run_agent_turn(
         // If the agent's process exited or crashed, this starts it again from
         // the pane's meta; the message waits for the new session.
         acp_ctrl.ensure_started(block.meta.clone())?;
+        let hint = arm_join_hint();
         acp_ctrl.send_message(message, message_id.as_deref())?;
+        hint.keep();
     } else {
         return Err(
             "controller is not a SubprocessController, PersistentSubprocessController or AcpController"
@@ -1413,7 +1477,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     crate::backend::blockcontroller::health::TurnOrigin::User
                 };
                 let block_id = cmd.blockid.clone();
-                run_agent_turn(
+                run_agent_turn_joining(
                     &deps,
                     cmd.blockid,
                     message,
@@ -1421,6 +1485,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     TurnRegistration::Register,
                     origin,
                     cmd.attachments.unwrap_or_default(),
+                    cmd.joins_turn,
                 )
                 .await?;
                 // Right after the hidden message's own transcript line: replay

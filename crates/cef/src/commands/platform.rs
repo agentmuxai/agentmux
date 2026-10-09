@@ -13,12 +13,7 @@ const SETTINGS_TEMPLATE: &str = include_str!("../../../../settings-template.json
 
 /// Get the current OS platform name.
 pub fn get_platform() -> serde_json::Value {
-    let platform = match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
-    };
-    serde_json::json!(platform)
+    serde_json::json!(agentmux_common::platform_name::platform_name())
 }
 
 /// Get the current user's username.
@@ -128,22 +123,7 @@ fn is_sensitive_env_key(key: &str) -> bool {
 /// portables that wrote the marker at the root.
 fn read_build_label() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?;
-    let candidates = [
-        Some(exe_dir.join("agentmux-portable.marker")),
-        exe_dir.parent().map(|p| p.join("agentmux-portable.marker")),
-    ];
-    for cand in candidates.into_iter().flatten() {
-        if let Ok(contents) = std::fs::read_to_string(&cand) {
-            if let Some(label) = contents.trim().strip_prefix("AgentMux portable build ") {
-                let label = label.trim();
-                if !label.is_empty() {
-                    return Some(label.to_string());
-                }
-            }
-        }
-    }
-    None
+    agentmux_common::runtime_mode::portable_build_label(exe.parent()?)
 }
 
 const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
@@ -169,11 +149,7 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
         "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
         "cefVersion": env!("AGENTMUX_CEF_VERSION"),
         "channel": channel,
-        "platform": match std::env::consts::OS {
-            "macos" => "darwin",
-            "windows" => "win32",
-            other => other,
-        },
+        "platform": agentmux_common::platform_name::platform_name(),
         "arch": std::env::consts::ARCH,
         "backendEndpoints": {
             "ws": endpoints.ws_endpoint,
