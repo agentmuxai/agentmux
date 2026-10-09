@@ -259,6 +259,46 @@ describe("Tower", () => {
         expect(screen.getByText(/of 2 matching/)).toBeInTheDocument();
     });
 
+    it("another machine that failed isn't asked again until Retry", async () => {
+        vi.useFakeTimers();
+        sample.mockRejectedValueOnce(new Error("no helper for armv7l"));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(screen.getByRole("alert").textContent).toContain("armv7l");
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(sample).toHaveBeenCalledTimes(1);
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(2);
+    });
+
+    it("a new filter waits for the request already in flight", async () => {
+        vi.useFakeTimers();
+        const remote = () => ({ ...snapshot(true), remote: true, tasks: [] });
+        sample.mockImplementation(() => Promise.resolve(remote()));
+        setMeta({ "tower:connection": "build-box" });
+        renderTower();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(1);
+        // The next poll is slow to answer.
+        let answer: (s: TowerSnapshot) => void = () => {};
+        sample.mockImplementationOnce(() => new Promise((r) => (answer = r)));
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(sample).toHaveBeenCalledTimes(2);
+        fireEvent.input(screen.getByTestId("tower-filter-input"), { target: { value: "ssh" } });
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(sample).toHaveBeenCalledTimes(2);
+        answer(remote());
+        await vi.advanceTimersByTimeAsync(0);
+        expect(sample).toHaveBeenCalledTimes(3);
+        expect(sample).toHaveBeenLastCalledWith(
+            expect.anything(),
+            expect.objectContaining({ filter: "ssh" }),
+            expect.anything()
+        );
+    });
+
     it("polls only while visible", async () => {
         vi.useFakeTimers();
         renderTower();

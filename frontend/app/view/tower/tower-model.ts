@@ -53,6 +53,12 @@ export class TowerViewModel {
     /** Bumped on every start and stop, so a reply from an older poll loop
      *  is dropped. */
     private generation = 0;
+    /** The request in flight, settled or not: the next one waits for it. */
+    private inFlight: Promise<void> = Promise.resolve();
+    private lastStart: [boolean, string, string] | undefined;
+    private setStalled: Setter<boolean>;
+    /** Another machine failed and polling stopped until `retry()`. */
+    stalled: Accessor<boolean>;
 
     // Built by `create(ctx)` in the instance's own reactive root (host rule 8),
     // so the effects and cleanup below live and die with the pane tab.
@@ -79,6 +85,7 @@ export class TowerViewModel {
         this.setSnapshot = (snap) =>
             snap ? setState("snap", reconcile(snap, { key: "id", merge: true })) : setState("snap", null);
         [this.error, this.setError] = createSignal<string | null>(null);
+        [this.stalled, this.setStalled] = createSignal(false);
         [this.sort, this.setSort] = createSignal<Sort>({ key: "cpu", desc: true });
         [this.expanded, this.setExpanded] = createSignal<ReadonlySet<string>>(new Set<string>());
         [this.filter, this.setFilter] = createSignal("");
@@ -136,9 +143,24 @@ export class TowerViewModel {
         this.stop();
     }
 
+    /** After another machine failed: ask again (the polling stopped there). */
+    retry(): void {
+        const last = this.lastStart;
+        if (!last) return;
+        this.stop();
+        this.start(...last);
+    }
+
     private start(host: boolean, connection: string, filter: string): void {
         const gen = ++this.generation;
-        void this.poll(gen, host, connection, filter);
+        this.lastStart = [host, connection, filter];
+        this.setStalled(false);
+        // At most one request in flight: a new one (another filter, say)
+        // waits for the last to answer. Another machine's helper measures CPU
+        // since its previous request, so two back to back would read noise.
+        void this.inFlight.then(() => {
+            if (gen === this.generation) this.poll(gen, host, connection, filter);
+        });
     }
 
     private stop(): void {
@@ -147,27 +169,40 @@ export class TowerViewModel {
         this.timer = undefined;
     }
 
-    private async poll(gen: number, host: boolean, connection: string, filter: string): Promise<void> {
-        let delay = RETRY_DELAY_MS;
-        try {
-            const snap = connection
-                ? await RpcApi.TowerSampleCommand(
-                      TabRpcClient,
-                      { host: true, connection, filter, block_id: this.blockId },
-                      { timeout: REMOTE_TIMEOUT_MS }
-                  )
-                : await RpcApi.TowerSampleCommand(TabRpcClient, { host });
-            if (gen !== this.generation) return;
-            this.setSnapshot(snap);
-            this.setError(null);
-            delay = hasNoRatesYet(snap) ? FIRST_RATE_DELAY_MS : snap.interval_ms;
-        } catch (e) {
-            if (gen !== this.generation) return;
-            this.setError(e instanceof Error ? e.message : String(e));
-        }
-        if (gen === this.generation) {
-            this.timer = setTimeout(() => void this.poll(gen, host, connection, filter), delay);
-        }
+    private poll(gen: number, host: boolean, connection: string, filter: string): void {
+        const request = connection
+            ? RpcApi.TowerSampleCommand(
+                  TabRpcClient,
+                  { host: true, connection, filter, block_id: this.blockId },
+                  { timeout: REMOTE_TIMEOUT_MS }
+              )
+            : RpcApi.TowerSampleCommand(TabRpcClient, { host });
+        this.inFlight = request.then(
+            () => undefined,
+            () => undefined
+        );
+        const again = (delay: number) => {
+            if (gen === this.generation) {
+                this.timer = setTimeout(() => this.poll(gen, host, connection, filter), delay);
+            }
+        };
+        request.then(
+            (snap) => {
+                if (gen !== this.generation) return;
+                this.setSnapshot(snap);
+                this.setError(null);
+                again(hasNoRatesYet(snap) ? FIRST_RATE_DELAY_MS : snap.interval_ms);
+            },
+            (e) => {
+                if (gen !== this.generation) return;
+                this.setError(e instanceof Error ? e.message : String(e));
+                // Another machine that failed (unreachable, no helper for its
+                // platform, an install the user declined) is not asked again
+                // on its own: each try could open ssh and ask about installing.
+                if (connection) this.setStalled(true);
+                else again(RETRY_DELAY_MS);
+            }
+        );
     }
 }
 

@@ -127,6 +127,12 @@ export function TowerView(props: { model: TowerViewModel }): JSX.Element {
                 {(err) => (
                     <div class="tower-error" role="alert">
                         Couldn't read processes: {err()}
+                        <Show when={m.stalled()}>
+                            {" "}
+                            <Button density="compact" onClick={() => m.retry()}>
+                                Retry
+                            </Button>
+                        </Show>
                     </div>
                 )}
             </Show>
