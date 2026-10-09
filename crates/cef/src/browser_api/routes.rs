@@ -885,6 +885,9 @@ pub async fn forward(
 #[derive(serde::Deserialize)]
 pub struct OwnedPanesReq {
     pub panes: Vec<String>,
+    /// Each limited pane's site list (allowed-origins spec §6).
+    #[serde(default)]
+    pub allowed: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// `POST /agentmux/browser/owned_panes` — srv's whole set of agent-owned
@@ -902,9 +905,12 @@ pub async fn owned_panes(
             Json(ApiResponse::err("unauthorized: missing or invalid bearer token")),
         );
     }
-    let mut owned = state.owned_panes.lock();
-    owned.clear();
-    owned.extend(req.panes);
+    {
+        let mut owned = state.owned_panes.lock();
+        owned.clear();
+        owned.extend(req.panes);
+    }
+    *state.allowed_origins.lock() = req.allowed;
     ok_body(ApiResponse::ok(AckData::new()))
 }
 

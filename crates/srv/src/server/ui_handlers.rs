@@ -472,6 +472,21 @@ pub(crate) async fn handle_ui_browser_navigate(
         Ok(b) => b,
         Err((code, e)) => return err_response(code, e),
     };
+    // A pane limited to some sites: the agent's own navigation elsewhere is
+    // refused outright, without asking the person (allowed-origins spec §3).
+    if let Some(list) = crate::server::browser_allowlist::list_for(&banner_for(&block_id).0) {
+        if !agentmux_common::allowed_origins::allows(&list, &req.url) {
+            return err_response(
+                StatusCode::FORBIDDEN,
+                format!(
+                    "{:?} isn't on the sites this pane is limited to ({}): open another pane with \
+                     OpenBrowser for it, or ask the user",
+                    req.url,
+                    list.join(", ")
+                ),
+            );
+        }
+    }
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -753,6 +768,25 @@ pub(crate) async fn handle_ui_browser_open(
             format!("split must be right, left, up or down, not {split:?}"),
         );
     }
+    let allowed = match req.allowed_origins.as_deref() {
+        None => None,
+        Some(entries) => match agentmux_common::allowed_origins::parse_list(entries) {
+            Ok(list) if list.is_empty() => {
+                return err_response(
+                    StatusCode::BAD_REQUEST,
+                    "allowed_origins is empty: leave it out, or list the sites the pane may go to".to_string(),
+                )
+            }
+            Ok(list) if !agentmux_common::allowed_origins::allows(&list, url) => {
+                return err_response(
+                    StatusCode::BAD_REQUEST,
+                    format!("url {url:?} isn't on allowed_origins ({})", list.join(", ")),
+                )
+            }
+            Ok(list) => Some(list),
+            Err(e) => return err_response(StatusCode::BAD_REQUEST, format!("allowed_origins: {e}")),
+        },
+    };
     let mut cmd = crate::backend::rpc_types::CommandPaneOpenData {
         view: "browser".to_string(),
         file: None,
@@ -782,12 +816,21 @@ pub(crate) async fn handle_ui_browser_open(
         crate::server::browser_owner::OWNER_META_KEY.to_string(),
         json!(req.auth.agent_id),
     );
+    if let Some(list) = &allowed {
+        meta.insert(crate::server::browser_allowlist::ALLOWED_META_KEY.to_string(), json!(list));
+    }
     cmd.meta = Some(meta);
     let result = match crate::server::app_api::open_pane(&state, cmd).await {
         Ok(r) => r,
         Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e),
     };
     crate::server::browser_owner::record(&result.block_id, &req.auth.agent_id);
+    if let Some(list) = allowed {
+        crate::server::browser_allowlist::set(&result.block_id, list);
+        // At once, not on the next sync: the host must have the list before
+        // the pane's first navigation can leave it.
+        push_owned_panes(&state).await;
+    }
     tracing::info!(
         agent_id = %req.auth.agent_id, own_block = %own, pane = %result.block_id, url = %url,
         "[ui-automation] browser open (agent-owned)"
@@ -1152,6 +1195,13 @@ fn not_waiting_on_user(pane: &str) -> Result<(), (StatusCode, String)> {
                  paused until they answer"
             ),
         )),
+        Some(Kind::Navigation) => Err((
+            StatusCode::CONFLICT,
+            format!(
+                "the page in pane {pane:?} tried to go to a site that isn't on its allowed_origins, and \
+                 the user is being asked whether to allow it; your tools on it are paused until they answer"
+            ),
+        )),
     }
 }
 
@@ -1301,6 +1351,13 @@ pub(crate) async fn handle_host_browser_popup(
     // The count and the slot are taken together: two popups reported at once
     // can't both fit under the cap. The slot is given back if the pane
     // doesn't open.
+    // The host asks before it offers a popup off the opener's site list;
+    // checked again here, from srv's own record.
+    if let Some(list) = crate::server::browser_allowlist::list_for(&opener) {
+        if !agentmux_common::allowed_origins::allows(&list, &url) {
+            return refused("it isn't on the sites the pane that opened it is limited to");
+        }
+    }
     let root = chain_root(&state, &opener);
     let reservation = match popup::reserve(
         &opener,
@@ -1377,6 +1434,11 @@ pub(crate) async fn handle_host_browser_popup(
         }
     }
     reservation.commit(&result.block_id);
+    // A popup pane shares the site limit of the chain it opened from.
+    if let Some(list) = crate::server::browser_allowlist::join(&result.block_id, &opener) {
+        crate::server::browser_allowlist::publish(&state, std::slice::from_ref(&result.block_id), Some(&list));
+        push_owned_panes(&state).await;
+    }
     tracing::info!(
         opener = %opener, pane = %result.block_id, url = %url, owner = ?owner,
         "[browser-popup] popup opened as a pane"
@@ -1483,17 +1545,118 @@ pub(crate) fn spawn_owned_panes_sync(state: AppState) {
                 crate::server::browser_owner::changed().notified(),
             )
             .await;
-            let Some(host) = state.host_ipc.lock().await.clone() else {
-                continue;
-            };
-            let body = json!({ "panes": crate::server::browser_owner::owned_panes() });
-            if let Err(e) =
-                proxy_to_host_timeout(&state, &host, "owned_panes", body, Some(std::time::Duration::from_secs(5))).await
-            {
-                tracing::debug!(error = %e, "[browser-popup] couldn't send the owned panes to the host");
-            }
+            push_owned_panes(&state).await;
         }
     });
+}
+
+/// Send the host the agent-owned panes and each limited pane's site list
+/// (allowed-origins spec §6). The sync loop does this on every change; a
+/// caller that needs the host to have it before the next navigation awaits
+/// it directly.
+async fn push_owned_panes(state: &AppState) {
+    let Some(host) = state.host_ipc.lock().await.clone() else {
+        return;
+    };
+    let body = json!({
+        "panes": crate::server::browser_owner::owned_panes(),
+        "allowed": crate::server::browser_allowlist::snapshot(),
+    });
+    if let Err(e) = proxy_to_host_timeout(state, &host, "owned_panes", body, Some(std::time::Duration::from_secs(5))).await {
+        tracing::debug!(error = %e, "[browser-popup] couldn't send the owned panes to the host");
+    }
+}
+
+/// `POST /api/v1/host/browser_navigation` — the host stopped a navigation off
+/// a pane's site list (allowed-origins spec §4). Body `{pane, target, url,
+/// kind}`: `pane` is the pane the list belongs to, `target` the pane or popup
+/// window that was navigating, `kind` `navigate` (replayed on Allow) or
+/// `popup` (not: the person or agent clicks again). Only the host calls it.
+/// Answers at once; the question runs on its own.
+pub(crate) async fn handle_host_browser_navigation(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    use crate::server::{browser_allowlist, browser_attention};
+    use agentmux_common::allowed_origins;
+    if !from_host(&state, &headers).await {
+        return err_response(StatusCode::FORBIDDEN, "only the AgentMux host can report a navigation".to_string());
+    }
+    let s = |k: &str| body.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let (pane, target, url, kind) = (s("pane"), s("target"), s("url"), s("kind"));
+    let answered = |asked: bool, reason: &str| {
+        (StatusCode::OK, Json(json!({ "ok": true, "data": { "asked": asked, "reason": reason } }))).into_response()
+    };
+    let Some(list) = browser_allowlist::list_for(&pane) else {
+        // Taken over or closed since: the host's copy was behind.
+        push_owned_panes(&state).await;
+        return answered(false, "the pane isn't limited to any sites");
+    };
+    if allowed_origins::allows(&list, &url) {
+        // Allowed already (the host's copy was behind): send it the list, and go on.
+        push_owned_panes(&state).await;
+        if kind == "navigate" {
+            replay_navigation(&state, &target, &url).await;
+        }
+        return answered(false, "it is on the pane's sites");
+    }
+    let Some(origin) = allowed_origins::target_origin(&url) else {
+        return answered(false, "not a web address");
+    };
+    if browser_attention::waiting_on_user(&pane).is_some() {
+        return answered(false, "the pane is already waiting for the user");
+    }
+    let agent = crate::server::browser_owner::owner_of(&pane).unwrap_or_default();
+    let window = crate::server::browser_popup::is_window_id(&target)
+        .then(|| crate::server::browser_popup::window(&target).map(|w| w.url))
+        .flatten();
+    tracing::info!(pane = %pane, target = %target, origin = %origin, kind = %kind, "[browser-allowlist] asking the user");
+    let st = state.clone();
+    tokio::spawn(async move {
+        let asked = browser_attention::ask(
+            &st,
+            &pane,
+            &agent,
+            browser_attention::Kind::Navigation,
+            json!({ "url": url, "origin": origin, "window": window, "popup": kind == "popup" }),
+            std::time::Duration::from_secs(10 * 60),
+        )
+        .await;
+        let (answer, waiting) = match asked {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::debug!(pane = %pane, error = %e, "[browser-allowlist] couldn't ask");
+                return;
+            }
+        };
+        if answer != browser_attention::Answer::Yes {
+            tracing::info!(pane = %pane, origin = %origin, answer = ?answer, "[browser-allowlist] not allowed");
+            return;
+        }
+        // Taken over or closed meanwhile: no list left to add to.
+        let Some((list, members)) = browser_allowlist::allow(&pane, &origin) else {
+            return;
+        };
+        tracing::info!(pane = %pane, origin = %origin, "[browser-allowlist] allowed by the user");
+        browser_allowlist::publish(&st, &members, Some(&list));
+        push_owned_panes(&st).await;
+        if kind == "navigate" {
+            replay_navigation(&st, &target, &url).await;
+        }
+        // The pane stays locked until the load is on its way.
+        drop(waiting);
+    });
+    answered(true, "")
+}
+
+/// Load `url` in `target` (a pane or popup window), as the navigation the
+/// host stopped would have. A plain load: a form's data isn't sent again.
+async fn replay_navigation(state: &AppState, target: &str, url: &str) {
+    let Ok(host) = get_host_ipc(state).await else { return };
+    if proxy_ack(state, &host, "navigate", json!({ "block_id": target, "url": url })).await.is_err() {
+        tracing::warn!(target = %target, "[browser-allowlist] couldn't load the allowed address");
+    }
 }
 
 /// `POST /api/v1/ui/browser/act` — backs `BrowserClick`, `BrowserFill`,

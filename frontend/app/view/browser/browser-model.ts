@@ -163,8 +163,12 @@ export class BrowserViewModel {
     /** The popup windows this pane's page has open (`browser:popup_windows`,
      *  written by srv; SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §7). */
     popupWindowsAtom: Accessor<{ id: string; url: string }[]>;
-    /** The driving agent's pending request to the user (hand-off or approval). */
+    /** The driving agent's pending request to the user (hand-off, approval,
+     *  or a navigation off the pane's sites). */
     attentionAtom: Accessor<BrowserAttention | undefined>;
+    /** The sites the driving agent limited this pane to (`browser:allowed_origins`,
+     *  written by srv; SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §5). */
+    allowedOriginsAtom: Accessor<string[]>;
 
     /** Late callers (IPC handlers landing post-dispose, defensive guards
      *  in goBack/Forward/reload) read this to no-op instead of firing
@@ -378,6 +382,10 @@ export class BrowserViewModel {
             this.driverAgentAtom = createMemo(() => {
                 const v = this.meta()?.["browser:owner_agent"];
                 return typeof v === "string" && v.trim() ? v.trim() : undefined;
+            });
+            this.allowedOriginsAtom = createMemo(() => {
+                const v = this.meta()?.["browser:allowed_origins"];
+                return Array.isArray(v) ? v.filter((o) => typeof o === "string") : [];
             });
             this.popupFromAtom = createMemo(() => {
                 const v = this.meta()?.["browser:popup_from"];

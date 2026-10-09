@@ -142,10 +142,12 @@ pub(crate) fn check(
 }
 
 /// Meta keys only srv writes, from its own records: who drives a pane, the
-/// banner that asks the person something, and what opened a popup.
-pub(crate) fn srv_only_keys() -> [&'static str; 5] {
+/// banner that asks the person something, what opened a popup, and the sites
+/// a pane is limited to.
+pub(crate) fn srv_only_keys() -> [&'static str; 6] {
     [
         OWNER_META_KEY,
+        crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_attention::ATTENTION_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
@@ -175,8 +177,11 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
     // The popup keys name the pane that opened this one and its site, shown
     // to the person as "Popup from …": a client that could write them could
     // make any pane claim to come from a site it doesn't.
+    // The site list is the agent's limit on its pane: a client that could
+    // write it could widen it.
     for key in [
         crate::server::browser_attention::ATTENTION_META_KEY,
+        crate::server::browser_allowlist::ALLOWED_META_KEY,
         crate::server::browser_popup::POPUP_OF_META_KEY,
         crate::server::browser_popup::POPUP_FROM_META_KEY,
         crate::server::browser_popup::POPUP_WINDOWS_META_KEY,
@@ -199,6 +204,10 @@ pub(crate) fn guard_client_meta_write(oref: &str, meta: &MetaMapType) -> Result<
         // Take over also answers any hand-off or approval still up on the
         // pane: an Approve clicked after it must not go through.
         crate::server::browser_attention::cancel_for(block_id);
+        // And ends the site limit: the person browses freely. The header
+        // shows the limit only while an agent drives the pane, so the meta
+        // key left behind shows nothing.
+        crate::server::browser_allowlist::drop_pane(block_id);
     }
     Ok(())
 }

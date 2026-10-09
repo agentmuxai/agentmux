@@ -409,6 +409,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
         .route("/api/v1/ui/browser/wait_for", post(ui_handlers::handle_ui_browser_wait_for))
         .route("/api/v1/ui/browser/handoff", post(ui_handlers::handle_ui_browser_handoff))
         .route("/api/v1/host/browser_attention", post(ui_handlers::handle_host_browser_attention))
+        .route("/api/v1/host/browser_navigation", post(ui_handlers::handle_host_browser_navigation))
         .route("/api/v1/host/browser_popup", post(ui_handlers::handle_host_browser_popup))
         .route("/api/v1/host/browser_popup_window", post(ui_handlers::handle_host_browser_popup_window))
         .route("/api/v1/ui/browser/navigate", post(ui_handlers::handle_ui_browser_navigate))

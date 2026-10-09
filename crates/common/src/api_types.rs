@@ -798,6 +798,11 @@ pub struct UiBrowserOpenRequest {
     pub split: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Keep the pane on these sites (`allowed_origins::parse` forms); a
+    /// navigation elsewhere asks the person
+    /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_origins: Option<Vec<String>>,
 }
 
 /// Response for `POST /api/v1/ui/browser/open`: the new pane's block id,

@@ -356,6 +356,17 @@ pub struct AppState {
     /// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
     pub owned_panes: Mutex<std::collections::HashSet<String>>,
 
+    /// Browser-pane block id → the sites an agent limited it to, as srv last
+    /// sent them with `owned_panes`. Read synchronously in `on_before_browse`
+    /// and `on_before_popup`, which stop a navigation off the list and ask srv
+    /// to put the question to the person
+    /// (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §6).
+    pub allowed_origins: Mutex<std::collections::HashMap<String, Vec<String>>>,
+
+    /// Panes with an off-list navigation report on its way to srv: one at a
+    /// time per pane, so a page retrying in a loop can't start a thread per try.
+    pub off_list_reports: Mutex<std::collections::HashSet<String>>,
+
     /// Popup window label (`popup-<uuid>`) → the browser-pane block id whose
     /// page opened it. Written when the popup is created, removed when it
     /// closes. A popup's own popups are recorded against the same root pane.
@@ -772,6 +783,8 @@ impl Default for AppState {
             window_meta: Mutex::new(HashMap::new()),
             approval_windows: Mutex::new(std::collections::HashSet::new()),
             owned_panes: Mutex::new(std::collections::HashSet::new()),
+            allowed_origins: Mutex::new(std::collections::HashMap::new()),
+            off_list_reports: Mutex::new(std::collections::HashSet::new()),
             popup_openers: Mutex::new(std::collections::HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
             media_grants: Mutex::new(

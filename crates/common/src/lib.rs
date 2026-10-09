@@ -17,6 +17,7 @@ pub mod log_retention;
 pub mod login_pty;
 pub mod pagefile;
 pub mod platform_name;
+pub mod allowed_origins;
 pub mod popup_rules;
 pub mod process;
 pub mod redact;
