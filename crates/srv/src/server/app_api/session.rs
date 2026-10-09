@@ -456,8 +456,13 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 // The pane's own translated conversation when it sent one (any
                 // provider); otherwise the output file, which only Claude-shaped
                 // streams can be read from.
+                // Pane activity that ends at the user's message was taken before the
+                // reply reached the pane's document (the turn-end edge can lead the
+                // last nodes); the file may already hold the reply.
                 let activity = match cmd.activity.filter(|entries| !entries.is_empty()) {
-                    Some(entries) => ambient::digest::activity_from_entries(&cmd.block_id, entries),
+                    Some(entries) => ambient::digest::activity_from_entries(&cmd.block_id, entries)
+                        .filter(|a| a.ending != ambient::digest::TurnEnding::UserLast)
+                        .or_else(|| ambient::digest::read_recent_activity(&filestore, &cmd.block_id)),
                     None => ambient::digest::read_recent_activity(&filestore, &cmd.block_id),
                 };
                 let Some(activity) = activity else {

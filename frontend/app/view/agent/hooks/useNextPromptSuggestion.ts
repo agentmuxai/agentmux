@@ -98,6 +98,7 @@ import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
+import { hasPendingStreamFlushForBlock } from "../stream-scheduler";
 import { recentActivityEntries } from "../ambient-activity";
 import type { DocumentNode } from "../types";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
@@ -159,6 +160,30 @@ export function shouldRequestSuggestion(phase: TurnPhase, composerEmpty: boolean
     return composerEmpty && !turnWasCutShort(phase);
 }
 
+/** How long to wait, after the backend's turn-end edge, for the pane to catch up. */
+const SETTLE_TIMEOUT_MS = 2_000;
+const SETTLE_POLL_MS = 50;
+
+/**
+ * Resolves once the turn's end has reached the pane: the phase is `Done` and no
+ * stream flush is waiting for the block. The backend's turn-end edge can arrive
+ * before the final reply's nodes are in the document (they wait in the flush
+ * queue, and the result line follows the edge), so activity taken at the edge
+ * can end at the user's message and read as "not answered yet" (#4506). Gives up
+ * after `SETTLE_TIMEOUT_MS`, or as soon as `isCurrent` turns false.
+ */
+function waitForTurnToSettle(blockId: string, turnPhase: Accessor<TurnPhase>, isCurrent: () => boolean): Promise<void> {
+    const started = Date.now();
+    return new Promise((resolve) => {
+        const check = (): void => {
+            const settled = turnPhase().kind === "Done" && !hasPendingStreamFlushForBlock(blockId);
+            if (settled || !isCurrent() || Date.now() - started >= SETTLE_TIMEOUT_MS) resolve();
+            else setTimeout(check, SETTLE_POLL_MS);
+        };
+        check();
+    });
+}
+
 export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): void {
     const { blockId, turnPhase, turnJustEndedAtom, isComposerEmpty } = opts;
 
@@ -189,7 +214,16 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
         if (lastTurnWasHidden) return; // see lastTurnWasHidden's own doc comment above
         if (!shouldRequestSuggestion(turnPhase(), isComposerEmpty())) return;
         const myTurnId = activeTurnId;
+        const isCurrent = () => activeTurnId === myTurnId;
 
+        void waitForTurnToSettle(blockId, turnPhase, isCurrent).then(() => {
+            // Checked again now that the outcome and the composer have had time to change.
+            if (!isCurrent() || !shouldRequestSuggestion(turnPhase(), isComposerEmpty())) return;
+            requestSuggestion(myTurnId);
+        });
+    }, { defer: true }));
+
+    function requestSuggestion(myTurnId: number): void {
         RpcApi.NextPromptSuggestionCommand(
             TabRpcClient,
             { block_id: blockId, generation: Date.now(), activity: opts.document && recentActivityEntries(opts.document()) },
@@ -203,5 +237,5 @@ export function useNextPromptSuggestion(opts: UseNextPromptSuggestionOptions): v
         }).catch(() => {
             // Silently ignore — no ghost text shows.
         });
-    }, { defer: true }));
+    }
 }

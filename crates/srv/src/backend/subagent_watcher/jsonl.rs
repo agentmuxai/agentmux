@@ -804,10 +804,6 @@ impl SubagentWatcher {
         Self::recompute_dispatch_status(state);
     }
 
-    /// A known subagent's fields changed without a new spawn — today, only its
-    /// `tool_use_id` arriving late from the sidecar. Swarm reloads the list on
-    /// it so the subagent's background tasks move under its row. Deliberately
-    /// NOT a re-sent `subagent:spawned`: the dock's sources add rows on that.
     /// `subagent:named`: the subagent's display name is set (from the parent's
     /// description, or by Haiku). The dock and the Swarm patch their row from it.
     pub(super) fn broadcast_subagent_named(&self, agent_id: &str, display_name: &str) {
@@ -828,6 +824,10 @@ impl SubagentWatcher {
         self.event_bus.broadcast_event(&event);
     }
 
+    /// A known subagent's fields changed without a new spawn — today, only its
+    /// `tool_use_id` arriving late from the sidecar. Swarm reloads the list on
+    /// it so the subagent's background tasks move under its row. Deliberately
+    /// NOT a re-sent `subagent:spawned`: the dock's sources add rows on that.
     pub(super) fn broadcast_subagent_updated(&self, agent_id: &str, parent_block_id: &str) {
         let event = WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),
