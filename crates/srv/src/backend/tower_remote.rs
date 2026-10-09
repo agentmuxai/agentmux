@@ -162,6 +162,9 @@ async fn start_wsl(distro: &str) -> Result<Arc<RemoteFiles>, String> {
     use agentmux_common::win32::NoWindow;
     let helper = crate::backend::remote::helper_install::local_path(env!("CARGO_PKG_VERSION"), wsl_target())?;
     let dir = helper.parent().ok_or("the helper has no folder")?;
+    // The file found: the packaged `agentmux-remote`, or a developer's flat
+    // `agentmux-remote-<version>-<target>` (`AGENTMUX_REMOTE_HELPER_DIR`).
+    let file = helper.file_name().ok_or("the helper has no name")?.to_string_lossy().into_owned();
     let mut cmd = tokio::process::Command::new("wsl.exe");
     // Not ours to configure, and it needs nothing of AgentMux's environment.
     crate::backend::pane_env::sanitize_external_command(&mut cmd);
@@ -169,7 +172,9 @@ async fn start_wsl(distro: &str) -> Result<Arc<RemoteFiles>, String> {
         .arg(distro)
         .arg("--cd")
         .arg(dir)
-        .args(["--exec", "./agentmux-remote", "serve", "--stdio"])
+        .arg("--exec")
+        .arg(format!("./{file}"))
+        .args(["serve", "--stdio"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
