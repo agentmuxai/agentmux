@@ -98,6 +98,7 @@
     // "notify:os:when":                         "unfocused",  // "unfocused" | "always" | "never"
     // "notify:os:inputwaiting":                 true,
     // "notify:os:turncompleted":                true,
+    // "notify:os:turncompleted:external":       false,  // turns you didn't start
     // "notify:os:turnerrored":                  true,
     // "notify:os:agentcrashed":                 true,
     // "notify:os:messageneedsreview":           true,

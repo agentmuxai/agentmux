@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, and phase 2a (the trigger on the row and the Worked line, §5.4) follows it; see §4.7 for how the build differs from the design below. Phase 2b and phases 3–4 are proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, and phase 2a (the trigger on the row and the Worked line, §5.4) follows it; see §4.7 for how the build differs from the design below. Phase 2b (attention, §5.5) follows phase 2a; phases 3–4 are proposed.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -310,7 +310,27 @@ Two guards keep the trigger honest:
 
 **Transcript.** A task wake-up leaves no message of its own, so `task-wake.ts` finds it in the stream: a main-agent `task_notification`, then a `system/init` with no input written in between. It adds an ambient line, `Woke up: <the notification's summary>`. The live stream and history replay both feed it, and the node id is the task's own, so the line survives a remount or reopen and is never duplicated. A task that wakes the CLI *inside* a turn is also listed in `absorbed` ("+1 task").
 
-**Still to come (phase 2b):** the transcript trigger header, unread dots, the per-kind notification policy, and the return digest.
+### 5.5 As built (phase 2b: attention follows need)
+
+**Notifications, per turn.** The router fired "turn completed" whenever `turn_active` flipped false, so once per *pass*: a multi-pass turn toasted "finished" while the agent was still busy for you. It now fires from the turn ledger:
+- `agentturn` with `end: "completed"`, once per `(block, turn_id)`;
+- skipped after a user stop, as before, and for AgentMux's own hidden turns.
+
+The `turn_active` path keeps only its "a new turn started" job, which retracts the old toast.
+
+**Closing a settled turn.** The tracker closes a settled turn only lazily, at the next pass. So the ledger publisher re-publishes a settling ledger, closed at its last pass (`closed_when_lapsed`), once its window lapses with nothing newer published in between.
+
+**External turns are quiet by default.** A new setting, `notify:os:turncompleted:external` (default off), lets a turn you didn't start (agent, service, schedule, task) toast when it finishes. Off, it marks its pane instead. A question or a failure in such a turn still notifies through its own kind.
+
+**Marks.** `store/turn-awareness.ts` watches every block's ledger app-wide (a scope-less subscription installed with the window services). It counts each completed external turn that ended while the user wasn't looking at its pane, where looking means this window focused and that block focused. Two things show the count:
+- **`UnseenTurnsDot`:** a dot in the pane header and on the agent's Swarm row, with the summary on hover.
+- **`TurnAwayDigest`:** on coming back to the pane, one line above the working row, for example `While you were away: 3 turns · 2 jekts (AgentX, Korp) · 1 finished task`. Looking clears the dot. The line stays until dismissed or until the next turn starts.
+
+The Swarm row shows the same dot beside the agent's name.
+
+**The `[turn]` log (§7).** Every published ledger change is logged by srv as one `[turn]` line, with `block_id`, `turn_id`, `passes`, `inputs` and `trigger`. The change is one of: `opened`, `input joined the running pass`, `next pass joined the turn`, `pass ended, settling for a next one`, `ended`, or `ended: the process exited` (`ledger_transition`). Next to the existing `[health] turn_active flip` lines, that answers "why did my timer reset" from the logs.
+
+**Not built:** a per-kind choice finer than one external switch.
 
 ---
 

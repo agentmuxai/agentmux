@@ -1037,6 +1037,10 @@ async function initMux(initOpts: AgentMuxInitOpts) {
         // the srv Router and handle toast-click activation.
         // docs/specs/SPEC_OS_NOTIFICATIONS_SYSTEM_2026_09_24.md.
         ["os-notify-bridge", import("@/app/notification/os/os-notify-bridge").then((m) => m.installOsNotifyBridge)],
+        // Turns you didn't start that finished while you weren't looking:
+        // a dot on their pane and a summary when you come back.
+        // SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §5.3.
+        ["turn-awareness", import("@/app/notification/turn-awareness-service").then((m) => m.installTurnAwarenessService)],
         // `block:reveal`: srv asks THIS window to reveal a block another
         // window's revealBlock couldn't reach.
         // SPEC_REVEAL_BLOCK_ONE_PATH_2026_09_27.md §4.3.

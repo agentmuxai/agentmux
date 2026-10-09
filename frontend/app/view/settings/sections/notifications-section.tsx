@@ -72,6 +72,13 @@ export const NOTIFICATIONS_SETTINGS = {
         section: "notifications",
         keywords: ["done", "finished", "complete", "notify:os:turncompleted"],
     },
+    osTurnCompletedExternal: {
+        id: "notifications.os_turn_completed_external",
+        label: "Also for turns you didn't start",
+        description: "A turn another agent's message, a service notice, a scheduled run or a finished background task started. Off: it ends quietly unless it needs you",
+        section: "notifications",
+        keywords: ["jekt", "external", "background", "cron", "notify:os:turncompleted:external"],
+    },
     osTurnErrored: {
         id: "notifications.os_turn_errored",
         label: "Agent stopped with an error",
@@ -189,14 +196,14 @@ export function NotificationsSection(): JSX.Element {
     };
 
     const osOn = () => (s()["notify:os:enabled"] as boolean | undefined) ?? true;
-    const kindRow = (entry: SettingsIndexEntry, key: string) => (
+    const kindRow = (entry: SettingsIndexEntry, key: string, fallback = true) => (
         <SettingRow
             id={entry.id}
             indent
             label={entry.label}
             description={entry.description}
             control={
-                <ToggleControl checked={(s()[key] as boolean | undefined) ?? true} onChange={(v) => set(key, v)} />
+                <ToggleControl checked={(s()[key] as boolean | undefined) ?? fallback} onChange={(v) => set(key, v)} />
             }
         />
     );
@@ -230,6 +237,7 @@ export function NotificationsSection(): JSX.Element {
                 />
                 {kindRow(NOTIFICATIONS_SETTINGS.osInputWaiting, "notify:os:inputwaiting")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osTurnCompleted, "notify:os:turncompleted")}
+                {kindRow(NOTIFICATIONS_SETTINGS.osTurnCompletedExternal, "notify:os:turncompleted:external", false)}
                 {kindRow(NOTIFICATIONS_SETTINGS.osTurnErrored, "notify:os:turnerrored")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osAgentCrashed, "notify:os:agentcrashed")}
                 {kindRow(NOTIFICATIONS_SETTINGS.osNeedsReview, "notify:os:messageneedsreview")}
