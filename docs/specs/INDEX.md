@@ -437,6 +437,7 @@ partial list.
 | [`SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14`](SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md) | SPEC — Slash Command Architecture |
 | [`SPEC_SOUND_NOTIFICATIONS_2026_06_05`](SPEC_SOUND_NOTIFICATIONS_2026_06_05.md) | SPEC — Sound notifications subsystem |
 | [`SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03`](SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md) | SPEC: srv hang-while-alive detection (#942 family) |
+| [`SPEC_SRV_HEADLESS_MODE_2026_09_26`](SPEC_SRV_HEADLESS_MODE_2026_09_26.md) | SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host |
 | [`SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18`](SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18.md) | SPEC: the status bar's Disk pill must not be Windows-only |
 | [`SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08`](SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md) | SPEC: a setting to hide the MuxBus cloud dot and sign-in info in the status bar |
 | [`SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25`](SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md) | SPEC: status bar host popover — drop the "Instance" row, add "open in file manager" |
@@ -613,7 +614,6 @@ partial list.
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
-| [`SPEC_SRV_HEADLESS_MODE_2026_09_26`](SPEC_SRV_HEADLESS_MODE_2026_09_26.md) | SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host |
 | [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |

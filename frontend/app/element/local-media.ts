@@ -7,7 +7,7 @@
  * (`markdown-media.tsx`, SPEC_AGENT_PANE_RICH_OUTPUT_2026_09_27.md §4).
  */
 
-import { getApi } from "@/app/store/app-api";
+import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 
@@ -154,11 +154,7 @@ export interface FetchMediaOpts {
 // with the header (same pattern as fetchMuxFile in mux-file.ts) and
 // hand the element a blob object URL instead. Caller owns revoking it.
 export async function fetchMediaBlob(path: string, opts: FetchMediaOpts = {}): Promise<Blob> {
-    const headers: Record<string, string> = {};
-    if (globalThis.window != null) {
-        const authKey = getApi()?.getAuthKey?.();
-        if (authKey) headers["X-AuthKey"] = authKey;
-    }
+    const headers = authHeaders();
     const resp = await fetch(streamUrl(path), { headers, signal: opts.signal });
     if (!resp.ok) {
         throw new MediaFetchError(resp.status, resp.statusText);
@@ -193,11 +189,7 @@ export async function fetchMediaRange(
     end: number,
     opts: { signal?: AbortSignal; type?: string } = {},
 ): Promise<MediaRange> {
-    const headers: Record<string, string> = { Range: `bytes=${start}-${end}` };
-    if (globalThis.window != null) {
-        const authKey = getApi()?.getAuthKey?.();
-        if (authKey) headers["X-AuthKey"] = authKey;
-    }
+    const headers = authHeaders({ Range: `bytes=${start}-${end}` });
     const resp = await fetch(streamUrl(path), { headers, signal: opts.signal });
     if (!resp.ok) throw new MediaFetchError(resp.status, resp.statusText);
     if (resp.status !== 206) {
