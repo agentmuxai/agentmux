@@ -12,7 +12,7 @@
     // "term:copyonselect":        false,
     // "term:transparency":        0.5,
     // "term:scrollsensitivity":   1,
-    // "term:localshellpath":      "/bin/bash",
+    // "term:localshellpath":      "/bin/bash",  // example; unset uses your shell
     // "term:localshellopts":      [],
     // "term:disablewebgl":        false,
     // "term:allowbracketedpaste": true,
@@ -20,7 +20,7 @@
 
     // -- Drag and drop (file drop onto Terminal / Agent panes) --
     // "dnd:enabled":              true,
-    // "dnd:concurrency":          4,
+    // "dnd:concurrency":          4,            // example; unset means no limit
     // "dnd:agentinserttoken":     true,
 
     // -- Window --
@@ -123,14 +123,14 @@
     //                                       // "webspeech" (browser API — does NOT work in
     //                                       // packaged CEF builds; dev/Chromium only)
     // -- groq engine: hosted, sends webm. Key read server-side only (never sent to UI).
-    // "voice:groqApiKey":       "gsk_...",  // or set AGENTMUX_GROQ_API_KEY
+    // "voice:groqApiKey":       "gsk_...",  // example; or set AGENTMUX_GROQ_API_KEY
     // -- whisper-local engine: offline, sends 16kHz WAV to a local whisper.cpp CLI.
     //    Provide the whisper-cli binary path; the GGML model auto-downloads on
     //    first use (default "base.en", ~142MB) to <config>/whisper-models/.
     //    Env override for the binary: AGENTMUX_WHISPER_CLI.
-    // "voice:whisperCliPath":   "C:/tools/whisper-cli.exe",
+    // "voice:whisperCliPath":   "C:/tools/whisper-cli.exe",  // example
     // "voice:whisperModel":     "base.en",   // tiny.en | base.en | small.en | …
-    // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",  // explicit override; skips auto-download
+    // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",  // example; explicit override; skips auto-download
 
     // -- Network --
     // Discover other AgentMux instances on your local network (mDNS/Bonjour)

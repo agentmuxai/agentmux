@@ -36,6 +36,29 @@ const KNOWN_MISMATCHES: Record<string, string> = {
     "window:magnifiedblocksize": "template 0.9, pane 1.5, layout 0.8 or 1.0",
 };
 
+// ── Defaults stated in one place only ───────────────────────────────────────
+// A default found in one place has nothing to agree with, so it is accepted
+// only when listed here with the reason. The test fails when a listed key
+// gains a second source.
+const UNREAD = "nothing in frontend/ or crates/ reads it; only the template lists it";
+const SINGLE_SOURCE: Record<string, string> = {
+    "app:defaultnewblock":
+        'the template and the pane leave it blank; blank and unset both open a terminal ("term", keymodel-blockcreate.ts)',
+    "dnd:concurrency":
+        "no default: unset means no limit (the schema says so); the template's value is marked as an example",
+    "conn:askbeforewshinstall": UNREAD,
+    "conn:wshenabled": UNREAD,
+    "preview:showhiddenfiles": UNREAD,
+    "telemetry:enabled": UNREAD,
+    "window:confirmclose": UNREAD,
+    "window:disablehardwareacceleration": UNREAD,
+    "window:maxtabcachesize": UNREAD,
+    "window:nativetitlebar": UNREAD,
+    "window:savelastwindow": UNREAD,
+    "window:showmenubar": UNREAD,
+    "window:zoom": UNREAD,
+};
+
 // ── The schema ──────────────────────────────────────────────────────────────
 
 const schemaProps: Record<string, { default?: unknown }> = JSON.parse(read("schema/settings.json")).$defs.SettingsType
@@ -47,13 +70,15 @@ const schemaDefault = (key: string): Found | undefined =>
         : undefined;
 
 // ── settings-template.jsonc ─────────────────────────────────────────────────
-// Every entry is a commented-out line: `    // "key":   value,  // note`.
+// Every entry is a commented-out line: `    // "key":   value,  // note`. A line
+// whose note says "example" shows a sample value, not a default, and is skipped.
 // `[ \t]`, not `\s`: with the `m` flag `\s` would run on into the next line.
 
 function templateValues(): Map<string, Found[]> {
     const text = read("settings-template.jsonc");
     const out = new Map<string, Found[]>();
-    for (const m of text.matchAll(/^[ \t]*\/\/[ \t]*"([^"]+)":[ \t]*(.*?)[ \t]*,?[ \t]*(?:\/\/.*)?$/gm)) {
+    for (const m of text.matchAll(/^[ \t]*\/\/[ \t]*"([^"]+)":[ \t]*(.*?)[ \t]*,?[ \t]*(\/\/.*)?$/gm)) {
+        if (/\bexample\b/i.test(m[3] ?? "")) continue;
         const at = `settings-template.jsonc:${lineOf(text, m.index!)}`;
         push(out, m[1], { value: JSON.parse(m[2]), at });
     }
@@ -109,14 +134,15 @@ function uiValues(): { values: Map<string, Found[]>; keys: Set<string> } {
 /**
  * The fallback a read implies, from the text just before and after it: the
  * token after `??` / `||` (past closing parens and `as` casts), "true" for
- * `!== false` / `=== false`, "false" for a negation. Null when it implies none.
+ * `!== false` / `=== false` (not a tri-state `=== false ? … : …`), "false"
+ * for a negation or a bare `if (read)`. Null when it implies none.
  */
 function fallbackToken(before: string, after: string): string | null {
     const rest = after.replace(/^(?:\s*\)|\s+as\s+(?:<[^>]*>|[^)?;,}<])+)*/, "");
     const m = new RegExp(String.raw`^\s*(?:\?\?|\|\|)\s*(${LITERAL}|${CONST})`).exec(rest);
     if (m) return m[1];
-    if (/^\s*[!=]==\s*false\b/.test(rest)) return "true";
-    if (/!\(?\s*$/.test(before)) return "false";
+    if (/^\s*[!=]==\s*false\b(?!\s*\?)/.test(rest)) return "true";
+    if (/!\(?\s*$/.test(before) || (/\bif\s*\(\s*$/.test(before) && /^\s*\)\s*\{/.test(after))) return "false";
     return null;
 }
 
@@ -140,7 +166,7 @@ function resolveConst(rel: string, text: string, name: string): unknown {
 // `typeof v === "number" ? v : X` and `if (v == null …) return X`.
 
 const ATOM_READ = String.raw`(?:getSettingsKeyAtom|getOverrideConfigAtom)\((?:[^()"]*,\s*)?"([^"]+)"(?:\s+as\s+any)?\)`;
-const BRACKET_READ = String.raw`\b\w*[sS]ettings\w*(?:\(\))?(?:\?\.)?\["([^"]+)"\]`;
+const BRACKET_READ = String.raw`(?:\b\w*[sS]ettings\w*(?:\(\))?|\(\s*\w*[sS]ettings\w*\(\)\s+as\s+any\s*\))(?:\?\.)?\["([^"]+)"\]`;
 
 /** Defaults the frontend applies through a helper or a stylesheet: file, and a pattern capturing the value. */
 const FRONTEND_CONSTANTS: Record<string, [string, RegExp]> = {
@@ -154,6 +180,36 @@ const FRONTEND_CONSTANTS: Record<string, [string, RegExp]> = {
     "window:tilegapsize": ["frontend/layout/lib/layoutResize.ts", /const DefaultGapSizePx = (\d+);/],
     "window:magnifiedblocksize": ["frontend/layout/lib/layoutGeometry.ts", /magnifiedNodeSizeAtom\) \?\? ([\d.]+);/],
     "window:magnifiedblockopacity": ["frontend/app/block/block.scss", /--magnified-block-opacity: ([\d.]+);/],
+};
+
+/**
+ * What the frontend does with an unset key where no literal says so: the
+ * value, the file, and a pattern that must still match there. `null` means
+ * "no limit".
+ */
+const UNSET_MEANS: Record<string, [unknown, string, RegExp]> = {
+    // Anything but an explicit false keeps turn-scoped tails.
+    "agent:turnscopedtail": [
+        true,
+        "frontend/app/view/agent/virtualization/streaming-buffer.ts",
+        /return setting === false \? "count" : "turn";/,
+    ],
+    // Absent: every file copies at once (`concurrency ?? sourcePaths.length`).
+    "dnd:concurrency": [null, "frontend/util/dnd.ts", /opts\?\.concurrency \?\? sourcePaths\.length/],
+    // Absent and "default" both leave the microphone unconstrained.
+    "voice:inputDeviceId": ["default", "frontend/app/hook/whisperVoiceEngine.ts", /deviceId && deviceId !== "default"/],
+    // Unset renders `undefinedpx`, an invalid length, so backdrop-filter
+    // falls back to none: no blur, as the pane's 0 says.
+    "window:magnifiedblockblurprimarypx": [
+        0,
+        "frontend/app/block/blockframe.tsx",
+        /"--magnified-block-blur": `\$\{magnifiedBlockBlur\(\)\}px`/,
+    ],
+    "window:magnifiedblockblursecondarypx": [
+        0,
+        "frontend/layout/lib/tilelayout-shared.tsx",
+        /const blockBlurStr = \(\) => `\$\{blockBlur\(\)\}px`;/,
+    ],
 };
 
 function frontendFiles(dir: string, out: string[] = []): string[] {
@@ -215,6 +271,12 @@ function appValues(): Map<string, Found[]> {
         const m = re.exec(text);
         if (!m) throw new Error(`FRONTEND_CONSTANTS: ${re} no longer matches in ${rel} (for ${key})`);
         push(out, key, { value: JSON.parse(m[1]), at: `${rel}:${lineOf(text, m.index)}` });
+    }
+    for (const [key, [value, rel, re]] of Object.entries(UNSET_MEANS)) {
+        const text = read(rel);
+        const m = re.exec(text);
+        if (!m) throw new Error(`UNSET_MEANS: ${re} no longer matches in ${rel} (for ${key})`);
+        push(out, key, { value, at: `${rel}:${lineOf(text, m.index)}` });
     }
     return out;
 }
@@ -344,27 +406,45 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
  */
 const isEmptyFallback = (v: unknown) => v === "" || (typeof v === "object" && v !== null && !Object.keys(v).length);
 
-function mismatches(sources: Record<Source, Map<string, Found[]>>): Map<string, string> {
+type Sources = Record<Source, Map<string, Found[]>>;
+
+/** Every default found for a key, with the source it came from; the schema's first. */
+function defaultsFor(key: string, sources: Sources): { source: Source | "schema"; found: Found }[] {
+    const schema = schemaDefault(key);
+    const out: { source: Source | "schema"; found: Found }[] = schema ? [{ source: "schema", found: schema }] : [];
+    for (const source of ["template", "ui", "app", "srv"] as Source[]) {
+        for (const found of sources[source].get(key) ?? []) {
+            if (!schema && isEmptyFallback(found.value)) continue;
+            out.push({ source, found });
+        }
+    }
+    return out;
+}
+
+function mismatches(sources: Sources): Map<string, string> {
     const out = new Map<string, string>();
     for (const key of SCHEMA_KEYS) {
-        const schema = schemaDefault(key);
-        const found: Found[] = [];
-        for (const source of ["template", "ui", "app", "srv"] as Source[]) {
-            for (const f of sources[source].get(key) ?? []) {
-                if (!schema && isEmptyFallback(f.value)) continue;
-                found.push(f);
-            }
-        }
-        const all = schema ? [schema, ...found] : found;
+        const all = defaultsFor(key, sources).map((d) => d.found);
         if (all.length < 2 || all.every((f) => same(f.value, all[0].value))) continue;
         out.set(key, all.map((f) => `${JSON.stringify(f.value)} (${f.at})`).join(" vs "));
     }
     return out;
 }
 
-describe("setting defaults agree across the schema, template, Settings pane and backend", () => {
+/** Keys whose default comes from one source only, so nothing checks it. */
+function singleSource(sources: Sources): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const key of SCHEMA_KEYS) {
+        const all = defaultsFor(key, sources);
+        if (new Set(all.map((d) => d.source)).size !== 1) continue;
+        out.set(key, all.map((d) => `${JSON.stringify(d.found.value)} (${d.found.at})`).join(", "));
+    }
+    return out;
+}
+
+describe("setting defaults agree across the schema, template, Settings pane, frontend and backend", () => {
     const ui = uiValues();
-    const sources: Record<Source, Map<string, Found[]>> = {
+    const sources: Sources = {
         template: templateValues(),
         ui: ui.values,
         app: appValues(),
@@ -393,5 +473,20 @@ describe("setting defaults agree across the schema, template, Settings pane and 
     it("KNOWN_MISMATCHES lists only keys that still disagree", () => {
         const found = mismatches(sources);
         expect(Object.keys(KNOWN_MISMATCHES).filter((key) => !found.has(key))).toEqual([]);
+    });
+
+    it("every default is found in at least two places, or is listed in SINGLE_SOURCE", () => {
+        const single = singleSource(sources);
+        const unexpected = [...single].filter(([key]) => !(key in SINGLE_SOURCE)).map(([k, v]) => `${k}: ${v}`);
+        expect(
+            unexpected,
+            "Only one place states this default, so nothing checks it. Find where the app applies it " +
+                "(add the read's shape here, or an UNSET_MEANS / FRONTEND_CONSTANTS entry), or list it in SINGLE_SOURCE"
+        ).toEqual([]);
+    });
+
+    it("SINGLE_SOURCE lists only keys that still have one source", () => {
+        const single = singleSource(sources);
+        expect(Object.keys(SINGLE_SOURCE).filter((key) => !single.has(key))).toEqual([]);
     });
 });
