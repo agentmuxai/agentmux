@@ -64,8 +64,11 @@ The list belongs to the agent's hold on the pane:
 - Only `OpenBrowser` sets it. It lives in srv, and on the pane as `browser:allowed_origins`, a
   srv-only meta key: clients can't write it, and it is stripped from new, restored and
   layout-opened panes, like `browser:owner_agent`.
-- **Take over** ends the hold, and the list with it: the person browses freely.
-- Closing the pane, or the agent stopping, drops it.
+- **Take over** ends the hold, and the pane's list with it: the person browses freely there.
+- Closing the pane drops its list too.
+- The other panes of its chain keep the list, even when the pane that left was the one
+  `OpenBrowser` opened: a popup pane can outlive its opener and still be the agent's, and must not
+  lose its limit with it. The list goes when the last pane of its chain does.
 
 ## 6. How it works
 
@@ -73,7 +76,7 @@ The list belongs to the agent's hold on the pane:
   by srv (validation, `BrowserNavigate`, the re-check of a request) and the host (enforcement).
 - **srv** (`browser_allowlist.rs`): one list per chain, keyed by the root pane, with each popup
   pane mapped to its root. It pushes `{pane: list}` for every member to the host with the
-  owned-pane set (`spawn_owned_panes_sync`), and pushes at once, before the pane opens, when a
+  owned-pane set (`browser_host_sync`), and pushes at once, before the pane opens, when a
   popup pane joins a chain, so its first navigation is already checked.
 - **Host:** `on_before_browse` runs synchronously and can't wait for an answer. For a main
   frame whose governing pane (the pane, or a popup window's opener) has a list and a target off

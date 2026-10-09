@@ -46,6 +46,7 @@ pub(crate) mod memory_delivery_handlers;
 mod notify_handlers;
 pub(crate) mod browser_allowlist;
 pub(crate) mod browser_attention;
+pub(crate) mod browser_host_sync;
 pub(crate) mod browser_owner;
 pub(crate) mod browser_popup;
 pub(crate) mod browser_uploads;

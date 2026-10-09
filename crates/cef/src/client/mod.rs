@@ -51,6 +51,7 @@ const MEMORY_PAUSE_WINDOW: Duration = Duration::from_secs(30);
 
 pub(crate) mod creation_labels;
 pub(crate) mod app_navigation;
+pub(crate) mod allowed_origins;
 mod handlers;
 pub(crate) mod helpers;
 mod lifecycle;

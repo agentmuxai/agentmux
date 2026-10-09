@@ -93,37 +93,6 @@ struct PopupReport {
     body: serde_json::Value,
 }
 
-/// Tell srv that `target` (a pane, or a popup window by its label) tried to
-/// go to `url`, off the site list of `pane`, and was stopped; srv asks the
-/// person (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §4). On its own
-/// thread, since the caller is a CEF callback on the UI thread, and one at a
-/// time per pane: srv asks one question at a time anyway.
-fn report_off_list(state: &std::sync::Arc<crate::state::AppState>, pane: &str, target: &str, url: &str, kind: &str) {
-    if !state.off_list_reports.lock().insert(pane.to_string()) {
-        return;
-    }
-    let web_endpoint = state.backend_endpoints.lock().web_endpoint.clone();
-    let auth_key = state.auth_key.lock().clone();
-    let ipc_token = state.ipc_token.clone();
-    let body = serde_json::json!({ "pane": pane, "target": target, "url": url, "kind": kind });
-    let state = state.clone();
-    let pane = pane.to_string();
-    let spawned = std::thread::Builder::new().name("browser-off-list".into()).spawn({
-        let pane = pane.clone();
-        let state = state.clone();
-        move || {
-            if let Err(e) = crate::client::backend_browser_navigation(&web_endpoint, &auth_key, &ipc_token, &body) {
-                tracing::warn!(pane = %pane, error = %e, "couldn't tell srv about a navigation off the allowed sites");
-            }
-            state.off_list_reports.lock().remove(&pane);
-        }
-    });
-    if let Err(e) = spawned {
-        tracing::warn!(error = %e, "couldn't start the browser-off-list thread");
-        state.off_list_reports.lock().remove(&pane);
-    }
-}
-
 /// The queue to the popup-window report worker, started on first use.
 fn popup_reports() -> &'static std::sync::mpsc::Sender<PopupReport> {
     static TX: std::sync::OnceLock<std::sync::mpsc::Sender<PopupReport>> = std::sync::OnceLock::new();
@@ -876,14 +845,9 @@ impl AgentMuxHandler {
                     .unwrap_or(false)
                     && crate::commands::platform::is_oauth_authorization_url(&url);
                 let opener = browser.as_deref().and_then(|b| self.opener_pane_of(b));
-                // A pane an agent limited to some sites opens nothing off the
-                // list: the person is asked, and on Allow the click is repeated
-                // (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §4).
-                if let Some(o) = opener.as_deref() {
-                    if self.off_list(o, &url) {
-                        report_off_list(&self.state, o, o, &url, "popup");
-                        return true;
-                    }
+                // Off an agent's site list: not opened (client/allowed_origins.rs).
+                if opener.as_deref().is_some_and(|o| self.stop_off_list_popup(o, &url)) {
+                    return true;
                 }
                 let opener_url = browser
                     .as_deref()
@@ -1012,55 +976,8 @@ impl AgentMuxHandler {
     /// the pane itself, or, when `browser` is a popup window, the pane that
     /// opened that popup (so a sign-in that opens a second window still counts
     /// against, and belongs with, the pane it started in).
-    fn opener_pane_of(&self, browser: &Browser) -> Option<String> {
-        if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
-            return Some(block);
-        }
-        let label = self
-            .state
-            .list_browsers()
-            .into_iter()
-            .find(|(_, b)| {
-                let b = b.clone();
-                let mut other: cef::Browser = browser.clone();
-                b.is_same(Some(&mut other)) != 0
-            })
-            .map(|(label, _)| label)?;
-        self.state.popup_openers.lock().get(&label).cloned()
-    }
-
-    /// For a browser whose navigations a site list may limit: the pane the
-    /// list belongs to, and the id to load in on Allow. A pane is both; a
-    /// popup window is limited by its opener's list, and loaded by its label.
-    fn limited_pane_of(&self, browser: &Browser) -> Option<(String, String)> {
-        if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
-            return Some((block.clone(), block));
-        }
-        if self.state.popup_openers.lock().is_empty() {
-            return None;
-        }
-        let label = self
-            .state
-            .list_browsers()
-            .into_iter()
-            .find(|(_, b)| {
-                let b = b.clone();
-                let mut other: cef::Browser = browser.clone();
-                b.is_same(Some(&mut other)) != 0
-            })
-            .map(|(label, _)| label)?;
-        let opener = self.state.popup_openers.lock().get(&label).cloned()?;
-        Some((opener, label))
-    }
-
-    /// Is `url` off the site list srv sent for `pane`? False when the pane
-    /// has no list.
-    fn off_list(&self, pane: &str, url: &str) -> bool {
-        self.state
-            .allowed_origins
-            .lock()
-            .get(pane)
-            .is_some_and(|list| !agentmux_common::allowed_origins::allows(list, url))
+    pub(super) fn opener_pane_of(&self, browser: &Browser) -> Option<String> {
+        self.limited_pane_of(browser).map(|(pane, _)| pane)
     }
 
     /// AgentMux's own origins (its frontend, srv): never opened in-app from a
@@ -1243,19 +1160,10 @@ impl AgentMuxHandler {
         // could grow far past the intended bound (reagentx P1 on PR #2593).
         // See `browser_pane::callbacks::update_pane_load_watchdog_url`.
         let is_main_frame = frame.as_ref().map(|f| f.is_main() == 1).unwrap_or(false);
-        // A pane an agent limited to some sites (or a popup window it opened)
-        // doesn't leave them: the navigation is cancelled, and srv asks the
-        // person; on Allow it loads the address again, now on the list
-        // (SPEC_BROWSER_PANE_ALLOWED_ORIGINS_2026_10_09.md §4). Checked
-        // before anything below marks the pane as loading.
-        if is_main_frame && !self.state.allowed_origins.lock().is_empty() {
-            if let Some((pane, target)) = browser.as_deref().and_then(|b| self.limited_pane_of(b)) {
-                if self.off_list(&pane, &url) {
-                    tracing::info!(pane = %pane, target = %target, url = %url, "browser pane: stopped a navigation off its allowed sites");
-                    report_off_list(&self.state, &pane, &target, &url, "navigate");
-                    return 1;
-                }
-            }
+        // Off an agent's site list: cancelled before anything below marks the
+        // pane as loading (client/allowed_origins.rs).
+        if is_main_frame && browser.as_deref().is_some_and(|b| self.stop_off_list_navigation(b, &url)) {
+            return 1;
         }
         if is_main_frame {
             if let Some(b) = browser.as_deref() {

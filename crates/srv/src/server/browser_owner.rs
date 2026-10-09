@@ -70,7 +70,7 @@ pub(crate) fn owned_panes() -> Vec<String> {
 }
 
 /// Woken whenever the set of owned panes changes, or the host needs the
-/// whole set again (it registered). See `ui_handlers::spawn_owned_panes_sync`.
+/// whole set again (it registered). See `browser_host_sync`.
 pub(crate) fn changed() -> &'static tokio::sync::Notify {
     static CHANGED: OnceLock<tokio::sync::Notify> = OnceLock::new();
     CHANGED.get_or_init(tokio::sync::Notify::new)

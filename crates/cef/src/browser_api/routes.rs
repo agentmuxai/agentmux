@@ -910,7 +910,7 @@ pub async fn owned_panes(
         owned.clear();
         owned.extend(req.panes);
     }
-    *state.allowed_origins.lock() = req.allowed;
+    *state.site_limits.lists.lock() = req.allowed;
     ok_body(ApiResponse::ok(AckData::new()))
 }
 
