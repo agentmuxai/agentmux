@@ -967,6 +967,17 @@ pub(crate) async fn handle_ui_browser_wait_for(
 /// with the approval check in front of committing clicks.
 #[allow(clippy::result_large_err)]
 fn refuse_on_driven_pane(block_id: &str, what: &str, instead: &str) -> Result<(), axum::response::Response> {
+    // A popup window has no owner record of its own (it is driven through the
+    // pane that opened it), and it is always driven: the same refusal holds.
+    if crate::server::browser_popup::is_window_id(block_id) {
+        return Err(err_response(
+            StatusCode::FORBIDDEN,
+            format!(
+                "{what} isn't allowed on a popup window: it could submit a form without the \
+                 user's approval. Use {instead}."
+            ),
+        ));
+    }
     if crate::server::browser_owner::owner_of(block_id).is_none() {
         return Ok(());
     }
@@ -1345,6 +1356,29 @@ pub(crate) async fn handle_host_browser_popup_window(
         update_popup_windows_strip(&state, &opener);
     }
     (StatusCode::OK, Json(json!({ "ok": true }))).into_response()
+}
+
+/// Forget every popup window and clear every opener's strip. Called when the
+/// host registers: after either side restarts, the windows srv knew of are
+/// gone or no longer known, and the strip, which is saved with the pane, must
+/// not keep listing them.
+pub(crate) fn reset_popup_windows(state: &AppState) {
+    use crate::server::browser_popup as popup;
+    popup::clear_windows();
+    let blocks = match state.mstore.get_all::<crate::backend::obj::Block>() {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!(error = %e, "[browser-popup] couldn't list panes to clear popup-window strips");
+            return;
+        }
+    };
+    for b in blocks.into_iter().filter(|b| b.meta.get(popup::POPUP_WINDOWS_META_KEY).is_some_and(|v| !v.is_null())) {
+        let mut meta = crate::backend::obj::MetaMapType::new();
+        meta.insert(popup::POPUP_WINDOWS_META_KEY.to_string(), serde_json::Value::Null);
+        if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, &b.oid, &meta) {
+            tracing::debug!(block = %b.oid, error = %e, "[browser-popup] stale popup-window strip not cleared");
+        }
+    }
 }
 
 /// Rewrite `opener`'s popup-windows strip (`browser:popup_windows`). The

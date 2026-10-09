@@ -1595,6 +1595,16 @@ async fn a_popup_window_is_driven_through_the_pane_that_opened_it() {
     let block = state.mstore.must_get::<crate::backend::obj::Block>(&opener).unwrap();
     assert_eq!(block.meta["browser:popup_windows"][0]["url"], "https://pay.other.org/confirm");
 
+    // The routes that could submit a form without the approval banner are
+    // refused on a popup window, as on any driven pane.
+    let (s, body) = post_json(&app, "/api/v1/ui/browser/eval", merged(&auth, serde_json::json!({ "pane": win, "script": "1" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN, "{body}");
+    assert!(body["error"].as_str().unwrap_or("").contains("popup window"), "{body}");
+    let (s, _) = post_json(&app, "/api/v1/ui/click", merged(&auth, serde_json::json!({ "pane": win, "selector": "button" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _) = post_json(&app, "/api/v1/ui/browser/dispatch_key", merged(&auth, serde_json::json!({ "pane": win, "key": "Enter" }))).await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+
     // A hand-off on the window shows on the opener's banner, naming the
     // window, and pauses both.
     let waiting = {
@@ -1652,6 +1662,12 @@ async fn a_popup_window_is_driven_through_the_pane_that_opened_it() {
     assert_eq!(s, StatusCode::OK);
     let (s, _) = post_json(&app, "/api/v1/ui/browser/focus_info", drive(win2)).await;
     assert_eq!(s, StatusCode::FORBIDDEN);
-    let (s, _) = post_json_headers(&app, "/api/v1/host/browser_popup_window", report("closed", win2, "", ""), &host).await;
-    assert_eq!(s, StatusCode::OK);
+
+    // When the host registers (either side restarted), every popup window
+    // record and every saved strip goes: those windows are gone or unknown.
+    assert!(state.mstore.must_get::<crate::backend::obj::Block>(&persons).unwrap().meta["browser:popup_windows"].is_array());
+    crate::server::ui_handlers::reset_popup_windows(&state);
+    assert!(crate::server::browser_popup::window(win2).is_none());
+    let block = state.mstore.must_get::<crate::backend::obj::Block>(&persons).unwrap();
+    assert!(block.meta.get("browser:popup_windows").is_none_or(|v| v.is_null()));
 }
