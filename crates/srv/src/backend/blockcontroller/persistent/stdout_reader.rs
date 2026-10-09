@@ -172,7 +172,7 @@ impl PersistentSubprocessController {
                     let subtype = parsed.get("subtype").and_then(|v| v.as_str());
                     let current = || inner_read.lock().unwrap().spawn_generation == my_generation_read;
                     if subtype == Some("task_notification") && current() {
-                        health_read.note_cli_task_notification();
+                        health_read.note_cli_task_notification(parsed.get("summary").and_then(|v| v.as_str()));
                     } else if subtype == Some("init") && current() && health_read.mark_turn_active_from_cli() {
                         if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
                             ctrl.cli_started_pass();

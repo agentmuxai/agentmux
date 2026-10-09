@@ -227,8 +227,8 @@ function TabContent(props: { tabId: string }): JSX.Element {
 /**
  * Identity panel shown on an empty tab — logo + the standard "who/what/where"
  * line every desktop app shows during a quiet startup screen: `user@host`,
- * version, git hash. Pulled from cached globals (`getUserName` / `getHostName`)
- * and the host's about-details payload, no IPC on render.
+ * version, git hash. `user@host` is srv's (`getUserName` / `getHostName`, from
+ * its `srvinfo`); the rest is the host's about-details payload. No IPC on render.
  */
 function EmptyTabIdentity(): JSX.Element {
     const details = getApi().getAboutModalDetails();

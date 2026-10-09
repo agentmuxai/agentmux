@@ -13,23 +13,7 @@ const SETTINGS_TEMPLATE: &str = include_str!("../../../../settings-template.json
 
 /// Get the current OS platform name.
 pub fn get_platform() -> serde_json::Value {
-    let platform = match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
-    };
-    serde_json::json!(platform)
-}
-
-/// Get the current user's username.
-pub fn get_user_name() -> serde_json::Value {
-    serde_json::json!(whoami::username())
-}
-
-/// Get the system hostname.
-pub fn get_host_name() -> serde_json::Value {
-    let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
-    serde_json::json!(hostname)
+    serde_json::json!(agentmux_common::platform_name::platform_name())
 }
 
 /// Check if THIS build is a `task dev` build — resolved from the host exe
@@ -38,37 +22,6 @@ pub fn get_host_name() -> serde_json::Value {
 /// packaged build to "DEV" (the status-bar badge).
 pub fn get_is_dev() -> serde_json::Value {
     serde_json::json!(agentmux_common::is_dev_self())
-}
-
-/// Get the app data directory path (version-specific).
-pub fn get_data_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let dir = state.version_data_dir.lock();
-    match dir.as_ref() {
-        Some(d) => Ok(serde_json::json!(d)),
-        None => Err("Data dir not initialized yet".to_string()),
-    }
-}
-
-/// Get the app config directory path (version-specific).
-pub fn get_config_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let dir = state.version_config_dir.lock();
-    match dir.as_ref() {
-        Some(d) => Ok(serde_json::json!(d)),
-        None => Err("Config dir not initialized yet".to_string()),
-    }
-}
-
-/// Get the AgentMux account-wide root (`~/.agentmux/`) — `user_home_dir`, set
-/// from `paths.home_dir` (sidecar.rs; the same root in portable / installed /
-/// override modes, not a per-channel or `<portable>/data` subdir). Used by the
-/// frontend for per-agent paths (e.g. the working dir). (The shared
-/// provider auth dir under it is srv's `provider.ensureauthdir`.)
-pub fn get_user_home_dir(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    let dir = state.user_home_dir.lock();
-    match dir.as_ref() {
-        Some(d) => Ok(serde_json::json!(d)),
-        None => Err("User home dir not initialized yet".to_string()),
-    }
 }
 
 /// Get an environment variable value.
@@ -128,22 +81,7 @@ fn is_sensitive_env_key(key: &str) -> bool {
 /// portables that wrote the marker at the root.
 fn read_build_label() -> Option<String> {
     let exe = std::env::current_exe().ok()?;
-    let exe_dir = exe.parent()?;
-    let candidates = [
-        Some(exe_dir.join("agentmux-portable.marker")),
-        exe_dir.parent().map(|p| p.join("agentmux-portable.marker")),
-    ];
-    for cand in candidates.into_iter().flatten() {
-        if let Ok(contents) = std::fs::read_to_string(&cand) {
-            if let Some(label) = contents.trim().strip_prefix("AgentMux portable build ") {
-                let label = label.trim();
-                if !label.is_empty() {
-                    return Some(label.to_string());
-                }
-            }
-        }
-    }
-    None
+    agentmux_common::runtime_mode::portable_build_label(exe.parent()?)
 }
 
 const BUILD_CHANNEL_DEFAULT: &str = match option_env!("AGENTMUX_BUILD_CHANNEL_DEFAULT") {
@@ -169,11 +107,7 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
         "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
         "cefVersion": env!("AGENTMUX_CEF_VERSION"),
         "channel": channel,
-        "platform": match std::env::consts::OS {
-            "macos" => "darwin",
-            "windows" => "win32",
-            other => other,
-        },
+        "platform": agentmux_common::platform_name::platform_name(),
         "arch": std::env::consts::ARCH,
         "backendEndpoints": {
             "ws": endpoints.ws_endpoint,
@@ -230,16 +164,6 @@ fn local_ip_address() -> Option<String> {
     socket.connect("8.8.8.8:80").ok()?;
     let addr = socket.local_addr().ok()?;
     Some(addr.ip().to_string())
-}
-
-/// Get the documentation site URL.
-pub fn get_docsite_url(state: &Arc<AppState>) -> serde_json::Value {
-    let endpoints = state.backend_endpoints.lock();
-    if !endpoints.web_endpoint.is_empty() {
-        serde_json::json!(format!("http://{}/docsite/", endpoints.web_endpoint))
-    } else {
-        serde_json::json!("https://docs.agentmux.ai")
-    }
 }
 
 /// Open a file in the best available code editor.

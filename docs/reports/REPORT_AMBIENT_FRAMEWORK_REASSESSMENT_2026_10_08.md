@@ -313,11 +313,19 @@ pub struct PurposeSpec {
   The second is the real fix, but it should be taken on measured numbers, not assumed. It also makes timed-out spend countable: the worker survives and reports usage.
 - **The model id** becomes a `PurposeSpec` field, or one constant.
 
+**Measured 2026-10-08, and what was decided.** The exact ambient command, run from the real `ambient-calls` folder with an agent's own `claude` (2.1.288) and identity environment, takes 1.2–1.6 s, and `claude --version` starts in 0.1 s. Process start does **not** dominate, so no worker. Prompt size doesn't explain it either: a call costs about 430 prompt tokens there. (From a folder with large `CLAUDE.md` files above it, the same call costs 17,500 tokens, which is why ambient calls run in their own folder.) The 15 s timeouts are most likely the API itself: many agents on one login, with the CLI retrying on overload. The fix taken, in PR 4:
+- **Time limits per class:** 30 s interactive, 45 s background, 90 s for the continuity summary. The pane's RPC timeout went from 20 s to 45 s to outlast them.
+- **Two classes, each with one cap:** interactive 2, background 3, so 5 at once in total. They replace the six semaphores, and the continuity summary, which had no cap, now has one.
+
+`run_ms` and `queued_ms` on the outcome lines (PR 1) will show whether the longer limits recover the timed-out calls.
+
 ### 6.5 Provider-neutral digest
 
 Build the digest from `agents::translator` `AgentEvent`s instead of raw Claude frames. Claude, Codex and Gemini translators exist; Kimi, Qwen and the ACP panes get one as each provider is moved to its rich protocol. Titles and suggestions then work for every provider with a translator, and the sweep stops spinning on the rest.
 
 The hidden-reinjection filter stays. It is about AgentMux's own message, not the provider's format.
+
+**What was built instead (PR 5).** The srv translators turned out not to fit: they translate replies only (Codex's serves `/btw`), and `AgentEvent` carries no user message, so a digest built from them could not say what was asked. The pane already holds every provider's conversation, translated, in its document, with hidden reinjection turns left out. So the pane sends it: `frontend/app/view/agent/ambient-activity.ts` renders the document in the digest's entry form, `session:next_prompt_suggestion` takes it as an optional `activity` field, and `digest::activity_from_entries` applies the same caps, the same turn-ending gate and the same hidden-turn refusal as the file reader. Without the field (an older pane) the server still reads the file. The title already arrives with the user's own message, so it needed nothing. The background title sweep has no pane to ask, so it now skips any block whose `agentOutputFormat` the file reader can't parse (`digest::reads_output_format`) rather than reading 96 KB of it to find nothing.
 
 ### 6.6 Subagent and dispatch names
 
@@ -336,6 +344,15 @@ The hidden-reinjection filter stays. It is about AgentMux's own message, not the
 - **One `meta-keys.ts`** for every `term:*` key both sides use.
 - **Token accounting:** the background purposes' tokens go into the status-bar totals (`PurposeSpec::counts_toward_totals`), served by the backend.
 - **Gate the suggestion hook** on providers that can produce a digest (6.5).
+
+**What was built (PR 6), and what changed on the way.**
+- The title is stored by `ambient::title::store_title`, in one transaction, for both the pane's request and the recovery sweep (`Replace::IfNews` and `Replace::IfEmpty`); `isTitleNews` moved there with its cases. The title hook now only schedules the request.
+- Spend is published by srv from `call::Slot::run` as an `ambient:spent` event, for every purpose, and recorded by one listener (`frontend/app/store/ambient-spend.ts`). No call site records spend any more, so none can be counted twice, and the five background purposes reach the totals. `PurposeSpec::counts_toward_totals` was not needed: every purpose counts.
+- `requestSubagentName`, `onSubagentNamed` and `withSubagentName` (`frontend/app/view/swarm/subagent-naming.ts`) replace the three name requests and two identical `subagent:named` handlers. The dock's subagent title uses `subagentDisplayLabel`, the Swarm's label, so same-slug siblings no longer look identical there.
+- `frontend/app/store/meta-keys.ts` names the title, OSC title and suggestion keys; Rust reads the title key as `ambient::title::META_TITLE`.
+- **`useAmbientPull` was not written.** Once the title hook stopped writing and neither hook records spend, what the two share is one RPC call with a timeout and a silent catch. Their triggers, guards and results differ, so a shared hook would be a wrapper around a function call.
+- **The provider gate is moot:** after PR 5 every pane can produce a digest.
+- The Tab/→ mask shipped in PR 1.
 
 ## 7. Plan
 

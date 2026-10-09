@@ -38,6 +38,7 @@ import { BlockInputSender } from "./block-input-sender";
 import { TermWrap } from "./termwrap";
 import { basicTermModels, termModels } from "./term-models";
 import { readZoom } from "@/app/store/zoom-factor";
+import { META_OSC_TITLE } from "@/app/store/meta-keys";
 
 /** The terminal's state behind its native pane tab (`terminalPaneTab`,
  *  term.tsx). */
@@ -180,7 +181,7 @@ class TermViewModel {
             }
             if (!isCmd) {
                 const blockMeta = this.meta();
-                const activity = blockMeta?.["term:osc_title"] as string | undefined;
+                const activity = blockMeta?.[META_OSC_TITLE] as string | undefined;
                 if (activity && activity.length > 0) {
                     rtn.push({
                         elemtype: "text",

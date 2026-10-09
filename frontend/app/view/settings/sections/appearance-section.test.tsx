@@ -33,6 +33,7 @@ vi.mock("@/app/menu/base-menus", () => ({ THEME_OPTIONS: [] }));
 // Has its own tests; it reads the pane registry and theme this file doesn't set up.
 vi.mock("./widget-colors", () => ({ WidgetColorsSettings: () => null }));
 
+import { makeTestHostApi } from "@/app/host/test-host";
 import { AppearanceSection } from "./appearance-section";
 
 describe("Appearance — startup splash toggle", () => {
@@ -91,5 +92,30 @@ describe("Appearance — SettingRow ids for search scroll-to-result", () => {
         const el = document.getElementById(`setting-${APPEARANCE_SETTINGS.theme.id}`);
         expect(el).not.toBeNull();
         expect(el?.querySelector(".ui-field-label")?.textContent).toBe("Theme");
+    });
+});
+
+describe("Appearance — window transparency rows", () => {
+    afterEach(() => {
+        cleanup();
+        window.api = undefined as unknown as AppApi;
+    });
+
+    it("shows transparency on a host whose windows can be see-through", () => {
+        window.api = makeTestHostApi({}, { windowTransparency: true });
+        settings = { "window:transparent": true };
+        render(() => <AppearanceSection />);
+        expect(screen.queryByText("Window transparency")).not.toBeNull();
+        expect(screen.queryByText("Opacity")).not.toBeNull();
+    });
+
+    it("hides transparency, opacity and blur on a host without windowTransparency", () => {
+        window.api = makeTestHostApi();
+        settings = { "window:transparent": true };
+        render(() => <AppearanceSection />);
+        expect(screen.queryByText("Window transparency")).toBeNull();
+        expect(screen.queryByText("Opacity")).toBeNull();
+        expect(screen.queryByText("Background blur")).toBeNull();
+        expect(screen.queryByText("Startup splash screen")).not.toBeNull();
     });
 });

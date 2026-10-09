@@ -20,6 +20,7 @@ import { UserInputModal } from "@/app/modals/userinputmodal";
 import * as MOS from "./mos";
 import { getFileSubject, muxEventSubscribe } from "./mps";
 import { getApi } from "./app-api";
+import { hostHas } from "@/app/host/host-caps";
 import {
     fullConfigAtom,
     setFullConfigAtom,
@@ -64,6 +65,14 @@ export { isFullScreen };
 export const [controlShiftDelayAtom, setControlShiftDelayAtom] = createSignal(false);
 export const [updaterStatusAtom, setUpdaterStatusAtom] = createSignal<UpdaterStatus>("up-to-date");
 export const [updaterVersionAtom, setUpdaterVersionAtom] = createSignal<string | null>(null);
+
+/** Read the updater's state from the host. A host without an updater leaves
+ *  the status at "up-to-date", so every update row and badge stays hidden. */
+export function syncUpdaterStatus(): void {
+    if (!hostHas("updater")) return;
+    setUpdaterStatusAtom(getApi().getUpdaterStatus());
+    setUpdaterVersionAtom(getApi().getUpdaterVersion());
+}
 
 // Which renderer the most recently-mounted terminal actually loaded: "webgl"
 // (GPU-accelerated, xterm WebglAddon) or "dom" (software fallback when WebGL is
@@ -225,12 +234,13 @@ function initGlobalSignals(initOpts: GlobalInitOptions) {
     } catch (_) {}
 
     try {
-        setUpdaterStatusAtom(getApi().getUpdaterStatus());
-        setUpdaterVersionAtom(getApi().getUpdaterVersion());
-        getApi().onUpdaterStatusChange((status) => {
-            setUpdaterStatusAtom(status);
-            setUpdaterVersionAtom(getApi().getUpdaterVersion());
-        });
+        syncUpdaterStatus();
+        if (hostHas("updater")) {
+            getApi().onUpdaterStatusChange((status) => {
+                setUpdaterStatusAtom(status);
+                setUpdaterVersionAtom(getApi().getUpdaterVersion());
+            });
+        }
     } catch (_) {}
 
     if (globalThis.window != null) {

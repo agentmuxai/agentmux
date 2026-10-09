@@ -16,6 +16,7 @@ const h = vi.hoisted(() => ({
     pushNotification: vi.fn(),
     openModal: vi.fn(),
 }));
+const caps = vi.hoisted(() => ({ multiWindow: true }));
 
 vi.mock("@/store/global", () => ({
     getApi: () => ({
@@ -25,6 +26,7 @@ vi.mock("@/store/global", () => ({
     pushNotification: h.pushNotification,
 }));
 vi.mock("@/app/store/modalmodel", () => ({ openModal: h.openModal }));
+vi.mock("@/app/host/host-caps", () => ({ hostHas: (cap: string) => cap === "multiWindow" && caps.multiWindow }));
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { PreviewLayoutCommand: h.PreviewLayoutCommand, OpenLayoutCommand: h.OpenLayoutCommand },
 }));
@@ -178,5 +180,19 @@ describe("LayoutPreviewModal", () => {
         expect(screen.getByText("Adds 1 tab to this window. Nothing that's open is replaced.")).toBeTruthy();
         fireEvent.click(screen.getByText("Open"));
         await vi.waitFor(() => expect(onOpen).toHaveBeenCalledWith({ runCommands: false, newWindow: false }));
+    });
+
+    it("only adds to this window on a host without multiWindow", async () => {
+        caps.multiWindow = false;
+        try {
+            const onOpen = vi.fn(() => Promise.resolve());
+            render(() => <LayoutPreviewModal preview={PREVIEW} onOpen={onOpen} close={() => {}} />);
+            expect(screen.getByText("Adds 1 tab to this window. Nothing that's open is replaced.")).toBeTruthy();
+            expect(screen.getByTestId("layout-preview-new-window").closest("section")?.hidden).toBe(true);
+            fireEvent.click(screen.getByText("Open"));
+            await vi.waitFor(() => expect(onOpen).toHaveBeenCalledWith({ runCommands: false, newWindow: false }));
+        } finally {
+            caps.multiWindow = true;
+        }
     });
 });

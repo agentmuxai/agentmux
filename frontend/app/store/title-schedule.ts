@@ -8,8 +8,9 @@
  * call per turn and let the title wander between near-synonyms. The owner chose
  * the `muxterm` schedule (spec section 9, decision 5): with no usable title, ask
  * on every message until there is one; once there is one, re-evaluate after
- * human turns 2, 5 and 8, then every third (11, 14, ...). A new title replaces
- * the old one only if it is news, not a rewording of the same goal.
+ * human turns 2, 5 and 8, then every third (11, 14, ...). Whether a new title
+ * replaces the old one (only if it is news, not a rewording of the same goal) is
+ * decided where it is stored, in `crates/srv/src/ambient/title.rs`.
  *
  * The backend's empty-title recovery (activity_watcher.rs) covers the agents this
  * cannot: ones driven by jekts or tools, with no human message to trigger it.
@@ -52,37 +53,4 @@ export function isReevaluationTurn(n: number): boolean {
  *  only on a re-evaluation turn. */
 export function shouldRequestTitle(hasUsableTitle: boolean, n: number): boolean {
     return !hasUsableTitle || isReevaluationTurn(n);
-}
-
-/** Words that carry no topic, ignored when comparing two titles. */
-const STOP_WORDS = new Set([
-    "a", "an", "the", "and", "or", "of", "to", "for", "in", "on", "with", "by", "at", "from", "into", "its", "it",
-]);
-
-function topicWords(title: string): Set<string> {
-    return new Set(
-        title
-            .toLowerCase()
-            .replace(/[^a-z0-9 ]+/g, " ")
-            .split(/\s+/)
-            .filter((w) => w.length > 0 && !STOP_WORDS.has(w))
-    );
-}
-
-/** Below this overlap (Jaccard over topic words) a new title counts as news. */
-export const NEWS_MAX_OVERLAP = 0.5;
-
-/**
- * Is `candidate` a different goal from `current`, or a rewording of it? A
- * rewording ("Fix the login race" → "Fix login race condition") keeps the old
- * title, so the title stays stable; a real change of topic replaces it.
- */
-export function isTitleNews(current: string, candidate: string): boolean {
-    const a = topicWords(current);
-    const b = topicWords(candidate);
-    if (a.size === 0 || b.size === 0) return a.size !== b.size;
-    let shared = 0;
-    for (const w of a) if (b.has(w)) shared++;
-    const overlap = shared / (a.size + b.size - shared);
-    return overlap < NEWS_MAX_OVERLAP;
 }

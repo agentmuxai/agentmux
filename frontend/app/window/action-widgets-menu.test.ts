@@ -7,12 +7,16 @@ import { buildWidgetOpenActions } from "./action-widgets-menu";
 const openNewWindowWithView = vi.fn();
 const rpcCall = vi.fn();
 const openViewInNewTab = vi.fn();
+const caps = { multiWindow: true };
 
 vi.mock("@/store/global", () => ({
     getApi: () => ({ openNewWindowWithView }),
 }));
 vi.mock("@/app/store/rpc-util", () => ({
     TabRpcClient: { rpcCall: (...args: unknown[]) => rpcCall(...args) },
+}));
+vi.mock("@/app/host/host-caps", () => ({
+    hostHas: (cap: string) => cap === "multiWindow" && caps.multiWindow,
 }));
 vi.mock("@/app/tab/tab-presets", () => ({
     openViewInNewTab: (...args: unknown[]) => openViewInNewTab(...args),
@@ -69,5 +73,15 @@ describe("buildWidgetOpenActions", () => {
         const wmap = { "defwidget@sysinfo": widget({ blockdef: { meta: { view: "sysinfo" } } }) };
         buildWidgetOpenActions("sysinfo", wmap)[2].run();
         expect(openViewInNewTab).toHaveBeenCalledWith("sysinfo", { view: "sysinfo" });
+    });
+
+    it("offers only 'Open in New Tab' on a host without multiWindow", () => {
+        caps.multiWindow = false;
+        try {
+            const wmap = { "defwidget@browser": widget() };
+            expect(buildWidgetOpenActions("browser", wmap).map((a) => a.label)).toEqual(["Open in New Tab"]);
+        } finally {
+            caps.multiWindow = true;
+        }
     });
 });

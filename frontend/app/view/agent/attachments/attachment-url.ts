@@ -10,7 +10,7 @@
  */
 
 import { createEffect, createResource, createSignal, onCleanup, type Accessor } from "solid-js";
-import { getApi } from "@/app/store/app-api";
+import { authHeaders } from "@/app/store/auth-headers";
 import { getWebServerEndpoint } from "@/util/endpoints";
 
 /** `text` is the extracted text version of a document. */
@@ -29,7 +29,7 @@ const entries = new Map<string, Entry>();
 
 function load(id: string, kind: AttachmentFileKind, entry: Entry): void {
     fetch(`${getWebServerEndpoint()}/api/v1/attachments/${id}/${kind}`, {
-        headers: { "X-AuthKey": getApi()?.getAuthKey?.() ?? "" },
+        headers: authHeaders(),
     })
         .then((r) => (r.ok ? r.blob() : null))
         .then((blob) => entry.setUrl(blob ? URL.createObjectURL(blob) : null))

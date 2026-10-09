@@ -76,6 +76,28 @@
     // No idle placeholder — component returns null when neither loading nor
     // has completed stats.
     // SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2.
+    // "While you were away: …" (TurnAwayDigest): one quiet line above the
+    // working row when you come back to a pane where turns you didn't start
+    // finished. SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §5.3.
+    .agent-away-digest {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        padding: var(--space-1) var(--space-3);
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        background: color-mix(in srgb, var(--accent-color) 6%, var(--elevated-bg-color));
+
+        .agent-away-digest-text {
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    }
+
     .agent-working-row-anchor {
         flex-shrink: 0;
     }
@@ -145,6 +167,26 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                // The live status, then the goal muted beside it: the goal
+                // takes only the room left and is truncated first.
+                // SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.4.
+                display: flex;
+
+                .agent-working-row-primary {
+                    flex: 0 1 auto;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .agent-working-row-detail {
+                    flex: 1 1 0;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    opacity: 0.55;
+                    font-weight: 400;
+                }
             }
 
             .agent-working-row-right {

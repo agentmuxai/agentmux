@@ -325,6 +325,7 @@ partial list.
 | [`SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15`](SPEC_EDITOR_FIRST_KEYSTROKE_NOT_RENDERED_2026_09_15.md) | Editor: the first keystroke after focusing is accepted but not rendered |
 | [`SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30`](SPEC_EDITOR_REUSE_RESTORES_MINIMIZED_PANE_2026_09_30.md) | Spec: An agent opening a file shows the Editor pane it lands in |
 | [`SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17`](SPEC_ESBUILD_OVERRIDE_VITE_INCOMPAT_2026_09_17.md) | SPEC: Remove the `esbuild >=0.28.2` override — it broke `task dev` and never protected the bundle |
+| [`SPEC_EXTERNAL_HOST_BUILD_2026_10_09`](SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md) | SPEC: Build the frontend for a host other than the desktop app |
 | [`SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22`](SPEC_FLEET_BROADCAST_CROSS_TIER_TARGETING_2026_08_22.md) | SPEC: `FleetBroadcast` reaches cross-channel/LAN/WAN targets |
 | [`SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22`](SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) | SPEC: `FleetBulkStop` reaches cross-channel targets; LAN/WAN deliberately deferred |
 | [`SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29`](SPEC_FLOATING_PANE_EDGE_RESIZE_2026_05_29.md) | SPEC: Floating-pane edge-resize (Win32) |
@@ -436,6 +437,7 @@ partial list.
 | [`SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14`](SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md) | SPEC — Slash Command Architecture |
 | [`SPEC_SOUND_NOTIFICATIONS_2026_06_05`](SPEC_SOUND_NOTIFICATIONS_2026_06_05.md) | SPEC — Sound notifications subsystem |
 | [`SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03`](SPEC_SRV_HANG_WHILE_ALIVE_DETECTION_2026_08_03.md) | SPEC: srv hang-while-alive detection (#942 family) |
+| [`SPEC_SRV_HEADLESS_MODE_2026_09_26`](SPEC_SRV_HEADLESS_MODE_2026_09_26.md) | SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host |
 | [`SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18`](SPEC_STATUSBAR_DISK_PILL_CROSS_PLATFORM_2026_09_18.md) | SPEC: the status bar's Disk pill must not be Windows-only |
 | [`SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08`](SPEC_STATUSBAR_HIDE_MUXBUS_SETTING_2026_10_08.md) | SPEC: a setting to hide the MuxBus cloud dot and sign-in info in the status bar |
 | [`SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25`](SPEC_STATUSBAR_HOST_POPOVER_INSTANCE_AND_OPEN_DATA_DIR_2026_09_25.md) | SPEC: status bar host popover — drop the "Instance" row, add "open in file manager" |
@@ -547,6 +549,8 @@ partial list.
 | [`SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02`](SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) | Spec: an orthogonal "attached task" status axis, sibling to `TurnPhase` |
 | [`SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27`](SPEC_BACKGROUND_TASK_STRUCTURED_FEED_AND_SWARM_OWNERSHIP_2026_09_27.md) | Spec: Background tasks from the CLI's structured task feed, owned in Swarm |
 | [`SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16`](SPEC_BROWSER_AND_EDITOR_PANES_2026_04_16.md) | SPEC: Browser and Editor Panes |
+| [`SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08`](SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md) | SPEC: A browser pane's new windows open the way the page asked, and the agent that owns the opener drives them |
+| [`SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08`](SPEC_BROWSER_PANE_POPUPS_ADOPTED_2026_10_08.md) | SPEC: Popups from a browser pane stay in AgentMux, and an agent can drive them |
 | [`SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07`](SPEC_BUNDLE_CONTENTS_MEMORY_NOT_MCP_2026_10_07.md) | SPEC: A bundle holds instructions, context, skills, Global Memory and Personal Memory — not MCP servers |
 | [`SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21`](SPEC_CANONICAL_AGENT_ID_MIGRATION_2026_09_21.md) | SPEC: retire the agent slug as a lookup key — `db_agents.id` becomes canonical |
 | [`SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07`](SPEC_CEF_MILESTONE_UPGRADE_148_TO_152_2026_09_07.md) | CEF milestone upgrade: 148 (7778) → 152 (7977), all three platforms |
@@ -603,6 +607,7 @@ partial list.
 | [`SPEC_PANE_TAB_CONTRACT_V1_2026_09_24`](SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md) | SPEC: Pane Tab contract v1 — one general interface for every pane tab (and future user-loaded widgets), starting with the Help "ghost" fix |
 | [`SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11`](SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB_2026_07_11.md) | SPEC: Pool adoption for foreign labels + srv window-row label crumb + non-Windows close verification |
 | [`SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31`](SPEC_PROCESS_AND_TURN_STATE_TRACKING_CONSOLIDATION_2026_07_31.md) | SPEC — Process & Turn-State Tracking: This Session's Findings, and the Case for a Unified State Machine |
+| [`SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09`](SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md) | SPEC: One provider-login implementation, in srv |
 | [`SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20`](SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md) | SPEC: Re-authentication from Agent Auth Failure |
 | [`SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02`](SPEC_REMOTE_TERMINALS_AND_DURABLE_SESSIONS_2026_10_02.md) | SPEC: Remote terminals (SSH, WSL) and durable remote sessions — implementation plan |
 | [`SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06`](SPEC_RENAME_KNOWLEDGE_TO_MEMORY_2026_10_06.md) | SPEC: Rename the Knowledge pane to Memory, and give "memory" one set of meanings |
@@ -612,7 +617,7 @@ partial list.
 | [`SPEC_RPC_BINDINGS_CODEGEN_2026_09_07`](SPEC_RPC_BINDINGS_CODEGEN_2026_09_07.md) | SPEC: Generate the Rust ↔ TypeScript RPC bindings from srv |
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
-| [`SPEC_SRV_HEADLESS_MODE_2026_09_26`](SPEC_SRV_HEADLESS_MODE_2026_09_26.md) | SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host |
+| [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |

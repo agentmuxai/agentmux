@@ -59,6 +59,7 @@
 
 import { createSignal, type Accessor } from "solid-js";
 
+import { authHeaders } from "./auth-headers";
 import { getApi, openWindowEntriesAtom } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -171,9 +172,7 @@ function myLabelSync(): string | null {
  * next claim or on history-replay.
  */
 async function publishClaim(payload: ClaimPayload): Promise<void> {
-    const key = getApi()?.getAuthKey?.();
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (key) headers["X-AuthKey"] = key;
+    const headers = authHeaders({ "Content-Type": "application/json" });
     try {
         const resp = await fetch(getWebServerEndpoint() + "/agentmux/wps/publish", {
             method: "POST",

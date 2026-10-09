@@ -161,9 +161,20 @@ let firstPass: Promise<void> | null = null;
  */
 export function startWidgetLoader(): Promise<void> {
     if (firstPass) return firstPass;
+    // Without srv's home directory (an srv too old to send `srvinfo`) there is
+    // no widgets folder to read: start without user widgets rather than fail
+    // startup. The status bar says the backend is out of date.
+    let widgetsDir: string;
+    try {
+        widgetsDir = `${agentmuxHome()}/widgets`;
+    } catch (e) {
+        console.warn("[widget-loader] no AgentMux home directory from srv; user widgets not loaded:", e);
+        firstPass = Promise.resolve();
+        return firstPass;
+    }
     const loaded = new Set<string>();
     const deps: WidgetLoaderDeps = {
-        widgetsDir: `${agentmuxHome()}/widgets`,
+        widgetsDir,
         readText: async (path) => (await RpcApi.ReadEditorFileCommand(TabRpcClient, { path })).content,
         importModule: (source) => importFromBlob(source),
     };

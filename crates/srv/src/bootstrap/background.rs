@@ -137,6 +137,8 @@ pub fn spawn_background_subsystems(
     let activity_mstore = Arc::clone(mstore);
     let activity_filestore = Arc::clone(filestore);
     let activity_event_bus = event_bus.clone();
+    // Every ambient call's spend goes to the status bar's totals (ambient/spend.rs).
+    crate::ambient::spend::publish_on(event_bus.clone());
     tokio::spawn(async move {
         backend::reactive::activity_watcher::run_agent_summary_loop(
             activity_mstore, activity_filestore, activity_event_bus,

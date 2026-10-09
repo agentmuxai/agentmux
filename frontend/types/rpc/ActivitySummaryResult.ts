@@ -2,9 +2,10 @@
 import type { TokenCounts } from "./TokenCounts";
 
 /**
- * Response from session:activity_summary. The backend also writes
- * `term:ambient_summary` to block meta. `tokens` is `None` when the request
- * was rejected as stale-on-arrival or the underlying call failed/was
- * cancelled — callers should only record usage when it's `Some`.
+ * Response from session:activity_summary. The backend stores the title in
+ * `term:ambient_summary` itself (`ambient::title`); `summary` is the title this
+ * call stored, empty when it left the title as it was. `tokens` is `None` when
+ * the request was rejected as stale-on-arrival or the underlying call failed or
+ * was cancelled — callers should only record usage when it's `Some`.
  */
 export type ActivitySummaryResult = { summary: string, tokens?: TokenCounts, };

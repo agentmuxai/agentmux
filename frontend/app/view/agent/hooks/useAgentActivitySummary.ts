@@ -15,16 +15,18 @@
  * `TurnStart.content`, see agent-pane-state/reducer.ts).
  *
  * Sends that text, plus the CURRENTLY DISPLAYED title (already in block
- * meta), to claude-haiku-4-5-20251001 and asks it to maintain a stable,
- * PR-title-style summary of the session's OVERALL GOAL — repeating the
- * current title back unchanged unless the new message represents a genuinely
- * new or expanded goal. This replaces the previous "what is currently being
+ * meta), to the ambient model and asks it to maintain a stable,
+ * PR-title-style summary of the session's OVERALL GOAL: it replies SKIP while
+ * the current title still fits, and writes a new one only for a genuinely
+ * new or expanded goal (`ambient::prompt::build_session_title_prompt`). This replaces the previous "what is currently being
  * worked on" per-turn micro-activity phrasing, which regenerated from a
  * blank slate every call and had no way to recognize "this is still the same
  * task." See docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
  *
- * The result is written to the `term:ambient_summary` block meta key, which
- * agent-model.ts and swarm-model.ts read (preferring it over the free
+ * The backend stores the result in the `term:ambient_summary` block meta key
+ * itself, keeping the current title unless the new one names a different goal
+ * (`crates/srv/src/ambient/title.rs`, shared with its empty-title recovery).
+ * agent-model.ts and swarm-model.ts read that key (preferring it over the free
  * `term:osc_title` signal — see
  * docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md §3.4).
  *
@@ -32,17 +34,11 @@
  * panes can accommodate up to 12.
  *
  * This call is routed through the backend's Ambient Model Call gateway
- * (`crate::ambient`), keyed by block_id: the gateway persists its
- * per-block generation state across pane remounts (tab-switch), but this
- * hook's own state does not (a fresh `activeTurnId` starts at 0 on every
- * mount — confirmed by useBlockActivity.ts's own comment on remount
- * behavior). Sending the local counter as `generation` would mean a remount
- * right after a high-generation turn could send a *lower* number than the
- * gateway already has recorded for this block, getting rejected as
- * stale-on-arrival for up to 15s (until the still-in-flight prior call's
- * guard drops) even though it's a legitimately new request. `Date.now()` is
- * used for the wire `generation` instead — always increasing regardless of
- * remounts, since real time never goes backwards for this purpose.
+ * (`crate::ambient`), keyed by block_id, which cancels a call superseded by a
+ * newer message. The gateway's per-block generation outlives this hook's mount
+ * (a tab switch remounts it), so the wire `generation` is `Date.now()`, which
+ * only increases, not a per-mount counter, which would restart lower than the
+ * gateway's last one and be refused as stale.
  *
  * The summary is never cleared on our own — it persists across turns so the
  * header always shows the last known title. It's cleared elsewhere
@@ -55,12 +51,13 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
-import { recordTurn } from "@/app/store/token-usage";
+import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
-import { isTitleNews, META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
+import { META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
 import { MOS } from "@/app/store/global";
 import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import { META_TITLE } from "@/app/store/meta-keys";
 
 export interface UseAgentActivitySummaryOptions {
     blockId: string;
@@ -70,13 +67,6 @@ export interface UseAgentActivitySummaryOptions {
 
 export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): void {
     const { blockId, turnPhase, getRootWidth } = opts;
-
-    // Monotonically increasing local counter, scoped to this mount — the
-    // write-boundary staleness guard (a fast second submission before the
-    // first call returns must discard the first call's result). Independent
-    // of the wire `generation` sent to the backend gateway — see the module
-    // doc comment for why those are deliberately different counters.
-    let activeTurnId = 0;
 
     // `defer: true` — skip the run at mount. A freshly-opened pane whose
     // live turnPhase happens to already be Submitting (e.g. reattaching
@@ -106,7 +96,7 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
         // a remount (tab switch) does not restart the schedule.
         const meta = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta;
         const turn = nextHumanTurn(blockId, meta?.[META_HUMAN_TURNS]);
-        const currentTitle = meta?.["term:ambient_summary"];
+        const currentTitle = meta?.[META_TITLE];
         const hasTitle = typeof currentTitle === "string" && isUsableTitle(currentTitle);
         fireAndForget(() =>
             ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
@@ -115,15 +105,11 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
             } as any)
         );
         if (!shouldRequestTitle(hasTitle, turn)) return;
-        // Only a turn that issues a request may supersede one in flight: a
-        // message on a non-scheduled turn must not discard the scheduled turn's
-        // result (ReAgent P2 on #4238).
-        activeTurnId++;
-        const myTurnId = activeTurnId;
         const rootWidth = getRootWidth() ?? 400;
         const textWidth = Math.max(0, rootWidth - 280);
         const wordTarget = Math.max(5, Math.min(12, Math.floor(textWidth / 48)));
 
+        // The backend stores the title and reports the spend (ambient/spend.rs).
         RpcApi.AgentActivitySummaryCommand(
             TabRpcClient,
             {
@@ -132,28 +118,8 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
                 generation: Date.now(),
                 user_message: phase.pendingContent,
             },
-            { timeout: 20_000 },
-        ).then((result) => {
-            if (activeTurnId !== myTurnId) return; // superseded by a newer turn
-            if (result.tokens) {
-                recordTurn("ambient:activity_summary", result.tokens);
-            }
-            // Only a real title is stored. The backend already rejects placeholders and
-            // the `KEEP` abstain token, so an empty result means "no change"; this second
-            // check is defence in depth, so a build mismatch can never write `(none yet)`
-            // to the meta and have it read back as the current title.
-            if (!result.summary || !isUsableTitle(result.summary)) return;
-            // A rewording of the goal the title already names keeps the old title,
-            // so it stays stable; only a different goal replaces it. Read now, not
-            // at submit: the backend's recovery may have filled it meanwhile.
-            const latest = MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()?.meta?.["term:ambient_summary"];
-            if (typeof latest === "string" && isUsableTitle(latest) && !isTitleNews(latest, result.summary)) return;
-            fireAndForget(() =>
-                ObjectService.UpdateObjectMeta(makeORef("block", blockId), {
-                    "term:ambient_summary": result.summary,
-                } as any)
-            );
-        }).catch(() => {
+            { timeout: AMBIENT_PULL_TIMEOUT_MS },
+        ).catch(() => {
             // Silently ignore — the header just stays on its last title.
         });
     }, { defer: true }));

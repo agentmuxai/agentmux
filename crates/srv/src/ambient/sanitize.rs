@@ -1,28 +1,18 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Strips the formatting a model wraps around a bare line of text. Whether what
-//! is left is *usable* is `validate`'s question.
+//! Strips the formatting a model wraps around its whole reply. Whether what is
+//! left is usable is the reply format's question (`reply`), then the purpose's own
+//! check (`validate`).
 
-/// Defends against the model wrapping its answer in markdown, or opening
-/// with conversational filler, despite every ambient-call prompt asking for
-/// a bare, direct line of plain text — instruction-following isn't
-/// guaranteed. An unwrapped fence is what produces a literal
-/// ` ``` `/newline/` ``` ` blob on a UI surface that renders this text
-/// verbatim (e.g. the ghost-text composer placeholder, which has no
-/// markdown renderer). Filler ("Yeah, let's fix the bug" instead of "Fix
-/// the bug") is a separate readability problem the prompt alone can't fully
-/// prevent — same "prompt nudge + reliable sanitizer" split this project
-/// already uses for the fence/quote case. Applied once here so every
-/// current and future `invoke_haiku` caller is covered, not
-/// just the one that first surfaced each bug.
+/// Removes, repeatedly, then trims: a code fence wrapping the whole text
+/// (optionally with a language tag), one matching pair of quotes wrapping it, and
+/// a conversational opener ("Yeah, let's…"). A reply left with nothing but
+/// backticks (an empty fence) becomes "", which callers already treat as no
+/// reply.
 ///
-/// Strips a wrapping code fence, wrapping quote characters, and a leading
-/// conversational preamble, repeatedly (a model can combine all three —
-/// e.g. a quoted, filler-prefixed sentence), then trims. A result left with
-/// nothing but backticks (e.g. an empty fence) collapses to "" so callers'
-/// existing empty-string handling (skip writing ghost text / filter out the
-/// summary) covers it without any caller-side change.
+/// Run on the whole reply by the CLI, and again on the text after `ANSWER:` by
+/// `reply::parse`, which the first pass can't reach past the prefix.
 pub fn sanitize_ambient_text(raw: &str) -> String {
     let mut s = raw.trim().to_string();
     for _ in 0..4 {
@@ -30,12 +20,9 @@ pub fn sanitize_ambient_text(raw: &str) -> String {
         if let Some(inner) = strip_wrapping_fence(&s) {
             s = inner;
         }
-        s = s
-            .trim_matches(|c: char| {
-                matches!(c, '"' | '\'' | '\u{201C}' | '\u{201D}' | '\u{2018}' | '\u{2019}')
-            })
-            .trim()
-            .to_string();
+        if let Some(inner) = strip_wrapping_quotes(&s) {
+            s = inner;
+        }
         if let Some(rest) = strip_conversational_preamble(&s) {
             s = rest;
         }
@@ -52,7 +39,7 @@ pub fn sanitize_ambient_text(raw: &str) -> String {
 /// Strip a wrapping code fence (triple-backtick, optionally with a language
 /// tag on the opening line, or a single inline backtick) if the *entire*
 /// string is wrapped — a fence-like substring embedded mid-sentence is left
-/// alone. Returns the un-fenced inner text (not yet trimmed of quotes).
+/// alone. Returns the un-fenced inner text, trimmed.
 fn strip_wrapping_fence(s: &str) -> Option<String> {
     let s = s.trim();
     for fence in ["```", "`"] {
@@ -64,6 +51,21 @@ fn strip_wrapping_fence(s: &str) -> Option<String> {
                 }
             }
             return Some(inner.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Strip ONE pair of quotes that wraps the whole string. A quote at only one end,
+/// or a pair that closes before the end (`"a" and "b"`), is part of the text.
+fn strip_wrapping_quotes(s: &str) -> Option<String> {
+    const PAIRS: &[(char, char)] = &[('"', '"'), ('\'', '\''), ('\u{201C}', '\u{201D}'), ('\u{2018}', '\u{2019}')];
+    let s = s.trim();
+    for &(open, close) in PAIRS {
+        if let Some(inner) = s.strip_prefix(open).and_then(|r| r.strip_suffix(close)) {
+            if !inner.contains(open) && !inner.contains(close) {
+                return Some(inner.trim().to_string());
+            }
         }
     }
     None
@@ -161,6 +163,7 @@ mod sanitize_ambient_text_tests {
     #[test]
     fn passes_plain_text_through_unchanged() {
         assert_eq!(sanitize_ambient_text("Run the tests"), "Run the tests");
+        assert_eq!(sanitize_ambient_text("ANSWER: Run the tests"), "ANSWER: Run the tests");
     }
 
     #[test]
@@ -185,10 +188,19 @@ mod sanitize_ambient_text_tests {
     }
 
     #[test]
-    fn strips_wrapping_quotes() {
+    fn strips_one_wrapping_pair_of_quotes() {
         assert_eq!(sanitize_ambient_text("\"Run the tests\""), "Run the tests");
         assert_eq!(sanitize_ambient_text("'Run the tests'"), "Run the tests");
         assert_eq!(sanitize_ambient_text("\u{201C}Run the tests\u{201D}"), "Run the tests");
+    }
+
+    /// Quotes were trimmed from each end independently, so a reply ending in a
+    /// quoted name lost its closing quote.
+    #[test]
+    fn a_quote_at_only_one_end_is_text() {
+        assert_eq!(sanitize_ambient_text("Rename it to \"foo\""), "Rename it to \"foo\"");
+        assert_eq!(sanitize_ambient_text("\"foo\" is the new name"), "\"foo\" is the new name");
+        assert_eq!(sanitize_ambient_text("\"foo\" and \"bar\""), "\"foo\" and \"bar\"");
     }
 
     #[test]

@@ -8,6 +8,7 @@ import { getWSServerEndpoint } from "@/util/endpoints";
 import { addWSReconnectHandler, globalWS, initGlobalWS, WSControl } from "./ws";
 import { DefaultRouter, setDefaultRouter } from "./rpc-util-base";
 import { getApi } from "./global";
+import { noteSrvConnectionOpened, noteSrvInfoMessage } from "./srv-info";
 
 let TabRpcClient: TabClient;
 
@@ -16,6 +17,7 @@ function initWshrpc(tabId: string): WSControl {
     setDefaultRouter(router);
     const handleFn = (event: WSEventType) => {
         if (event.data == null) return;
+        noteSrvInfoMessage(event.data);
         DefaultRouter.recvRpcMessage(event.data);
     };
 
@@ -26,6 +28,8 @@ function initWshrpc(tabId: string): WSControl {
     const authOpts = authKey ? { authKey } : undefined;
 
     initGlobalWS(getWSServerEndpoint(), tabId, handleFn, authOpts);
+    // Each connection reports its own srvinfo (a reconnect can reach another srv).
+    addWSReconnectHandler(noteSrvConnectionOpened);
     globalWS.connectNow("connectWshrpc");
     TabRpcClient = new TabClient(makeTabRouteId(tabId));
     DefaultRouter.registerRoute(TabRpcClient.routeId, TabRpcClient);

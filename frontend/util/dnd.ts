@@ -12,6 +12,7 @@
  * Spec: docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md §3.3, §3.4, §3.7.
  */
 
+import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
 
 export interface DropOutcome {
@@ -28,6 +29,7 @@ export interface DropOutcome {
  * gracefully, e.g. to the dropped files' bytes.
  */
 export async function consumeDragPaths(): Promise<string[]> {
+    if (!hostHas("nativeFileDrop")) return [];
     try {
         const paths = await getApi().consumeDroppedFilePaths();
         return Array.isArray(paths) ? paths : [];
@@ -41,6 +43,7 @@ export async function consumeDragPaths(): Promise<string[]> {
  * a pane decide by file name before the drop. Empty when unavailable.
  */
 export async function peekDragPaths(): Promise<string[]> {
+    if (!hostHas("nativeFileDrop")) return [];
     try {
         const paths = await getApi().peekDroppedFilePaths?.();
         return Array.isArray(paths) ? paths : [];

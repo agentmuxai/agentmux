@@ -124,6 +124,10 @@ impl SubagentWatcher {
     /// `false` if the subagent isn't tracked (e.g. it aged out between the
     /// RPC firing and resolving) — the caller should treat that as a no-op,
     /// not an error.
+    ///
+    /// A name already set is kept: the parent's description can land in a late
+    /// sidecar while this call runs, and it is the better name. Nothing is
+    /// broadcast then.
     pub fn set_display_name(&self, agent_id: &str, display_name: &str) -> bool {
         // Captured alongside the mutation itself (not re-looked-up after
         // unlocking) — this is the exact moment a NAME-based grouping key is
@@ -136,13 +140,16 @@ impl SubagentWatcher {
             let mut found = false;
             for session in sessions.values_mut() {
                 if let Some(state) = session.subagents.get_mut(agent_id) {
+                    found = true;
+                    if state.info.display_name.is_some() {
+                        break;
+                    }
                     state.info.display_name = Some(display_name.to_string());
                     found_context = Some((
                         state.info.parent_block_id.clone(),
                         state.info.session_id.clone(),
                         state.info.dispatch_id.clone(),
                     ));
-                    found = true;
                     break;
                 }
             }
@@ -161,22 +168,8 @@ impl SubagentWatcher {
             );
         }
 
-        if found {
-            let named_event = WSEventType {
-                eventtype: WS_EVENT_RPC.to_string(),
-                oref: String::new(),
-                data: Some(json!({
-                    "command": "eventrecv",
-                    "data": {
-                        "event": "subagent:named",
-                        "data": {
-                            "agentId": agent_id,
-                            "displayName": display_name,
-                        }
-                    }
-                })),
-            };
-            self.event_bus.broadcast_event(&named_event);
+        if found_context.is_some() {
+            self.broadcast_subagent_named(agent_id, display_name);
         }
         found
     }
@@ -224,6 +217,10 @@ impl SubagentWatcher {
         self.naming_triggered.lock().unwrap().contains(dispatch_id)
     }
 
+    /// How long a solo subagent's eager name waits for a late `.meta.json`, whose
+    /// description makes the model call unnecessary.
+    pub(super) const SIDECAR_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
     /// Fire the one eager Haiku-naming call for a dispatch's first-observed
     /// live spawn (issue: SPEC_SWARM_DISPATCH_NAMING_AND_ROW_MODEL_2026_07_19).
     /// Caller (`process_jsonl_change`) has already atomically claimed
@@ -246,14 +243,17 @@ impl SubagentWatcher {
                     &watcher,
                     &dispatch_id,
                     &first_member_agent_id,
-                    crate::ambient::limits::pull_call_semaphore(),
+                    crate::ambient::limits::Class::Interactive,
                 ).await;
             } else {
+                // The transcript is often seen before its sidecar, whose
+                // description names the subagent for free; give it time to land.
+                tokio::time::sleep(Self::SIDECAR_GRACE).await;
                 crate::ambient::tasks::generate_subagent_name(
                     &watcher.mstore,
                     &watcher,
                     &first_member_agent_id,
-                    crate::ambient::limits::pull_call_semaphore(),
+                    crate::ambient::limits::Class::Interactive,
                 ).await;
             }
         });
@@ -345,10 +345,9 @@ impl SubagentWatcher {
     /// `process_jsonl_change`'s doc comment and
     /// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md).
     ///
-    /// Deliberately separate from `trigger_eager_naming`'s live path: uses
-    /// its own `backlog_naming_semaphore()` (cap 1), not the shared
-    /// `pull_call_semaphore()` every live user-facing ambient caller
-    /// contends for.
+    /// Deliberately separate from `trigger_eager_naming`'s live path: runs as
+    /// background work (`limits::Class::Background`), so it never queues ahead
+    /// of a name or title the user is waiting on.
     pub(crate) async fn resolve_unnamed_backlog(self: std::sync::Arc<Self>) {
         let items = self.select_unnamed_backlog(BACKLOG_NAMING_BATCH_LIMIT);
         for item in items {
@@ -360,7 +359,7 @@ impl SubagentWatcher {
                             &watcher.mstore,
                             &watcher,
                             &agent_id,
-                            crate::ambient::limits::backlog_naming_semaphore(),
+                            crate::ambient::limits::Class::Background,
                         )
                         .await;
                     }
@@ -370,7 +369,7 @@ impl SubagentWatcher {
                             &watcher,
                             &dispatch_id,
                             &representative_agent_id,
-                            crate::ambient::limits::backlog_naming_semaphore(),
+                            crate::ambient::limits::Class::Background,
                         )
                         .await;
                     }

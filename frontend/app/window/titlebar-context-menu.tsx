@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
+import { hostHas } from "@/app/host/host-caps";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createTab, getApi } from "@/store/global";
@@ -48,12 +49,14 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
     const buildItems = (): PopoverMenuItem[] => {
         const items: PopoverMenuItem[] = [];
 
-        items.push({
-            label: "New Window",
-            click: () => {
-                fireAndForget(async () => getApi().openNewWindow());
-            },
-        });
+        if (hostHas("multiWindow")) {
+            items.push({
+                label: "New Window",
+                click: () => {
+                    fireAndForget(async () => getApi().openNewWindow());
+                },
+            });
+        }
 
         items.push({
             label: "New Tab",

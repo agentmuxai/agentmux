@@ -84,6 +84,21 @@
     color: var(--secondary-text-color);
 }
 
+.tower-host-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+// Under the group rows' arrow: a group of one lines up with the group names.
+.tower-process-row--single .tower-name {
+    padding-left: 30px;
+}
+
+.tower-group-row .tower-label {
+    font-weight: 500;
+}
+
 .tower-filter {
     max-width: 360px;
 }

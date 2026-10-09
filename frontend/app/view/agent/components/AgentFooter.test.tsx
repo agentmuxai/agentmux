@@ -773,6 +773,8 @@ describe("AgentWorkingRow across a turn's passes", () => {
         turnId: 7,
         seq: 1,
         origin: "user",
+        trigger: { kind: "user", from: null },
+        absorbed: [],
         startedAtMs: Date.now() - 125_000,
         passes: 1,
         active: true,
@@ -857,6 +859,66 @@ describe("AgentWorkingRow across a turn's passes", () => {
         expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.410  ·  9 steps  ·  2 passes");
     });
 
+    it("opens an external turn by naming what started it, then goes back to its usual text", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX" } })}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("↳ jekt from AgentX");
+        // The goal beside it, muted (truncated first).
+        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
+
+        const later = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                turnLedger={ledger({ startedAtMs: Date.now() - 10_000, trigger: { kind: "agent", from: "AgentX" } })}
+            />
+        ));
+        expect(later.container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("a turn the user started opens with its usual text", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix it" turnLedger={ledger({ startedAtMs: Date.now() - 500 })} />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix it");
+    });
+
+    it("names an external turn on its Worked line, with what joined it", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1 }}
+                turnLedger={ledger({
+                    trigger: { kind: "service", from: "github-consumer" },
+                    absorbed: [{ kind: "user", from: null }],
+                    inputs: 1,
+                    startedAtMs: end - 42_000,
+                    active: false,
+                    countedPasses: 2,
+                    passes: 2,
+                    outputTokens: 900,
+                    costUsd: 0.05,
+                    steps: 4,
+                    lastPassEndedAtMs: end,
+                    endedAtMs: end,
+                    end: "completed",
+                })}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe(
+            "✓ Worked on github-consumer's notice  ·  42s  ·  900 tokens",
+        );
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe(
+            "$0.050  ·  4 steps  ·  2 passes  ·  +1 your message",
+        );
+    });
+
     it("reports the turn from the pane's own carry when srv counted no passes (ACP, App Server, subprocess)", () => {
         const end = Date.now() - 1_000;
         const { container } = render(() => (
@@ -877,6 +939,52 @@ describe("AgentWorkingRow across a turn's passes", () => {
         ));
 
         expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.200  ·  3 steps");
+    });
+});
+
+/**
+ * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6: the left zone is the
+ * presenter's line (status/present-status.ts, tested there in depth).
+ */
+describe("AgentWorkingRow live status", () => {
+    const busy = (startedAt: number) => ({
+        phase: null,
+        phaseSince: 0,
+        tools: [{ id: "t1", activity: { family: "bash" as const, label: "Running the srv test suite" }, startedAt }],
+        plan: null,
+        planAt: 0,
+    });
+
+    it("names what is running once it has run a moment, over the goal", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 3_000)} />
+        ));
+        expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("Running the srv test suite");
+        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
+    });
+
+    it("keeps the goal while a call is too young to mention", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 200)} />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("a question or approval for the user outranks everything", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                stopping={false}
+                activity={busy(Date.now() - 3_000)}
+                needsYou="Waiting for your approval: Running git push"
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Waiting for your approval: Running git push");
+    });
+
+    it("a status like Stopping still outranks what is running", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} stopping={true} activity={busy(Date.now() - 3_000)} />);
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
     });
 });
 

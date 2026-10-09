@@ -6,8 +6,8 @@
 // for backward-compat (97 files import from that module).
 
 import { getWebServerEndpoint } from "@/util/endpoints";
+import { authHeaders } from "./auth-headers";
 import { fetch } from "@/util/fetchutil";
-import { getApi } from "./app-api";
 
 export async function fetchMuxFile(
     zoneId: string,
@@ -21,11 +21,7 @@ export async function fetchMuxFile(
     // Use X-AuthKey header instead of `?authkey=` query-string fallback.
     // The fallback was removed in the 2026-05-11 audit (C3) for everything
     // except the /ws upgrade route, where headers aren't possible.
-    const headers: Record<string, string> = {};
-    if (globalThis.window != null) {
-        const authKey = getApi()?.getAuthKey?.();
-        if (authKey) headers["X-AuthKey"] = authKey;
-    }
+    const headers = authHeaders();
     const resp = await fetch(getWebServerEndpoint() + "/agentmux/file?" + usp.toString(), { headers });
     if (!resp.ok) {
         if (resp.status === 404) return { data: null, fileInfo: null };

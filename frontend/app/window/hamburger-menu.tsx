@@ -15,6 +15,7 @@
 import { createTab, getApi, openOrFocusPaneByView, settingsAtom } from "@/store/global";
 import { openConnectors, openMemory } from "@/app/view/section-pane/panes";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
+import { hostHas } from "@/app/host/host-caps";
 import { fireAndForget } from "@/util/util";
 import { openModal } from "@/app/store/modalmodel";
 import { CommandPaletteModal } from "@/app/modals/command-palette";
@@ -98,23 +99,31 @@ export function HamburgerMenu(props: HamburgerMenuProps): JSX.Element {
                 onClick: () => createTab(),
             },
             { label: "", divider: true },
-            {
-                label: "New Window",
-                icon: "window-restore",
-                shortcut: shortcutFor("window:new"),
-                onClick: () => getApi().openNewWindow().catch(console.error),
-            },
-            { label: "", divider: true },
+            ...(hostHas("multiWindow")
+                ? [
+                      {
+                          label: "New Window",
+                          icon: "window-restore",
+                          shortcut: shortcutFor("window:new"),
+                          onClick: () => getApi().openNewWindow().catch(console.error),
+                      },
+                      { label: "", divider: true },
+                  ]
+                : []),
             {
                 label: "Theme",
                 icon: "palette",
                 subItems: themeSubItems,
             },
-            {
-                label: "Opacity",
-                icon: "circle-half-stroke",
-                subItems: opacitySubItems,
-            },
+            ...(hostHas("windowTransparency")
+                ? [
+                      {
+                          label: "Opacity",
+                          icon: "circle-half-stroke",
+                          subItems: opacitySubItems,
+                      },
+                  ]
+                : []),
             {
                 // SPEC_LAYOUT_FILES_2026_09_25.md §6.1 — placement per
                 // SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md §5.1.

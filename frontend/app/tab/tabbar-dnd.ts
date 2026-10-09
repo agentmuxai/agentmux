@@ -178,6 +178,8 @@ export function decideTabRelease(r: {
     stripRect: { left: number; right: number; top: number; bottom: number } | null;
     tabCount: number;
     draggedTabId: string | null;
+    /** The host can open a torn-off tab as its own window (`HostCaps.tearOff`). */
+    canTearOff: boolean;
 }): TabRelease {
     if (r.escaped) return "abort";
     const { input, stripRect: rect } = r;
@@ -189,7 +191,7 @@ export function decideTabRelease(r: {
     // and strand the source. Their cross-window exit is the host mouse-hook
     // remount.
     const releasedBelowStrip = rect != null && input.clientY > rect.bottom + TEAR_PAST_PX;
-    if (!dropInsideBar && releasedBelowStrip && r.draggedTabId != null && r.tabCount > 1) return "tear-off";
+    if (r.canTearOff && !dropInsideBar && releasedBelowStrip && r.draggedTabId != null && r.tabCount > 1) return "tear-off";
     if (dropInsideBar && r.ip != null && r.draggedTabId != null) return "reorder";
     return "none";
 }

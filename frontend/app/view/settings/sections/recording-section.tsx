@@ -8,12 +8,12 @@
  * for the full design this section implements.
  */
 import { Button, Select, TextInput } from "@/app/element/ui";
+import { authHeaders } from "@/app/store/auth-headers";
 import { createSignal, onCleanup, onMount, Show, For, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { isDev } from "@/app/store/misc-utils";
 import { getWebServerEndpoint } from "@/util/endpoints";
-import { getApi } from "@/app/store/app-api";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { createMicLevelMeter } from "@/app/hook/useMicLevelMeter";
@@ -275,7 +275,7 @@ export function RecordingSection(): JSX.Element {
             const url = `${base}/api/v1/voice/transcribe?mime=${encodeURIComponent(mime)}`;
             const resp = await fetch(url, {
                 method: "POST",
-                headers: { "X-AuthKey": getApi()?.getAuthKey?.() ?? "", "Content-Type": mime },
+                headers: authHeaders({ "Content-Type": mime }),
                 body: blob,
             });
             if (gen !== testGeneration) return; // cancelled (or superseded by a new test) while the request was in flight

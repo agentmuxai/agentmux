@@ -23,6 +23,8 @@ const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
     turnId: 1_000,
     seq: 1,
     origin: "user",
+    trigger: { kind: "user", from: null },
+    absorbed: [],
     startedAtMs: 1_000,
     passes: 1,
     active: true,

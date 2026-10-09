@@ -33,6 +33,8 @@ vi.mock("@/app/store/rpc-api", () => ({
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/mps", () => ({ muxEventSubscribe: () => () => {} }));
 vi.mock("@/app/store/app-api", () => ({ getApi: () => ({ getAuthKey: () => "k" }) }));
+// The desktop host: native dialogs, so the empty pane offers to pick a file.
+vi.mock("@/app/host/host-caps", () => ({ hostHas: () => true }));
 vi.mock("@/util/endpoints", () => ({ getWebServerEndpoint: () => "http://x" }));
 vi.mock("@/util/fetchutil", () => ({
     fetch: () => Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(["png"])) }),

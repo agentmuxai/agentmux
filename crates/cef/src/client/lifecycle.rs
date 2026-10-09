@@ -66,6 +66,80 @@ pub(crate) fn is_last_window_close(browser_list_empty: bool, is_browser_pane: bo
     browser_list_empty && !is_browser_pane && draining
 }
 
+/// Tell srv about a popup window (`opened`, `closed`). Callers are CEF
+/// lifecycle callbacks on the UI thread, so the request is made elsewhere:
+/// by one worker that sends reports in the order they were made, so a popup
+/// that closes as soon as it opens (a sign-in that calls `window.close()`)
+/// can't be reported closed before it is reported opened, which would leave
+/// srv a record of a window that no longer exists.
+pub(super) fn report_popup_window(state: &std::sync::Arc<crate::state::AppState>, event: &str, popup: &str, opener: &str, url: &str) {
+    let report = PopupReport {
+        web_endpoint: state.backend_endpoints.lock().web_endpoint.clone(),
+        auth_key: state.auth_key.lock().clone(),
+        ipc_token: state.ipc_token.clone(),
+        popup: popup.to_string(),
+        body: serde_json::json!({ "event": event, "popup": popup, "opener": opener, "url": url }),
+    };
+    if popup_reports().send(report).is_err() {
+        tracing::warn!(popup = %popup, "the popup-window report worker is gone; srv won't hear of this popup");
+    }
+}
+
+struct PopupReport {
+    web_endpoint: String,
+    auth_key: String,
+    ipc_token: String,
+    popup: String,
+    body: serde_json::Value,
+}
+
+/// The queue to the popup-window report worker, started on first use.
+fn popup_reports() -> &'static std::sync::mpsc::Sender<PopupReport> {
+    static TX: std::sync::OnceLock<std::sync::mpsc::Sender<PopupReport>> = std::sync::OnceLock::new();
+    TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<PopupReport>();
+        let spawned = std::thread::Builder::new().name("browser-popup-window".into()).spawn(move || {
+            for r in rx {
+                if let Err(e) = crate::client::backend_browser_popup_window(&r.web_endpoint, &r.auth_key, &r.ipc_token, &r.body) {
+                    tracing::warn!(popup = %r.popup, error = %e, "couldn't report a popup window to srv");
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "couldn't start the browser-popup-window worker");
+        }
+        tx
+    })
+}
+
+/// What a page asked for, from CEF's disposition
+/// (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §2).
+fn asked_from(d: WindowOpenDisposition) -> super::popup_route::Asked {
+    use super::popup_route::Asked;
+    let d = d.get_raw();
+    if d == WindowOpenDisposition::NEW_POPUP.get_raw() {
+        Asked::Popup
+    } else if d == WindowOpenDisposition::NEW_WINDOW.get_raw() {
+        Asked::Window
+    } else if d == WindowOpenDisposition::NEW_FOREGROUND_TAB.get_raw()
+        || d == WindowOpenDisposition::NEW_BACKGROUND_TAB.get_raw()
+    {
+        Asked::Tab
+    } else {
+        Asked::Other
+    }
+}
+
+/// Where a browser pane's popup went before it could open as a pane, and
+/// still goes when it can't. `open_url_in_default_browser` only spawns a
+/// child process, so it's safe from any thread.
+fn open_popup_in_system_browser(url: &str) {
+    match crate::commands::platform::open_url_in_default_browser(url) {
+        Ok(()) => tracing::info!(url = %url, "browser-pane popup opened in the system browser"),
+        Err(e) => tracing::warn!(url = %url, error = %e, "failed to open a browser-pane popup in the system browser"),
+    }
+}
+
 impl AgentMuxHandler {
     pub(crate) fn on_after_created(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
@@ -257,6 +331,16 @@ impl AgentMuxHandler {
                 kind,
             },
         );
+
+        // A popup window a browser pane's page opened: remember which pane,
+        // and tell srv, which records which agent (if any) may drive it
+        // (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §4).
+        if is_popup {
+            if let Some((Some(opener), url)) = self.pending_popup_openers.pop_front() {
+                self.state.popup_openers.lock().insert(label.clone(), opener.clone());
+                report_popup_window(&self.state, "opened", &label, &opener, &url);
+            }
+        }
 
         // A user window that arrived after the instance already decided to
         // quit (ReAgent P1 on PR #2996). Its creation was in flight before
@@ -726,6 +810,7 @@ impl AgentMuxHandler {
         _frame: Option<&mut Frame>,
         target_url: Option<&CefString>,
         target_disposition: WindowOpenDisposition,
+        user_gesture: bool,
     ) -> bool {
         let url = target_url.map(|s| s.to_string()).unwrap_or_default();
         if url.is_empty() {
@@ -733,84 +818,116 @@ impl AgentMuxHandler {
             return true;
         }
 
-        // A real popup window (`window.open` with popup features) rather than a
-        // `target="_blank"` link (which arrives as a tab disposition). OAuth /
-        // Google Identity Services sign-in, payment, and similar handshake
-        // windows use these — they postMessage a result back to their opener
-        // and then call `window.close()` when done.
-        let is_popup_window = {
-            let d = target_disposition.get_raw();
-            d == WindowOpenDisposition::NEW_POPUP.get_raw()
-                || d == WindowOpenDisposition::NEW_WINDOW.get_raw()
-        };
-
         let is_external = crate::commands::platform::is_external_http_url(&url);
 
-        if self.is_browser_pane && is_popup_window {
-            // **OAuth authorization popup only.** Let CEF create an ACTUAL
-            // child popup (return false) so the sign-in completes IN the pane:
-            // the popup shares the pane's browser/request context, so
-            // `window.opener` points at the pane's page, `postMessage` delivers
-            // the credential back to it, and cookies/session are shared — none
-            // of which work when the popup is a separate process (the "There
-            // was an error logging you in" symptom of routing it to the system
-            // browser). The popup's own `window.close()` closes only the popup
-            // (its hosting Views window is closed in do_close via
-            // popup_browser_ids), not the pane.
-            //
-            // SECURITY GATE — the native popup is allowed ONLY when BOTH hold:
-            //   1. the target host is a **known identity provider**
-            //      (`is_known_idp_host`), and
-            //   2. the URL is an OAuth/OIDC authorization request
-            //      (`is_oauth_authorization_url`).
-            //
-            // Condition 1 is the real boundary. Browser panes load
-            // untrusted/attacker pages; URL-shape heuristics alone let any such
-            // page spawn unlimited native phishing popups (reagent P1 on #2545,
-            // the popup-explosion class SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_
-            // 2026_04_21.md prevents). An attacker can't serve from
-            // accounts.google.com / github.com / *.okta.com / …, so gating on a
-            // known-IdP host makes the native popup safe — a real sign-in always
-            // targets the provider's host. A self-hosted / unlisted IdP simply
-            // doesn't get the in-pane popup and falls through to the system
-            // browser below.
-            let popup_host = crate::commands::platform::url_host(&url);
-            let is_trusted_idp = popup_host
-                .as_deref()
-                .map(crate::commands::platform::is_known_idp_host)
-                .unwrap_or(false);
-            if is_trusted_idp && crate::commands::platform::is_oauth_authorization_url(&url) {
+        // **Browser pane → a new window.** The page chose what it gets by what
+        // it asked for: popup features → a bare native popup window; a tab or
+        // a window → a browser pane beside it. Whether it's honored at all is
+        // `agentmux_common::popup_rules` (a click; its own site, a sign-in
+        // provider, or an agent-owned pane; a cap). Anything not honored does
+        // what it always did: a popup goes to the system browser, a link loads
+        // in this pane (SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md).
+        //
+        // A sign-in provider's popup keeps the real child popup it has always
+        // had (`window.opener`/`postMessage`/cookies shared with the pane),
+        // gated on a known provider's host: browser panes load untrusted
+        // pages, and URL shape alone would let any page spawn native phishing
+        // popups (the popup-explosion class
+        // SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md prevents).
+        if self.is_browser_pane {
+            use super::popup_route::{route, Asked, Request, Route};
+            let asked = asked_from(target_disposition);
+            if asked != Asked::Other {
+                let popup_host = crate::commands::platform::url_host(&url);
+                let sign_in = popup_host
+                    .as_deref()
+                    .map(crate::commands::platform::is_known_idp_host)
+                    .unwrap_or(false)
+                    && crate::commands::platform::is_oauth_authorization_url(&url);
+                let opener = browser.as_deref().and_then(|b| self.opener_pane_of(b));
+                let opener_url = browser
+                    .as_deref()
+                    .map(crate::browser_pane::callbacks::main_frame_url)
+                    .unwrap_or_default();
+                let own_origins = self.own_origins();
+                let opener_owned = opener
+                    .as_deref()
+                    .is_some_and(|o| self.state.owned_panes.lock().contains(o));
+                // Popup windows the pane has open, plus those this handler
+                // let CEF create that haven't arrived in on_after_created yet:
+                // several window.open calls from one click all count.
+                let windows_open = opener
+                    .as_deref()
+                    .map(|o| {
+                        self.state.popup_windows_of(o)
+                            + self.pending_popup_openers.iter().filter(|(p, _)| p.as_deref() == Some(o)).count()
+                    })
+                    .unwrap_or(0);
+                let decided = route(&Request {
+                    asked,
+                    url: &url,
+                    opener_url: &opener_url,
+                    user_gesture,
+                    opener: opener.as_deref(),
+                    opener_owned,
+                    windows_open,
+                    sign_in,
+                    external: is_external,
+                    own_origins: &own_origins,
+                });
                 tracing::info!(
-                    target: "oauth-popup",
                     url = %url,
-                    popup_host = ?popup_host,
-                    "[oauth-popup] step 1/4: on_before_popup — trusted-IdP OAuth URL, allowing native CEF child popup (returning false)",
+                    asked = ?asked,
+                    route = ?decided,
+                    opener = ?opener,
+                    "browser-pane new window routed",
                 );
-                // Count the popup about to be created; the matching number of
-                // subsequent on_after_created calls on this handler tag their
-                // browser ids for managed close (counter, not a bool, so two
-                // popups in flight both get tagged — reagent P2 on #2545).
-                // Bounded so a popup CEF never actually creates (resource
-                // exhaustion / pane destroyed mid-creation → no on_after_created
-                // to decrement) can't leak the counter unboundedly; it's also
-                // reset to 0 when the pane closes (on_before_close). A pane's
-                // handler only ever creates popups after its pane, so even a
-                // stale count would at worst mis-tag another popup (still a
-                // popup) — the cap+reset bounds it fully (reagent P2 round 5).
-                self.pending_popups = self.pending_popups.saturating_add(1).min(POPUP_PENDING_CAP);
-                return false; // allow CEF to create the popup browser
-            }
-
-            // Any OTHER pane popup (non-auth window.open): don't create a rogue
-            // in-app window and don't hijack the pane's own frame. Open it in
-            // the system browser if external; otherwise cancel.
-            if is_external {
-                match crate::commands::platform::open_url_in_default_browser(&url) {
-                    Ok(()) => tracing::info!(url = %url, "non-auth browser-pane popup opened in system browser"),
-                    Err(e) => tracing::warn!(url = %url, error = %e, "failed to open pane popup in system browser"),
+                // Never more native popups in flight than the queue that tags
+                // them holds: past it, a popup would be created untagged and
+                // treated as an ordinary top-level window.
+                let decided = if decided == Route::NativeWindow && self.pending_popups >= POPUP_PENDING_CAP {
+                    Route::SystemBrowser
+                } else {
+                    decided
+                };
+                match decided {
+                    Route::NativeWindow => {
+                        if sign_in {
+                            tracing::info!(
+                                target: "oauth-popup",
+                                url = %url,
+                                popup_host = ?popup_host,
+                                "[oauth-popup] step 1/4: on_before_popup — trusted-IdP OAuth URL, allowing native CEF child popup (returning false)",
+                            );
+                        }
+                        // Count the popup about to be created and remember who
+                        // opened it; the matching on_after_created on this
+                        // handler tags it for managed close and registers it.
+                        // Bounded so a popup CEF never creates (resource
+                        // exhaustion, the pane closing mid-creation) can't grow
+                        // them; both are reset when the pane closes.
+                        self.pending_popups = self.pending_popups.saturating_add(1).min(POPUP_PENDING_CAP);
+                        self.pending_popup_openers.push_back((opener, url.clone()));
+                        while self.pending_popup_openers.len() > POPUP_PENDING_CAP {
+                            self.pending_popup_openers.pop_front();
+                        }
+                        return false; // let CEF create the popup browser
+                    }
+                    Route::Pane => {
+                        if let Some(opener) = opener {
+                            self.offer_popup_as_pane(opener, opener_url, url, user_gesture);
+                        }
+                        return true;
+                    }
+                    Route::SystemBrowser => {
+                        open_popup_in_system_browser(&url);
+                        return true;
+                    }
+                    Route::Cancel => return true,
+                    // A link: navigate this pane, below.
+                    Route::LoadInFrame => {}
                 }
             }
-            return true; // cancel the in-app popup
         }
 
         // **App UI → external site** (Help pane's "Report Bugs & Issues",
@@ -849,6 +966,85 @@ impl AgentMuxHandler {
             "popup intercepted — deferred navigation of current frame",
         );
         true // cancel the top-level popup creation
+    }
+
+    /// The browser-pane block whose page opened a new window from `browser`:
+    /// the pane itself, or, when `browser` is a popup window, the pane that
+    /// opened that popup (so a sign-in that opens a second window still counts
+    /// against, and belongs with, the pane it started in).
+    fn opener_pane_of(&self, browser: &Browser) -> Option<String> {
+        if let Some(block) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, browser) {
+            return Some(block);
+        }
+        let label = self
+            .state
+            .list_browsers()
+            .into_iter()
+            .find(|(_, b)| {
+                let b = b.clone();
+                let mut other: cef::Browser = browser.clone();
+                b.is_same(Some(&mut other)) != 0
+            })
+            .map(|(label, _)| label)?;
+        self.state.popup_openers.lock().get(&label).cloned()
+    }
+
+    /// AgentMux's own origins (its frontend, srv): never opened in-app from a
+    /// page, even one on the same loopback origin.
+    fn own_origins(&self) -> Vec<String> {
+        let mut origins = self.frontend_origins();
+        let srv = self.state.backend_endpoints.lock().web_endpoint.clone();
+        if !srv.is_empty() {
+            origins.push(if srv.contains("://") { srv } else { format!("http://{srv}") });
+        }
+        origins
+    }
+
+    /// Ask srv to open a popup from the browser pane `opener` as a pane beside
+    /// it; open it in the system browser if srv says no or can't be reached.
+    /// srv makes the call because only it knows whether an agent owns the
+    /// opener. The request runs on its own thread: `on_before_popup` holds
+    /// this handler's lock on the UI thread and must return at once.
+    fn offer_popup_as_pane(&self, opener: String, opener_url: String, url: String, user_gesture: bool) {
+        let web_endpoint = self.state.backend_endpoints.lock().web_endpoint.clone();
+        let auth_key = self.state.auth_key.lock().clone();
+        let ipc_token = self.state.ipc_token.clone();
+        let body = serde_json::json!({
+            "opener": opener,
+            "opener_url": opener_url,
+            "url": url,
+            "user_gesture": user_gesture,
+        });
+        let fallback_url = url.clone();
+        let spawned = std::thread::Builder::new().name("browser-popup".into()).spawn(move || {
+            match crate::client::backend_browser_popup(&web_endpoint, &auth_key, &ipc_token, &body) {
+                Ok(data) if data.get("admitted").and_then(|v| v.as_bool()) == Some(true) => {
+                    tracing::info!(
+                        opener = %opener,
+                        pane = %data.get("pane").and_then(|v| v.as_str()).unwrap_or(""),
+                        url = %url,
+                        "browser-pane popup opened as a pane",
+                    );
+                }
+                Ok(data) => {
+                    tracing::info!(
+                        opener = %opener,
+                        url = %url,
+                        reason = %data.get("reason").and_then(|v| v.as_str()).unwrap_or(""),
+                        "browser-pane popup not opened as a pane",
+                    );
+                    open_popup_in_system_browser(&url);
+                }
+                Err(e) => {
+                    tracing::warn!(opener = %opener, url = %url, error = %e, "couldn't ask srv about a browser-pane popup");
+                    open_popup_in_system_browser(&url);
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "couldn't start the browser-popup thread");
+            open_popup_in_system_browser(&fallback_url);
+        }
     }
 
     /// An app window's main frame shows only the frontend
@@ -1088,6 +1284,24 @@ impl AgentMuxHandler {
         // cascade below depends on.
         let closing_id = browser.identifier();
         let closing_was_popup = self.popup_browser_ids.remove(&closing_id);
+        // A closing popup window, whichever way it closes (its own
+        // `window.close()`, the person, or its pane closing): forget it and
+        // tell srv, so nobody tries to drive it and the opener's strip drops it.
+        if !self.state.popup_openers.lock().is_empty() {
+            let label = self
+                .state
+                .host_state
+                .lock()
+                .browsers
+                .iter()
+                .find(|(_, h)| h.browser.identifier() == closing_id)
+                .map(|(label, _)| label.clone());
+            if let Some(label) = label {
+                if self.state.popup_openers.lock().remove(&label).is_some() {
+                    report_popup_window(&self.state, "closed", &label, "", "");
+                }
+            }
+        }
 
         // Cascade-close orphaned OAuth popups when THIS PANE closes. The popup
         // shares the pane's handler, so its browser id lives in
@@ -1120,6 +1334,7 @@ impl AgentMuxHandler {
             // The pane is gone — no popup can still be pending on its handler.
             // Clears any leaked increment (reagent P2 round 5 counter-leak).
             self.pending_popups = 0;
+            self.pending_popup_openers.clear();
         }
 
         // Unregister browser from the reducer's `browsers` map and get its

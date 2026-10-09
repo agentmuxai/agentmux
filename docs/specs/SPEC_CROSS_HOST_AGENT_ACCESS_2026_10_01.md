@@ -5,7 +5,7 @@
 **Author:** AgentX (narko), at the owner's request
 **Affects:** a new remote-access plane in `crates/srv/` (new routes and a transport, separate from the jekt routes in `server/routes.rs`), `crates/mcp/src/tool_schemas.rs` (an optional `host` target), a per-OS elevation helper, an approval window in `crates/cef/`, an audit store, the status bar.
 **Builds on:** `docs/specs/SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md` (this spec is the concrete design for its "remote invocation" part), `docs/specs/SPEC_WAN_JEKT_VERIFICATION_2026_09_24.md`, `docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `docs/specs/SPEC_LAN_FIREWALL_SETUP_2026_10_01.md`.
-**Related:** `docs/specs/SPEC_AGENT_HOST_CONTEXT_2026_04_14.md` (defers remote tool execution as "a separate, larger feature"; this is that feature), `docs/reports/REPORT_AGENT_FILE_ACCESS_2026_09_29.md`, `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`, `docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md`, `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`.
+**Related:** `docs/specs/SPEC_AGENT_HOST_CONTEXT_2026_04_14.md` (defers remote tool execution as "a separate, larger feature"; this is that feature), `docs/specs/SPEC_AGENT_INTERACTIVE_PTY_SHELL_API_2026_09_10.md`, `docs/specs/SPEC_HOST_VS_CONTAINER_AGENTS_2026_06_18.md`, `docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md`.
 
 ## 1. Goal
 
@@ -242,7 +242,7 @@ Phases ship separately, each usable and reviewable alone. The gates before phase
 - Completes the "remote invocation" part of `SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md` and fixes its transport question: the remote plane is a separate, encrypted listener, not the jekt routes.
 - Reuses, and does not change, the trust markers and tiers of the jekt specs: a jekt can still never carry an instruction that bypasses a human, and nothing here widens what a `TRUST` value means.
 - Depends on `SPEC_LAN_FIREWALL_SETUP_2026_10_01.md` for reachability and reuses its elevated-helper design for Windows.
-- Does not alter the local default permission mode (`bypass`); that is a separate decision (see `docs/reports/REPORT_AGENT_FILE_ACCESS_2026_09_29.md`), though the remote plane deliberately starts stricter than it.
+- Does not alter the local default permission mode (`bypass`); that is a separate decision, though the remote plane deliberately starts stricter than it.
 
 ## 11. Open questions (owner decisions)
 

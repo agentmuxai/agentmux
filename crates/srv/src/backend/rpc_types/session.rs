@@ -42,10 +42,11 @@ pub struct CommandActivitySummaryData {
     pub user_message: Option<String>,
 }
 
-/// Response from session:activity_summary. The backend also writes
-/// `term:ambient_summary` to block meta. `tokens` is `None` when the request
-/// was rejected as stale-on-arrival or the underlying call failed/was
-/// cancelled — callers should only record usage when it's `Some`.
+/// Response from session:activity_summary. The backend stores the title in
+/// `term:ambient_summary` itself (`ambient::title`); `summary` is the title this
+/// call stored, empty when it left the title as it was. `tokens` is `None` when
+/// the request was rejected as stale-on-arrival or the underlying call failed or
+/// was cancelled — callers should only record usage when it's `Some`.
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 #[serde(rename_all = "snake_case")]
@@ -71,6 +72,13 @@ pub struct CommandNextPromptSuggestionData {
     /// doc comment for the wall-clock-vs-remount rationale (identical here).
     #[ts(type = "number")]
     pub generation: u64,
+    /// The pane's recent conversation, oldest first, one entry per message,
+    /// tool call or error (`[user] …`, `[assistant] …`, `[tool] Name`,
+    /// `[error] …`), built from the document the pane has already translated
+    /// for its provider. Without it the server reads the block's output file,
+    /// which it can only parse for Claude-shaped streams.
+    #[ts(optional)]
+    pub activity: Option<Vec<String>>,
 }
 
 /// Response from session:next_prompt_suggestion. The FRONTEND writes

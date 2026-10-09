@@ -14,6 +14,7 @@ import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { DocTabsController, handleDocTabKey, type DocTabsSpec } from "@/app/doc-tabs/doc-tabs-controller";
 import { DocTabStrip } from "@/app/doc-tabs/DocTabStrip";
 import { AUDIO_EXTENSIONS, basenameOf, extOf, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS } from "@/app/element/local-media";
+import { hostHas } from "@/app/host/host-caps";
 import { getApi } from "@/app/store/app-api";
 import { fireAndForget } from "@/util/util";
 import { createEffect, on, Show, untrack, type JSX } from "solid-js";
@@ -211,6 +212,7 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
     };
 
     const pickInto = async (): Promise<void> => {
+        if (!hostHas("nativeDialogs")) return;
         const path = await getApi()?.showOpenFileDialog?.();
         if (path) pane.open(path);
     };
@@ -226,7 +228,9 @@ export function MediaPane(props: { pane: MediaPaneModel; ctx: PaneTabHostContext
                     fallback={
                         <div class="media-pane-empty" onClick={() => void pickInto()}>
                             <div>No files open</div>
-                            <div class="media-pane-empty-hint">Click to pick one, or drop a file here.</div>
+                            <div class="media-pane-empty-hint">
+                                {hostHas("nativeDialogs") ? "Click to pick one, or drop a file here." : "Drop a file here."}
+                            </div>
                         </div>
                     }
                 >

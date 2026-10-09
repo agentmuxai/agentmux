@@ -1,6 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { UnseenTurnsDot } from "@/app/block/UnseenTurnsDot";
 import type { PaneTabHostContext } from "@/app/block/pane-tab-registry";
 import { holdPaneContent, trackPaneContent } from "@/app/store/pane-content-holds";
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
@@ -8,7 +9,6 @@ import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, Active
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, subagentToolDetail, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import AnsiLine from "@/element/ansiline";
-import { callBackendService } from "@/store/mos";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { MOS, atoms } from "@/app/store/global";
@@ -17,7 +17,7 @@ import { showCopyContextMenu } from "@/app/store/contextmenu";
 import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import type { LayoutModel } from "@/layout/lib/layoutModel";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
-import { recordTurn } from "@/app/store/token-usage";
+import { requestSubagentName } from "./subagent-naming";
 import { useTick } from "@/app/hook/useTick";
 import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
 import { formatCompactNumber } from "@/util/format-count";
@@ -520,6 +520,9 @@ export function AgentRow({
                         <ProviderLogo provider={node.agentProvider ?? "agentmux"} size={16} />
                     </span>
                     <span class="swarm-agent-label">{node.agentName}</span>
+                    {/* Turns this agent didn't get from you that finished
+                        unseen: the same mark as its pane header (UnseenTurnsDot). */}
+                    <Show when={node.blockId}>{(blockId) => <UnseenTurnsDot blockId={blockId()} />}</Show>
                     <Show when={collapsed() && hasChildren()}>
                         <span class="swarm-agent-collapsed-count">{totalRows()}</span>
                     </Show>
@@ -1211,12 +1214,9 @@ function SubagentRow({
             // Fallback safety net — eager naming (Phase A) should already
             // have resolved this by the time a user gets here, but fire the
             // on-demand call too in case it hasn't (still in flight, or
-            // failed). Fire-and-forget — the row's label picks up the name
-            // via the subagent:named event (swarm-model.ts), not this call's
-            // return; we only need the return here for cost accounting.
-            void callBackendService("subagent", "GenerateName", [sub.agent_id]).then((result: any) => {
-                if (result?.tokens) recordTurn("ambient:subagent_name", result.tokens);
-            });
+            // failed). The row's label picks up the name via the
+            // subagent:named event (swarm-model.ts), not this call's return.
+            requestSubagentName(sub.agent_id);
         }
     };
 

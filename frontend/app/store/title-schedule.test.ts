@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { isReevaluationTurn, isTitleNews, shouldRequestTitle } from "./title-schedule";
+import { isReevaluationTurn, shouldRequestTitle } from "./title-schedule";
 
 describe("isReevaluationTurn", () => {
     it("re-evaluates after human turns 2, 5 and 8, then every third", () => {
@@ -24,23 +24,5 @@ describe("shouldRequestTitle", () => {
         expect([1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => shouldRequestTitle(true, n))).toEqual([
             false, true, false, false, true, false, false, true, false,
         ]);
-    });
-});
-
-describe("isTitleNews", () => {
-    it.each([
-        ["Fix the login race", "Fix login race condition"],
-        ["Fix the login race", "fix the LOGIN race"],
-        ["Harden the swarm ambient summary", "Harden swarm summary"],
-    ])("keeps %j over the rewording %j", (current, candidate) => {
-        expect(isTitleNews(current, candidate)).toBe(false);
-    });
-
-    it.each([
-        ["Fix the login race", "Set up CI for the docs site"],
-        ["Harden the swarm ambient summary", "Add UDP discovery for LAN peers"],
-        ["Review PR 4230", "Write the multi-host swarm spec"],
-    ])("replaces %j with the new topic %j", (current, candidate) => {
-        expect(isTitleNews(current, candidate)).toBe(true);
     });
 });

@@ -82,6 +82,7 @@ import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as MOS from "@/app/store/mos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
+import { loginBackend } from "./login-backend";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
 import { companionCliEnv } from "../providers/companion-env";
 
@@ -359,7 +360,7 @@ async function pollForInAppLoginCompletion(
     if (isCancelled()) return { completed: false, superseded: false };
     let myGeneration: number | undefined;
     try {
-        myGeneration = (await getApi().getCliLoginStatus()).generation;
+        myGeneration = (await loginBackend().status()).generation;
     } catch {
         // Fall through — the in-loop read below will try again; a missed
         // upfront capture just means supersede-detection starts one tick
@@ -387,7 +388,7 @@ async function pollForInAppLoginCompletion(
         let childActive = true;
         let credentialChanged = true;
         try {
-            const status = await getApi().getCliLoginStatus();
+            const status = await loginBackend().status();
             if (myGeneration === undefined) {
                 myGeneration = status.generation;
             } else if (status.generation !== myGeneration) {
@@ -461,6 +462,9 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
 
     if (!p.skipTier1) {
         const tier1 = await forceProviderLogin({ ...p, authEnv: authEnvForTiers });
+        // Another surface's login holds the slot now: leave it alone (no
+        // cancel, no fallback), as the awaited path does when superseded.
+        if (tier1 === "superseded") return "inapp-timeout";
         if (tier1 === "opened") {
             if (!(p.awaitTier1Completion && minted)) {
                 // Default contract: return immediately; the caller shows the
@@ -500,7 +504,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
             // kill that unrelated login instead of reaping our own, which
             // is already gone (codex P2 on PR #2410).
             if (!superseded) {
-                await getApi().cancelCliLogin().catch(() => {});
+                await loginBackend().cancel().catch(() => {});
             }
             if (!completed) return "inapp-timeout";
             // Same persist + one-retry + loud-error contract as tiers 2/3
@@ -536,7 +540,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     // same config dir. cancelCliLogin is idempotent and host-side (safe to
     // call even if nothing is running — see useAgentControllerStatus.ts's
     // and launch-flow.ts's existing best-effort uses of the same call).
-    await getApi().cancelCliLogin().catch(() => {});
+    await loginBackend().cancel().catch(() => {});
     // Whatever the caller displayed for tier 1 (a URL-capture countdown, or
     // nothing if skipTier1) is stale now — tier 3 from here can run for
     // up to 5 more minutes with zero further signal otherwise.
@@ -575,7 +579,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     }
 
     try {
-        await getApi().openLoginTerminal(p.cliPath, p.provider.authLoginCommand, terminalEnv);
+        await loginBackend().openTerminal(p.cliPath, p.provider.authLoginCommand, terminalEnv);
     } catch (err: any) {
         p.log("auth", `couldn't open a terminal for login: ${err?.message ?? String(err)}`, "error");
         return "terminal-unavailable";

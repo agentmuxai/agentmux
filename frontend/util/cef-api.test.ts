@@ -14,7 +14,8 @@ vi.mock("@/app/platform/pane-overlay", () => ({
     },
 }));
 
-import { closeJsContextMenu, isCef, showJsContextMenu } from "./cef-api";
+import { closeJsContextMenu, showJsContextMenu } from "@/app/host/js-context-menu";
+import { isCef } from "./cef-api";
 
 // ── isCef — #52 reload lock-out fix ──────────────────────────────────────────
 //

@@ -23,6 +23,7 @@ const PURPOSE_NAMES: ReadonlyArray<readonly [purpose: string, name: string]> = [
     ["dispatch_name", "Workflow names"],
     ["definition_summary", "Agent previews"],
     ["ambient_narration", "Narration"],
+    ["continuity_state", "Running summaries"],
 ];
 
 type Bucket = "accepted" | "kept" | "refused" | "skipped" | "failed";

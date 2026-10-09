@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492; see §4.7 for how the build differs from the design below. Phases 2–4 are proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503 and phase 3 (the live status, §6.8 and §6.9) in PR #4510; phase 2b (attention, §5.5) follows them. See §4.7 for how the build differs from the design below. Phase 4 (tuning `TIMING` from real log data) is proposed.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -288,6 +288,50 @@ The label is built by srv from data it already holds: the jekt marker's `FROM`, 
 | OS notification / sound | as today | only when the turn ends needing the user (question, approval, failure). This uses the existing notification router's families (`backend/notify`), with a per-kind policy (§5.1 item 5) |
 | Return digest | — | on focusing a pane that ran external turns unattended: one line above the composer, dismissable. Built deterministically from the ledgers; Haiku is optional, for a one-sentence "what changed" (§9, Q4) |
 
+### 5.4 As built (phase 2a: the trigger, on the row and the Worked line)
+
+**srv.** `TurnTrigger { kind, from }` sits on the ledger as `trigger`, and `absorbed` lists the labelled inputs that joined the turn, up to 20; `inputs` keeps the full count. srv sends the sender rather than a finished sentence, and the pane words it. `TurnTrigger::from_input` classifies an input as follows:
+
+| Input | Kind |
+|---|---|
+| User origin with srv's broadcast header | `broadcast` |
+| Any other user origin | `user` |
+| System origin | `system` |
+| Automated origin | read from the `FROM=` of the `[JEKT:…]` marker srv composed: `cron`/`loop` give `schedule`, `*-consumer` gives `service`, anything else gives `agent` |
+
+Two guards keep the trigger honest:
+- Only automated input is read for a marker, so the user quoting a jekt is never taken for one.
+- A task wake-up takes the `task_notification`'s own `summary` (shortened to 160 characters). A message queued at spawn takes its trigger from the `hint_next_turn` that queued it.
+
+**Pane.** `turn-trigger-text.ts` turns the trigger into words:
+- **Lead-in:** for the first 3 s of an external turn, the row's left zone reads `↳ jekt from AgentX`, `↳ github-consumer`, `↳ scheduled run` or `↳ Background command "…" completed (exit code 0)`. Statuses (stopping, rate limited, launch phases) still win.
+- **Worked verb:** `Worked on AgentX's jekt`, `Worked on github-consumer's notice`, `Worked on a scheduled run` or `Worked on a finished task`. A user turn keeps plain `Worked`.
+- **Secondary:** what joined the turn, by kind, for example `+1 jekt  ·  +2 your messages`, with `+N more` past the listed ones.
+
+**Transcript.** A task wake-up leaves no message of its own, so `task-wake.ts` finds it in the stream: a main-agent `task_notification`, then a `system/init` with no input written in between. It adds an ambient line, `Woke up: <the notification's summary>`. The live stream and history replay both feed it, and the node id is the task's own, so the line survives a remount or reopen and is never duplicated. A task that wakes the CLI *inside* a turn is also listed in `absorbed` ("+1 task").
+
+### 5.5 As built (phase 2b: attention follows need)
+
+**Notifications, per turn.** The router fired "turn completed" whenever `turn_active` flipped false, so once per *pass*: a multi-pass turn toasted "finished" while the agent was still busy for you. It now fires from the turn ledger:
+- `agentturn` with `end: "completed"`, once per `(block, turn_id)`;
+- skipped after a user stop, as before, and for AgentMux's own hidden turns.
+
+The `turn_active` path keeps only its "a new turn started" job, which retracts the old toast.
+
+**Closing a settled turn.** The tracker closes a settled turn only lazily, at the next pass. So the ledger publisher re-publishes a settling ledger, closed at its last pass (`closed_when_lapsed`), once its window lapses with nothing newer published in between.
+
+**External turns are quiet by default.** A new setting, `notify:os:turncompleted:external` (default off), lets a turn you didn't start (agent, service, schedule, task) toast when it finishes. Off, it marks its pane instead. A question or a failure in such a turn still notifies through its own kind.
+
+**Marks.** `store/turn-awareness.ts` watches every block's ledger app-wide (a scope-less subscription installed with the window services). It counts each completed external turn that ended while the user wasn't looking at its pane, where looking means this window focused and that block focused. Two things show the count:
+- **`UnseenTurnsDot`:** a dot in the pane header and on the agent's Swarm row, with the summary on hover.
+- **`TurnAwayDigest`:** on coming back to the pane, one line above the working row, for example `While you were away: 3 turns · 2 jekts (AgentX, Korp) · 1 finished task`. Looking clears the dot. The line stays until dismissed or until the next turn starts.
+
+The Swarm row shows the same dot beside the agent's name.
+
+**The `[turn]` log (§7).** Every published ledger change is logged by srv as one `[turn]` line, with `block_id`, `turn_id`, `passes`, `inputs` and `trigger`. The change is one of: `opened`, `input joined the running pass`, `next pass joined the turn`, `pass ended, settling for a next one`, `ended`, or `ended: the process exited` (`ledger_transition`). Next to the existing `[health] turn_active flip` lines, that answers "why did my timer reset" from the logs.
+
+**Not built:** a per-kind choice finer than one external switch.
+
 ---
 
 ## 6. Part C — a live status that says what is happening
@@ -429,6 +473,53 @@ Turn ── Idle
 - **`useStatusLine`:** a small hook that ticks the presenter (it reuses `useTick`).
 - **`AgentWorkingRow`:** it renders `{text, detail, tone}` and keeps its reveal, dot, compaction bar and right zone. `loadingLeftText` is replaced by the presenter.
 - **Swarm and muxspect:** get the turn ledger free from the status publish. Swarm can show the external-trigger chip and the unread dot from it.
+
+### 6.8 As built (phase 3a: deterministic sources only)
+
+**Reducer.** `state.activity` (`ActivityState`) holds three things:
+- `phase` and `phaseSince`: one of requesting, responding, thinking, writing or composing.
+- `tools`: the calls in flight, by `tool_use` id, each with its words.
+- `plan`/`planAt`: the latest `TodoWrite`'s in-progress step.
+
+How it's fed:
+- `TokensIn` sets responding, and `RequestStarted` sets requesting (only once a call exists).
+- `OutputStreamed.kind` sets thinking, writing or composing. `useAgentStream` sends the batch's latest delta kind (`mainAgentStreamedKind`).
+- `ToolStart` and `ToolEnd` now carry the tool's `id`, and `ToolStart` its `params`.
+- A pass end (`TurnEnd`, the idle reconcile) clears the phase and tools and keeps the plan. `TurnReset` clears everything.
+
+**Words.**
+- `status/tool-labels.ts`:
+  - Bash's `description`, put into progressive form ("Run the tests" becomes "Running the tests"). Otherwise just the program name, never the whole command.
+  - A subagent's kind and description.
+  - "Reading/Editing/Writing <base name>", "Searching for <pattern>", "Reading <host>" and "Using <mcp tool>".
+  - Calls running at once fold: "Reading 3 files", or "3 tools running" for a mix, naming a subagent if one is among them.
+- `status/plan.ts`: "Writing the spec (3/7)", from the todo item's `activeForm`.
+
+**Presenter.** `status/present-status.ts` implements §6.4's ranks and timing with the values in `TIMING`:
+- Promote thresholds: tools 1.5 s, composing 2 s, writing 3 s, thinking 4 s.
+- Dwell: 1.2 s. Hold after a call ends: 2 s.
+- A slow request: 20 s. Elapsed time is added to a single call's line after 10 s.
+
+Rank 0 comes from `AgentBottomPanels`:
+- the first pending approval: "Waiting for your approval: <its tool's words>";
+- otherwise any pending question: "Waiting for your answer".
+
+The row's statuses are rank 1, and phase 2a's lead-in is rank 3. The presenter returns a `key`, and the row types a line out only when the key changes, so a running clock never re-types the line.
+
+The muted goal, quiet-command detection, the thinking headline, subagent step detail and test progress came in phase 3b (§6.9).
+
+### 6.9 As built (phase 3b: the richer sources)
+
+- **Subagent steps.** `ToolStart` carries the raw line's `parent_tool_use_id` as `parentId`. A subagent's own calls no longer count as calls of their own: the row reads `Explore agent: map the code · Reading health.rs`. The key stays the Agent call's, so a new step swaps in without re-typing.
+- **Test progress** (`status/test-progress.ts`). It reads Bash's live output chunks (`useToolChunkStream`'s new `onOutput`) for known runners: cargo test's `running N tests` and per-test lines (`41/123, 1 failed`), the cargo, vitest and jest summaries, and pytest's `[ 45%]` and final line. It shows in place of the call's elapsed time. Unknown output shows nothing, never a guess.
+- **The thinking headline** (`status/thinking-headline.ts`). From the main agent's `thinking_delta`s, it takes a bold heading the model wrote, else its first sentence, else the start of a long run (up to 80 characters). That gives `Thinking: Weighing the join rule`. It is read once per thinking block and dropped at the next call. A model whose thinking is redacted stays at `Thinking`.
+- **The goal beside.** For ranks 2–5, the presenter returns the ambient summary as `detail`. The row shows it muted after the line (` · Fix the login redirect loop`), and it only takes the room left over, so it is truncated first.
+
+- **A command gone quiet.** Each call's last output time comes from its live chunks, reported at most every 5 s (`ToolOutput`). A Bash call that wrote output and then went silent for `quietToolMs` (60 s) is rank 2: `Running the build · no output for 2m 5s`. A command that never writes anything is not reported as quiet.
+
+- **What slow means in this pane.** The reducer keeps the pane's last 20 waits for the model, from request sent to its answer beginning (`activity.waits`). "Waiting on the model" fires at 20 s, or at twice the pane's median wait once it has 5 or more, whichever is later (`slowRequestMs`). A model that is always slow doesn't cry wolf on every request.
+
+Still open: tuning `TIMING` from real `[turn]` and `[wave-turn]` log data.
 
 ---
 

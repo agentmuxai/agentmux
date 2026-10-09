@@ -311,24 +311,26 @@ fn empty_summary_result() -> ActivitySummaryResult {
 fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mstore = state.mstore.clone();
     let filestore = state.filestore.clone();
+    let event_bus = state.event_bus.clone();
 
     engine.register_typed(
         COMMAND_SESSION_ACTIVITY_SUMMARY,
         move |cmd: CommandActivitySummaryData, _ctx| {
             let mstore = mstore.clone();
             let filestore = filestore.clone();
+            let event_bus = event_bus.clone();
             async move {
                 // Admit through the Ambient Model Call gateway BEFORE doing any
                 // work: a stale (superseded) request does zero FileStore reads
-                // or prompt building, not just skips the CLI spawn. The pull
-                // semaphore caps concurrent Haiku spawns across all blocks, raced
-                // against cancellation so a request superseded while queued for
+                // or prompt building, not just skips the CLI spawn. `admit` queues
+                // the call in the interactive class (`ambient::limits`), raced
+                // against cancellation, so a request superseded while queued for
                 // a permit never spawns the CLI at all. See
                 // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
-                let Some(slot) = ambient::call::admit(
-                    ambient::AmbientCallKey::new(cmd.block_id.clone(), ambient::purpose::ACTIVITY_SUMMARY),
+                let Some(mut slot) = ambient::call::admit(
+                    &ambient::purpose::ACTIVITY_SUMMARY,
+                    cmd.block_id.clone(),
                     cmd.generation,
-                    Some(ambient::limits::pull_call_semaphore()),
                 )
                 .await
                 else {
@@ -344,24 +346,27 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
 
                 // The user's newest message, verbatim — the frontend passes this
                 // directly from the just-submitted TurnStart content, so the
-                // common case needs no FileStore read at all. Falls back to the
-                // old tail-digest extraction only when the caller didn't supply
-                // one (e.g. an older frontend build), so the endpoint degrades
-                // gracefully instead of going silent. See
+                // common case needs no FileStore read at all. Without one, the
+                // session's recent activity is read instead, and shown to the
+                // model as activity: it used to be passed off as "The user just
+                // said". See
                 // docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
                 let user_message = cmd
                     .user_message
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .or_else(|| ambient::digest::read_recent_activity_digest(&filestore, &cmd.block_id));
+                    .map(str::to_string);
+                let activity = match user_message {
+                    Some(_) => None,
+                    None => ambient::digest::read_recent_activity_digest(&filestore, &cmd.block_id),
+                };
 
                 // A stored value that is not a real title (a placeholder an older build
                 // accepted, such as `(none yet)`) counts as NO title: it is never fed
                 // back into the prompt, so it cannot sustain itself. The first draft
                 // fed it back as the "current title" and told the model to repeat it.
-                let stored_title = obj::meta_get_string(&block.meta, "term:ambient_summary", "");
+                let stored_title = obj::meta_get_string(&block.meta, ambient::title::META_TITLE, "");
                 let current_title = if ambient::validate::is_usable_title(&stored_title) {
                     stored_title
                 } else {
@@ -370,7 +375,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
 
                 // Nothing to anchor a title on AND nothing new to evaluate —
                 // matches the old digest-empty early return.
-                if user_message.is_none() && current_title.is_empty() {
+                if user_message.is_none() && activity.is_none() && current_title.is_empty() {
                     slot.abandon(ambient::outcome::Outcome::EmptyDigest);
                     return Ok(empty_summary_result());
                 }
@@ -380,16 +385,38 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     return Ok(empty_summary_result());
                 };
 
-                let prompt = ambient::prompt::build_session_title_prompt(&current_title, user_message.as_deref(), word_target);
+                let prompt = ambient::prompt::build_session_title_prompt(
+                    &current_title,
+                    user_message.as_deref(),
+                    activity.as_deref(),
+                    word_target,
+                );
                 let limits = ambient::validate::title_limits(word_target);
-                let reply = slot.run(&target, &prompt, |t| ambient::validate::accept_line(t, &limits)).await;
+                let reply = slot
+                    .run_held(&target, &prompt, |raw| {
+                        ambient::reply::judge_line(raw, |t| ambient::validate::accept_line(t, &limits))
+                    })
+                    .await;
 
-                // The frontend writes `term:ambient_summary` after receiving this
-                // response so it can discard results from turns that were
-                // superseded before they returned (belt-and-suspenders on top of
-                // the gateway's own cancellation). Empty text leaves the current
-                // title in place.
-                Ok(ActivitySummaryResult { summary: reply.text, tokens: reply.tokens })
+                // Stored here, not by the pane: one writer with the recovery sweep,
+                // in one transaction, so a rewording never replaces the title and
+                // neither writer overwrites what the other stored while its call ran
+                // (`ambient::title`). The slot is held until the write, so a newer
+                // message's request, admitted while this one ran, supersedes it and
+                // this older title is not stored after the newer one.
+                let mut stored = false;
+                if !reply.text.is_empty() {
+                    let still_current = || !slot.is_superseded();
+                    match ambient::title::store_title(&mstore, &cmd.block_id, &reply.text, ambient::title::Replace::IfNews, still_current) {
+                        Ok(true) => {
+                            stored = true;
+                            crate::backend::blockcontroller::core::broadcast_block_update(&mstore, &event_bus, &cmd.block_id);
+                        }
+                        Ok(false) => {}
+                        Err(e) => tracing::warn!(block_id = %cmd.block_id, error = %e, "session:activity_summary: could not store the title"),
+                    }
+                }
+                Ok(ActivitySummaryResult { summary: if stored { reply.text } else { String::new() }, tokens: reply.tokens })
             }
         },
     );
@@ -409,14 +436,14 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
             let mstore = mstore.clone();
             let filestore = filestore.clone();
             async move {
-                // Same admission discipline and pull-call cap as activity_summary.
+                // Same admission discipline and interactive class as activity_summary.
                 // Ghost text has a sharper failure mode than the read-only summary
                 // (a stale suggestion can put words in the user's mouth), so
                 // admitting before any work matters just as much here.
                 let Some(slot) = ambient::call::admit(
-                    ambient::AmbientCallKey::new(cmd.block_id.clone(), ambient::purpose::NEXT_PROMPT_SUGGESTION),
+                    &ambient::purpose::NEXT_PROMPT_SUGGESTION,
+                    cmd.block_id.clone(),
                     cmd.generation,
-                    Some(ambient::limits::pull_call_semaphore()),
                 )
                 .await
                 else {
@@ -428,7 +455,19 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     .map_err(|e| format!("session:next_prompt_suggestion: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                let Some(activity) = ambient::digest::read_recent_activity(&filestore, &cmd.block_id) else {
+                // The pane's own translated conversation when it sent one (any
+                // provider); otherwise the output file, which only Claude-shaped
+                // streams can be read from.
+                // Pane activity that ends at the user's message was taken before the
+                // reply reached the pane's document (the turn-end edge can lead the
+                // last nodes); the file may already hold the reply.
+                let activity = match cmd.activity.filter(|entries| !entries.is_empty()) {
+                    Some(entries) => ambient::digest::activity_from_entries(&cmd.block_id, entries)
+                        .filter(|a| a.ending != ambient::digest::TurnEnding::UserLast)
+                        .or_else(|| ambient::digest::read_recent_activity(&filestore, &cmd.block_id)),
+                    None => ambient::digest::read_recent_activity(&filestore, &cmd.block_id),
+                };
+                let Some(activity) = activity else {
                     slot.abandon(ambient::outcome::Outcome::EmptyDigest);
                     return Ok(empty_suggestion_result());
                 };
@@ -447,7 +486,9 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                 };
 
                 let prompt = ambient::prompt::build_next_prompt_prompt(&activity.text);
-                let reply = slot.run_formatted(&target, &prompt, ambient::validate::accept_next_prompt).await;
+                let reply = slot
+                    .run(&target, &prompt, |raw| ambient::reply::judge_line(raw, ambient::validate::accept_next_prompt))
+                    .await;
 
                 // The tokens were spent either way, so they are still reported;
                 // only the text is withheld when it is not a usable next prompt.

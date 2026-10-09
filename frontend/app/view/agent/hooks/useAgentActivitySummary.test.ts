@@ -85,7 +85,16 @@ describe("useAgentActivitySummary — trigger", () => {
         const [, payload] = hub.activitySummary.mock.calls[0];
         expect(payload.block_id).toBe(BLOCK_ID);
         expect(payload.user_message).toBe("invert user input styling");
-        expect(hub.updateMeta).toHaveBeenCalledWith("block:b", { "term:ambient_summary": "new title" });
+        dispose();
+    });
+
+    it("never writes the title itself: the backend stores it (ambient/title.rs)", async () => {
+        hub.activitySummary.mockResolvedValue({ summary: "new title", tokens: null });
+        const { setPhase, dispose } = setup();
+        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "invert user input styling" });
+        for (let i = 0; i < 4; i++) await Promise.resolve();
+        const wrote = hub.updateMeta.mock.calls.some(([, patch]) => "term:ambient_summary" in patch);
+        expect(wrote).toBe(false);
         dispose();
     });
 
@@ -156,33 +165,6 @@ describe("useAgentActivitySummary — trigger", () => {
         expect(hub.activitySummary).toHaveBeenCalledTimes(1);
         dispose();
     });
-
-    it("discards a stale result superseded by a newer Submitting transition before it resolves", async () => {
-        let resolveFirst!: (v: unknown) => void;
-        hub.activitySummary
-            .mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }))
-            .mockResolvedValueOnce({ summary: "second title", tokens: null });
-        const { setPhase, dispose } = setup();
-
-        setPhase({ kind: "Submitting", submittedAt: 1, pendingContent: "first ask" });
-        await Promise.resolve();
-        setPhase({ kind: "Streaming", bufferSize: 0, toolsActive: 0, lastEventMs: 0 });
-        setPhase({ kind: "Submitting", submittedAt: 2, pendingContent: "second ask" });
-        await Promise.resolve();
-        await Promise.resolve();
-
-        // Second call already resolved and wrote its result.
-        expect(hub.updateMeta).toHaveBeenCalledWith("block:b", { "term:ambient_summary": "second title" });
-        hub.updateMeta.mockClear();
-
-        // First (stale) call resolves late — must NOT overwrite the newer title.
-        resolveFirst({ summary: "stale first title", tokens: null });
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(hub.updateMeta).not.toHaveBeenCalled();
-        dispose();
-    });
 });
 
 const submit = (setPhase: (p: TurnPhase) => void, n: number, text = `message ${n} about the login race`) => {
@@ -230,22 +212,6 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
         dispose();
     });
 
-    it("keeps the title over a rewording, and replaces it with a new goal", async () => {
-        hub.meta = { "term:ambient_summary": "Fix the login race", "term:human_turns": 1 };
-        hub.activitySummary.mockResolvedValueOnce({ summary: "Fix login race condition", tokens: null });
-        const { setPhase, dispose } = setup();
-        submit(setPhase, 2);
-        await flush();
-        expect(hub.meta["term:ambient_summary"]).toBe("Fix the login race");
-
-        hub.meta["term:human_turns"] = 4;
-        hub.activitySummary.mockResolvedValueOnce({ summary: "Set up CI for the docs site", tokens: null });
-        submit(setPhase, 5);
-        await flush();
-        expect(hub.meta["term:ambient_summary"]).toBe("Set up CI for the docs site");
-        dispose();
-    });
-
     it("counts messages sent before the meta write lands (muxreview P2 on #4238)", async () => {
         // The real write is a server round trip; until it lands the block meta
         // still shows the old count.
@@ -262,18 +228,14 @@ describe("useAgentActivitySummary — schedule (hardening PR 3)", () => {
         dispose();
     });
 
-    it("a message on an unscheduled turn does not discard the scheduled turn's result (muxreview P2 on #4238)", async () => {
-        let resolveTurn5!: (v: unknown) => void;
-        hub.activitySummary.mockImplementationOnce(() => new Promise((res) => { resolveTurn5 = res; }));
+    it("a message on an unscheduled turn makes no request, so it can't supersede the scheduled one (#4238)", async () => {
+        hub.activitySummary.mockImplementationOnce(() => new Promise(() => {}));
         hub.meta = { "term:ambient_summary": "Fix the login race", "term:human_turns": 4 };
         const { setPhase, dispose } = setup();
         submit(setPhase, 5); // scheduled: asks
         submit(setPhase, 6); // not scheduled: no request
         await flush();
         expect(hub.activitySummary).toHaveBeenCalledTimes(1);
-        resolveTurn5({ summary: "Set up CI for the docs site", tokens: null });
-        await flush();
-        expect(hub.meta["term:ambient_summary"]).toBe("Set up CI for the docs site");
         dispose();
     });
 });
