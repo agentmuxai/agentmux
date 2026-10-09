@@ -53,6 +53,10 @@ jobs:
 
       - name: lychee
         id: lychee
+        # Step-level, not just the job's: a failure while the action downloads
+        # or installs lychee (before its own `fail: false` applies) must still
+        # leave the report steps below to say so.
+        continue-on-error: true
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: --config .github/lychee.toml 'web-links/**/*.txt'
@@ -69,11 +73,13 @@ jobs:
           token: ${{ github.token }}
 
       - name: Build the report
+        if: ${{ !cancelled() }}
         env:
           LYCHEE_EXIT: ${{ steps.lychee.outputs.exit_code }}
         run: bash scripts/weekly-web-link-report.sh lychee/out.md "$LYCHEE_EXIT" web-links web-link-report
 
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: web-link-report
           path: |
@@ -82,7 +88,7 @@ jobs:
           retention-days: 30
 
       - name: Post to the docs-stale issue
-        if: github.ref == 'refs/heads/main'
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
