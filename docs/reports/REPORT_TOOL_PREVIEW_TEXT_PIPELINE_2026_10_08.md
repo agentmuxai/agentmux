@@ -1,6 +1,6 @@
 # Tool previews: why the formatting breaks, and one pipeline to fix it
 
-**Status:** active — Phase 0 items 1, 2 and 5 (bashwrap's echoed cursor report, the 200-column PTY, stale doc statuses) in #4508; items 3 and 4 moved into Phase 2 (§6). Phases 1–3 (the pipeline, the renderer, the deletions, the layout test) built in the PR after #4508; §8 says what's where.
+**Status:** active — Phase 0 items 1, 2 and 5 (bashwrap's echoed cursor report, the 200-column PTY, stale doc statuses) in #4508; items 3 and 4 moved into Phase 2 (§6). Phases 1–3 (the pipeline, the renderer, the deletions, the layout test) built in #4512; §8 says what's where.
 **Date:** 2026-10-08.
 **Requested by:** repo owner (asafebgi): "the preview formatting sometimes doesn't process right. We had a couple work on it including simulating 2 space tabs that doesn't appear to work. Sometimes lines are wordwrapped for no reason … I worry the code is spaghetti and isn't cleanly processing display in a robust way … we want a clear preview parser that ensures previews are always clean."
 **Author:** Masty.
@@ -258,7 +258,7 @@ That test is the definition of "previews are always clean".
 
 ## 8. As built (2026-10-09)
 
-Phases 1–3 are built in the PR after #4508. What's where:
+Phases 1–3 are built in #4512. What's where:
 
 | Layer | Files |
 |---|---|
