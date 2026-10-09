@@ -724,6 +724,39 @@ impl std::fmt::Display for TurnGate {
     }
 }
 
+/// A held message's join hint, armed for one dispatch. Dropped without
+/// `keep` (the dispatch failed), it is cleared, so no later message can take
+/// it (#4492).
+struct ArmedJoinHint(Option<std::sync::Arc<crate::backend::blockcontroller::health::TurnActivityTracker>>);
+
+impl ArmedJoinHint {
+    fn arm(
+        joins_turn: Option<u64>,
+        tracker: Option<std::sync::Arc<crate::backend::blockcontroller::health::TurnActivityTracker>>,
+    ) -> Self {
+        match (joins_turn, tracker) {
+            (Some(turn_id), Some(tracker)) => {
+                tracker.hint_join(turn_id);
+                Self(Some(tracker))
+            }
+            _ => Self(None),
+        }
+    }
+
+    /// The dispatch went through: the pass it starts takes the hint.
+    fn keep(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for ArmedJoinHint {
+    fn drop(&mut self) {
+        if let Some(tracker) = self.0.take() {
+            tracker.clear_join_hint();
+        }
+    }
+}
+
 pub async fn run_agent_turn(
     deps: &AgentTurnDeps,
     block_id: String,
@@ -769,11 +802,7 @@ pub async fn run_agent_turn_joining(
     // the others start passes with no labelled input, so their tracker is told
     // just before the dispatch, never earlier: a failure in the preparation
     // must not leave the hint armed for a later message (#4492).
-    let arm_join_hint = || {
-        if let (Some(turn_id), Some(tracker)) = (joins_turn, ctrl.turn_tracker()) {
-            tracker.hint_join(turn_id);
-        }
-    };
+    let arm_join_hint = || ArmedJoinHint::arm(joins_turn, ctrl.turn_tracker());
 
     // Re-read the spawn config from block metadata
     let block: Block = mstore
@@ -1001,8 +1030,9 @@ pub async fn run_agent_turn_joining(
         ctrl.as_any()
             .downcast_ref::<blockcontroller::app_server_controller::AppServerController>()
     {
-        arm_join_hint();
+        let hint = arm_join_hint();
         app_server_ctrl.send_message(message)?;
+        hint.keep();
     }
     // Try persistent controller first, fall back to subprocess
     else if let Some(persistent_ctrl) =
@@ -1198,7 +1228,9 @@ pub async fn run_agent_turn_joining(
                 },
                 instance_id: instance_id.clone(),
             };
+            let hint = arm_join_hint();
             subprocess_ctrl.spawn_container_turn(cm.clone(), container_name, base_cmd, config)?;
+            hint.keep();
         } else {
             // Host agent: regular CLI subprocess (env set on child process, not in argv).
             let config = blockcontroller::subprocess::SubprocessSpawnConfig {
@@ -1219,8 +1251,9 @@ pub async fn run_agent_turn_joining(
                 },
                 instance_id,
             };
-            arm_join_hint();
+            let hint = arm_join_hint();
             subprocess_ctrl.spawn_turn(config)?;
+            hint.keep();
         }
     } else if let Some(acp_ctrl) =
         ctrl.as_any().downcast_ref::<blockcontroller::acp::AcpController>()
@@ -1230,8 +1263,9 @@ pub async fn run_agent_turn_joining(
         // If the agent's process exited or crashed, this starts it again from
         // the pane's meta; the message waits for the new session.
         acp_ctrl.ensure_started(block.meta.clone())?;
-        arm_join_hint();
+        let hint = arm_join_hint();
         acp_ctrl.send_message(message, message_id.as_deref())?;
+        hint.keep();
     } else {
         return Err(
             "controller is not a SubprocessController, PersistentSubprocessController or AcpController"

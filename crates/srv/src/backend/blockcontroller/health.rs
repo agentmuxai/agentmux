@@ -293,7 +293,12 @@ impl TurnActivityTrackerInner {
         };
         if let Some(ledger) = self.ledger.as_mut() {
             let settling = ledger.settling_at(now);
-            let recently_ended = ledger.ended_at_ms.is_some_and(|e| now.saturating_sub(e) <= HELD_FLUSH_JOIN_MS);
+            // Ended, or done settling with no next pass (nothing writes the end
+            // then): it ended at its last pass, as the pane reads it (#4492).
+            let ended_at = ledger
+                .ended_at_ms
+                .or_else(|| (!ledger.active && !settling).then_some(ledger.last_pass_ended_at_ms).flatten());
+            let recently_ended = ended_at.is_some_and(|e| now.saturating_sub(e) <= HELD_FLUSH_JOIN_MS);
             let joins = match start {
                 // A fresh message the user typed after the agent stopped is a
                 // new turn, even inside the settle window (D3); only the
@@ -602,6 +607,12 @@ impl TurnActivityTracker {
         self.inner.lock().unwrap().pending_join = Some((turn_id, now));
     }
 
+    /// Drop a join hint whose dispatch failed: no pass will consume it, and
+    /// a later message must not.
+    pub fn clear_join_hint(&self) {
+        self.inner.lock().unwrap().pending_join = None;
+    }
+
     /// The current turn ledger, if any turn has started.
     #[cfg(test)]
     pub fn ledger(&self) -> Option<TurnLedger> {
@@ -645,7 +656,13 @@ impl TurnActivityTracker {
     /// process to spawn). Two queued before that turn starts: the second, if
     /// not the user's, taints it.
     pub fn hint_next_turn(&self, input: TurnInput) {
+        let now = (self.clock)();
         let mut inner = self.inner.lock().unwrap();
+        // A held message queued behind a spawn keeps its join for the pass the
+        // spawn starts (#4492).
+        if let Some(turn_id) = input.joins_turn {
+            inner.pending_join = Some((turn_id, now));
+        }
         match inner.next_turn.as_mut() {
             None => inner.next_turn = Some(TurnProvenance::from_input(input)),
             Some(p) => p.absorb(input.origin),
@@ -1199,6 +1216,47 @@ mod tests {
         t.mark_turn_active_from(Some(user("held, delivered mid-pass")));
         t.end_pass(None);
         advance(&clock, TURN_SETTLE_MS + 1);
+        t.mark_turn_active_returning_was_active();
+        assert_ne!(t.ledger().unwrap().turn_id, id);
+    }
+
+    /// A settle window that lapsed with no next pass counts as the turn's end
+    /// for a held message's join, as the pane reads it (#4492).
+    #[test]
+    fn a_held_message_joins_a_turn_whose_settle_window_lapsed() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        let id = t.ledger().unwrap().turn_id;
+        t.mark_turn_active_from(Some(jekt())); // answered inside the pass
+        t.end_pass(None);
+        advance(&clock, TURN_SETTLE_MS + 3_000); // lapsed, nothing wrote the end
+        let held = TurnInput { origin: TurnOrigin::User, text: "held".into(), joins_turn: Some(id) };
+        t.mark_turn_active_from(Some(held));
+        assert_eq!(t.ledger().unwrap().turn_id, id);
+    }
+
+    /// A held message queued behind a spawn keeps its join (#4492).
+    #[test]
+    fn a_held_message_queued_behind_a_spawn_keeps_its_join() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        let id = t.ledger().unwrap().turn_id;
+        t.end_pass(None);
+        advance(&clock, 200);
+        t.hint_next_turn(TurnInput { origin: TurnOrigin::User, text: "held".into(), joins_turn: Some(id) });
+        t.set_active_turn(true); // the spawn starts the queued pass
+        assert_eq!(t.ledger().unwrap().turn_id, id);
+    }
+
+    #[test]
+    fn a_cleared_join_hint_joins_nothing() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_returning_was_active();
+        let id = t.ledger().unwrap().turn_id;
+        t.end_pass(None);
+        t.hint_join(id);
+        t.clear_join_hint(); // the dispatch failed
+        advance(&clock, 100);
         t.mark_turn_active_returning_was_active();
         assert_ne!(t.ledger().unwrap().turn_id, id);
     }
