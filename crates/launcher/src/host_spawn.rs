@@ -310,13 +310,12 @@ fn kill_process_group(child: &tokio::process::Child, signal: libc::c_int, signal
     }
 }
 
+/// The signal itself goes through `agentmux_common::process::signal_process_group`,
+/// which refuses a pgid of 0 or 1 (the launcher's own group, or the
+/// broadcast) rather than signalling it.
 #[cfg(not(target_os = "windows"))]
 fn kill_group(pid: u32, signal: libc::c_int, signal_name: &str) {
-    // SAFETY: kill(2) with a process-scoped pid + a constant signal — no
-    // memory is touched. A stale pid just returns ESRCH (ignored below).
-    let rc = unsafe { libc::kill(-(pid as libc::pid_t), signal) };
-    if rc != 0 {
-        let err = std::io::Error::last_os_error();
+    if let Err(err) = agentmux_common::process::signal_process_group(pid, signal) {
         if err.raw_os_error() != Some(libc::ESRCH) {
             crate::logging::log(&format!(
                 "WARN: kill(-{}, {}) failed: {}",
