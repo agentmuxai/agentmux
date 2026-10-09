@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { noteSrvInfoMessage, onSrvInfo, srvInfo, UI_VERSION, versionSkew } from "./srv-info";
 
 describe("srvinfo", () => {
@@ -45,5 +45,17 @@ describe("noteSrvInfoMessage", () => {
 
         noteSrvInfoMessage({ command: "eventrecv", data: { event: "srvinfo", data: { version: "8.8.8", hostName: "h" } } });
         expect(srvInfo()).toMatchObject({ version: "8.8.8", hostName: "h" });
+    });
+});
+
+describe("a srv too old to send srvinfo", () => {
+    it("counts as a mismatch once an RPC has answered without srvinfo", async () => {
+        vi.resetModules();
+        const m = await import("./srv-info");
+        expect(m.versionSkew()).toBeNull();
+        m.noteSrvInfoDue();
+        expect(m.versionSkew()).toBe(m.OLDER_SRV);
+        m.onSrvInfo({ version: m.UI_VERSION });
+        expect(m.versionSkew()).toBeNull();
     });
 });

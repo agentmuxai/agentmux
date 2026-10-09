@@ -49,6 +49,7 @@ import { render } from "solid-js/web";
 import { benchMark, benchDump } from "@/util/startup-bench";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { isHostApp } from "@/app/init/host-detect";
+import { noteSrvInfoDue } from "@/app/store/srv-info";
 import { failStartup, showStartupError, StartupFailureHandled } from "@/app/init/error-display";
 import { describeError, formatDescribedError } from "@/app/errors/error-report";
 import { withTimeout } from "@/app/init/timeout";
@@ -999,6 +1000,8 @@ async function initMux(initOpts: AgentMuxInitOpts) {
 
     t = performance.now();
     const fullConfig = await withTimeout(RpcApi.GetFullConfigCommand(TabRpcClient), RPC_TIMEOUT, "GetFullConfig");
+    // A WebSocket RPC has answered, so `srvinfo` (sent before any reply) is in.
+    noteSrvInfoDue();
     tlog("GetFullConfig", t);
     setFullConfigAtom(fullConfig);
 

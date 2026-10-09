@@ -22,6 +22,19 @@ export interface SrvInfo {
 }
 
 const [srvInfo, setSrvInfo] = createSignal<SrvInfo | null>(null);
+const [srvSilent, setSrvSilent] = createSignal(false);
+
+/** What `versionSkew()` returns for a srv that never sent `srvinfo`. */
+export const OLDER_SRV = "an older version";
+
+/**
+ * Called once startup has had a WebSocket RPC reply. srv sends `srvinfo`
+ * before it answers any RPC, so none by then means a srv from before
+ * `srvinfo` existed: a version mismatch the version can't name.
+ */
+export function noteSrvInfoDue(): void {
+    if (srvInfo() == null) setSrvSilent(true);
+}
 
 /** What srv last reported, or null before the first connect. */
 export { srvInfo };
@@ -44,6 +57,7 @@ export function noteSrvInfoMessage(msg: { command?: string; data?: { event?: str
 /** Records a `srvinfo` payload. Ignores one without a version. */
 export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): void {
     if (typeof data?.version !== "string" || data.version === "") return;
+    setSrvSilent(false);
     setSrvInfo({
         version: data.version,
         platform: data.platform ?? "",
@@ -53,8 +67,10 @@ export function onSrvInfo(data: Partial<SrvInfo> | null | undefined): void {
     });
 }
 
-/** srv's version when it differs from this UI's, otherwise null. */
+/** srv's version when it differs from this UI's (`OLDER_SRV` for one too old
+ *  to say), otherwise null. */
 export function versionSkew(): string | null {
     const v = srvInfo()?.version;
-    return v != null && v !== UI_VERSION ? v : null;
+    if (v == null) return srvSilent() ? OLDER_SRV : null;
+    return v !== UI_VERSION ? v : null;
 }
