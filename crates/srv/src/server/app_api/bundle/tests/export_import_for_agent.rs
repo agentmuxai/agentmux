@@ -610,7 +610,7 @@ async fn export_for_agent_errors_for_an_unknown_bundle_or_agent() {
 ///
 /// Uses the dedicated setter, not `agent_def_update`: that UPDATE
 /// deliberately does not list `default_memory_id` among its columns
-/// (its `UPDATE db_agents` in `storage/agents.rs`), so mutating
+/// (its `UPDATE db_agents` in `storage/agents/definition.rs`), so mutating
 /// `AgentDefinition.memory_id` and calling it would silently no-op.
 fn bind_definition_to_bundle(state: &AppState, agent_id: &str, bundle_id: &str) {
     assert!(

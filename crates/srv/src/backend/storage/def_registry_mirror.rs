@@ -135,7 +135,7 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         // doesn't carry it yet, so a cross-channel-reopened agent starts
         // back at the fail-closed "private" default rather than an unset/
         // empty value — never silently more permissive than intended.
-        // agent_def_list()'s own overlay (agents.rs) preserves the local
+        // agent_def_list()'s own overlay (agents/definition.rs) preserves the local
         // row's real value when one exists, same as model_vendor_base_url/
         // memory_id; this default only applies to a genuinely
         // never-seen-locally cross-channel agent.

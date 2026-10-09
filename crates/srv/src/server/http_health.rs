@@ -108,7 +108,7 @@ pub(super) async fn handle_discovery(State(state): State<AppState>) -> Json<serd
 
     // Host directory (live SQLite instances). `instance_list` already excludes
     // hidden (user_hidden = 0) and template rows in SQL, and the consolidated
-    // path leaves block_id/status empty (agents.rs) — so addressability AND the
+    // path leaves block_id/status empty (storage/agents/instance.rs) — so addressability AND the
     // live block_id come from the reachable set above. `block_id` is null for a
     // known-but-unreachable agent; the always-empty `status` is omitted.
     let instances = state.mstore.instance_list(None, None).unwrap_or_default();
