@@ -38,21 +38,48 @@ function* rustFiles(dir) {
     }
 }
 
-// The file with every inline `#[cfg(test)] mod x { … }` block blanked out,
-// found by brace matching. Line breaks are kept, so line numbers still match.
+// Where the item opened by the `{` at `open` ends: the index of its `}`.
+// Braces inside comments, strings, raw strings and char literals don't count.
+function closingBrace(text, open) {
+    let depth = 0;
+    for (let i = open; i < text.length; i++) {
+        const c = text[i];
+        if (c === "/" && text[i + 1] === "/") {
+            i = text.indexOf("\n", i);
+            if (i < 0) return text.length - 1;
+        } else if (c === "/" && text[i + 1] === "*") {
+            i = text.indexOf("*/", i + 2) + 1;
+            if (i <= 0) return text.length - 1;
+        } else if (c === "r" && /^r#*"/.test(text.slice(i, i + 8)) && !/\w/.test(text[i - 1] ?? "")) {
+            const hashes = text.slice(i + 1).match(/^#*/)[0];
+            i = text.indexOf(`"${hashes}`, i + hashes.length + 2) + hashes.length;
+            if (i < hashes.length) return text.length - 1;
+        } else if (c === '"') {
+            for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === "\\") i++;
+        } else if (c === "'" && /^'(?:\\.|[^\\'])'/.test(text.slice(i, i + 4))) {
+            i = text.indexOf("'", i + 2);
+        } else if (c === "{") {
+            depth++;
+        } else if (c === "}" && --depth === 0) {
+            return i;
+        }
+    }
+    return text.length - 1;
+}
+
+// The file with every inline test-only module blanked out: `mod x { … }` under
+// a `#[cfg(…)]` that requires `test` (`test`, `all(test, …)`, not `not(test)`).
+// Line breaks are kept, so line numbers still match.
 function withoutTestMods(text) {
-    const head = /#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{/g;
+    const head = /#\[cfg\(([^\]]*)\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod \w+\s*\{/g;
     let out = "";
     let from = 0;
     for (let m = head.exec(text); m; m = head.exec(text)) {
-        let depth = 0;
-        let i = m.index + m[0].length - 1;
-        for (; i < text.length; i++) {
-            if (text[i] === "{") depth++;
-            else if (text[i] === "}" && --depth === 0) break;
-        }
-        out += text.slice(from, m.index) + text.slice(m.index, i + 1).replace(/[^\n]/g, " ");
-        from = i + 1;
+        const cfg = m[1];
+        if (!/\btest\b/.test(cfg) || /\bnot\s*\(\s*test\b/.test(cfg) || /^\s*any\s*\(/.test(cfg)) continue;
+        const end = closingBrace(text, m.index + m[0].length - 1);
+        out += text.slice(from, m.index) + text.slice(m.index, end + 1).replace(/[^\n]/g, " ");
+        from = end + 1;
         head.lastIndex = from;
     }
     return out + text.slice(from);
