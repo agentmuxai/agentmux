@@ -25,13 +25,16 @@
  * first tick and reap the in-flight login CLI before the user finishes.
  */
 
-import { getApi } from "@/app/store/global";
 import { openOAuthBrowserPane } from "./open-oauth-pane";
+import { loginBackend } from "./login-backend";
 import type { ProviderDefinition } from "../providers";
 import type { LogFn } from "../types";
 
 export interface ForceLoginParams {
-    provider: Pick<ProviderDefinition, "authLoginCommand" | "requiresLoginTty" | "authConfigDirEnvVar">;
+    provider: Pick<
+        ProviderDefinition,
+        "id" | "authLoginCommand" | "authCheckCommand" | "requiresLoginTty" | "authConfigDirEnvVar"
+    >;
     /** Resolved CLI path (from block meta `cmd`, set at launch). */
     cliPath: string;
     /** Auth env (e.g. CLAUDE_CONFIG_DIR) — from block meta `cmd:env`. */
@@ -53,21 +56,31 @@ export interface ForceLoginParams {
  * scrapeable OAuth URL — nothing was opened, and the CALLER must surface a
  * user-visible error pointing at the reliable recovery paths (the silent
  * warn-only branch here is how "Login Again" became a dead button —
- * retro-agent-auth-relogin-noop-2026-07-01 §5.1).
+ * retro-agent-auth-relogin-noop-2026-07-01 §5.1). "superseded": a newer login
+ * (or a cancel) took the login slot while this one started; the slot isn't this
+ * caller's any more, so it must not cancel it or fall back.
  */
-export type ForceLoginOutcome = "opened" | "no-url";
+export type ForceLoginOutcome = "opened" | "no-url" | "superseded";
 
 export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLoginOutcome> {
     const { provider, cliPath, authEnv, setAuthUrl, log, isCancelled } = p;
     log("auth", "re-login: forcing a fresh OAuth (bypassing the auth-status check)…");
 
-    const url = await getApi().runCliLogin(
+    const started = await loginBackend().start({
+        providerId: provider.id,
         cliPath,
-        provider.authLoginCommand,
+        loginArgs: provider.authLoginCommand,
+        checkArgs: provider.authCheckCommand,
         authEnv,
-        provider.requiresLoginTty ?? false,
-        provider.authConfigDirEnvVar,
-    );
+        requiresTty: provider.requiresLoginTty ?? false,
+        authConfigDirEnvVar: provider.authConfigDirEnvVar,
+    });
+    if (started && "superseded" in started) {
+        log("auth", "a newer sign-in replaced this one");
+        return "superseded";
+    }
+    const signIn = started && "url" in started ? started : null;
+    const url = signIn?.url ?? null;
 
     if (url) {
         if (isCancelled?.()) {
@@ -83,6 +96,9 @@ export async function forceProviderLogin(p: ForceLoginParams): Promise<ForceLogi
             // running anyway, which is wrong for an explicit cancel.
             log("auth", "login was cancelled before a browser could be opened", "warn");
             return "opened";
+        }
+        if (signIn?.deviceCode) {
+            log("auth", `enter the code ${signIn.deviceCode} on the sign-in page`);
         }
         setAuthUrl(url);
         const opened = await openOAuthBrowserPane(url);

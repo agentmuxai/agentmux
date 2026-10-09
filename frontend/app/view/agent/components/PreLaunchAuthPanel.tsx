@@ -21,6 +21,7 @@
  */
 
 import { Button } from "@/element/button";
+import { loginBackend } from "../flows/login-backend";
 import { translateError } from "@/app/errors/translate";
 import { CopyErrorButton } from "@/app/errors/CopyErrorButton";
 import { formatErrorReport } from "@/app/errors/error-report";
@@ -618,7 +619,7 @@ async function startConnect(
             // sign-in link…" forever) with no failed banner and no way to
             // retry short of closing the modal. Reap any partial child and
             // report it the same way every other failure path here does.
-            getApi().cancelCliLogin().catch(() => {});
+            loginBackend().cancel().catch(() => {});
             if (actionToken === undefined || !controller.isStaleAction(actionToken)) {
                 controller.failConnect(e);
             }

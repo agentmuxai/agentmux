@@ -329,9 +329,37 @@ pub(crate) fn compute_and_ensure_account_dir(
     (account_id, Some(dir_str))
 }
 
+/// The account directory a caller already chose, as `auth_env` names it under
+/// the provider's `auth_config_dir_env_var`: the key that keeps a login the
+/// caller persists itself (not `direct_account`) to one live session per
+/// directory. `None` for a provider without one, or when it isn't set.
+pub(crate) fn caller_auth_dir(
+    provider_id: &str,
+    auth_env: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    let var = get_provider(provider_id)?.auth_config_dir_env_var;
+    if var.is_empty() {
+        return None;
+    }
+    auth_env.get(var).filter(|d| !d.is_empty()).cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn caller_auth_dir_reads_the_providers_own_variable() {
+        let mut env = std::collections::HashMap::new();
+        assert_eq!(caller_auth_dir("claude", &env), None);
+        env.insert("CLAUDE_CONFIG_DIR".to_string(), "/accounts/a".to_string());
+        env.insert("CODEX_HOME".to_string(), "/accounts/b".to_string());
+        assert_eq!(caller_auth_dir("claude", &env).as_deref(), Some("/accounts/a"));
+        assert_eq!(caller_auth_dir("codex", &env).as_deref(), Some("/accounts/b"));
+        env.insert("CLAUDE_CONFIG_DIR".to_string(), String::new());
+        assert_eq!(caller_auth_dir("claude", &env), None);
+        assert_eq!(caller_auth_dir("no-such-provider", &env), None);
+    }
 
     // `AGENTMUX_HOME_OVERRIDE` is one of the process-global env vars
     // `crate::test_support::ISOLATED_AUTH_ENV_LOCK` exists specifically to

@@ -34,7 +34,8 @@
  */
 
 import { createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
-import { getApi, getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
+import { loginBackend } from "../flows/login-backend";
+import { getBlockMetaKeyAtom, staticTabId } from "@/app/store/global";
 import { sleep } from "@/util/util";
 import { RpcApi } from "@/app/store/rpc-api";
 import { BlockService } from "@/app/store/services";
@@ -1240,7 +1241,7 @@ export function useAgentControllerStatus(
 
     const cancelLogin = () => {
         loginCancelled = true;
-        getApi().cancelCliLogin().catch(() => {});
+        loginBackend().cancel().catch(() => {});
         opts.log("auth", "login cancelled", "warn");
         // Immediate UI feedback — the in-flight poll loop notices
         // loginCancelled on its own next tick (up to 2s), but the phase
@@ -1412,7 +1413,7 @@ export function useAgentControllerStatus(
         // pane closes inside that window. cancelCliLogin is idempotent and
         // swallows errors, so calling it when no login is in flight is safe.
         loginCancelled = true;
-        getApi().cancelCliLogin().catch(() => {});
+        loginBackend().cancel().catch(() => {});
     });
 
     return {

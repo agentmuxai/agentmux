@@ -121,6 +121,10 @@ declare global {
         tray: boolean;
         /** Detect and install provider CLIs on this machine. */
         localCliInstall: boolean;
+        /** Run a provider CLI's login itself (`runCliLogin`, `openLoginTerminal`).
+         *  Without it, logins run through srv (`auth.*`):
+         *  docs/specs/SPEC_PROVIDER_LOGIN_THROUGH_SRV_2026_10_09.md. */
+        hostLogin: boolean;
         /** Window transparency and opacity. */
         windowTransparency: boolean;
         /** Custom title bar and window controls (minimize/maximize/close, drag). */
