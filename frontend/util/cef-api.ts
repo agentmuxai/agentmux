@@ -784,11 +784,6 @@ export function buildCefApi(): AppApi {
             const label = new URLSearchParams(window.location.search).get("windowLabel") ?? "main";
             invokeCommand("set_window_init_status", { status, label }).catch(console.error);
         },
-        onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => {
-            listenEvent<AgentMuxInitOpts>("agentmux-init", (payload) => {
-                callback(payload);
-            });
-        },
 
         // --- Logging ---
         sendLog: (log: string) => {

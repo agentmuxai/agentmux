@@ -368,7 +368,6 @@ declare global {
         createTab: () => void;
         closeTab: (workspaceId: string, tabId: string) => void;
         setWindowInitStatus: (status: "ready" | "wave-ready" | "revealed" | "snapshot-shown") => void;
-        onAgentMuxInit: (callback: (initOpts: AgentMuxInitOpts) => void) => void;
         sendLog: (log: string) => void;
         sendLogStructured: (level: string, module: string, message: string, data: Record<string, any> | null) => void;
         onQuicklook: (filePath: string) => void;
