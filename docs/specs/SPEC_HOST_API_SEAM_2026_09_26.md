@@ -1,7 +1,7 @@
 # SPEC: Host API seam — the frontend reaches its host only through `AppApi`, and asks what the host can do
 
 **Date:** 2026-09-26
-**Status:** implemented — all slices merged: PRs #3878 (1), #3879 (2), #3882 (3), #3886 (4), #3887 (5a), #3888 (5b), #4516 (6), #4519 (7). Every file outside the seam reaches the host through `AppApi`; the ratchet's PENDING list is empty. Slices 6 and 7 guard the UI for the capabilities nothing checked.
+**Status:** implemented — all slices merged: PRs #3878 (1), #3879 (2), #3882 (3), #3886 (4), #3887 (5a), #3888 (5b), #4516 (6), #4519 (7), #4528 (8). Every file outside the seam reaches the host through `AppApi`; the ratchet's PENDING list is empty. Slices 6 to 8 guard the UI for the capabilities nothing checked.
 **Author:** Maricon
 
 ---
@@ -97,6 +97,7 @@ Moving the CEF implementation into `frontend/app/host/cef/`, or splitting the fr
 | **5b** | Startup. `app-init.ts` and `app/init/pool.ts` run after `window.api` exists: their floating-redock target and pool-ready calls move onto `AppApi.windows`, and their events onto `listen`. `bootstrap.ts`, `log/log-pipe.ts`, `log/error-forwarder.ts` and `app/init/error-display.ts` are the CEF entry (goal 1) and join the seam | 0 |
 | **6** | Guards for `multiWindow`, `updater`, `nativeDialogs` and `nativeFileDrop`, which nothing checked. `CommandEntry.requires`. Without `multiWindow`: no New Window (menus, palette, Ctrl+Shift+N, the instance panel), no Open in New Window or Floating Pane, and layouts only add to this window. Without `updater`: the status is never read, so no update row or badge shows, and About has no channel. Without `nativeDialogs`: the Media pane doesn't offer to pick a file. Without `nativeFileDrop`: no dropped paths are read | 0 |
 | **7** | Guards for `tearOff` and `windowTransparency`. Without `tearOff`: releasing a tab below the strip doesn't tear it off (`decideTabRelease` takes `canTearOff`), and the cross-window drag monitor and drop overlay aren't mounted, so a pane dragged out of the window isn't torn off either. Without `windowTransparency`: the window stays opaque whatever the settings say and the host isn't asked; the Opacity menu, the instance panel's opacity sliders and the transparency, opacity and blur settings are hidden | 0 |
+| **8** | The caption buttons (`WindowControlsLeft`, `WindowControlsRight`) mount only with `nativeWindowChrome` | 0 |
 
 ## 6. Testing
 
