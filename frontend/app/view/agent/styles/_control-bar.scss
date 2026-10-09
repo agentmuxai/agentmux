@@ -167,6 +167,26 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                // The live status, then the goal muted beside it: the goal
+                // takes only the room left and is truncated first.
+                // SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.4.
+                display: flex;
+
+                .agent-working-row-primary {
+                    flex: 0 1 auto;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .agent-working-row-detail {
+                    flex: 1 1 0;
+                    min-width: 0;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    opacity: 0.55;
+                    font-weight: 400;
+                }
             }
 
             .agent-working-row-right {

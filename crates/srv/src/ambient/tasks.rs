@@ -231,12 +231,16 @@ pub(crate) async fn generate_subagent_name(
     // (a user rapidly expanding several subagent rows shouldn't spawn
     // unbounded concurrent Haiku CLIs either), `backlog_naming_semaphore()`
     // for the bounded backfill pass — see each call site.
+    // Checked again once admitted: the parent's description may have named it
+    // while this call waited.
+    let still_unnamed = || subagent_watcher.get_info(agent_id).is_some_and(|i| i.display_name.is_none());
     let generated = generate_name_from_task_prompt(
         mstore,
         &info,
         (&purpose::SUBAGENT_NAME, agent_id),
         semaphore,
         prompt::build_subagent_name_prompt,
+        still_unnamed,
     )
     .await?;
     if let Some(name) = &generated.text {
@@ -283,6 +287,7 @@ pub(crate) async fn generate_dispatch_name(
         (&purpose::DISPATCH_NAME, dispatch_id),
         semaphore,
         prompt::build_dispatch_name_prompt,
+        || true,
     )
     .await?;
     if let Some(name) = &generated.text {
@@ -300,16 +305,27 @@ async fn generate_name_from_task_prompt(
     (purpose, entity): (&'static purpose::Purpose, &str),
     semaphore: &'static tokio::sync::Semaphore,
     build_prompt: fn(&str) -> String,
+    still_needed: impl Fn() -> bool,
 ) -> Option<Generated> {
     let slot = call::admit(purpose, entity, 1, Some(semaphore)).await?;
+    if !still_needed() {
+        slot.abandon(super::outcome::Outcome::Gated);
+        return None;
+    }
 
     let task_prompt = crate::backend::subagent_watcher::read_task_prompt(&info.jsonl_path)?;
     let block: Block = mstore.get(&info.parent_block_id).ok().flatten()?;
     let target = CliTarget::from_meta(&block.meta)?;
 
-    let prompt = build_prompt(&task_prompt);
+    let prompt = build_prompt(&prompt::clip_material(&task_prompt, TASK_HEAD_CHARS, TASK_TAIL_CHARS));
     finish(slot.run(&target, &prompt, |raw| judge_line(raw, |t| validate::accept_line(t, &validate::NAME))).await)
 }
+
+/// How much of a subagent's task prompt a name call reads. Task prompts run to
+/// many kilobytes; what the task is comes first, and the whole prompt only made
+/// the call slower and gave the model more to mistake for its own instructions.
+const TASK_HEAD_CHARS: usize = 1200;
+const TASK_TAIL_CHARS: usize = 300;
 
 /// Generate a short user-facing line narrating an autonomous action.
 ///

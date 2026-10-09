@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492 and phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503; phase 2b (attention, §5.5) follows them. See §4.7 for how the build differs from the design below. Phases 3–4 are proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, phase 2a (the trigger on the row and the Worked line, §5.4) in PR #4503 and phase 3 (the live status, §6.8 and §6.9) in PR #4510; phase 2b (attention, §5.5) follows them. See §4.7 for how the build differs from the design below. Phase 4 (tuning `TIMING` from real log data) is proposed.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -473,6 +473,53 @@ Turn ── Idle
 - **`useStatusLine`:** a small hook that ticks the presenter (it reuses `useTick`).
 - **`AgentWorkingRow`:** it renders `{text, detail, tone}` and keeps its reveal, dot, compaction bar and right zone. `loadingLeftText` is replaced by the presenter.
 - **Swarm and muxspect:** get the turn ledger free from the status publish. Swarm can show the external-trigger chip and the unread dot from it.
+
+### 6.8 As built (phase 3a: deterministic sources only)
+
+**Reducer.** `state.activity` (`ActivityState`) holds three things:
+- `phase` and `phaseSince`: one of requesting, responding, thinking, writing or composing.
+- `tools`: the calls in flight, by `tool_use` id, each with its words.
+- `plan`/`planAt`: the latest `TodoWrite`'s in-progress step.
+
+How it's fed:
+- `TokensIn` sets responding, and `RequestStarted` sets requesting (only once a call exists).
+- `OutputStreamed.kind` sets thinking, writing or composing. `useAgentStream` sends the batch's latest delta kind (`mainAgentStreamedKind`).
+- `ToolStart` and `ToolEnd` now carry the tool's `id`, and `ToolStart` its `params`.
+- A pass end (`TurnEnd`, the idle reconcile) clears the phase and tools and keeps the plan. `TurnReset` clears everything.
+
+**Words.**
+- `status/tool-labels.ts`:
+  - Bash's `description`, put into progressive form ("Run the tests" becomes "Running the tests"). Otherwise just the program name, never the whole command.
+  - A subagent's kind and description.
+  - "Reading/Editing/Writing <base name>", "Searching for <pattern>", "Reading <host>" and "Using <mcp tool>".
+  - Calls running at once fold: "Reading 3 files", or "3 tools running" for a mix, naming a subagent if one is among them.
+- `status/plan.ts`: "Writing the spec (3/7)", from the todo item's `activeForm`.
+
+**Presenter.** `status/present-status.ts` implements §6.4's ranks and timing with the values in `TIMING`:
+- Promote thresholds: tools 1.5 s, composing 2 s, writing 3 s, thinking 4 s.
+- Dwell: 1.2 s. Hold after a call ends: 2 s.
+- A slow request: 20 s. Elapsed time is added to a single call's line after 10 s.
+
+Rank 0 comes from `AgentBottomPanels`:
+- the first pending approval: "Waiting for your approval: <its tool's words>";
+- otherwise any pending question: "Waiting for your answer".
+
+The row's statuses are rank 1, and phase 2a's lead-in is rank 3. The presenter returns a `key`, and the row types a line out only when the key changes, so a running clock never re-types the line.
+
+The muted goal, quiet-command detection, the thinking headline, subagent step detail and test progress came in phase 3b (§6.9).
+
+### 6.9 As built (phase 3b: the richer sources)
+
+- **Subagent steps.** `ToolStart` carries the raw line's `parent_tool_use_id` as `parentId`. A subagent's own calls no longer count as calls of their own: the row reads `Explore agent: map the code · Reading health.rs`. The key stays the Agent call's, so a new step swaps in without re-typing.
+- **Test progress** (`status/test-progress.ts`). It reads Bash's live output chunks (`useToolChunkStream`'s new `onOutput`) for known runners: cargo test's `running N tests` and per-test lines (`41/123, 1 failed`), the cargo, vitest and jest summaries, and pytest's `[ 45%]` and final line. It shows in place of the call's elapsed time. Unknown output shows nothing, never a guess.
+- **The thinking headline** (`status/thinking-headline.ts`). From the main agent's `thinking_delta`s, it takes a bold heading the model wrote, else its first sentence, else the start of a long run (up to 80 characters). That gives `Thinking: Weighing the join rule`. It is read once per thinking block and dropped at the next call. A model whose thinking is redacted stays at `Thinking`.
+- **The goal beside.** For ranks 2–5, the presenter returns the ambient summary as `detail`. The row shows it muted after the line (` · Fix the login redirect loop`), and it only takes the room left over, so it is truncated first.
+
+- **A command gone quiet.** Each call's last output time comes from its live chunks, reported at most every 5 s (`ToolOutput`). A Bash call that wrote output and then went silent for `quietToolMs` (60 s) is rank 2: `Running the build · no output for 2m 5s`. A command that never writes anything is not reported as quiet.
+
+- **What slow means in this pane.** The reducer keeps the pane's last 20 waits for the model, from request sent to its answer beginning (`activity.waits`). "Waiting on the model" fires at 20 s, or at twice the pane's median wait once it has 5 or more, whichever is later (`slowRequestMs`). A model that is always slow doesn't cry wolf on every request.
+
+Still open: tuning `TIMING` from real `[turn]` and `[wave-turn]` log data.
 
 ---
 

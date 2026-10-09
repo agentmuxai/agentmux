@@ -14,8 +14,11 @@ use super::*;
 /// so the frontend renders the pane. Body is `CommandPaneOpenData`.
 pub(super) async fn handle_pane_open(
     State(state): State<AppState>,
-    Json(req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
+    Json(mut req): Json<crate::backend::rpc_types::CommandPaneOpenData>,
 ) -> impl IntoResponse {
+    if let Some(meta) = req.meta.as_mut() {
+        crate::server::browser_owner::strip_srv_only_keys(meta);
+    }
     // A pane on an SSH host reads and writes there as the user, with their
     // SSH keys: over HTTP (where agents call from) that takes the agent's
     // signed identity and the user's consent for that host, as `Shell` does

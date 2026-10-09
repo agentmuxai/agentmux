@@ -123,6 +123,27 @@ export function mainAgentStreamedChars(rawEvent: StreamLineShape): number {
     return typeof s === "string" ? s.length : 0;
 }
 
+/** What a main-agent `content_block_delta` streams: the model's reply text,
+ *  its thinking, or a tool call's input. For the live status's phase. */
+export type StreamedKind = "text" | "thinking" | "tool_input";
+
+/** The kind of output a line streams, when it is a main-agent delta that counts. */
+export function mainAgentStreamedKind(rawEvent: StreamLineShape): StreamedKind | null {
+    if (rawEvent.parent_tool_use_id || rawEvent.type !== "stream_event") return null;
+    const inner = rawEvent.event as { type?: string; delta?: { type?: string } } | undefined;
+    if (inner?.type !== "content_block_delta") return null;
+    switch (inner.delta?.type) {
+        case "text_delta":
+            return "text";
+        case "thinking_delta":
+            return "thinking";
+        case "input_json_delta":
+            return "tool_input";
+        default:
+            return null;
+    }
+}
+
 /**
  * A main-agent `user` frame carrying tool results: the CLI is sending them
  * back, so a request is in flight until the next call's `message_start`

@@ -15,6 +15,7 @@ pub mod jekt_sign;
 pub mod layout_types;
 pub mod log_retention;
 pub mod pagefile;
+pub mod popup_rules;
 pub mod process;
 pub mod redact;
 pub mod runtime_mode;

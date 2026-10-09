@@ -867,7 +867,9 @@ describe("AgentWorkingRow across a turn's passes", () => {
                 turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX" } })}
             />
         ));
-        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("↳ jekt from AgentX");
+        expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("↳ jekt from AgentX");
+        // The goal beside it, muted (truncated first).
+        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
 
         const later = render(() => (
             <AgentWorkingRow
@@ -937,6 +939,52 @@ describe("AgentWorkingRow across a turn's passes", () => {
         ));
 
         expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.200  ·  3 steps");
+    });
+});
+
+/**
+ * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6: the left zone is the
+ * presenter's line (status/present-status.ts, tested there in depth).
+ */
+describe("AgentWorkingRow live status", () => {
+    const busy = (startedAt: number) => ({
+        phase: null,
+        phaseSince: 0,
+        tools: [{ id: "t1", activity: { family: "bash" as const, label: "Running the srv test suite" }, startedAt }],
+        plan: null,
+        planAt: 0,
+    });
+
+    it("names what is running once it has run a moment, over the goal", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 3_000)} />
+        ));
+        expect(container.querySelector(".agent-working-row-primary")?.textContent).toBe("Running the srv test suite");
+        expect(container.querySelector(".agent-working-row-detail")?.textContent).toBe(" · Fix the login redirect loop");
+    });
+
+    it("keeps the goal while a call is too young to mention", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" activity={busy(Date.now() - 200)} />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("a question or approval for the user outranks everything", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                stopping={false}
+                activity={busy(Date.now() - 3_000)}
+                needsYou="Waiting for your approval: Running git push"
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Waiting for your approval: Running git push");
+    });
+
+    it("a status like Stopping still outranks what is running", () => {
+        const { container } = render(() => <AgentWorkingRow loading={true} stopping={true} activity={busy(Date.now() - 3_000)} />);
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Stopping…");
     });
 });
 

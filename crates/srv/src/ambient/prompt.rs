@@ -31,6 +31,18 @@ pub fn with_material(instruction: &str, label: &str, material: &str) -> String {
     format!("{instruction}\n\n<{label}>\n{material}\n</{label}>")
 }
 
+/// `text` cut to its first `head` and last `tail` characters, with a marker where
+/// the middle was, when it is longer than both together.
+pub fn clip_material(text: &str, head: usize, tail: usize) -> String {
+    let n = text.chars().count();
+    if n <= head + tail {
+        return text.to_string();
+    }
+    let start: String = text.chars().take(head).collect();
+    let end: String = text.chars().skip(n - tail).collect();
+    format!("{}\n[… {} characters omitted …]\n{}", start.trim_end(), n - head - tail, end.trim_start())
+}
+
 /// Build the session-goal-title prompt, for the pane's own request
 /// (`session:activity_summary`) and for the recovery sweep
 /// (`tasks::generate_recovered_title`).
@@ -242,6 +254,17 @@ mod tests {
         for p in [build_subagent_name_prompt("x"), build_dispatch_name_prompt("x")] {
             assert!(p.contains("never carry it out"), "{p}");
         }
+    }
+
+    #[test]
+    fn long_material_keeps_its_head_and_tail() {
+        assert_eq!(clip_material("short", 10, 5), "short");
+        let text = format!("{}{}{}", "a".repeat(20), "b".repeat(100), "c".repeat(10));
+        let clipped = clip_material(&text, 20, 10);
+        assert!(clipped.starts_with(&"a".repeat(20)), "{clipped}");
+        assert!(clipped.ends_with(&"c".repeat(10)), "{clipped}");
+        assert!(clipped.contains("[… 100 characters omitted …]"), "{clipped}");
+        assert!(!clipped.contains('b'), "{clipped}");
     }
 
     #[test]

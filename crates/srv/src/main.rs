@@ -239,6 +239,9 @@ async fn main() {
     let presence_id_store = Arc::clone(&state.id_store);
     let viewer = Arc::clone(&state.viewer);
     let viewer_router = server::build_viewer_router(state.clone());
+    // Keeps the host's copy of which panes agents own current (for its popup
+    // decisions; docs/specs/SPEC_BROWSER_PANE_NATIVE_POPUPS_AGENT_DRIVEN_2026_10_08.md §3).
+    server::ui_handlers::spawn_owned_panes_sync(state.clone());
     let routers = build_routers(state);
     let router = routers.full;
 
