@@ -105,6 +105,14 @@ pub struct TurnLedger {
 }
 
 impl TurnLedger {
+    fn add_stats(&mut self, stats: PassStats) {
+        self.counted_passes += 1;
+        self.output_tokens += stats.output_tokens;
+        self.cost_usd += stats.cost_usd;
+        self.steps += stats.steps;
+        self.duration_api_ms += stats.duration_api_ms;
+    }
+
     /// Whether a pass starting at `now` may still join this turn as a
     /// continuation: no pass running, not ended, and inside the settle window.
     fn settling_at(&self, now: u64) -> bool {
@@ -374,22 +382,18 @@ impl TurnActivityTracker {
 
     /// Called when a new turn starts (subprocess spawned).
     pub fn set_active_turn(&self, active: bool) {
+        if !active {
+            return self.end_pass(None);
+        }
         let now = (self.clock)();
         let mut inner = self.inner.lock().unwrap();
         let before = inner.ledger.clone();
         let was_active = inner.active_turn;
-        inner.active_turn = active;
-        if active {
-            inner.exit_code = None;
-            if !was_active {
-                inner.start_unlabelled();
-                inner.begin_pass(PassStart::Queued, now);
-            }
-        } else {
-            let ended = inner.provenance.take();
-            if was_active {
-                inner.end_pass(now, ended);
-            }
+        inner.active_turn = true;
+        inner.exit_code = None;
+        if !was_active {
+            inner.start_unlabelled();
+            inner.begin_pass(PassStart::Queued, now);
         }
         let after = inner.ledger.clone();
         drop(inner);
@@ -495,16 +499,35 @@ impl TurnActivityTracker {
         true
     }
 
-    /// Add a finished pass's `result` figures to the turn it belonged to.
+    /// The CLI's `result`: the running pass is over. Its figures (when the
+    /// frame carries them) go to the turn it belonged to in the same step as
+    /// the idle flip, so input that arrives right after can't take them.
+    pub fn end_pass(&self, stats: Option<PassStats>) {
+        let now = (self.clock)();
+        let mut inner = self.inner.lock().unwrap();
+        let before = inner.ledger.clone();
+        let was_active = inner.active_turn;
+        inner.active_turn = false;
+        let ended = inner.provenance.take();
+        if let (Some(stats), Some(l)) = (stats, inner.ledger.as_mut().filter(|l| l.active)) {
+            l.add_stats(stats);
+        }
+        if was_active {
+            inner.end_pass(now, ended);
+        }
+        let after = inner.ledger.clone();
+        drop(inner);
+        self.publish_if_changed(before, after);
+        tracing::info!(block_id = %self.block_id, active = false, "[health] turn_active flip");
+    }
+
+    /// Add a finished pass's `result` figures to the latest turn.
+    #[cfg(test)]
     pub fn add_pass_stats(&self, stats: PassStats) {
         let mut inner = self.inner.lock().unwrap();
         let before = inner.ledger.clone();
         if let Some(l) = inner.ledger.as_mut() {
-            l.counted_passes += 1;
-            l.output_tokens += stats.output_tokens;
-            l.cost_usd += stats.cost_usd;
-            l.steps += stats.steps;
-            l.duration_api_ms += stats.duration_api_ms;
+            l.add_stats(stats);
         }
         let after = inner.ledger.clone();
         drop(inner);
@@ -972,5 +995,22 @@ mod tests {
         assert_eq!(v["origin"], "user");
         assert_eq!(v["active"], true);
         assert!(v.get("ended_at_ms").is_none(), "absent, not null");
+    }
+
+    /// muxreview P2 on #4492: a pass's figures belong to its own turn, even
+    /// when input that opens a new turn arrives right after its `result`.
+    #[test]
+    fn a_pass_s_figures_stay_with_its_turn_when_a_new_turn_follows_at_once() {
+        let (t, _, seen) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("a")));
+        let first = t.ledger().unwrap().turn_id;
+        t.end_pass(Some(stats(300, 2)));
+        t.mark_turn_active_from(Some(user("b"))); // a new turn, at once
+        let next = t.ledger().unwrap();
+        assert_ne!(next.turn_id, first);
+        assert_eq!((next.counted_passes, next.output_tokens), (0, 0), "nothing of the old pass");
+        let ended = seen.lock().unwrap().iter().rev().find(|l| l.turn_id == first).cloned().unwrap();
+        assert_eq!((ended.counted_passes, ended.output_tokens, ended.steps), (1, 300, 2));
+        assert_eq!(ended.end, Some(TurnEnd::Completed));
     }
 }

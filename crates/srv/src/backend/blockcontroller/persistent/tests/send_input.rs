@@ -3588,6 +3588,7 @@ fn boundary(c: &PersistentSubprocessController, generation: u64) -> Option<bool>
         &c.health_monitor,
         "block",
         generation,
+        None,
     )
 }
 
@@ -3967,6 +3968,7 @@ fn commit_restart(c: &PersistentSubprocessController, generation: u64) {
             &c.health_monitor,
             "block",
             generation,
+            None,
         ),
         Some(true),
     );
@@ -3993,7 +3995,7 @@ fn the_restarts_own_stop_never_rearms_a_token_a_stop_cleared() {
         inner.spawn_generation = 3;
         inner.restart_when_idle = true;
     }
-    PersistentSubprocessController::turn_boundary_locked(&mut c.inner.lock().unwrap(), &c.health_monitor, "block", 3);
+    PersistentSubprocessController::turn_boundary_locked(&mut c.inner.lock().unwrap(), &c.health_monitor, "block", 3, None);
     let _ = c.stop_process(false); // the user's Stop, in the gap
     c.stop_for_config_restart();
     assert_eq!(c.inner.lock().unwrap().config_restart_generation, None, "the Stop must stay in force");

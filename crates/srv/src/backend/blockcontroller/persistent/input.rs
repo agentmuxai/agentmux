@@ -357,11 +357,17 @@ impl PersistentSubprocessController {
     /// The deferred restart applies only when nothing is queued. Killing the
     /// process with an entry still queued would strand it; the flag stays set,
     /// and the next `result` (the watchdog's write starts a turn) applies it.
+    ///
+    /// `stats`: the `result` frame's figures. They go to the turn the pass
+    /// belonged to in the same step that idles it, so input arriving right
+    /// after (which may open a new turn) can never take them (muxreview P2 on
+    /// #4492).
     pub(super) fn turn_boundary_locked(
         inner: &mut PersistentInner,
         health: &TurnActivityTracker,
         block_id: &str,
         generation: u64,
+        stats: Option<crate::backend::blockcontroller::health::PassStats>,
     ) -> Option<bool> {
         if inner.spawn_generation != generation {
             tracing::debug!(
@@ -374,7 +380,7 @@ impl PersistentSubprocessController {
         }
         let apply_deferred_restart = inner.deferred_deliveries.is_empty()
             && std::mem::replace(&mut inner.restart_when_idle, false);
-        health.set_active_turn(false);
+        health.end_pass(stats);
         if apply_deferred_restart {
             inner.restart_pending = true;
             // The restart token, set in the acquisition that commits the

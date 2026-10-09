@@ -238,6 +238,7 @@ impl PersistentSubprocessController {
                         &health_read,
                         &block_id_read,
                         my_generation_read,
+                        Some(crate::backend::blockcontroller::health::PassStats::from_result_frame(&parsed)),
                     );
                     // `None`: this reader's process has been replaced. Its
                     // `result` ends nothing the current process is doing,
@@ -245,12 +246,6 @@ impl PersistentSubprocessController {
                     // P1 on #3562).
                     let boundary_is_current = boundary.is_some();
                     let deferred_restart = boundary.unwrap_or(false);
-                    // The pass's figures, into the turn it belonged to.
-                    if boundary_is_current {
-                        health_read.add_pass_stats(
-                            crate::backend::blockcontroller::health::PassStats::from_result_frame(&parsed),
-                        );
-                    }
                     // The model can change under a running process (the CLI
                     // falls back to another model when one is overloaded), so
                     // ask again at every turn boundary. Cheap, and not for a
