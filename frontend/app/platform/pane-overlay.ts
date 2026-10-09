@@ -271,7 +271,7 @@ export interface PaneOverlayHandle {
 
 /**
  * Imperative sibling of `usePaneOverlay` for overlays that aren't Solid
- * components — `showJsContextMenu` (cef-api.ts) builds its menu with plain DOM
+ * components — `showJsContextMenu` (app/host/js-context-menu.ts) builds its menu with plain DOM
  * and so can't call a hook. Same map, same `sendClip()`, same observers.
  *
  * Registering early is fine: an element that is `display:none` (zero box) or
