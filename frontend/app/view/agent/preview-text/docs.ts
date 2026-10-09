@@ -57,10 +57,15 @@ export function splitGutter(lines: readonly string[]): { numbers: (number | unde
     return numbered > 0 ? { numbers, code } : null;
 }
 
-/** A Read body without its gutter, dedented: what a Markdown preview renders. */
-export function readBodyText(text: string): string {
+/**
+ * File text for a Markdown preview: capped like the code view (the same
+ * lines, no marker line in the text: the preview shows the code doc's
+ * markers), the Read gutter taken off when `gutter`, then dedented only —
+ * never narrowed, since indentation is syntax in Markdown.
+ */
+export function markdownBodyText(text: string, opts: { gutter: boolean }): string {
     const lines = capRawLines(splitLines(capChars(text, "head")), "head").lines;
-    const split = splitGutter(lines);
+    const split = opts.gutter ? splitGutter(lines) : null;
     return stripCommonIndent((split ? split.code : lines).join("\n"));
 }
 
@@ -130,6 +135,9 @@ function lcsEdits(a: string[], b: string[]): [DiffMarker, string][] {
  * own), then a line diff under one `@@` header.
  */
 export function diffDocFromSides(oldStr: string, newStr: string, path: string): PreviewDoc {
+    const cut = oldStr.length > MAX_TOOL_OUTPUT_CHARS || newStr.length > MAX_TOOL_OUTPUT_CHARS;
+    oldStr = capChars(oldStr, "head");
+    newStr = capChars(newStr, "head");
     const expand = (s: string) =>
         splitLines(s)
             .map((l) => expandTabs(l, CODE_TAB_WIDTH))
@@ -147,7 +155,8 @@ export function diffDocFromSides(oldStr: string, newStr: string, path: string): 
         { marker: "@@", text: `@@ -1,${oldCount} +1,${newCount} @@` },
         ...edits.map(([marker, text]) => ({ marker, text })),
     ];
-    return capLines({ kind: "diff", lang: detectLanguage(path), lines }, "head");
+    const doc = capLines({ kind: "diff" as const, lang: detectLanguage(path), lines }, "head");
+    return cut ? { ...doc, truncated: "head" } : doc;
 }
 
 /** A unified diff the tool returned, one line per diff line, tabs expanded
@@ -231,15 +240,22 @@ export function chunksDoc(
     // One decode over the joined lines, so colour carries from one line to the
     // next as it does in the finished output. No joined line holds a "\n", so
     // the decoded lines match `raw` one to one.
-    const capped = raw.map(({ text }) => {
-        if (text.length > MAX_TOOL_OUTPUT_CHARS) cut = true;
-        return capChars(text, "tail");
-    });
-    const decoded = raw.length > 0 ? decodeTerminal(capped.join("\n"), OUTPUT_TAB_WIDTH) : [];
-    const lines: PreviewLine[] = decoded.map((line, i) => {
-        const kind = raw[i]?.kind;
-        return kind === "stderr" || kind === "system" ? { ...line, stream: kind } : line;
-    });
+    // Each run of one stream is decoded on its own, so colour doesn't carry
+    // from stdout into stderr (as commandDoc decodes them apart).
+    const lines: PreviewLine[] = [];
+    for (let i = 0; i < raw.length;) {
+        let j = i;
+        while (j < raw.length && raw[j].kind === raw[i].kind) j++;
+        const run = raw.slice(i, j).map(({ text }) => {
+            if (text.length > MAX_TOOL_OUTPUT_CHARS) cut = true;
+            return capChars(text, "tail");
+        });
+        const kind = raw[i].kind;
+        for (const line of decodeTerminal(run.join("\n"), OUTPUT_TAB_WIDTH)) {
+            lines.push(kind === "stderr" || kind === "system" ? { ...line, stream: kind } : line);
+        }
+        i = j;
+    }
     const doc = capLines({ kind: "output" as const, lines }, opts.from ?? "tail");
     return cut ? { ...doc, truncated: "tail" } : doc;
 }
@@ -297,7 +313,11 @@ export function createChunkWindow(maxLines: number = MAX_TOOL_OUTPUT_LINES) {
         let chars = 0;
         while (start > 0 && lineEnds <= maxLines && chars <= MAX_TOOL_OUTPUT_CHARS) {
             const c = stream[--start];
-            lineEnds += countNewlines(c.content) + (isWhole(c) ? 1 : 0);
+            const next = stream[start + 1];
+            // A line ends at a newline, a whole-line chunk, or where the stream
+            // changes (chunksDoc starts a new line there).
+            const changes = next !== undefined && next.kind !== c.kind && !c.content.endsWith("\n");
+            lineEnds += countNewlines(c.content) + (isWhole(c) || changes ? 1 : 0);
             chars += c.content.length;
         }
         const chunks = stream.slice(start);

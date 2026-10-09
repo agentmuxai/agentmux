@@ -14,7 +14,7 @@ import { Markdown } from "@/app/element/markdown";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Show, type JSX } from "solid-js";
-import { codeDoc, readBodyText } from "../../preview-text/docs";
+import { codeDoc, markdownBodyText } from "../../preview-text/docs";
 import type { PreviewDoc } from "../../preview-text/types";
 import type { ResultFileFacts } from "../../providers/claude-translator";
 import { fileRangeOf, formatFileRangeLong } from "../../tool-meta/file-range";
@@ -25,7 +25,6 @@ import { DiffViewer } from "../DiffViewer";
 import { OutputHiddenMarker } from "../OutputHiddenMarker";
 import { PreviewLines, TruncatedMarker } from "../PreviewLines";
 import { ResultImages, resultImagesOf } from "../ResultImages";
-import { formatMarkdownPreview } from "../dedent";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "../output-cap";
 import { terminalText } from "../terminal-text";
 import { anyTool, byKind, type ToolRendererEntry } from "./registry";
@@ -204,7 +203,7 @@ function renderRead(node: ToolNode): JSX.Element {
                 <FilePreview
                     path={filePath}
                     doc={doc!}
-                    markdown={readBodyText(content!)}
+                    markdown={markdownBodyText(content!, { gutter: true })}
                     classPrefix="agent-tool-read"
                 />
             </Show>
@@ -247,8 +246,8 @@ function renderWrite(node: ToolNode): JSX.Element {
                     // Markdown is indentation-sensitive — four leading spaces
                     // are a code block, and rescaling them to two turns it into
                     // prose. Dedent only for that path (codex P2 on PR #2958);
-                    // `formatMarkdownPreview` documents why.
-                    markdown={formatMarkdownPreview(capText(content!, MAX_TOOL_OUTPUT_LINES, "head").text)}
+                    // `formatMarkdownPreview` (dedent.ts) documents why.
+                    markdown={markdownBodyText(content!, { gutter: false })}
                     classPrefix="agent-tool-write"
                 />
             </Show>

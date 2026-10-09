@@ -16,10 +16,10 @@ import {
     diffDocFromSides,
     diffDocFromUnified,
     jsonDoc,
+    markdownBodyText,
     outputDoc,
     proseDoc,
     rawDoc,
-    readBodyText,
     splitGutter,
 } from "./docs";
 import { CODE_TAB_WIDTH, expandTabs, OUTPUT_TAB_WIDTH } from "./tabs";
@@ -205,11 +205,13 @@ describe("codeDoc", () => {
     });
 
     it("gives Markdown the body without the gutter, and doesn't narrow it (indentation is syntax there)", () => {
-        expect(readBodyText("1\t# Title\n2\t\n3\t    code block line\n")).toContain("    code block line");
+        expect(markdownBodyText("1\t# Title\n2\t\n3\t    code block line\n", { gutter: true })).toContain(
+            "    code block line"
+        );
     });
 
     it("gives Markdown the body without the gutter", () => {
-        expect(readBodyText(asRead(["# Title", "", "text"]))).toBe("# Title\n\ntext");
+        expect(markdownBodyText(asRead(["# Title", "", "text"]), { gutter: true })).toBe("# Title\n\ntext");
     });
 });
 
@@ -400,4 +402,48 @@ describe("capLines", () => {
 it("code and output tab widths are what the report decided", () => {
     expect(CODE_TAB_WIDTH).toBe(2);
     expect(OUTPUT_TAB_WIDTH).toBe(8);
+});
+
+describe("Codex's second pass on #4512", () => {
+    const huge = "x".repeat(1_000_100);
+
+    it("a diff built from the edit's strings is capped by characters too, and says so", () => {
+        const doc = diffDocFromSides("a", huge, "a.ts");
+        expect(doc.lines.reduce((n, l) => n + l.text.length, 0)).toBeLessThanOrEqual(1_000_100);
+        expect(doc.truncated).toBe("head");
+    });
+
+    it("selective SGR resets end what they reset, even when carried across lines", () => {
+        const [, second] = decodeTerminal(`${ESC}[31mred\n${ESC}[39mplain`, 8);
+        expect(second).toEqual({ text: "plain" });
+        const [, bold] = decodeTerminal(`${ESC}[1mbold\n${ESC}[22mnormal`, 8);
+        expect(bold).toEqual({ text: "normal" });
+    });
+
+    it("an extended colour's parameters aren't read as other codes (2 isn't faint)", () => {
+        const [line] = decodeTerminal(`${ESC}[38;2;255;10;10mtruecolor${ESC}[0m`, 8);
+        expect(line.spans?.[0].classes ?? "").not.toContain("opacity-75");
+    });
+
+    it("colour doesn't carry from one stream into the next", () => {
+        const doc = chunksDoc([
+            { kind: "stdout", content: `${ESC}[32mgreen\n` },
+            { kind: "stderr", content: "error line\n" },
+        ]);
+        expect(doc.lines[1]).toEqual({ text: "error line", stream: "stderr" });
+    });
+
+    it("the window counts a stream change as a line end, so alternating chunks stay bounded", () => {
+        const stream = Array.from({ length: 4000 }, (_, i) => ({
+            kind: i % 2 ? "stderr" : "stdout",
+            content: `c${i}`,
+        }));
+        const { chunks, total } = createChunkWindow(100)(stream, () => false);
+        expect(total).toBe(4000);
+        expect(chunks.length).toBeLessThan(200);
+    });
+
+    it("Markdown text is capped without a marker line in it", () => {
+        expect(markdownBodyText(`# T\n${huge}`, { gutter: false })).not.toContain("…(truncated)");
+    });
 });
