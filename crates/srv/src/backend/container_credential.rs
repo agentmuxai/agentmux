@@ -5,8 +5,7 @@
 //! shell creation, `stream-local-file`, editor reads, attachment ingest by
 //! path. Its `docker exec` env therefore carries a token minted here instead,
 //! which srv accepts only on [`container_route_allowed`] and attributes to the
-//! agent it was minted for. See
-//! `docs/reports/REPORT_AGENT_FILE_ACCESS_2026_09_29.md`.
+//! agent it was minted for.
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

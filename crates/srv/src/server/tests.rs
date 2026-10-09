@@ -7611,7 +7611,7 @@ async fn memory_session_start_skips_global_memory_the_startup_file_carries() {
     assert_eq!(rules["size_bytes"], 0, "the file's row counts it");
 }
 
-// ---- Container-agent credential (REPORT_AGENT_FILE_ACCESS_2026_09_29.md) ----
+// ---- Container-agent credential (backend/container_credential.rs) ----
 
 async fn status_with_key(method: &str, uri: &str, key: &str) -> StatusCode {
     let req = Request::builder()
