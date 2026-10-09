@@ -773,6 +773,8 @@ describe("AgentWorkingRow across a turn's passes", () => {
         turnId: 7,
         seq: 1,
         origin: "user",
+        trigger: { kind: "user", from: null },
+        absorbed: [],
         startedAtMs: Date.now() - 125_000,
         passes: 1,
         active: true,
@@ -855,6 +857,64 @@ describe("AgentWorkingRow across a turn's passes", () => {
 
         expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("✓ Worked  ·  3m 12s  ·  4.2k tokens");
         expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe("$0.410  ·  9 steps  ·  2 passes");
+    });
+
+    it("opens an external turn by naming what started it, then goes back to its usual text", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                turnLedger={ledger({ startedAtMs: Date.now() - 500, trigger: { kind: "agent", from: "AgentX" } })}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("↳ jekt from AgentX");
+
+        const later = render(() => (
+            <AgentWorkingRow
+                loading={true}
+                activitySummary="Fix the login redirect loop"
+                turnLedger={ledger({ startedAtMs: Date.now() - 10_000, trigger: { kind: "agent", from: "AgentX" } })}
+            />
+        ));
+        expect(later.container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix the login redirect loop");
+    });
+
+    it("a turn the user started opens with its usual text", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix it" turnLedger={ledger({ startedAtMs: Date.now() - 500 })} />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Fix it");
+    });
+
+    it("names an external turn on its Worked line, with what joined it", () => {
+        const end = Date.now() - 1_000;
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                sessionStats={{ duration_ms: 5_000, output_tokens: 100, num_turns: 1 }}
+                turnLedger={ledger({
+                    trigger: { kind: "service", from: "github-consumer" },
+                    absorbed: [{ kind: "user", from: null }],
+                    inputs: 1,
+                    startedAtMs: end - 42_000,
+                    active: false,
+                    countedPasses: 2,
+                    passes: 2,
+                    outputTokens: 900,
+                    costUsd: 0.05,
+                    steps: 4,
+                    lastPassEndedAtMs: end,
+                    endedAtMs: end,
+                    end: "completed",
+                })}
+            />
+        ));
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe(
+            "✓ Worked on github-consumer's notice  ·  42s  ·  900 tokens",
+        );
+        expect(container.querySelector(".agent-working-row-secondary")?.textContent).toBe(
+            "$0.050  ·  4 steps  ·  2 passes  ·  +1 your message",
+        );
     });
 
     it("reports the turn from the pane's own carry when srv counted no passes (ACP, App Server, subprocess)", () => {

@@ -54,6 +54,87 @@ pub const TURN_SETTLE_MS: u64 = 2_000;
 /// once; this covers a slow round trip.
 pub const HELD_FLUSH_JOIN_MS: u64 = 10_000;
 
+/// At most this many inputs are listed on a turn (`TurnLedger::absorbed`);
+/// `inputs` keeps counting past it.
+pub const ABSORBED_CAP: usize = 20;
+
+/// What kind of thing started, or joined, a turn (turn-model spec §5.2).
+/// Display data next to [`TurnOrigin`], which stays the security class.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriggerKind {
+    /// The human, in this pane.
+    User,
+    /// The human, by Swarm broadcast.
+    Broadcast,
+    /// A jekt from another agent.
+    Agent,
+    /// A jekt from a service (`*-consumer`: GitHub review notices, …).
+    Service,
+    /// A scheduled delivery (cron, a loop).
+    Schedule,
+    /// The CLI woke for a background task it had started.
+    Task,
+    /// AgentMux on its own behalf (memory reinjection, a side question).
+    System,
+}
+
+/// What started, or joined, a turn: its kind, and who or what, for display.
+/// Built by srv from what it wrote itself (the jekt marker it composed, the
+/// CLI's task notification), never from message body text.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct TurnTrigger {
+    pub kind: TriggerKind,
+    /// The sender (a jekt's `FROM`), or the task's summary. Absent for the user.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+}
+
+impl TurnTrigger {
+    fn of(kind: TriggerKind, from: Option<&str>) -> Self {
+        TurnTrigger { kind, from: from.map(str::to_string) }
+    }
+
+    /// Classify an input by its origin and the envelope srv put on it.
+    pub fn from_input(origin: TurnOrigin, text: &str) -> Self {
+        match origin {
+            // srv rewrites a broadcast marker found inside any jekt, so only a
+            // user-origin input can carry a real one.
+            TurnOrigin::User if text.contains("[BROADCAST:FROM=user VIA=swarm") => Self::of(TriggerKind::Broadcast, None),
+            TurnOrigin::User => Self::of(TriggerKind::User, None),
+            TurnOrigin::System => Self::of(TriggerKind::System, None),
+            TurnOrigin::Automated => match jekt_sender(text) {
+                Some(from @ ("cron" | "loop")) => Self::of(TriggerKind::Schedule, Some(from)),
+                Some(from) if from.ends_with("-consumer") => Self::of(TriggerKind::Service, Some(from)),
+                from => Self::of(TriggerKind::Agent, from),
+            },
+        }
+    }
+
+    /// The CLI woke for a finished background task; `summary` is the
+    /// notification's own (`Background command "…" completed (exit code 0)`).
+    pub fn task(summary: Option<&str>) -> Self {
+        let summary = summary.map(str::trim).filter(|s| !s.is_empty()).map(|s| {
+            if s.chars().count() > 160 {
+                format!("{}…", s.chars().take(159).collect::<String>())
+            } else {
+                s.to_string()
+            }
+        });
+        TurnTrigger { kind: TriggerKind::Task, from: summary }
+    }
+}
+
+/// The `FROM=` of the `[JEKT:…]` marker srv puts at the head of every
+/// automated delivery (cron fires as `FROM=cron`). The input may be the
+/// plain text or the stream-json line carrying it, so the marker is looked
+/// for anywhere; only automated input is read this way.
+fn jekt_sender(text: &str) -> Option<&str> {
+    let tag = &text[text.find("[JEKT:")? + "[JEKT:".len()..];
+    let tag = &tag[..tag.find(']')?];
+    tag.split_whitespace().find_map(|t| t.strip_prefix("FROM=")).filter(|s| !s.is_empty())
+}
+
 /// Why a turn ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -78,6 +159,13 @@ pub struct TurnLedger {
     /// What started the turn; `None` when its first pass was unlabelled.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<TurnOrigin>,
+    /// The same, for display: what kind of thing, and who.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<TurnTrigger>,
+    /// The labelled inputs that arrived after the turn started, in order,
+    /// up to [`ABSORBED_CAP`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub absorbed: Vec<TurnTrigger>,
     pub started_at_ms: u64,
     /// CLI passes so far, the running one included.
     pub passes: u32,
@@ -109,6 +197,12 @@ pub struct TurnLedger {
 }
 
 impl TurnLedger {
+    fn absorb(&mut self, trigger: Option<TurnTrigger>) {
+        if let Some(t) = trigger.filter(|_| self.absorbed.len() < ABSORBED_CAP) {
+            self.absorbed.push(t);
+        }
+    }
+
     fn add_stats(&mut self, stats: PassStats) {
         self.counted_passes += 1;
         self.output_tokens += stats.output_tokens;
@@ -241,6 +335,10 @@ struct TurnActivityTrackerInner {
     pending_join: Option<(u64, u64)>,
     /// The last `TurnLedger::seq` stamped, across turns.
     ledger_seq: u64,
+    /// The trigger of a message queued for the next turn (`hint_next_turn`).
+    next_turn_trigger: Option<TurnTrigger>,
+    /// The task the CLI last reported finished, for the pass it wakes for.
+    pending_task_trigger: Option<TurnTrigger>,
 }
 
 impl TurnActivityTrackerInner {
@@ -262,19 +360,20 @@ impl TurnActivityTrackerInner {
     }
 
     /// Mid-pass input: the turn will expect a next pass when this one ends.
-    fn note_input_during_pass(&mut self) {
+    fn note_input_during_pass(&mut self, trigger: Option<TurnTrigger>) {
         self.input_during_pass = true;
         // A join hint for a message that reached a running pass is spent: it
         // must not make the next fresh message join this turn.
         self.pending_join = None;
         if let Some(l) = self.ledger.as_mut().filter(|l| l.active) {
             l.inputs += 1;
+            l.absorb(trigger);
         }
     }
 
     /// A pass starts (idle→active): join the current turn or open a new one
     /// (turn-model spec §4.3).
-    fn begin_pass(&mut self, start: PassStart, now: u64) {
+    fn begin_pass(&mut self, start: PassStart, trigger: Option<TurnTrigger>, now: u64) {
         self.input_during_pass = false;
         self.cli_wake_pending = false;
         self.continuation_expected = false;
@@ -286,6 +385,11 @@ impl TurnActivityTrackerInner {
             .take()
             .filter(|(_, at)| now.saturating_sub(*at) <= HELD_FLUSH_JOIN_MS)
             .map(|(id, _)| id);
+        let trigger = match start {
+            PassStart::Queued => trigger.or_else(|| self.next_turn_trigger.take()),
+            PassStart::CliWake => self.pending_task_trigger.take().or(trigger),
+            PassStart::Input { .. } => trigger,
+        };
         let origin = match start {
             PassStart::Input { origin, .. } => Some(origin),
             PassStart::CliWake => Some(TurnOrigin::Automated),
@@ -312,7 +416,10 @@ impl TurnActivityTrackerInner {
             if joins {
                 ledger.passes += 1;
                 // A CLI continuation or a queue drain brings no new input.
-                ledger.inputs += u32::from(matches!(start, PassStart::Input { .. }));
+                if matches!(start, PassStart::Input { .. }) {
+                    ledger.inputs += 1;
+                    ledger.absorb(trigger);
+                }
                 ledger.active = true;
                 ledger.settle_until_ms = None;
                 ledger.ended_at_ms = None;
@@ -326,6 +433,8 @@ impl TurnActivityTrackerInner {
             turn_id: now.max(previous + 1),
             seq: 0,
             origin,
+            trigger: trigger.or_else(|| origin.map(|o| TurnTrigger::from_input(o, ""))),
+            absorbed: Vec::new(),
             started_at_ms: now,
             passes: 1,
             active: true,
@@ -403,6 +512,8 @@ impl TurnActivityTracker {
                 continuation_provenance: None,
                 pending_join: None,
                 ledger_seq: 0,
+                next_turn_trigger: None,
+                pending_task_trigger: None,
             }),
             publisher: Mutex::new(None),
             publish_order: Mutex::new(()),
@@ -457,7 +568,7 @@ impl TurnActivityTracker {
         inner.exit_code = None;
         if !was_active {
             inner.start_unlabelled();
-            inner.begin_pass(PassStart::Queued, now);
+            inner.begin_pass(PassStart::Queued, None, now);
         }
         let after = inner.stamp(&before);
         self.publish_in_order(inner, before, after);
@@ -492,24 +603,25 @@ impl TurnActivityTracker {
         match (was_active, input) {
             (false, Some(i)) => {
                 let start = PassStart::Input { origin: i.origin, joins_turn: i.joins_turn };
+                let trigger = TurnTrigger::from_input(i.origin, &i.text);
                 inner.provenance = Some(TurnProvenance::from_input(i));
-                inner.begin_pass(start, now);
+                inner.begin_pass(start, Some(trigger), now);
             }
             (false, None) => {
                 inner.start_unlabelled();
-                inner.begin_pass(PassStart::Queued, now);
+                inner.begin_pass(PassStart::Queued, None, now);
             }
             (true, Some(i)) => {
                 if let Some(p) = inner.provenance.as_mut() {
                     p.absorb(i.origin);
                 }
-                inner.note_input_during_pass();
+                inner.note_input_during_pass(Some(TurnTrigger::from_input(i.origin, &i.text)));
             }
             (true, None) => {
                 if let Some(p) = inner.provenance.as_mut() {
                     p.tainted = true;
                 }
-                inner.note_input_during_pass();
+                inner.note_input_during_pass(None);
             }
         }
         let after = inner.stamp(&before);
@@ -526,8 +638,10 @@ impl TurnActivityTracker {
     /// The CLI reported a finished background task (`system/task_notification`).
     /// It tells the model in a pass it starts itself: at once if it is idle,
     /// straight after the running pass otherwise.
-    pub fn note_cli_task_notification(&self) {
-        self.inner.lock().unwrap().cli_wake_pending = true;
+    pub fn note_cli_task_notification(&self, summary: Option<&str>) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.cli_wake_pending = true;
+        inner.pending_task_trigger = Some(TurnTrigger::task(summary));
     }
 
     /// The CLI began a pass with no input from srv (`system/init` while idle).
@@ -558,7 +672,7 @@ impl TurnActivityTracker {
             tainted: false,
             user_text: None,
         }));
-        inner.begin_pass(PassStart::CliWake, now);
+        inner.begin_pass(PassStart::CliWake, None, now);
         let after = inner.stamp(&before);
         self.publish_in_order(inner, before, after);
         tracing::info!(block_id = %self.block_id, active = true, "[health] turn_active flip (CLI started a pass)");
@@ -633,6 +747,8 @@ impl TurnActivityTracker {
         inner.continuation_expected = false;
         inner.continuation_provenance = None;
         inner.pending_join = None;
+        inner.next_turn_trigger = None;
+        inner.pending_task_trigger = None;
         if let Some(l) = inner.ledger.as_mut().filter(|l| l.ended_at_ms.is_none()) {
             if l.active {
                 l.last_pass_ended_at_ms = Some(now);
@@ -663,6 +779,9 @@ impl TurnActivityTracker {
         if let Some(turn_id) = input.joins_turn {
             inner.pending_join = Some((turn_id, now));
         }
+        if inner.next_turn.is_none() {
+            inner.next_turn_trigger = Some(TurnTrigger::from_input(input.origin, &input.text));
+        }
         match inner.next_turn.as_mut() {
             None => inner.next_turn = Some(TurnProvenance::from_input(input)),
             Some(p) => p.absorb(input.origin),
@@ -692,7 +811,7 @@ impl TurnActivityTracker {
         inner.exit_code = None;
         if !was_active {
             inner.start_unlabelled();
-            inner.begin_pass(PassStart::Queued, now);
+            inner.begin_pass(PassStart::Queued, None, now);
         }
         let after = inner.stamp(&before);
         self.publish_in_order(inner, before, after);
@@ -916,7 +1035,7 @@ mod tests {
         let (t, clock, _) = ledger_tracker();
         t.mark_turn_active_from(Some(user("go")));
         let id = t.ledger().unwrap().turn_id;
-        t.note_cli_task_notification(); // the task finished mid-pass
+        t.note_cli_task_notification(None); // the task finished mid-pass
         advance(&clock, 4_000);
         t.set_active_turn(false);
         advance(&clock, 20);
@@ -935,7 +1054,7 @@ mod tests {
         t.set_active_turn(false);
         assert!(t.ledger().unwrap().end.is_some(), "nothing was pending: the turn is over");
         advance(&clock, 8_000);
-        t.note_cli_task_notification();
+        t.note_cli_task_notification(None);
         assert!(t.mark_turn_active_from_cli());
         let l = t.ledger().unwrap();
         assert_ne!(l.turn_id, first);
@@ -950,7 +1069,7 @@ mod tests {
         assert!(!t.mark_turn_active_from_cli());
         assert!(!t.is_active_turn(), "a stray init must not leave the agent busy");
         t.mark_turn_active_from(Some(user("go")));
-        t.note_cli_task_notification();
+        t.note_cli_task_notification(None);
         assert!(!t.mark_turn_active_from_cli(), "a pass is already running");
     }
 
@@ -1109,7 +1228,7 @@ mod tests {
         t.mark_turn_active_from(Some(user("and this too"))); // answered inside the pass
         t.set_active_turn(false);
         advance(&clock, 5 * 60_000);
-        t.note_cli_task_notification();
+        t.note_cli_task_notification(None);
         assert!(t.mark_turn_active_from_cli());
         let p = t.provenance().unwrap();
         assert_eq!((p.origin, p.user_text), (TurnOrigin::Automated, None));
@@ -1135,7 +1254,7 @@ mod tests {
         let (t, clock, _) = ledger_tracker();
         t.mark_turn_active_from(Some(user("go")));
         t.mark_turn_active_from(Some(user("more")));
-        t.note_cli_task_notification();
+        t.note_cli_task_notification(None);
         t.set_active_turn(false);
         advance(&clock, 20);
         assert!(t.mark_turn_active_from_cli());
@@ -1259,5 +1378,108 @@ mod tests {
         advance(&clock, 100);
         t.mark_turn_active_returning_was_active();
         assert_ne!(t.ledger().unwrap().turn_id, id);
+    }
+
+    // ---- turn triggers (turn-model spec §5.2) ----
+
+    fn jekt_from(from: &str) -> TurnInput {
+        TurnInput {
+            origin: TurnOrigin::Automated,
+            text: format!("[JEKT:FROM={from} TO=agent5 TIER=coord DELIVERY=wan TRUST=network-claimed]\n───\nhello\n[/JEKT]"),
+            joins_turn: None,
+        }
+    }
+
+    fn trig(kind: TriggerKind, from: Option<&str>) -> TurnTrigger {
+        TurnTrigger { kind, from: from.map(str::to_string) }
+    }
+
+    #[test]
+    fn an_automated_input_is_named_by_the_jekt_marker_srv_put_on_it() {
+        let of = |i: TurnInput| TurnTrigger::from_input(i.origin, &i.text);
+        assert_eq!(of(jekt_from("agentx")), trig(TriggerKind::Agent, Some("agentx")));
+        assert_eq!(of(jekt_from("cron")), trig(TriggerKind::Schedule, Some("cron")));
+        assert_eq!(of(jekt_from("github-consumer")), trig(TriggerKind::Service, Some("github-consumer")));
+        // The same marker inside the stream-json line that carries it.
+        let line = serde_json::json!({"type": "user", "message": {"role": "user", "content": jekt_from("korp").text}});
+        assert_eq!(TurnTrigger::from_input(TurnOrigin::Automated, &line.to_string()), trig(TriggerKind::Agent, Some("korp")));
+        // No marker: still automated, sender unknown.
+        assert_eq!(TurnTrigger::from_input(TurnOrigin::Automated, "nudge"), trig(TriggerKind::Agent, None));
+    }
+
+    #[test]
+    fn the_user_s_own_words_are_never_read_as_a_jekt() {
+        let quoted = "what does [JEKT:FROM=cron TIER=coord] mean?";
+        assert_eq!(TurnTrigger::from_input(TurnOrigin::User, quoted), trig(TriggerKind::User, None));
+        let broadcast = "[BROADCAST:FROM=user VIA=swarm TO=Agent5 RECIPIENTS=7 MSGID=x TS=1]\nhow's it going";
+        assert_eq!(TurnTrigger::from_input(TurnOrigin::User, broadcast), trig(TriggerKind::Broadcast, None));
+        assert_eq!(TurnTrigger::from_input(TurnOrigin::System, "reinjection"), trig(TriggerKind::System, None));
+    }
+
+    #[test]
+    fn a_task_summary_is_kept_and_a_long_one_shortened() {
+        assert_eq!(TurnTrigger::task(Some("  npm test completed ")), trig(TriggerKind::Task, Some("npm test completed")));
+        assert_eq!(TurnTrigger::task(None), trig(TriggerKind::Task, None));
+        let long = TurnTrigger::task(Some(&"x".repeat(400))).from.unwrap();
+        assert_eq!(long.chars().count(), 160);
+        assert!(long.ends_with('…'));
+    }
+
+    #[test]
+    fn a_turn_names_its_trigger_and_lists_what_joined_it() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(jekt_from("agentx")));
+        t.mark_turn_active_from(Some(jekt_from("github-consumer"))); // mid-pass
+        advance(&clock, 1_000);
+        t.set_active_turn(false);
+        advance(&clock, 10);
+        let held = TurnInput { origin: TurnOrigin::User, text: "also this".into(), joins_turn: Some(t.ledger().unwrap().turn_id) };
+        t.mark_turn_active_from(Some(held));
+        let l = t.ledger().unwrap();
+        assert_eq!(l.trigger, Some(trig(TriggerKind::Agent, Some("agentx"))));
+        assert_eq!(l.absorbed, vec![trig(TriggerKind::Service, Some("github-consumer")), trig(TriggerKind::User, None)]);
+        assert_eq!(l.inputs, 2);
+    }
+
+    #[test]
+    fn a_task_wake_up_is_named_by_the_task() {
+        let (t, clock, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("start the build")));
+        t.set_active_turn(false);
+        advance(&clock, 30_000);
+        t.note_cli_task_notification(Some("Background command \"npm run build\" completed (exit code 0)"));
+        assert!(t.mark_turn_active_from_cli());
+        assert_eq!(
+            t.ledger().unwrap().trigger,
+            Some(trig(TriggerKind::Task, Some("Background command \"npm run build\" completed (exit code 0)")))
+        );
+    }
+
+    #[test]
+    fn a_message_queued_at_spawn_names_the_turn_it_starts() {
+        let (t, _, _) = ledger_tracker();
+        t.hint_next_turn(jekt_from("cron"));
+        t.set_active_turn(true); // the spawn
+        assert_eq!(t.ledger().unwrap().trigger, Some(trig(TriggerKind::Schedule, Some("cron"))));
+    }
+
+    #[test]
+    fn absorbed_inputs_are_capped_but_still_counted() {
+        let (t, _, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(user("go")));
+        for _ in 0..(ABSORBED_CAP + 5) {
+            t.mark_turn_active_from(Some(jekt_from("agentx")));
+        }
+        let l = t.ledger().unwrap();
+        assert_eq!((l.absorbed.len(), l.inputs as usize), (ABSORBED_CAP, ABSORBED_CAP + 5));
+    }
+
+    #[test]
+    fn the_trigger_serializes_for_the_pane() {
+        let (t, _, _) = ledger_tracker();
+        t.mark_turn_active_from(Some(jekt_from("agentx")));
+        let v = serde_json::to_value(t.ledger().unwrap()).unwrap();
+        assert_eq!(v["trigger"], serde_json::json!({"kind": "agent", "from": "agentx"}));
+        assert!(v.get("absorbed").is_none(), "empty: absent");
     }
 }

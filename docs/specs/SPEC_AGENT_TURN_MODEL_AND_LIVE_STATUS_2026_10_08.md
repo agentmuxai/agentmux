@@ -1,6 +1,6 @@
 # SPEC: Agent turns that return to the user, what started them, and a live status that says what is happening
 
-**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492; see §4.7 for how the build differs from the design below. Phases 2–4 are proposed.
+**Status:** active. Phase 1 (the turn ledger, §4) is implemented in PR #4492, and phase 2a (the trigger on the row and the Worked line, §5.4) follows it; see §4.7 for how the build differs from the design below. Phase 2b and phases 3–4 are proposed.
 **Date:** 2026-10-08 · **Author:** agent5
 **Components:**
 - Turn accounting: `crates/srv/src/backend/blockcontroller/health.rs` (`TurnActivityTracker`), `persistent/stdout_reader.rs`, `persistent/queue.rs`, `persistent/input.rs`, the controller status publish; frontend `frontend/app/store/agent-pane-state/` (`reducer.ts`, `types.ts`, `turn-contribution.ts`).
@@ -287,6 +287,28 @@ The label is built by srv from data it already holds: the jekt marker's `FROM`, 
 | Tab, pane header, Swarm row | as today | an **unread** dot after an external turn finishes while the pane isn't focused. It clears on focus |
 | OS notification / sound | as today | only when the turn ends needing the user (question, approval, failure). This uses the existing notification router's families (`backend/notify`), with a per-kind policy (§5.1 item 5) |
 | Return digest | — | on focusing a pane that ran external turns unattended: one line above the composer, dismissable. Built deterministically from the ledgers; Haiku is optional, for a one-sentence "what changed" (§9, Q4) |
+
+### 5.4 As built (phase 2a: the trigger, on the row and the Worked line)
+
+**srv.** `TurnTrigger { kind, from }` sits on the ledger as `trigger`, and `absorbed` lists the labelled inputs that joined the turn, up to 20; `inputs` keeps the full count. srv sends the sender rather than a finished sentence, and the pane words it. `TurnTrigger::from_input` classifies an input as follows:
+
+| Input | Kind |
+|---|---|
+| User origin with srv's broadcast header | `broadcast` |
+| Any other user origin | `user` |
+| System origin | `system` |
+| Automated origin | read from the `FROM=` of the `[JEKT:…]` marker srv composed: `cron`/`loop` give `schedule`, `*-consumer` gives `service`, anything else gives `agent` |
+
+Two guards keep the trigger honest:
+- Only automated input is read for a marker, so the user quoting a jekt is never taken for one.
+- A task wake-up takes the `task_notification`'s own `summary` (shortened to 160 characters). A message queued at spawn takes its trigger from the `hint_next_turn` that queued it.
+
+**Pane.** `turn-trigger-text.ts` turns the trigger into words:
+- **Lead-in:** for the first 3 s of an external turn, the row's left zone reads `↳ jekt from AgentX`, `↳ github-consumer`, `↳ scheduled run` or `↳ Background command "…" completed (exit code 0)`. Statuses (stopping, rate limited, launch phases) still win.
+- **Worked verb:** `Worked on AgentX's jekt`, `Worked on github-consumer's notice`, `Worked on a scheduled run` or `Worked on a finished task`. A user turn keeps plain `Worked`.
+- **Secondary:** what joined the turn, by kind, for example `+1 jekt  ·  +2 your messages`, with `+N more` past the listed ones.
+
+**Still to come (phase 2b):** the transcript trigger header, unread dots, the per-kind notification policy, and the return digest.
 
 ---
 

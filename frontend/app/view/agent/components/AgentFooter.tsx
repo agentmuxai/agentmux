@@ -30,6 +30,7 @@ import {
 } from "@/app/store/agent-pane-state/turn-ledger";
 import type { SessionStats, TurnTokens } from "../types";
 import { formatPhaseLabel, type LaunchPhase } from "../flows/launch-phase";
+import { absorbedSummary, TRIGGER_LEAD_IN_MS, triggerLeadIn, workedVerb } from "../turn-trigger-text";
 import { SlashAutocomplete } from "./SlashAutocomplete";
 import { isBangCommand } from "../bang-command";
 import { AttachmentTray } from "../attachments/AttachmentTray";
@@ -183,6 +184,12 @@ function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: num
     }
     const phaseLabel = formatPhaseLabel(props.launchPhase, nowMs);
     if (phaseLabel) return phaseLabel;
+    // A turn something other than the user started opens by saying so.
+    const l = props.turnLedger;
+    if (l && turnOpen(l, nowMs) && nowMs - l.startedAtMs < TRIGGER_LEAD_IN_MS) {
+        const lead = triggerLeadIn(l.trigger);
+        if (lead) return lead;
+    }
     const summary = props.activitySummary?.trim();
     if (summary) return summary;
     return `${phrase}…`;
@@ -351,7 +358,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         const stats = props.sessionStats;
         if (!stats) return null;
         const turn = endedTurn();
-        const parts: string[] = ["✓ " + ingToEd(lastPhrase())];
+        // Named for what started it when that wasn't the user.
+        const parts: string[] = ["✓ " + (turn ? workedVerb(turn.l.trigger) : ingToEd(lastPhrase()))];
         const durationMs = turn?.durationMs ?? stats.duration_ms;
         if (durationMs != null) parts.push(fmtWorkedDuration(durationMs));
         // The turn's output: the results' exact figures (summed over its
@@ -374,6 +382,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         const steps = counted ? counted.steps : stats.num_turns;
         if (steps) parts.push(`${steps} ${steps === 1 ? "step" : "steps"}`);
         if (turn && turn.l.passes > 1) parts.push(`${turn.l.passes} passes`);
+        const joined = turn ? absorbedSummary(turn.l.absorbed, turn.l.inputs) : null;
+        if (joined) parts.push(joined);
         return parts.length ? parts.join("  ·  ") : null;
     });
 
