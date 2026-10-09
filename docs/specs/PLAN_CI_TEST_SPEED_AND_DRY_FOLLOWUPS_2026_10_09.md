@@ -1,7 +1,7 @@
 # Plan — faster CI tests, and the open architecture / DRY follow-ups
 
 **Date:** 2026-10-09
-**Status:** active — in progress, one PR per step. Merged: step 1 (#4534), 2 (#4535), 3 (#4536), 4 (#4541), 5 (#4546, re-scoped: the long sleeps were in ignored tests), 8 (#4542), 9 (#4545), 14 (#4537). In review: 10 (#4547, event names), 12 (#4548, as a ratchet), 13 (Codex turn figures). Steps 7, 16, 18–20 are AgentY's.
+**Status:** active — most steps merged, a few deferred with reasons (§5). Merged: step 1 (#4534), 2 (#4535), 3 (#4536), 4 (#4541), 5 (#4546), 8 (#4542), 9 (#4545), 10 (#4547 names, #4551 payloads), 12 (#4548), 13 (#4549), 14 (#4537), 15 (#4550), 17 in part (#4552, #4553), 20 (#4539). In review: 7 (#4543), 16 (#4540).
 **Author:** Agent5@narko
 **Builds on:**
 - [SPEC_CI_TEST_RUNNER_2026_06_22.md](SPEC_CI_TEST_RUNNER_2026_06_22.md) §6.4 (the serial-for-now decision this plan retires)
@@ -159,6 +159,29 @@ If vitest is still above 3 min after step 7, add a two-way `--shard` matrix in t
 **20. A weekly web-link report.**
 - lychee over `docs/` and code comments (about 562 web URLs, 466 on github.com), restricted to github.com and our own domains, posting to the docs-stale issue.
 - Non-blocking on purpose: a gate on outside URLs makes CI depend on other people's servers.
+
+## 5. Where it landed (2026-10-09)
+
+**Measured:**
+
+| | Before | After |
+|---|---|---|
+| PR lane, ubuntu Rust job | 10.0–12.6 min | 5.8–7.6 min (most of what's left is compiling) |
+| RPC bindings step | 3.4 min | 1 s (#4534) |
+| Rust tests, PR lane | srv binary alone 174 s, serial | 92 s for all 7,534, parallel; flakes reported FLAKY (#4541) |
+| Nightly, Windows | 55–59 min of 60 | release 27.7 min, test 30.5 min, in parallel (#4535) |
+| Nightly, macOS | cancelled at 60 min | release 24.7 min, test 36.0 min |
+
+**Re-scoped or deferred, and why:**
+- **Step 5:** the long sleeps the plan named were all in `#[ignore]` tests. Only one slow test that runs waits purely on tokio time; it now uses a paused clock (10 s → 0.3 s). The other slow tests wait on real processes.
+- **Step 6** (split the Rust job across runners): not needed. Under nextest the test run is 92 s, and the remaining job time is compiling, which another runner would repeat.
+- **Step 11** (`useMuxEvent`): of 39 subscribe/cleanup sites, only 7 follow the plain pattern a hook would replace; the rest resubscribe on id changes or live at module level. Deferred.
+- **Step 12:** shipped as a ratchet (60 untyped handlers, may only fall). Most are App API commands whose caller is the Rust MCP server, so generated TS buys them nothing.
+- **Step 13:** Codex turns now carry their figures (#4549), but the pane shows them only once the App Server transcript renders there (its translator gap). ACP's prompt response has no usage to read. The `ControllerStatusCore` consolidation is not needed for either and is deferred.
+- **Step 17:**
+  - Done: the largest frontend test (#4552) and `storage/agents.rs` (#4553).
+  - Left: `migrations.rs`, `server/reactive.rs`, `inject.rs`, `shell/lifecycle.rs` and `swarm-model.ts`; the file-size ratchet keeps them from growing meanwhile.
+  - `useAgentCommands.test.ts` is better left whole: its module-level `vi.mock` setup would be copied into every piece.
 
 ## 4. Not in this plan
 

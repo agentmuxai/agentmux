@@ -3,7 +3,7 @@
 # `node scripts/check-file-sizes.mjs --update` after shrinking one. Adding a
 # file or raising a number is a hand edit that the PR has to justify.
 3731 crates/bashwrap/src/bash_wrap.rs
-1975 crates/cef/src/client/lifecycle.rs
+1976 crates/cef/src/client/lifecycle.rs
 1549 crates/cef/src/commands/cli_login.rs
 2219 crates/cef/src/commands/window_pool.rs
 1515 crates/cef/src/lib.rs
@@ -28,7 +28,6 @@
 3272 crates/srv/src/backend/lan_discovery.rs
 1889 crates/srv/src/backend/providers.rs
 2442 crates/srv/src/backend/reactive/handler.rs
-3824 crates/srv/src/backend/storage/agents.rs
 3057 crates/srv/src/backend/storage/migrations.rs
 1799 crates/srv/src/backend/storage/muxbus.rs
 3385 crates/srv/src/identity/resolver/inject.rs

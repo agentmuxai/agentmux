@@ -1445,7 +1445,7 @@ async fn reactive_supervisor_decision_nudge_passes_gate_when_opted_in() {
 /// how every delivery path — and thus this gate — must resolve it: as
 /// Agent B's slug) must pass the gate, not get wrongly authorized OR
 /// wrongly rejected off Agent A's unrelated definition via a name match.
-/// Mirrors `agents.rs`'s own
+/// Mirrors `storage/agents/mod.rs`'s own
 /// `instance_get_by_name_and_by_slug_never_cross_the_others_namespace`.
 #[tokio::test]
 async fn reactive_supervisor_decision_nudge_slug_match_does_not_cross_into_a_colliding_display_name() {

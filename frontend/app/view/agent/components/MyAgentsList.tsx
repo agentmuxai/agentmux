@@ -77,7 +77,7 @@ import { WpsEvent } from "@/app/store/mps-events";
  *  reads backwards next to the badge's own HOST/SANDBOX vocabulary).
  *
  *  Codex P2, PR #2789: `"standalone"` is the LEGACY default `agent_type`
- *  (`default_agent_type()`, `backend/storage/agents.rs`) for definitions
+ *  (`default_agent_type()`, `backend/storage/agents/mod.rs`) for definitions
  *  predating the container feature, and every non-`"container"` value is
  *  treated as the host controller at launch (`agent_open.rs`'s
  *  `controller_type = if agent.agent_type == "container" {...} else {...}`)

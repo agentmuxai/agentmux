@@ -2483,7 +2483,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
     // agent's own opt-in go unrecognized, and — worse — let one agent's
     // slug collide with an unrelated agent's current display name,
     // authorizing a nudge off the wrong definition's flag. Same
-    // name/slug cross-namespace hazard `agents.rs`'s
+    // name/slug cross-namespace hazard `storage/agents/mod.rs`'s
     // `instance_get_by_name_and_by_slug_never_cross_the_others_namespace`
     // regression-tests for the read path.)
     if matches!(action, SupervisorAction::Nudge) {

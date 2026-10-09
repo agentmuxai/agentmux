@@ -1065,7 +1065,7 @@ mod tests {
     }
 
     /// Minimal local (not cross-channel registry) `AgentDefinition` —
-    /// mirrors `agents.rs`'s own private `test_agent_def` test fixture
+    /// mirrors `storage/agents/mod.rs`'s own private `test_agent_def` test fixture
     /// shape, duplicated here rather than widening that helper's
     /// visibility for one caller.
     fn local_agent_def(id: &str) -> AgentDefinition {
