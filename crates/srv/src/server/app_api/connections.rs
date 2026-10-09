@@ -550,16 +550,6 @@ pub(crate) struct UserAnswer {
     pub checkbox: bool,
 }
 
-/// Ask the user a question about the agent in `agent_block_id`, in an approval
-/// subwindow the host opens over the window showing it (crates/cef
-/// `ssh_approval`), and wait for the answer.
-///
-/// Through the host's own IPC server and its token, which no agent holds, and
-/// answered in a window the browser API never resolves a pane into: an agent
-/// can neither click this answer nor forge it, unlike a modal in the main
-/// window answered through srv's own services (both reachable with the auth
-/// key every agent has). With no host connected (headless) there is no one to
-/// ask: `Err`, so whatever needed the answer does not happen.
 /// The host that can put a question to the user and relay their answer. Only
 /// the host can: agents hold the key srv's own routes take (see `ask_user`).
 /// With none connected (headless) there is no one to ask, and whatever needs
@@ -573,6 +563,16 @@ pub(crate) async fn host_to_ask_user(state: &AppState) -> Result<crate::server::
         .ok_or_else(|| "no AgentMux window is connected to ask the user in".to_string())
 }
 
+/// Ask the user a question about the agent in `agent_block_id`, in an approval
+/// subwindow the host opens over the window showing it (crates/cef
+/// `ssh_approval`), and wait for the answer.
+///
+/// Through the host's own IPC server and its token, which no agent holds, and
+/// answered in a window the browser API never resolves a pane into: an agent
+/// can neither click this answer nor forge it, unlike a modal in the main
+/// window answered through srv's own services (both reachable with the auth
+/// key every agent has). With no host connected (headless) there is no one to
+/// ask: `Err`, so whatever needed the answer does not happen.
 pub(crate) async fn ask_user(
     state: &AppState,
     agent_block_id: &str,
