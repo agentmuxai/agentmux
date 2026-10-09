@@ -313,6 +313,12 @@ pub struct PurposeSpec {
   The second is the real fix, but it should be taken on measured numbers, not assumed. It also makes timed-out spend countable: the worker survives and reports usage.
 - **The model id** becomes a `PurposeSpec` field, or one constant.
 
+**Measured 2026-10-08, and what was decided.** The exact ambient command, run from the real `ambient-calls` folder with an agent's own `claude` (2.1.288) and identity environment, takes 1.2–1.6 s, and `claude --version` starts in 0.1 s. Process start does **not** dominate, so no worker. Prompt size doesn't explain it either: a call costs about 430 prompt tokens there. (From a folder with large `CLAUDE.md` files above it, the same call costs 17,500 tokens, which is why ambient calls run in their own folder.) The 15 s timeouts are most likely the API itself: many agents on one login, with the CLI retrying on overload. The fix taken, in PR 4:
+- **Time limits per class:** 30 s interactive, 45 s background, 90 s for the continuity summary. The pane's RPC timeout went from 20 s to 45 s to outlast them.
+- **Two classes, each with one cap:** interactive 2, background 3, so 5 at once in total. They replace the six semaphores, and the continuity summary, which had no cap, now has one.
+
+`run_ms` and `queued_ms` on the outcome lines (PR 1) will show whether the longer limits recover the timed-out calls.
+
 ### 6.5 Provider-neutral digest
 
 Build the digest from `agents::translator` `AgentEvent`s instead of raw Claude frames. Claude, Codex and Gemini translators exist; Kimi, Qwen and the ACP panes get one as each provider is moved to its rich protocol. Titles and suggestions then work for every provider with a translator, and the sweep stops spinning on the rest.

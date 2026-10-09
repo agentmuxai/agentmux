@@ -320,16 +320,15 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
             async move {
                 // Admit through the Ambient Model Call gateway BEFORE doing any
                 // work: a stale (superseded) request does zero FileStore reads
-                // or prompt building, not just skips the CLI spawn. The pull
-                // semaphore caps concurrent Haiku spawns across all blocks, raced
-                // against cancellation so a request superseded while queued for
+                // or prompt building, not just skips the CLI spawn. `admit` queues
+                // the call in the interactive class (`ambient::limits`), raced
+                // against cancellation, so a request superseded while queued for
                 // a permit never spawns the CLI at all. See
                 // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
                 let Some(slot) = ambient::call::admit(
                     &ambient::purpose::ACTIVITY_SUMMARY,
                     cmd.block_id.clone(),
                     cmd.generation,
-                    Some(ambient::limits::pull_call_semaphore()),
                 )
                 .await
                 else {
@@ -422,7 +421,7 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
             let mstore = mstore.clone();
             let filestore = filestore.clone();
             async move {
-                // Same admission discipline and pull-call cap as activity_summary.
+                // Same admission discipline and interactive class as activity_summary.
                 // Ghost text has a sharper failure mode than the read-only summary
                 // (a stale suggestion can put words in the user's mouth), so
                 // admitting before any work matters just as much here.
@@ -430,7 +429,6 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
                     &ambient::purpose::NEXT_PROMPT_SUGGESTION,
                     cmd.block_id.clone(),
                     cmd.generation,
-                    Some(ambient::limits::pull_call_semaphore()),
                 )
                 .await
                 else {

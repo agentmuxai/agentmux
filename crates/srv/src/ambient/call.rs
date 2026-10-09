@@ -6,7 +6,7 @@
 //! then run the CLI and judge the reply.
 //!
 //! ```ignore
-//! let slot = call::admit(&purpose::ACTIVITY_SUMMARY, block_id, generation, Some(limits::pull_call_semaphore())).await?;
+//! let slot = call::admit(&purpose::ACTIVITY_SUMMARY, block_id, generation).await?;
 //! // ... read the block, build the prompt (slot.cancellation() is available) ...
 //! let reply = slot.run(&target, &prompt, |raw| reply::judge_line(raw, |t| validate::accept_line(t, &limits))).await;
 //! ```
@@ -19,6 +19,7 @@
 use tokio::sync::{Semaphore, SemaphorePermit};
 use tokio_util::sync::CancellationToken;
 
+use super::limits::Class;
 use super::outcome::{Outcome, Timing};
 use super::purpose::Purpose;
 use super::reply::Verdict;
@@ -90,15 +91,36 @@ impl Drop for Slot {
     }
 }
 
-/// Admit a call for `purpose` on `entity_id` at `generation`; `None` if it is
-/// stale on arrival, or was superseded while queued for a permit. With a `limit`,
-/// waits for a permit raced against cancellation, so a request superseded in the
-/// queue never spawns a CLI at all.
-pub async fn admit(
+/// Admit a call for `purpose` on `entity_id` at `generation`, in the purpose's
+/// own class (`limits`); `None` if it is stale on arrival, or was superseded while
+/// queued. It waits for a permit raced against cancellation, so a request
+/// superseded in the queue never spawns a CLI at all.
+pub async fn admit(purpose: &'static Purpose, entity_id: impl Into<String>, generation: u64) -> Option<Slot> {
+    let class = purpose.class;
+    admit_with_limit(purpose, entity_id, generation, Some(class.semaphore()), class.max_queue_wait()).await
+}
+
+/// [`admit`] in a class the caller chooses, for the naming calls: interactive
+/// for a subagent that just started or a row the user opened, background for the
+/// backlog pass over historical ones. With no queue limit: a name arrives as a
+/// `subagent:named` event, not as an RPC reply someone stops waiting for, and an
+/// eager name is claimed once (`naming_triggered`), so one that gave up in the
+/// queue would never come.
+pub async fn admit_as(
+    purpose: &'static Purpose,
+    entity_id: impl Into<String>,
+    generation: u64,
+    class: Class,
+) -> Option<Slot> {
+    admit_with_limit(purpose, entity_id, generation, Some(class.semaphore()), None).await
+}
+
+async fn admit_with_limit(
     purpose: &'static Purpose,
     entity_id: impl Into<String>,
     generation: u64,
     limit: Option<&'static Semaphore>,
+    max_wait: Option<std::time::Duration>,
 ) -> Option<Slot> {
     let entity_id = entity_id.into();
     let guard = match gateway().admit(AmbientCallKey::new(entity_id.clone(), purpose.tag), generation) {
@@ -113,16 +135,27 @@ pub async fn admit(
     let permit = match limit {
         None => None,
         Some(sem) => {
+            let gave_up = async {
+                match max_wait {
+                    Some(wait) => tokio::time::sleep(wait).await,
+                    None => std::future::pending().await,
+                }
+            };
             let permit = tokio::select! {
                 biased;
-                _ = cancel.cancelled() => None,
-                permit = sem.acquire() => permit.ok(),
-            };
-            if permit.is_none() {
                 // Superseded while queued for a permit: never spawned.
-                super::outcome::record(purpose.tag, &entity_id, Outcome::Superseded, None);
+                _ = cancel.cancelled() => Err(Outcome::Superseded),
+                permit = sem.acquire() => permit.map_err(|_| Outcome::Superseded),
+                // Queued too long: whoever asked has stopped waiting (`limits`).
+                _ = gave_up => Err(Outcome::NotRun),
+            };
+            match permit {
+                Ok(permit) => Some(permit),
+                Err(outcome) => {
+                    super::outcome::record(purpose.tag, &entity_id, outcome, None);
+                    return None;
+                }
             }
-            Some(permit?)
         }
     };
     let queued_ms = admitted_at.elapsed().as_millis() as u64;
@@ -188,7 +221,8 @@ mod tests {
     /// key or an outcome counter.
     macro_rules! test_purpose {
         ($name:ident, $tag:literal) => {
-            static $name: Purpose = Purpose { tag: $tag, timeout: Duration::from_secs(1), logs_reply: true };
+            static $name: Purpose =
+                Purpose { tag: $tag, timeout: Duration::from_secs(1), class: Class::Interactive, logs_reply: true };
         };
     }
     test_purpose!(OUTCOMES, "test_purpose_slot_outcomes");
@@ -197,6 +231,7 @@ mod tests {
     test_purpose!(SIBLINGS, "t_sib");
     test_purpose!(PERMIT, "t_permit");
     test_purpose!(QUEUE, "t_queue");
+    test_purpose!(GIVE_UP, "t_give_up");
     test_purpose!(REDO, "t_redo");
 
     fn leaked_semaphore(permits: usize) -> &'static Semaphore {
@@ -214,11 +249,11 @@ mod tests {
                 .and_then(|by| by.get(label).copied())
                 .unwrap_or(0)
         };
-        let dropped = admit(&OUTCOMES, "e1", 1, None).await.unwrap();
+        let dropped = admit_with_limit(&OUTCOMES, "e1", 1, None, None).await.unwrap();
         drop(dropped);
         assert_eq!(count("not_run"), 1);
 
-        let abandoned = admit(&OUTCOMES, "e2", 1, None).await.unwrap();
+        let abandoned = admit_with_limit(&OUTCOMES, "e2", 1, None, None).await.unwrap();
         abandoned.abandon(Outcome::EmptyDigest);
         assert_eq!(count("empty_digest"), 1);
         assert_eq!(count("not_run"), 1, "abandon records once, not twice");
@@ -226,45 +261,58 @@ mod tests {
 
     #[tokio::test]
     async fn a_stale_request_is_not_admitted() {
-        let _newer = admit(&STALE, "call-stale", 5, None).await.expect("first is admitted");
-        assert!(admit(&STALE, "call-stale", 5, None).await.is_none(), "same generation");
-        assert!(admit(&STALE, "call-stale", 4, None).await.is_none(), "older generation");
+        let _newer = admit_with_limit(&STALE, "call-stale", 5, None, None).await.expect("first is admitted");
+        assert!(admit_with_limit(&STALE, "call-stale", 5, None, None).await.is_none(), "same generation");
+        assert!(admit_with_limit(&STALE, "call-stale", 4, None, None).await.is_none(), "older generation");
     }
 
     #[tokio::test]
     async fn a_newer_request_cancels_the_older_ones_cli() {
-        let first = admit(&NEWER, "call-newer", 1, None).await.unwrap();
+        let first = admit_with_limit(&NEWER, "call-newer", 1, None, None).await.unwrap();
         let cancelled = first.cancellation();
-        let _second = admit(&NEWER, "call-newer", 2, None).await.unwrap();
+        let _second = admit_with_limit(&NEWER, "call-newer", 2, None, None).await.unwrap();
         assert!(cancelled.is_cancelled());
     }
 
     #[tokio::test]
     async fn different_entities_do_not_cancel_each_other() {
-        let first = admit(&SIBLINGS, "call-a", 1, None).await.unwrap();
-        let _second = admit(&SIBLINGS, "call-b", 1, None).await.unwrap();
+        let first = admit_with_limit(&SIBLINGS, "call-a", 1, None, None).await.unwrap();
+        let _second = admit_with_limit(&SIBLINGS, "call-b", 1, None, None).await.unwrap();
         assert!(!first.cancellation().is_cancelled());
     }
 
     #[tokio::test]
     async fn the_permit_is_held_until_the_slot_drops() {
         let sem = leaked_semaphore(1);
-        let slot = admit(&PERMIT, "call-permit", 1, Some(sem)).await.unwrap();
+        let slot = admit_with_limit(&PERMIT, "call-permit", 1, Some(sem), None).await.unwrap();
         assert_eq!(sem.available_permits(), 0);
         drop(slot);
         assert_eq!(sem.available_permits(), 1);
     }
 
     #[tokio::test]
+    async fn a_call_queued_past_its_limit_gives_up_without_running() {
+        let sem = leaked_semaphore(1);
+        let holder = admit_with_limit(&GIVE_UP, "call-hold", 1, Some(sem), None).await.unwrap();
+        let wait = std::time::Duration::from_millis(30);
+        let queued = admit_with_limit(&GIVE_UP, "call-wait", 1, Some(sem), Some(wait)).await;
+        assert!(queued.is_none(), "gave up in the queue");
+        drop(holder);
+        assert_eq!(sem.available_permits(), 1, "no permit leaked");
+        // With a permit free, the same limit doesn't get in the way.
+        assert!(admit_with_limit(&GIVE_UP, "call-wait", 2, Some(sem), Some(wait)).await.is_some());
+    }
+
+    #[tokio::test]
     async fn a_request_superseded_while_queued_never_gets_a_permit() {
         let sem = leaked_semaphore(1);
-        let holder = admit(&QUEUE, "call-holder", 1, Some(sem)).await.unwrap();
+        let holder = admit_with_limit(&QUEUE, "call-holder", 1, Some(sem), None).await.unwrap();
 
         // Queues behind the holder (a different entity, so the holder is not cancelled).
-        let queued = tokio::spawn(admit(&QUEUE, "call-queued", 1, Some(sem)));
+        let queued = tokio::spawn(admit_with_limit(&QUEUE, "call-queued", 1, Some(sem), None));
         tokio::task::yield_now().await;
         // A newer request for the queued key supersedes it while it waits.
-        let newer = admit(&QUEUE, "call-queued", 2, None).await.unwrap();
+        let newer = admit_with_limit(&QUEUE, "call-queued", 2, None, None).await.unwrap();
 
         assert!(queued.await.unwrap().is_none(), "superseded in the queue");
         drop(holder);
@@ -274,10 +322,10 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_the_slot_lets_the_same_generation_be_admitted_again_only_if_newer() {
-        let slot = admit(&REDO, "call-redo", 3, None).await.unwrap();
+        let slot = admit_with_limit(&REDO, "call-redo", 3, None, None).await.unwrap();
         drop(slot);
         // The gateway clears the in-flight entry on drop, so the next request admits.
-        assert!(admit(&REDO, "call-redo", 3, None).await.is_some());
+        assert!(admit_with_limit(&REDO, "call-redo", 3, None, None).await.is_some());
     }
 
     #[test]

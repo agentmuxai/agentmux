@@ -160,7 +160,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                 &state.mstore,
                 &state.subagent_watcher,
                 &agent_id,
-                crate::ambient::limits::pull_call_semaphore(),
+                crate::ambient::limits::Class::Interactive,
             )
             .await;
             let (display_name, tokens) = match result {

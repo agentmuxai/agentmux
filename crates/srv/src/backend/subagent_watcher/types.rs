@@ -220,8 +220,8 @@ impl BacklogNamingItem {
 /// `SwarmViewModel`'s constructor). Deliberately separate from
 /// `BACKFILL_MAX_FILES` above — that one bounds how much JSONL history gets
 /// *replayed into memory*; this one bounds how many Haiku *naming calls*
-/// fire per burst, gated additionally by its own cap-1
-/// `backlog_naming_semaphore()` (`server::app_api::session`). Because
+/// fire per burst, which then wait in the background class's queue
+/// (`ambient::limits`). Because
 /// `naming_triggered` claims are permanent, a backlog larger than this
 /// drains progressively across repeated pane-opens rather than all at
 /// once — see `select_unnamed_backlog`'s doc comment.

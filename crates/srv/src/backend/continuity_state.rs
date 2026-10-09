@@ -340,7 +340,7 @@ async fn update(mstore: &Store, block_id: &str) -> Result<Option<StateVersion>, 
     // it only grows. The `InFlight` claim above already keeps a second update
     // from starting, so the gateway never has an older call of ours to cancel.
     let Some(slot) =
-        crate::ambient::call::admit(&crate::ambient::purpose::CONTINUITY_STATE, zone.clone(), size as u64, None).await
+        crate::ambient::call::admit(&crate::ambient::purpose::CONTINUITY_STATE, zone.clone(), size as u64).await
     else {
         return Ok(None);
     };

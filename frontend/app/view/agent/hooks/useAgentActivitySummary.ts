@@ -39,8 +39,9 @@
  * behavior). Sending the local counter as `generation` would mean a remount
  * right after a high-generation turn could send a *lower* number than the
  * gateway already has recorded for this block, getting rejected as
- * stale-on-arrival for up to 15s (until the still-in-flight prior call's
- * guard drops) even though it's a legitimately new request. `Date.now()` is
+ * stale-on-arrival until the still-in-flight prior call's guard drops (up to
+ * the purpose's time limit, `ambient::purpose`) even though it's a
+ * legitimately new request. `Date.now()` is
  * used for the wire `generation` instead — always increasing regardless of
  * remounts, since real time never goes backwards for this purpose.
  *
@@ -56,6 +57,7 @@ import { makeORef } from "@/app/store/mos";
 import { ObjectService } from "@/app/store/services";
 import { fireAndForget } from "@/util/util";
 import { recordTurn } from "@/app/store/token-usage";
+import { AMBIENT_PULL_TIMEOUT_MS } from "./ambient-rpc";
 import { isUsableTitle } from "@/app/store/ambient-title";
 import { lastPromptToStore, META_LAST_PROMPT } from "@/app/store/swarm-line";
 import { isTitleNews, META_HUMAN_TURNS, nextHumanTurn, shouldRequestTitle } from "@/app/store/title-schedule";
@@ -132,7 +134,7 @@ export function useAgentActivitySummary(opts: UseAgentActivitySummaryOptions): v
                 generation: Date.now(),
                 user_message: phase.pendingContent,
             },
-            { timeout: 20_000 },
+            { timeout: AMBIENT_PULL_TIMEOUT_MS },
         ).then((result) => {
             if (activeTurnId !== myTurnId) return; // superseded by a newer turn
             if (result.tokens) {
