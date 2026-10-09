@@ -12,11 +12,12 @@ import { createSignal } from "solid-js";
 
 import type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export type { MuxBusDeliveryStatus } from "@/types/rpc/MuxBusDeliveryStatus";
 export type { MuxBusDeliveryState } from "@/types/rpc/MuxBusDeliveryState";
 
 /** The `muxbus:status` WebSocket event. */
-export const MUXBUS_STATUS_EVENT = "muxbus:status";
+export const MUXBUS_STATUS_EVENT = WpsEvent.MuxbusStatus;
 
 /**
  * How long "reconnecting" stays quiet before the status bar shows it: a

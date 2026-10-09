@@ -16,6 +16,7 @@ import { Logger } from "@/util/logger";
 import { brandForProvider } from "@/app/view/accounts/provider-brand";
 import type { AgentDefinition, IdentityAccount } from "@/app/store/rpc-api";
 
+import { WpsEvent } from "@/app/store/mps-events";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type AccountProvider = "github" | "openai" | "aws" | "anthropic" | "google" | "slack" | "custom" | "agentmux";
@@ -402,7 +403,7 @@ export function primeAccountCache(): void {
     if (!_liveSyncInstalled) {
         _liveSyncInstalled = true;
         muxEventSubscribe({
-            eventType: "identityaccounts:changed",
+            eventType: WpsEvent.IdentityAccountsChanged,
             handler: () => void refreshAccountCache(),
         });
     }

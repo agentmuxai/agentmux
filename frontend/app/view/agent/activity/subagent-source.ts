@@ -23,6 +23,7 @@ import { onSubagentNamed, withSubagentName } from "../../swarm/subagent-naming";
 import { createBackfillAwareTrigger, holdBackfillingRows } from "./backfill-tracker";
 import { createDebouncedRefresh } from "./debounced-refresh";
 
+import { WpsEvent } from "@/app/store/mps-events";
 const [allSubagents, setAllSubagents] = createSignal<ActiveSubagent[]>([]);
 
 async function refresh(): Promise<void> {
@@ -56,8 +57,8 @@ const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh()
 // should reflect real data as soon as possible, not wait out a debounce
 // window with nothing yet to coalesce against.
 void refresh();
-muxEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
-muxEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.SubagentSpawned, handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.SubagentCompleted, handler: () => trigger() });
 // Without this, a subagent the backend reconciles from active to abandoned
 // (parent turn already ended — see `reconcile_stale_subagents`, which runs
 // on every pane reopen with a persisted session id, i.e. exactly the app-
@@ -67,7 +68,7 @@ muxEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() })
 // refresh — which, for an otherwise-idle pane, may never happen. Mirrors
 // `dispatch-source.ts`'s identical fix (reagent/codex, PR #2676) for the
 // sibling dispatch-card singleton, which this module predates.
-muxEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
+muxEventSubscribe({ eventType: WpsEvent.SubagentAbandoned, handler: () => trigger() });
 onSubagentNamed((agentId, displayName) => setAllSubagents((prev) => withSubagentName(prev, agentId, displayName)));
 
 /** Every subagent currently known (active or recently completed), across the

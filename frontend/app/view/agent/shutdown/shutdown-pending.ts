@@ -9,8 +9,10 @@
  * kept it or the window ran out.
  */
 
-export const EVENT_SHUTDOWN_PENDING = "agent:shutdown-pending";
-export const EVENT_SHUTDOWN_PENDING_CLEARED = "agent:shutdown-pending-cleared";
+import { WpsEvent } from "@/app/store/mps-events";
+
+export const EVENT_SHUTDOWN_PENDING = WpsEvent.AgentShutdownPending;
+export const EVENT_SHUTDOWN_PENDING_CLEARED = WpsEvent.AgentShutdownPendingCleared;
 /** The second chime, this long before the deadline. */
 export const LAST_CALL_MS = 5_000;
 

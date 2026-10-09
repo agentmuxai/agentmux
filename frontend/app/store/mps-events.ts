@@ -1,11 +1,10 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// MPS event-name constants — mostly mirrors the `EVENT_*` constants in
-// crates/srv/src/backend/mps.rs; a few (e.g. `waveobj:batchedupdates`,
-// `files:changed`) are defined elsewhere in the backend.
-// Use these instead of bare string literals so typos are caught at build time
-// and grepping for an event name finds all its usages in one search.
+// MPS event names: every `EVENT_*` constant in crates/srv/src/backend/mps.rs,
+// plus the events other backend modules publish by name (`files:changed`,
+// `waveobj:batchedupdates`, …). mps-events.test.ts checks them against the
+// backend source and fails a subscription that spells a name by hand.
 
 export const WpsEvent = {
     BlockFile: "blockfile",
@@ -127,4 +126,46 @@ export const WpsEvent = {
     // `components/BtwOverlay.tsx` waits on — it also fires on a terminal
     // `error` event, which `event.type` alone would not indicate as "done".
     BtwAnswerChunk: "btw_answer_chunk",
+    // Published outside mps.rs's EVENT_* constants (by the module that owns
+    // each), and subscribed to by name; listed so no subscription spells one
+    // by hand (mps-events.test.ts).
+    AgentProcessAdded: "agent:process-added",
+    AgentProcessExited: "agent:process-exited",
+    AgentProgress: "agent:progress",
+    AgentReactiveRegistered: "agent:reactive-registered",
+    AgentReactiveUnregistered: "agent:reactive-unregistered",
+    AgentsChanged: "agents:changed",
+    CronChanged: "cron_changed",
+    DispatchActivity: "dispatch:activity",
+    DispatchUpdated: "dispatch:updated",
+    IdentityAccountsChanged: "identityaccounts:changed",
+    InstallChunk: "install_chunk",
+    LanInstances: "laninstances",
+    LanInstancesError: "laninstances:error",
+    LanInstancesFirewall: "laninstances:firewall",
+    LanInstancesHealth: "laninstances:health",
+    LspMessage: "lsp:message",
+    McpChanged: "mcp:changed",
+    MemoriesChanged: "memories:changed",
+    OpenFloatingPane: "openfloatingpane",
+    ProcessBrokerTrackedBlocksChanged: "processbroker:tracked-blocks-changed",
+    SkillsChanged: "skills:changed",
+    SubagentAbandoned: "subagent:abandoned",
+    SubagentBlockPruned: "subagent:block_pruned",
+    SubagentCompleted: "subagent:completed",
+    SubagentNamed: "subagent:named",
+    SubagentSpawned: "subagent:spawned",
+    SubagentUpdated: "subagent:updated",
+    ToolChunk: "tool_chunk",
+    ViewerPaired: "viewer:paired",
+    AgentShutdown: "agent:shutdown",
+    AgentShutdownPending: "agent:shutdown-pending",
+    AgentShutdownPendingCleared: "agent:shutdown-pending-cleared",
+    AmbientSpent: "ambient:spent",
+    BlockReveal: "block:reveal",
+    MuxbusStatus: "muxbus:status",
+    NotificationActivate: "notification:activate",
+    NotificationState: "notification:state",
+    // Published by the frontend itself (singleton-modal.ts).
+    SingletonClaim: "singleton:claim",
 } as const;

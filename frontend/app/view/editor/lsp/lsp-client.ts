@@ -21,6 +21,7 @@ import type {
     LspResponse,
 } from "./lsp-types";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export type LspState =
     | { kind: "starting" }
     | { kind: "initializing" }
@@ -243,7 +244,7 @@ export class LspClient {
     private subscribe(): void {
         if (this.unsubscribeWs) return;
         this.unsubscribeWs = muxEventSubscribe({
-            eventType: "lsp:message",
+            eventType: WpsEvent.LspMessage,
             handler: (event) => {
                 const envelope = event.data as LspMessageEnvelope | undefined;
                 if (!envelope || envelope.server_id !== this.serverId) return;

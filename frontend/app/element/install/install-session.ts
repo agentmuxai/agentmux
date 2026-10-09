@@ -18,6 +18,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 
 import type { InstallFailure, InstallStep, LineTone, StepTracker } from "./install-types";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export type InstallState = "idle" | "running" | "done" | "failed";
 
 export interface LogLine {
@@ -187,7 +188,7 @@ export function createInstallSession(opts: InstallSessionOptions): InstallSessio
         }
         setSessionId(sid);
         unsub = muxEventSubscribe({
-            eventType: "install_chunk",
+            eventType: WpsEvent.InstallChunk,
             scope: `install:${sid}`,
             handler: (event: { data?: InstallChunk }) => {
                 const data = event?.data;

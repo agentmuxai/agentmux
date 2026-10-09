@@ -19,6 +19,7 @@ import { muxEventSubscribe } from "@/app/store/mps";
 import type { McpPreloadEntry } from "./mcp-preload-catalog";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export interface McpDraft {
     id?: string;
     name: string;
@@ -86,7 +87,7 @@ export class McpCatalogModel {
         void this.refresh();
         void this.loadAgents();
         this.unsubChanged = muxEventSubscribe({
-            eventType: "mcp:changed",
+            eventType: WpsEvent.McpChanged,
             handler: () => void this.refresh(),
         });
     }

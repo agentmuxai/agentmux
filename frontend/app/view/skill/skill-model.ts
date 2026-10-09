@@ -18,6 +18,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { muxEventSubscribe } from "@/app/store/mps";
 import type { AgentDefinition } from "@/app/store/rpc-api";
 
+import { WpsEvent } from "@/app/store/mps-events";
 export interface SkillDraft {
     id?: string;
     name: string;
@@ -88,7 +89,7 @@ export class SkillCatalogModel {
         void this.refresh();
         void this.loadAgents();
         this.unsubChanged = muxEventSubscribe({
-            eventType: "skills:changed",
+            eventType: WpsEvent.SkillsChanged,
             handler: () => void this.refresh(),
         });
     }

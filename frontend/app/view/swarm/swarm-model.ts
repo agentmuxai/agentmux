@@ -871,7 +871,7 @@ export function createDispatchDetail(dispatchId: string, backfillAgentId?: strin
     };
 
     const unsub = muxEventSubscribe({
-        eventType: "dispatch:activity",
+        eventType: WpsEvent.DispatchActivity,
         handler: (event: MuxEvent) => {
             const data = event?.data as any;
             if (data?.dispatchId !== dispatchId) return;
@@ -1195,13 +1195,13 @@ export class SwarmViewModel {
         void callBackendService("subagent", "ResolveUnnamedBacklog", []);
 
         const unsubSpawned = muxEventSubscribe({
-            eventType: "subagent:spawned",
+            eventType: WpsEvent.SubagentSpawned,
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubSpawned) this.unsubs.push(unsubSpawned);
 
         const unsubCompleted = muxEventSubscribe({
-            eventType: "subagent:completed",
+            eventType: WpsEvent.SubagentCompleted,
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubCompleted) this.unsubs.push(unsubCompleted);
@@ -1210,7 +1210,7 @@ export class SwarmViewModel {
         // writes the sidecar separately) — reload so its background tasks
         // move from the agent-level bucket to under its row.
         const unsubUpdated = muxEventSubscribe({
-            eventType: "subagent:updated",
+            eventType: WpsEvent.SubagentUpdated,
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubUpdated) this.unsubs.push(unsubUpdated);
@@ -1226,7 +1226,7 @@ export class SwarmViewModel {
         // is never emitted yet), not broken; #2234's own PR description
         // covers the same sequencing from the backend side.
         const unsubAbandoned = muxEventSubscribe({
-            eventType: "subagent:abandoned",
+            eventType: WpsEvent.SubagentAbandoned,
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubAbandoned) this.unsubs.push(unsubAbandoned);
@@ -1236,7 +1236,7 @@ export class SwarmViewModel {
         // used for subagent spawn/completion (they're closely correlated:
         // a workflow member spawning/completing IS a dispatch update).
         const unsubDispatchUpdated = muxEventSubscribe({
-            eventType: "dispatch:updated",
+            eventType: WpsEvent.DispatchUpdated,
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubDispatchUpdated) this.unsubs.push(unsubDispatchUpdated);
@@ -1246,7 +1246,7 @@ export class SwarmViewModel {
         // TabDeleted/WorkspaceDeleted) — reload so the ghost row this used
         // to leave behind (visible until srv restart) disappears promptly.
         const unsubBlockPruned = muxEventSubscribe({
-            eventType: "subagent:block_pruned",
+            eventType: WpsEvent.SubagentBlockPruned,
             handler: () => this.scheduleLoadSubagents(),
         });
         if (unsubBlockPruned) this.unsubs.push(unsubBlockPruned);
@@ -1254,7 +1254,7 @@ export class SwarmViewModel {
         // Shell bucket (SPEC_SWARM_LONG_RUNNING_PROCESS_ROWS_2026_07_20 Phase 1).
         // shell_node_create — a new shell appeared, reload the active list.
         const unsubShellCreate = muxEventSubscribe({
-            eventType: "shell_node_create",
+            eventType: WpsEvent.ShellNodeCreate,
             handler: () => this.scheduleLoadShells(),
         });
         if (unsubShellCreate) this.unsubs.push(unsubShellCreate);
@@ -1263,7 +1263,7 @@ export class SwarmViewModel {
         // terminal "exit" op, not every line of stdout/stderr (that would
         // re-fetch the whole active-shells list on every chunk).
         const unsubShellChunk = muxEventSubscribe({
-            eventType: "shell_chunk",
+            eventType: WpsEvent.ShellChunk,
             handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 if (data?.op === "exit") this.scheduleLoadShells();
@@ -1275,7 +1275,7 @@ export class SwarmViewModel {
         // Payload-free — any create/fire/pause/resume/delete just triggers a
         // full reload of the (already-cheap, unfiltered) active list.
         const unsubCronChanged = muxEventSubscribe({
-            eventType: "cron_changed",
+            eventType: WpsEvent.CronChanged,
             handler: () => this.scheduleLoadCrons(),
         });
         if (unsubCronChanged) this.unsubs.push(unsubCronChanged);
@@ -1293,7 +1293,7 @@ export class SwarmViewModel {
         // carries its whole payload on the event, so there's nothing to
         // reload — store it keyed by block and let buildTree read it.
         const unsubProgress = muxEventSubscribe({
-            eventType: "agent:progress",
+            eventType: WpsEvent.AgentProgress,
             handler: (event: MuxEvent) => {
                 const data = event?.data as any;
                 const blockId = data?.blockId;
@@ -1329,13 +1329,13 @@ export class SwarmViewModel {
 
         // When process trackers change, refresh the block list
         const unsubProcAdded = muxEventSubscribe({
-            eventType: "agent:process-added",
+            eventType: WpsEvent.AgentProcessAdded,
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubProcAdded) this.unsubs.push(unsubProcAdded);
 
         const unsubProcExited = muxEventSubscribe({
-            eventType: "agent:process-exited",
+            eventType: WpsEvent.AgentProcessExited,
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubProcExited) this.unsubs.push(unsubProcExited);
@@ -1345,13 +1345,13 @@ export class SwarmViewModel {
         // agent:process-added / agent:process-exited so useTrackedProcesses
         // doesn't treat reactive registrations as phantom OS processes.
         const unsubReactiveReg = muxEventSubscribe({
-            eventType: "agent:reactive-registered",
+            eventType: WpsEvent.AgentReactiveRegistered,
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubReactiveReg) this.unsubs.push(unsubReactiveReg);
 
         const unsubReactiveUnreg = muxEventSubscribe({
-            eventType: "agent:reactive-unregistered",
+            eventType: WpsEvent.AgentReactiveUnregistered,
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubReactiveUnreg) this.unsubs.push(unsubReactiveUnreg);
@@ -1368,7 +1368,7 @@ export class SwarmViewModel {
         // while this list stayed stale client-side indefinitely. See
         // docs/reports/REPORT_SWARM_MOUNT_DEPENDENT_TRACKING_GAP_2026_09_15.md.
         const unsubTrackedBlocksChanged = muxEventSubscribe({
-            eventType: "processbroker:tracked-blocks-changed",
+            eventType: WpsEvent.ProcessBrokerTrackedBlocksChanged,
             handler: () => void this.loadTrackedBlocks(),
         });
         if (unsubTrackedBlocksChanged) this.unsubs.push(unsubTrackedBlocksChanged);
