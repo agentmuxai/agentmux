@@ -197,6 +197,8 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "test: unit-test or fixture code, never on a user machine"),
     ("crates/srv/src/backend/fs_ops/host_jobs.rs", "\"mkfifo\"", 1,
      "test: unit-test or fixture code, never on a user machine"),
+    ("crates/srv/src/backend/tower_remote.rs", "\"wsl.exe\"", 1,
+     "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/remote/wsl.rs", "\"wsl.exe\"", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/srv/src/backend/shell_node.rs", "\"cmd\"", 1,

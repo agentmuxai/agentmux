@@ -160,6 +160,22 @@ pub fn parse_probe(out: &str, version: &str) -> Probe {
     Probe { uname, installed }
 }
 
+/// Where this version's build for `target` is on this computer (the same
+/// places [`local_build`] reads): what WSL runs in place.
+pub fn local_path(version: &str, target: &str) -> Result<PathBuf, String> {
+    let dev_dir = std::env::var_os("AGENTMUX_REMOTE_HELPER_DIR").map(PathBuf::from);
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    let paths = candidate_paths(dev_dir.as_deref(), exe_dir.as_deref(), version, target);
+    paths.iter().find(|p| p.is_file()).cloned().ok_or_else(|| {
+        format!(
+            "this AgentMux build doesn't include the helper for {target} (looked in {})",
+            paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+        )
+    })
+}
+
 /// This version's build for `target`, and its hash: from
 /// `AGENTMUX_REMOTE_HELPER_DIR` when set (a developer's own builds), else from
 /// this package (spec §9.1). Nothing is downloaded.

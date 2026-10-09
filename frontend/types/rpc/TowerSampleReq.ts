@@ -7,4 +7,17 @@ export type TowerSampleReq = {
 /**
  * Also list every process on the machine (the Host view).
  */
-host?: boolean, };
+host?: boolean, 
+/**
+ * Another machine: an SSH connection or `wsl://<distro>`, as a pane's
+ * `connection` meta names it. Absent or `local`: this computer.
+ */
+connection?: string, 
+/**
+ * On another machine, only processes whose name or PID holds every word.
+ */
+filter?: string, 
+/**
+ * The asking pane, where ssh's prompts (a password, a host key) go.
+ */
+block_id?: string, };

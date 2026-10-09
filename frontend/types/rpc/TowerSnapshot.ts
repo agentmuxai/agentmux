@@ -21,7 +21,12 @@ memory_metric: string,
 /**
  * How often to ask again while the pane is visible.
  */
-interval_ms: number, tasks: Array<TowerTask>, 
+interval_ms: number, 
+/**
+ * Another machine's (`TowerSampleReq::connection`): no tasks, no
+ * command lines.
+ */
+remote: boolean, tasks: Array<TowerTask>, 
 /**
  * Present when the request asked for it.
  */

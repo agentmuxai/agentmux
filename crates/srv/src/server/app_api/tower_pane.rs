@@ -6,17 +6,31 @@
 //!
 //! `tower.sample` is the window's, not an agent API: a connection registered
 //! as an agent (`bus:register`) is refused.
+//!
+//! With a `connection` it samples another machine instead
+//! (`backend::tower_remote`): an SSH host or a WSL distribution.
 
 use super::*;
 use crate::backend::process_tracker::registry::AgentProcessRegistry;
+use crate::backend::tower_remote;
 use crate::backend::tower_sampler::{BlockLabel, Inputs, Tower};
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let (mstore, hostname, tracker) = (state.mstore.clone(), state.hostname.clone(), state.process_tracker.clone());
+    let auth_key = state.auth_key.clone();
     engine.register_typed(COMMAND_TOWER_SAMPLE, move |req: TowerSampleReq, ctx| {
-        let (mstore, hostname, tracker) = (mstore.clone(), hostname.clone(), tracker.clone());
+        let (mstore, hostname, tracker, auth_key) = (mstore.clone(), hostname.clone(), tracker.clone(), auth_key.clone());
         async move {
             not_an_agent_api(&ctx)?;
+            // Another machine: its helper samples it (`tower_remote`).
+            if let Some(conn) = req.connection.as_deref().filter(|c| !tower_remote::is_local(c)) {
+                let block_id = req.block_id.clone().unwrap_or_default();
+                let ask = (!block_id.is_empty()).then(|| crate::backend::remote::sessions::AskIn {
+                    block_id: &block_id,
+                    auth_key: &auth_key,
+                });
+                return tower_remote::sample(conn, req.filter.as_deref().unwrap_or(""), ask).await;
+            }
             // The process table, and a store read per pane: off the async workers.
             tokio::task::spawn_blocking(move || {
                 Tower::global()
