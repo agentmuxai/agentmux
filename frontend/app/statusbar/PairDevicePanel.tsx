@@ -12,6 +12,7 @@ import { Button } from "@/app/element/ui";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { viewerPairedAtom } from "@/store/global";
+import { writeText } from "@/util/clipboard";
 import QRCode from "qrcode";
 import { createEffect, createMemo, createSignal, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 
@@ -114,7 +115,12 @@ export function PairDevicePanel(props: { lanDiscoveryEnabled: Accessor<boolean> 
                         disabled={!live()}
                         onClick={() => {
                             const p = pairing();
-                            if (p) void navigator.clipboard.writeText(p.url).then(() => setCopied(true));
+                            if (!p) return;
+                            // Through the host: CEF blocks navigator.clipboard.
+                            writeText(p.url).then(
+                                () => setCopied(true),
+                                () => setError("Couldn't copy the link to the clipboard.")
+                            );
                         }}
                     >
                         {copied() ? "Copied" : "Copy link"}

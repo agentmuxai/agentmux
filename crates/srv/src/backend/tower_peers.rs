@@ -63,10 +63,46 @@ impl Peer {
     }
 
     fn url(&self, host: &str, path: &str) -> String {
-        // An IPv6 address needs brackets in a URL.
-        let host = if host.contains(':') && !host.starts_with('[') { format!("[{host}]") } else { host.to_string() };
-        format!("https://{host}:{}{path}", self.port)
+        url_at(host, self.port, path)
     }
+}
+
+fn url_at(host: &str, port: u16, path: &str) -> String {
+    // An IPv6 address needs brackets in a URL.
+    let host = if host.contains(':') && !host.starts_with('[') { format!("[{host}]") } else { host.to_string() };
+    format!("https://{host}:{port}{path}")
+}
+
+/// The viewer ports `host`'s AgentMux instances advertise now, from the LAN
+/// discovery probe a phone sends (UDP 47891): the answering instance's, then
+/// its siblings' (other channels on that host). Empty when nothing answers.
+async fn probe_viewer_ports(host: &str) -> Vec<u16> {
+    use crate::backend::lan_discovery::{UDP_DISCOVERY_PORT, UDP_PROBE_TYPE, UDP_PROTOCOL_VERSION};
+    let Ok(ip) = host.parse::<std::net::IpAddr>() else { return Vec::new() };
+    let bind = if ip.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
+    let Ok(sock) = tokio::net::UdpSocket::bind(bind).await else { return Vec::new() };
+    let probe = serde_json::json!({ "type": UDP_PROBE_TYPE, "v": UDP_PROTOCOL_VERSION }).to_string();
+    if sock.send_to(probe.as_bytes(), (ip, UDP_DISCOVERY_PORT)).await.is_err() {
+        return Vec::new();
+    }
+    let mut buf = vec![0u8; 8192];
+    match tokio::time::timeout(Duration::from_millis(1500), sock.recv_from(&mut buf)).await {
+        Ok(Ok((n, _))) => viewer_ports_of(&buf[..n]),
+        _ => Vec::new(),
+    }
+}
+
+/// The viewer ports in a discovery reply: its own, then its siblings'.
+fn viewer_ports_of(reply: &[u8]) -> Vec<u16> {
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(reply) else { return Vec::new() };
+    let port = |x: &serde_json::Value| x.get("viewer_port").and_then(|p| p.as_u64()).and_then(|p| u16::try_from(p).ok());
+    let mut ports: Vec<u16> = port(&v).into_iter().collect();
+    for s in v.get("siblings").and_then(|s| s.as_array()).into_iter().flatten() {
+        if let Some(p) = port(s).filter(|p| !ports.contains(p)) {
+            ports.push(p);
+        }
+    }
+    ports
 }
 
 /// What a pairing link says.
@@ -277,10 +313,34 @@ pub async fn sample(peers: &'static Peers, id: &str, filter: &str, moved: Vec<St
     let client = pinned_client(&peer.fingerprint, TIMEOUT)?;
     let mut hosts = vec![peer.host.clone()];
     hosts.extend(moved.into_iter().filter(|h| *h != peer.host));
+    // The kept port at each address first; only if none answers, the ports the
+    // addresses advertise now (a restarted peer may have another). The pinned
+    // fingerprint decides which of them is really this peer.
+    let mut candidates: Vec<(String, u16)> = hosts.iter().map(|h| (h.clone(), peer.port)).collect();
+    let mut probed = false;
+    let mut next = 0;
     let mut last_err = String::new();
-    for host in hosts {
+    loop {
+        if next == candidates.len() {
+            if probed {
+                break;
+            }
+            probed = true;
+            for h in &hosts {
+                for p in probe_viewer_ports(h).await {
+                    if !candidates.contains(&(h.clone(), p)) {
+                        candidates.push((h.clone(), p));
+                    }
+                }
+            }
+            if next == candidates.len() {
+                break;
+            }
+        }
+        let (host, port) = candidates[next].clone();
+        next += 1;
         let resp = match client
-            .get(peer.url(&host, "/agentmux/viewer/procs"))
+            .get(url_at(&host, port, "/agentmux/viewer/procs"))
             .query(&[("filter", filter)])
             .bearer_auth(&token)
             .send()
@@ -288,14 +348,14 @@ pub async fn sample(peers: &'static Peers, id: &str, filter: &str, moved: Vec<St
         {
             Ok(r) => r,
             Err(e) => {
-                last_err = unreachable(&Peer { host: host.clone(), ..peer.clone() }, &e);
+                last_err = unreachable(&Peer { host: host.clone(), port, ..peer.clone() }, &e);
                 continue;
             }
         };
         match resp.status() {
             s if s.is_success() => {
-                if host != peer.host {
-                    peer.host = host;
+                if host != peer.host || port != peer.port {
+                    (peer.host, peer.port) = (host, port);
                     let _ = peers.put(peer.clone());
                 }
                 let mut snap: TowerSnapshot = resp.json().await.map_err(|e| format!("{} answered oddly: {e}", peer.hostname))?;
@@ -356,6 +416,15 @@ mod tests {
     fn peers_in(dir: &std::path::Path) -> (&'static Peers, std::sync::Arc<MemTokens>) {
         let tokens = std::sync::Arc::new(MemTokens::default());
         (Box::leak(Box::new(Peers::with_tokens(Some(dir.to_path_buf()), Box::new(tokens.clone())))), tokens)
+    }
+
+    #[test]
+    fn a_discovery_reply_gives_its_viewer_port_then_its_siblings() {
+        let reply = br#"{"type":"agentmux_discover_response","v":1,"viewer_port":29702,
+            "siblings":[{"channel":"dev","viewer_port":29703},{"channel":"x"},{"viewer_port":29702}]}"#;
+        assert_eq!(viewer_ports_of(reply), vec![29702, 29703]);
+        assert!(viewer_ports_of(b"not json").is_empty());
+        assert!(viewer_ports_of(br#"{"type":"agentmux_discover_response"}"#).is_empty(), "no viewer listener up");
     }
 
     #[test]
