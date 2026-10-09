@@ -22,7 +22,7 @@ use super::app_server_protocol::{
     CodexAppServerEvent, CodexAppServerProtocolError, CodexAppServerSession, ThreadStartOptions,
 };
 use super::core;
-use super::health::TurnActivityTracker;
+use super::health::{PassStats, TurnActivityTracker};
 use super::{
     BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_DONE, STATUS_INIT,
     STATUS_RUNNING,
@@ -205,7 +205,13 @@ impl AppServerController {
         // (as the host and container spawn paths do), not per frame.
         let global_zone = super::shell::resolve_global_output_zone(&self.mstore, &self.block_id);
         tokio::spawn(async move {
+            // The running turn's figures, for its ledger: summed over its model
+            // calls, reset when a call reports a different turn.
+            let mut turn_usage = CodexTurnUsage::default();
             while let Some(incoming) = process.transport.next_incoming().await {
+                if let AppServerIncoming::Notification { method, params } = &incoming {
+                    turn_usage.note(method, params);
+                }
                 // KNOWN GAP (ReAgent P1, PR #3215, tracked for a follow-up PR, not
                 // fixed here): frontend/app/view/agent/providers/codex-translator.ts
                 // (selected for outputFormat "codex-json") only understands the
@@ -234,7 +240,7 @@ impl AppServerController {
                         notification @ AppServerIncoming::Notification { .. } => {
                             if let Ok(event) = session.apply_incoming(notification) {
                                 if matches!(event, CodexAppServerEvent::TurnCompleted { .. }) {
-                                    controller.health_monitor.set_active_turn(false);
+                                    controller.health_monitor.end_pass(turn_usage.take());
                                     controller.set_status(STATUS_RUNNING);
                                     // Send the next queued message (if any) now that
                                     // the turn it collided with has finished — one at
@@ -566,6 +572,39 @@ impl Controller for AppServerController {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+/// A Codex turn's figures for the turn ledger (`PassStats`), from
+/// `thread/tokenUsage/updated`: one per model call, whose `tokenUsage.last`
+/// is that call's usage (`total` is the whole thread's). Codex reports no
+/// cost or API time, so those stay zero.
+#[derive(Default)]
+struct CodexTurnUsage {
+    turn_id: Option<String>,
+    stats: PassStats,
+}
+
+impl CodexTurnUsage {
+    fn note(&mut self, method: &str, params: &serde_json::Value) {
+        if method != "thread/tokenUsage/updated" {
+            return;
+        }
+        let Some(output) = params.pointer("/tokenUsage/last/outputTokens").and_then(|v| v.as_u64()) else {
+            return;
+        };
+        let turn_id = params.get("turnId").and_then(|v| v.as_str()).map(str::to_string);
+        if turn_id != self.turn_id {
+            *self = CodexTurnUsage { turn_id, stats: PassStats::default() };
+        }
+        self.stats.output_tokens += output;
+        self.stats.steps += 1;
+    }
+
+    /// The finished turn's figures, if any call reported usage; starts over.
+    fn take(&mut self) -> Option<PassStats> {
+        let stats = std::mem::take(self).stats;
+        (stats.steps > 0).then_some(stats)
     }
 }
 
@@ -1117,5 +1156,36 @@ mod tests {
             new_process_ptr,
             "inner.process must still be the respawned process, not cleared by the stale old event loop"
         );
+    }
+
+    fn usage(turn: &str, output: u64) -> serde_json::Value {
+        serde_json::json!({
+            "threadId": "t",
+            "turnId": turn,
+            "tokenUsage": {
+                "total": { "outputTokens": 9_999 },
+                "last": { "outputTokens": output },
+                "modelContextWindow": null,
+            },
+        })
+    }
+
+    #[test]
+    fn a_codex_turn_s_figures_sum_its_calls_and_start_over_per_turn() {
+        let mut u = CodexTurnUsage::default();
+        assert_eq!(u.take(), None, "no call reported usage");
+        u.note("thread/tokenUsage/updated", &usage("turn-1", 120));
+        u.note("item/completed", &usage("turn-1", 5_000));
+        u.note("thread/tokenUsage/updated", &usage("turn-1", 30));
+        let stats = u.take().unwrap();
+        assert_eq!((stats.output_tokens, stats.steps), (150, 2), "each call's last, not the thread total");
+        assert_eq!(u.take(), None, "taken once");
+
+        // Usage left from a turn that never completed is not the next turn's.
+        u.note("thread/tokenUsage/updated", &usage("turn-2", 70));
+        u.note("thread/tokenUsage/updated", &usage("turn-3", 40));
+        let stats = u.take().unwrap();
+        assert_eq!((stats.output_tokens, stats.steps), (40, 1));
+        assert_eq!(stats.cost_usd, 0.0);
     }
 }

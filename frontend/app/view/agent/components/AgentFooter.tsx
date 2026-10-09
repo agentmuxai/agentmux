@@ -407,7 +407,8 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         const turn = endedTurn();
         const counted = turnFigures();
         const parts: string[] = [];
-        const cost = counted ? counted.costUsd : stats.cost_usd;
+        // A provider that reports no cost (Codex) counts 0: show its own, if any.
+        const cost = counted && counted.costUsd > 0 ? counted.costUsd : stats.cost_usd;
         if (cost != null) parts.push(`$${cost.toFixed(3)}`);
         // Model calls, which is what `result.num_turns` counts: steps, not turns.
         const steps = counted ? counted.steps : stats.num_turns;

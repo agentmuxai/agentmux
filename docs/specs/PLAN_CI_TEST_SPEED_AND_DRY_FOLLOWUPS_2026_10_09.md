@@ -1,7 +1,7 @@
 # Plan — faster CI tests, and the open architecture / DRY follow-ups
 
 **Date:** 2026-10-09
-**Status:** proposed — nothing implemented yet; each step below is one PR.
+**Status:** active — in progress, one PR per step. Merged: step 1 (#4534), 2 (#4535), 3 (#4536), 4 (#4541), 5 (#4546, re-scoped: the long sleeps were in ignored tests), 8 (#4542), 9 (#4545), 14 (#4537). In review: 10 (#4547, event names), 12 (#4548, as a ratchet), 13 (Codex turn figures). Steps 7, 16, 18–20 are AgentY's.
 **Author:** Agent5@narko
 **Builds on:**
 - [SPEC_CI_TEST_RUNNER_2026_06_22.md](SPEC_CI_TEST_RUNNER_2026_06_22.md) §6.4 (the serial-for-now decision this plan retires)
