@@ -614,6 +614,7 @@ partial list.
 | [`SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13`](SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md) | Spec: Restore-on-relaunch + named, reloadable "Layouts" |
 | [`SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03`](SPEC_SHARED_AUTH_ACROSS_CHANNELS_2026_10_03.md) | SPEC: share authentication across channels — no re-login on every build |
 | [`SPEC_SRV_HEADLESS_MODE_2026_09_26`](SPEC_SRV_HEADLESS_MODE_2026_09_26.md) | SPEC: srv headless mode — run agentmux-srv without the launcher or a desktop host |
+| [`SPEC_SRV_INFO_ON_CONNECT_2026_10_09`](SPEC_SRV_INFO_ON_CONNECT_2026_10_09.md) | SPEC: srv describes itself on every connect (`srvinfo`) |
 | [`SPEC_START_WITH_OS_2026_09_25`](SPEC_START_WITH_OS_2026_09_25.md) | SPEC: Start with OS — AgentMux starts quietly at login, on every platform, and keeps working after updates |
 | [`SPEC_STREAMING_BASH_RUNNER_2026_05_11`](SPEC_STREAMING_BASH_RUNNER_2026_05_11.md) | Streaming bash runner — PreToolUse command rewrite |
 | [`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20`](SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md) | SPEC — live subagent reconciliation + Retire action (best-practices plan) |

@@ -13,12 +13,7 @@ const SETTINGS_TEMPLATE: &str = include_str!("../../../../settings-template.json
 
 /// Get the current OS platform name.
 pub fn get_platform() -> serde_json::Value {
-    let platform = match std::env::consts::OS {
-        "macos" => "darwin",
-        "windows" => "win32",
-        other => other,
-    };
-    serde_json::json!(platform)
+    serde_json::json!(agentmux_common::platform_name::platform_name())
 }
 
 /// Get the current user's username.
@@ -169,11 +164,7 @@ pub fn get_about_modal_details(state: &Arc<AppState>) -> serde_json::Value {
         "buildTime": env!("AGENTMUX_BUILD_TIME").parse::<i64>().unwrap_or(0),
         "cefVersion": env!("AGENTMUX_CEF_VERSION"),
         "channel": channel,
-        "platform": match std::env::consts::OS {
-            "macos" => "darwin",
-            "windows" => "win32",
-            other => other,
-        },
+        "platform": agentmux_common::platform_name::platform_name(),
         "arch": std::env::consts::ARCH,
         "backendEndpoints": {
             "ws": endpoints.ws_endpoint,

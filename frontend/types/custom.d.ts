@@ -12,6 +12,9 @@ import type * as rxjs from "rxjs";
 import type { Accessor, JSX } from "solid-js";
 
 declare global {
+    /** This build's version (package.json), set by vite.config.ts `define`. */
+    const __AGENTMUX_VERSION__: string;
+
     // All atoms are now SolidJS Accessors (call as function to read reactive value).
     // For writable atoms use SignalAtom (also callable, plus ._set()).
     type GlobalAtomsType = {
@@ -284,6 +287,8 @@ declare global {
         /** Take OS keyboard focus back from a native browser pane to this window's page. */
         reclaimWindowFocus(windowLabel: string): Promise<void>;
         getAuthKey(): string;
+        /** Reload this window's page, keeping what the host needs to reconnect it. */
+        reloadWindow(): void;
         getIsDev(): boolean;
         getCursorPoint: () => { x: number; y: number };
         getPlatform: () => NodeJS.Platform;

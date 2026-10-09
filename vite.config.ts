@@ -128,6 +128,9 @@ function stripKatexLegacyFonts(): Plugin {
     };
 }
 
+// The UI's own version, compared with the backend's on every connect (app/store/srv-info.ts).
+const APP_VERSION: string = JSON.parse(fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8")).version;
+
 // The host this build is for (docs/specs/SPEC_EXTERNAL_HOST_BUILD_2026_10_09.md).
 // Unset: the desktop host, `@host-module` → frontend/cef-host-module.ts (tsconfig.json).
 // AGENTMUX_HOST_MODULE: a module exporting `hostModule: HostModule` instead.
@@ -138,6 +141,9 @@ const HOST_TSCONFIG = process.env.AGENTMUX_HOST_TSCONFIG ? path.resolve(process.
 
 export default defineConfig({
     root: ".",
+    define: {
+        __AGENTMUX_VERSION__: JSON.stringify(APP_VERSION),
+    },
     resolve: HOST_MODULE ? { alias: { "@host-module": HOST_MODULE } } : {},
     optimizeDeps: {
         // The Shiki grammars are loaded lazily, one `import("shiki/langs/x.mjs")` per

@@ -13,6 +13,7 @@ import { StatusBarTip } from "./StatusBarTip";
 import { SystemStats } from "./SystemStats";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { UpdateStatus } from "./UpdateStatus";
+import { VersionSkewStatus } from "./VersionSkewStatus";
 import "./StatusBar.scss";
 
 const StatusBar = (): JSX.Element => {
@@ -48,6 +49,7 @@ const StatusBar = (): JSX.Element => {
                 <TokenUsageIndicator />
                 <ConfigStatus />
                 <MuxBusIndicator />
+                <VersionSkewStatus />
                 <UpdateStatus />
                 <HostPopover />
                 <Show when={version}>
