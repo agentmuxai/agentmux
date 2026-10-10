@@ -583,6 +583,10 @@ pub(crate) async fn ask_user(
     question: serde_json::Value,
 ) -> Result<UserAnswer, String> {
     let host = host_to_ask_user(state).await?;
+    // The agent's pane waits on the user until this returns: the waiting tone
+    // and notification for it (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2).
+    let title = question.get("title").and_then(|t| t.as_str()).unwrap_or("An agent needs your answer").to_string();
+    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, agent_block_id, "consent", &title);
     let mut body = question;
     body["block_id"] = serde_json::json!(agent_block_id);
     body["timeout_ms"] = serde_json::json!(DIALOG_TIMEOUT_MS);

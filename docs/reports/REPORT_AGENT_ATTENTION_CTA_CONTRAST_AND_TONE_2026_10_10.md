@@ -1,6 +1,6 @@
 # When an agent needs you: louder calls to action, and a tone for every one
 
-**Status:** active — §1 (contrast) in the PR that adds this report; §2 (the tone) in the PR after it.
+**Status:** active — §1 (contrast) in PR #4604; §2 (the tone) in the PR after it. Not done yet: see "Left for later" at the end.
 **Date:** 2026-10-10
 
 ## The requests
@@ -100,3 +100,23 @@ The browser attention banner: the lowest contrast, no sound, and the place the o
 3. Its `browser:attention` meta feeding the waiting tone.
 
 Then the permission panel, which has the same gap. After that, the approval windows and srv's `InputWaiting` reports.
+
+## As built (§2)
+
+- **The registry.** `frontend/app/notification/waiting-for-you.ts`, per window. A pane waits while any of its sources does:
+  - `question` (`useAgentQuestions`);
+  - `permission` (`useAgentDecisions`);
+  - `srv:<key>`, srv's announcements.
+- **srv's announcements.** `backend/user_attention.rs` `Asking` publishes `userattention` from start to end, its `Drop` sending the end. It's used in three places:
+  - `browser_attention::ask` (hand-offs, approvals and navigation);
+  - `connections::ask_user` (SSH consent and other host questions);
+  - the widget install route, for the verified agent's pane.
+- **Which window.** An announcement names the windows showing its pane (`resolve_click_target`). Requests with no pane go under an `app:` key, play only while the window isn't in front, and send no OS notification.
+- **Tab switches no longer silence it.** The agent hooks keep waiting through an unmount (a tab switch) and end only when the pane is gone.
+- **The flash.** The tone's tab flash comes once per loop (`WAITING_LOOP_MS`), under the tool-tones flash setting.
+
+## Left for later
+
+- **Late windows.** A window opened while srv holds a request open doesn't hear it until the next one. srv keeps no list of open announcements.
+- **Permissions in `AgentState::Waiting`.** A tool permission doesn't set `term:awaiting_user` yet, so it isn't in `AgentState::Waiting` or the Swarm's "Waiting for you" line.
+- **Separate toggles.** No separate setting for browser hand-offs. No repeat chime before the 5-minute auto-stop.

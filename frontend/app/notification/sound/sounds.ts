@@ -88,7 +88,7 @@ export const SOUNDS: Record<SoundId, SoundDef> = {
     },
     "agent.waiting.for.input": {
         id: "agent.waiting.for.input",
-        label: "Agent waiting for your reply",
+        label: "An agent is waiting for you",
         category: "info",
         settingKey: "notify:sound:agent.waiting.for.input",
         // No coalesceMs — the waiting player is looping, not one-shot;

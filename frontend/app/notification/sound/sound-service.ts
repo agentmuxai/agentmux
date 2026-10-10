@@ -34,7 +34,8 @@ import { SoundPlayer } from "./sound-player";
 import { audibleFlashDelayMs, flashPatternForCategory, flashPatternForSyllable } from "./flash-patterns";
 import { paramsForTool } from "./tool-tones";
 import { TOOL_TONE_COALESCE_MS, ToolTonesPlayer } from "./tool-tones-player";
-import { WaitingTonePlayer } from "./waiting-tone-player";
+import { WAITING_LOOP_MS, WaitingTonePlayer } from "./waiting-tone-player";
+import { APP_KEY_PREFIX } from "@/app/notification/waiting-keys";
 import { playShutdownTone } from "./shutdown-tone";
 import {
     DEFAULT_MASTER_VOLUME,
@@ -49,6 +50,8 @@ const player = new SoundPlayer();
 const toolTones = new ToolTonesPlayer();
 const waitingTones = new Map<string, WaitingTonePlayer>(); // blockId → player
 const waitingTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+/** A waiting pane's tab flashes once per loop of the tone, while it sounds. */
+const waitingFlashes = new Map<string, ReturnType<typeof setInterval>>();
 // blockIds whose tone is temporarily faded out because the pane is focused.
 // The player stays in waitingTones so it can be restarted when focus leaves.
 const suspendedByFocus = new Set<string>();
@@ -160,17 +163,19 @@ export function installSoundService(): () => void {
             const toSuspend: string[] = [];
             const toResume: string[] = [];
             for (const blockId of waitingTones.keys()) {
-                const suppressed = shouldSuppress && winFocused && focusedId === blockId;
+                const suppressed = shouldSuppress && winFocused && (focusedId === blockId || blockId.startsWith(APP_KEY_PREFIX));
                 if (suppressed && !suspendedByFocus.has(blockId)) toSuspend.push(blockId);
                 else if (!suppressed && suspendedByFocus.has(blockId)) toResume.push(blockId);
             }
             for (const blockId of toSuspend) {
                 void waitingTones.get(blockId)!.stop();
                 suspendedByFocus.add(blockId);
+                stopWaitingFlash(blockId);
             }
             for (const blockId of toResume) {
                 suspendedByFocus.delete(blockId);
                 waitingTones.get(blockId)?.start(vol);
+                startWaitingFlash(blockId);
             }
         });
         return dispose;
@@ -295,7 +300,7 @@ function startWaiting(blockId: string): void {
     const suppressWhenFocused = suppressRaw !== false;
     if (
         suppressWhenFocused &&
-        focusManager.blockFocusAtom() === blockId &&
+        (focusManager.blockFocusAtom() === blockId || blockId.startsWith(APP_KEY_PREFIX)) &&
         windowFocusedSignal?.()
     ) {
         // Pane is currently focused — mark as suspended so the reactive
@@ -307,6 +312,31 @@ function startWaiting(blockId: string): void {
     const vol =
         (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? DEFAULT_WAITING_VOLUME;
     wp.start(vol);
+    startWaitingFlash(blockId);
+}
+
+/**
+ * The waiting tone's visual twin: the pane's tab (and its window's tab)
+ * flashes on each loop of the arpeggio while the tone sounds, under the same
+ * flash setting as tool tones
+ * (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2).
+ */
+function startWaitingFlash(blockId: string): void {
+    if (waitingFlashes.has(blockId) || blockId.startsWith(APP_KEY_PREFIX)) return;
+    const flash = () => {
+        if (getSettingsKeyAtom("notify:tooltones:flash")() === false) return;
+        emitActivityFlash({ blockId, pattern: flashPatternForCategory("warning"), delayMs: 0 });
+    };
+    flash();
+    waitingFlashes.set(blockId, setInterval(flash, WAITING_LOOP_MS));
+}
+
+function stopWaitingFlash(blockId: string): void {
+    const t = waitingFlashes.get(blockId);
+    if (t !== undefined) {
+        clearInterval(t);
+        waitingFlashes.delete(blockId);
+    }
 }
 
 /**
@@ -335,6 +365,7 @@ function stopWaiting(blockId: string): void {
         waitingTimeouts.delete(blockId);
     }
     suspendedByFocus.delete(blockId);
+    stopWaitingFlash(blockId);
     const wp = waitingTones.get(blockId);
     if (wp) {
         void wp.stop();
@@ -446,6 +477,8 @@ export function __resetSoundService(): void {
     toolTones.__resetCoalesce();
     for (const t of waitingTimeouts.values()) clearTimeout(t);
     waitingTimeouts.clear();
+    for (const t of waitingFlashes.values()) clearInterval(t);
+    waitingFlashes.clear();
     waitingTones.clear();
     suspendedByFocus.clear();
 }

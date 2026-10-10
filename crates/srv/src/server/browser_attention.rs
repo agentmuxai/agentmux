@@ -204,6 +204,17 @@ pub(crate) async fn ask(
             b.insert(k.clone(), v.clone());
         }
     }
+    // The pane waits on the user until they answer or it times out: the
+    // waiting tone and notification for it
+    // (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2).
+    let what = ["reason", "what", "origin"]
+        .iter()
+        .find_map(|k| banner.get(*k).and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .to_string();
+    let who = if agent_id.is_empty() { "An agent" } else { agent_id };
+    let text = if what.is_empty() { format!("{who} needs you") } else { format!("{who} needs you: {what}") };
+    let _asking = crate::backend::user_attention::Asking::start(&state.broker, &state.mstore, block_id, "browser", &text);
     let mut meta = crate::backend::obj::MetaMapType::new();
     meta.insert(ATTENTION_META_KEY.to_string(), banner);
     if let Err(e) = crate::server::http_shell::broadcast_meta_update(state, block_id, &meta) {
