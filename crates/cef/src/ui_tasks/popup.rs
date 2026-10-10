@@ -71,6 +71,32 @@ wrap_task! {
     }
 }
 
+wrap_task! {
+    pub struct ClosePopupWindowTask {
+        window: Window,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let window = self.window.clone();
+            if window.is_closed() == 0 {
+                window.close();
+            }
+        }
+    }
+}
+
+/// Close a Views-hosted popup's own window once its browser has accepted the
+/// close. `do_close` calls this with the handler's lock held, and closing the
+/// window there re-enters it: the window's `can_close` asks the browser to
+/// close, which calls `do_close` again, which waits on that lock for good.
+/// Posted, the close runs after `do_close` has returned and the browser's
+/// close is accepted, so `can_close` just allows it.
+pub fn post_close_popup_window(window: Window) {
+    let mut task = ClosePopupWindowTask::new(window);
+    post_task(ThreadId::UI, Some(&mut task));
+}
+
 /// Bring the popup window `label` to the front.
 pub fn post_show_popup(state: &Arc<AppState>, label: &str) {
     let mut task = ShowPopupTask::new(state.clone(), label.to_string());
