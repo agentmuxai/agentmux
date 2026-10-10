@@ -115,4 +115,6 @@ For each PR that changes behaviour:
 
 ## 9. Results
 
-To be filled in by phase 3.
+Filled in by phase 3. Early results:
+
+**L3, taken by GNOME (charlie, Maricon, 2026-10-10, main @ `998175d3c`).** Every Linux key in the table (the first key of a chord) checked against the 150 accelerators GNOME 50 grabs on charlie: the window manager, mutter, the shell, media keys, and the enabled dash-to-dock and tiling-assistant extensions. **4 of 120 are taken, all `pane:swap:*`** (Ctrl+Alt+Shift+Arrow, `move-to-workspace-*`). The other 116 are free on stock GNOME, including every Alt+Shift+Arrow, Alt+Arrow and Ctrl+Alt+Shift+PageUp/PageDown row; the Linux table has no Super keys. A replacement for `pane:swap` on Linux should avoid Ctrl+Alt+Arrow and Ctrl+Alt+letter, which GNOME also takes; Alt+Shift+Arrow is free on GNOME but used by other desktops. This covers stock GNOME as configured on charlie, not KDE, Xfce or Sway, and not keys lost to an input method or VMware; injected L3 (`ydotool`) confirms it later. The check is a read-only script, `gnome-grabs.mjs`, to be added with the verification script.
