@@ -39,6 +39,10 @@ struct Registry {
     jars: HashMap<String, Jar>,
     /// Profile id → its disk-backed jar.
     profiles: HashMap<String, ProfileJar>,
+    /// Every profile opened by this process, deleted ones included: CEF keeps
+    /// using a profile's folder until the process ends, so their folders go
+    /// at the next start.
+    opened: HashSet<String>,
     /// Pane label → how many times its creation has waited for its profile.
     waits: HashMap<String, u32>,
 }
@@ -194,6 +198,7 @@ pub fn context_for_block(block: &str, cache_root: Option<&str>) -> Result<PaneJa
         tracing::info!(block, profile = id, path = %path.display(), "[browser-identity] opening a browser profile");
         let now_ready = ready.load(Ordering::SeqCst);
         r.profiles.insert(id.to_string(), ProfileJar { ctx: ctx.clone(), ready });
+        r.opened.insert(id.to_string());
         return Ok(if now_ready { PaneJar::Ready(ctx) } else { PaneJar::Pending });
     }
     if let Some(jar) = r.jars.get(&identity) {
@@ -246,20 +251,54 @@ wrap_task! {
 
     impl Task {
         fn execute(&self) {
+            // Each call gets a callback, if one that does nothing: with none,
+            // libcef crashed (an access violation) a few seconds later.
             if let Some(cookies) = self.ctx.cookie_manager(None) {
-                cookies.delete_cookies(None, None, None);
-                cookies.flush_store(None);
+                cookies.delete_cookies(None, None, Some(&mut CookiesDeleted::new()));
+                cookies.flush_store(Some(&mut Done::new()));
             }
-            self.ctx.clear_http_auth_credentials(None);
+            self.ctx.clear_http_auth_credentials(Some(&mut Done::new()));
         }
     }
 }
 
+wrap_delete_cookies_callback! {
+    struct CookiesDeleted;
+
+    impl DeleteCookiesCallback {
+        fn on_complete(&self, _num_deleted: ::std::os::raw::c_int) {}
+    }
+}
+
+wrap_completion_callback! {
+    struct Done;
+
+    impl CompletionCallback {
+        fn on_complete(&self) {}
+    }
+}
+
+/// Writes the cookies of `block`'s profile, if it has one, to disk now.
+/// Chromium writes them every 30 seconds or so, and the host doesn't shut
+/// CEF down on quit, so a sign-in made just before quitting was lost; a
+/// sign-in ends in a page load, which calls this.
+pub fn flush_profile_of_block(block: &str) {
+    let ctx = {
+        let r = registry();
+        let Some(id) = r.by_block.get(block).and_then(|i| profile_id(i)) else { return };
+        let Some(p) = r.profiles.get(id) else { return };
+        p.ctx.clone()
+    };
+    if let Some(cookies) = ctx.cookie_manager(None) {
+        cookies.flush_store(Some(&mut Done::new()));
+    }
+}
+
 /// srv's list of the named profiles there are: the jar of one not in it is
-/// dropped, its sign-ins cleared at once, and its folder under `cache_root`
-/// deleted, along with any folder left by a profile deleted before: CEF keeps
-/// an opened profile's files in use until the process ends, so a folder that
-/// can't be deleted now goes on the next start, before any profile is open.
+/// dropped and its sign-ins cleared at once. Folders under `cache_root` of
+/// profiles not in it are deleted, except those of profiles this process
+/// opened: CEF uses an opened profile's folder until the process ends, so
+/// those go at the next start, before any profile is open.
 pub fn retain_profiles(ids: &HashSet<String>, cache_root: Option<&str>) {
     let mut r = registry();
     let gone: Vec<String> = r.profiles.keys().filter(|id| !ids.contains(*id)).cloned().collect();
@@ -270,14 +309,14 @@ pub fn retain_profiles(ids: &HashSet<String>, cache_root: Option<&str>) {
         }
         tracing::info!(profile = %id, "[browser-identity] closed a deleted browser profile and cleared its sign-ins");
     }
-    let open: HashSet<String> = r.profiles.keys().cloned().collect();
+    let opened = r.opened.clone();
     drop(r);
     let Some(root) = cache_root.filter(|r| !r.is_empty()) else { return };
     let Ok(entries) = std::fs::read_dir(root) else { return };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().to_string();
         let Some(id) = name.strip_prefix("profile-") else { continue };
-        if ids.contains(id) || open.contains(id) || profile_id(&format!("profile:{id}")).is_none() {
+        if ids.contains(id) || opened.contains(id) || profile_id(&format!("profile:{id}")).is_none() {
             continue;
         }
         match std::fs::remove_dir_all(e.path()) {
@@ -318,6 +357,21 @@ mod tests {
         assert!(matches!(context_for_block("idt-a", None).unwrap(), PaneJar::Shared));
         set_for_block("idt-b", Some("profile:Not Valid"));
         assert!(matches!(context_for_block("idt-b", None).unwrap(), PaneJar::Shared));
+    }
+
+    #[test]
+    fn deleting_a_profile_leaves_the_folder_of_one_opened_this_run() {
+        let root = std::env::temp_dir().join(format!("idt-sweep-{}", std::process::id()));
+        for d in ["profile-p-sweepopen", "profile-p-sweepold", "profile-not valid"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        // Opened by this process, then deleted: CEF still uses its folder.
+        registry().opened.insert("p-sweepopen".to_string());
+        retain_profiles(&HashSet::new(), root.to_str());
+        assert!(root.join("profile-p-sweepopen").exists());
+        assert!(!root.join("profile-p-sweepold").exists());
+        assert!(root.join("profile-not valid").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

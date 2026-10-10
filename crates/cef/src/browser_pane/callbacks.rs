@@ -490,6 +490,7 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
         // reapply_zoom's own doc comment for why this is CSS injection and
         // not Chromium's native per-host zoom.
         state.browser_panes.reapply_zoom(block_id, state);
+        crate::browser_pane::identity::flush_profile_of_block(block_id);
     }
 
     #[cfg(target_os = "windows")]
