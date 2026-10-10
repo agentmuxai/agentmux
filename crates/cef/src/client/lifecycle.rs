@@ -753,10 +753,7 @@ impl AgentMuxHandler {
                             popup_id = id,
                             "[oauth-popup] step 4/4: do_close — closing the popup's own Views window (Alloy/Views path)",
                         );
-                        // Posted, not inline: this runs with the handler's
-                        // lock held, and closing the window re-enters
-                        // `do_close` (see `post_close_popup_window`).
-                        crate::ui_tasks::post_close_popup_window(win);
+                        crate::ui_tasks::post_close_popup_window(win); // closing inline re-enters do_close
                     }
                     None => tracing::info!(
                         target: "oauth-popup",
