@@ -525,13 +525,13 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     req.lan_verified = Some(verified);
 }
 
+mod channel_v2;
+
 /// Anti-replay window for cross-channel `channel_sig` —
 /// SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D6: host-tier's tighter
 /// `JEKT_SIG_MAX_AGE_SECS`, NOT LAN/WAN's wider one. A cross-channel forward
 /// is a same-machine HTTP call to `127.0.0.1`; it has no real-network
 /// latency budget to accommodate, for the same reason host-tier doesn't.
-mod channel_v2;
-
 const CHANNEL_SIG_MAX_AGE_SECS: i64 = JEKT_SIG_MAX_AGE_SECS;
 
 /// Cross-channel (same machine, different AgentMux instance) per-agent
