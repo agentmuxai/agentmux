@@ -32,7 +32,7 @@ No concept of "managed by settings.json" or "user-configurable". Every widget's 
 
 **Tab bar right-click** (`base-menus.ts → createTabBarMenu`):
 - Widget checkboxes read from `widget["display:hidden"]` — stored in the widget definition, not settings
-- "Edit widgets.json" item — exposes internal file, confusing
+- "Edit widgets.json" item — exposes internal file, confusing *(2026-10-09: a user `widgets.json` came back later as a documented file next to `settings.json`, Pane Tab contract Phase 6; widgets are now managed in Settings → Widgets, `SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md`)*
 
 **Action widgets bar right-click** (`action-widgets.tsx`):
 - "Edit widgets.json" item — same problem
