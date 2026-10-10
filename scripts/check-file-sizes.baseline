@@ -41,7 +41,7 @@
 1566 crates/srv/src/server/editor_handlers.rs
 2118 crates/srv/src/server/muxspect_handlers.rs
 1665 crates/srv/src/server/native_memory_handlers.rs
-2792 crates/srv/src/server/reactive.rs
+2799 crates/srv/src/server/reactive.rs
 1616 crates/srv/src/server/ui_handlers.rs
 2297 crates/srv/src/server/websocket.rs
 2036 frontend/app/store/agent-pane-state/reducer.ts
