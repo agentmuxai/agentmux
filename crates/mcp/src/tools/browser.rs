@@ -31,7 +31,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/open", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiBrowserOpenRequest { auth, url: url.to_string(), split, title, allowed_origins })
                 .send()
                 .await
@@ -70,7 +70,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/snapshot", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&agentmux_common::api_types::UiBrowserSnapshotRequest { auth, pane: pane_arg(arguments), scope })
                 .send()
                 .await
@@ -121,7 +121,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/act", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&agentmux_common::api_types::UiBrowserActRequest {
                     auth,
                     pane: pane_arg(arguments),
@@ -165,7 +165,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/set_files", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&agentmux_common::api_types::UiBrowserSetFilesRequest { auth, pane: pane_arg(arguments), ref_: r.clone(), paths })
                 // srv reads up to 25 MB and gives the host up to 60 s: wait for it.
                 .timeout(std::time::Duration::from_secs(90))
@@ -197,7 +197,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/wait_for", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&agentmux_common::api_types::UiBrowserWaitForRequest {
                     auth,
                     pane: pane_arg(arguments),
@@ -233,7 +233,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/handoff", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&agentmux_common::api_types::UiBrowserHandoffRequest { auth, pane: pane_arg(arguments), reason, timeout_minutes })
                 .timeout(wait)
                 .send()
@@ -261,7 +261,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/navigate", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiBrowserNavigateRequest { auth, pane: pane_arg(arguments), url: url.to_string() })
                 .send()
                 .await
@@ -285,7 +285,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/{route}", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiBrowserHistoryRequest { auth, pane: pane_arg(arguments), ignore_cache })
                 .send()
                 .await
@@ -308,7 +308,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/eval", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiBrowserEvalRequest {
                     auth,
                     pane: pane_arg(arguments),
@@ -342,7 +342,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/dispatch_key", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiBrowserDispatchKeyRequest { auth, pane: pane_arg(arguments), selector, text, key })
                 .send()
                 .await
@@ -364,7 +364,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/focus_element", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiBrowserFocusElementRequest { auth, pane: pane_arg(arguments), selector: selector.to_string() })
                 .send()
                 .await
@@ -382,7 +382,7 @@ pub(super) async fn call(name: &str, arguments: &Value, cx: &ToolCtx<'_>) -> Res
             let req_url = format!("{}/api/v1/ui/browser/focus_info", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&req_url)
-                .header("X-AuthKey", auth_key)
+                .header(AUTH_KEY_HEADER, auth_key)
                 .json(&UiBrowserFocusInfoRequest { auth, pane: pane_arg(arguments) })
                 .send()
                 .await

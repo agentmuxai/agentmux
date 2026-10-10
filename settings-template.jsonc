@@ -6,13 +6,13 @@
 {
     // -- Terminal --
     // "term:fontsize":            15,
-    // "term:fontfamily":          "JetBrains Mono",
+    // "term:fontfamily":          "Hack",
     // "term:theme":               "default-dark",
-    // "term:scrollback":          1000,
-    // "term:copyonselect":        true,
+    // "term:scrollback":          2000,
+    // "term:copyonselect":        false,
     // "term:transparency":        0.5,
     // "term:scrollsensitivity":   1,
-    // "term:localshellpath":      "/bin/bash",
+    // "term:localshellpath":      "/bin/bash",  // example; unset uses your shell
     // "term:localshellopts":      [],
     // "term:disablewebgl":        false,
     // "term:allowbracketedpaste": true,
@@ -20,13 +20,13 @@
 
     // -- Drag and drop (file drop onto Terminal / Agent panes) --
     // "dnd:enabled":              true,
-    // "dnd:concurrency":          4,
+    // "dnd:concurrency":          4,            // example; unset means no limit
     // "dnd:agentinserttoken":     true,
 
     // -- Window --
     // "window:transparent":       false,
     // "window:blur":              false,
-    // "window:opacity":           1.0,
+    // "window:opacity":           0.8,
     // "window:bgcolor":           "",
     // "window:zoom":              1.0,
     // "window:tilegapsize":       3,
@@ -37,7 +37,7 @@
     // "window:keepinactivetabslaidout": true,
     // "window:dimensions":        "",
     // "window:reducedmotion":     false,
-    // "window:magnifiedblockopacity": 0.6,
+    // "window:magnifiedblockopacity": 1.0,
     // "window:magnifiedblocksize":    0.9,
     // "window:maxtabcachesize":   10,
     // "window:disablehardwareacceleration": false,
@@ -66,7 +66,7 @@
     // "Start at login".
     // "app:startatlogin":         false,
     // "app:defaultnewblock":      "",
-    // "app:showoverlayblocknums": false,
+    // "app:showoverlayblocknums": true,
 
     // -- Shell Environment --
     // "cmd:env":                  {},
@@ -123,14 +123,14 @@
     //                                       // "webspeech" (browser API — does NOT work in
     //                                       // packaged CEF builds; dev/Chromium only)
     // -- groq engine: hosted, sends webm. Key read server-side only (never sent to UI).
-    // "voice:groqApiKey":       "gsk_...",  // or set AGENTMUX_GROQ_API_KEY
+    // "voice:groqApiKey":       "gsk_...",  // example; or set AGENTMUX_GROQ_API_KEY
     // -- whisper-local engine: offline, sends 16kHz WAV to a local whisper.cpp CLI.
     //    Provide the whisper-cli binary path; the GGML model auto-downloads on
     //    first use (default "base.en", ~142MB) to <config>/whisper-models/.
     //    Env override for the binary: AGENTMUX_WHISPER_CLI.
-    // "voice:whisperCliPath":   "C:/tools/whisper-cli.exe",
+    // "voice:whisperCliPath":   "C:/tools/whisper-cli.exe",  // example
     // "voice:whisperModel":     "base.en",   // tiny.en | base.en | small.en | …
-    // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",  // explicit override; skips auto-download
+    // "voice:whisperModelPath": "C:/models/ggml-base.en.bin",  // example; explicit override; skips auto-download
 
     // -- Network --
     // Discover other AgentMux instances on your local network (mDNS/Bonjour)

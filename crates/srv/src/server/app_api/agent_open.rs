@@ -83,7 +83,7 @@ fn resolve_vendor_env_override(
 }
 
 // resolve_effective_provider_id (and its store-lookup helper) moved to
-// Store::resolve_effective_provider_id in backend/storage/agents.rs
+// Store::resolve_effective_provider_id in backend/storage/agents/definition.rs
 // (2026-08-15) — the identical resolution logic was independently
 // duplicated in identity/resolver/inject.rs's layer-3 credential gate,
 // found reading agent.provider directly (the same mstore-vs-id_store

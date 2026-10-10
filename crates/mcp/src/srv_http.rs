@@ -42,7 +42,7 @@ pub(crate) async fn srv_get_json(
 ) -> Result<Value> {
     let resp = client
         .get(url)
-        .header("X-AuthKey", auth_key)
+        .header(AUTH_KEY_HEADER, auth_key)
         .query(query)
         .send()
         .await

@@ -1,11 +1,10 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
+import { AUTH_KEY_HEADER } from "@/util/sharedconst";
 import { type WebSocket, newWebSocket } from "@/util/wsutil";
 import debug from "debug";
 import { sprintf } from "sprintf-js";
-
-const AuthKeyHeader = "X-AuthKey";
 
 const dlog = debug("wave:ws");
 
@@ -91,7 +90,7 @@ class WSControl {
             this.baseHostPort + "/ws?tabid=" + this.tabId,
             this.authOpts
                 ? {
-                      [AuthKeyHeader]: this.authOpts.authKey,
+                      [AUTH_KEY_HEADER]: this.authOpts.authKey,
                   }
                 : null
         );

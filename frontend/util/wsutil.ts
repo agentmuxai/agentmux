@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { WebSocket as NodeWebSocketType } from "ws";
+import { AUTH_KEY_HEADER } from "./sharedconst";
 
 let NodeWebSocket: typeof NodeWebSocketType = null;
 
@@ -24,9 +25,9 @@ function newWebSocket(url: string, headers: { [key: string]: string }): ComboWeb
         // Browser WebSocket: does not support headers
         // Append auth key as query parameter instead
         let finalUrl = url;
-        if (headers && headers["X-AuthKey"]) {
+        if (headers && headers[AUTH_KEY_HEADER]) {
             const separator = url.includes("?") ? "&" : "?";
-            finalUrl = `${url}${separator}authkey=${encodeURIComponent(headers["X-AuthKey"])}`;
+            finalUrl = `${url}${separator}authkey=${encodeURIComponent(headers[AUTH_KEY_HEADER])}`;
         }
         return new WebSocket(finalUrl);
     }

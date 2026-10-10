@@ -561,7 +561,7 @@ pub fn inject_identity_env_with_broker(
     // links exist.
     //
     // Provider is resolved via `id_store.resolve_effective_provider_id`
-    // (`backend/storage/agents.rs`), the one resolver `agent_open.rs`'s
+    // (`backend/storage/agents/definition.rs`), the one resolver `agent_open.rs`'s
     // spawn path also uses, so this gate checks credentials for exactly the
     // provider that will run: the agent's own, read-only after creation, or
     // its bundle's when it has none (SPEC_AGENT_BUNDLE_FORMAT_V0_3_2026_10_05.md

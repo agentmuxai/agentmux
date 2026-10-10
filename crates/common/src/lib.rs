@@ -51,6 +51,14 @@ pub use toolchain_path::{
     PathSource,
 };
 
+/// The HTTP header that carries srv's instance auth key, on every route and
+/// on the `/ws` upgrade. srv checks it in `crates/srv/src/server/auth.rs`;
+/// every Rust client (mcp, cef, bashwrap, launcher, srv's own forwards)
+/// sends it under this name. The frontend's twin is `AUTH_KEY_HEADER` in
+/// `frontend/util/sharedconst.ts`. HTTP header names are case-insensitive,
+/// so this is the spelling we send, not the only one srv accepts.
+pub const AUTH_KEY_HEADER: &str = "X-AuthKey";
+
 /// Crate-wide test-only lock for env-var-touching tests. Both
 /// `runtime_mode::tests` and `data_paths::tests` mutate process-global
 /// env vars (`AGENTMUX_RUNTIME_MODE`, `AGENTMUX_HOME_OVERRIDE`, etc.);

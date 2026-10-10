@@ -407,9 +407,11 @@ fn detach_declared_background_session(_args: &Args) {}
 /// orphaned grandchild running and still attached to the PTY slave after
 /// the "kill" (reagent P1, PR #2156).
 ///
-/// Windows: `taskkill /T /F /PID <pid>` walks the OS-level parent-PID tree
-/// (independent of shell job control) and force-kills every process in it.
-/// No new dependency needed — this is a plain `std::process::Command`.
+/// `agentmux_common::process::force_kill_tree` does the killing, by PID only:
+///
+/// Windows: `taskkill /F /T /PID <pid>` (console flash suppressed) walks the
+/// OS-level parent-PID tree, independent of shell job control, and
+/// force-kills every process in it.
 ///
 /// Unix: SIGKILL to the child's process group. portable-pty makes the PTY
 /// child a session and group leader (`setsid`), so its pgid is its pid and
@@ -418,43 +420,12 @@ fn detach_declared_background_session(_args: &Args) {}
 /// `nohup`'d child ignores. A child that started its own session is out of
 /// reach here; the agent's process tracker ends it with the agent.
 fn kill_process_tree(pid: u32) {
-    #[cfg(windows)]
-    {
-        let mut cmd = std::process::Command::new("taskkill");
-        cmd.args(["/T", "/F", "/PID", &pid.to_string()]);
-        {
-            // CREATE_NO_WINDOW: console-flash suppression — bashwrap is a
-            // GUI-subsystem parent, so spawning taskkill without this pops a
-            // visible console window.
-            cmd.no_window();
-        }
-        match cmd.output() {
-            Ok(out) if out.status.success() => {
-                tracing::info!(target: "bashwrap", pid, "kill_process_tree: taskkill succeeded");
-            }
-            Ok(out) => {
-                // Non-fatal: the direct-handle kill above may have already
-                // won the race (taskkill then reports "not found"), which
-                // is fine — best-effort supplemental cleanup either way.
-                tracing::warn!(
-                    target: "bashwrap",
-                    pid,
-                    stderr = %String::from_utf8_lossy(&out.stderr),
-                    "kill_process_tree: taskkill did not report success"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(target: "bashwrap", pid, error = %e, "kill_process_tree: failed to spawn taskkill");
-            }
-        }
-    }
-    #[cfg(unix)]
-    {
-        // SAFETY: kill(2) on a process group id we spawned and a constant
-        // signal. ESRCH (already gone) is fine.
-        unsafe {
-            libc::kill(-(pid as libc::pid_t), libc::SIGKILL);
-        }
+    match agentmux_common::process::force_kill_tree(pid) {
+        Ok(()) => tracing::info!(target: "bashwrap", pid, "kill_process_tree: tree killed"),
+        // Non-fatal: the direct-handle kill above may have already won the
+        // race (the tree is then "not found"), which is fine — best-effort
+        // supplemental cleanup either way.
+        Err(e) => tracing::warn!(target: "bashwrap", pid, error = %e, "kill_process_tree: kill did not report success"),
     }
 }
 

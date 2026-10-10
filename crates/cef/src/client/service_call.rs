@@ -31,6 +31,7 @@
 //! close path. Leaving it self-contained keeps its reliability story
 //! reviewable on its own.
 
+use agentmux_common::AUTH_KEY_HEADER;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
@@ -118,7 +119,7 @@ pub(crate) fn service_call(
     let request = format!(
         "POST /agentmux/service HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
+         {AUTH_KEY_HEADER}: {}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\

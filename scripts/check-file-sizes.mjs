@@ -39,7 +39,10 @@
 // Usage:
 //   node scripts/check-file-sizes.mjs            check
 //   node scripts/check-file-sizes.mjs --update   lower the baseline to today's
-//                                                sizes (never raises or adds)
+//                                                sizes (never raises or adds),
+//                                                for the files this branch
+//                                                changed since origin/main
+//   node scripts/check-file-sizes.mjs --update --all   the same, for every file
 
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -139,16 +142,44 @@ export function compare(sizes, baseline, limit = LIMIT) {
 /**
  * The baseline after `--update`: each number lowered to today's size, and a
  * file dropped once it is gone or back under the limit. Never raises a number
- * or adds a file.
+ * or adds a file. With `scope`, only the entries for those paths move (the
+ * files this branch changed); every other line is kept as it is, so a branch
+ * that is behind main can't write main's newer numbers back to its own older
+ * ones.
  */
-export function lowered(sizes, baseline, limit = LIMIT) {
+export function lowered(sizes, baseline, limit = LIMIT, scope = null) {
     const out = new Map();
     for (const [path, allowed] of baseline) {
+        if (scope && !scope.has(path)) {
+            out.set(path, allowed);
+            continue;
+        }
         const now = sizes.get(path);
         if (now === undefined || now <= limit) continue;
         out.set(path, Math.min(now, allowed));
     }
     return out;
+}
+
+/**
+ * The paths this branch changed since it left origin/main (committed,
+ * staged, unstaged and untracked), or null when there is no origin/main to
+ * compare with, in which case `--update` falls back to every entry.
+ */
+export function changedSinceMain() {
+    const git = (args) => spawnSync("git", args, { cwd: REPO_ROOT, maxBuffer: 1 << 26 });
+    const base = git(["merge-base", "HEAD", "origin/main"]);
+    if (base.status !== 0) return null;
+    const changed = new Set();
+    for (const args of [
+        ["diff", "--name-only", "-z", base.stdout.toString().trim()],
+        ["ls-files", "-z", "--others", "--exclude-standard"],
+    ]) {
+        const r = git(args);
+        if (r.status !== 0) return null;
+        for (const path of r.stdout.toString().split("\0")) if (path) changed.add(path);
+    }
+    return changed;
 }
 
 // ── Measure ─────────────────────────────────────────────────────────────────
@@ -182,7 +213,11 @@ if (isMain) {
     const baseline = parseBaseline(readFileSync(baselinePath, "utf8"));
 
     if (process.argv.includes("--update")) {
-        const next = lowered(sizes, baseline);
+        const scope = process.argv.includes("--all") ? null : changedSinceMain();
+        if (!scope && !process.argv.includes("--all")) {
+            console.log("check-file-sizes: no origin/main to compare with; lowering every entry.");
+        }
+        const next = lowered(sizes, baseline, LIMIT, scope);
         writeFileSync(baselinePath, formatBaseline(next));
         console.log(`check-file-sizes: wrote ${BASELINE_FILE} (${next.size} files).`);
         const { grew, added } = compare(sizes, next);

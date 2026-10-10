@@ -21,6 +21,7 @@
 //!   and, for instances too old to take one, asks every other live
 //!   AgentMux instance on this host whether it is running this UID.
 
+use agentmux_common::AUTH_KEY_HEADER;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -474,7 +475,7 @@ pub async fn probe_other_instances(uid: &str) -> Option<LegacyHolder> {
 async fn registered_uid_blocks(local_url: &str, auth_key: &str, uid: &str) -> Result<Option<String>, String> {
     let mut req = PROBE_CLIENT.get(format!("{local_url}/agentmux/reactive/agents"));
     if !auth_key.is_empty() {
-        req = req.header("X-AuthKey", auth_key);
+        req = req.header(AUTH_KEY_HEADER, auth_key);
     }
     let resp = req.send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
@@ -647,7 +648,7 @@ pub async fn lan_holders(uid: &str) -> Vec<PeerHolding> {
         let req = PROBE_CLIENT
             .get(url)
             .query(&[("uid", uid)])
-            .header("X-AuthKey", p.auth_key.as_str())
+            .header(AUTH_KEY_HEADER, p.auth_key.as_str())
             .timeout(LAN_QUERY_TIMEOUT);
         match req.send().await {
             Ok(r) if r.status().is_success() => r.json::<PeerHolding>().await.ok(),
@@ -919,7 +920,7 @@ pub async fn request_release(holder: &HolderEndpoint, uid: &str, agent: &str) ->
             "requested_by_version": me.version,
         }));
     if !holder.auth_key.is_empty() {
-        req = req.header("X-AuthKey", &holder.auth_key);
+        req = req.header(AUTH_KEY_HEADER, &holder.auth_key);
     }
     let agent = if agent.is_empty() { "this agent" } else { agent };
     let resp = req.send().await.map_err(|e| {

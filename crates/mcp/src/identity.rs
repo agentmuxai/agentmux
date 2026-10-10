@@ -42,7 +42,7 @@ pub(crate) async fn resolve_agent_name_at_boundary(
     let url = format!("{}/agentmux/agents/resolve", local_url.trim_end_matches('/'));
     let resp = client
         .post(&url)
-        .header("X-AuthKey", auth_key)
+        .header(AUTH_KEY_HEADER, auth_key)
         .json(&serde_json::json!({ "name": name }))
         .send()
         .await

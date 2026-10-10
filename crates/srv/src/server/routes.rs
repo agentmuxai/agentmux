@@ -5,6 +5,7 @@
 //! Split out of server/mod.rs unchanged (SPEC_LARGE_FILE_MODULE_ANALYSIS_2026_09_30.md §4.1).
 
 use super::*;
+use agentmux_common::AUTH_KEY_HEADER;
 
 /// The two routers srv serves. `full` is every route and is bound on
 /// loopback only. `lan` is what `backend::lan_listeners` binds on LAN
@@ -57,7 +58,7 @@ pub(crate) fn build_routers_with(state: AppState, frontend_dir: Option<&std::pat
             header::AUTHORIZATION,
             header::ACCEPT,
             "X-Session-Id".parse().unwrap(),
-            "X-AuthKey".parse().unwrap(),
+            AUTH_KEY_HEADER.parse().unwrap(),
             "X-Requested-With".parse().unwrap(),
             "x-vercel-ai-ui-message-stream".parse().unwrap(),
             // A video poster reads a file's first bytes (stream-local-file,

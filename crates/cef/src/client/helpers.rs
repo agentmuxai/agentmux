@@ -10,6 +10,7 @@
 /// Reload button's navigation target.
 use super::dlog;
 use super::service_call::{service_body, service_call, ServiceCallError};
+use agentmux_common::AUTH_KEY_HEADER;
 
 pub(crate) fn js_string_literal(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -88,7 +89,7 @@ pub(crate) fn backend_close_window(web_endpoint: &str, auth_key: &str, window_id
     let request = format!(
         "POST /agentmux/service HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
+         {AUTH_KEY_HEADER}: {}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\
@@ -246,7 +247,7 @@ fn post_as_host(
     let request = format!(
         "POST {path} HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
-         X-AuthKey: {auth_key}\r\n\
+         {AUTH_KEY_HEADER}: {auth_key}\r\n\
          X-Host-Token: {ipc_token}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
@@ -741,7 +742,7 @@ pub(crate) fn backend_save_session_snapshot(web_endpoint: &str, auth_key: &str) 
     let request = format!(
         "POST /agentmux/service HTTP/1.1\r\n\
          Host: 127.0.0.1\r\n\
-         X-AuthKey: {}\r\n\
+         {AUTH_KEY_HEADER}: {}\r\n\
          Content-Type: application/json\r\n\
          Content-Length: {}\r\n\
          Connection: close\r\n\
