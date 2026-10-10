@@ -30,10 +30,11 @@ const LOADING_SPINNER_FADE_MS = 200;
 // (use-drag-snapshot.ts).
 const DRAG_SNAPSHOT_CAP_MS = 500;
 
-// The in-app (pragmatic) drags: a whole pane, a Window Tab, a Pane Tab. The
-// page is a native window drawn above the DOM and can't see them, so the
-// catcher below is shown from each one's start until its source releases it.
-const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab"] as const;
+// The in-app (pragmatic) drags: a whole pane, a Window Tab, a Pane Tab, an
+// Editor or Media document tab. The page is a native window drawn above the
+// DOM and can't see them, so the catcher below is shown from each one's start
+// until its source releases it.
+const ELEMENT_DRAG_KINDS = ["tile", "window-tab", "pane-tab", "doc-tab"] as const;
 
 /**
  * Covers the page for the length of an in-app drag (a pane, a Pane Tab, a
