@@ -101,6 +101,18 @@
             filter: blur(8px);
         }
 
+        // A minimized pane is its whole block squeezed to a header-sized chip,
+        // so nothing but the clip above keeps its content out of sight. Hide
+        // it outright, so a chip that is a fraction of a pixel off the header's
+        // rendered height can't show a sliver of content. `.block-content` never
+        // holds the pane header (inline or hoisted chrome both draw it outside),
+        // and `visibility` (unlike `display: none`) leaves layout untouched, so
+        // terminals and virtualised lists see no resize
+        // (REPORT_MINIMIZED_PANE_CHROME_ZOOM_DESYNC_2026_10_10.md).
+        &.tile-minimized .block-content {
+            visibility: hidden;
+        }
+
         .tile-leaf {
             overflow: clip; // not scrollable either — see .tile-node
             // Containing block for Block's own loading cover — `<PaneLoadingCover>`

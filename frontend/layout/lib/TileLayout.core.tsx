@@ -550,7 +550,11 @@ export function createTileLayout(platform: TileLayoutPlatform) {
 
         return (
             <div
-                class={clsx("tile-node", { dragging: isDragging(), "tile-hidden": magnifyActive() })}
+                class={clsx("tile-node", {
+                    dragging: isDragging(),
+                    "tile-hidden": magnifyActive(),
+                    "tile-minimized": nodeModel.isMinimized(),
+                })}
                 ref={tileNodeRef}
                 id={props.node.id}
                 style={tileStyle()}

@@ -34,6 +34,7 @@ import { getAllBlockComponentModelEntries } from "@/app/store/block-component-re
 import { getBlockComponentModel, getFocusedBlockId, MOS } from "@/app/store/global";
 import { fireAndForget } from "@/util/util";
 import { createSignal } from "solid-js";
+import { chromeZoomAtom, setChromeZoomSignal } from "./chrome-zoom";
 import { clampZoom, DEFAULT_ZOOM, MAX_ZOOM, MIN_ZOOM } from "./zoom-factor";
 import { setBlockMeta } from "@/app/store/block-meta";
 
@@ -48,8 +49,9 @@ export const [zoomIndicatorVisibleAtom, setZoomIndicatorVisible] = createSignal<
 export const [zoomIndicatorTextAtom, setZoomIndicatorText] = createSignal<string>("");
 let zoomIndicatorTimeout: NodeJS.Timeout | null = null;
 
-// Chrome zoom (title bar + status bar)
-export const [chromeZoomAtom, setChromeZoomSignal] = createSignal<number>(DEFAULT_ZOOM);
+// Chrome zoom (title bar + status bar + pane headers). The signal lives in a
+// leaf module so the layout engine can size minimized-pane chips from it.
+export { chromeZoomAtom } from "./chrome-zoom";
 
 function roundZoom(factor: number): number {
     return Math.round(factor * 100) / 100; // Round to 0.01 increments
