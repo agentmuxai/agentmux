@@ -36,7 +36,7 @@ mod platform_macos;
 pub use window::*;
 pub use drag::*;
 pub use pool::*;
-pub use popup::{post_close_popup, post_show_popup};
+pub use popup::{post_close_popup, post_close_popup_window, post_show_popup};
 #[cfg(not(target_os = "windows"))]
 pub use pane_geometry::*;
 // `clear_pane_swizzle_statics` is always present (real impl on macOS, no-op

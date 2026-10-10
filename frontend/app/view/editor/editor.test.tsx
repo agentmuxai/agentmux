@@ -19,12 +19,22 @@ vi.mock("./editor-model", () => ({
 vi.mock("./editor-view", () => ({ EditorViewComponent: () => null }));
 
 import { editorPaneTab } from "./editor";
+import { editorSplitBlockDef } from "./editor-split";
 
 describe("editorPaneTab", () => {
+    it("a split opens an empty editor, not a copy (SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md)", () => {
+        expect(editorPaneTab.capabilities?.splitBlockDef).toBe(editorSplitBlockDef);
+    });
+
     it("is native, kept alive, zooms from 13px, full-bleed", () => {
         expect(editorPaneTab.view).toBe("editor");
         expect(editorPaneTab.create).toBeTypeOf("function");
-        expect(editorPaneTab.capabilities).toEqual({ lifecycle: "keepAlive", paneZoom: { baseFontSize: 13 }, noPadding: true });
+        expect(editorPaneTab.capabilities).toEqual({
+            lifecycle: "keepAlive",
+            paneZoom: { baseFontSize: 13 },
+            noPadding: true,
+            splitBlockDef: editorSplitBlockDef,
+        });
     });
 
     it("hands the host its title, header text, menu, focus and dispose", () => {

@@ -319,6 +319,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
         return order().slice(first, last);
     });
     const byName = createMemo(() => new Map(entries().map((e) => [e.name, e])));
+    // A row's entry, kept while it leaves: a selection change in the update that drops its name
+    // re-runs the row once more, and reading the <Show>'s accessor then throws (a stale read).
+    const entryOf = (name: string) => createMemo<FsEntry | undefined>((prev) => byName().get(name) ?? prev) as () => FsEntry;
     // Files an agent changed in the last half hour (§8.4), by child name.
     // A minute's tick lets an old badge go without waiting for a change.
     const [minute, setMinute] = createSignal(Date.now());
@@ -1048,44 +1051,44 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                     <Show when={model.phase() === "ready" && grid()}>
                         <div class="files-grid" style={{ height: `${Math.ceil(entries().length / gridCols()) * TILE_H}px` }}>
                             <For each={visibleNames()}>
-                                {(name, i) => (
-                                    <Show when={byName().get(name)}>
-                                        {(entry) => {
-                                            const index = () => range().first + i();
-                                            return (
-                                                <GridTile
-                                                    model={model}
-                                                    entry={entry()}
-                                                    index={index()}
-                                                    left={(index() % gridCols()) * TILE_W}
-                                                    top={Math.floor(index() / gridCols()) * TILE_H}
-                                                    selected={model.selection().names.has(name)}
-                                                    focused={model.selection().focus === name}
-                                                    renaming={model.renaming() === name}
-                                                    git={model.gitStateOf().get(name)}
-                                                    touch={touchOf(name)}
-                                                    dropTarget={dropRow() === name}
-                                                    onClick={(e) => onRowClick(e, entry())}
-                                                    onOpen={() => openEntry(entry())}
-                                                    onContextMenu={(e) => onRowContextMenu(e, entry())}
-                                                    onDragStart={(e) => onRowDragStart(e, entry())}
-                                                    onDragOver={() => onRowDragOver(entry())}
-                                                    onDragEnd={() => endPathDrag()}
-                                                    onRenameDone={() => listEl?.focus()}
-                                                />
-                                            );
-                                        }}
-                                    </Show>
-                                )}
+                                {(name, i) => {
+                                    const entry = entryOf(name);
+                                    const index = () => range().first + i();
+                                    return (
+                                        <Show when={byName().has(name)}>
+                                            <GridTile
+                                                model={model}
+                                                entry={entry()}
+                                                index={index()}
+                                                left={(index() % gridCols()) * TILE_W}
+                                                top={Math.floor(index() / gridCols()) * TILE_H}
+                                                selected={model.selection().names.has(name)}
+                                                focused={model.selection().focus === name}
+                                                renaming={model.renaming() === name}
+                                                git={model.gitStateOf().get(name)}
+                                                touch={touchOf(name)}
+                                                dropTarget={dropRow() === name}
+                                                onClick={(e) => onRowClick(e, entry())}
+                                                onOpen={() => openEntry(entry())}
+                                                onContextMenu={(e) => onRowContextMenu(e, entry())}
+                                                onDragStart={(e) => onRowDragStart(e, entry())}
+                                                onDragOver={() => onRowDragOver(entry())}
+                                                onDragEnd={() => endPathDrag()}
+                                                onRenameDone={() => listEl?.focus()}
+                                            />
+                                        </Show>
+                                    );
+                                }}
                             </For>
                         </div>
                     </Show>
                     <Show when={model.phase() === "ready" && !grid()}>
                         <div class="files-rows" style={{ height: `${entries().length * ROW_HEIGHT}px` }}>
                             <For each={visibleNames()}>
-                                {(name, i) => (
-                                    <Show when={byName().get(name)}>
-                                        {(entry) => (
+                                {(name, i) => {
+                                    const entry = entryOf(name);
+                                    return (
+                                        <Show when={byName().has(name)}>
                                             <FileRow
                                                 model={model}
                                                 entry={entry()}
@@ -1104,9 +1107,9 @@ export function FilesView(props: { model: FilesModel; ctx: PaneTabHostContext })
                                                 onDragEnd={() => endPathDrag()}
                                                 onRenameDone={() => listEl?.focus()}
                                             />
-                                        )}
-                                    </Show>
-                                )}
+                                        </Show>
+                                    );
+                                }}
                             </For>
                         </div>
                     </Show>

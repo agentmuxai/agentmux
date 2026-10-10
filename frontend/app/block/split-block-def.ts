@@ -14,5 +14,5 @@ import { paneTabCapability } from "./pane-tab-registry";
  */
 export function splitBlockDefFor(source: Block | undefined, fallback: () => BlockDef): BlockDef {
     const declared = paneTabCapability(source?.meta?.view, "splitBlockDef");
-    return declared ? declared() : fallback();
+    return declared && source ? declared(source) : fallback();
 }
