@@ -518,3 +518,26 @@ tr:hover .tower-reveal,
     justify-content: space-between;
     font-size: 0.8em;
 }
+
+// A narrow pane: the number columns give the names room.
+.tower-view .tower-table th {
+    @container (max-width: 640px) {
+        &:nth-child(2),
+        &:nth-child(3) {
+            width: 64px;
+        }
+
+        &:nth-child(4),
+        &:nth-child(5),
+        &:nth-child(6) {
+            width: 56px;
+        }
+    }
+}
+
+// How long ago an exited process went: short, and never wrapped under its
+// name (the row is dimmed, its tooltip says "exited").
+.tower-exited-ago {
+    flex-shrink: 0;
+    white-space: nowrap;
+}

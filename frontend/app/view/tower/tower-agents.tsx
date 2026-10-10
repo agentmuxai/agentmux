@@ -400,7 +400,9 @@ function TreeRows(props: {
 type ManyLine = Extract<TreeLine, { kind: "many" }>;
 type ProcessLine = Extract<TreeLine, { kind: "process" }>;
 
-const indentStyle = (depth: number) => ({ "padding-left": `${8 + depth * 16}px` });
+/** 12px a level, and no deeper than six levels: a narrow pane keeps room
+ *  for the name. */
+const indentStyle = (depth: number) => ({ "padding-left": `${8 + Math.min(depth, 6) * 12}px` });
 
 /** Same-named siblings with nothing under them: one line, opening to each. */
 function ManyRows(props: { model: TowerViewModel; line: ManyLine; depth: number; cpu: Cpu; scope: string }) {
@@ -489,7 +491,12 @@ function ProcessRows(props: { model: TowerViewModel; node: ProcessNode; depth: n
                         <ProcessName process={props.node.process} />
                         <Show when={exitedMs()}>
                             {(ms) => (
-                                <span class="tower-muted">exited {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}</span>
+                                <span
+                                    class="tower-muted tower-exited-ago"
+                                    title={`Exited ${formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}`}
+                                >
+                                    {formatAgo(ms(), m.snapshot()?.ts_ms ?? ms())}
+                                </span>
                             )}
                         </Show>
                     </div>

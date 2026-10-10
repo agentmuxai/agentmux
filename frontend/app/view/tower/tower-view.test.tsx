@@ -348,7 +348,7 @@ describe("Tower", () => {
         expect(within(gone).getByText("exited")).toBeInTheDocument();
         const cc = screen.getByText("cc.exe").closest("tr")!;
         expect(cc).toHaveClass("tower-process-row--exited");
-        expect(within(cc).getByText("exited 4 s ago")).toBeInTheDocument();
+        expect(within(cc).getByText("4 s ago")).toHaveAttribute("title", "Exited 4 s ago");
         // It isn't counted as running.
         expect(within(screen.getByTestId("tower-rail-block-a")).getByText("50%")).toBeInTheDocument();
 
