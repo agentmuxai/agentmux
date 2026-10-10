@@ -57,7 +57,7 @@ const SPAWN_INVENTORY: &[(&str, &str, usize, &str)] = &[
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/bashwrap/src/bash_wrap.rs", "bash", 1,
      "no-window: calls no_window()/creation_flags in this file"),
-    ("crates/bashwrap/src/bash_wrap.rs", "&bash", 1,
+    ("crates/bashwrap/src/prefix.rs", "&bash", 1,
      "no-window: calls no_window()/creation_flags in this file"),
     ("crates/cef/src/lib.rs", "&exe", 1,
      "not-windows: Linux-only (zenity/kdialog dialogs) or the unix exec() self-relaunch"),

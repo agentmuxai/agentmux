@@ -67,10 +67,12 @@ Checked against the real CLI with a fake API (`scripts/cli-contract/`):
    `permissionDecision`.
 2. **The prefix claims a record.** It reads `CLAUDE_CODE_SESSION_ID` and takes
    the command out of the script's `eval '…'` (undoing the CLI's `'"'"'`
-   quoting). Then it claims the oldest unclaimed record for that session with
-   exactly that command, by renaming the file, which is atomic. Two identical
-   commands running at once may swap records. Both are the same command, so the
-   output is still right, at worst on the other card.
+   quoting). Then it claims the newest unclaimed record for that session with
+   exactly that command, by renaming the file, which is atomic. Newest,
+   because a call the CLI never ran (a deny rule, a refused prompt) leaves an
+   older record behind that a retry of the same command must not take. Two
+   identical commands running at once may swap records. Both are the same
+   command, so the output is still right, at worst on the other card.
 3. **When there's no match** (the eval can't be parsed after a CLI change, or
    the record is missing), it uses the session's only unclaimed record if there
    is exactly one. Otherwise it runs the script with no tool id: no live output,
@@ -113,9 +115,12 @@ command can't be taken out, the script runs as is (no tee).
   flag.
 - **Kill switch:** `AGENTMUX_BASHWRAP_MODE=rewrite` in srv's environment keeps the
   old behaviour.
-- Container agents get the in-image path (`/usr/local/bin/agentmux-bashwrap`).
-  Streaming from containers is blocked today by the container route allowlist;
-  that is out of scope here.
+- Container agents don't get the prefix: srv drops the variable from a
+  container's environment (`CONTAINER_ENV_DENYLIST`), because the image's own
+  `agentmux-bashwrap` may predate prefix mode and would then fail every Bash
+  command. The hook in the container finds no prefix and rewrites commands as
+  before. (Streaming from containers is blocked today by the container route
+  allowlist anyway; that is out of scope here.)
 
 ### 2.5 What changes for users
 

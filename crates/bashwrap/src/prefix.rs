@@ -17,7 +17,12 @@
 use std::ffi::OsString;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+
+#[cfg(windows)]
+use agentmux_common::win32::NoWindow;
+use agentmux_common::time::now_ms_u64 as now_ms;
+use anyhow::{Context, Result};
 
 use serde::{Deserialize, Serialize};
 
@@ -158,10 +163,6 @@ fn sanitize(raw: &str) -> String {
         .collect()
 }
 
-fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
-}
-
 /// Record a call for the prefix process to claim. Written to a temporary
 /// name and renamed, so a claim never reads half a record.
 pub fn register(session_id: &str, record: &CallRecord) -> std::io::Result<()> {
@@ -174,15 +175,18 @@ pub fn register(session_id: &str, record: &CallRecord) -> std::io::Result<()> {
     std::fs::rename(&tmp, dir.join(name))
 }
 
-/// Claim the record of the call this script runs: the oldest one for the
+/// Claim the record of the call this script runs: the newest one for the
 /// session whose command is `command`; failing that (no command, or no
-/// match), the session's only record. A claim renames the record away, so
-/// two prefix processes never claim the same call. `None` when there is
-/// nothing to claim: the script then runs unlinked.
+/// match), the session's only record. Newest, because the hook records a
+/// call just before the CLI runs it, while a call the CLI never ran (a deny
+/// rule, a refused prompt) leaves an older record behind that a retry of
+/// the same command must not take. A claim renames the record away, so two
+/// prefix processes never claim the same call. `None` when there is nothing
+/// to claim: the script then runs unlinked.
 pub fn claim(session_id: &str, command: Option<&str>) -> Option<CallRecord> {
     let dir = session_dir(session_id)?;
     let mut records = read_records(&dir);
-    records.sort_by_key(|(_, r)| r.created_ms);
+    records.sort_by_key(|(_, r)| std::cmp::Reverse(r.created_ms));
     let matching: Vec<&(PathBuf, CallRecord)> = match command {
         Some(cmd) => records.iter().filter(|(_, r)| r.command == cmd).collect(),
         None => Vec::new(),
@@ -226,6 +230,55 @@ fn read_records(dir: &Path) -> Vec<(PathBuf, CallRecord)> {
         }
     }
     out
+}
+
+/// Run the CLI's whole `script` for the Bash call it belongs to, streaming it
+/// exactly as `exec` streams a command. The call is the record the hook left
+/// for this session's command. A script that can't be linked to a call (a
+/// `claude` run by hand or nested inside an agent, whose session has no
+/// records, or the CLI's own shell calls) runs as plain bash, as if there
+/// were no prefix: no live output, nothing else changed.
+/// docs/specs/SPEC_BASH_STREAMING_VIA_SHELL_PREFIX_2026_10_10.md §2.2, §2.3.
+pub async fn run(script: String) -> Result<i32> {
+    let extracted = extract_command(&script);
+    let session = std::env::var(SESSION_ID_ENV).ok().filter(|s| !s.is_empty());
+    let record = session
+        .as_deref()
+        .and_then(|s| claim(s, extracted.as_ref().map(|(cmd, _)| cmd.as_str())));
+    let Some(record) = record else {
+        tracing::info!(target: "bashwrap", session = ?session, extracted = extracted.is_some(), "prefix: no call to link; running the script as plain bash");
+        return run_plain(&script);
+    };
+    // The tee rewrite works on the model's command, so it is applied to the
+    // command inside the script's `eval` and the script rebuilt around it.
+    // Without the command (the CLI's format changed) the script runs as is.
+    let script = match &extracted {
+        Some((command, range)) => match crate::hook::tee_redirect_rewrite(command) {
+            Some(teed) => replace_command(&script, range.clone(), &teed),
+            None => script,
+        },
+        None => script,
+    };
+    let args = crate::bash_wrap::Args {
+        tool_id: record.tool_use_id,
+        b64_cmd: String::new(),
+        block_id: None,
+        declared_background: record.run_in_background,
+    };
+    crate::bash_wrap::run_command(args, script).await
+}
+
+/// Run `script` with bash on this process's own stdio, for its exit code.
+fn run_plain(script: &str) -> Result<i32> {
+    let bash = crate::bash_wrap::locate_bash()?;
+    let mut cmd = std::process::Command::new(&bash);
+    cmd.arg("-c").arg(script);
+    // Windows only: bash.exe is a console program; without this it opens a
+    // console window (SPEC_ELIMINATE_BASHWRAP_CONSOLE_WINDOWS_2026_06_20).
+    #[cfg(windows)]
+    cmd.no_window();
+    let status = cmd.status().with_context(|| format!("running {}", bash.display()))?;
+    Ok(status.code().unwrap_or(1))
 }
 
 /// A record for a call the hook just saw.
@@ -333,15 +386,17 @@ mod tests {
         });
     }
 
+    /// A call the CLI never ran (denied) leaves its record; the retry of the
+    /// same command, recorded later, is the one its run claims.
     #[test]
-    fn identical_commands_are_claimed_oldest_first() {
+    fn the_newest_record_for_a_command_is_claimed_first() {
         with_calls_dir(|| {
-            let mut first = new_record("toolu_1", "make", false);
-            first.created_ms -= 10;
-            register("s", &first).unwrap();
-            register("s", &new_record("toolu_2", "make", false)).unwrap();
-            assert_eq!(claim("s", Some("make")).unwrap().tool_use_id, "toolu_1");
-            assert_eq!(claim("s", Some("make")).unwrap().tool_use_id, "toolu_2");
+            let mut denied = new_record("toolu_denied", "make", false);
+            denied.created_ms -= 10_000;
+            register("s", &denied).unwrap();
+            register("s", &new_record("toolu_retry", "make", true)).unwrap();
+            let got = claim("s", Some("make")).unwrap();
+            assert_eq!((got.tool_use_id.as_str(), got.run_in_background), ("toolu_retry", true));
         });
     }
 

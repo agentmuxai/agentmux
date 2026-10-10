@@ -102,7 +102,7 @@ fn main() -> Result<()> {
     let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
     if let Some(script) = prefix::prefix_script(&argv) {
         let rt = tokio::runtime::Runtime::new()?;
-        let exit_code = rt.block_on(bash_wrap::run_prefix(script))?;
+        let exit_code = rt.block_on(prefix::run(script))?;
         std::process::exit(exit_code);
     }
 
