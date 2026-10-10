@@ -74,6 +74,19 @@ describe("findBrowser", () => {
         expect(findBrowser({ ...l, platform: "darwin", arch: "x64" })).toBeNull();
     });
 
+    it("on 64-bit Windows takes a win64 build first, else a win32 one (what Puppeteer installs on Windows 10 ARM)", () => {
+        const exe = (dir: string, inner: string) => join(CACHE, dir, inner, "chrome-headless-shell.exe");
+        const w32 = exe("win32-131.0.6778.204", "chrome-headless-shell-win32");
+        const w64 = exe("win64-131.0.6778.204", "chrome-headless-shell-win64");
+        const dirs = {
+            [CACHE]: ["win32-131.0.6778.204", "win64-131.0.6778.204"],
+            [join(CACHE, "win32-131.0.6778.204")]: ["chrome-headless-shell-win32"],
+            [join(CACHE, "win64-131.0.6778.204")]: ["chrome-headless-shell-win64"],
+        };
+        expect(findBrowser(lookup({ platform: "win32", arch: "arm64", files: [w32], dirs }))).toBe(w32);
+        expect(findBrowser(lookup({ platform: "win32", arch: "x64", files: [w32, w64], dirs }))).toBe(w64);
+    });
+
     it("searches the default cache too when PUPPETEER_CACHE_DIR points elsewhere", () => {
         const mac = shellIn("131.0.6778.204");
         const l = lookup({

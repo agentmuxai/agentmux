@@ -54,13 +54,15 @@ const newestFirst = (a: string, b: string): number => {
     return 0;
 };
 
-/** Puppeteer's name for this host's platform, as in its cache's
- *  `<platform>-<version>` folders, or null for one it has no builds for. */
-function puppeteerPlatform(l: BrowserLookup): string | null {
-    if (l.platform === "darwin") return l.arch === "arm64" ? "mac_arm" : "mac";
-    if (l.platform === "linux") return l.arch === "arm64" ? "linux_arm" : "linux";
-    if (l.platform === "win32") return l.arch === "ia32" ? "win32" : "win64";
-    return null;
+/** Puppeteer's names for this host's platform, as in its cache's
+ *  `<platform>-<version>` folders, best first. Windows takes either build:
+ *  Puppeteer installs `win32` on some 64-bit hosts (Windows 10 on ARM), and a
+ *  32-bit build runs on them all. */
+function puppeteerPlatforms(l: BrowserLookup): string[] {
+    if (l.platform === "darwin") return [l.arch === "arm64" ? "mac_arm" : "mac"];
+    if (l.platform === "linux") return [l.arch === "arm64" ? "linux_arm" : "linux"];
+    if (l.platform === "win32") return l.arch === "ia32" ? ["win32"] : ["win64", "win32"];
+    return [];
 }
 
 /** Chrome's headless shell, on PATH or in the Puppeteer cache (newest build
@@ -75,15 +77,16 @@ function findHeadlessShell(l: BrowserLookup): string | null {
     const roots = [
         ...new Set([l.env.PUPPETEER_CACHE_DIR, join(l.home, ".cache", "puppeteer")].filter(Boolean)),
     ] as string[];
-    const host = puppeteerPlatform(l);
-    if (host === null) return null;
+    const hosts = puppeteerPlatforms(l);
     for (const root of roots) {
         const cache = join(root, "chrome-headless-shell");
-        const builds = l
-            .list(cache)
-            .filter((name) => name.startsWith(`${host}-`))
-            .map((name) => ({ name, version: name.slice(host.length + 1) }))
-            .sort((a, b) => newestFirst(a.version, b.version));
+        const builds = hosts.flatMap((host) =>
+            l
+                .list(cache)
+                .filter((name) => name.startsWith(`${host}-`))
+                .map((name) => ({ name, version: name.slice(host.length + 1) }))
+                .sort((a, b) => newestFirst(a.version, b.version))
+        );
         for (const { name } of builds) {
             for (const inner of l.list(join(cache, name))) {
                 const candidate = join(cache, name, inner, exe);
