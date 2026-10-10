@@ -266,7 +266,7 @@ A package can add entries to the command palette and items to the status bar (`c
 
 A trusted widget gets it as `command(id, source)` on its pane tab instance, if it has one.
 
-Commands run only on a user's click: the palette or a status item. They aren't keyboard shortcuts, so an agent's `RunCommand` (which runs the shortcut table's commands) can't run them, and a key can't be bound to one yet.
+Commands run only on a user's click: the palette or a status item. They aren't keyboard shortcuts, and the `keybindings` setting refuses a widget's command (an `ext:` id) with a warning, so none joins the shortcut table that an agent's `RunCommand` and `PressKeys` read.
 
 **Status bar items.** Each shows its manifest's `text` and `icon` (the package's icon when it has none), on the right before AgentMux's own items, or on the left after them. Its tooltip is always `<widget name>: <tooltip>` (the text when there is no tooltip), so a widget's item can't pass for one of AgentMux's. A click runs its `command`, or shows the first pane when it names none.
 

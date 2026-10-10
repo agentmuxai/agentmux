@@ -92,6 +92,13 @@ export function setUserKeybindings(entries: unknown, isKnownCommand: (id: string
             continue;
         }
         const id = e.command.replace(/^-/, "");
+        if (id.startsWith("ext:")) {
+            // A widget's command runs only on the user's click (palette,
+            // status bar); bound to a key it would join the table agents'
+            // RunCommand reads (SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6.8).
+            warnings.push(`${where}: "${id}" is a widget's command, which can't be bound to a key`);
+            continue;
+        }
         if (!TABLE_COMMANDS.has(id) && !isKnownCommand(id)) {
             // A typo on a default key would otherwise win and run nothing.
             warnings.push(`${where}: unknown command "${id}"`);

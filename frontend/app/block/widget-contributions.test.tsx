@@ -112,7 +112,7 @@ describe("status items", () => {
         const host = document.createElement("div");
         document.body.appendChild(host);
         render(() => item.render(), host);
-        return () => host.querySelector("button");
+        return () => host.querySelector<HTMLElement>("[role=button]");
     }
 
     it("show the manifest's look, named by the widget, until a pane sets another", () => {

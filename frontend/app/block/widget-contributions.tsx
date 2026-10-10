@@ -27,7 +27,7 @@ export interface ContributionDeps {
     focusedBlockId(): string | null;
     /** Focuses `blockId` if it is in the active tab (a background pane tab
      *  becomes its pane's visible one); false otherwise. */
-    focusPane(blockId: string): boolean;
+    focusPane(blockId: string): boolean | Promise<boolean>;
     /** Opens a pane; resolves to its block id. */
     openPane(blockDef: BlockDef): Promise<string>;
 }
@@ -53,7 +53,7 @@ export async function runWidgetCommand(
     const candidates = [...open.filter(([b]) => b === focused), ...open.filter(([b]) => b !== focused)];
     let pane = null;
     for (const [blockId, p] of candidates) {
-        if (deps.focusPane(blockId)) {
+        if (await deps.focusPane(blockId)) {
             pane = p;
             break;
         }
@@ -113,16 +113,25 @@ function WidgetStatusItem(props: { pkg: WidgetPackageInfo; item: WidgetStatusIte
     };
     return (
         <Show when={!look()?.hidden}>
-            <button
-                type="button"
+            {/* A status bar readout, like the bar's own (MuxBusIndicator), not a
+                line-style control. */}
+            <div
+                role="button"
+                tabIndex={0}
                 class={`status-bar-item clickable status-widget-item tone-${look()?.tone ?? "default"}`}
                 data-tip={tip()}
                 aria-label={tip()}
                 onClick={run}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        run();
+                    }
+                }}
             >
                 <i class={`fa fa-solid fa-${icon()} status-icon`} aria-hidden="true" />
                 <span>{text()}</span>
-            </button>
+            </div>
         </Show>
     );
 }
