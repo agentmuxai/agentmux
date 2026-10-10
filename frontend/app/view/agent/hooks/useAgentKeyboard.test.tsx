@@ -6,7 +6,8 @@
 // (REPORT_AGENT_PANE_SIDE_BY_SIDE_SCROLL_AND_FOCUS_QUIRKS_2026_09_23.md §6).
 
 import { cleanup, render } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setPlatform } from "@/util/platformutil";
 import { useAgentKeyboard } from "./useAgentKeyboard";
 
 function Pane(props: { blockId: string; onToggleSearch: () => void; focused?: boolean }) {
@@ -22,9 +23,24 @@ function Pane(props: { blockId: string; onToggleSearch: () => void; focused?: bo
 const ctrlF = (target: EventTarget) =>
     target.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true }));
 
+// Search is mod+F: Ctrl+F on Windows and Linux (these tests), ⌘F on macOS.
+beforeEach(() => setPlatform("win32"));
 afterEach(() => {
     cleanup();
     document.getSelection()?.removeAllRanges();
+});
+
+describe("useAgentKeyboard — the key", () => {
+    it("is ⌘F on macOS, where Ctrl+F stays the text field's", () => {
+        setPlatform("darwin");
+        const toggle = vi.fn();
+        const { getByTestId } = render(() => <Pane blockId="M" onToggleSearch={toggle} focused />);
+        const composer = getByTestId("composer-M");
+        ctrlF(composer);
+        expect(toggle).not.toHaveBeenCalled();
+        composer.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true }));
+        expect(toggle).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe("useAgentKeyboard — Ctrl+F with two panes", () => {

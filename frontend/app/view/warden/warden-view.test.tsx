@@ -9,7 +9,8 @@
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setPlatform } from "@/util/platformutil";
 
 vi.mock("@/app/view/warden-host/warden-host-manager", () => ({
     WardenHostManager: () => <div data-testid="host-manager" />,
@@ -163,6 +164,8 @@ describe("WardenView pane title", () => {
 });
 
 describe("WardenView zoom", () => {
+    // mod+wheel: Ctrl on Windows/Linux (these tests), ⌘ on macOS.
+    beforeEach(() => setPlatform("win32"));
     afterEach(() => {
         cleanup();
         setMetaMock.mockClear();
