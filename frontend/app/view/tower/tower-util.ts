@@ -44,6 +44,23 @@ export function formatMem(bytes: number | undefined): string {
     return bytes == null ? "—" : formatBytes(bytes);
 }
 
+/** CPU time used, from nanoseconds: "0.4 s", "12.3 s", "4 min 5 s",
+ *  "1 h 2 min". */
+export function formatCpuTime(ns: number | undefined): string {
+    if (ns == null || !Number.isFinite(ns)) return "—";
+    const sec = ns / 1e9;
+    if (sec < 60) return `${sec < 10 ? sec.toFixed(1) : Math.round(sec)} s`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min} min ${Math.floor(sec % 60)} s`;
+    return `${Math.floor(min / 60)} h ${min % 60} min`;
+}
+
+/** How long ago, from two unix-ms times: "4 s ago", "2 min ago". */
+export function formatAgo(thenMs: number, nowMs: number): string {
+    const sec = Math.max(0, Math.round((nowMs - thenMs) / 1000));
+    return sec < 60 ? `${sec} s ago` : `${Math.floor(sec / 60)} min ago`;
+}
+
 /** Unknown values sort as the smallest, so "—" rows sink under a descending
  *  sort instead of floating to the top. */
 function compareNumbers(a: number | undefined, b: number | undefined): number {
@@ -340,6 +357,9 @@ export interface ProcessNode {
     /** This process and every descendant: what a parent sorts and shows by. */
     cpu?: number;
     mem?: number;
+    /** CPU time this process and every descendant used, exited ones
+     *  included: what a build cost. Nanoseconds. */
+    cpuTime?: number;
 }
 
 /** A task's processes as trees, a parent above what it started
@@ -382,6 +402,7 @@ export function buildProcessTree(processes: TowerProcess[]): ProcessNode[] {
         n.children.forEach((c) => total(c, seen));
         n.cpu = sumKnown([n.process.cpu, ...n.children.map((c) => c.cpu)]);
         n.mem = sumKnown([n.process.mem, ...n.children.map((c) => c.mem)]);
+        n.cpuTime = sumKnown([n.process.cpu_time_ns, ...n.children.map((c) => c.cpuTime)]);
     };
     const seen = new Set<string>();
     roots.forEach((r) => total(r, seen));
@@ -392,7 +413,18 @@ export function buildProcessTree(processes: TowerProcess[]): ProcessNode[] {
  *  siblings with the same name and nothing under them (`rustc.exe ×6`). */
 export type TreeLine =
     | { kind: "process"; key: string; node: ProcessNode }
-    | { kind: "many"; key: string; name: string; nodes: ProcessNode[]; cpu?: number; mem?: number };
+    | {
+          kind: "many";
+          key: string;
+          name: string;
+          nodes: ProcessNode[];
+          cpu?: number;
+          mem?: number;
+          cpuTime?: number;
+          peak?: number;
+          /** Folded processes that have exited (they fold apart from live ones). */
+          exited: boolean;
+      };
 
 /** What a process row is called: what one of AgentMux's own processes is
  *  ("GPU", "Renderer · window Main"), else its executable's name. */
@@ -408,10 +440,13 @@ export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: bo
     const fold = opts.fold ?? true;
     const value = (n: ProcessNode) => (sort.key === "cpu" ? n.cpu : sort.key === "mem" ? n.mem : n.process.pid);
     const sorted = [...siblings].sort(compareWith(sort, value, (n) => processLabel(n.process)));
+    // Exited processes fold apart from live ones of the same name.
+    const foldKey = (n: ProcessNode) =>
+        `${processLabel(n.process).toLowerCase()}${n.process.exited_ms != null ? "|exited" : ""}`;
     const leavesByName = new Map<string, ProcessNode[]>();
     for (const n of sorted) {
         if (n.children.length) continue;
-        const key = processLabel(n.process).toLowerCase();
+        const key = foldKey(n);
         const list = leavesByName.get(key);
         if (list) list.push(n);
         else leavesByName.set(key, [n]);
@@ -419,7 +454,7 @@ export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: bo
     const lines: TreeLine[] = [];
     const placed = new Set<string>();
     for (const n of sorted) {
-        const key = processLabel(n.process).toLowerCase();
+        const key = foldKey(n);
         const group = !fold || n.children.length ? undefined : leavesByName.get(key);
         if (group && group.length > 1) {
             if (placed.has(key)) continue;
@@ -431,6 +466,12 @@ export function treeLines(siblings: ProcessNode[], sort: Sort, opts: { fold?: bo
                 nodes: group,
                 cpu: sumKnown(group.map((g) => g.cpu)),
                 mem: sumKnown(group.map((g) => g.mem)),
+                cpuTime: sumKnown(group.map((g) => g.cpuTime)),
+                peak: group.reduce<number | undefined>(
+                    (m, g) => (g.process.peak_mem == null ? m : Math.max(m ?? 0, g.process.peak_mem)),
+                    undefined
+                ),
+                exited: n.process.exited_ms != null,
             });
         } else {
             lines.push({ kind: "process", key: n.process.id, node: n });

@@ -50,6 +50,26 @@ const STALE_AFTER: Duration = Duration::from_secs(10);
 /// sample).
 const MAX_TREE: usize = 2048;
 
+/// How long a task's exited process stays listed (dimmed, with what it
+/// used): long enough to see a build's compilers that a 2 s sample catches
+/// once or never. SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.4.
+const EXITED_LINGER: Duration = Duration::from_secs(60);
+
+/// At most this many exited processes are kept, the newest: a big build
+/// runs thousands of compilers a minute.
+const MAX_EXITED: usize = 500;
+
+/// A task's process that has exited: what it was when last seen.
+#[derive(Clone)]
+struct Exited {
+    info: ProcInfo,
+    task: String,
+    role: TowerProcessRole,
+    peak: Option<u64>,
+    gone: Instant,
+    gone_ms: u64,
+}
+
 /// What the sampler is told about the panes.
 #[derive(Debug, Default)]
 pub struct Inputs {
@@ -317,6 +337,10 @@ struct State {
     /// from, so it neither costs a second read nor shrinks the CPU window to
     /// milliseconds (one coarse clock tick over that would read as a spike).
     last: Option<Sampled>,
+    /// Each live process's most private memory seen.
+    peaks: HashMap<ProcKey, u64>,
+    /// Tasks' processes that exited within [`EXITED_LINGER`], oldest first.
+    exited: VecDeque<Exited>,
 }
 
 /// One measurement: the process table, every process's CPU rate, the grouping
@@ -330,6 +354,10 @@ struct Sampled {
     account_rates: HashMap<String, Option<f64>>,
     /// AgentMux's own processes: index → what it is (`TowerProcess::detail`).
     details: HashMap<usize, String>,
+    /// Each process's peak private memory, by index.
+    peaks: Vec<Option<u64>>,
+    /// Tasks' processes that exited within [`EXITED_LINGER`].
+    exited: Vec<Exited>,
 }
 
 /// The process-wide sampler. Its state is the previous sample (for CPU
@@ -353,6 +381,8 @@ impl Tower {
                 sticky: HashMap::new(),
                 describer: Describer::default(),
                 last: None,
+                peaks: HashMap::new(),
+                exited: VecDeque::new(),
             }),
         }
     }
@@ -417,6 +447,7 @@ fn advance(
 ) -> Sampled {
     let grouping = group(&procs, inputs, &st.sticky);
     let details = st.describer.describe(&procs, &grouping.agentmux, inputs.own_pid, cmdline);
+    let (peaks, exited) = track_peaks_and_exits(st, &procs, now);
     // Every process's rate, every round, so the Host view has rates the
     // moment it is opened.
     let rates: Vec<Option<f64>> = procs
@@ -444,12 +475,53 @@ fn advance(
         grouping,
         account_rates,
         details,
+        peaks,
+        exited,
     }
 }
 
 /// What a renderer row adds after its type: the window or pane it serves.
 fn renderer_suffix(detail: &str, pid: u32, renderer: &dyn Fn(u32) -> Option<String>) -> Option<String> {
     (detail == "Renderer").then(|| renderer(pid)).flatten()
+}
+
+/// Update each process's peak memory, and note the tasks' members that were
+/// in the previous measurement and are gone from this one. Returns the
+/// peaks by index and the exited processes still within [`EXITED_LINGER`].
+fn track_peaks_and_exits(st: &mut State, procs: &[ProcInfo], now: Instant) -> (Vec<Option<u64>>, Vec<Exited>) {
+    let live: HashSet<ProcKey> = procs.iter().map(|p| p.key()).collect();
+    if let Some(prev) = st.last.as_ref() {
+        let gone_ms = agentmux_common::time::now_ms() as u64;
+        for g in &prev.grouping.tasks {
+            for &(i, role) in &g.members {
+                let p = &prev.procs[i];
+                if live.contains(&p.key()) {
+                    continue;
+                }
+                let peak = st.peaks.get(&p.key()).copied().or(p.mem_private);
+                st.exited.push_back(Exited { info: p.clone(), task: g.id.clone(), role, peak, gone: now, gone_ms });
+            }
+        }
+    }
+    // Gone past the linger, or (a PID reused with the same key is impossible,
+    // but a process seen gone in one read can reappear in the next) back.
+    st.exited.retain(|e| now.duration_since(e.gone) < EXITED_LINGER && !live.contains(&e.info.key()));
+    while st.exited.len() > MAX_EXITED {
+        st.exited.pop_front();
+    }
+    let mut peaks = HashMap::with_capacity(procs.len());
+    for p in procs {
+        let peak = match (st.peaks.get(&p.key()).copied(), p.mem_private) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        if let Some(v) = peak {
+            peaks.insert(p.key(), v);
+        }
+    }
+    st.peaks = peaks;
+    let by_index = procs.iter().map(|p| st.peaks.get(&p.key()).copied()).collect();
+    (by_index, st.exited.iter().cloned().collect())
 }
 
 /// A sum of rates, or `None` when none of them is known yet (a first
@@ -485,7 +557,28 @@ fn render(
                 Some(serves) => format!("{d} · {serves}"),
                 None => d.clone(),
             }),
+            cpu_time_ns: p.cpu_ns,
+            peak_mem: s.peaks.get(i).copied().flatten(),
+            exited_ms: None,
         }
+    };
+    let exited_of = |task: &str| -> Vec<TowerProcess> {
+        s.exited
+            .iter()
+            .filter(|e| e.task == task)
+            .map(|e| TowerProcess {
+                id: proc_id(&e.info),
+                pid: e.info.pid,
+                ppid: e.info.ppid,
+                name: e.info.name.clone(),
+                started_at_ms: e.info.started_at_ms,
+                role: Some(e.role),
+                cpu_time_ns: e.info.cpu_ns,
+                peak_mem: e.peak,
+                exited_ms: Some(e.gone_ms),
+                ..Default::default()
+            })
+            .collect()
     };
 
     let mut tasks = Vec::new();
@@ -495,8 +588,10 @@ fn render(
         } else {
             sum_known(g.members.iter().map(|m| rates[m.0]))
         };
-        // Nothing running and nothing used since the last sample: no row.
-        if g.members.is_empty() && cpu.unwrap_or(0.0) <= 0.0 {
+        let exited = exited_of(&g.id);
+        // Nothing running, nothing used since the last sample and nothing
+        // that just exited: no row.
+        if g.members.is_empty() && cpu.unwrap_or(0.0) <= 0.0 && exited.is_empty() {
             continue;
         }
         let Some(label) = labels(&g.id) else { continue };
@@ -509,6 +604,7 @@ fn render(
             cpu_account: g.cpu_time_ns.is_some(),
             mem: g.members.iter().filter_map(|&(i, _)| procs[i].mem_private).sum(),
             processes: g.members.iter().map(|&(i, role)| row(i, Some(role), None)).collect(),
+            exited: (!exited.is_empty()).then_some(exited),
         });
     }
 
@@ -526,6 +622,7 @@ fn render(
                 .iter()
                 .map(|&i| row(i, Some(TowerProcessRole::Main), None))
                 .collect(),
+            exited: None,
         });
     }
 
@@ -583,7 +680,10 @@ mod tests {
         labels: &dyn Fn(&str) -> Option<BlockLabel>,
     ) -> TowerSnapshot {
         let sampled = advance(st, procs.to_vec(), inputs, now, &|_| None);
-        render(&sampled, want_host, hostname, labels, &|_| None)
+        let snap = render(&sampled, want_host, hostname, labels, &|_| None);
+        // As `Tower::sample_from` does: the next measurement compares to it.
+        st.last = Some(sampled);
+        snap
     }
 
     fn state() -> State {
@@ -593,6 +693,8 @@ mod tests {
             sticky: HashMap::new(),
             describer: Describer::default(),
             last: None,
+            peaks: HashMap::new(),
+            exited: VecDeque::new(),
         }
     }
 
@@ -735,6 +837,47 @@ mod tests {
 
     fn label(id: &str) -> Option<BlockLabel> {
         Some(BlockLabel { label: format!("label {id}"), agent: id.starts_with("agent") })
+    }
+
+    /// A build's compiler that exits between samples stays in its task's
+    /// `exited` list for a minute, with all the CPU it used and its peak
+    /// memory, then goes; it never counts as running.
+    #[test]
+    fn a_task_process_that_exits_lingers_a_minute_with_what_it_used() {
+        let mut st = state();
+        let t0 = Instant::now();
+        let mut snap = machine();
+        let inputs = Inputs { blocks: vec![tracked("agent-a", &[200, 201, 202, 203], &[200])], roots: vec![], own_pid: 110 };
+        let node = |snap: &mut Vec<ProcInfo>| snap.iter_mut().find(|x| x.pid == 203).unwrap().clone();
+        let set = |snap: &mut Vec<ProcInfo>, mem: u64, cpu_ns: u64| {
+            let n = snap.iter_mut().find(|x| x.pid == 203).unwrap();
+            n.mem_private = Some(mem);
+            n.cpu_ns = Some(cpu_ns);
+        };
+        set(&mut snap, 400, 1_000_000_000);
+        build(&mut st, &snap, &inputs, t0, false, "host", &label);
+        set(&mut snap, 100, 2_000_000_000);
+        let second = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(2), false, "host", &label);
+        let task = |s: &TowerSnapshot| s.tasks.iter().find(|t| t.id == "agent-a").cloned().unwrap();
+        let live = task(&second).processes.into_iter().find(|p| p.pid == 203).unwrap();
+        assert_eq!((live.peak_mem, live.cpu_time_ns), (Some(400), Some(2_000_000_000)), "the peak, not the current");
+        assert!(task(&second).exited.is_none());
+
+        let gone_key = node(&mut snap).key();
+        snap.retain(|x| x.pid != 203);
+        let third = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(4), false, "host", &label);
+        let t = task(&third);
+        assert!(t.processes.iter().all(|p| p.pid != 203), "an exited process isn't running");
+        let exited = t.exited.unwrap();
+        assert_eq!(exited.len(), 1);
+        let e = &exited[0];
+        assert_eq!(e.id, format!("{}:{}", gone_key.pid, gone_key.start_key));
+        assert_eq!((e.peak_mem, e.cpu_time_ns, e.cpu, e.mem), (Some(400), Some(2_000_000_000), None, None));
+        assert_eq!(e.role, Some(TowerProcessRole::Started));
+        assert!(e.exited_ms.is_some());
+
+        let later = build(&mut st, &snap, &inputs, t0 + Duration::from_secs(4) + EXITED_LINGER, false, "host", &label);
+        assert!(task(&later).exited.is_none(), "gone after the linger");
     }
 
     #[test]

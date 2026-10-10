@@ -36,7 +36,7 @@ pub enum TowerProcessRole {
 /// (1.0 = one core fully busy); the pane divides by `cpu_count` for "percent
 /// of the machine". Absent values are ones the OS wouldn't give without
 /// elevation, never zeros.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ts_rs::TS)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export, export_to = "../../../frontend/types/rpc/")]
 pub struct TowerProcess {
     /// `pid:start`, unique across PID reuse.
@@ -78,6 +78,19 @@ pub struct TowerProcess {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub detail: Option<String>,
+    /// CPU time used so far (user + kernel), nanoseconds: for an exited
+    /// process, all it used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub cpu_time_ns: Option<u64>,
+    /// The most private memory seen while it was sampled, bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub peak_mem: Option<u64>,
+    /// In a task's `exited` list: when it was first seen gone, unix ms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub exited_ms: Option<u64>,
 }
 
 /// A pane and every process it started, or AgentMux itself.
@@ -103,6 +116,13 @@ pub struct TowerTask {
     #[ts(type = "number")]
     pub mem: u64,
     pub processes: Vec<TowerProcess>,
+    /// Its processes that exited in the last minute, kept so a build's
+    /// short-lived compilers aren't missed by a 2 s sample: no CPU rate or
+    /// memory any more, but their CPU time and peak memory.
+    /// SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub exited: Option<Vec<TowerProcess>>,
 }
 
 /// Every process on the machine this user may see.

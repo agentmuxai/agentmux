@@ -28,4 +28,11 @@ cpu?: number, cpu_account: boolean,
 /**
  * Summed private memory of the processes the OS measured, bytes.
  */
-mem: number, processes: Array<TowerProcess>, };
+mem: number, processes: Array<TowerProcess>, 
+/**
+ * Its processes that exited in the last minute, kept so a build's
+ * short-lived compilers aren't missed by a 2 s sample: no CPU rate or
+ * memory any more, but their CPU time and peak memory.
+ * SPEC_TOWER_AGENT_CENTRIC_VIEWS_2026_10_08.md §5.4.
+ */
+exited?: Array<TowerProcess>, };

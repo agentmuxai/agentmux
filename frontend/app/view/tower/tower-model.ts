@@ -83,6 +83,8 @@ export class TowerViewModel {
     ownersOpened = false;
     filter: Accessor<string>;
     setFilter: Setter<string>;
+    /** The Agents view's tree shows CPU time and peak memory too. */
+    moreColumns: Accessor<boolean>;
     viewName: Accessor<string>;
     private setMeta: (patch: Record<string, unknown>) => void;
     private setSnapshot: (snap: TowerSnapshot | null) => void;
@@ -141,6 +143,7 @@ export class TowerViewModel {
         void this.refreshPeers();
         this.sharing = () => settingsAtom()?.["tower:sharewithpaired"] === true;
         this.cpuMode = createMemo<CpuMode>(() => (ctx.meta()?.["tower:cpu"] === "core" ? "core" : "machine"));
+        this.moreColumns = createMemo(() => ctx.meta()?.["tower:cols"] === "more");
         // Saved as "off" until 2026-10-10, when grouping was by app or nothing.
         this.grouping = createMemo<ProcessGrouping>(() => {
             const g = ctx.meta()?.["tower:group"];
@@ -311,6 +314,10 @@ export class TowerViewModel {
         const next = new Set(this.expanded());
         for (const k of keys) next.add(k);
         this.setExpanded(next);
+    }
+
+    setMoreColumns(on: boolean): void {
+        this.setMeta({ "tower:cols": on ? "more" : null });
     }
 
     setCpuMode(mode: CpuMode): void {
