@@ -1332,6 +1332,14 @@ sustained over a release cycle (`GET /agentmux/identity/fallbacks`, first
 shipped in v0.56.14; the cycle starts with v0.57.0). Design may land
 before the gate; code does not, except M4d-1 (see "Gating per step").
 
+**Gate read 2026-10-10:** `GET /agentmux/identity/fallbacks` on every running
+channel's srv (0.59.15, 0.59.16 and 0.59.17), each read by an agent of that
+instance with its own key: no `spawn.no_token.*` counter and
+`live.tokenless_or_unknown` 0 on all three, well past the release cycle that
+started with v0.57.0. M4d-2 onward proceeds. What prompted it: a jekt from an
+agent that had moved instances arrived `TRUST=unverified`, the false
+`sensitive` M4d-4 records below, which M4d-6 resolves by UID.
+
 **Rules carried from §6.5.3–§6.5.4, and one added.** Names on the wire and in
 display are never replaced; name-keyed key rows stay until M5, so reverting
 any step loses nothing; nothing that works today is refused. **Added

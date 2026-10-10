@@ -1080,6 +1080,28 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             deleted_at  INTEGER NOT NULL DEFAULT 0
         );
 
+        -- Identity M4d-2: each agent's LAN and WAN signing keypairs filed
+        -- under its UID (db_agents.id), copied from the name-keyed tables on
+        -- ownership evidence or minted fresh (storage/agent_uid_keys.rs,
+        -- SPEC_AGENT_IDENTITY_CARRIED_NOT_DERIVED_2026_09_23.md §6.5.10).
+        -- copied_from is the name a key was copied from, '' when minted.
+        -- Purged by UID in purge_agent_dependents. Additive, applied on
+        -- every open, so no version bump.
+        CREATE TABLE IF NOT EXISTS db_agent_lan_keys_by_uid (
+            uid         TEXT PRIMARY KEY,
+            public_key  TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            copied_from TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS db_agent_wan_keys_by_uid (
+            uid         TEXT PRIMARY KEY,
+            public_key  TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            copied_from TEXT NOT NULL DEFAULT ''
+        );
+
         -- Identity M4d-1: every display / instance name an agent has had.
         -- Keys are filed under names (and their fallback ids), and every
         -- write path that renames an agent — rename, the continuation fold,

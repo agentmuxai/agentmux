@@ -11,6 +11,7 @@ pub mod agent_groups;
 pub mod agent_jekt_keys;
 pub mod agent_tokens;
 pub mod agent_lan_keys;
+pub mod agent_uid_keys;
 pub mod agent_wan_keys;
 pub mod wan_identity;
 pub mod agent_native_memory;
