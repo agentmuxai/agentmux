@@ -266,6 +266,10 @@ describe("the Files pane: navigation", () => {
         fireEvent.dblClick(v.row("src"));
         await waitFor(() => expect(v.names()).toEqual(["main.rs"]));
         expect(v.meta()["files:path"]).toBe(`${HOME}\\src`);
+        // Tooling reads the folder shown here (verify-shortcuts.mjs's temp-tree guard).
+        const root = v.container.querySelector(".files-view");
+        expect(root?.getAttribute("data-path")).toBe(`${HOME}\\src`);
+        expect(root?.getAttribute("data-connection") ?? "").toBe("");
         fireEvent.keyDown(v.list(), { key: "ArrowLeft", altKey: true });
         await waitFor(() => expect(v.names()).toHaveLength(4));
         fireEvent.keyDown(v.list(), { key: "ArrowRight", altKey: true });
@@ -395,6 +399,7 @@ describe("the Files pane on an SSH host (remote terminals spec §6.3)", () => {
         expect(h.rpc.FsWatchCommand).not.toHaveBeenCalled();
         expect(h.rpc.FsGitStatusCommand).not.toHaveBeenCalled();
         expect(v.container.querySelector(".files-crumb-host")?.textContent).toContain("user@box");
+        expect(v.container.querySelector(".files-view")?.getAttribute("data-connection")).toBe("user@box");
         // The host is listed under Remote, and marked as the one shown.
         await waitFor(() => expect(v.container.querySelector(".files-place-active")?.textContent).toContain("user@box"));
         expect(v.container.textContent).not.toContain("wsl://Ubuntu");
