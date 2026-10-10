@@ -287,7 +287,7 @@ In `docs/examples/widgets/`, each a complete package that installs from its fold
 | `react-vite/` | The same as `hello-sandboxed`, built with React and Vite (`npm run build` writes the package) | sandboxed, none |
 | `hello/` | The v1 trusted Solid module, now with a `widget.json` | trusted |
 
-`docs/examples/widgets/README.md` is the quickstart: copy a sample, change its `id`, install from folder, edit, reload.
+A README in `docs/examples/widgets/` is the quickstart: copy a sample, change its `id`, install from folder, edit, reload.
 
 ## 8. Installing and approval
 
