@@ -262,7 +262,7 @@ async fn commit_selects_context_files_by_id_not_display_path() {
     let bi_files: Vec<bi::BundleImportFile> =
         files.iter().map(|f| bi::BundleImportFile { path: f.path.clone(), content: f.content.clone() }).collect();
     let digest = bi::content_digest_files(&bi_files);
-    // Only select id 1 (b.md) -- verify a.md (id 0) is excluded.
+    // Only select id 1 (b.md) -- verify a.md (id 0) is excluded. (comment-hygiene: allow)
     let req = CommitReq {
         file_path: None,
         zip_base64: None,

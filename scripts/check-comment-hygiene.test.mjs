@@ -438,30 +438,32 @@ describe("file references", () => {
         expect(refs("// Payloads in frontend/types/rpc/Attachment*Event.ts;\n")).toEqual([]);
         expect(refs("// a non-ASCII byte (\"docs/specs/Caf\\303\\251.md\")\n")).toEqual([]);
         expect(refs("// see a.ts and *.md\n")).toEqual(["a.ts"]);
+        // Markdown emphasis is not a glob: the name inside is read.
+        expect(refs("// See *crates/srv/src/gone.rs* first\n")).toEqual(["crates/srv/src/gone.rs"]);
         // A Windows path still yields its file name, so a rename can flag it.
         expect(refs("// e.g. C:\\repo\\gone.ts or frontend\\app\\gone.ts\n")).toEqual(["gone.ts", "gone.ts"]);
         expect(refs("// a stray \\x.md and \\12.md stay names\n")).toEqual(["x.md", "12.md"]);
     });
 
-    it("excuses bare names a test uses as fixtures, or the file's code spells the same way", () => {
+    it("excuses a bare name the file's own code uses: a property access or a fixture", () => {
         const code = ts("// `item.ts + 1` and `last.ts`\nconst gap = item.ts - last.ts;\n");
         expect(isBareNonRef("item.ts", code)).toBe(true);
         expect(isBareNonRef("last.ts", code)).toBe(true);
-        // `xitem.ts` and `a.item.ts` are not what the code spells.
+        // `xitem.ts` is not what the code spells.
         expect(isBareNonRef("xitem.ts", ts("// x\nconst t = item.ts;\n"))).toBe(false);
         expect(isBareNonRef("gone.rs", rs("// see gone.rs\nfn main() {}\n"))).toBe(false);
-        // Anywhere in a test, in any language the scan reads.
-        for (const file of ["frontend/x.test.ts", "scripts/y.test.mjs", "crates/srv/src/tests/z.rs", "crates/a/tests.rs"]) {
-            expect(isBareNonRef("a.md", ts("// a.md\n"), file), file).toBe(true);
-        }
-        expect(isBareNonRef("a.md", ts("// a.md\n"), "frontend/x.ts")).toBe(false);
+        // A fixture the test passes around, partial path included.
+        const fixture = ts('// reads src/a.ts, then a.md\nrun("Read 1:2 src/a.ts", ["a.md"]);\n');
+        expect(isBareNonRef("src/a.ts", fixture)).toBe(true);
+        expect(isBareNonRef("a.md", fixture)).toBe(true);
     });
 
-    it("keeps failing a doc name or repo path in a test, and skips only the bare fixture", () => {
-        const info = ts("// fixtures: a.md, src/a.ts\n// see docs/specs/SPEC_GONE_2026_01_01.md and frontend/gone.ts\n");
-        const res = deadRefFindings(info, new Set([1, 2]), index, new Set(), "frontend/x.test.ts");
-        expect(res.warnings).toEqual([]);
-        expect(res.errors.map((e) => e.line)).toEqual([2, 2]);
+    it("still flags a stale production pointer in a test comment, and a doc name or path anywhere", () => {
+        // The comment names a deleted module the test's code never mentions.
+        const info = ts('// split from a single rpc-api.ts\n// see docs/specs/SPEC_GONE_2026_01_01.md\nimport { x } from "./rpc-api/index";\n');
+        const res = deadRefFindings(info, new Set([1, 2]), index);
+        expect(res.warnings.map((w) => w.line)).toEqual([1]);
+        expect(res.errors.map((e) => e.line)).toEqual([2]);
     });
 
     it("errors on an added dead doc or repo path, warns on a bare name, skips the rest", () => {

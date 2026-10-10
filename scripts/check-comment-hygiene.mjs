@@ -45,9 +45,9 @@
 //   the narration and density rules above stay on .ts/.tsx/.rs. Shell,
 //   PowerShell (`#` comments) and Markdown are not read.
 //   Runtime files AgentMux writes (CLAUDE.md, ...), sibling repos and the old
-//   `src-tauri/` tree are not repo files and are skipped. So is a bare name in
-//   a test (a fixture) or one the file's own code spells the same way (a
-//   property access). The same opt-out applies, for a deliberately historical
+//   `src-tauri/` tree are not repo files and are skipped. So is a bare name the
+//   file's own code uses (a property access, a test's fixture, a file name read
+//   at runtime). The same opt-out applies, for a deliberately historical
 //   or illustrative name; a historical one usually reads better naming the
 //   module (`the single-file bootstrap module`) than a file that is gone.
 //
@@ -391,10 +391,11 @@ export function narrationRule(text) {
 // this repo.
 const REF_EXT = "rs|tsx?|jsx?|mjs|cjs|sh|ps1|scss|css|md";
 const REF_FILE = new RegExp(`\\.(?:${REF_EXT})$`);
-// A name glued to `*` (a glob, `Attachment*Event.ts`) is not a file name on its
-// own; neither is the tail of an octal escape (`Caf\303\251.md`), which
-// commentRefs drops. A Windows path (`frontend\app\x.ts`) still yields `x.ts`. (comment-hygiene: allow)
-const REF_RE = new RegExp(`(?<![\\w./@*-])((?:\\.{1,2}/)*(?:[\\w@.-]+/)*[\\w@-][\\w@.-]*\\.(?:${REF_EXT}))(?![\\w/-])`, "g");
+// commentRefs drops a name that is the tail of a glob (`Attachment*Event.ts`,
+// a word right before the `*`) or of an octal escape (`Caf\303\251.md`). A
+// Markdown-emphasised name (`*src/x.rs*`) and a Windows path (`frontend\app\x.ts`) (comment-hygiene: allow)
+// are still read.
+const REF_RE = new RegExp(`(?<![\\w./@-])((?:\\.{1,2}/)*(?:[\\w@.-]+/)*[\\w@-][\\w@.-]*\\.(?:${REF_EXT}))(?![\\w/-])`, "g");
 const OCTAL_ESCAPE_TAIL = /^[0-7]{3}\./;
 // Names that are real but not files in this repo: what AgentMux writes into an
 // agent's workdir or reads from a provider CLI's config, sibling repos, and the
@@ -431,7 +432,9 @@ export function commentRefs(info) {
         const body = normalizeComment(l.text);
         for (const m of body.matchAll(REF_RE)) {
             let ref = m[1];
-            if (body[m.index - 1] === "\\" && OCTAL_ESCAPE_TAIL.test(ref)) continue;
+            const before = body[m.index - 1];
+            if (before === "\\" && OCTAL_ESCAPE_TAIL.test(ref)) continue;
+            if (before === "*" && /\w/.test(body[m.index - 2] || "")) continue;
             const prev = idx > 0 ? normalizeComment(info.lines[idx - 1].text) : "";
             if (m.index === 0 && prev) {
                 const tail = /[\w@./-]+$/.exec(prev);
@@ -488,30 +491,23 @@ export function resolvesRef(ref, index) {
     return index.list.some((p) => p.endsWith(suffix));
 }
 
-// Test files in every language the scan reads, for `isBareNonRef`.
-const FIXTURE_FILE_RE = /\.(?:test|spec)\.(?:tsx?|m?jsx?|cjs)$|(^|\/)(?:tests?|__tests__)\/|_tests?\.rs$|\/tests\.rs$/;
-
 /**
- * True when a bare name (`kind` "bare") is not a pointer at a repo file:
- *   - in a test, where names in comments are fixtures (`a.md`, `src/a.ts`); (comment-hygiene: allow)
- *   - a name the file's own code spells the same way, which is a property
- *     access (`item.ts`, a timestamp field) or a name the code uses at runtime. (comment-hygiene: allow)
- * Doc names and repo-rooted paths are never excused this way.
+ * True when a bare name (`kind` "bare") is a name the file's own code uses,
+ * not a pointer at a repo file: a property access (`item.ts`, a timestamp (comment-hygiene: allow)
+ * field), a fixture a test passes around, or a file name the code reads or
+ * writes at runtime. Doc names and repo-rooted paths are never excused this way.
  */
-export function isBareNonRef(ref, info, file = "") {
-    if (FIXTURE_FILE_RE.test(file)) return true;
+export function isBareNonRef(ref, info) {
     const r = cleanRef(ref);
-    if (r.includes("/") || !info?.code) return false;
-    const stem = r.slice(0, r.lastIndexOf("."));
-    if (!/^[A-Za-z_$][\w$]*$/.test(stem)) return false;
-    const escaped = r.replace(/[.$]/g, "\\$&");
-    return new RegExp(`(?<![\\w$.])${escaped}(?![\\w$])`).test(info.code);
+    if (!info?.code) return false;
+    const escaped = r.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    return new RegExp(`(?<![\\w$./\\\\-])${escaped}(?![\\w$/-])`).test(info.code);
 }
 
 /** True when a comment's file name needs no attention (rule C7). */
-function refIsFine(ref, info, index, file) {
+function refIsFine(ref, info, index) {
     if (isForeignRef(ref) || resolvesRef(ref, index)) return true;
-    return refKind(ref, index) === "bare" && isBareNonRef(ref, info, file);
+    return refKind(ref, index) === "bare" && isBareNonRef(ref, info);
 }
 
 /**
@@ -521,13 +517,13 @@ function refIsFine(ref, info, index, file) {
  * the cases that are skipped outright). Comments that only moved (see
  * gateFile) are skipped.
  */
-export function deadRefFindings(info, added, index, moved = new Set(), file = "") {
+export function deadRefFindings(info, added, index, moved = new Set()) {
     const errors = [];
     const warnings = [];
     for (const { line, ref, text } of commentRefs(info)) {
         if (!added.has(line) || text.includes(ALLOW_TOKEN)) continue;
         if (moved.has(normalizeComment(text))) continue;
-        if (refIsFine(ref, info, index, file)) continue;
+        if (refIsFine(ref, info, index)) continue;
         const kind = refKind(ref, index);
         const message =
             `comment names \`${ref}\`, which is not in this repo. Point it at the current file or drop it (rule C7). ` +
@@ -837,7 +833,7 @@ function runGate() {
         // scanned file.
         const source = isSourcePath(file);
         const res = source ? gateFile(info, lines, moved) : { errors: [], warnings: [] };
-        const refs = deadRefFindings(info, lines, index, moved, file);
+        const refs = deadRefFindings(info, lines, index, moved);
         for (const e of [...res.errors, ...refs.errors]) annotate("error", file, e.line, e.message);
         for (const w of [...res.warnings, ...refs.warnings]) annotate("warning", file, w.line, w.message);
         errors += res.errors.length;
@@ -885,7 +881,7 @@ function runDeadRefs(json) {
     const rows = [];
     for (const { file, info } of lexTree(tree)) {
         for (const { line, ref, text } of commentRefs(info)) {
-            if (refIsFine(ref, info, index, file)) continue;
+            if (refIsFine(ref, info, index)) continue;
             rows.push({ file, line, ref, kind: refKind(ref, index), allowed: text.includes(ALLOW_TOKEN), text: text.trim() });
         }
     }
