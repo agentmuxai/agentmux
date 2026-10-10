@@ -13,12 +13,14 @@ import { revealBlock } from "@/app/util/reveal-block";
 import { pickAgentColor } from "@/app/view/agent/agent-color";
 import clsx from "clsx";
 import { createMemo, createSignal, For, type JSX, Show } from "solid-js";
+import { HistoryCharts } from "./tower-history";
 import { HISTORY_POINTS, type TowerViewModel } from "./tower-model";
 import { ProcessName } from "./tower-process-name";
 import { SortHeader } from "./tower-sort-header";
 import {
     buildProcessTree,
     count,
+    cpuPercent,
     formatAgo,
     formatCpuTime,
     formatMem,
@@ -181,7 +183,7 @@ function RailRow(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu; sel
             <span class="tower-rail-name">{props.entry.label}</span>
             <span class="tower-rail-cpu tower-num">{props.cpu(props.entry.cpu)}</span>
             <span class="tower-rail-mem tower-num tower-muted">{formatMem(props.entry.mem)}</span>
-            <Sparkline points={m.history().get(props.entry.id) ?? []} color={entryColor(props.entry, remote())} />
+            <Sparkline points={m.recentCpu(props.entry.id)} color={entryColor(props.entry, remote())} />
         </div>
     );
 }
@@ -236,6 +238,12 @@ function Detail(props: { model: TowerViewModel; entry: RailEntry; cpu: Cpu }) {
                     {count(props.entry.processes, "process")}
                 </span>
             </div>
+            <HistoryCharts
+                points={m.history().get(props.entry.id) ?? []}
+                color={entryColor(props.entry, remote())}
+                cpuPercent={(f) => cpuPercent(f, m.snapshot()?.cpu_count ?? 1, m.cpuMode())}
+                formatCpu={props.cpu}
+            />
             <Show
                 when={props.entry.kind !== "other"}
                 fallback={

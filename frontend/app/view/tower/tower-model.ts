@@ -35,6 +35,16 @@ const REMOTE_TIMEOUT_MS = 180_000;
 const REMOTE_FILTER_DELAY_MS = 300;
 /** The rail's sparklines: the last minute at the 2 s refresh. */
 export const HISTORY_POINTS = 30;
+/** The detail's history charts: the last 10 minutes at the 2 s refresh. */
+export const CHART_POINTS = 300;
+/** One sample of a rail entry, for its sparkline and history charts. */
+export interface HistoryPoint {
+    /** The sample's time, unix ms. */
+    t: number;
+    /** Fraction of one core; absent when not known. */
+    cpu?: number;
+    mem?: number;
+}
 /** A CPU-ordered rail orders by the average of this many recent samples, so
  *  a moment's spike doesn't reorder it. */
 const SMOOTHING_POINTS = 5;
@@ -61,9 +71,9 @@ export class TowerViewModel {
      *  `ownerOf`), carried over from the Agents view; `""` for all. */
     only: Accessor<string>;
     railSort: Accessor<RailSort>;
-    /** Each rail entry's recent CPU, oldest first (fraction of one core). */
-    history: Accessor<ReadonlyMap<string, readonly number[]>>;
-    private setHistory: Setter<ReadonlyMap<string, readonly number[]>>;
+    /** Each rail entry's samples over the last 10 minutes, oldest first. */
+    history: Accessor<ReadonlyMap<string, readonly HistoryPoint[]>>;
+    private setHistory: Setter<ReadonlyMap<string, readonly HistoryPoint[]>>;
     remotes: Accessor<RemoteRecord[]>;
     /** AgentMux computers this one is paired with (`peer:<id>`). */
     peers: Accessor<TowerPeerInfo[]>;
@@ -137,7 +147,7 @@ export class TowerViewModel {
             const v = ctx.meta()?.["tower:railsort"];
             return RAIL_SORTS.includes(v as RailSort) ? (v as RailSort) : "pane";
         });
-        [this.history, this.setHistory] = createSignal<ReadonlyMap<string, readonly number[]>>(new Map());
+        [this.history, this.setHistory] = createSignal<ReadonlyMap<string, readonly HistoryPoint[]>>(new Map());
         this.remotes = remotesList();
         [this.peers, this.setPeers] = createSignal<TowerPeerInfo[]>([]);
         void this.refreshPeers();
@@ -247,20 +257,35 @@ export class TowerViewModel {
 
     /** A rail entry's recent average CPU, for a CPU-ordered rail. */
     smoothedCpu = (id: string): number | undefined => {
-        const points = this.history().get(id);
-        if (!points?.length) return undefined;
-        const recent = points.slice(-SMOOTHING_POINTS);
+        const recent = this.recentCpu(id).slice(-SMOOTHING_POINTS);
+        if (!recent.length) return undefined;
         return recent.reduce((a, b) => a + b, 0) / recent.length;
     };
 
-    /** Append each rail entry's CPU to its history; an entry gone from the
-     *  rail loses its history. */
+    /** A rail entry's last minute of known CPU rates, oldest first: its
+     *  sparkline. */
+    recentCpu = (id: string): number[] =>
+        (this.history().get(id) ?? [])
+            .slice(-HISTORY_POINTS)
+            .map((p) => p.cpu)
+            .filter((c): c is number => c != null);
+
+    /** Append each rail entry's sample to its history; an entry gone from
+     *  the rail loses its history. Kept in the pane only, not saved. */
     private recordHistory(snap: TowerSnapshot): void {
         const prev = this.history();
-        const next = new Map<string, readonly number[]>();
+        const next = new Map<string, readonly HistoryPoint[]>();
         for (const e of railEntries(snap)) {
             const points = prev.get(e.id) ?? [];
-            next.set(e.id, e.cpu == null ? points : [...points, e.cpu].slice(-HISTORY_POINTS));
+            const last = points[points.length - 1];
+            // A refresh that brought no new sample (the same measurement) adds
+            // nothing.
+            next.set(
+                e.id,
+                last?.t === snap.ts_ms
+                    ? points
+                    : [...points, { t: snap.ts_ms, cpu: e.cpu, mem: e.mem }].slice(-CHART_POINTS)
+            );
         }
         this.setHistory(next);
     }
