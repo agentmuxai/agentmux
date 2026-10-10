@@ -81,7 +81,7 @@ function startHost(p: WidgetPackageInfo) {
     return { handOver, notify, setTitle, meta: () => meta };
 }
 
-describe("@agentmux/widget-sdk v1", () => {
+describe("@agentmuxai/widget-sdk v1", () => {
     it("connects, applies the theme, and reads its pane's meta", async () => {
         const h = startHost(pkg());
         const pending = connect();
