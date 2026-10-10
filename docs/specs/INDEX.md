@@ -510,6 +510,7 @@ partial list.
 | [`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14`](ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md) | Architecture rethink: making ABF mandatory ("every agent must have an ABF") |
 | [`PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09`](PLAN_CI_TEST_SPEED_AND_DRY_FOLLOWUPS_2026_10_09.md) | Plan — faster CI tests, and the open architecture / DRY follow-ups |
 | [`PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20`](PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md) | Plan — collapse every provider-login code path onto one |
+| [`PLAN_MACOS_COMPILE_GATE_2026_10_09`](PLAN_MACOS_COMPILE_GATE_2026_10_09.md) | Plan — a macOS compile check on PRs, and a nightly macOS leg that can fail |
 | [`PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17`](PLAN_PANE_TABS_UNIVERSAL_IMPLEMENTATION_2026_09_17.md) | PLAN: Universal Pane Tabs — Implementation Task Breakdown |
 | [`PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13`](PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md) | Plan — fix the recurring `create_no_window_flag_set` flake on Windows nightly CI |
 | [`REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07`](REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md) | Report: agent/swarm pane loading, ambient-call flood, and stale status |
