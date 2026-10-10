@@ -280,14 +280,20 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
                     return;
                 }
                 setRevealed(0);
+                // Progress follows the clock, not the number of callbacks: a
+                // throttled timer (a background window, a busy thread) catches
+                // up instead of falling behind, so the line is fully printed
+                // when the presenter's dwell (counted from the same clock)
+                // assumes it is.
+                const startedAt = Date.now();
                 const id = setInterval(() => {
-                    setRevealed((n) => {
-                        if (n + 1 >= untrack(leftText).length) {
-                            clearInterval(id);
-                            return Number.POSITIVE_INFINITY;
-                        }
-                        return n + 1;
-                    });
+                    const n = Math.floor((Date.now() - startedAt) / REVEAL_CHAR_MS);
+                    if (n >= untrack(leftText).length) {
+                        clearInterval(id);
+                        setRevealed(Number.POSITIVE_INFINITY);
+                    } else {
+                        setRevealed(n);
+                    }
                 }, REVEAL_CHAR_MS);
                 onCleanup(() => clearInterval(id));
             },

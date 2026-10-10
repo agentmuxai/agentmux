@@ -768,6 +768,33 @@ describe("AgentWorkingRow ambient summary and per-turn tokens", () => {
  * SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §4.4: the row times and
  * counts the turn the user sees, over its CLI passes, from srv's ledger.
  */
+// SPEC_AGENT_TURN_MODEL_AND_LIVE_STATUS_2026_10_08.md §6.10: the presenter's
+// dwell counts from when a line is fully printed, by the wall clock. The row's
+// type-out must follow the same clock, or a throttled timer (a background
+// window) leaves the line half printed when the dwell thinks it is done.
+describe("AgentWorkingRow type-out follows the clock", () => {
+    afterEach(() => {
+        cleanup();
+        vi.useRealTimers();
+    });
+
+    it("a throttled timer catches up: one late callback prints the whole line", () => {
+        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date"] });
+        const [needsYou, setNeedsYou] = createSignal<string | null>(null);
+        const { container } = render(() => (
+            <AgentWorkingRow loading={true} activitySummary="Fix the login redirect loop" needsYou={needsYou()} />
+        ));
+        const primary = () => container.querySelector(".agent-working-row-primary")?.textContent;
+        expect(primary()).toBe("Fix the login redirect loop"); // a turn's first line: at once
+        setNeedsYou("Waiting for your approval: git push"); // a rank change: types out
+        expect(primary()).toBe("");
+        // The window was in the background: 2 s pass, and one callback runs.
+        vi.setSystemTime(Date.now() + 2_000);
+        vi.advanceTimersByTime(30);
+        expect(primary()).toBe("Waiting for your approval: git push");
+    });
+});
+
 describe("AgentWorkingRow across a turn's passes", () => {
     const ledger = (over: Partial<TurnLedger> = {}): TurnLedger => ({
         turnId: 7,
