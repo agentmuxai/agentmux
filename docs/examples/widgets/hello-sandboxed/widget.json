@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "id": "agentmux.hello-sandboxed",
+  "name": "Hello (sandboxed)",
+  "version": "1.0.0",
+  "description": "The smallest sandboxed widget: counts clicks in its pane, follows the theme.",
+  "author": "AgentMux",
+  "icon": "hand-sparkles",
+  "kind": "sandboxed",
+  "entry": "index.html",
+  "permissions": [],
+  "contributes": {
+    "panes": [{ "name": "main", "label": "Hello" }]
+  }
+}

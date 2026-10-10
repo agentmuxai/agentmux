@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Copyright 2026, AgentMux Corp. SPDX-License-Identifier: Apache-2.0 -->
+<!--
+  The smallest sandboxed AgentMux widget
+  (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §6, §7).
+
+  Install: Settings → Widgets → Install…, pick this folder's widget.json,
+  and approve it. Then open "Hello" from the widget bar's "more" menu.
+
+  It runs in a sandbox: it can't touch AgentMux except through the SDK,
+  and this one asks for no permissions at all.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="/agentmux/widget-sdk/am-widget.css" />
+  </head>
+  <body>
+    <h1>Hello from a sandboxed widget</h1>
+    <p id="count" class="muted">Connecting…</p>
+    <p><button id="click" class="primary">Click me</button></p>
+    <p class="muted" id="where"></p>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

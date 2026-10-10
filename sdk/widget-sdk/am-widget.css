@@ -1,0 +1,149 @@
+/* Copyright 2026, AgentMux Corp. SPDX-License-Identifier: Apache-2.0 */
+
+/*
+ * am-widget.css: optional base styles for a sandboxed AgentMux widget
+ * (docs/specs/SPEC_USER_WIDGETS_AND_WIDGET_API_2026_10_09.md §7). It uses the
+ * theme variables the SDK's connect() sets (--am-bg, --am-fg, ...), so a plain
+ * HTML widget looks at home, in dark or light, with no CSS of its own.
+ *
+ *   <link rel="stylesheet" href="/agentmux/widget-sdk/am-widget.css">
+ */
+
+:root {
+    --am-bg: #1e1e1e;
+    --am-fg: #e6e6e6;
+    --am-muted: #9a9a9a;
+    --am-accent: #58c142;
+    --am-border: #3a3a3a;
+    --am-error: #e5484d;
+    --am-warning: #f5a623;
+    --am-success: #46a758;
+    --am-font: system-ui, sans-serif;
+    --am-font-mono: ui-monospace, monospace;
+    --am-radius: 6px;
+}
+
+html,
+body {
+    margin: 0;
+    background: var(--am-bg);
+    color: var(--am-fg);
+    font: 13px/1.45 var(--am-font);
+}
+
+body {
+    padding: 12px;
+}
+
+h1,
+h2,
+h3 {
+    font-weight: 600;
+    margin: 0 0 8px;
+}
+
+h1 {
+    font-size: 16px;
+}
+
+h2 {
+    font-size: 14px;
+}
+
+p {
+    margin: 0 0 8px;
+}
+
+a {
+    color: var(--am-accent);
+}
+
+.muted {
+    color: var(--am-muted);
+}
+
+code,
+pre,
+kbd {
+    font-family: var(--am-font-mono);
+    font-size: 12px;
+}
+
+pre {
+    border: 1px solid var(--am-border);
+    border-radius: var(--am-radius);
+    padding: 8px;
+    overflow: auto;
+}
+
+button {
+    font: inherit;
+    color: var(--am-fg);
+    background: transparent;
+    border: 1px solid var(--am-border);
+    border-radius: var(--am-radius);
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+button:hover {
+    border-color: var(--am-accent);
+}
+
+button.primary {
+    border-color: var(--am-accent);
+    color: var(--am-accent);
+}
+
+button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+input,
+select,
+textarea {
+    font: inherit;
+    color: var(--am-fg);
+    background: transparent;
+    border: 1px solid var(--am-border);
+    border-radius: var(--am-radius);
+    padding: 4px 8px;
+    box-sizing: border-box;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
+    outline: 1px solid var(--am-accent);
+    outline-offset: 1px;
+}
+
+textarea {
+    width: 100%;
+    resize: vertical;
+}
+
+ul.list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+ul.list > li {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--am-border);
+}
+
+.error {
+    color: var(--am-error);
+}
+
+.warning {
+    color: var(--am-warning);
+}
+
+.success {
+    color: var(--am-success);
+}
