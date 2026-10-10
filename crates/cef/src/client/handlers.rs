@@ -275,6 +275,13 @@ fn app_shortcut_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac
     host_key_for(ctrl, shift, alt, meta, vk, mac).map(|k| k.command.as_str())
 }
 
+/// Whether the app's own binding for a key applies in a browser pane, given
+/// the pane's own shortcut for it. Ctrl+Shift+N (⇧⌘N) is the app's New window,
+/// but in a browser pane it opens an Incognito tab, as in a browser.
+fn app_key_applies(pane_shortcut: Option<BrowserPaneShortcut>) -> bool {
+    pane_shortcut != Some(BrowserPaneShortcut::NewIncognito)
+}
+
 fn host_key_for(ctrl: bool, shift: bool, alt: bool, meta: bool, vk: i32, mac: bool) -> Option<&'static HostKey> {
     let keys = if mac { &HOST_KEYS.mac } else { &HOST_KEYS.other };
     keys.iter()
@@ -456,9 +463,13 @@ fn handle_pre_key_event(
         let (meta, mac) = ((ev.modifiers & EVENTFLAG_COMMAND_DOWN) != 0, true);
         #[cfg(not(target_os = "macos"))]
         let (meta, mac) = (false, false);
-        if let Some(key) = host_key_for(ctrl, shift, alt, meta, ev.windows_key_code, mac) {
-            if forward_app_shortcut(inner, browser.as_deref_mut(), key) {
-                return 1;
+        let pane_mod = if mac { meta } else { ctrl };
+        let pane_shortcut = browser_pane_shortcut_for(pane_mod, alt, shift, ev.windows_key_code);
+        if app_key_applies(pane_shortcut) {
+            if let Some(key) = host_key_for(ctrl, shift, alt, meta, ev.windows_key_code, mac) {
+                if forward_app_shortcut(inner, browser.as_deref_mut(), key) {
+                    return 1;
+                }
             }
         }
     }
@@ -1138,6 +1149,18 @@ mod browser_pane_shortcut_tests {
                 assert_eq!(app_shortcut_for(c, false, alt, m, vk, mac), None, "mac={mac} vk={vk:#x}");
             }
         }
+    }
+
+    #[test]
+    fn ctrl_shift_n_is_a_new_incognito_tab_not_a_new_window() {
+        // The app binds the chord to New window; in a pane the pane's wins.
+        assert_eq!(app_shortcut_for(true, true, false, false, VK_N, false), Some("window:new"));
+        assert_eq!(app_shortcut_for(false, true, false, true, VK_N, true), Some("window:new"));
+        let pane = browser_pane_shortcut_for(true, false, true, VK_N);
+        assert_eq!(pane, Some(BrowserPaneShortcut::NewIncognito));
+        assert!(!app_key_applies(pane));
+        assert!(app_key_applies(browser_pane_shortcut_for(true, false, true, 0x54)));
+        assert!(app_key_applies(None));
     }
 
     #[test]
