@@ -32,6 +32,10 @@ export interface DocTransfer {
 export interface DocTabHost {
     /** The pane type: tabs move only between hosts of one type. */
     readonly docType: string;
+    /** Where its documents live, when that can differ between panes of one
+     *  type (an Editor's connection: "" for this computer). Tabs move only
+     *  between hosts of one scope: a path means nothing elsewhere. */
+    scope?(): string;
     /** Tab `tabId` as it is now, or null if there is no such tab. */
     peek(tabId: string): DocTab<unknown> | null;
     /** Why `tab` can't leave this pane, or null. */
@@ -74,6 +78,7 @@ export function moveDocTab(sourceBlockId: string, tabId: string, targetBlockId: 
     if (sourceBlockId === targetBlockId || !from || !to || from.docType !== to.docType) return { moved: false };
     const tab = from.peek(tabId);
     if (!tab) return { moved: false };
+    if ((from.scope?.() ?? "") !== (to.scope?.() ?? "")) return { moved: false, reason: "Its file is on another computer." };
     const reason = from.refuseGive(tab) ?? to.refuseTake(tab);
     if (reason) return { moved: false, reason };
     const transfer = from.give(tabId);

@@ -27,6 +27,8 @@ import type { EditorMode, EditorViewModel } from "./editor-model";
 import { cursorAtLine } from "./open-at-line";
 import { Button, SegmentedControl } from "@/app/element/ui";
 import { EditorTabStrip } from "./editor-tab-strip";
+import { EDITOR_STATE_FIELDS, provideEditorStates, takeMovedEditorState } from "./editor-doc-tabs";
+import { registerDocTabDropZone } from "@/app/doc-tabs/doc-tab-hosts";
 import { FileTree } from "./file-tree";
 import { LspClient, type LspState } from "./lsp/lsp-client";
 import { lspDiagnosticsExtension } from "./lsp/lsp-extensions";
@@ -372,6 +374,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
     // wired below.
     const cmStates = new Map<string, EditorState>();
     let activeTabIdForCm: string | null = null;
+    // A tab moving to another Editor takes its state from here: the live one
+    // for the tab in front, the saved one for the rest (editor-doc-tabs.ts).
+    onCleanup(provideEditorStates(model, (tabId) => (tabId === activeTabIdForCm ? cmView?.state : cmStates.get(tabId))));
 
     // Guards setupEditor against concurrent invocation. It is async and awaits
     // `loadLanguage()` BETWEEN destroying the previous view and constructing
@@ -394,6 +399,7 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
         const container = containerRef();
         if (!container) return;
         const gen = ++setupGeneration;
+        const tabId = untrack(model.activeIdAtom);
 
         // Destroy previous instance
         if (cmView) {
@@ -454,11 +460,21 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             model.cmViewRef.current = null;
         }
 
+        // A tab moved in from another Editor brings its undo history and
+        // selection (editor-doc-tabs.ts), rebuilt here with this view's own
+        // extensions. Taken only now, past the superseded check above, so a
+        // superseded build leaves it for the next one.
+        const moved = tabId ? takeMovedEditorState(model, tabId) : undefined;
+        let state: EditorState | undefined;
+        if (moved !== undefined) {
+            try {
+                state = EditorState.fromJSON(moved, { extensions }, EDITOR_STATE_FIELDS);
+            } catch {
+                state = undefined; // its text is still `content`
+            }
+        }
         cmView = new EditorView({
-            state: EditorState.create({
-                doc: content,
-                extensions,
-            }),
+            state: state ?? EditorState.create({ doc: content, extensions }),
             parent: container,
         });
         setLiveDoc(content); // seed preview from the freshly-built doc
@@ -664,6 +680,11 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             { defer: true }
         )
     );
+
+    // An Editor tab from another pane, dropped anywhere on this one, joins it.
+    onMount(() => {
+        if (rootRef) onCleanup(registerDocTabDropZone(rootRef, "editor", model.blockId));
+    });
 
     // Clear cached CodeMirror state when its tab closes, so re-opening
     // the same file later starts fresh (matches user expectation —

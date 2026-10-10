@@ -1,6 +1,6 @@
 # Report: dragging document tabs between panes (Editor to Editor, Media to Media)
 
-**Status:** active. Phase 1 (drag to reorder) and Phase 2 (Media ↔ Media) are built; Phase 3 (Editor ↔ Editor) is next.
+**Status:** active. Phases 1 to 3 are built: drag to reorder, Media ↔ Media and Editor ↔ Editor within a window. Phase 4 (layout space, Move to new pane, across windows) is not.
 **Date:** 2026-10-09 · **Author:** agent2
 **Trigger:** the repo owner: *"we want to implement dnd for document panes. Editor and Media each have document panes, but they each are not compatible with eachother. we want to implement dnd so a user can drag a doc pane from editor to another, or from one media to another, i believe it is already DRY and we want to keep it that way."*
 **Written against:** `main` @ `4afd8c527`. **Builds on:** `SPEC_DOCUMENT_TABS_2026_10_02.md` (this is its Phase 5, §5.8 and §4.1), `SPEC_PANE_TAB_DRAG_AND_DROP_2026_09_19.md` (the pane-tab drag this reuses), `SPEC_DRAG_AND_DROP_CONSOLIDATION_2026_09_27.md` (the drag session).
@@ -109,8 +109,8 @@ The drop target in pane B reads the source block from the drag data, finds both 
 | Scratch buffer | cache file named by `scratchId` | moves with the payload; same cache file |
 
 Rules the Editor host enforces:
-- **Same connection only.** An Editor can be on another host (`connection()`); its paths are that host's. A tab never moves between Editors on different connections (local ↔ remote, host A ↔ host B).
-- **Same file already open in the target.** Clean in both: the source tab closes and the target's tab comes to the front. Dirty in either: refused with a message saying so, never a silent merge.
+- **Same connection only.** An Editor can be on another host (`connection()`); its paths are that host's. A tab never moves between Editors on different connections (local ↔ remote, host A ↔ host B). As built, this is a generic `DocTabHost.scope` that `moveDocTab` compares for every pane type.
+- **Same file already open in the target.** The moved tab gives way: the source tab goes and the target's copy comes to the front. That loses nothing unless the moved tab has unsaved edits, so only then is it refused, with a message saying why (as built; this narrows "dirty in either", since a dirty copy in the target is never touched).
 - A tab still loading moves as a not-yet-loaded tab; the target reads it when it is shown (the existing `_ensureActiveLoaded`).
 
 Media's own rules:
