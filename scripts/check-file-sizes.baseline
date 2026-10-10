@@ -11,7 +11,7 @@
 2202 crates/cef/src/ui_tasks/window.rs
 2606 crates/common/src/data_paths.rs
 2268 crates/common/src/ipc.rs
-1842 crates/common/src/jekt_sign.rs
+1846 crates/common/src/jekt_sign.rs
 1867 crates/launcher/src/saga/mod.rs
 3240 crates/srv/src/backend/agent_config.rs
 1677 crates/srv/src/backend/blockcontroller/acp.rs
@@ -41,7 +41,7 @@
 1566 crates/srv/src/server/editor_handlers.rs
 2118 crates/srv/src/server/muxspect_handlers.rs
 1665 crates/srv/src/server/native_memory_handlers.rs
-2799 crates/srv/src/server/reactive.rs
+2814 crates/srv/src/server/reactive.rs
 1616 crates/srv/src/server/ui_handlers.rs
 2297 crates/srv/src/server/websocket.rs
 2036 frontend/app/store/agent-pane-state/reducer.ts

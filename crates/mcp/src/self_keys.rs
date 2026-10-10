@@ -208,4 +208,32 @@ mod tests {
         assert!(!still_good(&cached(Some(1_000)), 1_000), "expired: srv may rotate it now");
         assert!(still_good(&cached(None), 1_000_000), "no expiry served: the 20 h clock");
     }
+
+    #[test]
+    fn the_v2_signer_is_only_ever_the_fetched_uid_key() {
+        let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_for_test();
+        assert!(
+            uid_signer().is_none(),
+            "no fetch: no v2, whatever the env holds"
+        );
+        let set = |uid: &str, key: Option<&str>| {
+            *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some(Cached {
+                keys: Wire {
+                    slug: "aria".into(),
+                    uid: uid.into(),
+                    uid_lan_key: key.map(str::to_string),
+                    ..Default::default()
+                },
+                fetched_at: Instant::now(),
+            });
+        };
+        set("uid-1", Some(FETCHED_B64));
+        assert_eq!(uid_signer(), Some(("uid-1".to_string(), vec![7u8; 32])));
+        set("", Some(FETCHED_B64));
+        assert!(uid_signer().is_none(), "a key with no UID to claim");
+        set("uid-1", None);
+        assert!(uid_signer().is_none());
+        clear_for_test();
+    }
 }

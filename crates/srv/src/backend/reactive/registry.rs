@@ -631,6 +631,18 @@ pub fn remove_shared_from_env_if_nonce(agent_id: &str, expected_nonce: u64) {
 /// evict-on-forward-failure pattern already used by Tier 2a/3 in
 /// `server/reactive.rs`, matching how this codebase already handles
 /// registry staleness elsewhere rather than re-validating on every read.
+/// Every channel's shared entry that published a key for `uid` (identity
+/// M4d-6). Scans the whole registry: entries are filed by name, and one UID
+/// live in several channels has an entry, and a key, in each.
+pub fn lookup_shared_by_uid(shared_dir: &Path, uid: &str) -> Vec<AgentEntry> {
+    let Ok(dirs) = std::fs::read_dir(shared_dir) else { return Vec::new() };
+    dirs.flatten()
+        .filter(|d| d.path().is_dir())
+        .flat_map(|d| read_entry_files_in_dir(&d.path()))
+        .filter(|e| e.uid == uid && !e.uid_public_key.is_empty())
+        .collect()
+}
+
 pub fn lookup_all_shared(shared_dir: &Path, agent_id: &str) -> Vec<AgentEntry> {
     let dir = shared_agent_dir(shared_dir, agent_id);
     let mut list = read_entry_files_in_dir(&dir);
