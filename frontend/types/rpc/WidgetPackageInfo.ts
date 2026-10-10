@@ -2,6 +2,7 @@
 import type { WidgetCommandInfo } from "./WidgetCommandInfo";
 import type { WidgetKind } from "./WidgetKind";
 import type { WidgetPaneInfo } from "./WidgetPaneInfo";
+import type { WidgetSignatureInfo } from "./WidgetSignatureInfo";
 import type { WidgetState } from "./WidgetState";
 import type { WidgetStatusItemInfo } from "./WidgetStatusItemInfo";
 
@@ -15,6 +16,10 @@ granted: Array<string>, state: WidgetState, error: string | null,
  * The current content hash (empty when the files couldn't be read).
  */
 hash: string, panes: Array<WidgetPaneInfo>, commands: Array<WidgetCommandInfo>, status_items: Array<WidgetStatusItemInfo>, 
+/**
+ * Who signed it, against this instance's pinned publishers.
+ */
+signature: WidgetSignatureInfo, 
 /**
  * Where its files are served, ending in `/`, while it is approved and
  * enabled; relative to srv's web endpoint.

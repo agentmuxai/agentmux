@@ -9,8 +9,8 @@
 
 import { For, Show, type JSX } from "solid-js";
 
-import type { WidgetKind } from "@/app/store/rpc-api/widgets";
-import { describePermission, TRUSTED_WIDGET_WARNING } from "./widget-permissions";
+import type { WidgetKind, WidgetSignatureInfo } from "@/app/store/rpc-api/widgets";
+import { describePermission, describeSignature, TRUSTED_WIDGET_WARNING } from "./widget-permissions";
 
 import "./widget-approval.scss";
 
@@ -21,6 +21,13 @@ export interface WidgetApprovalFacts {
     implied?: boolean;
     description?: string | null;
     permissions: string[];
+    signature?: WidgetSignatureInfo | null;
+}
+
+/** The prompt's Install button: "Install anyway" when the publisher's
+ *  pinned key didn't sign it. */
+export function installLabel(pkg: WidgetApprovalFacts, label = "Install"): string {
+    return pkg.signature?.state === "key_changed" ? `${label} anyway` : label;
 }
 
 export function WidgetApprovalDetails(props: { pkg: WidgetApprovalFacts }): JSX.Element {
@@ -36,6 +43,15 @@ export function WidgetApprovalDetails(props: { pkg: WidgetApprovalFacts }): JSX.
             <Show when={props.pkg.description}>
                 <div class="widget-approval-description">{props.pkg.description}</div>
             </Show>
+            {(() => {
+                const s = () => describeSignature(props.pkg.signature);
+                return (
+                    <div class={s().warning ? "widget-approval-warning" : "widget-approval-signature"}>
+                        <i class={`fa-solid ${s().warning ? "fa-triangle-exclamation" : "fa-signature"}`} aria-hidden="true" />{" "}
+                        {s().warning ? <strong>{s().text}</strong> : s().text}
+                    </div>
+                );
+            })()}
             <Show
                 when={props.pkg.kind === "sandboxed"}
                 fallback={

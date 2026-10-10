@@ -9,10 +9,11 @@ import { createSignal, type Accessor } from "solid-js";
 import { muxEventSubscribe } from "@/app/store/mps";
 import { WpsEvent } from "@/app/store/mps-events";
 import { RpcApi } from "@/app/store/rpc-api";
-import type { WidgetPackageInfo } from "@/app/store/rpc-api/widgets";
+import type { WidgetPackageInfo, WidgetPublisherPin } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
 const [packages, setPackages] = createSignal<WidgetPackageInfo[]>([]);
+const [publishers, setPublishers] = createSignal<WidgetPublisherPin[]>([]);
 const [loaded, setLoaded] = createSignal(false);
 let started: Promise<void> | null = null;
 
@@ -25,7 +26,9 @@ export function setWidgetPackages(list: WidgetPackageInfo[] | null | undefined):
 /** Fetch the list now. A failure keeps the last one. */
 export async function refreshWidgetPackages(): Promise<void> {
     try {
-        setWidgetPackages((await RpcApi.WidgetsListCommand(TabRpcClient, { timeout: 5000 }))?.packages);
+        const r = await RpcApi.WidgetsListCommand(TabRpcClient, { timeout: 5000 });
+        setPublishers(r?.publishers ?? []);
+        setWidgetPackages(r?.packages);
     } catch (e) {
         console.log("widget packages: could not load the list", e);
         setLoaded(true);
@@ -37,7 +40,14 @@ export function startWidgetPackages(): Promise<void> {
     if (started) return started;
     muxEventSubscribe({
         eventType: WpsEvent.WidgetPackages,
-        handler: (event: { data?: { packages?: WidgetPackageInfo[] } }) => setWidgetPackages(event?.data?.packages),
+        handler: (event: { data?: { packages?: WidgetPackageInfo[] } }) => {
+            setWidgetPackages(event?.data?.packages);
+            // The event carries packages only; a pin changes with an
+            // approval or a Forget key, which this follows.
+            void RpcApi.WidgetsListCommand(TabRpcClient, { timeout: 5000 })
+                .then((r) => setPublishers(r?.publishers ?? []))
+                .catch(() => {});
+        },
     });
     started = refreshWidgetPackages();
     return started;
@@ -47,6 +57,12 @@ export function startWidgetPackages(): Promise<void> {
 export function widgetPackages(): Accessor<WidgetPackageInfo[]> {
     void startWidgetPackages();
     return packages;
+}
+
+/** The publishers this instance has pinned to a key. */
+export function widgetPublishers(): Accessor<WidgetPublisherPin[]> {
+    void startWidgetPackages();
+    return publishers;
 }
 
 /** Whether the first list has arrived. */

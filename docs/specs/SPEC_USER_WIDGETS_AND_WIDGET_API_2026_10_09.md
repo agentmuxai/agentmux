@@ -1,6 +1,6 @@
 # User widgets and the widget API
 
-**Status:** active — W1 (packages and approval, §13) merged in PR #4575, W2 (the sandboxed runtime and the SDK) in PR #4581 and W3 (scoped access) in PR #4582; W4 (agents) in PR #4584; W5 (commands and status bar items, §6.8) in this PR; W6 not started.
+**Status:** active — W1 (packages and approval, §13) merged in PR #4575, W2 (the sandboxed runtime and the SDK) in PR #4581 and W3 (scoped access) in PR #4582; W4 (agents) in PR #4584; W5 (commands and status bar items, §6.8) in PR #4638; W6 (sharing) is specified in `SPEC_WIDGET_SHARING_2026_10_10.md`, with W6a (signed packages) in PR #4645.
 **Date:** 2026-10-09
 **Builds on:** `SPEC_PANE_TAB_CONTRACT_V1_2026_09_24.md` (the pane tab contract, and its Phase 6: user widgets as trusted local ES modules), `SPEC_HOST_API_SEAM_2026_09_26.md` (the host seam), `SPEC_WIDGET_DEFAULT_PANE_COLORS_2026_10_05.md` (`defaultHue`), `SPEC_AGENT_DRIVEN_BROWSER_PANES_2026_10_07.md` §5.6 (answers that only the host can give)
 **Supersedes, for widgets:** `web-widget.md`, the plugin tiers in `docs/analysis/ANALYSIS_PLUGIN_WIDGET_MESSAGING_INTEGRATION_2026_06_24.md`, and the "community catalog, deferred" line of `SPEC_TOOLCHAIN_MANAGER_EXTERNAL_WIDGETS_2026_06_22.md`
@@ -403,4 +403,4 @@ What agents are told: an Operator Config entry, "Building widgets", given to hos
 | **W4: agents** | `WidgetList`, `WidgetInstall`, `OpenWidget`; the "Write an AgentMux widget" skill | an agent builds and installs a widget the user asked for, the user approves it, and the agent opens it |
 | **Docs** | agentmux-docs: **Widgets** (using and managing), **Build a widget** (quickstart), **Widget API reference** (§5–§7 for users), **Widget security**; each lands right after the code it describes | — |
 | **W5: beyond panes** | `contributes.commands` and `contributes.statusItems`, with a status bar registry replacing the fixed list; `ui.setStatusItem` and the `command` event; the `pr-dashboard` sample adds both | a widget adds a palette command and a status bar item |
-| **W6: sharing** | widgets in agent bundles; signed packages; a catalog of sandboxed widgets | — |
+| **W6: sharing** | widgets in agent bundles; signed packages; a catalog of sandboxed widgets (`SPEC_WIDGET_SHARING_2026_10_10.md`) | that spec's §5 |

@@ -191,6 +191,7 @@ dependencies = [
  "crash-handler",
  "cron",
  "dirs 5.0.1",
+ "ed25519-dalek",
  "encoding_rs",
  "flate2",
  "futures-util",

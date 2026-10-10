@@ -234,6 +234,7 @@ mod tests {
             panes: Vec::<WidgetPaneInfo>::new(),
             commands: vec![],
             status_items: vec![],
+            signature: crate::backend::widget_signature::describe("acme.x", None, &Default::default()),
             files_url: None,
             implied: false,
             folder: String::new(),

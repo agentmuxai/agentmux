@@ -71,3 +71,15 @@ await am.ui.setStatusItem("count", { text: `${prs.length} PRs`, tone: prs.length
 ```
 
 A status item shows its `widget.json` look until a pane of the widget sets another, and again once that pane closes. Its tooltip always starts with the widget's name. Up to 20 commands and 4 status items per widget.
+
+## Signing a widget
+
+Signing lets AgentMux's install prompt say who published a widget, and warn when a later widget of the same publisher (the part of the id before the dot) is signed by another key. The package's `agentmux-widget` command does it with Node's own Ed25519:
+
+```bash
+npx -p @agentmuxai/widget-sdk agentmux-widget keygen ~/.agentmux-widget-key.json   # once; keep it private
+npx -p @agentmuxai/widget-sdk agentmux-widget sign ./acme.notes --key ~/.agentmux-widget-key.json
+npx -p @agentmuxai/widget-sdk agentmux-widget verify ./acme.notes
+```
+
+`sign` writes `widget.sig` next to `widget.json`; it covers every other file, so sign last: an edit afterwards makes AgentMux refuse the package until it is signed again. Publish your key's fingerprint (`K7Q2-MZ4D-PX3A-9TWE`) where users can check it. A signature names a key, not what the widget does: the permissions in the prompt are still all a sandboxed widget can do.

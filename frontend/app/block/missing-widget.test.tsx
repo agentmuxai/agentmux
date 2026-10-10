@@ -40,6 +40,7 @@ function pkg(over: Partial<WidgetPackageInfo> = {}): WidgetPackageInfo {
         panes: [{ view: VIEW, name: "main", label: "Notes", icon: "note-sticky", entry: "index.html", singleton: false, default_meta: {} }],
         commands: [],
         status_items: [],
+        signature: { state: "unsigned", publisher: "acme", fingerprint: null, pinned: null },
         files_url: null,
         implied: false,
         folder: "",

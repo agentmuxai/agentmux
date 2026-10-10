@@ -21,11 +21,12 @@ import { RpcApi } from "@/app/store/rpc-api";
 import type { WidgetInstallRequest } from "@/app/store/rpc-api/widgets";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getApi } from "@/app/store/app-api";
-import { WidgetApprovalDetails } from "@/app/view/settings/sections/widget-approval-details";
+import { installLabel, WidgetApprovalDetails } from "@/app/view/settings/sections/widget-approval-details";
 
 const [requests, setRequests] = createSignal<WidgetInstallRequest[]>([]);
 
-const keyOf = (r: Pick<WidgetInstallRequest, "id" | "hash">) => `${r.id}@${r.hash}`;
+// The signer is part of a version: a re-signed package is a new prompt.
+const keyOf = (r: Pick<WidgetInstallRequest, "id" | "hash" | "signature">) => `${r.id}@${r.hash}@${r.signature?.fingerprint ?? ""}`;
 
 function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCloseProps): JSX.Element {
     const r = props.request;
@@ -36,7 +37,7 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
     });
     const decide = async (approve: boolean) => {
         try {
-            await getApi().approvals.decideWidget(r.id, r.hash, approve);
+            await getApi().approvals.decideWidget(r.id, r.hash, approve, r.signature?.fingerprint ?? "");
             props.close();
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
@@ -47,7 +48,10 @@ function InstallRequestPrompt(props: { request: WidgetInstallRequest } & ModalCl
             open={true}
             title={`${r.agent} wants to install ${r.name}`}
             attention
-            confirmLabel="Install"
+            // Not signed by the publisher's usual key: the risky choice isn't
+            // the bright one, and focus starts on "Don't install".
+            destructive={r.signature?.state === "key_changed"}
+            confirmLabel={installLabel(r)}
             cancelLabel="Don't install"
             onConfirm={() => decide(true)}
             onCancel={() => void decide(false)}
