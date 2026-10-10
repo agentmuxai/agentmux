@@ -117,15 +117,15 @@ Changes to the App API or the shortcut table also get a run on the other two pla
 
 | Package | Owner | Status |
 |---|---|---|
-| M1 Trash restore (macOS) | Masty@starpower | in #4610 |
+| M1 Trash restore (macOS) | Masty@starpower | done (#4610) |
 | M2 L3 macOS | Masty@starpower | waiting for Accessibility |
 | L1 Stale `<Show>` | Maricon@charlie | done: gone on Linux and macOS (#4603 reruns) |
-| L2 Temp-tree guard, script timeouts | Maricon@charlie | in progress |
-| L3 Injected L3 Linux | Maricon@charlie | open |
+| L2 Temp-tree guard, script timeouts | Maricon@charlie | done (#4612) |
+| L3 Injected L3 Linux | Maricon@charlie | in progress |
 | A1 Pane-tab targets, caret wait | AgentA@Area54 | done (#4609) |
 | A2 Other tabs | AgentA@Area54 | waiting for D1 |
 | A3 Beyond-the-pane commands | AgentA@Area54 | waiting for D2 |
-| A4 Help notes, dialog Escape | AgentA@Area54 | open |
-| A5 Pool window marker | AgentA@Area54 | open |
-| A6 Dev environment | AgentA@Area54 | open |
+| A4 Save-key reporting, dialog Escape | AgentA@Area54 | done (#4613); the Ctrl+F Help note moved to SPEC_HELP_HIDDEN_TIPS_2026_10_10 (#4616) |
+| A5 Pool window marker | AgentA@Area54 | done (#4618) |
+| A6 Dev environment | AgentA@Area54 | terminals start at home (#4621), full-reload reason logged (#NNNN); `npm ci` and launching a dev instance from an agent still open |
 | A7 New-tab focus | AgentA@Area54 | waiting for D3 |
