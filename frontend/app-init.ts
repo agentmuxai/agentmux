@@ -992,6 +992,9 @@ async function initMux(initOpts: AgentMuxInitOpts) {
     tlog("LoadWidgets", t);
     // An agent's request to install a widget opens a prompt here.
     void import("@/app/block/widget-install-requests").then((m) => m.startWidgetInstallRequests());
+    // srv's calls to action (browser, SSH consent, widget installs) join the
+    // waiting tone and notification.
+    void import("@/app/notification/waiting-for-you").then((m) => m.installWaitingForYou());
 
     // Window services that don't paint. They load alongside the render and
     // install when loaded; initMux doesn't wait for them, because its end is

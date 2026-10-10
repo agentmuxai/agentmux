@@ -10,7 +10,10 @@
  * to the sidecar. Spec: docs/specs/SPEC_DECISION_PROMPT_2026_04_24.md.
  */
 
+import { createEffect, on, onCleanup } from "solid-js";
+import { endWaitingForYou, startWaitingForYou } from "@/app/notification/waiting-for-you";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
+import { MOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { DocumentNode, ToolNode } from "../types";
@@ -92,6 +95,32 @@ export function useAgentDecisions(opts: UseAgentDecisionsOptions): UseAgentDecis
             opts.log("error", `tool:decision failed: ${String(err)}`);
         });
     };
+
+    // A pending permission is a call to action too: the same waiting tone,
+    // notification and taskbar badge as a question
+    // (REPORT_AGENT_ATTENTION_CTA_CONTRAST_AND_TONE_2026_10_10.md §2). As
+    // for questions, an unmount (a tab switch) doesn't end the wait; only a
+    // closed pane does.
+    let waitingForPermission = false;
+    createEffect(
+        on(pendingDecisions, (pending) => {
+            if (pending.length > 0 && !waitingForPermission) {
+                waitingForPermission = true;
+                startWaitingForYou(opts.blockId, "permission", `Allow ${pending[0].toolName ?? pending[0].tool}?`);
+            } else if (pending.length === 0) {
+                waitingForPermission = false;
+                endWaitingForYou(opts.blockId, "permission", "submitted");
+            }
+        })
+    );
+    onCleanup(() => {
+        if (!waitingForPermission) return;
+        waitingForPermission = false;
+        const blockId = opts.blockId;
+        setTimeout(() => {
+            if (!MOS.getMuxObjectAtom<Block>(`block:${blockId}`)()) endWaitingForYou(blockId, "permission", "closed");
+        }, 1500);
+    });
 
     return { pendingDecisions, handleDecide };
 }
