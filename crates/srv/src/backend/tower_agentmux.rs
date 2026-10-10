@@ -15,10 +15,16 @@
 //! The window host and the launcher carry no `--type`; they are told apart by
 //! the tree: the host is the parent of CEF subprocesses, the launcher an
 //! ancestor of this backend.
+//!
+//! A renderer also says what it serves — a window, a browser pane, an idle
+//! pool window ([`renderer_serves`]). Only the window host knows that: each
+//! renderer reports its PID to it (`crates/cef/src/renderer_map.rs`), and
+//! Tower asks it for the map while sampling.
 
 use std::collections::{HashMap, HashSet};
 
 use agentmux_procstats::{ProcInfo, ProcKey};
+use serde::Deserialize;
 
 /// What a process's own command line (or, failing that, its name) says.
 #[derive(Debug, Clone, PartialEq)]
@@ -115,6 +121,101 @@ impl Describer {
         }
         out
     }
+}
+
+/// One browser and the renderer serving it, as the window host reports it
+/// (`crates/cef/src/renderer_map.rs`, `POST /agentmux/browser/renderer_map`).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct RendererEntry {
+    pub pid: u32,
+    pub label: String,
+    /// A browser pane's block id.
+    #[serde(default)]
+    pub block_id: Option<String>,
+    /// An unpromoted pool window, kept ready and not shown yet.
+    #[serde(default)]
+    pub pool: bool,
+    /// An app window's srv window id.
+    #[serde(default)]
+    pub window_id: Option<String>,
+}
+
+/// The host's `renderer_map` answer (`{ok, data: {renderers}}`) as entries;
+/// none for anything else, so an older host just leaves renderers unnamed.
+pub fn parse_renderer_map(answer: &serde_json::Value) -> Vec<RendererEntry> {
+    answer
+        .get("data")
+        .and_then(|d| d.get("renderers"))
+        .and_then(|r| serde_json::from_value(r.clone()).ok())
+        .unwrap_or_default()
+}
+
+/// What the renderer `pid` serves, for its row: "window Main", "browser pane
+/// github.com", "pool window (idle)", joined when one renderer serves several
+/// (Chromium may share one between same-site browsers). `page` names a
+/// browser pane by its block id, `workspace` a window by its srv id.
+pub fn renderer_serves(
+    entries: &[RendererEntry],
+    pid: u32,
+    page: &dyn Fn(&str) -> Option<String>,
+    workspace: &dyn Fn(&str) -> Option<String>,
+) -> Option<String> {
+    let mut names: Vec<String> = Vec::new();
+    for e in entries.iter().filter(|e| e.pid == pid) {
+        let name = if let Some(block_id) = &e.block_id {
+            page(block_id).map_or_else(|| "browser pane".to_string(), |p| format!("browser pane {p}"))
+        } else if e.pool {
+            "pool window (idle)".to_string()
+        } else {
+            e.window_id
+                .as_deref()
+                .and_then(workspace)
+                .map_or_else(|| "window".to_string(), |w| format!("window {w}"))
+        };
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    (!names.is_empty()).then(|| names.join(", "))
+}
+
+/// A page URL's host, for a browser pane's renderer row: never its user,
+/// password, port, path or query (`https://user:pass@host:8080/x` → `host`).
+pub fn page_host(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    parsed.host_str().filter(|h| !h.is_empty()).map(str::to_string)
+}
+
+/// The PID a process sees for itself, which is what a renderer reports.
+///
+/// On Linux, Chromium's namespace sandbox runs renderers in a PID namespace
+/// of their own, where `getpid()` is a small number (2, 3, …) unrelated to
+/// the host PID this backend lists. The kernel records every level in
+/// `/proc/<pid>/status` (`NSpid: <host> … <innermost>`), so a renderer row is
+/// looked up by the innermost one. AgentMux's renderers share one namespace
+/// per instance, and only this instance's processes are looked up, so the
+/// number is unique among them. Elsewhere there is no namespace: the PID.
+pub fn own_view_pid(pid: u32) -> u32 {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(inner) = std::fs::read_to_string(format!("/proc/{pid}/status"))
+            .ok()
+            .and_then(|s| innermost_ns_pid(&s))
+        {
+            return inner;
+        }
+    }
+    pid
+}
+
+/// The last PID on a `/proc/<pid>/status` `NSpid:` line.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn innermost_ns_pid(status: &str) -> Option<u32> {
+    status
+        .lines()
+        .find_map(|l| l.strip_prefix("NSpid:"))
+        .and_then(|rest| rest.split_whitespace().last())
+        .and_then(|p| p.parse().ok())
 }
 
 fn kind_of(p: &ProcInfo, cmdline: Option<&str>) -> Kind {
@@ -323,6 +424,80 @@ mod tests {
         assert_eq!(reads.get(), first, "a second sample reads nothing");
         d.describe(&snap, &members[..2], 30, &read);
         assert_eq!(d.kinds.len(), 2, "processes no longer present are forgotten");
+    }
+
+    fn entry(pid: u32, label: &str) -> RendererEntry {
+        RendererEntry { pid, label: label.to_string(), block_id: None, pool: false, window_id: None }
+    }
+
+    #[test]
+    fn names_what_each_renderer_serves() {
+        let entries = vec![
+            RendererEntry { window_id: Some("w1".into()), ..entry(1, "main") },
+            RendererEntry { block_id: Some("b1".into()), ..entry(2, "pane-b1") },
+            RendererEntry { pool: true, ..entry(3, "window-pool-2") },
+            RendererEntry { block_id: Some("gone".into()), ..entry(4, "pane-gone") },
+            entry(5, "floating-7"),
+        ];
+        let page = |id: &str| (id == "b1").then(|| "github.com".to_string());
+        let workspace = |id: &str| (id == "w1").then(|| "Main".to_string());
+        let serves = |pid| renderer_serves(&entries, pid, &page, &workspace);
+        assert_eq!(serves(1).as_deref(), Some("window Main"));
+        assert_eq!(serves(2).as_deref(), Some("browser pane github.com"));
+        assert_eq!(serves(3).as_deref(), Some("pool window (idle)"));
+        assert_eq!(serves(4).as_deref(), Some("browser pane"));
+        assert_eq!(serves(5).as_deref(), Some("window"));
+        assert_eq!(serves(9), None);
+    }
+
+    #[test]
+    fn one_renderer_serving_two_browsers_names_both_once() {
+        let entries = vec![
+            RendererEntry { block_id: Some("b1".into()), ..entry(2, "pane-a") },
+            RendererEntry { block_id: Some("b2".into()), ..entry(2, "pane-b") },
+            RendererEntry { block_id: Some("b3".into()), ..entry(2, "pane-c") },
+        ];
+        let page = |id: &str| Some(if id == "b3" { "a.test" } else { "b.test" }.to_string());
+        let none = |_: &str| None;
+        assert_eq!(
+            renderer_serves(&entries, 2, &page, &none).as_deref(),
+            Some("browser pane b.test, browser pane a.test")
+        );
+    }
+
+    #[test]
+    fn a_page_is_named_by_its_host_alone() {
+        assert_eq!(page_host("https://github.com/agentmuxai").as_deref(), Some("github.com"));
+        assert_eq!(page_host("https://user:secret@example.com:8080/a?b=c#d").as_deref(), Some("example.com"));
+        assert_eq!(page_host("http://127.0.0.1:5173/").as_deref(), Some("127.0.0.1"));
+        assert_eq!(page_host("about:blank"), None);
+        assert_eq!(page_host("not a url"), None);
+        assert_eq!(page_host(""), None);
+    }
+
+    #[test]
+    fn a_sandboxed_renderer_is_found_by_the_pid_it_sees_for_itself() {
+        // A renderer in Chromium's PID namespace, as the host sees it: host
+        // PID 48211, PID 3 inside the namespace, which is what it reported.
+        let status = "Name:\tagentmux-cef\nTgid:\t48211\nNSpid:\t48211\t3\nPPid:\t48190\n";
+        assert_eq!(innermost_ns_pid(status), Some(3));
+        // No namespace: one PID on the line.
+        assert_eq!(innermost_ns_pid("NSpid:\t912\n"), Some(912));
+        // An old kernel without the line.
+        assert_eq!(innermost_ns_pid("Name:\tx\nPid:\t912\n"), None);
+    }
+
+    #[test]
+    fn parses_the_hosts_answer_and_tolerates_anything_else() {
+        let answer = serde_json::json!({"ok": true, "data": {"renderers": [
+            {"pid": 7, "label": "main", "pool": false, "window_id": "w1"},
+            {"pid": 8, "label": "pane-x", "block_id": "b1", "pool": false}
+        ]}});
+        let got = parse_renderer_map(&answer);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1].block_id.as_deref(), Some("b1"));
+        assert!(parse_renderer_map(&serde_json::json!({"ok": false, "error": "x"})).is_empty());
+        assert!(parse_renderer_map(&serde_json::json!({"ok": true, "data": {"renderers": "nope"}})).is_empty());
     }
 
     #[test]

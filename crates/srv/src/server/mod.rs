@@ -52,6 +52,7 @@ pub(crate) mod browser_identity;
 pub(crate) mod browser_owner;
 pub(crate) mod browser_popup;
 pub(crate) mod browser_uploads;
+pub(crate) mod host_http;
 pub(crate) mod ui_handlers;
 pub(crate) mod ui_shortcuts;
 pub(crate) mod widget_access_handlers;

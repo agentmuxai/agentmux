@@ -31,6 +31,11 @@ vi.mock("solid-js", () => ({
     createEffect: () => {},
 }));
 
+const flashes: string[] = [];
+vi.mock("@/app/notification/activity-flash", () => ({
+    emitActivityFlash: (t: { blockId: string }) => flashes.push(t.blockId),
+}));
+
 let captured: ((blockId: string, event: { type: string; [k: string]: unknown }) => void) | null = null;
 vi.mock("@/app/store/agent-pane-state-store", () => ({
     addEventListener: (l: typeof captured) => { captured = l; return () => { captured = null; }; },
@@ -130,6 +135,32 @@ describe("waiting-sound-service: startWaiting gating", () => {
         focusState.windowFocused = true;
         fireWaitingForInput("blk-1");
         expect(__getWaitingTones().has("blk-1")).toBe(true);
+    });
+
+    it("flashes the pane's tab with each loop of the tone, and stops with it", () => {
+        flashes.length = 0;
+        fireWaitingForInput("blk-1");
+        expect(flashes).toEqual(["blk-1"]);
+        vi.advanceTimersByTime(2500);
+        expect(flashes).toEqual(["blk-1", "blk-1"]);
+        fireWaitingEnded("blk-1");
+        vi.advanceTimersByTime(5000);
+        expect(flashes).toHaveLength(2);
+    });
+
+    it("a request with no pane is quiet while its window is in front, and has no tab to flash", () => {
+        flashes.length = 0;
+        focusState.windowFocused = true;
+        fireWaitingForInput("app:k1");
+        expect(__getWaitingTones().get("app:k1")?.__isRunning()).toBe(false);
+        expect(flashes).toHaveLength(0);
+        __resetSoundService();
+        __resetSoundListeners();
+        cleanup();
+        cleanup = installSoundService();
+        focusState.windowFocused = false;
+        fireWaitingForInput("app:k2");
+        expect(__getWaitingTones().has("app:k2")).toBe(true);
     });
 
     it("stopWaiting removes the player from the map", () => {

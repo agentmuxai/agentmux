@@ -44,6 +44,7 @@ mod ssh_approval;
 #[cfg(target_os = "windows")]
 mod floating_pane;
 mod reducer;
+mod renderer_map;
 mod saga_dispatch;
 mod sidecar;
 mod state;
@@ -497,10 +498,9 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         }
     }
 
-    // Execute subprocess if applicable (exits here for non-browser processes).
-    let ret = execute_process(
+    let ret = execute_process( // runs a subprocess (exiting below); renderer_map.rs says why its app
         Some(args.as_main_args()),
-        None, // App can be None for subprocess
+        (!is_browser_process).then(renderer_map::SubprocessApp::new).as_mut(),
         windows_sandbox_info as *mut u8,
     );
 

@@ -5,7 +5,7 @@ import type { TowerProcess } from "@/app/store/rpc-api";
 import { type JSX, Show } from "solid-js";
 
 /** A process row's name. AgentMux's own processes say what they are ("GPU",
- *  "Renderer", "Network service"), since many run the same executable; the
+ *  "Renderer · window Main"), since many run the same executable; the
  *  executable's name follows, muted. */
 export function ProcessName(props: { process: TowerProcess }): JSX.Element {
     return (

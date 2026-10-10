@@ -32,6 +32,9 @@ pub const EVENT_WIDGET_PACKAGES: &str = "widgetpackages";
 pub const EVENT_WIDGET_STORAGE: &str = "widgetstorage";
 /// Agents' widget install requests waiting for the user: `{ requests }`.
 pub const EVENT_WIDGET_REQUESTS: &str = "widgetrequests";
+/// A call to action srv holds open started or ended:
+/// `{ key, block_id, kind, text, window_ids, active }` (`backend/user_attention.rs`).
+pub const EVENT_USER_ATTENTION: &str = "userattention";
 pub const EVENT_SYS_INFO: &str = "sysinfo";
 pub const EVENT_CONTROLLER_STATUS: &str = "controllerstatus";
 /// What an agent process was actually spawned with. See `agent_runtime.rs`.

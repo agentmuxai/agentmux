@@ -657,10 +657,19 @@ wrap_task! {
                 }
                 #[cfg(not(target_os = "macos"))]
                 {
-                    let pane_rect = {
-                        let pb = controller.bounds();
-                        (pb.x, pb.y, pb.width, pb.height)
-                    };
+                    // The frontend's last rect, not `bounds()`: an inactive
+                    // stack tab is 0×0 there but full-size in `bounds()` (see
+                    // `AppState::browser_pane_physical_rects`).
+                    let pane_rect = self
+                        .state
+                        .browser_pane_physical_rects
+                        .lock()
+                        .get(&label)
+                        .copied()
+                        .unwrap_or_else(|| {
+                            let pb = controller.bounds();
+                            (pb.x, pb.y, pb.width, pb.height)
+                        });
                     // Shared visibility helper consults BOTH the pane's own rect
                     // (zero → hidden because tab inactive) and the latest
                     // overlay-clip rects published in AppState. Resize path uses

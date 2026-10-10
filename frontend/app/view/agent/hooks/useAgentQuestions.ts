@@ -27,7 +27,7 @@
 
 import { createEffect, on, onCleanup } from "solid-js";
 import { dispatch as dispatchDoc } from "@/app/store/agent-document-store";
-import { fireEvent as firePaneEvent } from "@/app/store/agent-pane-state-store";
+import { endWaitingForYou, startWaitingForYou } from "@/app/notification/waiting-for-you";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { makeORef } from "@/app/store/mos";
@@ -134,15 +134,14 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
         if (hasAny && !hadAny) {
             waitingToneActive = true;
             setAwaitingUser(true);
-            firePaneEvent(opts.blockId, {
-                type: "waiting-for-input",
-                question: qs[0]?.question?.questions?.[0]?.question,
+            startWaitingForYou(opts.blockId, "question", qs[0]?.question?.questions?.[0]?.question, {
                 questionCount: qs[0]?.question?.questions?.length,
+                stillWaiting: () => pendingQuestions().length > 0,
             });
         } else if (!hasAny && hadAny) {
             waitingToneActive = false;
             setAwaitingUser(false);
-            firePaneEvent(opts.blockId, { type: "waiting-ended", reason: "submitted" });
+            endWaitingForYou(opts.blockId, "question", "submitted");
         } else if (!hasAny && prevQs === undefined) {
             // First run at mount with nothing pending: a `true` left in the block
             // meta from before (the question was answered while this pane was not
@@ -150,13 +149,17 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             if (MOS.getMuxObjectAtom<Block>(`block:${opts.blockId}`)()?.meta?.[META_AWAITING_USER]) {
                 setAwaitingUser(false);
             }
+            // Likewise a tone still asking from before this mount.
+            endWaitingForYou(opts.blockId, "question", "submitted");
         }
     }));
+    // An unmount isn't the end of the wait: a tab switch unmounts the pane
+    // while its question is still pending, and the tone should keep asking.
+    // The registry ends it when the question is no longer pending or the
+    // pane is deleted (stillWaiting above), mounted or not; a pane that
+    // mounts again keeps the one entry.
     onCleanup(() => {
-        if (waitingToneActive) {
-            firePaneEvent(opts.blockId, { type: "waiting-ended", reason: "closed" });
-            waitingToneActive = false;
-        }
+        waitingToneActive = false;
     });
 
     // AskUserQuestion answer handler.

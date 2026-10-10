@@ -747,13 +747,13 @@ impl AgentMuxHandler {
             // sibling in-progress popup (reagent P1 round 4 on #2545).
             if self.popup_browser_ids.contains(&id) {
                 match browser_view_get_for_browser(Some(b)).and_then(|v| v.window()) {
-                    Some(mut win) => {
+                    Some(win) => {
                         tracing::info!(
                             target: "oauth-popup",
                             popup_id = id,
                             "[oauth-popup] step 4/4: do_close — closing the popup's own Views window (Alloy/Views path)",
                         );
-                        win.close();
+                        crate::ui_tasks::post_close_popup_window(win); // closing inline re-enters do_close
                     }
                     None => tracing::info!(
                         target: "oauth-popup",

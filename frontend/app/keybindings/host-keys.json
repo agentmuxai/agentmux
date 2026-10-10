@@ -460,6 +460,15 @@
       "vk": 105
     },
     {
+      "command": "pane:refocus",
+      "source": "meta+i",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "meta": true,
+      "vk": 73
+    },
+    {
       "command": "pane:changeConnection",
       "source": "meta+shift+g",
       "ctrl": false,

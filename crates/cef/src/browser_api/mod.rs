@@ -62,6 +62,7 @@ pub fn register_routes(router: Router<Arc<AppState>>) -> Router<Arc<AppState>> {
         .route("/agentmux/browser/forward", post(routes::forward))
         .route("/agentmux/browser/reload", post(routes::reload))
         .route("/agentmux/browser/owned_panes", post(routes::owned_panes))
+        .route("/agentmux/browser/renderer_map", post(routes::renderer_map))
         .route("/agentmux/browser/list_shortcuts", post(shortcuts::list_shortcuts))
         .route("/agentmux/browser/run_command", post(shortcuts::run_command))
         .route("/agentmux/browser/press_keys", post(shortcuts::press_keys))

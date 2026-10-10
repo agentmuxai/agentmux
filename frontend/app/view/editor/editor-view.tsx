@@ -254,8 +254,9 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
             ...codeMirrorKeys("editor:save").map((key) => ({
                 key,
                 run: () => {
-                    noteResolved("editor:save", "editor");
-                    return runEditorCommand("editor:save");
+                    const ran = runEditorCommand("editor:save");
+                    if (ran) noteResolved("editor:save", "editor");
+                    return ran;
                 },
             })),
             ...codeMirrorKeys("editor:saveAs").map((key) => ({
@@ -263,8 +264,11 @@ export function EditorViewComponent(props: { model: EditorViewModel }): JSX.Elem
                 run: () => {
                     // False for non-scratch tabs, so the key isn't swallowed
                     // and the OS default (or a future handler) can still see it.
-                    noteResolved("editor:saveAs", "editor");
-                    return runEditorCommand("editor:saveAs");
+                    // Noted only when it applied, or PressKeys counts a key
+                    // that did nothing as resolved.
+                    const ran = runEditorCommand("editor:saveAs");
+                    if (ran) noteResolved("editor:saveAs", "editor");
+                    return ran;
                 },
             })),
         ]);

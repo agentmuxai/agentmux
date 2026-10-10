@@ -213,6 +213,8 @@ dependencies = [
  "memchr",
  "minidumper",
  "notify",
+ "objc2",
+ "objc2-foundation",
  "parking_lot",
  "portable-pty",
  "proptest",

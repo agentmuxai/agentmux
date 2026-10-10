@@ -985,9 +985,11 @@ impl Controller for ShellController {
         // this block shows in the live gauge.
         crate::backend::identity_spawn::record_spawn(&self.block_id, false, None);
 
-        // Set working directory if specified
-        let cwd = obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, "");
-        if !cwd.is_empty() && wsl_distro.is_none() && ssh_plan.is_none() {
+        // Working directory: the pane's own, else (a local shell) the user's
+        // home, not srv's own working directory.
+        let remote = wsl_distro.is_some() || ssh_plan.is_some();
+        let cwd = super::spawn_cwd::spawn_cwd(&obj::meta_get_string(&block_meta, super::super::META_KEY_CMD_CWD, ""), remote);
+        if !cwd.is_empty() && !remote {
             cmd.cwd(&cwd);
         }
 
@@ -1110,13 +1112,7 @@ impl Controller for ShellController {
         // this machine's directory would be sent there on the next launch.
         let remote_pane = ssh_plan.is_some() || wsl_distro.is_some();
         if let Some(store) = self.mstore.as_ref().filter(|_| !remote_pane) {
-            let effective_cwd = if !cwd.is_empty() {
-                cwd.clone()
-            } else {
-                std::env::current_dir()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            };
+            let effective_cwd = cwd.clone(); // spawn_cwd: never empty for a local shell
             tracing::debug!(block_id = %self.block_id, cwd = %effective_cwd, "seeding cmd:cwd");
             if !effective_cwd.is_empty() {
                 let oref_str = format!("block:{}", self.block_id);
