@@ -61,9 +61,12 @@ export interface PaneTabCapabilities {
      *  `cmd:cwd`. */
     sharesCwd?: boolean;
     /** The block a split of this pane creates, instead of a copy of the
-     *  pane's meta (agent: a fresh picker, the block "+" → Agent opens).
-     *  SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md. */
-    splitBlockDef?: () => BlockDef;
+     *  pane's meta (agent: a fresh picker, the block "+" → Agent opens;
+     *  editor and media: an empty pane of the same kind with the source's
+     *  settings). Given the pane being split.
+     *  SPEC_AGENT_PANE_SPLIT_OPENS_PICKER_2026_09_30.md,
+     *  SPEC_EDITOR_MEDIA_SPLIT_OPENS_EMPTY_2026_10_10.md. */
+    splitBlockDef?: (source: Block) => BlockDef;
     /** The pane runs against a connection (`meta.connection`) and its header
      *  shows the connection button (sysinfo, term). */
     connection?: boolean;
