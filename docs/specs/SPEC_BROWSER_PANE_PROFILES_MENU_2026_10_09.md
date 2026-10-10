@@ -118,8 +118,8 @@ second glyph beside it would only repeat it.
   for as long as the tab exists (identities spec §4.1).
 - **Agents:** `OpenBrowser` gets an optional `profile` (`"incognito"` or a profile name).
   - **Default:** unchanged in this spec.
-  - **Named profiles:** an agent may use one only after you switch on "Agents may use this
-    profile" for it in Manage profiles.
+  - **Named profiles:** an agent may use one only after you switch on "Agents may use it" for
+    it in Settings → Browser (Manage profiles).
   - **Incognito:** always allowed, since it gives the agent less, not more (identities spec §7).
   - **Agents never create, rename or delete profiles.** `browser_profiles.create`, `update`
     and `delete` refuse a connection registered as an agent; `list` doesn't.
@@ -191,7 +191,7 @@ second glyph beside it would only repeat it.
 | **P1** | Home button, button order, "Home page" naming; the Profile button and menu with Personal and **Open new Incognito tab** (Windows); badges; Incognito tabs back signed out | The toolbar and Incognito, with nothing blocked |
 | **P2** | The spike on disk-backed profiles (§7.1), then **New profile…**, the profile list, Manage profiles, restore signed in | Named profiles, once the spike works |
 | **P3** | Linux/macOS: floating-pane fallback, then the CEF patch | The same menu on every platform |
-| **P4** | `OpenBrowser({profile})` and "Agents may use this profile" | Agents in their own jars |
+| **P4** | `OpenBrowser({profile})` and "Agents may use it" | Agents in their own jars |
 
 Until P2, the menu shows Personal, Open new Incognito tab, and a disabled **New profile…** with
 "Coming soon", so the menu's shape doesn't change when profiles arrive.

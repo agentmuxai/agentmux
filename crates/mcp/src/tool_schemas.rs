@@ -325,7 +325,7 @@ pub(crate) const OPEN_BROWSER_TOOL: &str = r#"{
       "split": { "type": "string", "enum": ["right", "left", "up", "down"], "description": "Where to place the pane relative to your own (default: right)" },
       "title": { "type": "string", "description": "Optional pane title" },
       "allowed_origins": { "type": "array", "items": { "type": "string" }, "maxItems": 32, "description": "Optional: keep the pane on these sites. Each is example.com (https://example.com), *.example.com (it and its subdomains, https) or a full origin like http://localhost:3000. url must be on the list. A navigation elsewhere (a link, a redirect, a popup) doesn't happen: the user is asked in the pane, and Allow adds that site. Include every site a sign-in on the way needs." },
-      "profile": { "type": "string", "description": "Optional: whose sign-ins the pane browses with. Omit for the user's own (Personal). \"incognito\": a fresh jar, signed in nowhere, gone when the pane closes (Windows only for now). Or the name of a browser profile the user has let agents use (Settings → Browser, \"Agents may use this profile\"); any other profile is refused." }
+      "profile": { "type": "string", "description": "Optional: whose sign-ins the pane browses with. Omit for the user's own (Personal). \"incognito\": a fresh jar, signed in nowhere, gone when the pane closes (Windows only for now). Or the name of a browser profile the user has let agents use (Settings → Browser, \"Agents may use it\"); any other profile is refused." }
     },
     "required": ["url"]
   }

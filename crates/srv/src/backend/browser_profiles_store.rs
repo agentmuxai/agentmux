@@ -25,7 +25,7 @@ pub struct BrowserProfile {
     #[serde(default)]
     #[ts(type = "number")]
     pub created_at: i64,
-    /// "Agents may use this profile": an agent's `OpenBrowser` may browse as
+    /// "Agents may use it" (Settings → Browser): an agent's `OpenBrowser` may browse as
     /// it. Off until the user switches it on.
     #[serde(default)]
     pub agents_allowed: bool,

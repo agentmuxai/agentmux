@@ -11,7 +11,7 @@ id: string, name: string,
  */
 color: string, created_at: number, 
 /**
- * "Agents may use this profile": an agent's `OpenBrowser` may browse as
+ * "Agents may use it" (Settings → Browser): an agent's `OpenBrowser` may browse as
  * it. Off until the user switches it on.
  */
 agents_allowed: boolean, };

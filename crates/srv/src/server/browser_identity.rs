@@ -150,7 +150,7 @@ pub(crate) fn refresh_for_replay(
 /// none (Personal) for "personal" or nothing; a fresh Incognito jar for
 /// "incognito", always allowed since it gives the agent less, not more; and a
 /// named profile (by name, any case, or id) only when the user switched on
-/// "Agents may use this profile" for it (profiles spec §5).
+/// "Agents may use it" for it in Settings → Browser (profiles spec §5).
 pub(crate) fn identity_for_agent(requested: &str, profiles: &[BrowserProfile]) -> Result<Option<String>, String> {
     let requested = requested.trim();
     if requested.is_empty() || requested.eq_ignore_ascii_case("personal") {
@@ -175,7 +175,7 @@ pub(crate) fn identity_for_agent(requested: &str, profiles: &[BrowserProfile]) -
     };
     if !p.agents_allowed {
         return Err(format!(
-            "the user hasn't let agents use the browser profile {:?}: they can switch on \"Agents may use this profile\"              in Settings → Browser. Use \"incognito\", or a profile agents may use: {}",
+            "the user hasn't let agents use the browser profile {:?}: they can switch on \"Agents may use it\" for it in Settings → Browser. Use \"incognito\", or a profile agents may use: {}",
             p.name,
             allowed()
         ));
@@ -227,6 +227,7 @@ mod tests {
         assert_eq!(identity_for_agent("p-work", &ps), Ok(Some("profile:p-work".into())));
         let refused = identity_for_agent("Bank", &ps).unwrap_err();
         assert!(refused.contains("hasn't let agents use") && refused.contains("Work"), "{refused}");
+        assert!(refused.contains("\"Agents may use it\" for it in Settings → Browser") && !refused.contains("  "), "{refused}");
         let unknown = identity_for_agent("Nope", &ps).unwrap_err();
         assert!(unknown.contains("no browser profile") && !unknown.contains("Bank"), "{unknown}");
     }
