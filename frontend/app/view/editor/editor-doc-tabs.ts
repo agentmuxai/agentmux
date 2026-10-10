@@ -34,15 +34,21 @@ export function moveEditorTabTo(blockId: string, tabId: string, targetId: string
 /** Tabs being saved, per pane. A tab can't move mid-save: the save's end
  *  (its unsaved mark cleared, a scratch buffer moved to its new path) would
  *  land on the pane it left. */
-const saving = new WeakMap<EditorViewModel, Set<string>>();
+/** Counted per tab: a second save can start before the first ends (Save As
+ *  submitted twice), and the tab stays put until the last one has. */
+const saving = new WeakMap<EditorViewModel, Map<string, number>>();
 
 /** Run `save` for tab `tabId` of `model`, marking the tab as being saved. */
 export function trackSave(model: EditorViewModel, tabId: string | null | undefined, save: Promise<void>): Promise<void> {
     if (!tabId) return save;
     let tabs = saving.get(model);
-    if (!tabs) saving.set(model, (tabs = new Set()));
-    tabs.add(tabId);
-    return save.finally(() => tabs!.delete(tabId));
+    if (!tabs) saving.set(model, (tabs = new Map()));
+    tabs.set(tabId, (tabs.get(tabId) ?? 0) + 1);
+    return save.finally(() => {
+        const left = (tabs!.get(tabId) ?? 1) - 1;
+        if (left > 0) tabs!.set(tabId, left);
+        else tabs!.delete(tabId);
+    });
 }
 
 /** What travels with an Editor tab, beside the tab itself. */

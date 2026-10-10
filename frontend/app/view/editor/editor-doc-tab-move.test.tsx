@@ -217,6 +217,23 @@ describe("moving an Editor tab to another Editor", () => {
         expect(moveDocTab(a.blockId, id, b.blockId)).toEqual({ moved: true });
     });
 
+    it("two saves of one tab at once: it stays put until the last one ends", async () => {
+        const a = mount();
+        const b = mount();
+        await openLoaded(a, "c:/repo/a.ts");
+        const id = a.activeIdAtom()!;
+        let first!: () => void;
+        let second!: () => void;
+        const one = trackSave(a, id, new Promise<void>((r) => (first = r)));
+        const two = trackSave(a, id, new Promise<void>((r) => (second = r)));
+        first();
+        await one;
+        expect(moveDocTab(a.blockId, id, b.blockId).moved).toBe(false);
+        second();
+        await two;
+        expect(moveDocTab(a.blockId, id, b.blockId)).toEqual({ moved: true });
+    });
+
     it("never between this computer and a host", async () => {
         const a = mount();
         const remote = mount({ connection: "user@box" });
