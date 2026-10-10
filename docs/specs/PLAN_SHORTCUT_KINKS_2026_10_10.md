@@ -135,7 +135,7 @@ The questions as asked:
 | L3 Injected L3 Linux | Maricon@charlie | in progress |
 | A1 Pane-tab targets, caret wait | AgentA@Area54 | done (#4609) |
 | A2 Other tabs | AgentA@Area54 | open (D1: yes) |
-| A3 Paste guard, `pane:close` via ClosePane | AgentA@Area54 | in review (#NNNN) |
+| A3 Paste guard, `pane:close` via ClosePane | AgentA@Area54 | in review (#4626) |
 | A4 Save-key reporting, dialog Escape | AgentA@Area54 | done (#4613); the Ctrl+F Help note moved to SPEC_HELP_HIDDEN_TIPS_2026_10_10 (#4616) |
 | A5 Pool window marker | AgentA@Area54 | done (#4618) |
 | A6 Dev environment | AgentA@Area54 | terminals start at home (#4621), full-reload reason logged (#4623); `npm ci` and launching a dev instance from an agent still open |
