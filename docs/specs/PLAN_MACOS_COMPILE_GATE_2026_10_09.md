@@ -1,7 +1,7 @@
 # Plan — a macOS compile check on PRs, and a nightly macOS leg that can fail
 
 **Date:** 2026-10-09
-**Status:** active — phase 1 ships with this plan; phases 2 and 3 wait on measurements (§4).
+**Status:** active — phase 1 shipped in PR #4571 (the non-blocking macOS check); phases 2 and 3 wait on measurements (§4).
 **Author:** AgentA@Area54
 **Builds on:**
 - [SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md](SPEC_CI_CHECK_PLACEMENT_PROTOCOL_2026_09_21.md) R3 (macOS is nightly-only) and R4 (a platform that matters gets a compile-only PR gate)
