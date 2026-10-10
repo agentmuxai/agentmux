@@ -58,7 +58,7 @@ describe("syncAwaitingUser", () => {
             return d;
         });
         await Promise.resolve();
-        expect(writes).toEqual([], "nothing before history loads");
+        expect(writes, "nothing before history loads").toEqual([]);
         setReady(true);
         await Promise.resolve();
         expect(writes).toEqual([null]);
