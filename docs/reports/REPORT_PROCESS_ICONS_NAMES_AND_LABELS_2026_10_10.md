@@ -177,7 +177,8 @@ Names, though, are per process on Linux, unlike Windows:
 - A process started through such a symlink, directly or by bare name on `PATH`, is reported by the kernel (`proc_pidpath`, which Tower reads) at its real path inside the helper app, while its own `current_exe()` is the symlink's path. So srv's `exe_dir` stays `Contents/MacOS`: the launcher and `sidecar::resolve_backend_binary` find srv where they did, and `tools/bin`, the remote helpers and the frontend resolve as before. The one code change: `fs_ops`'s protected installation is the outermost `.app` (it canonicalizes the path, which now leads into the nested app).
 - `codesign --verify --deep --strict` passes. srv's helper app is signed as `ai.agentmux.srv`, the identifier the login keychain's "Always Allow" is tied to. In a throwaway keychain, an item created by a bare binary signed `ai.agentmux.srv` was read without a prompt by a different build of it in the nested layout, and refused to the same layout signed with another identifier: the item trusts the designated requirement (identifier and team), not the path. So updating to this layout shouldn't bring back a keychain prompt.
 - Tower names srv's row `agentmux-srv` (it was `agentmux-srv-<ver>-darwin.arm64`) and still labels it Server. An agent pane's `PATH` resolves both tools through `tools/bin`.
-- Not yet confirmed: how Activity Monitor shows these processes (it needs eyes on a screen), and notarization of the layout.
+- Notarization: a DMG of this layout was accepted by Apple's notary service with no issues.
+- Not yet confirmed: how Activity Monitor shows these processes (it needs eyes on a screen).
 
 ## 10. How to verify
 
