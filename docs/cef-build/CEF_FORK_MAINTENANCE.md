@@ -504,9 +504,11 @@ compare both against the object that was actually linked:
 scripts/cef-verify-patches.sh --build-dir out/Release_GN_arm64
 ```
 
-Expect one `OK` per no-symbol patch (two today). It never writes to the build
-directory — `scripts/cef-verify.test.sh` asserts that with a fake compiler,
-because an earlier inline version of this check *did* write to it (below).
+Expect one `OK` per no-symbol patch: two on macOS, one elsewhere
+(`agentmux_process_requirement` patches a macOS-only file). It never writes to
+the build directory — `scripts/cef-verify.test.sh` asserts that with a fake
+compiler, because an earlier inline version of this check *did* write to it
+(below).
 
 Three compiles, isolating one variable at a time:
 
@@ -525,7 +527,14 @@ source path in DWARF, so comparing the shipped object against a `/tmp`-compiled
 pristine build always differs — on the path alone, patched or not. An earlier
 version did exactly that, and its "shipped != unpatched" leg could never fire.
 
-Expect **two** `OK` lines. `views_caption_rightclick_passthrough` is not listed
+**All three keep the object's own output path.** Linux builds use split DWARF,
+so an object also embeds its `.dwo` name, derived from `-o`: an A compiled to
+`/tmp/A.o` never equalled the shipped object, and `B.o` and `C.o` always
+differed by name, so the no-op check could never fire. Each compile runs its
+command unchanged from a temporary sibling of the build directory (same depth,
+`gen/` and the rest symlinked, its own `obj/`).
+
+Expect **two** `OK` lines on macOS, one on Linux. `views_caption_rightclick_passthrough` is not listed
 because it adds a symbol and §7.2 already covers it.
 
 Both comparisons matter, but **they must not be the pair you would first reach
@@ -615,8 +624,9 @@ mechanical instead of a convention.
 **Before updating the pins:**
 - [ ] All three platforms built from one recorded fork commit (P1)
 - [ ] §7.2 symbol probes pass on each artifact, using full `nm`
-- [ ] §7.2b differential compile prints **two** `OK` lines — one per no-symbol
-      patch (`agentmux_process_requirement`, `rwhv_background_opaque_check`)
+- [ ] §7.2b differential compile prints one `OK` line per no-symbol patch:
+      two on macOS (`agentmux_process_requirement`, `rwhv_background_opaque_check`),
+      one on Linux (`rwhv_background_opaque_check`)
 - [ ] §7.3 functional checks pass per platform
 - [ ] All three pins bumped together (P2)
 
